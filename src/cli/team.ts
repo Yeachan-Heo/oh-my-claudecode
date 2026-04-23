@@ -14,7 +14,7 @@ import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
-const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor']);
+const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor', 'copilot']);
 const SUBCOMMANDS = new Set(['start', 'status', 'wait', 'cleanup', 'resume', 'shutdown', 'api', 'help', '--help', '-h']);
 
 const SUPPORTED_API_OPERATIONS = new Set([
@@ -685,7 +685,7 @@ export async function teamCleanupCommand(
 
 export const TEAM_USAGE = `
 Usage:
-  omc team start --agent <claude|codex|gemini|cursor>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--json]
+  omc team start --agent <claude|codex|gemini|cursor|copilot>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--json]
   omc team status <job_id|team_name> [--json] [--cwd DIR]
   omc team wait <job_id> [--timeout-ms MS] [--json]
   omc team cleanup <job_id> [--grace-ms MS] [--json]
@@ -696,6 +696,7 @@ Usage:
 
 Examples:
   omc team start --agent codex --count 2 --task "review auth flow" --new-window
+  omc team start --agent copilot --task "implement feature"
   omc team status omc-abc123
   omc team status auth-review
   omc team resume auth-review

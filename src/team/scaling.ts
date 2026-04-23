@@ -38,14 +38,14 @@ import {
   isWorkerAlive,
   killWorkerPanes,
   buildWorkerStartCommand,
-  waitForPaneReady,
+  waitForPaneReadyStatus,
 } from './tmux-session.js';
 import { TeamPaths, absPath } from './state-paths.js';
 
 // ── Environment gate ──────────────────────────────────────────────────────────
 
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
-const CLI_AGENT_TYPES = new Set<CliAgentType>(['claude', 'codex', 'gemini']);
+const CLI_AGENT_TYPES = new Set<string>(['claude', 'codex', 'gemini', 'copilot']);
 
 export function isScalingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env[OMC_TEAM_SCALING_ENABLED_ENV];
@@ -353,6 +353,7 @@ export async function scaleUp(
         name: workerName,
         index: workerIndex,
         role: workerRole,
+        worker_cli: workerAgentType as WorkerInfo['worker_cli'],
         assigned_tasks: [],
         pid: panePid,
         pane_id: paneId,
@@ -367,7 +368,10 @@ export async function scaleUp(
       const skipReadyWait = env.OMC_TEAM_SKIP_READY_WAIT === '1';
       if (!skipReadyWait) {
         try {
-          await waitForPaneReady(paneId, { timeoutMs: readyTimeoutMs });
+          await waitForPaneReadyStatus(paneId, {
+            timeoutMs: readyTimeoutMs,
+            agentType: workerAgentType,
+          });
         } catch {
           // Non-fatal: worker may still become ready
         }

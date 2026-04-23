@@ -7,11 +7,12 @@ import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWo
 import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout,
+  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReadyStatus, applyMainVerticalLayout,
+  detectInteractiveStartupBlocker, paneHasTrustPrompt,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
-  composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage,
+  composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generateCopilotTriggerMessage,
 } from './worker-bootstrap.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
 import {
@@ -106,6 +107,62 @@ interface TeamTaskRecord {
 interface DeadPaneTransition {
   action: 'requeued' | 'failed' | 'skipped';
   retryCount?: number;
+}
+
+function hasWorkerStatusProgress(status: Record<string, unknown>, taskId: string): boolean {
+  if (status.current_task_id === taskId) return true;
+  const state = typeof status.state === 'string' ? status.state : '';
+  return ['working', 'blocked', 'done', 'failed'].includes(state);
+}
+
+async function hasWorkerStartupEvidence(
+  root: string,
+  workerNameValue: string,
+  taskId: string,
+): Promise<boolean> {
+  const [task, status] = await Promise.all([
+    readTask(root, taskId),
+    readJsonSafe<Record<string, unknown>>(join(root, 'workers', workerNameValue, 'status.json')),
+  ]);
+  if (task?.owner === workerNameValue && ['in_progress', 'completed', 'failed'].includes(task.status)) {
+    return true;
+  }
+  return status ? hasWorkerStatusProgress(status, taskId) : false;
+}
+
+async function waitForWorkerStartupEvidence(
+  root: string,
+  workerNameValue: string,
+  taskId: string,
+  attempts = 6,
+  delayMs = 250,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (await hasWorkerStartupEvidence(root, workerNameValue, taskId)) {
+      return true;
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
+}
+
+async function readPaneStartupBlocker(
+  paneId: string,
+  agentType: string,
+): Promise<string | null> {
+  try {
+    const capture = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
+    const blockedReason = detectInteractiveStartupBlocker(capture.stdout, agentType);
+    if (blockedReason) return blockedReason;
+    if (String(agentType).trim().toLowerCase() === 'copilot' && paneHasTrustPrompt(capture.stdout)) {
+      return 'copilot_directory_trust_prompt';
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function workerName(index: number): string {
@@ -725,18 +782,22 @@ export async function spawnWorkerForTask(
   // For Claude agents on Bedrock/Vertex, resolve the provider-specific model
   // so workers don't fall back to invalid Anthropic API model names. (#1695)
   const modelForAgent = (() => {
-    if (agentType === 'codex') {
+    const agentTypeKey = String(agentType).trim().toLowerCase();
+    if (agentTypeKey === 'codex') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL
         || process.env.OMC_CODEX_DEFAULT_MODEL
         || undefined;
     }
-    if (agentType === 'gemini') {
+    if (agentTypeKey === 'gemini') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL
         || process.env.OMC_GEMINI_DEFAULT_MODEL
         || undefined;
     }
-    // Claude agents: resolve Bedrock/Vertex model when on those providers
-    return resolveClaudeWorkerModel();
+    if (agentTypeKey === 'claude') {
+      // Claude agents: resolve Bedrock/Vertex model when on those providers
+      return resolveClaudeWorkerModel();
+    }
+    return undefined;
   })();
 
   const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
@@ -750,7 +811,10 @@ export async function spawnWorkerForTask(
   // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
   // flag so tmux send-keys never needs to interact with the TUI input widget.
   if (usePromptMode) {
-    const promptArgs = getPromptModeArgs(agentType, generateTriggerMessage(runtime.teamName, workerNameValue));
+    const startupTrigger = agentType === 'copilot'
+      ? generateCopilotTriggerMessage(runtime.teamName, workerNameValue)
+      : generateTriggerMessage(runtime.teamName, workerNameValue);
+    const promptArgs = getPromptModeArgs(agentType, startupTrigger);
     launchArgs.push(...promptArgs);
   }
 
@@ -779,8 +843,12 @@ export async function spawnWorkerForTask(
   if (!usePromptMode) {
     // Interactive mode: wait for pane readiness, handle trust-confirm, then
     // send instruction via tmux send-keys.
-    const paneReady = await waitForPaneReady(paneId);
-    if (!paneReady) {
+    const paneReady = await waitForPaneReadyStatus(paneId, { agentType });
+    if (!paneReady.ready) {
+      if (paneReady.blockedReason) {
+        console.warn(`[runtime] worker ${workerNameValue} startup blocked before inbox dispatch: ${paneReady.blockedReason}`);
+        return paneId;
+      }
       await killWorkerPane(runtime, workerNameValue, paneId);
       await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
       throw new Error(`worker_pane_not_ready:${workerNameValue}`);
@@ -799,12 +867,26 @@ export async function spawnWorkerForTask(
     const notified = await notifyPaneWithRetry(
       runtime.sessionName,
       paneId,
-      generateTriggerMessage(runtime.teamName, workerNameValue)
+      agentType === 'copilot'
+        ? generateCopilotTriggerMessage(runtime.teamName, workerNameValue)
+        : generateTriggerMessage(runtime.teamName, workerNameValue)
     );
     if (!notified) {
       await killWorkerPane(runtime, workerNameValue, paneId);
       await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);
       throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
+    }
+
+    if (String(agentType).trim().toLowerCase() === 'copilot') {
+      const settled = await waitForWorkerStartupEvidence(root, workerNameValue, taskId);
+      if (!settled) {
+        const blockedReason = await readPaneStartupBlocker(paneId, agentType);
+        console.warn(
+          `[runtime] worker ${workerNameValue} produced no startup evidence after inbox dispatch` +
+          `${blockedReason ? ` (${blockedReason})` : ''}`,
+        );
+        return paneId;
+      }
     }
   }
   // Prompt-mode agents: instruction already passed via CLI flag at spawn.

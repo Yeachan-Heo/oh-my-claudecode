@@ -106,6 +106,12 @@ describe('model-contract', () => {
       expect(c.agentType).toBe('gemini');
       expect(c.binary).toBe('gemini');
     });
+    it('returns contract for copilot', () => {
+      const c = getContract('copilot');
+      expect(c.agentType).toBe('copilot');
+      expect(c.binary).toBe('copilot');
+      expect(c.supportsPromptMode).toBe(false);
+    });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
@@ -180,6 +186,11 @@ describe('model-contract', () => {
       expect(args).toContain('--approval-mode');
       expect(args).toContain('yolo');
       expect(args).not.toContain('-i');
+    });
+    it('copilot includes interactive automation flags', () => {
+      const args = buildLaunchArgs('copilot', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+      expect(args).toContain('--allow-all');
+      expect(args).toContain('--no-ask-user');
     });
     it('passes model flag when specified', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });

@@ -711,6 +711,16 @@ export async function executeTeamApiOperation(
           return { ok: false, operation, error: { code: 'invalid_input', message: 'expected_version must be a positive integer when provided' } };
         }
         const result = await teamClaimTask(teamName, taskId, worker, (rawExpectedVersion as number | undefined) ?? null, cwd);
+        if (result.ok && typeof result.claimToken === 'string') {
+          return {
+            ok: true,
+            operation,
+            data: {
+              ...(result as unknown as Record<string, unknown>),
+              claim_token: result.claimToken,
+            },
+          };
+        }
         return { ok: true, operation, data: result as unknown as Record<string, unknown> };
       }
       case 'transition-task-status': {

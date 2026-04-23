@@ -33,6 +33,7 @@ const tmuxSessionMocks = vi.hoisted(() => ({
   killWorkerPanes: vi.fn(),
   buildWorkerStartCommand: vi.fn(() => 'start-worker'),
   waitForPaneReady: vi.fn(),
+  waitForPaneReadyStatus: vi.fn(),
 }));
 
 vi.mock('../../cli/tmux-utils.js', () => ({
@@ -64,6 +65,7 @@ vi.mock('../tmux-session.js', () => ({
   killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
   buildWorkerStartCommand: tmuxSessionMocks.buildWorkerStartCommand,
   waitForPaneReady: tmuxSessionMocks.waitForPaneReady,
+  waitForPaneReadyStatus: tmuxSessionMocks.waitForPaneReadyStatus,
 }));
 
 import { scaleUp } from '../scaling.js';
@@ -114,6 +116,7 @@ describe('scaleUp launch config', () => {
       return { status: 0, stdout: '', stderr: '' };
     });
     tmuxSessionMocks.waitForPaneReady.mockResolvedValue(undefined);
+    tmuxSessionMocks.waitForPaneReadyStatus.mockResolvedValue({ ready: true });
   });
 
   afterEach(async () => {
@@ -125,6 +128,7 @@ describe('scaleUp launch config', () => {
   it.each([
     ['codex', ['/usr/bin/codex', '--dangerously-bypass-approvals-and-sandbox']],
     ['gemini', ['/usr/bin/gemini', '--approval-mode', 'yolo']],
+    ['copilot', ['/usr/bin/copilot', '--allow-all', '--no-ask-user']],
   ] as const)('uses model-contract launch argv for %s scale-up workers', async (
     agentType: CliAgentType,
     workerArgv: readonly string[],
@@ -160,5 +164,17 @@ describe('scaleUp launch config', () => {
         OMC_TEAM_LEADER_CWD: resolve(cwd),
       }),
     }));
+    expect(teamOpsMocks.teamWriteWorkerIdentity).toHaveBeenCalledWith(
+      'demo-team',
+      'worker-1',
+      expect.objectContaining({ worker_cli: agentType }),
+      resolve(cwd),
+    );
+    expect(monitorMocks.saveTeamConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workers: [expect.objectContaining({ worker_cli: agentType })],
+      }),
+      resolve(cwd),
+    );
   });
 });

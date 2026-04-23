@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { resolveWorkerProvider } from "../team/capabilities.js";
 
 // ============================================================================
 // BUG 6: team-status provider type handles tmux workers
 // ============================================================================
 describe('BUG 6: team-status provider type for tmux workers', () => {
-  it('source strips both mcp- and tmux- prefixes', async () => {
+  it('delegates provider mapping through the shared capability resolver', async () => {
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
     const source = readFileSync(
@@ -12,13 +13,10 @@ describe('BUG 6: team-status provider type for tmux workers', () => {
       'utf-8',
     );
 
-    // Should use a regex that strips both prefixes
-    expect(source).toMatch(/replace\(.*mcp.*tmux/s);
-    // Should include 'claude' in the provider union type
-    expect(source).toContain("'claude'");
+    expect(source).toContain('resolveWorkerProvider');
   });
 
-  it('WorkerStatus interface includes claude in provider union', async () => {
+  it('WorkerStatus interface uses the shared WorkerProvider alias', async () => {
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
     const source = readFileSync(
@@ -31,23 +29,13 @@ describe('BUG 6: team-status provider type for tmux workers', () => {
       /interface WorkerStatus[\s\S]*?provider:\s*([^;]+);/,
     );
     expect(interfaceMatch).not.toBeNull();
-    expect(interfaceMatch![1]).toContain("'claude'");
-    expect(interfaceMatch![1]).toContain("'codex'");
-    expect(interfaceMatch![1]).toContain("'gemini'");
+    expect(interfaceMatch![1].trim()).toBe('WorkerProvider');
+    expect(source).toContain('type WorkerProvider');
   });
 
-  it('regex correctly strips mcp- prefix', () => {
-    const regex = /^(?:mcp|tmux)-/;
-    expect('mcp-codex'.replace(regex, '')).toBe('codex');
-  });
-
-  it('regex correctly strips tmux- prefix', () => {
-    const regex = /^(?:mcp|tmux)-/;
-    expect('tmux-claude'.replace(regex, '')).toBe('claude');
-  });
-
-  it('regex correctly strips tmux-codex to codex', () => {
-    const regex = /^(?:mcp|tmux)-/;
-    expect('tmux-codex'.replace(regex, '')).toBe('codex');
+  it('resolver correctly handles tmux/mcp/copilot worker labels', () => {
+    expect(resolveWorkerProvider('mcp-codex')).toBe('codex');
+    expect(resolveWorkerProvider('tmux-claude')).toBe('claude');
+    expect(resolveWorkerProvider('tmux-copilot')).toBe('copilot');
   });
 });

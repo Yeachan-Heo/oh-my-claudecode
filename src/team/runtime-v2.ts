@@ -62,13 +62,16 @@ import {
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, type WorkerPaneConfig,
+  waitForPaneReadyStatus, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout,
+  detectInteractiveStartupBlocker, paneHasTrustPrompt,
+  type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
   ensureWorkerStateDir,
   writeWorkerOverlay,
   generateTriggerMessage,
+  generateCopilotTriggerMessage,
   generatePromptModeStartupPrompt,
 } from './worker-bootstrap.js';
 import { queueInboxInstruction, type DispatchOutcome } from './mcp-comm.js';
@@ -372,7 +375,8 @@ function buildV2TaskInstruction(
     ``,
     `1. Claim your task:`,
     `   ${claimTaskCommand}`,
-    `   Save the claim_token from the response.`,
+    `   Save the claimToken from the response (claim_token alias also provided).`,
+    `   If the claim succeeds, do NOT run claim-task a second time.`,
     `2. Do the work described below.`,
     `3. On completion (use claim_token from step 1):`,
     `   ${completeTaskCommand}`,
@@ -516,6 +520,23 @@ async function waitForWorkerStartupEvidence(
   return false;
 }
 
+async function readPaneStartupBlocker(
+  paneId: string,
+  agentType: string,
+): Promise<string | null> {
+  try {
+    const capture = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
+    const blockedReason = detectInteractiveStartupBlocker(capture.stdout, agentType);
+    if (blockedReason) return blockedReason;
+    if (String(agentType).trim().toLowerCase() === 'copilot' && paneHasTrustPrompt(capture.stdout)) {
+      return 'copilot_directory_trust_prompt';
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
@@ -554,7 +575,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const instruction = buildV2TaskInstruction(
     opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract,
   );
-  const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName);
+  const inboxTriggerMessage = String(opts.agentType).trim().toLowerCase() === 'copilot'
+    ? generateCopilotTriggerMessage(opts.teamName, opts.workerName)
+    : generateTriggerMessage(opts.teamName, opts.workerName);
   const promptModeStartupPrompt = generatePromptModeStartupPrompt(
     opts.teamName, opts.workerName, undefined, cliOutputContract,
   );
@@ -579,18 +602,22 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   // Snapshot-provided model (from resolved_routing) takes precedence so
   // per-role routing (codex/gemini/claude-tier) is honored at spawn time.
   const modelForAgent = opts.model ?? (() => {
-    if (opts.agentType === 'codex') {
+    const agentTypeKey = String(opts.agentType).trim().toLowerCase();
+    if (agentTypeKey === 'codex') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL
         || process.env.OMC_CODEX_DEFAULT_MODEL
         || undefined;
     }
-    if (opts.agentType === 'gemini') {
+    if (agentTypeKey === 'gemini') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL
         || process.env.OMC_GEMINI_DEFAULT_MODEL
         || undefined;
     }
-    // Claude agents: resolve Bedrock/Vertex model when on those providers
-    return resolveClaudeWorkerModel();
+    if (agentTypeKey === 'claude') {
+      // Claude agents: resolve Bedrock/Vertex model when on those providers
+      return resolveClaudeWorkerModel();
+    }
+    return undefined;
   })();
 
   const [launchBinary, ...launchArgs] = buildWorkerArgv(opts.agentType, {
@@ -624,12 +651,12 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
 
   // For interactive agents, wait for pane readiness before dispatching startup inbox.
   if (!usePromptMode) {
-    const paneReady = await waitForPaneReady(paneId);
-    if (!paneReady) {
+    const paneReady = await waitForPaneReadyStatus(paneId, { agentType: opts.agentType });
+    if (!paneReady.ready) {
       return {
         paneId,
         startupAssigned: false,
-        startupFailureReason: 'worker_pane_not_ready',
+        startupFailureReason: paneReady.blockedReason ?? 'worker_pane_not_ready',
       };
     }
   }
@@ -670,19 +697,22 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     };
   }
 
-  if (opts.agentType === 'claude') {
+  const agentTypeKey = String(opts.agentType).trim().toLowerCase();
+  if (agentTypeKey === 'claude' || agentTypeKey === 'copilot') {
+    const startupEvidenceAttempts = agentTypeKey === 'copilot' ? 960 : 6;
     const settled = await waitForWorkerStartupEvidence(
       opts.teamName,
       opts.workerName,
       opts.taskId,
       opts.cwd,
-      6,
+      startupEvidenceAttempts,
     );
     if (!settled) {
+      const blockedReason = await readPaneStartupBlocker(paneId, agentTypeKey);
       return {
         paneId,
         startupAssigned: false,
-        startupFailureReason: 'claude_startup_evidence_missing',
+        startupFailureReason: blockedReason ?? `${agentTypeKey}_startup_evidence_missing`,
       };
     }
   }
@@ -873,6 +903,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     index: i + 1,
     role: config.workerRoles?.[i]
       ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
+    worker_cli: (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as WorkerInfo['worker_cli'],
     assigned_tasks: [] as string[],
     working_dir: leaderCwd,
   }));

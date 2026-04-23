@@ -9,6 +9,8 @@ import {
   shouldAttemptAdaptiveRetry,
   getDefaultShell,
   buildWorkerStartCommand,
+  paneHasTrustPrompt,
+  detectInteractiveStartupBlocker,
 } from '../tmux-session.js';
 
 afterEach(() => {
@@ -144,6 +146,23 @@ describe('buildWorkerStartCommand', () => {
 
     expect(cmd).toContain("exec \"$@\"");
     expect(cmd).toContain("'--' 'codex' '--full-auto'");
+  });
+
+  it('includes copilot launch args unchanged in launchBinary mode', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    vi.stubEnv('SHELL', '/bin/zsh');
+    vi.stubEnv('HOME', '/home/tester');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 't/w' },
+      launchBinary: 'copilot',
+      launchArgs: ['--allow-all', '--no-ask-user'],
+      cwd: '/tmp'
+    });
+
+    expect(cmd).toContain("'--' 'copilot' '--allow-all' '--no-ask-user'");
   });
 
   it('uses exec $argv for launchBinary with fish shell', () => {
@@ -325,6 +344,27 @@ describe('sendToWorker implementation guards', () => {
     expect(source).toContain('Safety gate: copy-mode can turn on while we retry');
     expect(source).toContain('Before fallback control keys, re-check copy-mode');
     expect(source).toContain('Fail-closed: one final submit attempt');
+  });
+});
+
+describe('copilot trust prompt detection', () => {
+  const copilotTrustPrompt = `
+╭──────────────────────────────────────────────╮
+│ Confirm folder trust                         │
+│ Do you trust the files in this folder?       │
+│ ❯ 1. Yes                                     │
+│  2. Yes, and remember this folder for future │
+│   sessions                                   │
+│   3. No (Esc)                                │
+╰──────────────────────────────────────────────╯
+`;
+
+  it('recognizes the GitHub Copilot trust prompt choice format', () => {
+    expect(paneHasTrustPrompt(copilotTrustPrompt)).toBe(true);
+  });
+
+  it('reports the Copilot trust prompt as a startup blocker for copilot workers', () => {
+    expect(detectInteractiveStartupBlocker(copilotTrustPrompt, 'copilot')).toBe('copilot_directory_trust_prompt');
   });
 });
 

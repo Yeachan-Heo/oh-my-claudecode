@@ -20,7 +20,10 @@ import { loadConfig } from '../../config/loader.js';
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
-const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
+// Explicit CLI specs may expose providers before they are accepted as
+// config-level defaults. Keep the parsing and defaulting allowlists separate.
+const EXPLICIT_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'copilot']);
+const DEFAULT_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 const DEFAULT_TEAM_CLI_AGENT_TYPE: CliAgentType = 'claude';
 
 const TEAM_HELP = `
@@ -34,6 +37,7 @@ Examples:
   omc team 3:claude "fix failing tests"
   omc team 2:codex:architect "design auth system"
   omc team 1:gemini:executor "implement feature"
+  omc team 1:copilot:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
   omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
@@ -223,7 +227,8 @@ function slugifyTask(task: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, 30) || 'team-task';
+    .slice(0, 30)
+    .replace(/^-|-$/g, '') || 'team-task';
 }
 
 export interface ParsedWorkerSpec {
@@ -309,7 +314,7 @@ function normalizeWorkerSpecSegment(match: RegExpMatchArray): NormalizedWorkerSp
     return { count, agentType: token, role: explicitRole };
   }
 
-  if (VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
+  if (EXPLICIT_TEAM_CLI_AGENT_TYPES.has(token)) {
     return { count, agentType: token };
   }
 
@@ -324,7 +329,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   let workerSpecs: ParsedWorkerSpec[] = [];
   let json = false;
   let newWindow = false;
-  const normalizedDefaultAgentType = VALID_TEAM_CLI_AGENT_TYPES.has(defaultAgentType as CliAgentType)
+  const normalizedDefaultAgentType = DEFAULT_TEAM_CLI_AGENT_TYPES.has(defaultAgentType as CliAgentType)
     ? defaultAgentType
     : DEFAULT_TEAM_CLI_AGENT_TYPE;
 

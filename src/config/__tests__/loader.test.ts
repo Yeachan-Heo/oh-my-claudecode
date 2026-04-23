@@ -543,23 +543,26 @@ describe("team.roleRouting (Option E)", () => {
     }
   });
 
-  it("rejects unsupported team.ops.defaultAgentType values", () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "omc-team-default-agent-type-"));
-    try {
-      const claudeDir = join(tempDir, ".claude");
-      require("node:fs").mkdirSync(claudeDir, { recursive: true });
-      writeFileSync(
-        join(claudeDir, "omc.jsonc"),
-        JSON.stringify({
-          team: { ops: { defaultAgentType: "executor" } },
-        }),
-      );
-      process.chdir(tempDir);
-      expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+  it.each(["executor", "copilot"])(
+    "rejects unsupported team.ops.defaultAgentType value %s",
+    (defaultAgentType) => {
+      const tempDir = mkdtempSync(join(tmpdir(), "omc-team-default-agent-type-"));
+      try {
+        const claudeDir = join(tempDir, ".claude");
+        require("node:fs").mkdirSync(claudeDir, { recursive: true });
+        writeFileSync(
+          join(claudeDir, "omc.jsonc"),
+          JSON.stringify({
+            team: { ops: { defaultAgentType } },
+          }),
+        );
+        process.chdir(tempDir);
+        expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("rejects unknown role with descriptive error", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-role-"));

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
+  generateCopilotTriggerMessage,
   generateMailboxTriggerMessage,
   generatePromptModeStartupPrompt,
   generateTriggerMessage,
@@ -74,6 +75,15 @@ describe('worker-bootstrap', () => {
         .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/mailbox/worker-1.json');
       expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
         .toContain('report progress');
+    });
+
+    it('uses a more explicit copilot trigger while staying under the sendToWorker limit', () => {
+      const trigger = generateCopilotTriggerMessage('test-team', 'worker-1');
+      expect(trigger).toContain('claim-task');
+      expect(trigger).toContain('transition-task-status');
+      expect(trigger).toContain('claim_token');
+      expect(trigger).toContain('Run claim-task once');
+      expect(trigger.length).toBeLessThan(200);
     });
 
     it('uses a short prompt-mode startup pointer instead of lifecycle/task text', () => {

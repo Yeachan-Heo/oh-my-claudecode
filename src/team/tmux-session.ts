@@ -636,12 +636,56 @@ async function capturePaneAsync(paneId: string): Promise<string> {
   }
 }
 
-function paneHasTrustPrompt(captured: string): boolean {
-  const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
-  const tail = lines.slice(-12);
-  const hasQuestion = tail.some(l => /Do you trust the contents of this directory\?/i.test(l));
-  const hasChoices = tail.some(l => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
+export type InteractiveStartupBlocker =
+  | 'copilot_login_required'
+  | 'copilot_waiting_for_authorization'
+  | 'copilot_directory_trust_prompt';
+
+function normalizeAgentType(agentType?: string | null): string {
+  return String(agentType ?? '').trim().toLowerCase();
+}
+
+function normalizePanePromptLine(line: string): string {
+  return line
+    .replace(/\r/g, '')
+    .replace(/^[\s│╭╰─]+/u, '')
+    .replace(/[\s│╭╰─]+$/u, '')
+    .trim();
+}
+
+export function paneHasTrustPrompt(captured: string): boolean {
+  const lines = captured.split('\n').map(normalizePanePromptLine).filter(l => l.length > 0);
+  const tail = lines.slice(-16);
+  const hasQuestion = tail.some((line) =>
+    /Do you trust(?: that)? (?:the contents of this directory|the files in (?:this|the current) (?:folder|directory))\??/i.test(line),
+  );
+  const hasChoices = tail.some((line) =>
+    /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(line)
+    || /^\d+\.\s+Yes\b/i.test(line)
+    || /^\d+\.\s+No\b/i.test(line)
+    || /remember this folder for future sessions/i.test(line),
+  );
   return hasQuestion && hasChoices;
+}
+
+function paneHasCopilotLoginPrompt(captured: string): boolean {
+  const lines = captured.split('\n').map(normalizePanePromptLine).filter(l => l.length > 0);
+  const tail = lines.slice(-16);
+  return tail.some((line) =>
+    /\b(?:run|enter)\s+\/login\b/i.test(line)
+    || /\bnot currently logged in to GitHub\b/i.test(line)
+    || /What account do you want to log into\?/i.test(line),
+  );
+}
+
+function paneHasCopilotAuthorizationWait(captured: string): boolean {
+  const lines = captured.split('\n').map(normalizePanePromptLine).filter(l => l.length > 0);
+  const tail = lines.slice(-20);
+  return tail.some((line) =>
+    /\bWaiting for authorization\b/i.test(line)
+    || /\bEnter one-time code:\b/i.test(line)
+    || /\bPress any key to copy to clipboard and open browser\b/i.test(line),
+  );
 }
 
 function paneIsBootstrapping(captured: string): boolean {
@@ -683,15 +727,42 @@ export function paneLooksReady(captured: string): boolean {
   return hasCodexPromptLine || hasClaudePromptLine;
 }
 
+export function detectInteractiveStartupBlocker(
+  captured: string,
+  agentType?: string | null,
+): InteractiveStartupBlocker | null {
+  if (normalizeAgentType(agentType) !== 'copilot') return null;
+  if (paneHasCopilotAuthorizationWait(captured)) return 'copilot_waiting_for_authorization';
+  if (paneHasCopilotLoginPrompt(captured)) return 'copilot_login_required';
+  if (paneHasTrustPrompt(captured)) return 'copilot_directory_trust_prompt';
+  return null;
+}
+
+export function paneReadyForInteractiveInjection(
+  captured: string,
+  agentType?: string | null,
+): boolean {
+  if (paneHasActiveTask(captured)) return false;
+  if (paneLooksReady(captured)) return true;
+  return normalizeAgentType(agentType) === 'copilot' && paneHasTrustPrompt(captured);
+}
+
 export interface WaitForPaneReadyOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
+  agentType?: string | null;
 }
 
-export async function waitForPaneReady(
+export interface WaitForPaneReadyResult {
+  ready: boolean;
+  blockedReason?: InteractiveStartupBlocker;
+  latestCapture?: string;
+}
+
+export async function waitForPaneReadyStatus(
   paneId: string,
-  opts: WaitForPaneReadyOptions = {}
-): Promise<boolean> {
+  opts: WaitForPaneReadyOptions = {},
+): Promise<WaitForPaneReadyResult> {
   const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
   const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
     ? Number(opts.timeoutMs)
@@ -701,10 +772,19 @@ export async function waitForPaneReady(
     : 250;
 
   const deadline = Date.now() + timeoutMs;
+  let latestCapture = '';
   while (Date.now() < deadline) {
-    const captured = await capturePaneAsync(paneId);
-    if (paneLooksReady(captured) && !paneHasActiveTask(captured)) {
-      return true;
+    latestCapture = await capturePaneAsync(paneId);
+    const blockedReason = detectInteractiveStartupBlocker(latestCapture, opts.agentType);
+    if (blockedReason && blockedReason !== 'copilot_directory_trust_prompt') {
+      return {
+        ready: false,
+        blockedReason,
+        latestCapture,
+      };
+    }
+    if (paneReadyForInteractiveInjection(latestCapture, opts.agentType)) {
+      return { ready: true, latestCapture };
     }
     await sleep(pollIntervalMs);
   }
@@ -713,7 +793,15 @@ export async function waitForPaneReady(
     `[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms ` +
     `(set OMC_SHELL_READY_TIMEOUT_MS to tune)`
   );
-  return false;
+  return { ready: false, latestCapture };
+}
+
+export async function waitForPaneReady(
+  paneId: string,
+  opts: WaitForPaneReadyOptions = {}
+): Promise<boolean> {
+  const result = await waitForPaneReadyStatus(paneId, opts);
+  return result.ready;
 }
 
 function paneTailContainsLiteralLine(captured: string, text: string): boolean {
@@ -728,6 +816,21 @@ async function paneInCopyMode(
     return result.stdout.trim() === '1';
   } catch {
     return false;
+  }
+}
+
+async function waitForPostTrustPromptSettle(
+  paneId: string,
+  timeoutMs = 3_000,
+  pollIntervalMs = 100,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const capture = await capturePaneAsync(paneId);
+    if (!paneHasTrustPrompt(capture) && paneReadyForInteractiveInjection(capture)) {
+      return;
+    }
+    await sleep(pollIntervalMs);
   }
 }
 
@@ -782,8 +885,7 @@ export async function sendToWorker(
     if (paneHasTrustPrompt(initialCapture)) {
       await sendKey('C-m');
       await sleep(120);
-      await sendKey('C-m');
-      await sleep(200);
+      await waitForPostTrustPromptSettle(paneId);
     }
 
     // Send text in literal mode with -- separator

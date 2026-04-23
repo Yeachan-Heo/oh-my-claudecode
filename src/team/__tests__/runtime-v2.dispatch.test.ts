@@ -11,10 +11,13 @@ const mocks = vi.hoisted(() => ({
   spawnWorkerInPane: vi.fn(),
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
+  waitForPaneReadyStatus: vi.fn(),
   applyMainVerticalLayout: vi.fn(),
   execFile: vi.fn(),
   spawnSync: vi.fn(() => ({ status: 0 })),
   tmuxExecAsync: vi.fn(),
+  detectInteractiveStartupBlocker: vi.fn(() => null),
+  paneHasTrustPrompt: vi.fn(() => false),
 }));
 
 const modelContractMocks = vi.hoisted(() => ({
@@ -56,7 +59,10 @@ vi.mock('../tmux-session.js', () => ({
   spawnWorkerInPane: mocks.spawnWorkerInPane,
   sendToWorker: mocks.sendToWorker,
   waitForPaneReady: mocks.waitForPaneReady,
+  waitForPaneReadyStatus: mocks.waitForPaneReadyStatus,
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+  detectInteractiveStartupBlocker: mocks.detectInteractiveStartupBlocker,
+  paneHasTrustPrompt: mocks.paneHasTrustPrompt,
 }));
 
 describe('runtime v2 startup inbox dispatch', () => {
@@ -69,6 +75,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockReset();
     mocks.sendToWorker.mockReset();
     mocks.waitForPaneReady.mockReset();
+    mocks.waitForPaneReadyStatus.mockReset();
     mocks.applyMainVerticalLayout.mockReset();
     mocks.execFile.mockReset();
     mocks.spawnSync.mockReset();
@@ -86,9 +93,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     mocks.spawnWorkerInPane.mockResolvedValue(undefined);
     mocks.waitForPaneReady.mockResolvedValue(true);
+    mocks.waitForPaneReadyStatus.mockResolvedValue({ ready: true });
     mocks.sendToWorker.mockResolvedValue(true);
     mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
     mocks.spawnSync.mockReturnValue({ status: 0 });
+    mocks.detectInteractiveStartupBlocker.mockReturnValue(null);
+    mocks.paneHasTrustPrompt.mockReturnValue(false);
     modelContractMocks.buildWorkerArgv.mockImplementation((agentType?: string) => [`/usr/bin/${agentType ?? 'claude'}`]);
     modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => `/usr/bin/${agentType ?? 'claude'}`);
     modelContractMocks.getWorkerEnv.mockImplementation((...args: unknown[]) => {
@@ -418,6 +428,77 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts copilot workers through the interactive dispatch path and persists worker_cli', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-copilot-dispatch-'));
+
+    mocks.sendToWorker.mockImplementation(async () => {
+      const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
+      const taskPath = join(taskDir, 'task-1.json');
+      const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
+      await writeFile(taskPath, JSON.stringify({
+        ...existing,
+        status: 'in_progress',
+        owner: 'worker-1',
+      }, null, 2), 'utf-8');
+      return true;
+    });
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['copilot'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify copilot startup dispatch evidence' }],
+      cwd,
+    });
+
+    expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
+      'copilot',
+      expect.objectContaining({
+        teamName: 'dispatch-team',
+        workerName: 'worker-1',
+      }),
+    );
+    expect(mocks.sendToWorker).toHaveBeenCalledWith(
+      'dispatch-session',
+      '%2',
+      expect.stringContaining('.omc/state/team/dispatch-team/workers/worker-1/inbox.md'),
+    );
+    expect(runtime.config.workers[0]?.worker_cli).toBe('copilot');
+    expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+  });
+
+  it('waits longer for copilot startup evidence before marking the startup as failed', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-copilot-slower-startup-'));
+
+    mocks.sendToWorker.mockImplementation(async () => {
+      const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
+      const taskPath = join(taskDir, 'task-1.json');
+      const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
+      setTimeout(async () => {
+        await writeFile(taskPath, JSON.stringify({
+          ...existing,
+          status: 'in_progress',
+          owner: 'worker-1',
+        }, null, 2), 'utf-8');
+      }, 1500);
+      return true;
+    });
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['copilot'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify slower copilot startup evidence is tolerated' }],
+      cwd,
+    });
+
+    expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
   });
 
   it('keeps codex prompt-mode launch args to a short inbox pointer and waits for claim evidence', async () => {

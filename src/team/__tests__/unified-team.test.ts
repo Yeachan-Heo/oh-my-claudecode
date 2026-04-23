@@ -19,11 +19,20 @@ describe('unified-team', () => {
   });
 
   function registerWorker(name: string, agentType: string = 'mcp-codex') {
+    const provider =
+      agentType === 'mcp-codex' ? 'codex'
+      : agentType === 'mcp-gemini' ? 'gemini'
+      : agentType === 'mcp-copilot' ? 'copilot'
+      : 'codex';
+    const model =
+      agentType === 'mcp-codex' ? 'gpt-5.3-codex'
+      : agentType === 'mcp-gemini' ? 'gemini-3.1-pro-preview'
+      : 'gpt-5.4';
     registerMcpWorker(
       teamName,
       name,
-      agentType === 'mcp-codex' ? 'codex' : 'gemini',
-      agentType === 'mcp-codex' ? 'gpt-5.3-codex' : 'gemini-3.1-pro-preview',
+      provider as any,
+      model,
       `tmux-${name}`,
       testDir,
       testDir
@@ -94,6 +103,26 @@ describe('unified-team', () => {
       const members = getTeamMembers(teamName, testDir);
       expect(members).toHaveLength(1);
       expect(members[0].backend).toBe('mcp-codex');
+    });
+
+    it('maps copilot workers to the interactive executor backend', () => {
+      registerWorker('copilot-1', 'mcp-copilot');
+      writeHeartbeat(testDir, {
+        workerName: 'copilot-1',
+        teamName,
+        provider: 'copilot',
+        pid: process.pid,
+        lastPollAt: new Date().toISOString(),
+        status: 'polling',
+        consecutiveErrors: 0,
+      });
+
+      const members = getTeamMembers(teamName, testDir);
+      expect(members).toHaveLength(1);
+      expect(members[0].backend).toBe('tmux-cursor');
+      expect(members[0].provider).toBe('copilot');
+      expect(members[0].capabilities).toContain('code-edit');
+      expect(members[0].capabilities).toContain('refactoring');
     });
   });
 });

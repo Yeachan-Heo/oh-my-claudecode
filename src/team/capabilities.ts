@@ -10,6 +10,8 @@
 import type { WorkerBackend, WorkerCapability } from './types.js';
 import type { UnifiedTeamMember } from './unified-team.js';
 
+export type WorkerProvider = 'claude' | 'codex' | 'gemini' | 'cursor' | 'copilot';
+
 /** Default capabilities by worker backend */
 const DEFAULT_CAPABILITIES: Record<WorkerBackend, WorkerCapability[]> = {
   'claude-native': ['code-edit', 'testing', 'general'],
@@ -21,11 +23,70 @@ const DEFAULT_CAPABILITIES: Record<WorkerBackend, WorkerCapability[]> = {
   'tmux-cursor': ['code-edit', 'refactoring', 'general'],
 };
 
+const PROVIDER_BY_BACKEND: Record<WorkerBackend, WorkerProvider> = {
+  'claude-native': 'claude',
+  'mcp-codex': 'codex',
+  'mcp-gemini': 'gemini',
+  'tmux-claude': 'claude',
+  'tmux-codex': 'codex',
+  'tmux-gemini': 'gemini',
+  'tmux-cursor': 'cursor',
+};
+
+const BACKEND_BY_AGENT_TYPE: Record<string, WorkerBackend> = {
+  claude: 'tmux-claude',
+  'mcp-claude': 'tmux-claude',
+  'tmux-claude': 'tmux-claude',
+  codex: 'tmux-codex',
+  'mcp-codex': 'mcp-codex',
+  'tmux-codex': 'tmux-codex',
+  gemini: 'tmux-gemini',
+  'mcp-gemini': 'mcp-gemini',
+  'tmux-gemini': 'tmux-gemini',
+  cursor: 'tmux-cursor',
+  'tmux-cursor': 'tmux-cursor',
+  copilot: 'tmux-cursor',
+  'mcp-copilot': 'tmux-cursor',
+  'tmux-copilot': 'tmux-cursor',
+};
+
+/**
+ * Resolve a runtime/backend identifier into one of the existing worker backends.
+ *
+ * Copilot workers intentionally piggyback on the cursor-style executor backend:
+ * they are interactive executor lanes, not prompt-mode reviewer lanes.
+ */
+export function resolveWorkerBackend(agentTypeOrBackend: string | null | undefined): WorkerBackend {
+  const normalized = String(agentTypeOrBackend ?? '').trim().toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(DEFAULT_CAPABILITIES, normalized)) {
+    return normalized as WorkerBackend;
+  }
+  return BACKEND_BY_AGENT_TYPE[normalized] ?? 'mcp-codex';
+}
+
+/**
+ * Resolve a runtime/backend identifier into a user-facing provider label.
+ */
+export function resolveWorkerProvider(agentTypeOrBackend: string | null | undefined): WorkerProvider {
+  const normalized = String(agentTypeOrBackend ?? '').trim().toLowerCase();
+  if (normalized === 'copilot' || normalized === 'mcp-copilot' || normalized === 'tmux-copilot') {
+    return 'copilot';
+  }
+  return PROVIDER_BY_BACKEND[resolveWorkerBackend(normalized)];
+}
+
 /**
  * Get default capabilities for a worker backend.
  */
 export function getDefaultCapabilities(backend: WorkerBackend): WorkerCapability[] {
   return [...(DEFAULT_CAPABILITIES[backend] || ['general'])];
+}
+
+/**
+ * Get default capabilities from a runtime agent type or worker_cli string.
+ */
+export function getDefaultCapabilitiesForWorker(agentTypeOrBackend: string | null | undefined): WorkerCapability[] {
+  return getDefaultCapabilities(resolveWorkerBackend(agentTypeOrBackend));
 }
 
 /**

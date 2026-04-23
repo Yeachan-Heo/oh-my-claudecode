@@ -18,6 +18,11 @@ import { existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
+import {
+  detectInteractiveStartupBlocker,
+  paneHasTrustPrompt,
+  paneReadyForInteractiveInjection,
+} from '../team/tmux-session.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -316,34 +321,6 @@ function paneHasActiveTask(captured: string): boolean {
   return false;
 }
 
-function paneIsBootstrapping(captured: string): boolean {
-  const lines = safeString(captured)
-    .split('\n')
-    .map((line) => line.replace(/\r/g, '').trim())
-    .filter((line) => line.length > 0);
-  return lines.some((line) =>
-    /\b(loading|initializing|starting up)\b/i.test(line)
-    || /\bmodel:\s*loading\b/i.test(line)
-    || /\bconnecting\s+to\b/i.test(line),
-  );
-}
-
-function paneLooksReady(captured: string): boolean {
-  const content = safeString(captured).trimEnd();
-  if (content === '') return false;
-  const lines = content
-    .split('\n')
-    .map((line) => line.replace(/\r/g, '').trimEnd())
-    .filter((line) => line.trim() !== '');
-  if (paneIsBootstrapping(content)) return false;
-  const lastLine = lines.length > 0 ? lines[lines.length - 1]! : '';
-  if (/^\s*[›>❯]\s*/u.test(lastLine)) return true;
-  const hasCodexPromptLine = lines.some((line) => /^\s*›\s*/u.test(line));
-  const hasClaudePromptLine = lines.some((line) => /^\s*❯\s*/u.test(line));
-  if (hasCodexPromptLine || hasClaudePromptLine) return true;
-  return false;
-}
-
 function resolveWorkerCliForRequest(request: DispatchRequest, config: TeamConfig): string {
   const workers = Array.isArray(config.workers) ? config.workers : [];
   const idx = Number.isFinite(request.worker_index) ? Number(request.worker_index) : null;
@@ -351,16 +328,9 @@ function resolveWorkerCliForRequest(request: DispatchRequest, config: TeamConfig
     const worker = workers.find((c) => Number(c.index) === idx);
     const workerCli = safeString(worker?.worker_cli).trim().toLowerCase();
     if (workerCli === 'claude') return 'claude';
+    if (workerCli === 'copilot') return 'copilot';
   }
   return 'codex';
-}
-
-async function runProcess(cmd: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
-  const { execFile } = await import('child_process');
-  const { promisify } = await import('util');
-  const execFileAsync = promisify(execFile);
-  const result = await execFileAsync(cmd, args, { timeout: timeoutMs });
-  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
 async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cwd: string): Promise<InjectionResult> {
@@ -375,17 +345,38 @@ async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cw
     }
   } catch { /* best effort */ }
 
-  const submitKeyPresses = resolveWorkerCliForRequest(request, config) === 'claude' ? 1 : 2;
+  const workerCli = resolveWorkerCliForRequest(request, config);
+  const submitKeyPresses = workerCli === 'claude' || workerCli === 'copilot' ? 1 : 2;
   const attemptCountAtStart = Number.isFinite(request.attempt_count) ? Math.max(0, Math.floor(request.attempt_count)) : 0;
 
   let preCaptureHasTrigger = false;
+  let initialCapture = '';
   if (attemptCountAtStart >= 1) {
     try {
       const preCapture = await tmuxExecAsync(['capture-pane', '-t', paneTarget, '-p', '-S', '-8'], { timeout: 2000 });
       preCaptureHasTrigger = capturedPaneContainsTrigger(preCapture.stdout, request.trigger_message);
+      initialCapture = preCapture.stdout;
     } catch {
       preCaptureHasTrigger = false;
     }
+  } else {
+    try {
+      const preCapture = await tmuxExecAsync(['capture-pane', '-t', paneTarget, '-p', '-S', '-8'], { timeout: 2000 });
+      initialCapture = preCapture.stdout;
+    } catch {
+      initialCapture = '';
+    }
+  }
+
+  const startupBlocker = detectInteractiveStartupBlocker(initialCapture, workerCli);
+  if (startupBlocker && startupBlocker !== 'copilot_directory_trust_prompt') {
+    return { ok: false, reason: startupBlocker };
+  }
+  if (workerCli === 'copilot' && paneHasTrustPrompt(initialCapture)) {
+    await tmuxExecAsync(['send-keys', '-t', paneTarget, 'C-m'], { timeout: 1000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 120));
+    await tmuxExecAsync(['send-keys', '-t', paneTarget, 'C-m'], { timeout: 1000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 180));
   }
 
   const shouldTypePrompt = attemptCountAtStart === 0 || !preCaptureHasTrigger;
@@ -418,7 +409,11 @@ async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cw
       if (paneHasActiveTask(wideCap.stdout)) {
         return { ok: true, reason: 'tmux_send_keys_confirmed_active_task', pane: paneTarget };
       }
-      if (request.to_worker !== 'leader-fixed' && !paneLooksReady(wideCap.stdout)) {
+      const postInjectBlocker = detectInteractiveStartupBlocker(wideCap.stdout, workerCli);
+      if (postInjectBlocker && postInjectBlocker !== 'copilot_directory_trust_prompt') {
+        return { ok: false, reason: postInjectBlocker };
+      }
+      if (request.to_worker !== 'leader-fixed' && !paneReadyForInteractiveInjection(wideCap.stdout, workerCli)) {
         continue;
       }
       const triggerInNarrow = capturedPaneContainsTrigger(narrowCap.stdout, request.trigger_message);

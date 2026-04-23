@@ -16,6 +16,7 @@ import { listTaskIds, readTask } from './task-file-ops.js';
 import { sanitizeName } from './tmux-session.js';
 import type { HeartbeatData, TaskFile, OutboxMessage } from './types.js';
 import { generateUsageReport } from './usage-tracker.js';
+import { resolveWorkerProvider, type WorkerProvider } from './capabilities.js';
 
 function emptyUsageReport(teamName: string): ReturnType<typeof generateUsageReport> {
   return {
@@ -59,7 +60,7 @@ function peekRecentOutboxMessages(
 
 export interface WorkerStatus {
   workerName: string;
-  provider: 'claude' | 'codex' | 'gemini';
+  provider: WorkerProvider;
   heartbeat: HeartbeatData | null;
   isAlive: boolean;
   currentTask: TaskFile | null;
@@ -133,7 +134,7 @@ export function getTeamStatus(
     };
 
     const currentTask = workerTasks.find(t => t.status === 'in_progress') || null;
-    const provider = w.agentType.replace(/^(?:mcp|tmux)-/, '') as 'claude' | 'codex' | 'gemini';
+    const provider = resolveWorkerProvider(w.agentType);
 
     return {
       workerName: w.name,

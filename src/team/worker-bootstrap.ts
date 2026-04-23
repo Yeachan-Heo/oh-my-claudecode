@@ -29,6 +29,19 @@ export function generateTriggerMessage(
   return `Read ${inboxPath}, execute now, report concrete progress.`;
 }
 
+export function generateCopilotTriggerMessage(
+  teamName: string,
+  workerName: string,
+  teamStateRoot = '.omc/state',
+): string {
+  const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
+  const message = `Open ${inboxPath}. Run claim-task first, do the task, then transition-task-status. Include a short description for each shell command.`;
+  const stricter = `Open ${inboxPath}. Run claim-task once, do the task, then transition-task-status. Use claim_token if parsing JSON.`;
+  return stricter.length <= 200
+    ? stricter
+    : `Open ${inboxPath}. Follow it and begin the assigned work.`;
+}
+
 export function generatePromptModeStartupPrompt(
   teamName: string,
   workerName: string,
@@ -79,6 +92,16 @@ function agentTypeGuidance(agentType: CliAgentType): string {
         '- You are an interactive REPL (cursor-agent), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.',
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT type \`/exit\` unless the leader sends an explicit shutdown.`,
         '- Reviewer/critic/security-review roles are NOT supported for cursor workers — those require a verdict-file write-and-exit which the REPL does not perform. Take only executor-style tasks.',
+      ].join('\n');
+    case 'copilot':
+      return [
+        '### Agent-Type Guidance (copilot)',
+        '- You are an interactive REPL (copilot), not a one-shot CLI. Stay in the session and keep following mailbox/inbox instructions.',
+        `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done.`,
+        '- The claim response includes both `claimToken` and `claim_token`; prefer `claim_token` when parsing shell output.',
+        '- If claim-task succeeds once, do not re-run claim-task for the same task.',
+        '- When you invoke shell commands, include a short description so Copilot tool calls do not fail validation.',
+        '- Reviewer/critic/security-review roles are NOT supported for copilot workers in the first pass — take only executor-style tasks.',
       ].join('\n');
     case 'claude':
     default:
@@ -140,7 +163,7 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
 
 1. **Claim** your task (run this command first):
    \`${claimTaskCommand}\`
-   Save the \`claim_token\` from the response — you need it for step 4.
+   Save the \`claimToken\` from the response (a \`claim_token\` alias is also returned) — you need it for step 4.
 2. **Do the work** described in your task assignment below.
 3. **Send ACK** to the leader:
    \`${sendAckCommand}\`

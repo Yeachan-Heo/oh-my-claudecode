@@ -42,7 +42,7 @@ function writeHeartbeatFile(data: HeartbeatData): void {
   atomicWriteJson(hbPath, data);
 }
 
-function makeWorker(name: string, provider: 'codex' | 'gemini' = 'codex'): McpWorkerMember {
+function makeWorker(name: string, provider: 'codex' | 'gemini' | 'copilot' = 'codex'): McpWorkerMember {
   return {
     agentId: `${name}@${TEST_TEAM}`,
     name,
@@ -56,7 +56,7 @@ function makeWorker(name: string, provider: 'codex' | 'gemini' = 'codex'): McpWo
   };
 }
 
-function makeHeartbeat(workerName: string, provider: 'codex' | 'gemini' = 'codex', ageMs: number = 0): HeartbeatData {
+function makeHeartbeat(workerName: string, provider: 'codex' | 'gemini' | 'copilot' = 'codex', ageMs: number = 0): HeartbeatData {
   return {
     workerName,
     teamName: TEST_TEAM,
@@ -129,6 +129,18 @@ describe('getTeamStatus', () => {
     expect(status.taskSummary.pending).toBe(1);
     expect(status.usage.taskCount).toBe(0);
     expect(status.performance.totalMs).toBeGreaterThanOrEqual(status.performance.taskScanMs);
+  });
+
+  it('reports copilot workers with the copilot provider label', () => {
+    const w1 = makeWorker('w1', 'copilot');
+    writeWorkerRegistry([w1]);
+    writeHeartbeatFile(makeHeartbeat('w1', 'copilot', 1000));
+    writeTask(makeTask('1', 'w1', 'in_progress'));
+
+    const status = getTeamStatus(TEST_TEAM, WORK_DIR);
+    expect(status.workers).toHaveLength(1);
+    expect(status.workers[0]?.provider).toBe('copilot');
+    expect(status.workers[0]?.currentTask?.id).toBe('1');
   });
 
   it('detects dead workers via heartbeat age', () => {

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   getDefaultCapabilities,
+  getDefaultCapabilitiesForWorker,
+  resolveWorkerBackend,
+  resolveWorkerProvider,
   scoreWorkerFitness,
   rankWorkersForTask,
 } from '../capabilities.js';
@@ -53,6 +56,16 @@ describe('capabilities', () => {
       const caps2 = getDefaultCapabilities('claude-native');
       caps1.push('research');
       expect(caps2).not.toContain('research');
+    });
+
+    it('maps copilot workers onto the cursor-style executor backend capabilities', () => {
+      expect(resolveWorkerBackend('copilot')).toBe('tmux-cursor');
+      expect(resolveWorkerBackend('mcp-copilot')).toBe('tmux-cursor');
+      expect(resolveWorkerBackend('tmux-copilot')).toBe('tmux-cursor');
+      expect(resolveWorkerProvider('mcp-copilot')).toBe('copilot');
+      expect(getDefaultCapabilitiesForWorker('copilot')).toEqual(
+        getDefaultCapabilities('tmux-cursor'),
+      );
     });
   });
 

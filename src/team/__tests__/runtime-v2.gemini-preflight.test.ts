@@ -8,9 +8,12 @@ const mocks = vi.hoisted(() => ({
   spawnWorkerInPane: vi.fn(),
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
+  waitForPaneReadyStatus: vi.fn(),
   applyMainVerticalLayout: vi.fn(),
   tmuxExecAsync: vi.fn(),
   queueInboxInstruction: vi.fn(),
+  detectInteractiveStartupBlocker: vi.fn(() => null),
+  paneHasTrustPrompt: vi.fn(() => false),
 }));
 
 const modelContractMocks = vi.hoisted(() => ({
@@ -35,9 +38,12 @@ vi.mock('../tmux-session.js', () => ({
   spawnWorkerInPane: mocks.spawnWorkerInPane,
   sendToWorker: mocks.sendToWorker,
   waitForPaneReady: mocks.waitForPaneReady,
+  waitForPaneReadyStatus: mocks.waitForPaneReadyStatus,
   paneHasActiveTask: vi.fn(() => false),
   paneLooksReady: vi.fn(() => true),
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+  detectInteractiveStartupBlocker: mocks.detectInteractiveStartupBlocker,
+  paneHasTrustPrompt: mocks.paneHasTrustPrompt,
 }));
 
 vi.mock('../model-contract.js', () => ({
@@ -67,6 +73,7 @@ describe('runtime-v2 Gemini preflight routing', () => {
     });
     mocks.spawnWorkerInPane.mockResolvedValue(undefined);
     mocks.waitForPaneReady.mockResolvedValue(true);
+    mocks.waitForPaneReadyStatus.mockResolvedValue({ ready: true });
     mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
     mocks.tmuxExecAsync.mockImplementation(async (args: string[]) => {
       if (args[0] === 'split-window') {
@@ -75,6 +82,8 @@ describe('runtime-v2 Gemini preflight routing', () => {
       return { stdout: '', stderr: '' };
     });
     mocks.queueInboxInstruction.mockResolvedValue({ ok: true, reason: 'transport_direct', transport: 'transport_direct' });
+    mocks.detectInteractiveStartupBlocker.mockReturnValue(null);
+    mocks.paneHasTrustPrompt.mockReturnValue(false);
   });
 
   afterEach(async () => {
@@ -103,6 +112,48 @@ describe('runtime-v2 Gemini preflight routing', () => {
         teamName: 'issue2675-team',
         workerName: 'worker-1',
         resolvedBinaryPath: 'gemini',
+      }),
+    );
+  });
+
+  it('keeps a requested copilot lane on copilot when preflight downgrades to launch-time resolution', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'issue2675-copilot-preflight-'));
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+      if (agentType === 'copilot') {
+        throw new Error('Resolved CLI binary \'copilot\' to untrusted location: /tmp/copilot');
+      }
+      return `/usr/bin/${agentType ?? 'claude'}`;
+    });
+    modelContractMocks.getContract.mockImplementation((agentType?: string) => ({ binary: agentType ?? 'claude' }));
+    mocks.queueInboxInstruction.mockImplementation(async () => {
+      const taskDir = join(cwd, '.omc', 'state', 'team', 'issue2675-team', 'tasks');
+      const taskPath = join(taskDir, 'task-1.json');
+      const existing = JSON.parse(await (await import('fs/promises')).readFile(taskPath, 'utf-8'));
+      await (await import('fs/promises')).writeFile(taskPath, JSON.stringify({
+        ...existing,
+        status: 'in_progress',
+        owner: 'worker-1',
+      }, null, 2), 'utf-8');
+      return { ok: true, reason: 'transport_direct', transport: 'transport_direct' } as const;
+    });
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'issue2675-team',
+      workerCount: 1,
+      agentTypes: ['copilot'],
+      tasks: [{ subject: 'Implement task', description: 'Verify copilot preflight fallback' }],
+      cwd,
+    });
+
+    expect(runtime.config.workers[0]?.worker_cli).toBe('copilot');
+    expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
+      'copilot',
+      expect.objectContaining({
+        teamName: 'issue2675-team',
+        workerName: 'worker-1',
+        resolvedBinaryPath: 'copilot',
       }),
     );
   });

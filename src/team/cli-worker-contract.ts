@@ -49,8 +49,9 @@ const VALID_SEVERITIES: ReadonlySet<string> = new Set(['critical', 'major', 'min
 
 /**
  * Returns true when a role + provider pair requires the verdict-output contract.
- * External providers (codex/gemini) on reviewer-style roles need it; Claude
- * teammates speak through the team messaging API directly.
+ * External prompt-mode providers (codex/gemini) on reviewer-style roles need
+ * it; Claude and interactive-only workers speak through the team messaging API
+ * directly.
  */
 export function shouldInjectContract(
   role: CanonicalTeamRole | null | undefined,
@@ -58,13 +59,13 @@ export function shouldInjectContract(
 ): boolean {
   if (!role || !provider) return false;
   // Claude workers speak through the team messaging API directly.
-  // Cursor workers run as interactive REPLs — they cannot perform the
-  // write-verdict-and-exit dance the contract requires, so reviewer
-  // roles must not be assigned to cursor in the first place. The
-  // role-router and worker-bootstrap guidance both flag this; here we
-  // simply skip contract injection if a cursor worker somehow lands on
-  // a CONTRACT_ROLES role rather than emit instructions it cannot follow.
-  if (provider === 'claude' || provider === 'cursor') return false;
+  // Cursor/Copilot workers run as interactive sessions — they cannot perform
+  // the write-verdict-and-exit dance the contract requires, so reviewer roles
+  // must not be assigned to them in the first place. The role-router and
+  // worker-bootstrap guidance both flag this; here we simply skip contract
+  // injection if one somehow lands on a CONTRACT_ROLES role rather than emit
+  // instructions it cannot follow.
+  if (provider === 'claude' || provider === 'cursor' || provider === 'copilot') return false;
   return CONTRACT_ROLES.has(role);
 }
 
