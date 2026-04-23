@@ -52,7 +52,7 @@ interface UsageCache {
   /** Preserved error reason for accurate cache-hit reporting */
   errorReason?: UsageErrorReason;
   /** Provider that produced this cache entry */
-  source?: 'anthropic' | 'zai' | 'minimax';
+  source?: 'anthropic' | 'zai' | 'minimax' | 'kimi';
   /** Whether this cache entry was caused by a 429 rate limit response */
   rateLimited?: boolean;
   /** Consecutive 429 count for exponential backoff */
@@ -120,6 +120,20 @@ export function isZaiHost(urlString: string): boolean {
 }
 
 /**
+ * Check if a URL points to Kimi.
+ * Matches api.kimi.com and kimi.com domains.
+ */
+export function isKimiHost(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'kimi.com' || hostname.endsWith('.kimi.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check if a URL points to MiniMax.
  * Matches all known MiniMax domains:
  *   - minimax.io / *.minimax.io  (international)
@@ -138,6 +152,17 @@ export function isMinimaxHost(urlString: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface KimiUsageDetail {
+  limit: number;
+  remaining: number | null;
+  resetTime?: string | number;
+}
+
+interface KimiUsageResponse {
+  limits?: Array<{ detail: KimiUsageDetail }>;
+  usage?: KimiUsageDetail;
 }
 
 interface MinimaxModelRemain {
@@ -174,7 +199,7 @@ function getLegacyCachePath(): string {
 /**
  * Get the provider-specific cache file path
  */
-function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
+function getCachePath(source: 'anthropic' | 'zai' | 'minimax' | 'kimi'): string {
   return join(getClaudeConfigDir(), 'plugins', 'oh-my-claudecode', `.usage-cache-${source}.json`);
 }
 
@@ -184,7 +209,7 @@ function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
  * and the legacy cache's source matches the current provider.
  * Does NOT delete the legacy file (rolling update safety).
  */
-function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
+function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax' | 'kimi'): void {
   try {
     const legacyPath = getLegacyCachePath();
     if (!existsSync(legacyPath)) return;
@@ -212,7 +237,7 @@ function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
 /**
  * Read cached usage data for a specific provider
  */
-function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
+function readCache(source: 'anthropic' | 'zai' | 'minimax' | 'kimi'): UsageCache | null {
   try {
     const cachePath = getCachePath(source);
     if (!existsSync(cachePath)) return null;
@@ -254,7 +279,7 @@ function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
 interface WriteCacheOptions {
   data: RateLimits | null;
   error?: boolean;
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: 'anthropic' | 'zai' | 'minimax' | 'kimi';
   rateLimited?: boolean;
   rateLimitedCount?: number;
   rateLimitedUntil?: number;
@@ -372,7 +397,7 @@ function getCachedUsageResult(cache: UsageCache): UsageResult {
 }
 
 function createRateLimitedCacheEntry(
-  source: 'anthropic' | 'zai' | 'minimax',
+  source: 'anthropic' | 'zai' | 'minimax' | 'kimi',
   data: RateLimits | null,
   pollIntervalMs: number,
   previousCount: number,
@@ -720,6 +745,81 @@ function fetchUsageFromZai(): Promise<FetchResult<ZaiQuotaResponse>> {
 }
 
 /**
+ * Fetch usage from Kimi Coding API
+ *
+ * Response structure (from cc-switch coding_plan.rs):
+ * {
+ *   limits: [{ detail: { limit, remaining, resetTime } }],
+ *   usage: { limit, remaining, resetTime }
+ * }
+ */
+function fetchUsageFromKimi(apiKey: string): Promise<FetchResult<KimiUsageResponse>> {
+  return new Promise((resolve) => {
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+
+    if (!baseUrl) {
+      resolve({ data: null });
+      return;
+    }
+
+    // Validate baseUrl for SSRF protection
+    const validation = validateAnthropicBaseUrl(baseUrl);
+    if (!validation.allowed) {
+      console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
+      resolve({ data: null });
+      return;
+    }
+
+    try {
+      // Kimi's baseUrl includes the /coding/ path prefix (e.g. https://api.kimi.com/coding/)
+      // The usages endpoint lives under that prefix: /coding/v1/usages
+      const usageUrl = new URL('v1/usages', baseUrl).href;
+      const urlObj = new URL(usageUrl);
+
+      const req = https.request(
+        {
+          hostname: urlObj.hostname,
+          path: urlObj.pathname,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          timeout: API_TIMEOUT_MS,
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve({ data: JSON.parse(data) });
+              } catch {
+                resolve({ data: null });
+              }
+            } else if (res.statusCode === 429) {
+              if (process.env.OMC_DEBUG) {
+                console.error(`[usage-api] Kimi API returned 429 (rate limited)`);
+              }
+              resolve({ data: null, rateLimited: true });
+            } else {
+              resolve({ data: null });
+            }
+          });
+        }
+      );
+
+      req.on('error', () => resolve({ data: null }));
+      req.on('timeout', () => { req.destroy(); resolve({ data: null }); });
+      req.end();
+    } catch {
+      resolve({ data: null });
+    }
+  });
+}
+
+/**
  * Persist refreshed credentials back to the file-based credential store.
  * Keychain write-back is not supported (read-only for HUD).
  * Updates only the claudeAiOauth fields, preserving other data.
@@ -924,6 +1024,61 @@ export function parseZaiResponse(response: ZaiQuotaResponse): RateLimits | null 
 }
 
 /**
+ * Parse Kimi API response into RateLimits.
+ *
+ * Kimi returns remaining quota; we invert to used percentage like MiniMax.
+ * limits[].detail → five_hour bucket
+ * usage → weekly bucket
+ */
+export function parseKimiResponse(response: KimiUsageResponse): RateLimits | null {
+  if (!response) return null;
+
+  // Parse reset time (ISO 8601 string or Unix timestamp sec/ms)
+  const parseResetTime = (value: string | number | undefined): Date | null => {
+    if (value == null) return null;
+    if (typeof value === 'number') {
+      const millis = Math.abs(value) < 1e12 ? value * 1000 : value;
+      const date = new Date(millis);
+      return isNaN(date.getTime()) ? null : date;
+    }
+    if (typeof value === 'string') {
+      const date = new Date(value);
+      return isNaN(date.getTime()) ? null : date;
+    }
+    return null;
+  };
+
+  // limits[].detail → five_hour
+  const fiveHourLimit = response.limits?.[0]?.detail;
+  let fiveHourPercent: number | null = null;
+  let fiveHourResetsAt: Date | null = null;
+  if (fiveHourLimit && typeof fiveHourLimit.limit === 'number' && fiveHourLimit.limit > 0) {
+    const used = fiveHourLimit.limit - (fiveHourLimit.remaining ?? 0);
+    fiveHourPercent = (used / fiveHourLimit.limit) * 100;
+    fiveHourResetsAt = parseResetTime(fiveHourLimit.resetTime);
+  }
+
+  // usage → weekly
+  const weekly = response.usage;
+  let weeklyPercent: number | null = null;
+  let weeklyResetsAt: Date | null = null;
+  if (weekly && typeof weekly.limit === 'number' && weekly.limit > 0) {
+    const used = weekly.limit - (weekly.remaining ?? 0);
+    weeklyPercent = (used / weekly.limit) * 100;
+    weeklyResetsAt = parseResetTime(weekly.resetTime);
+  }
+
+  if (fiveHourPercent == null && weeklyPercent == null) return null;
+
+  return {
+    fiveHourPercent: clamp(fiveHourPercent ?? undefined),
+    fiveHourResetsAt,
+    weeklyPercent: weeklyPercent != null ? clamp(weeklyPercent) : undefined,
+    weeklyResetsAt,
+  };
+}
+
+/**
  * Fetch usage from MiniMax coding plan API
  */
 function fetchUsageFromMinimax(apiKey: string): Promise<FetchResult<MinimaxCodingPlanResponse>> {
@@ -1048,7 +1203,7 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
  * Provider-specific pre-fetch logic (e.g., credential refresh) runs before calling this.
  */
 async function fetchAndCacheUsage<T>(opts: {
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: 'anthropic' | 'zai' | 'minimax' | 'kimi';
   fetchFn: () => Promise<FetchResult<T>>;
   parseFn: (data: T) => RateLimits | null;
   cache: UsageCache | null;
@@ -1114,10 +1269,11 @@ export async function getUsage(): Promise<UsageResult> {
   const baseUrl = process.env.ANTHROPIC_BASE_URL;
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isMinimax = baseUrl != null && isMinimaxHost(baseUrl);
+  const isKimi = baseUrl != null && isKimiHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const currentSource: 'anthropic' | 'zai' | 'minimax' =
-    isMinimax ? 'minimax' : isZai && authToken ? 'zai' : 'anthropic';
+  const currentSource: 'anthropic' | 'zai' | 'minimax' | 'kimi' =
+    isMinimax ? 'minimax' : isKimi && authToken ? 'kimi' : isZai && authToken ? 'zai' : 'anthropic';
   const pollIntervalMs = getUsagePollIntervalMs();
 
   // Migrate legacy single-file cache to provider-specific file (one-shot, best-effort)
@@ -1145,6 +1301,17 @@ export async function getUsage(): Promise<UsageResult> {
           source: 'minimax',
           fetchFn: () => fetchUsageFromMinimax(minimaxApiKey),
           parseFn: parseMinimaxResponse,
+          cache,
+          pollIntervalMs,
+        });
+      }
+
+      // Kimi path (must precede OAuth check to avoid stale Anthropic credentials)
+      if (isKimi && authToken) {
+        return fetchAndCacheUsage({
+          source: 'kimi',
+          fetchFn: () => fetchUsageFromKimi(authToken),
+          parseFn: parseKimiResponse,
           cache,
           pollIntervalMs,
         });
