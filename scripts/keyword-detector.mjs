@@ -33,18 +33,29 @@ import { readStdin } from './lib/stdin.mjs';
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
 const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT ||
   join(dirname(fileURLToPath(import.meta.url)), '..');
+const SKILL_INVOCATION_USER_REQUEST_MAX = 1200;
 
-/**
- * Load skill content directly from SKILL.md on disk.
- * Works for both npm installs and plugin marketplace installs.
- * Returns null if the skill file is not found.
- */
-function loadSkillContent(skillName) {
-  const skillPath = join(_omcRoot, 'skills', skillName, 'SKILL.md');
-  if (existsSync(skillPath)) {
-    try { return readFileSync(skillPath, 'utf8'); } catch { /* fall through */ }
+function compactHookText(text, maxChars = SKILL_INVOCATION_USER_REQUEST_MAX) {
+  const notice = '\n...[truncated; original user prompt remains available in the conversation]';
+  if (!text || text.length <= maxChars) return text || '';
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+
+function getSkillPathCandidates(skillName) {
+  const roots = [
+    process.env.CLAUDE_PLUGIN_ROOT,
+    _omcRoot,
+    process.cwd(),
+  ].filter(Boolean);
+  return [...new Set(roots.map(root => join(root, 'skills', skillName, 'SKILL.md')))];
+}
+
+function resolveSkillPath(skillName) {
+  for (const skillPath of getSkillPathCandidates(skillName)) {
+    if (existsSync(skillPath)) return skillPath;
   }
-  return null;
+  return getSkillPathCandidates(skillName)[0] || `skills/${skillName}/SKILL.md`;
 }
 
 const ULTRATHINK_MESSAGE = `<think-mode>
@@ -204,7 +215,7 @@ const ROLE_BOUNDARY_PATTERN =
   /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
 const SKILL_TRANSCRIPT_LINE_PATTERN =
   /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
-const USER_REQUEST_LINE_PATTERN = /^\s*User request:\s*$/i;
+const USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
 const SHELL_TRANSCRIPT_LINE_PATTERN = /^\s*[$%❯]\s+/;
 const GIT_DIFF_START_PATTERNS = [
   /^diff\s+--git\s+a\//,
@@ -688,26 +699,27 @@ function isTeamEnabled() {
 }
 
 /**
- * Create a skill invocation message.
- * Prefers direct SKILL.md content injection (works for npm and plugin installs).
- * Falls back to Skill tool invocation (requires plugin marketplace install).
+ * Create a compact skill invocation guide without inlining SKILL.md bodies.
+ * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
 function createSkillInvocation(skillName, originalPrompt, args = '') {
-  const argsSection = args ? `\nArguments: ${args}` : '';
-  const skillContent = loadSkillContent(skillName);
-  if (skillContent) {
-    return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]\n\n${skillContent}\n\n---\nUser request:\n${originalPrompt}${argsSection}`;
-  }
+  const argsSection = args ? `
+Arguments: ${args}` : '';
+  const skillPath = resolveSkillPath(skillName);
+  const pathStatus = existsSync(skillPath)
+    ? `Read fallback: open ${skillPath} and follow its SKILL.md instructions.`
+    : `Read fallback: locate skills/${skillName}/SKILL.md in the active oh-my-claudecode plugin/install and follow it.`;
+
   return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]
 
-You MUST invoke the skill using the Skill tool:
+Skill routing detected: ${skillName}
+Preferred invocation: /oh-my-claudecode:${skillName}${args ? ` ${args}` : ''}
+${pathStatus}${argsSection}
 
-Skill: oh-my-claudecode:${skillName}${argsSection}
+User request (compact echo; original prompt remains authoritative):
+${compactHookText(originalPrompt)}
 
-User request:
-${originalPrompt}
-
-IMPORTANT: Invoke the skill IMMEDIATELY. Do not proceed without loading the skill instructions.`;
+IMPORTANT: Start the ${skillName} workflow immediately. If the slash invocation is unavailable, read the SKILL.md at the fallback path instead of relying on this compact guide.`;
 }
 
 /**
@@ -720,23 +732,24 @@ function createMultiSkillInvocation(skills, originalPrompt) {
   }
 
   const skillBlocks = skills.map((s, i) => {
-    const argsSection = s.args ? `\nArguments: ${s.args}` : '';
-    const content = loadSkillContent(s.name);
-    if (content) {
-      return `### Skill ${i + 1}: ${s.name.toUpperCase()}\n\n${content}${argsSection}`;
-    }
-    return `### Skill ${i + 1}: ${s.name.toUpperCase()}\nSkill: oh-my-claudecode:${s.name}${argsSection}`;
+    const skillPath = resolveSkillPath(s.name);
+    const argsText = s.args ? ` ${s.args}` : '';
+    const pathStatus = existsSync(skillPath)
+      ? `Read fallback: ${skillPath}`
+      : `Read fallback: locate skills/${s.name}/SKILL.md in the active oh-my-claudecode plugin/install`;
+    return `### Skill ${i + 1}: ${s.name.toUpperCase()}
+Preferred invocation: /oh-my-claudecode:${s.name}${argsText}
+${pathStatus}`;
   }).join('\n\n');
 
-  const hasDirectContent = skills.some(s => loadSkillContent(s.name));
   return `[MAGIC KEYWORDS DETECTED: ${skills.map(s => s.name.toUpperCase()).join(', ')}]
 
-${hasDirectContent ? 'Execute ALL of the following skills in order:' : 'You MUST invoke ALL of the following skills using the Skill tool, in order:'}
+Execute ALL detected workflows in order using compact invocation guidance. Do not inline full SKILL.md files into the prompt.
 
 ${skillBlocks}
 
-User request:
-${originalPrompt}
+User request (compact echo; original prompt remains authoritative):
+${compactHookText(originalPrompt)}
 
 IMPORTANT: Complete ALL skills listed above in order. Start with the first skill IMMEDIATELY.`;
 }

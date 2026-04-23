@@ -359,6 +359,12 @@ describe('Builtin Skills', () => {
             expect(raw).toContain('Gate: ≤<resolvedThresholdPercent> ambiguity');
             expect(raw).toContain('"ambiguityThreshold": <resolvedThreshold>,');
             expect(raw).toContain('At or below the resolved threshold');
+            expect(raw).toContain('Normalize oversized initial context before state init');
+            expect(raw).toContain('prompt-safe initial-context summary');
+            expect(raw).toContain('Wait until the summary exists before ambiguity scoring');
+            expect(raw).toContain('Do not ask the next `AskUserQuestion`, score ambiguity, or hand off to execution from an over-budget raw transcript.');
+            expect(raw).toContain('Preserve the AskUserQuestion path for OMC-native interaction');
+            expect(raw).not.toContain('omx question');
             expect(raw).not.toContain('(default: 20%)');
             expect(raw).not.toContain('(default 0.2)');
             expect(raw).not.toContain('"threshold": 0.2,');
@@ -367,6 +373,18 @@ describe('Builtin Skills', () => {
             expect(raw).not.toContain('(threshold: 20%).');
             expect(raw).not.toContain('"ambiguityThreshold": 0.2,');
             expect(raw).not.toContain('ambiguity ≤ 20%');
+        });
+        it('renders deep-interview summary-gate hardening while preserving AskUserQuestion transport', () => {
+            const skill = getBuiltinSkill('deep-interview');
+            expect(skill).toBeDefined();
+            const t = skill.template;
+            expect(t).toContain('Normalize oversized initial context before state init');
+            expect(t).toContain('prompt-safe initial-context summary');
+            expect(t).toContain('Wait until the summary exists before ambiguity scoring');
+            expect(t).toContain('Do not ask the next `AskUserQuestion`, score ambiguity, or hand off to execution from an over-budget raw transcript.');
+            expect(t).toContain('Preserve the AskUserQuestion path for OMC-native interaction');
+            expect(t).toContain('Initial Context Summarized: {yes|no}');
+            expect(t).not.toContain('omx question');
         });
         it('rewrites built-in skill command examples to plugin-safe bridge invocations when omc is unavailable', () => {
             process.env.CLAUDE_PLUGIN_ROOT = '/plugin-root';

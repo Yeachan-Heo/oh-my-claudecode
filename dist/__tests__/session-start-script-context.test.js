@@ -130,5 +130,35 @@ describe('session-start.mjs regression #1386', () => {
         expect(context).toContain('[env] Requires LOCAL_API_BASE for smoke tests');
         expect(context).toContain('</project-memory-context>');
     });
+    it('injects model routing override for non-standard providers before lower-priority context', () => {
+        writeFileSync(join(fakeProject, 'AGENTS.md'), `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+<guidance_schema_contract>schema</guidance_schema_contract>
+
+<operating_principles>
+${'- oversized startup guidance\n'.repeat(700)}
+</operating_principles>`);
+        const raw = execFileSync(NODE, [SCRIPT_PATH], {
+            input: JSON.stringify({
+                hook_event_name: 'SessionStart',
+                session_id: 'session-bedrock-script',
+                cwd: fakeProject,
+            }),
+            encoding: 'utf-8',
+            env: {
+                ...process.env,
+                HOME: fakeHome,
+                USERPROFILE: fakeHome,
+                CLAUDE_CODE_USE_BEDROCK: '1',
+            },
+            timeout: 15000,
+        }).trim();
+        const output = JSON.parse(raw);
+        const context = output.hookSpecificOutput?.additionalContext || '';
+        expect(output.continue).toBe(true);
+        expect(context).toContain('[MODEL ROUTING OVERRIDE');
+        expect(context).toContain('Do NOT pass the `model` parameter');
+        expect(context.length).toBeLessThanOrEqual(6000);
+    });
 });
 //# sourceMappingURL=session-start-script-context.test.js.map

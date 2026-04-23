@@ -143,6 +143,131 @@ function semverCompare(a, b) {
   return 0;
 }
 
+const SESSION_START_CONTEXT_BUDGET = 6000;
+const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
+
+const MODEL_ROUTING_OVERRIDE_MESSAGE = `<system-reminder>
+
+[MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
+
+This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
+Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
+The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
+
+</system-reminder>`;
+
+function isTruthyProviderFlag(value) {
+  return value === '1' || value === 'true';
+}
+
+function getSessionModelId() {
+  return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+}
+
+function isBedrockSession() {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) return true;
+  const modelId = getSessionModelId();
+  return Boolean(
+    modelId && (
+      /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
+      (
+        /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId) &&
+        /:(inference-profile|application-inference-profile)\//i.test(modelId) &&
+        modelId.toLowerCase().includes('claude')
+      )
+    )
+  );
+}
+
+function isVertexSession() {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) return true;
+  const modelId = getSessionModelId();
+  return Boolean(modelId && modelId.toLowerCase().startsWith('vertex_ai/'));
+}
+
+function readRoutingForceInheritFromConfig(directory) {
+  const configPaths = [
+    join(configDir, '.omc-config.json'),
+    join(directory, '.omc', 'config.json'),
+  ];
+
+  for (const configPath of configPaths) {
+    const config = readJsonFile(configPath);
+    if (config?.routing?.forceInherit === true) return true;
+  }
+
+  return false;
+}
+
+function shouldEmitModelRoutingOverride(directory) {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') return true;
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'false') return false;
+  if (readRoutingForceInheritFromConfig(directory)) return true;
+
+  if (isBedrockSession() || isVertexSession()) return true;
+
+  const modelId = getSessionModelId();
+  if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
+
+  return false;
+}
+
+
+function compactBudgetedText(text, maxChars) {
+  const notice = '\n...[truncated to preserve SessionStart context budget]';
+  if (!text || text.length <= maxChars) return text || '';
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+
+function buildSessionStartAdditionalContext(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const sections = messages.map((message, index) => ({ index, message }));
+  const priorityOrder = [
+    /\[MODEL ROUTING OVERRIDE/,
+    /\[AUTOPILOT MODE RESTORED\]/,
+    /\[ULTRAWORK MODE RESTORED\]/,
+    /\[RALPH LOOP RESTORED\]/,
+    /\[PROJECT MEMORY\]/,
+    /\[NOTEPAD - Priority Context\]/,
+    /\[PENDING TASKS DETECTED\]/,
+  ];
+  const prioritized = [];
+  const remaining = [];
+  for (const section of sections) {
+    const score = priorityOrder.findIndex((pattern) => pattern.test(section.message));
+    if (score !== -1) prioritized.push({ ...section, score });
+    else remaining.push({ ...section, score: priorityOrder.length + section.index });
+  }
+  const ordered = [...prioritized.sort((a, b) => a.score - b.score || a.index - b.index), ...remaining]
+    .map((entry) => entry.message);
+
+  let used = 0;
+  const selected = [];
+  for (const message of ordered) {
+    const separator = selected.length > 0 ? 1 : 0;
+    if (used + separator + message.length > SESSION_START_CONTEXT_BUDGET) {
+      const remainingBudget = SESSION_START_CONTEXT_BUDGET - used - separator;
+      if (remainingBudget > 0) {
+        selected.push(
+          remainingBudget > 120
+            ? compactBudgetedText(message, remainingBudget)
+            : compactBudgetedText(SESSION_START_OMISSION_NOTICE, remainingBudget),
+        );
+      }
+      break;
+    }
+    selected.push(message);
+    used += separator + message.length;
+  }
+
+  return selected.join('\n');
+}
+
 // Extract OMC version from CLAUDE.md content
 function extractOmcVersion(content) {
   const match = content.match(/<!-- OMC:VERSION:(\d+\.\d+\.\d+[^\s]*?) -->/);
@@ -417,6 +542,10 @@ async function main() {
       messages.push(`<system-reminder>
 [OMC] HUD not configured (${hudCheck.reason}). Run /hud setup then restart Claude Code.
 </system-reminder>`);
+    }
+
+    if (shouldEmitModelRoutingOverride(directory)) {
+      messages.push(MODEL_ROUTING_OVERRIDE_MESSAGE);
     }
 
     // Check for ultrawork state - only restore if session matches (issue #311)
@@ -697,7 +826,7 @@ ${cleanContent}
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
-          additionalContext: messages.join('\n')
+          additionalContext: buildSessionStartAdditionalContext(messages)
         }
       }));
     } else {

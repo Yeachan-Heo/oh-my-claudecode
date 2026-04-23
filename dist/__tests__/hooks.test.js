@@ -518,6 +518,53 @@ schema
         expect(result.message || '').not.toContain('<skills>');
         expect(result.message || '').not.toContain('<team_compositions>');
     });
+    it('keeps session-start under budget when only a tiny omission remainder remains', async () => {
+        writeFileSync(join(testDir, '.omc', 'state', 'sessions', sessionId, 'ultrawork-state.json'), JSON.stringify({
+            active: true,
+            session_id: sessionId,
+            started_at: '2026-04-23T00:00:00.000Z',
+            original_prompt: 'budget '.repeat(520),
+        }));
+        writeFileSync(join(testDir, 'AGENTS.md'), `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+<guidance_schema_contract>schema</guidance_schema_contract>
+
+<operating_principles>
+${'- preserve this startup guidance\n'.repeat(400)}
+</operating_principles>`);
+        const result = await processHook('session-start', {
+            sessionId,
+            directory: testDir,
+        });
+        expect(result.continue).toBe(true);
+        expect((result.message || '').length).toBeLessThanOrEqual(6000);
+    });
+    it('keeps combined session-start restore context under aggregate budget', async () => {
+        writeFileSync(join(testDir, '.omc', 'state', 'sessions', sessionId, 'team-state.json'), JSON.stringify({
+            active: true,
+            session_id: sessionId,
+            stage: 'team-exec',
+            team_name: 'budget-team'
+        }));
+        writeFileSync(join(testDir, 'AGENTS.md'), `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+<guidance_schema_contract>schema</guidance_schema_contract>
+
+<operating_principles>
+${'- preserve this startup guidance\n'.repeat(500)}
+</operating_principles>
+
+<agent_catalog>${'- drop catalog\n'.repeat(500)}</agent_catalog>
+
+<skills>${'- drop skills\n'.repeat(500)}</skills>`);
+        const result = await processHook('session-start', {
+            sessionId,
+            directory: testDir,
+        });
+        expect(result.continue).toBe(true);
+        expect(result.message || '').toContain('[TEAM MODE RESTORED]');
+        expect((result.message || '').length).toBeLessThanOrEqual(6000);
+    });
     it('emits terminal Team restore guidance on cancelled stage', async () => {
         writeFileSync(join(testDir, '.omc', 'state', 'sessions', sessionId, 'team-state.json'), JSON.stringify({
             active: true,

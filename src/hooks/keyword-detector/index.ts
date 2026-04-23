@@ -171,7 +171,7 @@ const ROLE_BOUNDARY_PATTERN =
   /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
 const SKILL_TRANSCRIPT_LINE_PATTERN =
   /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
-const USER_REQUEST_LINE_PATTERN = /^\s*User request:\s*$/i;
+const USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
 const SHELL_TRANSCRIPT_LINE_PATTERN = /^\s*[$%❯]\s+/;
 const GIT_DIFF_START_PATTERNS: RegExp[] = [
   /^diff\s+--git\s+a\//,
