@@ -87,7 +87,8 @@ level: 3
   </Tool_Usage>
 
   <Execution_Policy>
-    - Default effort: medium-high
+    - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override.
+    - Behavioral effort guidance: medium-high
     - Prefer evidence density over breadth, but do not stop at the first plausible explanation when alternatives remain viable
     - When ambiguity remains high, preserve a ranked shortlist instead of forcing a single verdict
     - If the trace is blocked by missing evidence, end with the best current ranking plus the critical unknown and discriminating probe

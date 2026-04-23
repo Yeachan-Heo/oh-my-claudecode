@@ -63,7 +63,8 @@ disallowedTools: Write, Edit
   </Tool_Usage>
 
   <Execution_Policy>
-    - Default effort: high (thorough OWASP analysis).
+    - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override.
+    - Behavioral effort guidance: high (thorough OWASP analysis).
     - Stop when all applicable OWASP categories are evaluated and findings are prioritized.
     - Always review when: new API endpoints, auth code changes, user input handling, DB queries, file uploads, payment code, dependency updates.
   </Execution_Policy>

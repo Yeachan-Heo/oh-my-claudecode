@@ -180,7 +180,7 @@ tags: tag1, tag2
 Skill documentation here...
 ```
 
-**Agents** are discovered from `.md` files in the agents directory with similar frontmatter structure.
+**Agents** are discovered from `.md` files in the agents directory with similar frontmatter structure. Supported runtime fields depend on Claude Code; OMC's bundled agent files currently rely on `name`, `description`, `model`, optional tool restrictions, and prompt body guidance. They do not currently ship an `effort:` frontmatter override, so effort inherits from the parent Claude Code session unless a custom agent explicitly adds one.
 
 ## MCP Server Discovery
 

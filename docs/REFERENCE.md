@@ -192,9 +192,13 @@ name: architect
 description: Your custom description
 tools: Read, Grep, Glob, Bash, Edit
 model: opus # or sonnet, haiku
+# Optional: effort inherits from the parent Claude Code session unless you add an explicit override.
+# effort: high
 ---
 Your custom system prompt here...
 ```
+
+Bundled OMC agent prompts currently do **not** ship an `effort:` frontmatter field. Any effort language inside `agents/*.md` is behavioral guidance for the prompt body, while runtime effort inherits from the parent Claude Code session unless the agent markdown explicitly declares an override.
 
 ### Project-Level Config
 

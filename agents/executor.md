@@ -70,7 +70,8 @@ level: 2
   </Tool_Usage>
 
   <Execution_Policy>
-    - Default effort: match complexity to task classification.
+    - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override.
+    - Behavioral effort guidance: match complexity to task classification.
     - Trivial tasks: skip extensive exploration, verify only modified file.
     - Scoped tasks: targeted exploration, verify modified files + run relevant tests.
     - Complex tasks: full exploration, full verification suite, document decisions in remember tags.

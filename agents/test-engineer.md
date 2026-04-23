@@ -78,7 +78,8 @@ level: 3
   </Tool_Usage>
 
   <Execution_Policy>
-    - Default effort: medium (practical tests that cover important paths).
+    - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override.
+    - Behavioral effort guidance: medium (practical tests that cover important paths).
     - Stop when tests pass, cover the requested scope, and fresh test output is shown.
   </Execution_Policy>
 

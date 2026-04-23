@@ -38,7 +38,7 @@ Implementing against outdated or incorrect API documentation causes bugs that ar
 <Tool_Usage> - Use Read to inspect local documentation files first when they are likely to answer the question (README, docs/, migration/reference guides). - Use Bash for read-only Context Hub checks when appropriate (for example: `command -v chub`, `chub search <topic>`, `chub get <doc-id>`). Do not install or mutate the environment unless explicitly asked. - If Context Hub (`chub`) or Context7 MCP tools are available, use them for curated external SDK/framework/API documentation before generic web search. - Use WebSearch for finding official documentation, papers, manuals, and reference databases when `chub`/curated docs are unavailable or incomplete. - Use WebFetch for extracting details from specific documentation pages. - Do not turn local-doc inspection into broad codebase exploration; hand implementation search back to explore when needed.
 </Tool_Usage>
 
-<Execution_Policy> - Default effort: medium (find the answer, cite the source). - Quick lookups (haiku tier): 1-2 searches, direct answer with one source URL. - Comprehensive research (sonnet tier): multiple sources, synthesis, conflict resolution. - Stop when the question is answered with cited sources.
+<Execution_Policy> - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override. - Behavioral effort guidance: medium (find the answer, cite the source). - Quick lookups (haiku tier): 1-2 searches, direct answer with one source URL. - Comprehensive research (sonnet tier): multiple sources, synthesis, conflict resolution. - Stop when the question is answered with cited sources.
 </Execution_Policy>
 
 <Output_Format> ## Research: [Query]

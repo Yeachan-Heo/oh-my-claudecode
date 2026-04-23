@@ -48,7 +48,8 @@ disallowedTools: Write, Edit
   </Tool_Usage>
 
   <Execution_Policy>
-    - Default effort: high (thorough gap analysis).
+    - Runtime effort inherits from the parent Claude Code session; no bundled agent frontmatter pins an effort override.
+    - Behavioral effort guidance: high (thorough gap analysis).
     - Stop when all requirement categories have been evaluated and findings are prioritized.
   </Execution_Policy>
 
