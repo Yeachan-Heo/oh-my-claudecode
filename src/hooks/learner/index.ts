@@ -50,36 +50,74 @@ export function isLearnerEnabled(): boolean {
   return loadConfig().enabled;
 }
 
+const MAX_LEARNED_SKILL_DESCRIPTOR_CHARS = 1000;
+const MAX_LEARNED_SKILLS_CONTEXT_CHARS = 3000;
+
+function compactText(text: string, maxChars: number): string {
+  if (!text || maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  if (maxChars === 1) return "…";
+  return `${text.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function summarizeSkillContent(content: string): string {
+  const firstUsefulLine = content
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .find((line) => line && !line.startsWith("---"));
+  return compactText(firstUsefulLine || content.replace(/\s+/g, " ").trim(), 240);
+}
+
+function formatSkillDescriptor(skill: LearnedSkill): string {
+  const summary = skill.metadata.description || summarizeSkillContent(skill.content);
+  const lines = [
+    `### ${skill.metadata.name}`,
+    `**Path:** ${skill.path}`,
+    `**Triggers:** ${skill.metadata.triggers.join(", ")}`,
+    skill.metadata.tags && skill.metadata.tags.length > 0
+      ? `**Tags:** ${skill.metadata.tags.join(", ")}`
+      : "",
+    `**Summary:** ${summary}`,
+    `**Load instructions:** If this skill is needed, read ${skill.path} and follow the full instructions there.`,
+  ].filter(Boolean);
+  return compactText(lines.join("\n"), MAX_LEARNED_SKILL_DESCRIPTOR_CHARS);
+}
+
 /**
  * Format skills for context injection.
  */
 function formatSkillsForContext(skills: LearnedSkill[]): string {
   if (skills.length === 0) return "";
 
-  const lines = [
+  const header = [
     "<learner>",
     "",
     "## Relevant Learned Skills",
     "",
-    "The following skills have been learned from previous sessions and may be helpful:",
+    "Compact descriptors only; full learned skill bodies stay on disk to avoid prompt bloat.",
     "",
-  ];
+  ].join("\n");
+  const footer = "\n</learner>";
+  const budget = MAX_LEARNED_SKILLS_CONTEXT_CHARS - header.length - footer.length;
+  const descriptors: string[] = [];
+  let used = 0;
 
   for (const skill of skills) {
-    lines.push(`### ${skill.metadata.name}`);
-    lines.push(`**Triggers:** ${skill.metadata.triggers.join(", ")}`);
-    if (skill.metadata.tags && skill.metadata.tags.length > 0) {
-      lines.push(`**Tags:** ${skill.metadata.tags.join(", ")}`);
+    const descriptor = formatSkillDescriptor(skill);
+    const separator = descriptors.length > 0 ? "\n\n---\n\n" : "";
+    if (used + separator.length + descriptor.length > budget) {
+      const omission = `${separator}[Additional learned skills omitted due to ${MAX_LEARNED_SKILLS_CONTEXT_CHARS}-character context budget; use skill metadata paths if needed.]`;
+      const remainingBudget = budget - used;
+      if (remainingBudget > 0) {
+        descriptors.push(compactText(omission, remainingBudget));
+      }
+      break;
     }
-    lines.push("");
-    lines.push(skill.content);
-    lines.push("");
-    lines.push("---");
-    lines.push("");
+    descriptors.push(`${separator}${descriptor}`);
+    used += separator.length + descriptor.length;
   }
 
-  lines.push("</learner>");
-  return lines.join("\n");
+  return `${header}${descriptors.join("")}${footer}`;
 }
 
 /**

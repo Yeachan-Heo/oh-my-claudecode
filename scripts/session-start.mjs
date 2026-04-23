@@ -143,6 +143,61 @@ function semverCompare(a, b) {
   return 0;
 }
 
+const SESSION_START_CONTEXT_BUDGET = 6000;
+const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
+
+function compactBudgetedText(text, maxChars) {
+  const notice = '\n...[truncated to preserve SessionStart context budget]';
+  if (!text || text.length <= maxChars) return text || '';
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+
+function buildSessionStartAdditionalContext(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const sections = messages.map((message, index) => ({ index, message }));
+  const priorityOrder = [
+    /\[MODEL ROUTING OVERRIDE/,
+    /\[AUTOPILOT MODE RESTORED\]/,
+    /\[ULTRAWORK MODE RESTORED\]/,
+    /\[RALPH LOOP RESTORED\]/,
+    /\[PROJECT MEMORY\]/,
+    /\[NOTEPAD - Priority Context\]/,
+    /\[PENDING TASKS DETECTED\]/,
+  ];
+  const prioritized = [];
+  const remaining = [];
+  for (const section of sections) {
+    const score = priorityOrder.findIndex((pattern) => pattern.test(section.message));
+    if (score !== -1) prioritized.push({ ...section, score });
+    else remaining.push({ ...section, score: priorityOrder.length + section.index });
+  }
+  const ordered = [...prioritized.sort((a, b) => a.score - b.score || a.index - b.index), ...remaining]
+    .map((entry) => entry.message);
+
+  let used = 0;
+  const selected = [];
+  for (const message of ordered) {
+    const separator = selected.length > 0 ? 1 : 0;
+    if (used + separator + message.length > SESSION_START_CONTEXT_BUDGET) {
+      const remainingBudget = SESSION_START_CONTEXT_BUDGET - used - separator;
+      if (remainingBudget > 0) {
+        selected.push(
+          remainingBudget > 120
+            ? compactBudgetedText(message, remainingBudget)
+            : compactBudgetedText(SESSION_START_OMISSION_NOTICE, remainingBudget),
+        );
+      }
+      break;
+    }
+    selected.push(message);
+    used += separator + message.length;
+  }
+
+  return selected.join('\n');
+}
+
 // Extract OMC version from CLAUDE.md content
 function extractOmcVersion(content) {
   const match = content.match(/<!-- OMC:VERSION:(\d+\.\d+\.\d+[^\s]*?) -->/);
@@ -697,7 +752,7 @@ ${cleanContent}
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
-          additionalContext: messages.join('\n')
+          additionalContext: buildSessionStartAdditionalContext(messages)
         }
       }));
     } else {

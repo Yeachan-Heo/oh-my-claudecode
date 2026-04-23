@@ -86,6 +86,8 @@ interface CachedSkillData {
   triggersLower: string[];
   matching: "exact" | "fuzzy" | undefined;
   content: string;
+  description?: string;
+  summary?: string;
   scope: "user" | "project";
 }
 
@@ -137,6 +139,8 @@ function getSkillMetadataCache(projectRoot: string): CachedSkillData[] {
         triggersLower: expandTriggers(triggers.map((t) => t.toLowerCase())),
         matching: parsed.metadata.matching,
         content: parsed.content,
+        description: parsed.metadata.description,
+        summary: summarizeSkillContent(parsed.content),
         scope: candidate.scope,
       });
     } catch {
@@ -165,6 +169,14 @@ export function clearSkillMetadataCache(): void {
  */
 export function clearLevenshteinCache(): void {
   levenshteinCache.clear();
+}
+
+function summarizeSkillContent(content: string): string {
+  const firstUsefulLine = content
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .find((line) => line && !line.startsWith("---"));
+  return (firstUsefulLine || content.replace(/\s+/g, " ").trim()).slice(0, 240);
 }
 
 /** State file path */
@@ -202,6 +214,8 @@ export interface MatchedSkill {
   path: string;
   name: string;
   content: string;
+  description?: string;
+  summary?: string;
   score: number;
   scope: "user" | "project";
   triggers: string[];
@@ -708,6 +722,8 @@ export function matchSkillsForInjection(
         path: skill.path,
         name: skill.name,
         content: skill.content,
+        description: skill.description,
+        summary: skill.summary,
         score: totalScore,
         scope: skill.scope,
         triggers: skill.triggers,

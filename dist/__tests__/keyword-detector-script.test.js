@@ -53,7 +53,8 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         const output = runKeywordDetector('ralplan fix issue #2053');
         const context = output.hookSpecificOutput?.additionalContext ?? '';
         expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
-        expect(context).toContain('name: ralplan');
+        expect(context).toContain('Preferred invocation: /oh-my-claudecode:ralplan');
+        expect(context).not.toContain('name: ralplan');
     });
     it('does not emit or activate ralplan for informational/question mentions', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-info-'));

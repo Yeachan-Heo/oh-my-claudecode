@@ -89,6 +89,8 @@ function getSkillMetadataCache(projectRoot) {
                 triggersLower: expandTriggers(triggers.map((t) => t.toLowerCase())),
                 matching: parsed.metadata.matching,
                 content: parsed.content,
+                description: parsed.metadata.description,
+                summary: summarizeSkillContent(parsed.content),
                 scope: candidate.scope,
             });
         }
@@ -115,6 +117,13 @@ export function clearSkillMetadataCache() {
  */
 export function clearLevenshteinCache() {
     levenshteinCache.clear();
+}
+function summarizeSkillContent(content) {
+    const firstUsefulLine = content
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^#+\s*/, "").trim())
+        .find((line) => line && !line.startsWith("---"));
+    return (firstUsefulLine || content.replace(/\s+/g, " ").trim()).slice(0, 240);
 }
 /** State file path */
 const STATE_FILE = `${OmcPaths.STATE}/skill-sessions.json`;
@@ -538,6 +547,8 @@ export function matchSkillsForInjection(prompt, projectRoot, sessionId, options 
                 path: skill.path,
                 name: skill.name,
                 content: skill.content,
+                description: skill.description,
+                summary: skill.summary,
                 score: totalScore,
                 scope: skill.scope,
                 triggers: skill.triggers,

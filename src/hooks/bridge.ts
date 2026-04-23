@@ -160,6 +160,58 @@ const MODE_CONFIRMATION_SKILL_MAP: Record<string, string[]> = {
   ralplan: ["ralplan"],
 };
 
+const SESSION_START_CONTEXT_BUDGET = 6000;
+const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
+
+function compactBudgetedText(text: string, maxChars: number): string {
+  const notice = "\n...[truncated to preserve SessionStart context budget]";
+  if (!text || text.length <= maxChars) return text || "";
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+
+function buildSessionStartAdditionalContext(messages: string[]): string {
+  if (messages.length === 0) return "";
+
+  const priorityOrder = [
+    /\[MODEL ROUTING OVERRIDE/,
+    /\[AUTOPILOT MODE RESTORED\]/,
+    /\[ULTRAWORK MODE RESTORED\]/,
+    /\[RALPLAN MODE RESTORED\]/,
+    /\[TEAM MODE RESTORED\]/,
+    /\[ROOT AGENTS\.md LOADED\]/,
+    /\[PENDING TASKS DETECTED\]/,
+  ];
+  const ordered = messages
+    .map((message, index) => {
+      const priority = priorityOrder.findIndex((pattern) => pattern.test(message));
+      return { message, index, priority: priority === -1 ? priorityOrder.length + index : priority };
+    })
+    .sort((a, b) => a.priority - b.priority || a.index - b.index)
+    .map((entry) => entry.message);
+
+  let used = 0;
+  const selected: string[] = [];
+  for (const message of ordered) {
+    const separatorLength = selected.length > 0 ? 1 : 0;
+    if (used + separatorLength + message.length > SESSION_START_CONTEXT_BUDGET) {
+      const remainingBudget = SESSION_START_CONTEXT_BUDGET - used - separatorLength;
+      if (remainingBudget > 0) {
+        selected.push(
+          remainingBudget > 120
+            ? compactBudgetedText(message, remainingBudget)
+            : compactBudgetedText(SESSION_START_OMISSION_NOTICE, remainingBudget),
+        );
+      }
+      break;
+    }
+    selected.push(message);
+    used += separatorLength + message.length;
+  }
+
+  return selected.join("\n");
+}
+
 
 function getExtraField(input: HookInput, key: string): unknown {
   return (input as Record<string, unknown>)[key];
@@ -1800,7 +1852,7 @@ The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does N
   if (messages.length > 0) {
     return {
       continue: true,
-      message: messages.join("\n"),
+      message: buildSessionStartAdditionalContext(messages),
     };
   }
 

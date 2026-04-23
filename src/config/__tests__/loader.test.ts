@@ -189,6 +189,64 @@ schema
     }
   });
 
+  it("caps aggregated context across multiple files", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omc-loader-context-aggregate-"));
+
+    try {
+      const fileA = join(tempDir, "AGENTS.md");
+      const fileB = join(tempDir, "nested", "CLAUDE.md");
+      require("node:fs").mkdirSync(join(tempDir, "nested"), { recursive: true });
+      const largeSection = `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+<guidance_schema_contract>schema</guidance_schema_contract>
+
+<operating_principles>
+${"- keep this\n".repeat(900)}
+</operating_principles>
+
+<verification>
+- verify
+</verification>`;
+      writeFileSync(fileA, largeSection);
+      writeFileSync(fileB, largeSection);
+
+      const loaded = loadContextFromFiles([fileA, fileB]);
+
+      expect(loaded.length).toBeLessThanOrEqual(12000);
+      expect(loaded).toContain(`## Context from ${fileA}`);
+      expect(loaded).toContain('startup context budget');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps very large OMC guidance after preserving high-value sections", () => {
+    const largeOmc = `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+<guidance_schema_contract>
+schema
+</guidance_schema_contract>
+
+<operating_principles>
+${"- keep this principle\n".repeat(1200)}
+</operating_principles>
+
+<agent_catalog>
+${"- drop catalog\n".repeat(1000)}
+</agent_catalog>
+
+<verification>
+- verify this stays before truncation
+</verification>`;
+
+    const compacted = compactOmcStartupGuidance(largeOmc);
+
+    expect(compacted.length).toBeLessThanOrEqual(8000);
+    expect(compacted).toContain("<operating_principles>");
+    expect(compacted).not.toContain("<agent_catalog>");
+    expect(compacted).toContain("OMC startup guidance truncated");
+  });
+
   it("leaves non-OMC guidance unchanged even if it uses similar tags", () => {
     const nonOmc = `# Project guide
 

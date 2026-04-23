@@ -4122,6 +4122,13 @@ function loadConfig() {
   validateTeamConfig(config2);
   return config2;
 }
+function compactBudgetedText(text, maxChars) {
+  if (!text || maxChars <= 0) return "";
+  const notice = "\n...[truncated to preserve startup context budget]";
+  if (text.length <= maxChars) return text;
+  if (maxChars <= notice.length) return notice.slice(0, maxChars);
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
 function looksLikeOmcGuidance(content) {
   return content.includes("<guidance_schema_contract>") && /oh-my-(claudecode|codex)/i.test(content) && OMC_STARTUP_COMPACTABLE_SECTIONS.some(
     (section) => content.includes(`<${section}>`) && content.includes(`</${section}>`)
@@ -4144,10 +4151,12 @@ function compactOmcStartupGuidance(content) {
     removedAny = removedAny || next !== compacted;
     compacted = next;
   }
-  if (!removedAny) {
-    return content;
+  const normalized = compacted.replace(/\n{3,}/g, "\n\n").replace(/\n\n---\n\n---\n\n/g, "\n\n---\n\n").trim();
+  if (normalized.length <= OMC_STARTUP_GUIDANCE_MAX_CHARS) {
+    return removedAny ? normalized : content;
   }
-  return compacted.replace(/\n{3,}/g, "\n\n").replace(/\n\n---\n\n---\n\n/g, "\n\n---\n\n").trim();
+  const notice = "\n\n[OMC startup guidance truncated to preserve an 8000-character budget. Read the source file directly for the full document.]";
+  return `${normalized.slice(0, OMC_STARTUP_GUIDANCE_MAX_CHARS - notice.length).trimEnd()}${notice}`;
 }
 function findContextFiles(startDir) {
   const files = [];
@@ -4176,19 +4185,30 @@ function findContextFiles(startDir) {
 }
 function loadContextFromFiles(files) {
   const contexts = [];
+  let used = 0;
+  const separator = "\n\n---\n\n";
   for (const file of files) {
     try {
       const content = compactOmcStartupGuidance((0, import_fs2.readFileSync)(file, "utf-8"));
-      contexts.push(`## Context from ${file}
+      const contextBlock = `## Context from ${file}
 
-${content}`);
+${content}`;
+      const separatorLength = contexts.length > 0 ? separator.length : 0;
+      const remainingBudget = OMC_CONTEXT_FILES_MAX_CHARS - used - separatorLength;
+      if (remainingBudget <= 0) break;
+      if (contextBlock.length > remainingBudget) {
+        contexts.push(compactBudgetedText(contextBlock, remainingBudget));
+        break;
+      }
+      contexts.push(contextBlock);
+      used += separatorLength + contextBlock.length;
     } catch (error2) {
       console.warn(`Warning: Could not read context file ${file}:`, error2);
     }
   }
-  return contexts.join("\n\n---\n\n");
+  return contexts.join(separator);
 }
-var import_fs2, import_path3, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, OMC_STARTUP_COMPACTABLE_SECTIONS;
+var import_fs2, import_path3, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, OMC_STARTUP_COMPACTABLE_SECTIONS, OMC_STARTUP_GUIDANCE_MAX_CHARS, OMC_CONTEXT_FILES_MAX_CHARS;
 var init_loader = __esm({
   "src/config/loader.ts"() {
     "use strict";
@@ -4209,6 +4229,8 @@ var init_loader = __esm({
       "skills",
       "team_compositions"
     ];
+    OMC_STARTUP_GUIDANCE_MAX_CHARS = 8e3;
+    OMC_CONTEXT_FILES_MAX_CHARS = 12e3;
   }
 });
 
@@ -77673,7 +77695,7 @@ function removeCodeBlocks2(text) {
 var PASTED_MAGIC_KEYWORD_HEADER_PATTERN = /^\s*\[MAGIC KEYWORDS?(?: DETECTED)?:.*$/i;
 var ROLE_BOUNDARY_PATTERN = /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
 var SKILL_TRANSCRIPT_LINE_PATTERN = /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
-var USER_REQUEST_LINE_PATTERN = /^\s*User request:\s*$/i;
+var USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
 var SHELL_TRANSCRIPT_LINE_PATTERN = /^\s*[$%❯]\s+/;
 var GIT_DIFF_START_PATTERNS = [
   /^diff\s+--git\s+a\//,
@@ -79277,6 +79299,47 @@ var MODE_CONFIRMATION_SKILL_MAP = {
   autopilot: ["autopilot"],
   ralplan: ["ralplan"]
 };
+var SESSION_START_CONTEXT_BUDGET = 6e3;
+var SESSION_START_OMISSION_NOTICE = "[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]";
+function compactBudgetedText2(text, maxChars) {
+  const notice = "\n...[truncated to preserve SessionStart context budget]";
+  if (!text || text.length <= maxChars) return text || "";
+  if (maxChars <= notice.length) return notice.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
+}
+function buildSessionStartAdditionalContext(messages) {
+  if (messages.length === 0) return "";
+  const priorityOrder = [
+    /\[MODEL ROUTING OVERRIDE/,
+    /\[AUTOPILOT MODE RESTORED\]/,
+    /\[ULTRAWORK MODE RESTORED\]/,
+    /\[RALPLAN MODE RESTORED\]/,
+    /\[TEAM MODE RESTORED\]/,
+    /\[ROOT AGENTS\.md LOADED\]/,
+    /\[PENDING TASKS DETECTED\]/
+  ];
+  const ordered = messages.map((message, index) => {
+    const priority = priorityOrder.findIndex((pattern) => pattern.test(message));
+    return { message, index, priority: priority === -1 ? priorityOrder.length + index : priority };
+  }).sort((a, b) => a.priority - b.priority || a.index - b.index).map((entry) => entry.message);
+  let used = 0;
+  const selected = [];
+  for (const message of ordered) {
+    const separatorLength = selected.length > 0 ? 1 : 0;
+    if (used + separatorLength + message.length > SESSION_START_CONTEXT_BUDGET) {
+      const remainingBudget = SESSION_START_CONTEXT_BUDGET - used - separatorLength;
+      if (remainingBudget > 0) {
+        selected.push(
+          remainingBudget > 120 ? compactBudgetedText2(message, remainingBudget) : compactBudgetedText2(SESSION_START_OMISSION_NOTICE, remainingBudget)
+        );
+      }
+      break;
+    }
+    selected.push(message);
+    used += separatorLength + message.length;
+  }
+  return selected.join("\n");
+}
 function getExtraField(input, key) {
   return input[key];
 }
@@ -80371,7 +80434,7 @@ The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does N
   if (messages.length > 0) {
     return {
       continue: true,
-      message: messages.join("\n")
+      message: buildSessionStartAdditionalContext(messages)
     };
   }
   return { continue: true };

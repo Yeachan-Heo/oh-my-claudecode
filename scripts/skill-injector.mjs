@@ -33,6 +33,8 @@ const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
 const PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
 const SKILL_EXTENSION = '.md';
 const MAX_SKILLS_PER_SESSION = 5;
+const MAX_LEARNED_SKILL_DESCRIPTOR_CHARS = 1000;
+const MAX_LEARNED_SKILLS_CONTEXT_CHARS = 3000;
 
 // =============================================================================
 // Fallback Implementation (used when bridge bundle not available)
@@ -82,11 +84,13 @@ function parseSkillFrontmatterFallback(content) {
     }
   }
 
-  // Extract name
+  // Extract name and description
   const nameMatch = yamlContent.match(/name:\s*["']?([^"'\n]+)["']?/);
   const name = nameMatch ? nameMatch[1].trim() : 'Unnamed Skill';
+  const descriptionMatch = yamlContent.match(/description:\s*["']?([^"'\n]+)["']?/);
+  const description = descriptionMatch ? descriptionMatch[1].trim() : summarizeSkillContent(body);
 
-  return { name, triggers, content: body };
+  return { name, description, triggers, content: body };
 }
 
 // Find all skill files (fallback - NON-RECURSIVE for backward compat)
@@ -193,6 +197,8 @@ function findMatchingSkillsFallback(prompt, directory, sessionId) {
           path: candidate.path,
           name: skill.name,
           content: skill.content,
+          description: skill.description,
+          summary: summarizeSkillContent(skill.content),
           score,
           scope: candidate.scope,
           triggers: skill.triggers
@@ -244,38 +250,69 @@ function findMatchingSkills(prompt, directory, sessionId) {
   return findMatchingSkillsFallback(prompt, directory, sessionId);
 }
 
+function compactText(text, maxChars) {
+  if (!text || maxChars <= 0) return '';
+  if (text.length <= maxChars) return text;
+  if (maxChars === 1) return '…';
+  return `${text.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function summarizeSkillContent(content) {
+  if (!content) return '';
+  const firstUsefulLine = content
+    .split(/\r?\n/)
+    .map(line => line.replace(/^#+\s*/, '').trim())
+    .find(line => line && !line.startsWith('---'));
+  return compactText(firstUsefulLine || content.replace(/\s+/g, ' ').trim(), 240);
+}
+
+function formatSkillDescriptor(skill) {
+  const metadata = {
+    path: skill.path,
+    triggers: skill.triggers,
+    score: skill.score,
+    scope: skill.scope
+  };
+  const summary = skill.description || skill.summary || summarizeSkillContent(skill.content);
+  return compactText([
+    `### ${skill.name} (${skill.scope})`,
+    `<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`,
+    summary ? `Summary: ${summary}` : '',
+    `Load instructions: if this skill is needed, read ${skill.path} and follow the full instructions there.`,
+  ].filter(Boolean).join('\n'), MAX_LEARNED_SKILL_DESCRIPTOR_CHARS);
+}
+
 // Format skills for injection
 function formatSkillsMessage(skills) {
-  const lines = [
+  const header = [
     '<mnemosyne>',
     '',
     '## Relevant Learned Skills',
     '',
-    'The following skills from previous sessions may help:',
+    'Compact descriptors only; full learned skill bodies stay on disk to avoid prompt bloat.',
     ''
-  ];
+  ].join('\n');
+  const footer = '\n</mnemosyne>';
+  const budget = MAX_LEARNED_SKILLS_CONTEXT_CHARS - header.length - footer.length;
+  const descriptors = [];
+  let used = 0;
 
   for (const skill of skills) {
-    lines.push(`### ${skill.name} (${skill.scope})`);
-
-    // Add metadata block for programmatic parsing
-    const metadata = {
-      path: skill.path,
-      triggers: skill.triggers,
-      score: skill.score,
-      scope: skill.scope
-    };
-    lines.push(`<skill-metadata>${JSON.stringify(metadata)}</skill-metadata>`);
-    lines.push('');
-
-    lines.push(skill.content);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
+    const descriptor = formatSkillDescriptor(skill);
+    const separator = descriptors.length > 0 ? '\n\n---\n\n' : '';
+    if (used + separator.length + descriptor.length > budget) {
+      const omission = `${separator}[Additional learned skills omitted due to ${MAX_LEARNED_SKILLS_CONTEXT_CHARS}-character context budget; use skill metadata paths if needed.]`;
+      const remainingBudget = budget - used;
+      if (remainingBudget > 0) {
+        descriptors.push(compactText(omission, remainingBudget));
+      }
+      break;
+    }
+    descriptors.push(`${separator}${descriptor}`);
+    used += separator.length + descriptor.length;
   }
 
-  lines.push('</mnemosyne>');
-  return lines.join('\n');
+  return `${header}${descriptors.join('')}${footer}`;
 }
 
 // Main
