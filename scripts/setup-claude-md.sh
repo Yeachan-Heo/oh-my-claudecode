@@ -55,10 +55,10 @@ resolve_active_plugin_root() {
           if is_valid_plugin_root "${cache_base}/${v}"; then
             echo "$v"
           fi
-        done | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+        done | sort -rV | head -1)
 
         if [ -n "$latest_cache_version" ] && [ -d "${cache_base}/${latest_cache_version}" ]; then
-          preferred_version=$(printf '%s\n%s\n' "$active_version" "$latest_cache_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+          preferred_version=$(printf '%s\n%s\n' "$active_version" "$latest_cache_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -rV | head -1)
           if [ "$preferred_version" = "$latest_cache_version" ] && [ "$latest_cache_version" != "$active_version" ]; then
             echo "${cache_base}/${latest_cache_version}"
             return 0
@@ -78,7 +78,7 @@ resolve_active_plugin_root() {
       if is_valid_plugin_root "${cache_base}/${v}"; then
         echo "$v"
       fi
-    done | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
+    done | sort -rV | head -1)
     if [ -n "$latest" ] && is_valid_plugin_root "${cache_base}/${latest}"; then
       echo "${cache_base}/${latest}"
       return 0
