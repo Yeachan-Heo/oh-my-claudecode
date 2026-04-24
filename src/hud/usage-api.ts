@@ -819,14 +819,26 @@ function clamp(v: number | undefined): number {
 export function parseUsageResponse(response: UsageApiResponse): RateLimits | null {
   const fiveHour = response.five_hour?.utilization;
   const sevenDay = response.seven_day?.utilization;
-  const enterpriseCredits = response.extra_usage?.used_credits;
-  const enterpriseCurrency = (response.extra_usage?.currency ?? 'USD').toUpperCase();
+  const sonnetSevenDay = response.seven_day_sonnet?.utilization;
+  const opusSevenDay = response.seven_day_opus?.utilization;
+  const extra = response.extra_usage;
+  const enterpriseCredits = extra?.used_credits;
+  const enterpriseCurrency = (extra?.currency ?? 'USD').toUpperCase();
   // Enterprise credits are only usable when we know how to interpret the minor-unit digits;
   // see the USD guard in the extra_usage branch below for rationale.
   const hasUsableEnterprise = enterpriseCredits != null && enterpriseCurrency === 'USD';
+  const hasUsableExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
 
-  // Need at least one valid value (5h/7d for Pro/Max, or usable enterprise credits)
-  if (fiveHour == null && sevenDay == null && !hasUsableEnterprise) return null;
+  // Need at least one valid value. Model-specific weekly buckets are valid usage data
+  // even when generic subscription/window metadata is absent or nullish.
+  if (
+    fiveHour == null &&
+    sevenDay == null &&
+    sonnetSevenDay == null &&
+    opusSevenDay == null &&
+    !hasUsableEnterprise &&
+    !hasUsableExtraUsage
+  ) return null;
 
   // Parse ISO 8601 date strings to Date objects
   const parseDate = (dateStr: string | undefined): Date | null => {
@@ -841,15 +853,17 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
 
   // Per-model quotas are at the top level (flat structure)
   // e.g., response.seven_day_sonnet, response.seven_day_opus
-  const sonnetSevenDay = response.seven_day_sonnet?.utilization;
   const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
 
   const result: RateLimits = {
     fiveHourPercent: clamp(fiveHour),
-    weeklyPercent: clamp(sevenDay),
     fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
-    weeklyResetsAt: parseDate(response.seven_day?.resets_at),
   };
+
+  if (sevenDay != null) {
+    result.weeklyPercent = clamp(sevenDay);
+    result.weeklyResetsAt = parseDate(response.seven_day?.resets_at);
+  }
 
   // Add Sonnet-specific quota if available from API
   if (sonnetSevenDay != null) {
@@ -858,7 +872,6 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
   }
 
   // Add Opus-specific quota if available from API
-  const opusSevenDay = response.seven_day_opus?.utilization;
   const opusResetsAt = response.seven_day_opus?.resets_at;
   if (opusSevenDay != null) {
     result.opusWeeklyPercent = clamp(opusSevenDay);
@@ -866,7 +879,6 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
   }
 
   // Add extra (metered) usage if available (Pro subscribers with extra usage allocation)
-  const extra = response.extra_usage;
   if (extra != null) {
     // Enterprise path: used_credits (minor units) is present instead of spent_usd/limit_usd.
     // Only USD is observed in practice; the /100 divisor below assumes 2-digit minor units.

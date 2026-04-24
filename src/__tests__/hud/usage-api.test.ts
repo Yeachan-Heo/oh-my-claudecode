@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as childProcess from 'child_process';
 import * as os from 'os';
 import { EventEmitter } from 'events';
-import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, getUsage } from '../../hud/usage-api.js';
+import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, getUsage, parseUsageResponse } from '../../hud/usage-api.js';
 
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
 vi.mock('../../lib/file-lock.js', () => ({
@@ -654,6 +654,70 @@ describe('getUsage routing', () => {
     expect(execFileMock).toHaveBeenCalledTimes(2);
     expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
     expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization).toBe('Bearer fresh-legacy-token');
+  });
+
+  it('preserves model-specific rate limits when generic subscription windows are nullish', () => {
+    const result = parseUsageResponse({
+      five_hour: { utilization: 36, resets_at: '2026-04-24T13:00:00Z' },
+      seven_day: null,
+      seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+    } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(36);
+    expect(result!.weeklyPercent).toBeUndefined();
+    expect(result!.sonnetWeeklyPercent).toBe(8);
+    expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
+  });
+
+  it('returns getUsage rateLimits when OAuth credentials lack subscription metadata', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.credentials.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.credentials.json')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'valid-token',
+            refreshToken: 'refresh-token',
+            expiresAt: Date.now() + 60_000,
+            subscriptionType: null,
+            rateLimitTier: null,
+          },
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 36, resets_at: '2026-04-24T13:00:00Z' },
+          seven_day: { utilization: 32, resets_at: '2026-04-25T13:00:00Z' },
+          seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits).toMatchObject({
+      fiveHourPercent: 36,
+      weeklyPercent: 32,
+      sonnetWeeklyPercent: 8,
+    });
+    expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
   });
 
   it('routes to z.ai when ANTHROPIC_BASE_URL is z.ai host', async () => {

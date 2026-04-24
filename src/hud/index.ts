@@ -443,8 +443,15 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       : null;
     const contextPercent = getContextPercent(stdin);
 
-    // Read subscription info for enterprise detection (best-effort, never throws)
-    const subscriptionInfo = getSubscriptionInfo();
+    // Read subscription info for enterprise detection (best-effort).
+    // Rate-limit rendering must not depend on this metadata being present.
+    const subscriptionInfo = (() => {
+      try {
+        return getSubscriptionInfo() ?? { subscriptionType: null, rateLimitTier: null };
+      } catch {
+        return { subscriptionType: null, rateLimitTier: null };
+      }
+    })();
 
     // Build render context
     const context: HudRenderContext = {
