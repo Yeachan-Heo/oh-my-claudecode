@@ -206,6 +206,17 @@ export interface RateLimits {
   extraUsageLimitUsd?: number;
   /** When the extra usage period resets (null if unavailable) */
   extraUsageResetsAt?: Date | null;
+
+  /** Enterprise billing-period cumulative spend in USD */
+  enterpriseSpentUsd?: number;
+  /** Enterprise monthly limit in USD (null = unlimited) */
+  enterpriseLimitUsd?: number | null;
+  /** Enterprise billing utilization (0-100), only set when monthly_limit is a positive number */
+  enterpriseUtilization?: number;
+  /** Enterprise billing currency (e.g. 'USD') */
+  enterpriseCurrency?: string;
+  /** When the enterprise billing period resets (null if unavailable or not returned by API) */
+  enterpriseResetsAt?: Date | null;
 }
 
 /**
@@ -383,6 +394,12 @@ export interface HudRenderContext {
   /** API key source: 'project', 'global', or 'env' */
   apiKeySource: ApiKeySource | null;
 
+  /** OAuth subscription type (e.g. 'enterprise'), null when unavailable */
+  subscriptionType?: string | null;
+
+  /** OAuth rate limit tier (e.g. 'default_claude_zero'), null when unavailable */
+  rateLimitTier?: string | null;
+
   /** Active profile name (derived from CLAUDE_CONFIG_DIR), null if default */
   profileName: string | null;
 
@@ -473,6 +490,8 @@ export interface HudElementConfig {
   showSessionDuration?: boolean;  // Show session:19m duration display (default: true if sessionHealth is true)
   showHealthIndicator?: boolean;  // Show 🟢/🟡/🔴 health indicator (default: true if sessionHealth is true)
   showTokens?: boolean;           // Show last-request token usage when enabled (tok:i1.2k/o340)
+  enterpriseMode?: boolean;       // Explicit override for enterprise mode (undefined = auto-detect)
+  showEnterpriseCost?: boolean;   // Whether to render enterprise billing cost (default: true when enterprise)
   useBars: boolean;           // Show visual progress bars instead of/alongside percentages
   showCallCounts?: boolean;   // Show tool/agent/skill call counts on the right of the status line (default: true)
   callCountsFormat?: CallCountsFormat; // Controls call count icon rendering: auto (platform default), emoji, or ascii
@@ -528,7 +547,7 @@ export interface LayoutConfig {
 export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
   line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'model', 'apiKeySource', 'profile'],
   main: [
-    'omcLabel', 'rateLimits', 'customBuckets', 'permission', 'thinking',
+    'omcLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
     'skills', 'lastSkill', 'contextBar', 'agents', 'background',
     'callCounts', 'lastTool', 'sessionSummary',

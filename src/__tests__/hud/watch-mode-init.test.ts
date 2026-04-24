@@ -124,7 +124,10 @@ describe('HUD watch mode initialization', () => {
       readAutopilotStateForHud,
     }));
 
-    vi.doMock('../../hud/usage-api.js', () => ({ getUsage }));
+    vi.doMock('../../hud/usage-api.js', () => ({
+      getUsage,
+      getSubscriptionInfo: vi.fn(() => ({ subscriptionType: null, rateLimitTier: null })),
+    }));
     vi.doMock('../../hud/custom-rate-provider.js', () => ({ executeCustomProvider: vi.fn(async () => null) }));
     vi.doMock('../../hud/render.js', () => ({ render }));
     vi.doMock('../../hud/elements/api-key-source.js', () => ({ detectApiKeySource: vi.fn(() => null) }));
