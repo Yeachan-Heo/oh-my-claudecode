@@ -13,6 +13,7 @@ import { readTeamConfig } from '../team/monitor.js';
 import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
 import { loadConfig } from '../config/loader.js';
+import type { PluginConfig } from '../shared/types.js';
 import { resolveTeamWorkerCount } from '../team/resource-policy.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
@@ -367,6 +368,20 @@ function parseJsonInput(inputRaw: string | undefined): Record<string, unknown> {
     throw new Error('Invalid --input JSON payload');
   }
   return parsed;
+}
+
+function loadConfigForCwd(cwd: string): PluginConfig {
+  const previousCwd = process.cwd();
+  try {
+    if (cwd && cwd !== previousCwd) {
+      process.chdir(cwd);
+    }
+    return loadConfig();
+  } finally {
+    if (process.cwd() !== previousCwd) {
+      process.chdir(previousCwd);
+    }
+  }
 }
 
 export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResult> {
@@ -966,7 +981,7 @@ function parseStartArgs(args: string[]): StartArgsParsed {
     throw new Error(`Task count (${taskDescriptions.length}) must match worker count (${agentTypes.length}).`);
   }
 
-  const cfg = loadConfig();
+  const cfg = loadConfigForCwd(cwd);
   const workerCountDecision = resolveTeamWorkerCount(agentTypes.length, cfg.team?.ops);
   const effectiveAgentTypes = agentTypes.slice(0, workerCountDecision.effective);
 
@@ -1335,10 +1350,10 @@ export async function teamCommand(argv: string[]): Promise<void> {
   if (!SUBCOMMANDS.has(command)) {
     const legacy = parseLegacyStartAlias(argv);
     if (legacy) {
-      const cfg = loadConfig();
+      const cfg = loadConfigForCwd(legacy.cwd);
       const workerCountDecision = resolveTeamWorkerCount(legacy.workerCount, cfg.team?.ops);
       const workerCount = workerCountDecision.effective;
-      const tasks = Array.from({ length: workerCount }, (_, idx) => ({
+      const tasks = Array.from({ length: legacy.workerCount }, (_, idx) => ({
         subject: legacy.ralph ? `Ralph Task ${idx + 1}` : `Task ${idx + 1}`,
         description: legacy.task,
       }));

@@ -68,8 +68,10 @@ vi.mock('../../team/git-worktree.js', async (importOriginal) => {
 
 describe('team cli', () => {
   let jobsDir: string;
+  let originalCwd: string;
 
   beforeEach(() => {
+    originalCwd = process.cwd();
     jobsDir = mkdtempSync(join(tmpdir(), 'omc-team-cli-jobs-'));
     process.env.OMC_JOBS_DIR = jobsDir;
     process.env.OMC_RUNTIME_CLI_PATH = '/tmp/runtime-cli.cjs';
@@ -92,6 +94,7 @@ describe('team cli', () => {
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     delete process.env.OMC_JOBS_DIR;
     delete process.env.OMC_RUNTIME_CLI_PATH;
     delete process.env.OMC_TEAM_MAX_AGENTS;
@@ -267,6 +270,80 @@ describe('team cli', () => {
     expect(stdinPayload.agentTypes).toEqual(['gemini', 'gemini']);
     expect(stdinPayload.tasks).toHaveLength(4);
     expect(stdinPayload.tasks.every((t) => t.description === 'lint all modules')).toBe(true);
+
+    logSpy.mockRestore();
+  });
+
+  it('teamCommand start loads resource policy from --cwd project config', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const rootDir = mkdtempSync(join(tmpdir(), 'omc-team-root-cwd-'));
+    const projectDir = join(rootDir, 'project');
+
+    mkdirSync(join(rootDir, '.claude'), { recursive: true });
+    mkdirSync(join(projectDir, '.claude'), { recursive: true });
+    writeFileSync(join(rootDir, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 4 } },
+    }));
+    writeFileSync(join(projectDir, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+    process.chdir(rootDir);
+
+    mocks.spawn.mockReturnValue({
+      pid: 8991,
+      stdin: { write, end },
+      unref,
+    });
+
+    const { teamCommand } = await import('../team.js');
+    await teamCommand([
+      'start', '--agent', 'gemini', '--count', '4',
+      '--task', 'lint all modules', '--cwd', projectDir, '--name', 'lint-team', '--json',
+    ]);
+
+    const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+      workerCount?: number;
+      agentTypes: string[];
+      tasks: Array<{ subject: string; description: string }>;
+      cwd: string;
+    };
+    expect(stdinPayload.cwd).toBe(projectDir);
+    expect(stdinPayload.workerCount).toBe(2);
+    expect(stdinPayload.agentTypes).toEqual(['gemini', 'gemini']);
+    expect(stdinPayload.tasks).toHaveLength(4);
+
+    logSpy.mockRestore();
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('legacy team shorthand caps workers but preserves requested backlog', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    process.env.OMC_TEAM_MAX_AGENTS = '2';
+    mocks.spawn.mockReturnValue({
+      pid: 8992,
+      stdin: { write, end },
+      unref,
+    });
+
+    const { teamCommand } = await import('../team.js');
+    await teamCommand(['4:codex', 'review auth flow', '--json']);
+
+    const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+      workerCount?: number;
+      agentTypes: string[];
+      tasks: Array<{ subject: string; description: string }>;
+    };
+    expect(stdinPayload.workerCount).toBe(2);
+    expect(stdinPayload.agentTypes).toEqual(['codex', 'codex']);
+    expect(stdinPayload.tasks).toHaveLength(4);
+    expect(stdinPayload.tasks.every((task) => task.description === 'review auth flow')).toBe(true);
 
     logSpy.mockRestore();
   });
