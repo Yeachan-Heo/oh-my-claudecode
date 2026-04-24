@@ -54,11 +54,18 @@ fi
 # 3. nvm versioned paths: iterate to find the latest installed version
 # ---------------------------------------------------------------------------
 if [ -z "$NODE_BIN" ] && [ -d "$HOME/.nvm/versions/node" ]; then
-  # shellcheck disable=SC2231
-  for _path in "$HOME/.nvm/versions/node/"*/bin/node; do
-    [ -x "$_path" ] && NODE_BIN="$_path"
-    # Keep iterating — later entries tend to be newer (lexicographic order)
-  done
+  # Pick the highest installed version. Lexicographic glob order is wrong
+  # for node version dirs — e.g. v10.x sorts BEFORE v8.x by byte comparison,
+  # so the old "last iter wins" heuristic picked v9.x when v18.x was also
+  # installed. `sort -rV` gives version-aware ordering; take the first
+  # executable.
+  NODE_BIN=$(
+    # shellcheck disable=SC2231
+    printf '%s\n' "$HOME/.nvm/versions/node"/*/bin/node | sort -rV | \
+      while IFS= read -r _p; do
+        [ -x "$_p" ] && { printf '%s' "$_p"; exit 0; }
+      done
+  )
 fi
 
 # ---------------------------------------------------------------------------
@@ -70,10 +77,15 @@ if [ -z "$NODE_BIN" ]; then
     "$HOME/Library/Application Support/fnm/node-versions" \
     "$HOME/.local/share/fnm/node-versions"; do
     if [ -d "$_fnm_base" ]; then
-      # shellcheck disable=SC2231
-      for _path in "$_fnm_base/"*/installation/bin/node; do
-        [ -x "$_path" ] && NODE_BIN="$_path"
-      done
+      # Version-sort matches the nvm handling above (avoids picking v9.x
+      # over v18.x from lexicographic glob order).
+      NODE_BIN=$(
+        # shellcheck disable=SC2231
+        printf '%s\n' "$_fnm_base"/*/installation/bin/node | sort -rV | \
+          while IFS= read -r _p; do
+            [ -x "$_p" ] && { printf '%s' "$_p"; exit 0; }
+          done
+      )
       [ -n "$NODE_BIN" ] && break
     fi
   done
