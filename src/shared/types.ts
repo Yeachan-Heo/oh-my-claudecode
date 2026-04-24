@@ -459,6 +459,9 @@ export type OrchestratorSpec = Pick<TeamRoleAssignmentSpec, 'model'>;
 /** Cost mode reserved for future downgrade behavior (no implementation yet). */
 export type TeamCostMode = 'normal' | 'downgrade';
 
+/** Local resource posture used when adaptive team sizing is enabled. */
+export type TeamResourceProfile = 'conservative' | 'balanced' | 'aggressive';
+
 /** Ops-level knobs for `/team`. */
 export interface TeamOpsConfig {
   maxAgents?: number;
@@ -466,6 +469,14 @@ export interface TeamOpsConfig {
   monitorIntervalMs?: number;
   shutdownTimeoutMs?: number;
   costMode?: TeamCostMode;
+  /**
+   * Opt-in cap that shrinks requested /team fanout to fit local CPU and memory.
+   * It never increases the user-requested worker count and always respects
+   * `maxAgents` when set.
+   */
+  adaptiveAgents?: boolean;
+  /** Resource posture for adaptiveAgents. Defaults to balanced. */
+  resourceProfile?: TeamResourceProfile;
   /** Opt-in native team worker worktrees. Disabled unless explicitly set. */
   worktreeMode?: 'disabled' | 'off' | 'detached' | 'branch' | 'named';
 }

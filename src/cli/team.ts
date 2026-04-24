@@ -12,6 +12,8 @@ import { monitorTeam, resumeTeam, shutdownTeam } from '../team/runtime.js';
 import { readTeamConfig } from '../team/monitor.js';
 import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
+import { loadConfig } from '../config/loader.js';
+import { resolveTeamWorkerCount } from '../team/resource-policy.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor']);
@@ -964,8 +966,13 @@ function parseStartArgs(args: string[]): StartArgsParsed {
     throw new Error(`Task count (${taskDescriptions.length}) must match worker count (${agentTypes.length}).`);
   }
 
-  const resolvedTeamName = (teamName && teamName.trim()) ? teamName.trim() : autoTeamName(taskDescriptions[0]);
-  const tasks: TeamTaskInput[] = taskDescriptions.map((description, index) => ({
+  const cfg = loadConfig();
+  const workerCountDecision = resolveTeamWorkerCount(agentTypes.length, cfg.team?.ops);
+  const effectiveAgentTypes = agentTypes.slice(0, workerCountDecision.effective);
+  const effectiveTaskDescriptions = taskDescriptions.slice(0, workerCountDecision.effective);
+
+  const resolvedTeamName = (teamName && teamName.trim()) ? teamName.trim() : autoTeamName(effectiveTaskDescriptions[0]);
+  const tasks: TeamTaskInput[] = effectiveTaskDescriptions.map((description, index) => ({
     subject: `${subjectPrefix} ${index + 1}`,
     description,
   }));
@@ -973,9 +980,10 @@ function parseStartArgs(args: string[]): StartArgsParsed {
   return {
     input: {
       teamName: resolvedTeamName,
-      agentTypes,
+      agentTypes: effectiveAgentTypes,
       tasks,
       cwd,
+      workerCount: effectiveAgentTypes.length,
       ...(newWindow ? { newWindow: true } : {}),
       ...(pollIntervalMs != null ? { pollIntervalMs } : {}),
       ...(sentinelGateTimeoutMs != null ? { sentinelGateTimeoutMs } : {}),
@@ -1328,15 +1336,18 @@ export async function teamCommand(argv: string[]): Promise<void> {
   if (!SUBCOMMANDS.has(command)) {
     const legacy = parseLegacyStartAlias(argv);
     if (legacy) {
-      const tasks = Array.from({ length: legacy.workerCount }, (_, idx) => ({
+      const cfg = loadConfig();
+      const workerCountDecision = resolveTeamWorkerCount(legacy.workerCount, cfg.team?.ops);
+      const workerCount = workerCountDecision.effective;
+      const tasks = Array.from({ length: workerCount }, (_, idx) => ({
         subject: legacy.ralph ? `Ralph Task ${idx + 1}` : `Task ${idx + 1}`,
         description: legacy.task,
       }));
 
       const result = await startTeamJob({
         teamName: legacy.teamName,
-        workerCount: legacy.workerCount,
-        agentTypes: Array.from({ length: legacy.workerCount }, () => legacy.agentType),
+        workerCount,
+        agentTypes: Array.from({ length: workerCount }, () => legacy.agentType),
         tasks,
         cwd: legacy.cwd,
         ...(legacy.newWindow ? { newWindow: true } : {}),

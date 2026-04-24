@@ -94,6 +94,9 @@ describe('team cli', () => {
   afterEach(() => {
     delete process.env.OMC_JOBS_DIR;
     delete process.env.OMC_RUNTIME_CLI_PATH;
+    delete process.env.OMC_TEAM_MAX_AGENTS;
+    delete process.env.OMC_TEAM_ADAPTIVE_AGENTS;
+    delete process.env.OMC_TEAM_RESOURCE_PROFILE;
     rmSync(jobsDir, { recursive: true, force: true });
   });
 
@@ -232,6 +235,37 @@ describe('team cli', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string) as { status: string };
     expect(output.status).toBe('running');
+
+    logSpy.mockRestore();
+  });
+
+  it('teamCommand start caps initial workers with team resource policy', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    process.env.OMC_TEAM_MAX_AGENTS = '2';
+    mocks.spawn.mockReturnValue({
+      pid: 8989,
+      stdin: { write, end },
+      unref,
+    });
+
+    const { teamCommand } = await import('../team.js');
+    await teamCommand([
+      'start', '--agent', 'gemini', '--count', '4',
+      '--task', 'lint all modules', '--name', 'lint-team', '--json',
+    ]);
+
+    const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+      workerCount?: number;
+      agentTypes: string[];
+      tasks: Array<{ subject: string; description: string }>;
+    };
+    expect(stdinPayload.workerCount).toBe(2);
+    expect(stdinPayload.agentTypes).toEqual(['gemini', 'gemini']);
+    expect(stdinPayload.tasks).toHaveLength(2);
 
     logSpy.mockRestore();
   });

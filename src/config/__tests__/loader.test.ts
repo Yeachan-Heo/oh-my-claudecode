@@ -28,6 +28,9 @@ const ALL_KEYS = [
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
   "OMC_DELEGATION_ROUTING_ENABLED",
   "OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER",
+  "OMC_TEAM_MAX_AGENTS",
+  "OMC_TEAM_ADAPTIVE_AGENTS",
+  "OMC_TEAM_RESOURCE_PROFILE",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -556,6 +559,36 @@ describe("team.roleRouting (Option E)", () => {
       );
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges adaptive team ops from env", () => {
+    process.env.OMC_TEAM_MAX_AGENTS = "4";
+    process.env.OMC_TEAM_ADAPTIVE_AGENTS = "true";
+    process.env.OMC_TEAM_RESOURCE_PROFILE = "conservative";
+
+    const config = loadConfig();
+
+    expect(config.team?.ops?.maxAgents).toBe(4);
+    expect(config.team?.ops?.adaptiveAgents).toBe(true);
+    expect(config.team?.ops?.resourceProfile).toBe("conservative");
+  });
+
+  it("rejects invalid team.ops.resourceProfile values", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-resource-profile-"));
+    try {
+      const claudeDir = join(tempDir, ".claude");
+      require("node:fs").mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(
+        join(claudeDir, "omc.jsonc"),
+        JSON.stringify({
+          team: { ops: { resourceProfile: "turbo" } },
+        }),
+      );
+      process.chdir(tempDir);
+      expect(() => loadConfig()).toThrow(/team\.ops\.resourceProfile/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

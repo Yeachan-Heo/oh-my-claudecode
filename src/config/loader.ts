@@ -437,6 +437,33 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     };
   }
 
+  const teamOps: NonNullable<NonNullable<PluginConfig["team"]>["ops"]> = {};
+  if (process.env.OMC_TEAM_MAX_AGENTS) {
+    const maxAgents = parseInt(process.env.OMC_TEAM_MAX_AGENTS, 10);
+    if (!isNaN(maxAgents) && maxAgents >= 1) {
+      teamOps.maxAgents = maxAgents;
+    }
+  }
+  if (process.env.OMC_TEAM_ADAPTIVE_AGENTS !== undefined) {
+    const normalized = process.env.OMC_TEAM_ADAPTIVE_AGENTS.trim().toLowerCase();
+    teamOps.adaptiveAgents = ["1", "true", "yes", "on", "enabled"].includes(normalized);
+  }
+  if (process.env.OMC_TEAM_RESOURCE_PROFILE) {
+    const profile = process.env.OMC_TEAM_RESOURCE_PROFILE.trim().toLowerCase();
+    if (TEAM_RESOURCE_PROFILES.has(profile)) {
+      teamOps.resourceProfile = profile as NonNullable<typeof teamOps.resourceProfile>;
+    }
+  }
+  if (Object.keys(teamOps).length > 0) {
+    config.team = {
+      ...config.team,
+      ops: {
+        ...config.team?.ops,
+        ...teamOps,
+      },
+    };
+  }
+
   return config;
 }
 
@@ -477,6 +504,7 @@ const CANONICAL_TEAM_ROLE_SET = new Set<string>(CANONICAL_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set<string>(KNOWN_AGENT_NAMES);
 const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
+const TEAM_RESOURCE_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 
 export function validateTeamConfig(config: PluginConfig): void {
   const team = (config as Record<string, unknown>).team as
@@ -486,6 +514,17 @@ export function validateTeamConfig(config: PluginConfig): void {
 
   const ops = team.ops as Record<string, unknown> | undefined;
   if (ops && typeof ops === "object") {
+    if (ops.maxAgents !== undefined) {
+      if (
+        typeof ops.maxAgents !== "number" ||
+        !Number.isInteger(ops.maxAgents) ||
+        ops.maxAgents < 1
+      ) {
+        throw new Error(
+          `[OMC] team.ops.maxAgents: invalid value "${String(ops.maxAgents)}". Expected integer >= 1.`,
+        );
+      }
+    }
     if (ops.defaultAgentType !== undefined) {
       if (
         typeof ops.defaultAgentType !== "string" ||
@@ -501,6 +540,18 @@ export function validateTeamConfig(config: PluginConfig): void {
       if (typeof ops.worktreeMode !== "string" || !allowed.has(ops.worktreeMode)) {
         throw new Error(
           `[OMC] team.ops.worktreeMode: invalid value "${String(ops.worktreeMode)}". Allowed: ${[...allowed].join(", ")}`,
+        );
+      }
+    }
+    if (ops.adaptiveAgents !== undefined && typeof ops.adaptiveAgents !== "boolean") {
+      throw new Error(
+        `[OMC] team.ops.adaptiveAgents: invalid value "${String(ops.adaptiveAgents)}". Expected boolean.`,
+      );
+    }
+    if (ops.resourceProfile !== undefined) {
+      if (typeof ops.resourceProfile !== "string" || !TEAM_RESOURCE_PROFILES.has(ops.resourceProfile)) {
+        throw new Error(
+          `[OMC] team.ops.resourceProfile: invalid value "${String(ops.resourceProfile)}". Allowed: ${[...TEAM_RESOURCE_PROFILES].join(", ")}`,
         );
       }
     }
@@ -1098,6 +1149,17 @@ export function generateConfigSchema(): object {
               monitorIntervalMs: { type: "integer", minimum: 1 },
               shutdownTimeoutMs: { type: "integer", minimum: 1 },
               costMode: { type: "string", enum: ["normal", "downgrade"] },
+              adaptiveAgents: {
+                type: "boolean",
+                description:
+                  "When true, cap requested /team workers to fit local CPU and memory.",
+              },
+              resourceProfile: {
+                type: "string",
+                enum: ["conservative", "balanced", "aggressive"],
+                default: "balanced",
+                description: "Local resource posture used by adaptiveAgents.",
+              },
             },
           },
           roleRouting: {

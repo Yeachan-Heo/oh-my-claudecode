@@ -16,6 +16,8 @@ import {
 } from '../../team/api-interop.js';
 import type { CliAgentType } from '../../team/model-contract.js';
 import { loadConfig } from '../../config/loader.js';
+import type { PluginConfig } from '../../shared/types.js';
+import { resolveTeamWorkerCount } from '../../team/resource-policy.js';
 
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
@@ -551,28 +553,36 @@ function parseTeamApiArgs(args: string[]): {
 // Team start (spawns tmux workers)
 // ---------------------------------------------------------------------------
 
-async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<void> {
+async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string, pluginConfig: PluginConfig): Promise<void> {
   await assertTeamSpawnAllowed(cwd);
 
   // Decompose the task string into subtasks when possible
   const decomposition = splitTaskString(parsed.task);
-  const effectiveWorkerCount = resolveTeamFanoutLimit(
+  const fanoutWorkerCount = resolveTeamFanoutLimit(
     parsed.workerCount,
     parsed.agentTypes[0],
     parsed.workerCount,
     decomposition
   );
+  const workerCountDecision = resolveTeamWorkerCount(fanoutWorkerCount, pluginConfig.team?.ops);
+  const effectiveWorkerCount = workerCountDecision.effective;
+  const effectiveAgentTypes = parsed.agentTypes.slice(0, effectiveWorkerCount);
+  const effectiveWorkerRoles = parsed.workerSpecs
+    .slice(0, effectiveWorkerCount)
+    .map((spec) => spec.role ?? spec.agentType);
 
   // Build the task list from decomposition subtasks or fall back to atomic replication
   const tasks: Array<{ subject: string; description: string; owner?: string }> = [];
   if (decomposition.strategy !== 'atomic' && decomposition.subtasks.length > 1) {
-    // Use decomposed subtasks — one per subtask (up to effectiveWorkerCount)
-    const subtasks = decomposition.subtasks.slice(0, effectiveWorkerCount);
+    // Use decomposed subtasks — keep the pre-resource fanout so capping workers
+    // does not silently drop work; overflow subtasks are distributed across the
+    // smaller active worker pool.
+    const subtasks = decomposition.subtasks.slice(0, fanoutWorkerCount);
     for (let i = 0; i < subtasks.length; i++) {
       tasks.push({
         subject: subtasks[i].subject,
         description: subtasks[i].description,
-        owner: `worker-${i + 1}`,
+        owner: `worker-${(i % effectiveWorkerCount) + 1}`,
       });
     }
   } else {
@@ -602,15 +612,16 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
     const runtime = await startTeamV2({
       teamName: parsed.teamName,
       workerCount: effectiveWorkerCount,
-      agentTypes: parsed.agentTypes.slice(0, effectiveWorkerCount),
+      agentTypes: effectiveAgentTypes,
       tasks,
       cwd,
       newWindow: parsed.newWindow,
-      workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
+      workerRoles: effectiveWorkerRoles,
       ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
+      pluginConfig,
     });
 
-    const uniqueTypes = [...new Set(parsed.agentTypes)].join(',');
+    const uniqueTypes = [...new Set(effectiveAgentTypes)].join(',');
 
     if (parsed.json) {
       const snapshot = await monitorTeamV2(runtime.teamName, cwd);
@@ -619,6 +630,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
         sessionName: runtime.sessionName,
         workerCount: runtime.config.worker_count,
         agentType: uniqueTypes,
+        resourcePolicy: workerCountDecision.capped ? workerCountDecision : undefined,
         tasks: snapshot ? snapshot.tasks : null,
       }));
       return;
@@ -628,6 +640,9 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
     console.log(`tmux session: ${runtime.sessionName}`);
     console.log(`workers: ${runtime.config.worker_count}`);
     console.log(`agent_type: ${uniqueTypes}`);
+    if (workerCountDecision.capped) {
+      console.log(`resource_policy: workers ${workerCountDecision.requested} -> ${workerCountDecision.effective} (${workerCountDecision.reason})`);
+    }
 
     const snapshot = await monitorTeamV2(runtime.teamName, cwd);
     if (snapshot) {
@@ -641,13 +656,13 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
   const runtime = await startTeam({
     teamName: parsed.teamName,
     workerCount: effectiveWorkerCount,
-    agentTypes: parsed.agentTypes.slice(0, effectiveWorkerCount) as CliAgentType[],
+    agentTypes: effectiveAgentTypes as CliAgentType[],
     tasks,
     cwd,
     newWindow: parsed.newWindow,
   });
 
-  const uniqueTypesV1 = [...new Set(parsed.agentTypes)].join(',');
+  const uniqueTypesV1 = [...new Set(effectiveAgentTypes)].join(',');
 
   if (parsed.json) {
     const snapshot = await monitorTeam(runtime.teamName, cwd, runtime.workerPaneIds);
@@ -656,6 +671,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       sessionName: runtime.sessionName,
       workerCount: runtime.workerNames.length,
       agentType: uniqueTypesV1,
+      resourcePolicy: workerCountDecision.capped ? workerCountDecision : undefined,
       tasks: snapshot ? {
         total: snapshot.taskCounts.pending + snapshot.taskCounts.inProgress + snapshot.taskCounts.completed + snapshot.taskCounts.failed,
         pending: snapshot.taskCounts.pending,
@@ -671,6 +687,9 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
   console.log(`tmux session: ${runtime.sessionName}`);
   console.log(`workers: ${runtime.workerNames.length}`);
   console.log(`agent_type: ${uniqueTypesV1}`);
+  if (workerCountDecision.capped) {
+    console.log(`resource_policy: workers ${workerCountDecision.requested} -> ${workerCountDecision.effective} (${workerCountDecision.reason})`);
+  }
 
   const snapshot = await monitorTeam(runtime.teamName, cwd, runtime.workerPaneIds);
   if (snapshot) {
@@ -884,7 +903,7 @@ export async function teamCommand(args: string[]): Promise<void> {
     const cfg = loadConfig();
     const defaultAgentType = cfg.team?.ops?.defaultAgentType ?? DEFAULT_TEAM_CLI_AGENT_TYPE;
     const parsed = parseTeamArgs(args, defaultAgentType);
-    await handleTeamStart(parsed, cwd);
+    await handleTeamStart(parsed, cwd, cfg);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     console.log(TEAM_HELP.trim());

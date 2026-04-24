@@ -1004,7 +1004,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     policy: DEFAULT_TEAM_TRANSPORT_POLICY,
     governance: DEFAULT_TEAM_GOVERNANCE,
     worker_count: config.workerCount,
-    max_workers: 20,
+    max_workers: pluginCfg.team?.ops?.maxAgents ?? 20,
     workers: workersInfo,
     created_at: new Date().toISOString(),
     tmux_session: sessionName,
