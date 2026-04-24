@@ -236,6 +236,89 @@ describe('team cli', () => {
     logSpy.mockRestore();
   });
 
+  it('teamCommand start caps active workers from --cwd maxAgents without dropping replicated tasks', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-max-agents-start-'));
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+
+    mocks.spawn.mockReturnValue({
+      pid: 8989,
+      stdin: { write, end },
+      unref,
+    });
+
+    try {
+      const { teamCommand } = await import('../team.js');
+      await teamCommand([
+        'start', '--agent', 'codex', '--count', '4',
+        '--task', 'lint all modules', '--cwd', cwd, '--json',
+      ]);
+
+      const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+        workerCount?: number;
+        agentTypes: string[];
+        tasks: Array<{ subject: string; description: string }>;
+      };
+      expect(stdinPayload.workerCount).toBe(2);
+      expect(stdinPayload.agentTypes).toEqual(['codex', 'codex']);
+      expect(stdinPayload.tasks).toHaveLength(4);
+      expect(stdinPayload.tasks.every((t) => t.description === 'lint all modules')).toBe(true);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      logSpy.mockRestore();
+    }
+  });
+
+  it('teamCommand start caps active workers from --cwd maxAgents without dropping explicit tasks', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-max-agents-explicit-'));
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+
+    mocks.spawn.mockReturnValue({
+      pid: 9090,
+      stdin: { write, end },
+      unref,
+    });
+
+    try {
+      const { teamCommand } = await import('../team.js');
+      await teamCommand([
+        'start', '--agent', 'codex', '--count', '4',
+        '--task', 'task one', '--task', 'task two', '--task', 'task three', '--task', 'task four',
+        '--cwd', cwd, '--json',
+      ]);
+
+      const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+        workerCount?: number;
+        agentTypes: string[];
+        tasks: Array<{ subject: string; description: string }>;
+      };
+      expect(stdinPayload.workerCount).toBe(2);
+      expect(stdinPayload.agentTypes).toEqual(['codex', 'codex']);
+      expect(stdinPayload.tasks.map((task) => task.description)).toEqual([
+        'task one',
+        'task two',
+        'task three',
+        'task four',
+      ]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      logSpy.mockRestore();
+    }
+  });
+
   it('teamCommand start without --json outputs non-JSON', async () => {
     const write = vi.fn();
     const end = vi.fn();
@@ -797,6 +880,42 @@ describe('team cli', () => {
     expect(out.pid).toBe(5151);
 
     logSpy.mockRestore();
+  });
+
+  it('legacy shorthand caps active workers from --cwd maxAgents without dropping backlog', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-max-agents-legacy-'));
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+
+    mocks.spawn.mockReturnValue({
+      pid: 5252,
+      stdin: { write, end },
+      unref,
+    });
+
+    try {
+      const { teamCommand } = await import('../team.js');
+      await teamCommand(['4:codex', 'ship', 'feature', '--cwd', cwd, '--json']);
+
+      const payload = JSON.parse(write.mock.calls[0][0] as string) as {
+        workerCount?: number;
+        agentTypes: string[];
+        tasks: Array<{ subject: string; description: string }>;
+      };
+      expect(payload.workerCount).toBe(2);
+      expect(payload.agentTypes).toEqual(['codex', 'codex']);
+      expect(payload.tasks).toHaveLength(4);
+      expect(payload.tasks.every((task) => task.description === 'ship feature')).toBe(true);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      logSpy.mockRestore();
+    }
   });
 
 

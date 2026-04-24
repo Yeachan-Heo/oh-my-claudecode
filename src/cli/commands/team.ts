@@ -16,6 +16,7 @@ import {
 } from '../../team/api-interop.js';
 import type { CliAgentType } from '../../team/model-contract.js';
 import { loadConfig } from '../../config/loader.js';
+import { resolveTeamFanout } from '../../team/fanout-policy.js';
 
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
@@ -553,37 +554,40 @@ function parseTeamApiArgs(args: string[]): {
 
 async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<void> {
   await assertTeamSpawnAllowed(cwd);
+  const cfg = loadConfig();
 
   // Decompose the task string into subtasks when possible
   const decomposition = splitTaskString(parsed.task);
-  const effectiveWorkerCount = resolveTeamFanoutLimit(
+  const requestedBacklogCount = resolveTeamFanoutLimit(
     parsed.workerCount,
     parsed.agentTypes[0],
     parsed.workerCount,
     decomposition
   );
+  const fanout = resolveTeamFanout(requestedBacklogCount, cfg.team?.ops);
+  const effectiveWorkerCount = fanout.effective;
 
   // Build the task list from decomposition subtasks or fall back to atomic replication
   const tasks: Array<{ subject: string; description: string; owner?: string }> = [];
   if (decomposition.strategy !== 'atomic' && decomposition.subtasks.length > 1) {
-    // Use decomposed subtasks — one per subtask (up to effectiveWorkerCount)
-    const subtasks = decomposition.subtasks.slice(0, effectiveWorkerCount);
+    // Use decomposed subtasks — preserve requested backlog and round-robin over active workers.
+    const subtasks = decomposition.subtasks.slice(0, requestedBacklogCount);
     for (let i = 0; i < subtasks.length; i++) {
       tasks.push({
         subject: subtasks[i].subject,
         description: subtasks[i].description,
-        owner: `worker-${i + 1}`,
+        owner: `worker-${(i % effectiveWorkerCount) + 1}`,
       });
     }
   } else {
-    // Atomic task: replicate across all workers (backward compatible)
-    for (let i = 0; i < effectiveWorkerCount; i++) {
+    // Atomic task: preserve requested backlog and round-robin over active workers.
+    for (let i = 0; i < requestedBacklogCount; i++) {
       tasks.push({
-        subject: effectiveWorkerCount === 1
+        subject: requestedBacklogCount === 1
           ? parsed.task.slice(0, 80)
           : `Worker ${i + 1}: ${parsed.task}`.slice(0, 80),
         description: parsed.task,
-        owner: `worker-${i + 1}`,
+        owner: `worker-${(i % effectiveWorkerCount) + 1}`,
       });
     }
   }
@@ -606,7 +610,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       tasks,
       cwd,
       newWindow: parsed.newWindow,
-      workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
+      workerRoles: parsed.workerSpecs.slice(0, effectiveWorkerCount).map((spec) => spec.role ?? spec.agentType),
       ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
     });
 

@@ -85,6 +85,7 @@ import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
 import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { loadConfig } from '../config/loader.js';
+import { normalizeMaxWorkers } from './fanout-policy.js';
 import { buildResolvedRoutingSnapshot, getRoleRoutingSpec } from './stage-router.js';
 import { routeTaskToRole } from './role-router.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
@@ -185,6 +186,16 @@ interface ShutdownGateCounts {
 }
 
 const MONITOR_SIGNAL_STALE_MS = 30_000;
+
+function loadConfigForCwd(cwd: string): PluginConfig {
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+    return loadConfig();
+  } finally {
+    process.chdir(previousCwd);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helper: sanitize team name
@@ -800,7 +811,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // for the team's lifetime (stickiness per plan AC-10): spawn/scaleUp/restart
   // all read this snapshot and never re-resolve. Config edits mid-lifetime
   // do NOT change routing — user must recreate the team to pick up changes.
-  const pluginCfg: PluginConfig = config.pluginConfig ?? loadConfig();
+  const pluginCfg: PluginConfig = config.pluginConfig ?? loadConfigForCwd(leaderCwd);
+  const maxWorkers = Math.max(normalizeMaxWorkers(pluginCfg.team?.ops?.maxAgents) ?? 20, config.workerCount);
   const resolvedRouting = buildResolvedRoutingSnapshot(pluginCfg);
   const worktreeMode: TeamWorktreeMode = normalizeTeamWorktreeMode(
     process.env.OMC_TEAM_WORKTREE_MODE ?? pluginCfg.team?.ops?.worktreeMode,
@@ -1004,7 +1016,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     policy: DEFAULT_TEAM_TRANSPORT_POLICY,
     governance: DEFAULT_TEAM_GOVERNANCE,
     worker_count: config.workerCount,
-    max_workers: 20,
+    max_workers: maxWorkers,
     workers: workersInfo,
     created_at: new Date().toISOString(),
     tmux_session: sessionName,
@@ -1053,6 +1065,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     permissions_snapshot: permissionsSnapshot,
     tmux_session: sessionName,
     worker_count: teamConfig.worker_count,
+    max_workers: teamConfig.max_workers,
     workers: workersInfo,
     next_task_id: teamConfig.next_task_id,
     created_at: teamConfig.created_at,

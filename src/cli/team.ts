@@ -8,8 +8,10 @@ import { executeTeamApiOperation as executeCanonicalTeamApiOperation, resolveTea
 import { cleanupTeamWorktrees } from '../team/git-worktree.js';
 import { killWorkerPanes, killTeamSession, getWorkerLiveness } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
+import { resolveTeamFanout } from '../team/fanout-policy.js';
 import { monitorTeam, resumeTeam, shutdownTeam } from '../team/runtime.js';
 import { readTeamConfig } from '../team/monitor.js';
+import { loadConfig } from '../config/loader.js';
 import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
 
@@ -365,6 +367,16 @@ function parseJsonInput(inputRaw: string | undefined): Record<string, unknown> {
     throw new Error('Invalid --input JSON payload');
   }
   return parsed;
+}
+
+function loadConfigForCwd(cwd: string): ReturnType<typeof loadConfig> {
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+    return loadConfig();
+  } finally {
+    process.chdir(previousCwd);
+  }
 }
 
 export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResult> {
@@ -948,7 +960,7 @@ function parseStartArgs(args: string[]): StartArgsParsed {
   if (agentValues.length === 0) throw new Error('Missing required --agent');
   if (taskValues.length === 0) throw new Error('Missing required --task');
 
-  const agentTypes = agentValues.length === 1
+  const requestedAgentTypes = agentValues.length === 1
     ? Array.from({ length: count }, () => agentValues[0])
     : [...agentValues];
 
@@ -957,13 +969,15 @@ function parseStartArgs(args: string[]): StartArgsParsed {
   }
 
   const taskDescriptions = taskValues.length === 1
-    ? Array.from({ length: agentTypes.length }, () => taskValues[0])
+    ? Array.from({ length: requestedAgentTypes.length }, () => taskValues[0])
     : [...taskValues];
 
-  if (taskDescriptions.length !== agentTypes.length) {
-    throw new Error(`Task count (${taskDescriptions.length}) must match worker count (${agentTypes.length}).`);
+  if (taskDescriptions.length !== requestedAgentTypes.length) {
+    throw new Error(`Task count (${taskDescriptions.length}) must match worker count (${requestedAgentTypes.length}).`);
   }
 
+  const fanout = resolveTeamFanout(requestedAgentTypes.length, loadConfigForCwd(cwd).team?.ops);
+  const agentTypes = requestedAgentTypes.slice(0, fanout.effective);
   const resolvedTeamName = (teamName && teamName.trim()) ? teamName.trim() : autoTeamName(taskDescriptions[0]);
   const tasks: TeamTaskInput[] = taskDescriptions.map((description, index) => ({
     subject: `${subjectPrefix} ${index + 1}`,
@@ -973,6 +987,7 @@ function parseStartArgs(args: string[]): StartArgsParsed {
   return {
     input: {
       teamName: resolvedTeamName,
+      workerCount: fanout.effective,
       agentTypes,
       tasks,
       cwd,
@@ -1328,6 +1343,7 @@ export async function teamCommand(argv: string[]): Promise<void> {
   if (!SUBCOMMANDS.has(command)) {
     const legacy = parseLegacyStartAlias(argv);
     if (legacy) {
+      const fanout = resolveTeamFanout(legacy.workerCount, loadConfigForCwd(legacy.cwd).team?.ops);
       const tasks = Array.from({ length: legacy.workerCount }, (_, idx) => ({
         subject: legacy.ralph ? `Ralph Task ${idx + 1}` : `Task ${idx + 1}`,
         description: legacy.task,
@@ -1335,8 +1351,8 @@ export async function teamCommand(argv: string[]): Promise<void> {
 
       const result = await startTeamJob({
         teamName: legacy.teamName,
-        workerCount: legacy.workerCount,
-        agentTypes: Array.from({ length: legacy.workerCount }, () => legacy.agentType),
+        workerCount: fanout.effective,
+        agentTypes: Array.from({ length: fanout.effective }, () => legacy.agentType),
         tasks,
         cwd: legacy.cwd,
         ...(legacy.newWindow ? { newWindow: true } : {}),

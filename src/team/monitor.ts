@@ -29,6 +29,7 @@ import type {
 import type { TeamPhase } from './phase-controller.js';
 import { normalizeTeamManifest } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
+import { normalizeMaxWorkers } from './fanout-policy.js';
 
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
@@ -66,7 +67,7 @@ function configFromManifest(manifest: TeamManifestV2): TeamConfig {
     governance: manifest.governance,
     worker_launch_mode: manifest.policy.worker_launch_mode,
     worker_count: manifest.worker_count,
-    max_workers: 20,
+    max_workers: normalizeMaxWorkers(manifest.max_workers) ?? 20,
     workers: manifest.workers,
     created_at: manifest.created_at,
     tmux_session: manifest.tmux_session,
@@ -97,7 +98,9 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
     worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config.max_workers ?? 0, 20),
+    max_workers: normalizeMaxWorkers(config.max_workers)
+      ?? normalizeMaxWorkers(manifest.max_workers)
+      ?? 20,
   });
 }
 

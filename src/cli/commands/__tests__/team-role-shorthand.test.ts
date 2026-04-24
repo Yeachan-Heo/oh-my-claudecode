@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const runtimeV2Mocks = vi.hoisted(() => ({
   isRuntimeV2Enabled: vi.fn(() => true),
@@ -29,6 +32,7 @@ vi.mock('../../../agents/utils.js', () => ({
 describe('teamCommand role-only shorthand', () => {
   const originalCwd = process.cwd();
   let logSpy: ReturnType<typeof vi.spyOn>;
+  let tempDir: string | undefined;
 
   beforeEach(() => {
     runtimeV2Mocks.isRuntimeV2Enabled.mockReturnValue(true);
@@ -47,6 +51,8 @@ describe('teamCommand role-only shorthand', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    tempDir = undefined;
     logSpy.mockRestore();
     vi.clearAllMocks();
   });
@@ -66,6 +72,54 @@ describe('teamCommand role-only shorthand', () => {
       tasks: [
         { subject: 'Worker 1: fix the bug', description: 'fix the bug', owner: 'worker-1' },
         { subject: 'Worker 2: fix the bug', description: 'fix the bug', owner: 'worker-2' },
+      ],
+    }));
+  });
+
+  it('caps active workers from existing team.ops.maxAgents without dropping atomic backlog', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-team-max-agents-command-'));
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(join(tempDir, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+    process.chdir(tempDir);
+
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['4:codex', 'review the system']);
+
+    expect(runtimeV2Mocks.startTeamV2).toHaveBeenCalledWith(expect.objectContaining({
+      workerCount: 2,
+      agentTypes: ['codex', 'codex'],
+      tasks: [
+        { subject: 'Worker 1: review the system', description: 'review the system', owner: 'worker-1' },
+        { subject: 'Worker 2: review the system', description: 'review the system', owner: 'worker-2' },
+        { subject: 'Worker 3: review the system', description: 'review the system', owner: 'worker-1' },
+        { subject: 'Worker 4: review the system', description: 'review the system', owner: 'worker-2' },
+      ],
+    }));
+  });
+
+  it('caps active workers from existing team.ops.maxAgents without dropping decomposed subtasks', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-team-max-agents-decomposed-'));
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(join(tempDir, '.claude', 'omc.jsonc'), JSON.stringify({
+      team: { ops: { maxAgents: 2 } },
+    }));
+    process.chdir(tempDir);
+
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['4:codex', 'fix auth and fix billing and fix search and fix docs']);
+
+    expect(runtimeV2Mocks.startTeamV2).toHaveBeenCalledWith(expect.objectContaining({
+      workerCount: 2,
+      agentTypes: ['codex', 'codex'],
+      tasks: [
+        { subject: 'fix auth', description: 'fix auth', owner: 'worker-1' },
+        { subject: 'fix billing', description: 'fix billing', owner: 'worker-2' },
+        { subject: 'fix search', description: 'fix search', owner: 'worker-1' },
+        { subject: 'fix docs', description: 'fix docs', owner: 'worker-2' },
       ],
     }));
   });
