@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import type { RateLimits, StatuslineStdin } from './types.js';
 
@@ -16,8 +16,25 @@ const TRANSIENT_CONTEXT_PERCENT_TOLERANCE = 3;
 // Stdin Cache (for --watch mode)
 // ============================================================================
 
+/**
+ * Return the current session id, if present in the environment.
+ *
+ * Claude Code populates `CLAUDE_SESSION_ID` / `CLAUDECODE_SESSION_ID` for
+ * tools it invokes. The cache path uses this to keep concurrent sessions
+ * from clobbering each other's last-stdin snapshots.
+ */
+function getSessionId(): string | null {
+  const id = process.env.CLAUDE_SESSION_ID ?? process.env.CLAUDECODE_SESSION_ID;
+  return id && id.length > 0 ? id : null;
+}
+
 function getStdinCachePath(): string {
   const root = getWorktreeRoot() || process.cwd();
+  const sessionId = getSessionId();
+  if (sessionId) {
+    return join(root, '.omc', 'state', 'sessions', sessionId, 'hud-stdin-cache.json');
+  }
+  // Fallback when no session id is available (e.g. bare CLI invocations).
   return join(root, '.omc', 'state', 'hud-stdin-cache.json');
 }
 
@@ -27,12 +44,12 @@ function getStdinCachePath(): string {
  */
 export function writeStdinCache(stdin: StatuslineStdin): void {
   try {
-    const root = getWorktreeRoot() || process.cwd();
-    const cacheDir = join(root, '.omc', 'state');
+    const cachePath = getStdinCachePath();
+    const cacheDir = dirname(cachePath);
     if (!existsSync(cacheDir)) {
       mkdirSync(cacheDir, { recursive: true });
     }
-    writeFileSync(getStdinCachePath(), JSON.stringify(stdin));
+    writeFileSync(cachePath, JSON.stringify(stdin));
   } catch {
     // Best-effort; ignore failures
   }

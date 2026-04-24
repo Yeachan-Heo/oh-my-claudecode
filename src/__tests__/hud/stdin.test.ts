@@ -1,7 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { execSync } from 'child_process';
 
 import type { StatuslineStdin } from '../../hud/types.js';
-import { getContextPercent, getModelName, getRateLimitsFromStdin, stabilizeContextPercent } from '../../hud/stdin.js';
+import {
+  getContextPercent,
+  getModelName,
+  getRateLimitsFromStdin,
+  readStdinCache,
+  stabilizeContextPercent,
+  writeStdinCache,
+} from '../../hud/stdin.js';
 
 function makeStdin(overrides: Partial<StatuslineStdin> = {}): StatuslineStdin {
   return {
@@ -220,5 +231,101 @@ describe('HUD stdin rate limits', () => {
       fiveHourResetsAt: null,
       weeklyResetsAt: null,
     });
+  });
+});
+
+describe('HUD stdin cache path is session-scoped', () => {
+  let tmpRoot: string;
+  let originalCwd: string;
+  const envKeys = ['CLAUDE_SESSION_ID', 'CLAUDECODE_SESSION_ID'] as const;
+  const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'omc-hud-stdin-cache-'));
+    // Make a real git repo so getWorktreeRoot() (which shells out to git
+    // rev-parse) deterministically returns tmpRoot instead of leaking into
+    // the surrounding workspace.
+    execSync('git init --quiet', { cwd: tmpRoot });
+    originalCwd = process.cwd();
+    process.chdir(tmpRoot);
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('writes to a session-scoped path when CLAUDE_SESSION_ID is set', () => {
+    process.env.CLAUDE_SESSION_ID = 'test-session-aaa';
+    const stdin = makeStdin({ cwd: tmpRoot });
+
+    writeStdinCache(stdin);
+
+    const expected = join(tmpRoot, '.omc', 'state', 'sessions', 'test-session-aaa', 'hud-stdin-cache.json');
+    expect(existsSync(expected)).toBe(true);
+    const loaded = JSON.parse(readFileSync(expected, 'utf-8')) as StatuslineStdin;
+    expect(loaded.cwd).toBe(tmpRoot);
+  });
+
+  it('falls back to the legacy flat path when no session env var is set', () => {
+    const stdin = makeStdin({ cwd: tmpRoot });
+
+    writeStdinCache(stdin);
+
+    const expected = join(tmpRoot, '.omc', 'state', 'hud-stdin-cache.json');
+    expect(existsSync(expected)).toBe(true);
+    const sessionScoped = join(tmpRoot, '.omc', 'state', 'sessions');
+    expect(existsSync(sessionScoped)).toBe(false);
+  });
+
+  it('accepts CLAUDECODE_SESSION_ID as the session id source', () => {
+    process.env.CLAUDECODE_SESSION_ID = 'test-session-bbb';
+    const stdin = makeStdin({ cwd: tmpRoot });
+
+    writeStdinCache(stdin);
+
+    const expected = join(tmpRoot, '.omc', 'state', 'sessions', 'test-session-bbb', 'hud-stdin-cache.json');
+    expect(existsSync(expected)).toBe(true);
+  });
+
+  it('prevents two concurrent sessions from clobbering each other', () => {
+    process.env.CLAUDE_SESSION_ID = 'session-alpha';
+    const alpha = makeStdin({ cwd: tmpRoot, transcript_path: `${tmpRoot}/alpha.jsonl` });
+    writeStdinCache(alpha);
+
+    process.env.CLAUDE_SESSION_ID = 'session-beta';
+    const beta = makeStdin({ cwd: tmpRoot, transcript_path: `${tmpRoot}/beta.jsonl` });
+    writeStdinCache(beta);
+
+    // Reading back from each session must return its own snapshot.
+    process.env.CLAUDE_SESSION_ID = 'session-alpha';
+    expect(readStdinCache()?.transcript_path).toBe(`${tmpRoot}/alpha.jsonl`);
+
+    process.env.CLAUDE_SESSION_ID = 'session-beta';
+    expect(readStdinCache()?.transcript_path).toBe(`${tmpRoot}/beta.jsonl`);
+  });
+
+  it('readStdinCache ignores a legacy flat file when a session id is set', () => {
+    const stateDir = join(tmpRoot, '.omc', 'state');
+    execSync(`mkdir -p "${stateDir}"`);
+    // Simulate a stale legacy cache written by an older build.
+    const legacy = makeStdin({ cwd: '/legacy/cwd' });
+    writeFileSync(join(stateDir, 'hud-stdin-cache.json'), JSON.stringify(legacy));
+
+    process.env.CLAUDE_SESSION_ID = 'fresh-session';
+    // Without a session file yet, read should miss rather than return the
+    // legacy (cross-session) value.
+    expect(readStdinCache()).toBeNull();
   });
 });
