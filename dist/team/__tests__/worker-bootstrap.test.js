@@ -59,11 +59,11 @@ describe('worker-bootstrap', () => {
         });
         it('supports state-root placeholders for worktree-backed trigger paths', () => {
             expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
-                .toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
+                .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/workers/worker-1/inbox.md');
             expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
                 .toContain('work now');
             expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
-                .toContain('$OMC_TEAM_STATE_ROOT/mailbox/worker-1.json');
+                .toContain('$OMC_TEAM_STATE_ROOT/team/test-team/mailbox/worker-1.json');
             expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
                 .toContain('report progress');
         });

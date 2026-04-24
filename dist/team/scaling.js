@@ -23,6 +23,9 @@ import { TeamPaths, absPath } from './state-paths.js';
 import { writeWorkerOverlay } from './worker-bootstrap.js';
 import { ensureWorkerWorktree, installWorktreeRootAgents, prepareWorkerWorktreeForRemoval, removeWorkerWorktree, restoreWorktreeRootAgents, } from './git-worktree.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
+function sharedStateRoot(cwd) {
+    return `${cwd}/.omc/state`;
+}
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 export function isScalingEnabled(env = process.env) {
@@ -71,7 +74,7 @@ export async function scaleUp(teamName, count, agentType, tasks, cwd, env = proc
                 error: `Cannot add ${count} workers: would exceed max_workers (${currentCount} + ${count} > ${maxWorkers})`,
             };
         }
-        const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state/team/${sanitized}`;
+        const teamStateRoot = config.team_state_root ?? sharedStateRoot(leaderCwd);
         const worktreeMode = config.worktree_mode ?? 'disabled';
         // Resolve the monotonic worker index counter
         let nextIndex = config.next_worker_index ?? (currentCount + 1);

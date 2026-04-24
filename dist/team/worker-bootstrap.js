@@ -7,9 +7,10 @@ function buildInstructionPath(...parts) {
     return join(...parts).replaceAll('\\', '/');
 }
 function buildTeamStateInstructionPath(teamName, instructionStateRoot, ...teamRelativeParts) {
-    const baseParts = instructionStateRoot === DEFAULT_INSTRUCTION_STATE_ROOT
-        ? [instructionStateRoot, 'team', teamName]
-        : [instructionStateRoot];
+    const rootIncludesTeam = instructionStateRoot.endsWith(`/team/${teamName}`);
+    const baseParts = rootIncludesTeam
+        ? [instructionStateRoot]
+        : [instructionStateRoot, 'team', teamName];
     return buildInstructionPath(...baseParts, ...teamRelativeParts);
 }
 export function generateTriggerMessage(teamName, workerName, teamStateRoot = DEFAULT_INSTRUCTION_STATE_ROOT) {
@@ -144,8 +145,8 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
 - Release claim (rollback): \`${releaseClaimCommand}\`
 
 ## Canonical Team State Root
-- Resolve the team state root in this order: \`OMC_TEAM_STATE_ROOT\` env -> worker identity \`team_state_root\` -> config/manifest \`team_state_root\` -> ${params.cwd}/.omc/state/team/${teamName}.
-- \`OMC_TEAM_STATE_ROOT\` is the team-specific root (\`.../.omc/state/team/${teamName}\`). When it is set, append worker/mailbox paths directly below it; do not append another \`team/${teamName}\` segment.
+- Resolve the team state root in this order: \`OMC_TEAM_STATE_ROOT\` env -> worker identity \`team_state_root\` -> config/manifest \`team_state_root\` -> ${params.cwd}/.omc/state.
+- \`OMC_TEAM_STATE_ROOT\` is the shared state root (\`.../.omc/state\`). Worker-facing trigger paths append \`team/${teamName}\` below it so leader dispatch and worker instructions use the same canonical mailbox/task paths.
 - Worktree-backed workers MUST use the canonical leader-owned state root for inbox, mailbox, task lifecycle, status, heartbeat, and shutdown files; do not use a local worktree \`.omc/state\` when \`OMC_TEAM_STATE_ROOT\` is set.
 
 ## Communication Protocol

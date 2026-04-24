@@ -25,6 +25,9 @@ import { allocateTasksToWorkers } from './allocation-policy.js';
 import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnapshot, writeMonitorSnapshot, writeShutdownRequest, readShutdownAck, writeWorkerInbox, listTasksFromFiles, saveTeamConfig, cleanupTeamState, } from './monitor.js';
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
+function sharedStateRoot(cwd) {
+    return join(cwd, '.omc', 'state');
+}
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { buildWorkerArgv, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, } from './model-contract.js';
@@ -302,7 +305,7 @@ async function spawnV2Worker(opts) {
     // Build env and launch command
     const envVars = {
         ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
-        OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
+        OMC_TEAM_STATE_ROOT: sharedStateRoot(opts.cwd),
         OMC_TEAM_LEADER_CWD: opts.cwd,
         ...(opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {}),
         ...(opts.workerCwd ? { OMC_TEAM_WORKER_CWD: opts.workerCwd } : {}),
@@ -600,7 +603,7 @@ export async function startTeamV2(config) {
                 ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude'),
             assigned_tasks: [],
             working_dir: worktree?.path ?? leaderCwd,
-            team_state_root: teamStateRoot(leaderCwd, sanitized),
+            team_state_root: sharedStateRoot(leaderCwd),
             ...(worktree ? {
                 worktree_repo_root: leaderCwd,
                 worktree_path: worktree.path,
@@ -626,7 +629,7 @@ export async function startTeamV2(config) {
         tmux_window_owned: ownsWindow,
         next_task_id: config.tasks.length + 1,
         leader_cwd: leaderCwd,
-        team_state_root: teamStateRoot(leaderCwd, sanitized),
+        team_state_root: sharedStateRoot(leaderCwd),
         leader_pane_id: leaderPaneId,
         hud_pane_id: null,
         resize_hook_name: null,

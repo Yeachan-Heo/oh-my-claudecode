@@ -386,11 +386,15 @@ function recordMetadata(repoRoot: string, teamName: string, info: WorktreeInfo):
   });
 }
 
+function forgetMetadataUnlocked(repoRoot: string, teamName: string, workerName: string): void {
+  const existing = readMetadata(repoRoot, teamName).filter(entry => entry.workerName !== workerName);
+  writeMetadata(repoRoot, teamName, existing);
+}
+
 function forgetMetadata(repoRoot: string, teamName: string, workerName: string): void {
   const metaLockPath = getMetadataPath(repoRoot, teamName) + '.lock';
   withFileLockSync(metaLockPath, () => {
-    const existing = readMetadata(repoRoot, teamName).filter(entry => entry.workerName !== workerName);
-    writeMetadata(repoRoot, teamName, existing);
+    forgetMetadataUnlocked(repoRoot, teamName, workerName);
   });
 }
 
@@ -592,27 +596,30 @@ export function removeWorkerWorktree(
 ): void {
   const wtPath = getWorktreePath(repoRoot, teamName, workerName);
   const branch = getBranchName(teamName, workerName);
+  const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
 
-  prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
+  withFileLockSync(metaLockPath, () => {
+    prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
 
-  try {
-    execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
-  } catch { /* may not exist */ }
+    try {
+      execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
+    } catch { /* may not exist */ }
 
-  try {
-    execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
-  } catch { /* ignore */ }
+    try {
+      execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
+    } catch { /* ignore */ }
 
-  try {
-    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
-  } catch { /* branch may not exist */ }
+    try {
+      execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
+    } catch { /* branch may not exist */ }
 
-  // If a stale plain directory remains and it is not a registered worktree, remove it.
-  if (existsSync(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
-    rmSync(wtPath, { recursive: true, force: true });
-  }
+    // If a stale plain directory remains and it is not a registered worktree, remove it.
+    if (existsSync(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
+      rmSync(wtPath, { recursive: true, force: true });
+    }
 
-  forgetMetadata(repoRoot, teamName, workerName);
+    forgetMetadataUnlocked(repoRoot, teamName, workerName);
+  });
 }
 
 /** List all worktrees for a team. */

@@ -182,12 +182,9 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     agentType: 'codex',
     binary: 'codex',
     installInstructions: 'Install Codex CLI: npm install -g @openai/codex',
-    // Team workers must be persistent interactive panes. Do not use `codex exec`
-    // or positional prompt mode here; runtime dispatch writes inbox.md and nudges
-    // the live Codex TUI with `codex` as the worker process.
-    supportsPromptMode: false,
+    supportsPromptMode: true,
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
-      const args = ['--dangerously-bypass-approvals-and-sandbox'];
+      const args = ['exec', '--dangerously-bypass-approvals-and-sandbox'];
       if (model) args.push('--model', model);
       return [...args, ...extraFlags];
     },
@@ -215,7 +212,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     binary: 'gemini',
     installInstructions: 'Install Gemini CLI: npm install -g @google/gemini-cli',
     supportsPromptMode: true,
-    promptModeFlag: '-i',
+    promptModeFlag: '-p',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--approval-mode', 'yolo'];
       if (model) args.push('--model', model);

@@ -290,11 +290,14 @@ function recordMetadata(repoRoot, teamName, info) {
         writeMetadata(repoRoot, teamName, [...existing, info]);
     });
 }
+function forgetMetadataUnlocked(repoRoot, teamName, workerName) {
+    const existing = readMetadata(repoRoot, teamName).filter(entry => entry.workerName !== workerName);
+    writeMetadata(repoRoot, teamName, existing);
+}
 function forgetMetadata(repoRoot, teamName, workerName) {
     const metaLockPath = getMetadataPath(repoRoot, teamName) + '.lock';
     withFileLockSync(metaLockPath, () => {
-        const existing = readMetadata(repoRoot, teamName).filter(entry => entry.workerName !== workerName);
-        writeMetadata(repoRoot, teamName, existing);
+        forgetMetadataUnlocked(repoRoot, teamName, workerName);
     });
 }
 function assertCompatibleExistingWorktree(repoRoot, wtPath, expectedBranch, mode) {
@@ -453,24 +456,27 @@ export function prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, 
 export function removeWorkerWorktree(teamName, workerName, repoRoot) {
     const wtPath = getWorktreePath(repoRoot, teamName, workerName);
     const branch = getBranchName(teamName, workerName);
-    prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
-    try {
-        execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
-    }
-    catch { /* may not exist */ }
-    try {
-        execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
-    }
-    catch { /* ignore */ }
-    try {
-        execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
-    }
-    catch { /* branch may not exist */ }
-    // If a stale plain directory remains and it is not a registered worktree, remove it.
-    if (existsSync(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
-        rmSync(wtPath, { recursive: true, force: true });
-    }
-    forgetMetadata(repoRoot, teamName, workerName);
+    const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
+    withFileLockSync(metaLockPath, () => {
+        prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
+        try {
+            execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
+        }
+        catch { /* may not exist */ }
+        try {
+            execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
+        }
+        catch { /* ignore */ }
+        try {
+            execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
+        }
+        catch { /* branch may not exist */ }
+        // If a stale plain directory remains and it is not a registered worktree, remove it.
+        if (existsSync(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
+            rmSync(wtPath, { recursive: true, force: true });
+        }
+        forgetMetadataUnlocked(repoRoot, teamName, workerName);
+    });
 }
 /** List all worktrees for a team. */
 export function listTeamWorktrees(teamName, repoRoot) {

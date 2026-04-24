@@ -146,7 +146,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(mocks.spawnWorkerInPane).toHaveBeenCalledWith('dispatch-session', '%2', expect.objectContaining({
             envVars: expect.objectContaining({
                 OMC_TEAM_WORKER: 'dispatch-team/worker-1',
-                OMC_TEAM_STATE_ROOT: join(cwd, '.omc', 'state', 'team', 'dispatch-team'),
+                OMC_TEAM_STATE_ROOT: join(cwd, '.omc', 'state'),
                 OMC_TEAM_LEADER_CWD: cwd,
             }),
         }));
@@ -188,15 +188,13 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(manifest.workspace_mode).toBe('worktree');
         expect(manifest.worktree_mode).toBe('named');
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-        expect(requests[0]?.trigger_message).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
-        expect(requests[0]?.trigger_message).not.toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team');
+        expect(requests[0]?.trigger_message).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/workers/worker-1/inbox.md');
         expect(runtime.config.team_state_root).toBeDefined();
         const teamStateRoot = runtime.config.team_state_root;
         expect(requests[0]?.trigger_message.replace('$OMC_TEAM_STATE_ROOT', teamStateRoot))
             .toContain(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md'));
         const overlay = await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'AGENTS.md'), 'utf-8');
-        expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/status.json');
-        expect(overlay).not.toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team');
+        expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/workers/worker-1/status.json');
     });
     it('uses owner-aware startup allocation when task owners are provided', async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-owner-startup-'));

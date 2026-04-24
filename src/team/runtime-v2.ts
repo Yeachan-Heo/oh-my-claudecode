@@ -43,6 +43,10 @@ import {
   DEFAULT_TEAM_TRANSPORT_POLICY,
   getConfigGovernance,
 } from './governance.js';
+
+function sharedStateRoot(cwd: string): string {
+  return join(cwd, '.omc', 'state');
+}
 import { inferPhase } from './phase-controller.js';
 import type {
   TeamConfig,
@@ -584,7 +588,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   // Build env and launch command
   const envVars = {
     ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
-    OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
+    OMC_TEAM_STATE_ROOT: sharedStateRoot(opts.cwd),
     OMC_TEAM_LEADER_CWD: opts.cwd,
     ...(opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {}),
     ...(opts.workerCwd ? { OMC_TEAM_WORKER_CWD: opts.workerCwd } : {}),
@@ -916,7 +920,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
         ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
       assigned_tasks: [] as string[],
       working_dir: worktree?.path ?? leaderCwd,
-      team_state_root: teamStateRoot(leaderCwd, sanitized),
+      team_state_root: sharedStateRoot(leaderCwd),
       ...(worktree ? {
         worktree_repo_root: leaderCwd,
         worktree_path: worktree.path,
@@ -943,7 +947,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     tmux_window_owned: ownsWindow,
     next_task_id: config.tasks.length + 1,
     leader_cwd: leaderCwd,
-    team_state_root: teamStateRoot(leaderCwd, sanitized),
+    team_state_root: sharedStateRoot(leaderCwd),
     leader_pane_id: leaderPaneId,
     hud_pane_id: null,
     resize_hook_name: null,
