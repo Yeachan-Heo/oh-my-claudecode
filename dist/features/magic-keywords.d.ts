@@ -12,7 +12,7 @@ export declare const builtInMagicKeywords: MagicKeyword[];
 /**
  * Create a magic keyword processor with custom triggers
  */
-export declare function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords']): (prompt: string, agentName?: string) => string;
+export declare function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords']): (prompt: string, agentName?: string, modelId?: string) => string;
 /**
  * Check if a prompt contains any magic keywords
  */

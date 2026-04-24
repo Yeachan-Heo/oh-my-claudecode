@@ -136,6 +136,13 @@ describe('Project Memory Learner', () => {
             expect(updated?.customNotes).toHaveLength(20);
             expect(updated?.customNotes[19].content).toContain('Node.js');
         });
+        it('should ignore non-string Bash tool output without crashing', async () => {
+            const memory = createBasicMemory();
+            await saveProjectMemory(tempDir, memory);
+            await expect(learnFromToolOutput('Bash', { command: 'node --version' }, { stdout: 'Node.js v20.10.0' }, tempDir)).resolves.not.toThrow();
+            const updated = await loadProjectMemory(tempDir);
+            expect(updated?.customNotes).toHaveLength(0);
+        });
         it('should do nothing if memory file does not exist', async () => {
             await expect(learnFromToolOutput('Bash', { command: 'pnpm build' }, '', tempDir)).resolves.not.toThrow();
         });

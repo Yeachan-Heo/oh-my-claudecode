@@ -55,7 +55,7 @@ export function getDefaultShell() {
     if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
         return process.env.COMSPEC || 'cmd.exe';
     }
-    const shell = process.env.SHELL || '/bin/bash';
+    const shell = process.env.SHELL || '/bin/sh';
     // Validate that the shell supports our launch script syntax.
     // Unsupported shells (tcsh, csh, etc.) fall back to /bin/sh.
     const name = basename(shell.replace(/\\/g, '/')).replace(/\.(exe|cmd|bat)$/i, '');

@@ -101,6 +101,29 @@ describe('processHook - Routing Matrix', () => {
             expect(result.message).toBeDefined();
             expect(typeof result.message).toBe('string');
         });
+        it('routes ultrawork planner context ahead of model routing', async () => {
+            const result = await processHook('keyword-detector', {
+                sessionId: 'test-session',
+                prompt: '/ultrawork fix the complex multi-step regression in src/hooks/bridge.ts function processKeywordDetector by preserving keyword routing, state activation behavior, verification messaging, prompt enhancement flow, bridge wiring, runtime output guarantees, prompt-context propagation, and related test coverage, installer constants, generated bridge artifacts, keyword false-positive behavior, session isolation assumptions, and developer-facing documentation without changing unrelated orchestration behavior elsewhere in this worktree',
+                directory: '/tmp/test-routing',
+                agent_name: 'planner',
+                model: 'gpt-5.4',
+            });
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('CRITICAL: YOU ARE A PLANNER, NOT AN IMPLEMENTER');
+            expect(result.message).toContain('Parallel Execution Waves');
+        });
+        it('routes ultrawork gpt models to the GPT-oriented protocol', async () => {
+            const result = await processHook('keyword-detector', {
+                sessionId: 'test-session',
+                prompt: '/ultrawork fix the complex multi-step regression in src/hooks/bridge.ts function processKeywordDetector by preserving keyword routing, state activation behavior, verification messaging, prompt enhancement flow, bridge wiring, runtime output guarantees, prompt-context propagation, and related test coverage, installer constants, generated bridge artifacts, keyword false-positive behavior, session isolation assumptions, and developer-facing documentation without changing unrelated orchestration behavior elsewhere in this worktree',
+                directory: '/tmp/test-routing',
+                model: 'gpt-5.4',
+            });
+            expect(result.continue).toBe(true);
+            expect(result.message).toContain('<output_verbosity_spec>');
+            expect(result.message).toContain('DECISION FRAMEWORK: Self vs Delegate');
+        });
         it('should route code review keyword to the review mode message', async () => {
             const input = {
                 sessionId: 'test-session',

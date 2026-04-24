@@ -57,6 +57,26 @@ describe('Tier-0 contract docs consistency', () => {
         expect(localPluginDoc).toContain('/setup');
         expect(localPluginDoc).toContain('git worktrees');
     });
+    it('uses the published /docs/ path instead of the removed docs.html path in README links', () => {
+        const readmes = [
+            'README.md',
+            'README.de.md',
+            'README.es.md',
+            'README.fr.md',
+            'README.it.md',
+            'README.ja.md',
+            'README.ko.md',
+            'README.pt.md',
+            'README.ru.md',
+            'README.tr.md',
+            'README.vi.md',
+            'README.zh.md',
+        ].map((file) => readProjectFile(file));
+        for (const content of readmes) {
+            expect(content).not.toContain('https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html');
+            expect(content).toContain('https://yeachan-heo.github.io/oh-my-claudecode-website/docs/#');
+        }
+    });
     it('keeps root AGENTS.md aligned with OMC branding and state paths', () => {
         const agentsDoc = readProjectFile('AGENTS.md');
         expect(agentsDoc).toContain('# oh-my-claudecode - Intelligent Multi-Agent Orchestration');

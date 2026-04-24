@@ -226,10 +226,10 @@ describe('wrapWithLoginShell', () => {
         expect(result).toContain('claude --print');
         expect(result).toMatch(/^exec /);
     });
-    it('defaults to /bin/bash when $SHELL is not set', () => {
+    it('defaults to /bin/sh when $SHELL is not set', () => {
         vi.stubEnv('SHELL', '');
         const result = wrapWithLoginShell('codex');
-        expect(result).toContain('/bin/bash');
+        expect(result).toContain('/bin/sh');
         expect(result).toContain('-lc');
     });
     it('properly quotes the inner command containing single quotes', () => {

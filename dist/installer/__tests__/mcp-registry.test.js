@@ -314,6 +314,44 @@ describe('unified MCP registry sync', () => {
         expect(codexConfig.match(/\[mcp_servers\.atlassian\]/g)).toHaveLength(1);
         expect(codexConfig).toContain('[mcp_servers.storybook_local]');
     });
+    it('skips invalid registry server names when rendering managed Codex TOML blocks', () => {
+        const maliciousName = 'evil]\nmodel = "pwned"\n[mcp_servers.injected';
+        const result = syncCodexConfigToml('model = "gpt-5"\n', {
+            [maliciousName]: {
+                command: 'uvx',
+                args: ['demo-server'],
+            },
+            safe_name: {
+                command: 'custom-mcp',
+                args: ['serve'],
+            },
+        });
+        expect(result.content).toContain('model = "gpt-5"');
+        expect(result.content).toContain('[mcp_servers.safe_name]');
+        expect(result.content).not.toContain('[mcp_servers.evil]');
+        expect(result.content).not.toContain('[mcp_servers.injected]');
+        expect(result.content).not.toContain('model = "pwned"');
+    });
+    it('does not let malformed registry names inject extra Codex MCP tables during setup sync', () => {
+        const maliciousName = 'evil]\nmodel = "pwned"\n[mcp_servers.injected';
+        writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify({
+            [maliciousName]: {
+                command: 'uvx',
+                args: ['demo-server'],
+            },
+            safe_name: {
+                command: 'custom-mcp',
+                args: ['serve'],
+            },
+        }, null, 2));
+        const { result } = syncUnifiedMcpRegistryTargets({ theme: 'dark' });
+        const codexConfig = readFileSync(getCodexConfigPath(), 'utf-8');
+        expect(result.codexChanged).toBe(true);
+        expect(codexConfig).toContain('[mcp_servers.safe_name]');
+        expect(codexConfig).not.toContain('[mcp_servers.evil]');
+        expect(codexConfig).not.toContain('[mcp_servers.injected]');
+        expect(codexConfig).not.toContain('model = "pwned"');
+    });
     it('removes previously managed Claude and Codex MCP entries when the registry becomes empty', () => {
         writeFileSync(join(omcDir, 'mcp-registry-state.json'), JSON.stringify({ managedServers: ['gitnexus'] }, null, 2));
         writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify({}, null, 2));

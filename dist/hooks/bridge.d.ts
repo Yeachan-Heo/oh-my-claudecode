@@ -23,6 +23,10 @@ export declare function requiredKeysForHook(hookType: string): string[];
 export interface HookInput {
     /** Session identifier */
     sessionId?: string;
+    /** Optional agent name context for routing prompt variants */
+    agentName?: string;
+    /** Optional model identifier context for routing prompt variants */
+    model?: string;
     /** User prompt text */
     prompt?: string;
     /** Message content (alternative to prompt) */

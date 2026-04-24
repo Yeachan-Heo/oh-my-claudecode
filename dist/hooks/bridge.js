@@ -32,7 +32,8 @@ import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../conf
 import { formatAutopilotRuntimeInsight } from "./autopilot/runtime-insight.js";
 import { writeSkillActiveState, isCanonicalWorkflowSkill, upsertWorkflowSkillSlot, markWorkflowSkillCompleted, pruneExpiredWorkflowSkillTombstones, readSkillActiveStateNormalized, writeSkillActiveStateCopies, } from "./skill-state/index.js";
 import { parseExplicitWorkflowSlashInvocation } from "./keyword-detector/index.js";
-import { ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
+import { ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
+import { getUltraworkMessage } from "./keyword-detector/ultrawork/index.js";
 // Agent dashboard is used in pre/post-tool-use hot path
 import { getAgentDashboard } from "./subagent-tracker/index.js";
 // Session replay recordFileTouch is used in pre-tool-use hot path
@@ -138,6 +139,15 @@ function getExtraField(input, key) {
 function getHookToolUseId(input) {
     const value = getExtraField(input, "tool_use_id");
     return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+function getHookContextString(input, ...keys) {
+    for (const key of keys) {
+        const value = getExtraField(input, key);
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+    return undefined;
 }
 function extractAsyncAgentId(toolOutput) {
     if (typeof toolOutput !== "string") {
@@ -932,7 +942,7 @@ async function processKeywordDetector(input) {
                 if (activated) {
                     markModeAwaitingConfirmation(directory, sessionId, 'ultrawork');
                 }
-                messages.push(ULTRAWORK_MESSAGE);
+                messages.push(getUltraworkMessage(getHookContextString(input, "agentName", "agent_name"), getHookContextString(input, "model", "modelId", "model_id")));
                 break;
             }
             case "ultrathink":

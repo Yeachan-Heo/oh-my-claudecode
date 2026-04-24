@@ -9,11 +9,6 @@ function commandExists(command, env) {
     });
     return result.status === 0;
 }
-function isClaudeSession(env) {
-    return Boolean(env.CLAUDECODE?.trim()
-        || env.CLAUDE_SESSION_ID?.trim()
-        || env.CLAUDECODE_SESSION_ID?.trim());
-}
 export function resolveOmcCliPrefix(options = {}) {
     const env = options.env ?? process.env;
     const omcAvailable = options.omcAvailable ?? commandExists(OMC_CLI_BINARY, env);
@@ -27,13 +22,7 @@ export function resolveOmcCliPrefix(options = {}) {
     return OMC_CLI_BINARY;
 }
 function resolveInvocationPrefix(commandSuffix, options = {}) {
-    const env = options.env ?? process.env;
-    const normalizedSuffix = commandSuffix.trim();
-    // Ask flows are intentionally safe inside Claude Code and must not be
-    // rewritten to the bridge binary, which can re-enter the launch guard.
-    if (/^ask(?:\s|$)/.test(normalizedSuffix) && isClaudeSession(env)) {
-        return OMC_CLI_BINARY;
-    }
+    void commandSuffix;
     return resolveOmcCliPrefix(options);
 }
 export function formatOmcCliInvocation(commandSuffix, options = {}) {

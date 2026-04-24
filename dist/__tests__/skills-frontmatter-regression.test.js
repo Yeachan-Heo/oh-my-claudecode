@@ -22,6 +22,7 @@ describe('builtin skill drafting contracts for learned skills (issue #2425)', ()
         expect(learner.template).toContain('Do **not** write plain markdown without frontmatter.');
         expect(learner.template).toContain('.omc/skills/<skill-name>.md');
         expect(learner.template).toContain('skills/omc-learned/<skill-name>.md');
+        expect(learner.template).toContain('uncommitted skills are still worktree-local');
     });
     it('skillify skill instructs drafting flat file-backed skills with YAML frontmatter', () => {
         const skills = createBuiltinSkills();

@@ -44,6 +44,11 @@ declare const HookInputSchema: z.ZodObject<{
         type: string;
         text?: string | undefined;
     }>, "many">>;
+    model: z.ZodOptional<z.ZodString>;
+    model_id: z.ZodOptional<z.ZodString>;
+    modelId: z.ZodOptional<z.ZodString>;
+    agent_name: z.ZodOptional<z.ZodString>;
+    agentName: z.ZodOptional<z.ZodString>;
     stop_reason: z.ZodOptional<z.ZodString>;
     stopReason: z.ZodOptional<z.ZodString>;
     user_requested: z.ZodOptional<z.ZodBoolean>;
@@ -80,6 +85,11 @@ declare const HookInputSchema: z.ZodObject<{
         type: string;
         text?: string | undefined;
     }>, "many">>;
+    model: z.ZodOptional<z.ZodString>;
+    model_id: z.ZodOptional<z.ZodString>;
+    modelId: z.ZodOptional<z.ZodString>;
+    agent_name: z.ZodOptional<z.ZodString>;
+    agentName: z.ZodOptional<z.ZodString>;
     stop_reason: z.ZodOptional<z.ZodString>;
     stopReason: z.ZodOptional<z.ZodString>;
     user_requested: z.ZodOptional<z.ZodBoolean>;
@@ -116,6 +126,11 @@ declare const HookInputSchema: z.ZodObject<{
         type: string;
         text?: string | undefined;
     }>, "many">>;
+    model: z.ZodOptional<z.ZodString>;
+    model_id: z.ZodOptional<z.ZodString>;
+    modelId: z.ZodOptional<z.ZodString>;
+    agent_name: z.ZodOptional<z.ZodString>;
+    agentName: z.ZodOptional<z.ZodString>;
     stop_reason: z.ZodOptional<z.ZodString>;
     stopReason: z.ZodOptional<z.ZodString>;
     user_requested: z.ZodOptional<z.ZodBoolean>;
