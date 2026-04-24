@@ -1073,6 +1073,148 @@ $ ultrawork search the codebase`,
       expect(result.continue).toBe(true);
     });
 
+    it('writes a durable started marker on session-start', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-marker-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const sessionId = 'session-start-marker';
+
+        const result = await processHook('session-start', {
+          sessionId,
+          directory: tempDir,
+        } as HookInput);
+
+        expect(result.continue).toBe(true);
+        const markerPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'session-started.json');
+        expect(existsSync(markerPath)).toBe(true);
+        const marker = JSON.parse(readFileSync(markerPath, 'utf-8')) as Record<string, unknown>;
+        expect(marker.session_id).toBe(sessionId);
+        expect(typeof marker.started_at).toBe('string');
+        expect(typeof marker.ppid).toBe('number');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('reconciles a hard-terminated prior session only when ownership and abandonment are explicit', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-reconcile-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const staleSessionId = 'stale-hard-terminated-session';
+        const currentSessionId = 'current-reconcile-session';
+        const staleSessionDir = join(tempDir, '.omc', 'state', 'sessions', staleSessionId);
+        mkdirSync(staleSessionDir, { recursive: true });
+        writeFileSync(
+          join(staleSessionDir, 'ralph-state.json'),
+          JSON.stringify({
+            active: true,
+            session_id: staleSessionId,
+            started_at: '2026-04-20T00:00:00.000Z',
+          }),
+        );
+        writeFileSync(
+          join(staleSessionDir, 'session-started.json'),
+          JSON.stringify({
+            session_id: staleSessionId,
+            started_at: '2026-04-20T00:00:00.000Z',
+            ppid: 999999,
+          }),
+        );
+        const missionStatePath = join(tempDir, '.omc', 'state', 'mission-state.json');
+        writeFileSync(
+          missionStatePath,
+          JSON.stringify({
+            missions: [
+              { id: `ralph-${staleSessionId}`, source: 'session' },
+              { id: 'team-still-owned', source: 'team' },
+            ],
+          }),
+        );
+
+        const result = await processHook('session-start', {
+          sessionId: currentSessionId,
+          directory: tempDir,
+        } as HookInput);
+
+        expect(result.continue).toBe(true);
+        expect(existsSync(join(staleSessionDir, 'ralph-state.json'))).toBe(false);
+        expect(existsSync(join(staleSessionDir, 'session-started.json'))).toBe(false);
+        const missionState = JSON.parse(readFileSync(missionStatePath, 'utf-8')) as {
+          missions: Array<{ id: string; source: string }>;
+        };
+        expect(missionState.missions).toEqual([{ id: 'team-still-owned', source: 'team' }]);
+        expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves prior session state untouched when the recorded parent process is alive', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-live-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const priorSessionId = 'prior-live-session';
+        const currentSessionId = 'current-live-session';
+        const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+        mkdirSync(priorSessionDir, { recursive: true });
+        writeFileSync(
+          join(priorSessionDir, 'ultrawork-state.json'),
+          JSON.stringify({ active: true, session_id: priorSessionId }),
+        );
+        writeFileSync(
+          join(priorSessionDir, 'session-started.json'),
+          JSON.stringify({
+            session_id: priorSessionId,
+            started_at: new Date().toISOString(),
+            ppid: process.pid,
+          }),
+        );
+
+        await processHook('session-start', {
+          sessionId: currentSessionId,
+          directory: tempDir,
+        } as HookInput);
+
+        expect(existsSync(join(priorSessionDir, 'ultrawork-state.json'))).toBe(true);
+        expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves prior session state untouched when the marker ownership is ambiguous', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-ambiguous-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const priorSessionId = 'prior-ambiguous-session';
+        const currentSessionId = 'current-ambiguous-session';
+        const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+        mkdirSync(priorSessionDir, { recursive: true });
+        writeFileSync(
+          join(priorSessionDir, 'team-state.json'),
+          JSON.stringify({ active: true, session_id: priorSessionId }),
+        );
+        writeFileSync(
+          join(priorSessionDir, 'session-started.json'),
+          JSON.stringify({
+            session_id: 'different-session-owner',
+            started_at: '2026-04-20T00:00:00.000Z',
+            ppid: 999999,
+          }),
+        );
+
+        await processHook('session-start', {
+          sessionId: currentSessionId,
+          directory: tempDir,
+        } as HookInput);
+
+        expect(existsSync(join(priorSessionDir, 'team-state.json'))).toBe(true);
+        expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should restore canonical team context when coarse team-state drifts away', async () => {
       const tempDir = process.cwd();
       const sessionId = 'canonical-team-session';

@@ -18,7 +18,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -162,6 +164,17 @@ const MODE_CONFIRMATION_SKILL_MAP: Record<string, string[]> = {
 
 const SESSION_START_CONTEXT_BUDGET = 6000;
 const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
+const SESSION_STARTED_MARKER_FILE = "session-started.json";
+const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
+
+interface SessionStartedMarker {
+  session_id?: string;
+  started_at?: string;
+  cwd?: string;
+  pid?: number;
+  ppid?: number;
+  boot_id?: string;
+}
 
 function compactBudgetedText(text: string, maxChars: number): string {
   const notice = "\n...[truncated to preserve SessionStart context budget]";
@@ -210,6 +223,145 @@ function buildSessionStartAdditionalContext(messages: string[]): string {
   }
 
   return selected.join("\n");
+}
+
+function readLinuxBootId(): string | undefined {
+  try {
+    if (!existsSync(LINUX_BOOT_ID_PATH)) return undefined;
+    const bootId = readFileSync(LINUX_BOOT_ID_PATH, "utf-8").trim();
+    return bootId.length > 0 ? bootId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionStateDir(directory: string, sessionId: string): string {
+  return join(getOmcRoot(directory), "state", "sessions", sessionId);
+}
+
+function sessionStartedMarkerPath(directory: string, sessionId: string): string {
+  return join(sessionStateDir(directory, sessionId), SESSION_STARTED_MARKER_FILE);
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | null {
+  try {
+    if (!existsSync(filePath)) return null;
+    const parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionStartedMarker(directory: string, sessionId?: string): void {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+
+  try {
+    const dir = sessionStateDir(directory, sessionId);
+    mkdirSync(dir, { recursive: true });
+    const marker: SessionStartedMarker = {
+      session_id: sessionId,
+      started_at: new Date().toISOString(),
+      cwd: directory,
+      pid: process.pid,
+      ppid: process.ppid,
+      boot_id: readLinuxBootId(),
+    };
+    writeFileSync(sessionStartedMarkerPath(directory, sessionId), JSON.stringify(marker, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+  } catch {
+    // SessionStart markers are best-effort and must never block startup.
+  }
+}
+
+function removeSessionStartedMarker(directory: string, sessionId?: string): void {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+
+  try {
+    const markerPath = sessionStartedMarkerPath(directory, sessionId);
+    if (existsSync(markerPath)) {
+      unlinkSync(markerPath);
+    }
+  } catch {
+    // Best-effort marker cleanup only.
+  }
+}
+
+function hasSessionEndSummary(directory: string, sessionId: string): boolean {
+  return existsSync(join(getOmcRoot(directory), "sessions", `${sessionId}.json`));
+}
+
+function isMarkerAbandoned(marker: SessionStartedMarker): boolean {
+  const storedBootId = typeof marker.boot_id === "string" ? marker.boot_id : undefined;
+  const currentBootId = readLinuxBootId();
+  if (storedBootId && currentBootId && storedBootId !== currentBootId) {
+    return true;
+  }
+
+  if (typeof marker.ppid !== "number" || !Number.isInteger(marker.ppid) || marker.ppid <= 1) {
+    return false;
+  }
+
+  try {
+    process.kill(marker.ppid, 0);
+    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ESRCH";
+  }
+}
+
+async function reconcileAbandonedSessionStarts(directory: string, currentSessionId?: string): Promise<void> {
+  const sessionsDir = join(getOmcRoot(directory), "state", "sessions");
+  if (!existsSync(sessionsDir)) return;
+
+  let entries: string[];
+  try {
+    entries = readdirSync(sessionsDir);
+  } catch {
+    return;
+  }
+
+  let cleanupFns: Pick<typeof import("./session-end/index.js"), "cleanupModeStates" | "cleanupMissionState"> | null = null;
+
+  for (const sessionId of entries) {
+    if (!SAFE_SESSION_ID_PATTERN.test(sessionId) || sessionId === currentSessionId) continue;
+
+    const markerPath = sessionStartedMarkerPath(directory, sessionId);
+    const marker = readJsonObject(markerPath) as SessionStartedMarker | null;
+    if (!marker) continue;
+
+    // Explicit ownership only: the marker must belong to the session directory.
+    if (marker.session_id !== sessionId) continue;
+
+    // If SessionEnd already wrote its summary, only remove the leftover marker.
+    if (hasSessionEndSummary(directory, sessionId)) {
+      removeSessionStartedMarker(directory, sessionId);
+      continue;
+    }
+
+    if (!isMarkerAbandoned(marker)) continue;
+
+    // Deliberately narrow: clear only OMC session-scoped mode/mission state.
+    // Do not call team runtime shutdown here; SessionStart must not kill tmux PIDs.
+    cleanupFns ??= await import("./session-end/index.js");
+    cleanupFns.cleanupModeStates(directory, sessionId);
+    cleanupFns.cleanupMissionState(directory, sessionId);
+    removeSessionStartedMarker(directory, sessionId);
+
+    try {
+      const remaining = readdirSync(sessionStateDir(directory, sessionId));
+      if (remaining.length === 0) {
+        rmdirSync(sessionStateDir(directory, sessionId));
+      }
+    } catch {
+      // Leave non-empty/unreadable directories untouched.
+    }
+  }
 }
 
 
@@ -1616,6 +1768,9 @@ When team verification passes or cancel is requested, allow terminal cleanup beh
 async function processSessionStart(input: HookInput): Promise<HookOutput> {
   const sessionId = input.sessionId;
   const directory = resolveToWorktreeRoot(input.directory);
+
+  writeSessionStartedMarker(directory, sessionId);
+  await reconcileAbandonedSessionStarts(directory, sessionId);
 
   // Lazy-load session-start dependencies
   const { initSilentAutoUpdate } = await import("../features/auto-update.js");
