@@ -107,7 +107,7 @@ import {
   isEventAllowedByVerbosity,
   shouldIncludeTmuxTail,
 } from "./config.js";
-import { formatNotification, parseTmuxTail } from "./formatter.js";
+import { formatNotification } from "./formatter.js";
 import { dispatchNotifications } from "./dispatcher.js";
 import { getCurrentTmuxSession } from "./tmux.js";
 import { getHookConfig, resolveEventTemplate } from "./hook-config.js";

@@ -43,7 +43,7 @@ Examples:
 Worktrees (opt-in): set team.ops.worktreeMode or OMC_TEAM_WORKTREE_MODE=detached|branch to launch workers from .omc/team/<team>/worktrees/<worker>. Status includes workspace/worktree metadata.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
-  code-reviewer, security-reviewer, test-engineer, debugger, designer, writer, scientist
+  code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
 `;
 
 const TEAM_API_HELP = `

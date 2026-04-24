@@ -7,7 +7,7 @@
 import { execSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
-import { dim, cyan, green, yellow, red } from '../colors.js';
+import { dim, cyan, green, red } from '../colors.js';
 
 const CACHE_TTL_MS = 30_000;
 

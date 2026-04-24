@@ -238,6 +238,19 @@ export function getRalphthonPrdStatus(prd: RalphthonPRD): RalphthonPrdStatus {
 // Task Operations
 // ============================================================================
 
+type RetriableTask = Pick<RalphthonTask, "retries" | "status" | "notes">;
+
+function incrementRetry(task: RetriableTask, maxRetries: number): { retries: number; skipped: boolean } {
+  task.retries += 1;
+  const skipped = task.retries >= maxRetries;
+  if (skipped) {
+    task.status = "skipped";
+    task.notes = `Skipped after ${task.retries} failed attempts`;
+  }
+
+  return { retries: task.retries, skipped };
+}
+
 /**
  * Update a story task's status
  */
@@ -281,15 +294,9 @@ export function incrementTaskRetry(
   const task = story.tasks.find((t) => t.id === taskId);
   if (!task) return { retries: 0, skipped: false };
 
-  task.retries += 1;
-  const skipped = task.retries >= maxRetries;
-  if (skipped) {
-    task.status = "skipped";
-    task.notes = `Skipped after ${task.retries} failed attempts`;
-  }
-
+  const result = incrementRetry(task, maxRetries);
   writeRalphthonPrd(directory, prd);
-  return { retries: task.retries, skipped };
+  return result;
 }
 
 /**
@@ -327,15 +334,9 @@ export function incrementHardeningTaskRetry(
   const task = prd.hardening.find((t) => t.id === taskId);
   if (!task) return { retries: 0, skipped: false };
 
-  task.retries += 1;
-  const skipped = task.retries >= maxRetries;
-  if (skipped) {
-    task.status = "skipped";
-    task.notes = `Skipped after ${task.retries} failed attempts`;
-  }
-
+  const result = incrementRetry(task, maxRetries);
   writeRalphthonPrd(directory, prd);
-  return { retries: task.retries, skipped };
+  return result;
 }
 
 /**

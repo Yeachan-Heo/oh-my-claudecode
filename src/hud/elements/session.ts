@@ -5,12 +5,7 @@
  */
 
 import type { SessionHealth } from '../types.js';
-import { RESET } from '../colors.js';
-
-// Local color constants (following context.ts pattern)
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { green, red, yellow } from '../colors.js';
 
 /**
  * Render session health indicator.
@@ -20,9 +15,9 @@ const RED = '\x1b[31m';
 export function renderSession(session: SessionHealth | null): string | null {
   if (!session) return null;
 
-  const color = session.health === 'critical' ? RED
-    : session.health === 'warning' ? YELLOW
-    : GREEN;
+  const colorize = session.health === 'critical' ? red
+    : session.health === 'warning' ? yellow
+    : green;
 
-  return `session:${color}${session.durationMinutes}m${RESET}`;
+  return `session:${colorize(`${session.durationMinutes}m`)}`;
 }
