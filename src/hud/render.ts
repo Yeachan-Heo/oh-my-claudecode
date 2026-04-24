@@ -297,10 +297,20 @@ export async function render(
     }
   }
 
+  // Determine effective enterprise mode before rendering limits: only real
+  // enterprise accounts replace token-window limits with enterprise cost.
+  const isEnterprise = enabledElements.enterpriseMode !== undefined
+    ? enabledElements.enterpriseMode
+    : (
+        (context.subscriptionType ?? '').toLowerCase() === 'enterprise' ||
+        /claude_zero/i.test(context.rateLimitTier ?? '')
+      );
+
   // Rate limits (5h and weekly) - data takes priority over error indicator.
   // Skip for enterprise responses where token-window limits aren't applicable
   // (the enterpriseCost element replaces this slot for those accounts).
   const hasEnterpriseData =
+    isEnterprise &&
     context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== undefined;
   if (enabledElements.rateLimits && context.rateLimitsResult && !hasEnterpriseData) {
     if (context.rateLimitsResult.rateLimits) {
@@ -351,14 +361,6 @@ export async function render(
       if (session) rendered.set("session", session);
     }
   }
-
-  // Determine effective enterprise mode
-  const isEnterprise = enabledElements.enterpriseMode !== undefined
-    ? enabledElements.enterpriseMode
-    : (
-        (context.subscriptionType ?? '').toLowerCase() === 'enterprise' ||
-        /claude_zero/i.test(context.rateLimitTier ?? '')
-      );
 
   if (isEnterprise && enabledElements.showEnterpriseCost !== false) {
     const stale = context.rateLimitsResult?.stale;

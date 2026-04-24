@@ -110,6 +110,41 @@ describe('render: rate limits display priority', () => {
     expect(output).toContain('8%');
   });
 
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['null', null],
+    ['undefined', undefined],
+  ] as const)(
+    'renders normal rate limits for Max-like responses with %s enterprise limit',
+    async (_caseName, enterpriseLimitUsd) => {
+      const context = makeContext({
+        subscriptionType: 'max',
+        rateLimitTier: null,
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 36,
+            weeklyPercent: 32,
+            sonnetWeeklyPercent: 8,
+            enterpriseSpentUsd: 12.34,
+            enterpriseLimitUsd,
+            enterpriseCurrency: 'USD',
+          },
+        },
+      });
+
+      const output = await render(context, makeConfig());
+
+      expect(output).toContain('5h:');
+      expect(output).toContain('36%');
+      expect(output).toContain('wk:');
+      expect(output).toContain('32%');
+      expect(output).toContain('sn:');
+      expect(output).toContain('8%');
+      expect(output).not.toContain('spent:');
+    },
+  );
+
   it('shows [API 429] when error=rate_limited and rateLimits is null', async () => {
     const context = makeContext({
       rateLimitsResult: {
