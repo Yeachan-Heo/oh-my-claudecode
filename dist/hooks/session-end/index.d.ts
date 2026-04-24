@@ -40,9 +40,16 @@ export declare function getSessionStartTime(directory: string, sessionId?: strin
  */
 export declare function recordSessionMetrics(directory: string, input: SessionEndInput): SessionMetrics;
 /**
- * Clean up transient state files
+ * Clean up transient state files.
+ *
+ * @param directory - Worktree root (or any path under it).
+ * @param endingSessionId - Optional id of the session that is ending.
+ *   When provided, per-session transient caches (HUD stdin cache) are
+ *   removed only from that session's directory so other concurrent
+ *   sessions keep their live state. When omitted (e.g. legacy callers
+ *   or tests), the previous behavior is preserved for compatibility.
  */
-export declare function cleanupTransientState(directory: string): number;
+export declare function cleanupTransientState(directory: string, endingSessionId?: string): number;
 /**
  * Extract python_repl research session IDs from transcript JSONL.
  * These sessions are terminated on SessionEnd to prevent bridge leaks.
