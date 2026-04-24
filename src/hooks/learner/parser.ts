@@ -130,9 +130,9 @@ export function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
       case 'tags': {
         const { value, consumed } = parseArrayValue(rawValue, lines, i);
         if (key === 'triggers') {
-          metadata.triggers = Array.isArray(value) ? value : [value];
+          metadata.triggers = normalizeStringArray(value);
         } else {
-          metadata.tags = Array.isArray(value) ? value : [value];
+          metadata.tags = normalizeStringArray(value);
         }
         i += consumed - 1;
         break;
@@ -152,6 +152,11 @@ export function parseStringValue(value: string): string {
     return value.slice(1, -1);
   }
   return value;
+}
+
+function normalizeStringArray(value: string | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => item.trim()).filter(Boolean);
 }
 
 export function parseArrayValue(

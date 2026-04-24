@@ -127,7 +127,9 @@ function getSkillMetadataCache(projectRoot: string): CachedSkillData[] {
       const parsed = parseSkillFile(content);
       if (!parsed) continue;
 
-      const triggers = parsed.metadata.triggers ?? [];
+      const triggers = (parsed.metadata.triggers ?? [])
+        .map((trigger) => trigger.trim())
+        .filter(Boolean);
       if (triggers.length === 0) continue;
 
       const name =
