@@ -32611,7 +32611,7 @@ function recordSessionMetrics(directory, input) {
   }
   return metrics;
 }
-function cleanupTransientState(directory) {
+function cleanupTransientState(directory, endingSessionId) {
   let filesRemoved = 0;
   const omcDir = getOmcRoot(directory);
   if (!fs12.existsSync(omcDir)) {
@@ -32683,6 +32683,16 @@ function cleanupTransientState(directory) {
     }
     const sessionsDir = path16.join(stateDir, "sessions");
     if (fs12.existsSync(sessionsDir)) {
+      const crossSessionSafePatterns = [
+        /^cancel-signal/,
+        /stop-breaker/
+      ];
+      const endingSessionOnlyPatterns = [
+        // HUD's stdin cache is session-scoped (see `src/hud/stdin.ts`)
+        // and consumed by `omc hud --watch` for the owning session.
+        /^hud-stdin-cache\.json$/
+      ];
+      const isEndingSession = (sid) => typeof endingSessionId === "string" && endingSessionId.length > 0 && sid === endingSessionId;
       try {
         const sessionDirs = fs12.readdirSync(sessionsDir);
         for (const sid of sessionDirs) {
@@ -32690,9 +32700,10 @@ function cleanupTransientState(directory) {
           try {
             const stat2 = fs12.statSync(sessionDir);
             if (!stat2.isDirectory()) continue;
+            const activePatterns = isEndingSession(sid) ? [...crossSessionSafePatterns, ...endingSessionOnlyPatterns] : crossSessionSafePatterns;
             const sessionFiles = fs12.readdirSync(sessionDir);
             for (const file of sessionFiles) {
-              if (/^cancel-signal/.test(file) || /stop-breaker/.test(file)) {
+              if (activePatterns.some((p) => p.test(file))) {
                 try {
                   fs12.unlinkSync(path16.join(sessionDir, file));
                   filesRemoved++;
@@ -32940,7 +32951,7 @@ async function processSessionEnd(input) {
   const metrics = recordSessionMetrics(directory, input);
   exportSessionSummary(directory, metrics);
   await cleanupSessionOwnedTeams(directory, input.session_id);
-  cleanupTransientState(directory);
+  cleanupTransientState(directory, input.session_id);
   cleanupModeStates(directory, input.session_id);
   cleanupMissionState(directory, input.session_id);
   try {
@@ -40696,28 +40707,82 @@ var init_leader_nudge_guidance = __esm({
 });
 
 // src/hud/stdin.ts
+function normalizeCandidate(value) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 function getStdinCachePath() {
   const root2 = getWorktreeRoot() || process.cwd();
-  return (0, import_path121.join)(root2, ".omc", "state", "hud-stdin-cache.json");
+  for (const envVar of SESSION_ID_ENV_VARS) {
+    const candidate = normalizeCandidate(process.env[envVar]);
+    if (!candidate) continue;
+    try {
+      return (0, import_path121.join)(getSessionStateDir(candidate, root2), "hud-stdin-cache.json");
+    } catch {
+    }
+  }
+  return resolveOmcPath("state/hud-stdin-cache.json", root2);
 }
 function writeStdinCache(stdin) {
   try {
-    const root2 = getWorktreeRoot() || process.cwd();
-    const cacheDir = (0, import_path121.join)(root2, ".omc", "state");
+    const cachePath = getStdinCachePath();
+    const cacheDir = (0, import_path121.dirname)(cachePath);
     if (!(0, import_fs102.existsSync)(cacheDir)) {
       (0, import_fs102.mkdirSync)(cacheDir, { recursive: true });
     }
-    (0, import_fs102.writeFileSync)(getStdinCachePath(), JSON.stringify(stdin));
+    (0, import_fs102.writeFileSync)(cachePath, JSON.stringify(stdin));
   } catch {
   }
 }
 function readStdinCache() {
-  try {
-    const cachePath = getStdinCachePath();
-    if (!(0, import_fs102.existsSync)(cachePath)) {
+  const root2 = getWorktreeRoot() || process.cwd();
+  const scopedPath = getStdinCachePath();
+  const tryRead = (p) => {
+    try {
+      if (!(0, import_fs102.existsSync)(p)) return null;
+      return JSON.parse((0, import_fs102.readFileSync)(p, "utf-8"));
+    } catch {
       return null;
     }
-    return JSON.parse((0, import_fs102.readFileSync)(cachePath, "utf-8"));
+  };
+  const scoped = tryRead(scopedPath);
+  if (scoped) return scoped;
+  const legacyPath = resolveOmcPath("state/hud-stdin-cache.json", root2);
+  if (scopedPath !== legacyPath) {
+    return null;
+  }
+  return readMostRecentSessionCache(root2);
+}
+function readMostRecentSessionCache(root2) {
+  let sessionIds;
+  try {
+    sessionIds = listSessionIds(root2);
+  } catch {
+    return null;
+  }
+  let bestPath = null;
+  let bestMtime = -Infinity;
+  for (const sid of sessionIds) {
+    let candidate;
+    try {
+      candidate = (0, import_path121.join)(getSessionStateDir(sid, root2), "hud-stdin-cache.json");
+    } catch {
+      continue;
+    }
+    try {
+      const st = (0, import_fs102.statSync)(candidate);
+      if (!st.isFile()) continue;
+      if (st.mtimeMs > bestMtime) {
+        bestMtime = st.mtimeMs;
+        bestPath = candidate;
+      }
+    } catch {
+    }
+  }
+  if (!bestPath) return null;
+  try {
+    return JSON.parse((0, import_fs102.readFileSync)(bestPath, "utf-8"));
   } catch {
     return null;
   }
@@ -40834,7 +40899,7 @@ function getRateLimitsFromStdin(stdin) {
 function getModelName(stdin) {
   return stdin.model?.display_name ?? stdin.model?.id ?? "Unknown";
 }
-var import_fs102, import_path121, TRANSIENT_CONTEXT_PERCENT_TOLERANCE;
+var import_fs102, import_path121, TRANSIENT_CONTEXT_PERCENT_TOLERANCE, SESSION_ID_ENV_VARS;
 var init_stdin = __esm({
   "src/hud/stdin.ts"() {
     "use strict";
@@ -40842,6 +40907,7 @@ var init_stdin = __esm({
     import_path121 = require("path");
     init_worktree_paths();
     TRANSIENT_CONTEXT_PERCENT_TOLERANCE = 3;
+    SESSION_ID_ENV_VARS = ["CLAUDE_SESSION_ID", "CLAUDECODE_SESSION_ID"];
   }
 });
 

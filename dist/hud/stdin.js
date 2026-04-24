@@ -4,16 +4,62 @@
  * Parse stdin JSON from Claude Code statusline interface.
  * Based on claude-hud reference implementation.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
-import { getWorktreeRoot } from '../lib/worktree-paths.js';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
+import { getSessionStateDir, getWorktreeRoot, listSessionIds, resolveOmcPath, } from '../lib/worktree-paths.js';
 const TRANSIENT_CONTEXT_PERCENT_TOLERANCE = 3;
 // ============================================================================
 // Stdin Cache (for --watch mode)
 // ============================================================================
+/**
+ * Session-id environment variables consulted in priority order.
+ * Claude Code populates `CLAUDE_SESSION_ID` first; `CLAUDECODE_SESSION_ID`
+ * is a legacy / compatibility alias for the same value.
+ */
+const SESSION_ID_ENV_VARS = ['CLAUDE_SESSION_ID', 'CLAUDECODE_SESSION_ID'];
+/**
+ * Normalize an env value to a session-id candidate.
+ * Empty / whitespace-only strings are treated as "not set" so a defined
+ * but blank slot does not block the fallback to the next candidate.
+ */
+function normalizeCandidate(value) {
+    if (!value)
+        return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+/**
+ * Resolve the stdin cache path.
+ *
+ * Walks the session-id env vars in priority order, and for each candidate
+ * tries to resolve a session-scoped path via the shared validated helper
+ * `getSessionStateDir` (which calls `validateSessionId`). A candidate
+ * that fails validation (path traversal, disallowed chars, overlong) is
+ * skipped so the next candidate still gets a chance — a non-empty-but-
+ * invalid primary does not silently bypass a valid secondary. Only when
+ * no candidate yields a valid session path do we fall back to the legacy
+ * flat path.
+ *
+ * The file name remains `hud-stdin-cache.json` so that the existing
+ * session-end cleanup pattern (`/^hud-stdin-cache\.json$/`) still matches
+ * and no migration is required for existing environments.
+ */
 function getStdinCachePath() {
     const root = getWorktreeRoot() || process.cwd();
-    return join(root, '.omc', 'state', 'hud-stdin-cache.json');
+    for (const envVar of SESSION_ID_ENV_VARS) {
+        const candidate = normalizeCandidate(process.env[envVar]);
+        if (!candidate)
+            continue;
+        try {
+            return join(getSessionStateDir(candidate, root), 'hud-stdin-cache.json');
+        }
+        catch {
+            // Invalid session id — try the next candidate.
+        }
+    }
+    // Legacy flat path must also resolve through the shared OMC-root helper so
+    // `OMC_STATE_DIR`-backed deployments land on the same directory as writers.
+    return resolveOmcPath('state/hud-stdin-cache.json', root);
 }
 /**
  * Persist the last successful stdin read to disk.
@@ -21,12 +67,12 @@ function getStdinCachePath() {
  */
 export function writeStdinCache(stdin) {
     try {
-        const root = getWorktreeRoot() || process.cwd();
-        const cacheDir = join(root, '.omc', 'state');
+        const cachePath = getStdinCachePath();
+        const cacheDir = dirname(cachePath);
         if (!existsSync(cacheDir)) {
             mkdirSync(cacheDir, { recursive: true });
         }
-        writeFileSync(getStdinCachePath(), JSON.stringify(stdin));
+        writeFileSync(cachePath, JSON.stringify(stdin));
     }
     catch {
         // Best-effort; ignore failures
@@ -34,15 +80,88 @@ export function writeStdinCache(stdin) {
 }
 /**
  * Read the last cached stdin JSON.
+ *
+ * When a session id is available in the environment, the session-scoped
+ * path is authoritative. Otherwise — e.g. `omc hud --watch` running as a
+ * detached CLI/tmux process that never inherited the parent's session
+ * env — we still need a way to surface the active session's cache; we
+ * fall back first to the legacy flat path, and then to the most recently
+ * updated `state/sessions/{id}/hud-stdin-cache.json` so the watch pane
+ * does not stay stuck on an empty/starting view.
+ *
  * Returns null if no cache exists or it is unreadable.
  */
 export function readStdinCache() {
-    try {
-        const cachePath = getStdinCachePath();
-        if (!existsSync(cachePath)) {
+    const root = getWorktreeRoot() || process.cwd();
+    const scopedPath = getStdinCachePath();
+    const tryRead = (p) => {
+        try {
+            if (!existsSync(p))
+                return null;
+            return JSON.parse(readFileSync(p, 'utf-8'));
+        }
+        catch {
             return null;
         }
-        return JSON.parse(readFileSync(cachePath, 'utf-8'));
+    };
+    const scoped = tryRead(scopedPath);
+    if (scoped)
+        return scoped;
+    // If the scoped path already *is* the legacy flat path (no session id
+    // was available), there's no further lookup to try.
+    const legacyPath = resolveOmcPath('state/hud-stdin-cache.json', root);
+    if (scopedPath !== legacyPath) {
+        return null;
+    }
+    // Env-less reader: pick the most recent session-scoped cache as a
+    // best-effort surface of "the active session's HUD".
+    return readMostRecentSessionCache(root);
+}
+/**
+ * Scan `state/sessions/{id}/hud-stdin-cache.json` and return the contents
+ * of the most recently modified one. Only used as a fallback when no
+ * session id is available in the environment (e.g. a tmux-hosted
+ * `omc hud --watch` reader that did not inherit `CLAUDE_SESSION_ID`).
+ *
+ * Uses the same OMC-root helpers as the writers (`listSessionIds` /
+ * `getSessionStateDir`) so this fallback honors `OMC_STATE_DIR` and any
+ * other centralized-state configuration.
+ */
+function readMostRecentSessionCache(root) {
+    let sessionIds;
+    try {
+        sessionIds = listSessionIds(root);
+    }
+    catch {
+        return null;
+    }
+    let bestPath = null;
+    let bestMtime = -Infinity;
+    for (const sid of sessionIds) {
+        let candidate;
+        try {
+            candidate = join(getSessionStateDir(sid, root), 'hud-stdin-cache.json');
+        }
+        catch {
+            continue;
+        }
+        try {
+            const st = statSync(candidate);
+            if (!st.isFile())
+                continue;
+            if (st.mtimeMs > bestMtime) {
+                bestMtime = st.mtimeMs;
+                bestPath = candidate;
+            }
+        }
+        catch {
+            // Skip unreadable entries
+        }
+    }
+    if (!bestPath)
+        return null;
+    try {
+        return JSON.parse(readFileSync(bestPath, 'utf-8'));
     }
     catch {
         return null;
