@@ -1053,6 +1053,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     permissions_snapshot: permissionsSnapshot,
     tmux_session: sessionName,
     worker_count: teamConfig.worker_count,
+    max_workers: teamConfig.max_workers,
     workers: workersInfo,
     next_task_id: teamConfig.next_task_id,
     created_at: teamConfig.created_at,

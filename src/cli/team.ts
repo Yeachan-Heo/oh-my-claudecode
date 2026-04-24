@@ -969,10 +969,9 @@ function parseStartArgs(args: string[]): StartArgsParsed {
   const cfg = loadConfig();
   const workerCountDecision = resolveTeamWorkerCount(agentTypes.length, cfg.team?.ops);
   const effectiveAgentTypes = agentTypes.slice(0, workerCountDecision.effective);
-  const effectiveTaskDescriptions = taskDescriptions.slice(0, workerCountDecision.effective);
 
-  const resolvedTeamName = (teamName && teamName.trim()) ? teamName.trim() : autoTeamName(effectiveTaskDescriptions[0]);
-  const tasks: TeamTaskInput[] = effectiveTaskDescriptions.map((description, index) => ({
+  const resolvedTeamName = (teamName && teamName.trim()) ? teamName.trim() : autoTeamName(taskDescriptions[0]);
+  const tasks: TeamTaskInput[] = taskDescriptions.map((description, index) => ({
     subject: `${subjectPrefix} ${index + 1}`,
     description,
   }));

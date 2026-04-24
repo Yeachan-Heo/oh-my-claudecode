@@ -200,7 +200,7 @@ function configFromManifest(manifest: TeamManifestV2): TeamConfig {
     governance: manifest.governance,
     worker_launch_mode: manifest.policy.worker_launch_mode,
     worker_count: manifest.worker_count,
-    max_workers: 20,
+    max_workers: manifest.max_workers ?? 20,
     workers: manifest.workers,
     created_at: manifest.created_at,
     tmux_session: manifest.tmux_session,
@@ -228,7 +228,7 @@ function mergeTeamConfigSources(config: TeamConfig | null, manifest: TeamManifes
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
     worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config.max_workers ?? 0, 20),
+    max_workers: config.max_workers ?? manifest.max_workers ?? 20,
   });
 }
 

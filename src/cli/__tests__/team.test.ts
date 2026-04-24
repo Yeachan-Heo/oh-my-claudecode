@@ -265,7 +265,48 @@ describe('team cli', () => {
     };
     expect(stdinPayload.workerCount).toBe(2);
     expect(stdinPayload.agentTypes).toEqual(['gemini', 'gemini']);
-    expect(stdinPayload.tasks).toHaveLength(2);
+    expect(stdinPayload.tasks).toHaveLength(4);
+    expect(stdinPayload.tasks.every((t) => t.description === 'lint all modules')).toBe(true);
+
+    logSpy.mockRestore();
+  });
+
+  it('teamCommand start preserves explicit tasks when resource policy caps workers', async () => {
+    const write = vi.fn();
+    const end = vi.fn();
+    const unref = vi.fn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    process.env.OMC_TEAM_MAX_AGENTS = '2';
+    mocks.spawn.mockReturnValue({
+      pid: 8990,
+      stdin: { write, end },
+      unref,
+    });
+
+    const { teamCommand } = await import('../team.js');
+    await teamCommand([
+      'start',
+      '--agent', 'gemini,codex,claude',
+      '--task', 'lint all modules',
+      '--task', 'typecheck the cli',
+      '--task', 'review resource policy',
+      '--name', 'lint-team',
+      '--json',
+    ]);
+
+    const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
+      workerCount?: number;
+      agentTypes: string[];
+      tasks: Array<{ subject: string; description: string }>;
+    };
+    expect(stdinPayload.workerCount).toBe(2);
+    expect(stdinPayload.agentTypes).toEqual(['gemini', 'codex']);
+    expect(stdinPayload.tasks.map((task) => task.description)).toEqual([
+      'lint all modules',
+      'typecheck the cli',
+      'review resource policy',
+    ]);
 
     logSpy.mockRestore();
   });

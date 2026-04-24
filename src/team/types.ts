@@ -234,6 +234,7 @@ export interface TeamManifestV2 {
   permissions_snapshot: PermissionsSnapshot;
   tmux_session: string;
   worker_count: number;
+  max_workers?: number;
   workers: WorkerInfo[];
   next_task_id: number;
   created_at: string;
