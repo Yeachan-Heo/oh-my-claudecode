@@ -2727,12 +2727,9 @@ var CONTRACTS = {
     agentType: "codex",
     binary: "codex",
     installInstructions: "Install Codex CLI: npm install -g @openai/codex",
-    // Team workers must be persistent interactive panes. Do not use `codex exec`
-    // or positional prompt mode here; runtime dispatch writes inbox.md and nudges
-    // the live Codex TUI with `codex` as the worker process.
-    supportsPromptMode: false,
+    supportsPromptMode: true,
     buildLaunchArgs(model, extraFlags = []) {
-      const args = ["--dangerously-bypass-approvals-and-sandbox"];
+      const args = ["exec", "--dangerously-bypass-approvals-and-sandbox"];
       if (model) args.push("--model", model);
       return [...args, ...extraFlags];
     },
@@ -2758,7 +2755,7 @@ var CONTRACTS = {
     binary: "gemini",
     installInstructions: "Install Gemini CLI: npm install -g @google/gemini-cli",
     supportsPromptMode: true,
-    promptModeFlag: "-i",
+    promptModeFlag: "-p",
     buildLaunchArgs(model, extraFlags = []) {
       const args = ["--approval-mode", "yolo"];
       if (model) args.push("--model", model);
@@ -3014,7 +3011,8 @@ function buildInstructionPath(...parts) {
   return (0, import_path10.join)(...parts).replaceAll("\\", "/");
 }
 function buildTeamStateInstructionPath(teamName, instructionStateRoot, ...teamRelativeParts) {
-  const baseParts = instructionStateRoot === DEFAULT_INSTRUCTION_STATE_ROOT ? [instructionStateRoot, "team", teamName] : [instructionStateRoot];
+  const rootIncludesTeam = instructionStateRoot.endsWith(`/team/${teamName}`);
+  const baseParts = rootIncludesTeam ? [instructionStateRoot] : [instructionStateRoot, "team", teamName];
   return buildInstructionPath(...baseParts, ...teamRelativeParts);
 }
 function generateTriggerMessage(teamName, workerName2, teamStateRoot2 = DEFAULT_INSTRUCTION_STATE_ROOT) {
@@ -3135,8 +3133,8 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
 - Release claim (rollback): \`${releaseClaimCommand}\`
 
 ## Canonical Team State Root
-- Resolve the team state root in this order: \`OMC_TEAM_STATE_ROOT\` env -> worker identity \`team_state_root\` -> config/manifest \`team_state_root\` -> ${params.cwd}/.omc/state/team/${teamName}.
-- \`OMC_TEAM_STATE_ROOT\` is the team-specific root (\`.../.omc/state/team/${teamName}\`). When it is set, append worker/mailbox paths directly below it; do not append another \`team/${teamName}\` segment.
+- Resolve the team state root in this order: \`OMC_TEAM_STATE_ROOT\` env -> worker identity \`team_state_root\` -> config/manifest \`team_state_root\` -> ${params.cwd}/.omc/state.
+- \`OMC_TEAM_STATE_ROOT\` is the shared state root (\`.../.omc/state\`). Worker-facing trigger paths append \`team/${teamName}\` below it so leader dispatch and worker instructions use the same canonical mailbox/task paths.
 - Worktree-backed workers MUST use the canonical leader-owned state root for inbox, mailbox, task lifecycle, status, heartbeat, and shutdown files; do not use a local worktree \`.omc/state\` when \`OMC_TEAM_STATE_ROOT\` is set.
 
 ## Communication Protocol
@@ -3492,12 +3490,9 @@ function recordMetadata(repoRoot, teamName, info) {
     writeMetadata(repoRoot, teamName, [...existing, info]);
   });
 }
-function forgetMetadata(repoRoot, teamName, workerName2) {
-  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
-  withFileLockSync(metaLockPath, () => {
-    const existing = readMetadata(repoRoot, teamName).filter((entry) => entry.workerName !== workerName2);
-    writeMetadata(repoRoot, teamName, existing);
-  });
+function forgetMetadataUnlocked(repoRoot, teamName, workerName2) {
+  const existing = readMetadata(repoRoot, teamName).filter((entry) => entry.workerName !== workerName2);
+  writeMetadata(repoRoot, teamName, existing);
 }
 function assertCompatibleExistingWorktree(repoRoot, wtPath, expectedBranch, mode) {
   const registeredBranch = getRegisteredWorktreeBranch(repoRoot, wtPath);
@@ -3618,23 +3613,33 @@ function prepareWorkerWorktreeForRemoval(teamName, workerName2, repoRoot, worktr
 function removeWorkerWorktree(teamName, workerName2, repoRoot) {
   const wtPath = getWorktreePath(repoRoot, teamName, workerName2);
   const branch = getBranchName(teamName, workerName2);
-  prepareWorkerWorktreeForRemoval(teamName, workerName2, repoRoot, wtPath);
-  try {
-    (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
-  } catch {
-  }
-  try {
-    (0, import_node_child_process.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
-  } catch {
-  }
-  try {
-    (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
-  } catch {
-  }
-  if ((0, import_node_fs.existsSync)(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
-    (0, import_node_fs.rmSync)(wtPath, { recursive: true, force: true });
-  }
-  forgetMetadata(repoRoot, teamName, workerName2);
+  const metaLockPath = `${getMetadataPath(repoRoot, teamName)}.lock`;
+  withFileLockSync(metaLockPath, () => {
+    prepareWorkerWorktreeForRemoval(teamName, workerName2, repoRoot, wtPath);
+    const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
+    try {
+      (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
+    } catch (err) {
+      if (wasRegisteredWorktree) {
+        const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
+        const error = new Error(`worktree_remove_failed: preserving metadata for registered worker worktree at ${wtPath}${detail}`);
+        error.code = "worktree_remove_failed";
+        throw error;
+      }
+    }
+    try {
+      (0, import_node_child_process.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+    } catch {
+    }
+    try {
+      (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
+    } catch {
+    }
+    if ((0, import_node_fs.existsSync)(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
+      (0, import_node_fs.rmSync)(wtPath, { recursive: true, force: true });
+    }
+    forgetMetadataUnlocked(repoRoot, teamName, workerName2);
+  });
 }
 function inspectTeamWorktreeCleanupSafety(teamName, repoRoot) {
   const metadata = readMetadataResult(repoRoot, teamName);
@@ -6231,6 +6236,9 @@ function cliWorkerOutputFilePath(teamStateRootAbs, workerName2) {
 }
 
 // src/team/runtime-v2.ts
+function sharedStateRoot(cwd) {
+  return (0, import_path19.join)(cwd, ".omc", "state");
+}
 function isRuntimeV2Enabled(env = process.env) {
   const raw = env.OMC_RUNTIME_V2;
   if (!raw) return true;
@@ -6458,7 +6466,7 @@ async function spawnV2Worker(opts) {
   }
   const envVars = {
     ...getWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
-    OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
+    OMC_TEAM_STATE_ROOT: sharedStateRoot(opts.cwd),
     OMC_TEAM_LEADER_CWD: opts.cwd,
     ...opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {},
     ...opts.workerCwd ? { OMC_TEAM_WORKER_CWD: opts.workerCwd } : {}
@@ -6719,7 +6727,7 @@ async function startTeamV2(config) {
       role: config.workerRoles?.[i] ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? "claude"),
       assigned_tasks: [],
       working_dir: worktree?.path ?? leaderCwd,
-      team_state_root: teamStateRoot(leaderCwd, sanitized),
+      team_state_root: sharedStateRoot(leaderCwd),
       ...worktree ? {
         worktree_repo_root: leaderCwd,
         worktree_path: worktree.path,
@@ -6744,7 +6752,7 @@ async function startTeamV2(config) {
     tmux_window_owned: ownsWindow,
     next_task_id: config.tasks.length + 1,
     leader_cwd: leaderCwd,
-    team_state_root: teamStateRoot(leaderCwd, sanitized),
+    team_state_root: sharedStateRoot(leaderCwd),
     leader_pane_id: leaderPaneId,
     hud_pane_id: null,
     resize_hook_name: null,
@@ -7231,7 +7239,7 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
       const requestedAt = (/* @__PURE__ */ new Date()).toISOString();
       await writeShutdownRequest(sanitized, w.name, "leader-fixed", cwd);
       shutdownRequestTimes.set(w.name, requestedAt);
-      const shutdownAckPath = w.worktree_path ? `$OMC_TEAM_STATE_ROOT/workers/${w.name}/shutdown-ack.json` : TeamPaths.shutdownAck(sanitized, w.name);
+      const shutdownAckPath = w.worktree_path ? `$OMC_TEAM_STATE_ROOT/team/${sanitized}/workers/${w.name}/shutdown-ack.json` : TeamPaths.shutdownAck(sanitized, w.name);
       const shutdownInbox = `# Shutdown Request
 
 All tasks are complete. Please wrap up and respond with a shutdown acknowledgement.

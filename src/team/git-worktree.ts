@@ -601,9 +601,18 @@ export function removeWorkerWorktree(
   withFileLockSync(metaLockPath, () => {
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
 
+    const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
       execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
-    } catch { /* may not exist */ }
+    } catch (err) {
+      if (wasRegisteredWorktree) {
+        const detail = err instanceof Error && err.message ? `: ${err.message}` : '';
+        const error = new Error(`worktree_remove_failed: preserving metadata for registered worker worktree at ${wtPath}${detail}`);
+        (error as Error & { code?: string }).code = 'worktree_remove_failed';
+        throw error;
+      }
+      // Unregistered/absent stale paths are best-effort cleanup only.
+    }
 
     try {
       execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });

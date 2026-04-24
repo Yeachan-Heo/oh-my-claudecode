@@ -196,6 +196,50 @@ describe('runtime v2 startup inbox dispatch', () => {
         const overlay = await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'AGENTS.md'), 'utf-8');
         expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/workers/worker-1/status.json');
     });
+    it('uses canonical team-scoped shutdown ack path for worktree-backed workers', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-shutdown-inbox-'));
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), 'shutdown inbox contract test\n', 'utf-8');
+        execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        const { createWorkerWorktree } = await import('../git-worktree.js');
+        const worktree = createWorkerWorktree('dispatch-team', 'worker-1', cwd);
+        await writeFile(join(worktree.path, 'dirty.txt'), 'preserve state so shutdown inbox remains readable', 'utf-8');
+        const teamRoot = join(cwd, '.omc', 'state', 'team', 'dispatch-team');
+        await mkdir(teamRoot, { recursive: true });
+        await writeFile(join(teamRoot, 'config.json'), JSON.stringify({
+            name: 'dispatch-team',
+            task: 'demo',
+            agent_type: 'claude',
+            worker_launch_mode: 'interactive',
+            worker_count: 1,
+            max_workers: 20,
+            workers: [{
+                    name: 'worker-1',
+                    index: 1,
+                    role: 'claude',
+                    assigned_tasks: [],
+                    worktree_path: worktree.path,
+                }],
+            created_at: new Date().toISOString(),
+            tmux_session: '',
+            leader_pane_id: null,
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+            next_task_id: 1,
+            workspace_mode: 'worktree',
+            worktree_mode: 'named',
+            team_state_root: join(cwd, '.omc', 'state'),
+        }, null, 2), 'utf-8');
+        const { shutdownTeamV2 } = await import('../runtime-v2.js');
+        await shutdownTeamV2('dispatch-team', cwd, { timeoutMs: 0 });
+        const inbox = await readFile(join(teamRoot, 'workers', 'worker-1', 'inbox.md'), 'utf-8');
+        expect(inbox).toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team/workers/worker-1/shutdown-ack.json');
+        expect(inbox).not.toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/shutdown-ack.json');
+    });
     it('uses owner-aware startup allocation when task owners are provided', async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-owner-startup-'));
         const { startTeamV2 } = await import('../runtime-v2.js');

@@ -1717,7 +1717,7 @@ export async function shutdownTeamV2(
       shutdownRequestTimes.set(w.name, requestedAt);
       // Write shutdown inbox
       const shutdownAckPath = w.worktree_path
-        ? `$OMC_TEAM_STATE_ROOT/workers/${w.name}/shutdown-ack.json`
+        ? `$OMC_TEAM_STATE_ROOT/team/${sanitized}/workers/${w.name}/shutdown-ack.json`
         : TeamPaths.shutdownAck(sanitized, w.name);
       const shutdownInbox = `# Shutdown Request\n\nAll tasks are complete. Please wrap up and respond with a shutdown acknowledgement.\n\nWrite your ack to: ${shutdownAckPath}\nFormat: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n\nThen exit your session.\n`;
       await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);

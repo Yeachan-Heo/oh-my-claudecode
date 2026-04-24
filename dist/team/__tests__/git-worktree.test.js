@@ -104,6 +104,17 @@ describe('git-worktree', () => {
             const branches = execFileSync('git', ['branch'], { cwd: repoDir, encoding: 'utf-8' });
             expect(branches).not.toContain('omc-team/');
         });
+        it('throws and preserves metadata when git refuses to remove a registered worktree', () => {
+            const workerName = 'locked-worker';
+            const info = createWorkerWorktree(teamName, workerName, repoDir);
+            execFileSync('git', ['worktree', 'lock', info.path], { cwd: repoDir, stdio: 'pipe' });
+            expect(() => removeWorkerWorktree(teamName, workerName, repoDir)).toThrow(/worktree_remove_failed/);
+            expect(existsSync(info.path)).toBe(true);
+            expect(listTeamWorktrees(teamName, repoDir).map(w => w.workerName)).toContain(workerName);
+            const worktreeList = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoDir, encoding: 'utf-8' });
+            expect(worktreeList).toContain(info.path);
+            execFileSync('git', ['worktree', 'unlock', info.path], { cwd: repoDir, stdio: 'pipe' });
+        });
         it('does not throw for non-existent worktree', () => {
             expect(() => removeWorkerWorktree(teamName, 'nonexistent', repoDir)).not.toThrow();
         });
