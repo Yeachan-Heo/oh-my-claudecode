@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execSync } from 'child_process';
@@ -426,5 +426,141 @@ describe('HUD stdin cache path is session-scoped', () => {
     expect(existsSync(legacy)).toBe(true);
     const sessionsDir = join(tmpRoot, '.omc', 'state', 'sessions');
     expect(existsSync(sessionsDir)).toBe(false);
+  });
+});
+
+describe('readStdinCache — env-less reader fallback to most recent session cache', () => {
+  let tmpRoot: string;
+  let originalCwd: string;
+  const envKeys = ['CLAUDE_SESSION_ID', 'CLAUDECODE_SESSION_ID'] as const;
+  const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'omc-hud-stdin-read-'));
+    execSync('git init --quiet', { cwd: tmpRoot });
+    originalCwd = process.cwd();
+    process.chdir(tmpRoot);
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('returns the most recently updated session cache when no session env is set', () => {
+    // Simulate two concurrent sessions' writes by hand.
+    const stale = join(tmpRoot, '.omc', 'state', 'sessions', 'session-old');
+    const fresh = join(tmpRoot, '.omc', 'state', 'sessions', 'session-new');
+    mkdirSync(stale, { recursive: true });
+    mkdirSync(fresh, { recursive: true });
+
+    const stalePayload = makeStdin({ transcript_path: '/tmp/old.jsonl' });
+    const freshPayload = makeStdin({ transcript_path: '/tmp/new.jsonl' });
+    writeFileSync(join(stale, 'hud-stdin-cache.json'), JSON.stringify(stalePayload));
+    writeFileSync(join(fresh, 'hud-stdin-cache.json'), JSON.stringify(freshPayload));
+
+    // Ensure mtime ordering is unambiguous even on low-resolution filesystems.
+    const past = (Date.now() - 60_000) / 1000;
+    const future = (Date.now() + 1_000) / 1000;
+    utimesSync(join(stale, 'hud-stdin-cache.json'), past, past);
+    utimesSync(join(fresh, 'hud-stdin-cache.json'), future, future);
+
+    const got = readStdinCache();
+    expect(got?.transcript_path).toBe('/tmp/new.jsonl');
+  });
+
+  it('prefers the legacy flat cache over the session-scoped fallback when both exist', () => {
+    // A session wrote via the old (flat) path; an unrelated session dir
+    // also happens to sit under state/sessions/. The legacy file should
+    // win so callers that rely on the pre-session-scoping behavior keep
+    // their existing semantics.
+    const stateDir = join(tmpRoot, '.omc', 'state');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'hud-stdin-cache.json'),
+      JSON.stringify(makeStdin({ transcript_path: '/tmp/legacy.jsonl' })),
+    );
+    const some = join(stateDir, 'sessions', 'session-xyz');
+    mkdirSync(some, { recursive: true });
+    writeFileSync(
+      join(some, 'hud-stdin-cache.json'),
+      JSON.stringify(makeStdin({ transcript_path: '/tmp/scoped.jsonl' })),
+    );
+
+    const got = readStdinCache();
+    expect(got?.transcript_path).toBe('/tmp/legacy.jsonl');
+  });
+
+  it('returns null when nothing has been cached yet', () => {
+    expect(readStdinCache()).toBeNull();
+  });
+
+  it('resolves the fallback directory through the same OMC_STATE_DIR helper as writers', () => {
+    // Regression: the env-less fallback previously assembled the sessions
+    // directory from `join(root, '.omc', 'state', 'sessions')` directly,
+    // which bypasses `OMC_STATE_DIR`-backed centralized state and made
+    // `omc hud --watch` miss the active cache in that deployment shape.
+    const centralRoot = mkdtempSync(join(tmpdir(), 'omc-hud-stdin-central-'));
+    const prevStateDir = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = centralRoot;
+    try {
+      // Writer pinned to a session id: must land under OMC_STATE_DIR/...,
+      // not under `tmpRoot/.omc/state/sessions/...`.
+      process.env.CLAUDE_SESSION_ID = 'central-session';
+      const payload = makeStdin({ transcript_path: '/tmp/central.jsonl' });
+      writeStdinCache(payload);
+
+      // Sanity: nothing was written into the worktree-local .omc/ tree.
+      expect(existsSync(join(tmpRoot, '.omc', 'state', 'sessions', 'central-session'))).toBe(false);
+
+      // Env-less reader must still surface the same payload via the
+      // shared helper, not via a hard-coded worktree-local path.
+      delete process.env.CLAUDE_SESSION_ID;
+      delete process.env.CLAUDECODE_SESSION_ID;
+      const got = readStdinCache();
+      expect(got?.transcript_path).toBe('/tmp/central.jsonl');
+    } finally {
+      if (prevStateDir === undefined) {
+        delete process.env.OMC_STATE_DIR;
+      } else {
+        process.env.OMC_STATE_DIR = prevStateDir;
+      }
+      rmSync(centralRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('env-bound reader still reads from its own session-scoped path only', () => {
+    // Regression: the fallback must not fire when an env var pins a
+    // specific session — otherwise an unrelated session's cache could
+    // be surfaced when the current session has not written anything yet.
+    const mine = join(tmpRoot, '.omc', 'state', 'sessions', 'me');
+    const theirs = join(tmpRoot, '.omc', 'state', 'sessions', 'them');
+    mkdirSync(theirs, { recursive: true });
+    writeFileSync(
+      join(theirs, 'hud-stdin-cache.json'),
+      JSON.stringify(makeStdin({ transcript_path: '/tmp/theirs.jsonl' })),
+    );
+
+    process.env.CLAUDE_SESSION_ID = 'me';
+    expect(readStdinCache()).toBeNull();
+
+    // Once `me` writes, it gets its own snapshot.
+    mkdirSync(mine, { recursive: true });
+    writeFileSync(
+      join(mine, 'hud-stdin-cache.json'),
+      JSON.stringify(makeStdin({ transcript_path: '/tmp/mine.jsonl' })),
+    );
+    expect(readStdinCache()?.transcript_path).toBe('/tmp/mine.jsonl');
   });
 });
