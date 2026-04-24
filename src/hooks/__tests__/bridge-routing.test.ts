@@ -1121,6 +1121,23 @@ $ ultrawork search the codebase`,
           }),
         );
         const missionStatePath = join(tempDir, '.omc', 'state', 'mission-state.json');
+        const legacyRalphStatePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
+        const otherLegacyAutopilotStatePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+        writeFileSync(
+          legacyRalphStatePath,
+          JSON.stringify({
+            active: true,
+            started_at: '2026-04-19T00:00:00.000Z',
+          }),
+        );
+        writeFileSync(
+          otherLegacyAutopilotStatePath,
+          JSON.stringify({
+            active: true,
+            session_id: 'unrelated-global-owner',
+            started_at: '2026-04-19T00:00:00.000Z',
+          }),
+        );
         writeFileSync(
           missionStatePath,
           JSON.stringify({
@@ -1144,6 +1161,8 @@ $ ultrawork search the codebase`,
         };
         expect(missionState.missions).toEqual([{ id: 'team-still-owned', source: 'team' }]);
         expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
+        expect(existsSync(legacyRalphStatePath)).toBe(true);
+        expect(existsSync(otherLegacyAutopilotStatePath)).toBe(true);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

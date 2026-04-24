@@ -27,6 +27,7 @@ import {
 import { dirname, join } from "path";
 import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
 import { readModeState, writeModeState } from "../lib/mode-state-io.js";
+import { SESSION_END_MODE_STATE_FILES } from "../lib/mode-names.js";
 import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
 import { createSwallowedErrorLogger } from "../lib/swallowed-error.js";
 import { readCanonicalTeamStateCandidate } from "./team-canonical-state.js";
@@ -295,6 +296,52 @@ function hasSessionEndSummary(directory: string, sessionId: string): boolean {
   return existsSync(join(getOmcRoot(directory), "sessions", `${sessionId}.json`));
 }
 
+function cleanupSessionModeStateFiles(directory: string, sessionId: string): void {
+  const dir = sessionStateDir(directory, sessionId);
+
+  for (const { file } of SESSION_END_MODE_STATE_FILES) {
+    const filePath = join(dir, file);
+    const state = readJsonObject(filePath);
+
+    // SessionStart reconciliation is intentionally narrower than SessionEnd:
+    // only remove files inside the explicit stale session directory. Do not
+    // touch legacy/global state, even if it is unowned or shares a mode name.
+    if (state?.active === true || file === "skill-active-state.json") {
+      try {
+        unlinkSync(filePath);
+      } catch {
+        // Leave files in place when deletion fails.
+      }
+    }
+  }
+}
+
+function cleanupMissionStateForSession(directory: string, sessionId: string): void {
+  const missionStatePath = join(getOmcRoot(directory), "state", "mission-state.json");
+  const parsed = readJsonObject(missionStatePath) as {
+    updatedAt?: string;
+    missions?: Array<Record<string, unknown>>;
+  } | null;
+
+  if (!Array.isArray(parsed?.missions)) return;
+
+  const before = parsed.missions.length;
+  parsed.missions = parsed.missions.filter((mission) => {
+    if (mission.source !== "session") return true;
+    const missionId = typeof mission.id === "string" ? mission.id : "";
+    return !missionId.includes(sessionId);
+  });
+
+  if (parsed.missions.length === before) return;
+
+  try {
+    parsed.updatedAt = new Date().toISOString();
+    writeFileSync(missionStatePath, JSON.stringify(parsed, null, 2));
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 function isMarkerAbandoned(marker: SessionStartedMarker): boolean {
   const storedBootId = typeof marker.boot_id === "string" ? marker.boot_id : undefined;
   const currentBootId = readLinuxBootId();
@@ -326,8 +373,6 @@ async function reconcileAbandonedSessionStarts(directory: string, currentSession
     return;
   }
 
-  let cleanupFns: Pick<typeof import("./session-end/index.js"), "cleanupModeStates" | "cleanupMissionState"> | null = null;
-
   for (const sessionId of entries) {
     if (!SAFE_SESSION_ID_PATTERN.test(sessionId) || sessionId === currentSessionId) continue;
 
@@ -348,9 +393,8 @@ async function reconcileAbandonedSessionStarts(directory: string, currentSession
 
     // Deliberately narrow: clear only OMC session-scoped mode/mission state.
     // Do not call team runtime shutdown here; SessionStart must not kill tmux PIDs.
-    cleanupFns ??= await import("./session-end/index.js");
-    cleanupFns.cleanupModeStates(directory, sessionId);
-    cleanupFns.cleanupMissionState(directory, sessionId);
+    cleanupSessionModeStateFiles(directory, sessionId);
+    cleanupMissionStateForSession(directory, sessionId);
     removeSessionStartedMarker(directory, sessionId);
 
     try {
