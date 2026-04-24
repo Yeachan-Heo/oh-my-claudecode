@@ -439,14 +439,19 @@ export function loadEnvConfig(): Partial<PluginConfig> {
 
   const teamOps: NonNullable<NonNullable<PluginConfig["team"]>["ops"]> = {};
   if (process.env.OMC_TEAM_MAX_AGENTS) {
-    const maxAgents = parseInt(process.env.OMC_TEAM_MAX_AGENTS, 10);
-    if (!isNaN(maxAgents) && maxAgents >= 1) {
+    const rawMaxAgents = process.env.OMC_TEAM_MAX_AGENTS.trim();
+    if (/^[1-9]\d*$/.test(rawMaxAgents)) {
+      const maxAgents = parseInt(rawMaxAgents, 10);
       teamOps.maxAgents = maxAgents;
     }
   }
   if (process.env.OMC_TEAM_ADAPTIVE_AGENTS !== undefined) {
     const normalized = process.env.OMC_TEAM_ADAPTIVE_AGENTS.trim().toLowerCase();
-    teamOps.adaptiveAgents = ["1", "true", "yes", "on", "enabled"].includes(normalized);
+    if (["1", "true", "yes", "on", "enabled"].includes(normalized)) {
+      teamOps.adaptiveAgents = true;
+    } else if (["0", "false", "no", "off", "disabled"].includes(normalized)) {
+      teamOps.adaptiveAgents = false;
+    }
   }
   if (process.env.OMC_TEAM_RESOURCE_PROFILE) {
     const profile = process.env.OMC_TEAM_RESOURCE_PROFILE.trim().toLowerCase();

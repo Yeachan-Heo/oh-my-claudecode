@@ -576,6 +576,38 @@ describe("team.roleRouting (Option E)", () => {
     expect(config.team?.ops?.resourceProfile).toBe("conservative");
   });
 
+  it("ignores malformed adaptive team ops env values without overriding file config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omc-team-malformed-resource-env-"));
+    try {
+      const claudeDir = join(tempDir, ".claude");
+      require("node:fs").mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(
+        join(claudeDir, "omc.jsonc"),
+        JSON.stringify({
+          team: {
+            ops: {
+              maxAgents: 5,
+              adaptiveAgents: true,
+              resourceProfile: "balanced",
+            },
+          },
+        }),
+      );
+      process.env.OMC_TEAM_MAX_AGENTS = "2abc";
+      process.env.OMC_TEAM_ADAPTIVE_AGENTS = "maybe";
+      process.env.OMC_TEAM_RESOURCE_PROFILE = "turbo";
+      process.chdir(tempDir);
+
+      const config = loadConfig();
+
+      expect(config.team?.ops?.maxAgents).toBe(5);
+      expect(config.team?.ops?.adaptiveAgents).toBe(true);
+      expect(config.team?.ops?.resourceProfile).toBe("balanced");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects invalid team.ops.resourceProfile values", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-resource-profile-"));
     try {

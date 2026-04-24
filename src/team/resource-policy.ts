@@ -64,7 +64,9 @@ function parseBooleanEnv(raw: string | undefined): boolean | undefined {
 
 function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  const parsed = Number.parseInt(raw, 10);
+  const normalized = raw.trim();
+  if (!/^[1-9]\d*$/.test(normalized)) return undefined;
+  const parsed = Number.parseInt(normalized, 10);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
 

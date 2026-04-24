@@ -92,4 +92,3 @@ describe('team max_workers config readers', () => {
     });
   });
 });
-

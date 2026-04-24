@@ -99,5 +99,22 @@ describe('team resource policy', () => {
     expect(decision.resourceProfile).toBe('conservative');
     expect(decision.effective).toBe(2);
   });
-});
 
+  it('ignores malformed environment overrides instead of partially parsing them', () => {
+    const decision = resolveTeamWorkerCount(
+      5,
+      { maxAgents: 4, adaptiveAgents: true, resourceProfile: 'balanced' },
+      {
+        OMC_TEAM_MAX_AGENTS: '2abc',
+        OMC_TEAM_ADAPTIVE_AGENTS: 'maybe',
+        OMC_TEAM_RESOURCE_PROFILE: 'turbo',
+      } as NodeJS.ProcessEnv,
+      baseSnapshot,
+    );
+
+    expect(decision.maxAgents).toBe(4);
+    expect(decision.adaptiveEnabled).toBe(true);
+    expect(decision.resourceProfile).toBe('balanced');
+    expect(decision.effective).toBe(4);
+  });
+});
