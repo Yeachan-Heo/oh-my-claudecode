@@ -31,7 +31,7 @@ import { buildWorkerArgv, getContract, resolveValidatedBinaryPath, getWorkerEnv 
 import { createTeamSession, spawnWorkerInPane, sendToWorker, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
-import { cleanupTeamWorktrees } from './git-worktree.js';
+import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
@@ -274,7 +274,7 @@ async function spawnV2Worker(opts) {
     const splitResult = await tmuxExecAsync([
         'split-window', splitType, '-t', splitTarget,
         '-d', '-P', '-F', '#{pane_id}',
-        '-c', opts.cwd,
+        '-c', opts.workerCwd ?? opts.cwd,
     ]);
     const paneId = splitResult.stdout.split('\n')[0]?.trim();
     if (!paneId) {
@@ -293,8 +293,9 @@ async function spawnV2Worker(opts) {
         : undefined;
     // Build v2 task instruction (CLI API, NO done.json)
     const instruction = buildV2TaskInstruction(opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract);
-    const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName);
-    const promptModeStartupPrompt = generatePromptModeStartupPrompt(opts.teamName, opts.workerName, undefined, cliOutputContract);
+    const instructionStateRoot = opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : undefined;
+    const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
+    const promptModeStartupPrompt = generatePromptModeStartupPrompt(opts.teamName, opts.workerName, instructionStateRoot, cliOutputContract);
     if (usePromptMode) {
         await composeInitialInbox(opts.teamName, opts.workerName, instruction, opts.cwd, cliOutputContract);
     }
@@ -303,6 +304,8 @@ async function spawnV2Worker(opts) {
         ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
         OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
         OMC_TEAM_LEADER_CWD: opts.cwd,
+        ...(opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {}),
+        ...(opts.workerCwd ? { OMC_TEAM_WORKER_CWD: opts.workerCwd } : {}),
     };
     const resolvedBinaryPath = opts.resolvedBinaryPaths[opts.agentType]
         ?? resolveValidatedBinaryPath(opts.agentType);
@@ -328,11 +331,11 @@ async function spawnV2Worker(opts) {
     const [launchBinary, ...launchArgs] = buildWorkerArgv(opts.agentType, {
         teamName: opts.teamName,
         workerName: opts.workerName,
-        cwd: opts.cwd,
+        cwd: opts.workerCwd ?? opts.cwd,
         resolvedBinaryPath,
         model: modelForAgent,
     });
-    // For prompt-mode agents (codex, gemini), keep the full instruction in
+    // For prompt-mode agents (currently gemini), keep the full instruction in
     // inbox.md and pass only a short file-pointer prompt via CLI args. This
     // avoids echoing reviewer/seed prompt text into tmux scrollback.
     if (usePromptMode) {
@@ -344,7 +347,7 @@ async function spawnV2Worker(opts) {
         envVars,
         launchBinary,
         launchArgs,
-        cwd: opts.cwd,
+        cwd: opts.workerCwd ?? opts.cwd,
     };
     await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
     // Apply layout
@@ -440,6 +443,8 @@ export async function startTeamV2(config) {
     // do NOT change routing — user must recreate the team to pick up changes.
     const pluginCfg = config.pluginConfig ?? loadConfig();
     const resolvedRouting = buildResolvedRoutingSnapshot(pluginCfg);
+    const worktreeMode = normalizeTeamWorktreeMode(process.env.OMC_TEAM_WORKTREE_MODE ?? pluginCfg.team?.ops?.worktreeMode);
+    const workspaceMode = worktreeMode === 'disabled' ? 'single' : 'worktree';
     // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
     // AC-8: missing/untrusted binaries fall back to the snapshot's Claude tuple at
     // spawn time; emit a loud warning naming the binary so operators can fix it.
@@ -517,6 +522,17 @@ export async function startTeamV2(config) {
     }
     // Build allocation inputs for the new role-aware allocator
     const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
+    const workerWorktrees = new Map();
+    if (worktreeMode !== 'disabled') {
+        for (const workerName of workerNames) {
+            const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+                mode: worktreeMode,
+                requireCleanLeader: true,
+            });
+            if (worktree)
+                workerWorktrees.set(workerName, worktree);
+        }
+    }
     const workerNameSet = new Set(workerNames);
     // Respect explicit owner fields first, then allocate remaining tasks
     const startupAllocations = [];
@@ -551,14 +567,20 @@ export async function startTeamV2(config) {
         const wName = workerNames[i];
         const agentType = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
         await ensureWorkerStateDir(sanitized, wName, leaderCwd);
-        await writeWorkerOverlay({
+        const overlayPath = await writeWorkerOverlay({
             teamName: sanitized, workerName: wName, agentType,
             tasks: config.tasks.map((t, idx) => ({
                 id: String(idx + 1), subject: t.subject, description: t.description,
             })),
             cwd: leaderCwd,
             ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
+            ...(workerWorktrees.has(wName) ? { instructionStateRoot: '$OMC_TEAM_STATE_ROOT' } : {}),
         });
+        const worktree = workerWorktrees.get(wName);
+        if (worktree) {
+            const overlayContent = await readFile(overlayPath, 'utf-8');
+            installWorktreeRootAgents(sanitized, wName, leaderCwd, worktree.path, overlayContent);
+        }
     }
     // Create tmux session (leader only — workers spawned below)
     const session = await createTeamSession(sanitized, 0, leaderCwd, {
@@ -569,14 +591,25 @@ export async function startTeamV2(config) {
     const ownsWindow = session.sessionMode !== 'split-pane';
     const workerPaneIds = [];
     // Build workers info for config
-    const workersInfo = workerNames.map((wName, i) => ({
-        name: wName,
-        index: i + 1,
-        role: config.workerRoles?.[i]
-            ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude'),
-        assigned_tasks: [],
-        working_dir: leaderCwd,
-    }));
+    const workersInfo = workerNames.map((wName, i) => {
+        const worktree = workerWorktrees.get(wName);
+        return {
+            name: wName,
+            index: i + 1,
+            role: config.workerRoles?.[i]
+                ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude'),
+            assigned_tasks: [],
+            working_dir: worktree?.path ?? leaderCwd,
+            team_state_root: teamStateRoot(leaderCwd, sanitized),
+            ...(worktree ? {
+                worktree_repo_root: leaderCwd,
+                worktree_path: worktree.path,
+                worktree_branch: worktree.branch,
+                worktree_detached: worktree.detached,
+                worktree_created: worktree.created,
+            } : {}),
+        };
+    });
     // Write initial v2 config
     const teamConfig = {
         name: sanitized,
@@ -599,7 +632,8 @@ export async function startTeamV2(config) {
         resize_hook_name: null,
         resize_hook_target: null,
         resolved_routing: resolvedRouting,
-        ...(ownsWindow ? { workspace_mode: 'single' } : {}),
+        workspace_mode: workspaceMode,
+        worktree_mode: worktreeMode,
     };
     await saveTeamConfig(teamConfig, leaderCwd);
     const permissionsSnapshot = {
@@ -627,6 +661,7 @@ export async function startTeamV2(config) {
         leader_cwd: leaderCwd,
         team_state_root: teamConfig.team_state_root,
         workspace_mode: teamConfig.workspace_mode,
+        worktree_mode: teamConfig.worktree_mode,
         leader_pane_id: leaderPaneId,
         hud_pane_id: null,
         resize_hook_name: null,
@@ -668,6 +703,8 @@ export async function startTeamV2(config) {
             task,
             taskId,
             cwd: leaderCwd,
+            workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
+            worktreePath: workersInfo[workerIndex]?.worktree_path,
             resolvedBinaryPaths,
             ...(assignment.model ? { model: assignment.model } : {}),
             ...(assignment.role ? { role: assignment.role } : {}),
@@ -1045,6 +1082,13 @@ export async function monitorTeamV2(teamName, cwd) {
             status,
             heartbeat,
             assignedTasks: w.assigned_tasks,
+            working_dir: w.working_dir,
+            worktree_repo_root: w.worktree_repo_root,
+            worktree_path: w.worktree_path,
+            worktree_branch: w.worktree_branch,
+            worktree_detached: w.worktree_detached,
+            worktree_created: w.worktree_created,
+            team_state_root: w.team_state_root,
             turnsWithoutProgress,
         });
         if (!alive) {
@@ -1172,8 +1216,14 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     const sanitized = sanitizeTeamName(teamName);
     const config = await readTeamConfig(sanitized, cwd);
     if (!config) {
-        // No config available; only clean state. We intentionally avoid guessing
-        // a tmux session name here to prevent accidental self-session termination.
+        // No config means worker liveness cannot be proven. Worktree metadata and
+        // root AGENTS backups live under the scoped state tree, so use non-mutating
+        // inspection and preserve state whenever any worktree recovery evidence exists.
+        const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
+        if (cleanupSafety.hasEvidence) {
+            process.stderr.write('[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n');
+            return;
+        }
         await cleanupTeamState(sanitized, cwd);
         return;
     }
@@ -1233,7 +1283,10 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             await writeShutdownRequest(sanitized, w.name, 'leader-fixed', cwd);
             shutdownRequestTimes.set(w.name, requestedAt);
             // Write shutdown inbox
-            const shutdownInbox = `# Shutdown Request\n\nAll tasks are complete. Please wrap up and respond with a shutdown acknowledgement.\n\nWrite your ack to: ${TeamPaths.shutdownAck(sanitized, w.name)}\nFormat: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n\nThen exit your session.\n`;
+            const shutdownAckPath = w.worktree_path
+                ? `$OMC_TEAM_STATE_ROOT/workers/${w.name}/shutdown-ack.json`
+                : TeamPaths.shutdownAck(sanitized, w.name);
+            const shutdownInbox = `# Shutdown Request\n\nAll tasks are complete. Please wrap up and respond with a shutdown acknowledgement.\n\nWrite your ack to: ${shutdownAckPath}\nFormat: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n\nThen exit your session.\n`;
             await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);
         }
         catch (err) {
@@ -1272,11 +1325,11 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         await new Promise((r) => setTimeout(r, 2_000));
     }
     // 4. Force kill remaining tmux panes
+    const recordedWorkerPaneIds = config.workers
+        .map((w) => w.pane_id)
+        .filter((p) => typeof p === 'string' && p.trim().length > 0);
     try {
-        const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds } = await import('./tmux-session.js');
-        const recordedWorkerPaneIds = config.workers
-            .map((w) => w.pane_id)
-            .filter((p) => typeof p === 'string' && p.trim().length > 0);
+        const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');
         const ownsWindow = config.tmux_window_owned === true;
         const workerPaneIds = ownsWindow
             ? recordedWorkerPaneIds
@@ -1293,9 +1346,33 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
                 : 'detached-session';
             await killTeamSession(config.tmux_session, workerPaneIds, config.leader_pane_id ?? undefined, { sessionMode });
         }
+        const paneById = new Map(config.workers
+            .filter((w) => typeof w.pane_id === 'string' && w.pane_id.trim().length > 0)
+            .map((w) => [w.pane_id, w.name]));
+        const liveness = await Promise.all(workerPaneIds.map(async (paneId) => [paneId, await getWorkerLiveness(paneId)]));
+        const aliveWorkers = liveness
+            .filter(([, state]) => state === 'alive')
+            .map(([paneId]) => paneById.get(paneId) ?? paneId);
+        if (aliveWorkers.length > 0) {
+            process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(', ')}
+`);
+            return;
+        }
+        const unknownWorkers = liveness
+            .filter(([, state]) => state === 'unknown')
+            .map(([paneId]) => paneById.get(paneId) ?? paneId);
+        if (unknownWorkers.length > 0) {
+            process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(', ')}
+`);
+            return;
+        }
     }
     catch (err) {
         process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}\n`);
+        if (recordedWorkerPaneIds.length > 0) {
+            process.stderr.write('[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n');
+            return;
+        }
     }
     // 5. Ralph completion logging
     if (ralph) {
@@ -1309,14 +1386,24 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
         }, cwd).catch(logEventFailure);
     }
-    // 6. Clean up state
+    // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
+    // team state directory too; it contains the metadata and root AGENTS.md backups
+    // needed for a later safe cleanup attempt.
+    let preservedWorktrees = 0;
     try {
-        cleanupTeamWorktrees(sanitized, cwd);
+        const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
+        preservedWorktrees = worktreeCleanup.preserved.length;
     }
     catch (err) {
+        preservedWorktrees = 1;
         process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
     }
-    await cleanupTeamState(sanitized, cwd);
+    if (preservedWorktrees === 0) {
+        await cleanupTeamState(sanitized, cwd);
+    }
+    else {
+        process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
+    }
 }
 // ---------------------------------------------------------------------------
 // resumeTeam — reconstruct runtime from persisted state

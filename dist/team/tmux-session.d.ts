@@ -129,6 +129,8 @@ export declare function injectToLeaderPane(sessionName: string, leaderPaneId: st
  * Check if a worker pane is still alive.
  * Uses pane ID for stable targeting (not pane index).
  */
+export type WorkerPaneLiveness = 'alive' | 'dead' | 'unknown';
+export declare function getWorkerLiveness(paneId: string): Promise<WorkerPaneLiveness>;
 export declare function isWorkerAlive(paneId: string): Promise<boolean>;
 /**
  * Graceful-then-force kill of worker panes.

@@ -496,6 +496,14 @@ export function validateTeamConfig(config: PluginConfig): void {
         );
       }
     }
+    if (ops.worktreeMode !== undefined) {
+      const allowed = new Set(["disabled", "off", "detached", "branch", "named"]);
+      if (typeof ops.worktreeMode !== "string" || !allowed.has(ops.worktreeMode)) {
+        throw new Error(
+          `[OMC] team.ops.worktreeMode: invalid value "${String(ops.worktreeMode)}". Allowed: ${[...allowed].join(", ")}`,
+        );
+      }
+    }
   }
 
   const roleRouting = team.roleRouting as Record<string, unknown> | undefined;

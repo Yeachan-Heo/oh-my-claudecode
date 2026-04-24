@@ -11,7 +11,7 @@
  */
 
 import { resolve } from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
 import { tmuxExec, tmuxSpawn } from '../cli/tmux-utils.js';
 import {
   buildWorkerArgv,
@@ -35,12 +35,21 @@ import {
 import { withScalingLock, saveTeamConfig } from './monitor.js';
 import {
   sanitizeName,
-  isWorkerAlive,
+  getWorkerLiveness,
   killWorkerPanes,
   buildWorkerStartCommand,
   waitForPaneReady,
 } from './tmux-session.js';
 import { TeamPaths, absPath } from './state-paths.js';
+import { writeWorkerOverlay } from './worker-bootstrap.js';
+import {
+  ensureWorkerWorktree,
+  installWorktreeRootAgents,
+  prepareWorkerWorktreeForRemoval,
+  removeWorkerWorktree,
+  restoreWorktreeRootAgents,
+  type TeamWorktreeMode,
+} from './git-worktree.js';
 
 // ── Environment gate ──────────────────────────────────────────────────────────
 
@@ -133,13 +142,27 @@ export async function scaleUp(
       };
     }
 
-    const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state`;
+    const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state/team/${sanitized}`;
+    const worktreeMode: TeamWorktreeMode = config.worktree_mode ?? 'disabled';
 
     // Resolve the monotonic worker index counter
     let nextIndex = config.next_worker_index ?? (currentCount + 1);
     const addedWorkers: WorkerInfo[] = [];
+    const pendingWorktrees: Array<{ workerName: string; created: boolean }> = [];
+
+    const cleanupScaledWorkerWorktree = (workerName: string, created: boolean): void => {
+      if (created) {
+        removeWorkerWorktree(sanitized, workerName, leaderCwd);
+      } else {
+        const restored = restoreWorktreeRootAgents(sanitized, workerName, leaderCwd);
+        if (restored.reason === 'agents_dirty') {
+          throw new Error(`agents_dirty: preserving modified worktree root AGENTS.md for ${workerName}`);
+        }
+      }
+    };
 
     const rollbackScaleUp = async (error: string, paneId?: string): Promise<ScaleError> => {
+      const cleanedWorktrees = new Set<string>();
       for (const w of addedWorkers) {
         const idx = config.workers.findIndex((worker) => worker.name === w.name);
         if (idx >= 0) {
@@ -149,7 +172,17 @@ export async function scaleUp(
           if (w.pane_id) {
             tmuxExec(['kill-pane', '-t', w.pane_id], { stdio: 'pipe' });
           }
-        } catch { /* best-effort pane cleanup */ }
+          if (w.worktree_path) {
+            cleanupScaledWorkerWorktree(w.name, w.worktree_created === true);
+            cleanedWorktrees.add(w.name);
+          }
+        } catch { /* best-effort pane/worktree cleanup */ }
+      }
+      for (const pending of pendingWorktrees) {
+        if (cleanedWorktrees.has(pending.workerName)) continue;
+        try {
+          cleanupScaledWorkerWorktree(pending.workerName, pending.created);
+        } catch { /* best-effort pending worktree cleanup */ }
       }
 
       if (paneId) {
@@ -195,6 +228,17 @@ export async function scaleUp(
       // Create worker directory
       const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
       await mkdir(workerDirPath, { recursive: true });
+
+      const worktree = worktreeMode === 'disabled'
+        ? null
+        : ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+          mode: worktreeMode,
+          requireCleanLeader: true,
+        });
+      if (worktree) {
+        pendingWorktrees.push({ workerName, created: worktree.created });
+      }
+      const workerCwd = worktree?.path ?? leaderCwd;
 
       // Resolve per-worker provider/model from the team's routing snapshot
       // (Option E stickiness — snapshot is immutable, never re-resolved).
@@ -248,7 +292,7 @@ export async function scaleUp(
         const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
           teamName: sanitized,
           workerName,
-          cwd: leaderCwd,
+          cwd: workerCwd,
           ...(model ? { model } : {}),
         });
         return { launchBinary, launchArgs };
@@ -294,7 +338,31 @@ export async function scaleUp(
         ...getModelWorkerEnv(sanitized, workerName, workerAgentType, env),
         OMC_TEAM_STATE_ROOT: teamStateRoot,
         OMC_TEAM_LEADER_CWD: leaderCwd,
+        ...(worktree ? { OMC_TEAM_WORKTREE_PATH: worktree.path, OMC_TEAM_WORKER_CWD: workerCwd } : {}),
       };
+
+      if (worktree) {
+        try {
+          const workerOverlayParams = {
+            teamName: sanitized,
+            workerName,
+            agentType: workerAgentType,
+            tasks: tasks.map((t, idx) => ({
+              id: String(idx + 1),
+              subject: t.subject,
+              description: t.description,
+            })),
+            cwd: leaderCwd,
+            instructionStateRoot: '$OMC_TEAM_STATE_ROOT',
+          };
+          const overlayPath = await writeWorkerOverlay(workerOverlayParams);
+          const overlayContent = await readFile(overlayPath, 'utf-8');
+          installWorktreeRootAgents(sanitized, workerName, leaderCwd, worktree.path, overlayContent);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return await rollbackScaleUp(`Failed to install worker overlay for ${workerName}: ${reason}`);
+        }
+      }
 
       let cmd: string;
       try {
@@ -304,7 +372,7 @@ export async function scaleUp(
           envVars: extraEnv,
           launchArgs,
           launchBinary,
-          cwd: leaderCwd,
+          cwd: workerCwd,
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -321,7 +389,7 @@ export async function scaleUp(
       const splitDirection = splitTarget === (config.leader_pane_id ?? '') ? '-h' : '-v';
 
       const result = tmuxSpawn([
-        'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', leaderCwd, cmd,
+        'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', workerCwd, cmd,
       ]);
 
       if (result.status !== 0) {
@@ -356,8 +424,15 @@ export async function scaleUp(
         assigned_tasks: [],
         pid: panePid,
         pane_id: paneId,
-        working_dir: leaderCwd,
+        working_dir: workerCwd,
         team_state_root: teamStateRoot,
+        ...(worktree ? {
+          worktree_repo_root: leaderCwd,
+          worktree_path: worktree.path,
+          worktree_branch: worktree.branch,
+          worktree_detached: worktree.detached,
+          worktree_created: worktree.created,
+        } : {}),
       };
 
       await teamWriteWorkerIdentity(sanitized, workerName, workerInfo, leaderCwd);
@@ -374,6 +449,8 @@ export async function scaleUp(
       }
 
       addedWorkers.push(workerInfo);
+      const pendingIndex = pendingWorktrees.findIndex(pending => pending.workerName === workerName);
+      if (pendingIndex >= 0) pendingWorktrees.splice(pendingIndex, 1);
       config.workers.push(workerInfo);
       config.worker_count = config.workers.length;
       config.next_worker_index = nextIndex;
@@ -483,7 +560,9 @@ export async function scaleDown(
 
     const removedNames: string[] = [];
 
-    // Phase 1: Set workers to 'draining' status
+    // Phase 1: Set workers to 'draining' status. Worktree safety is checked
+    // after the drain/kill boundary so active workers can finish and clean up
+    // ordinary in-progress work before removal is attempted.
     for (const w of targetWorkers) {
       const drainingStatus: WorkerStatus = {
         state: 'draining',
@@ -501,8 +580,8 @@ export async function scaleDown(
         const allDrained = await Promise.all(
           targetWorkers.map(async (w) => {
             const status = await teamReadWorkerStatus(sanitized, w.name, leaderCwd);
-            const alive = w.pane_id ? await isWorkerAlive(w.pane_id) : false;
-            return status.state === 'idle' || status.state === 'done' || !alive;
+            const liveness = w.pane_id ? await getWorkerLiveness(w.pane_id) : 'dead';
+            return status.state === 'idle' || status.state === 'done' || liveness === 'dead';
           }),
         );
         if (allDrained.every(Boolean)) break;
@@ -510,7 +589,7 @@ export async function scaleDown(
       }
     }
 
-    // Phase 3: Kill tmux panes and remove from config
+    // Phase 3: Kill tmux panes after workers have had a chance to drain.
     const targetPaneIds = targetWorkers
       .map((w) => w.pane_id)
       .filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().length > 0);
@@ -522,11 +601,35 @@ export async function scaleDown(
       cwd: leaderCwd,
     });
 
+    const liveness = await Promise.all(
+      targetWorkers.map(async (w) => (w.pane_id ? [w.name, await getWorkerLiveness(w.pane_id)] as const : [w.name, 'dead'] as const)),
+    );
+    const aliveNames = liveness.filter(([, state]) => state === 'alive').map(([name]) => name);
+    if (aliveNames.length > 0) {
+      return { ok: false, error: `Refusing to remove worker state while pane(s) are still alive: ${aliveNames.join(', ')}` };
+    }
+    const unknownNames = liveness.filter(([, state]) => state === 'unknown').map(([name]) => name);
+    if (unknownNames.length > 0) {
+      return { ok: false, error: `Refusing to remove worker state while pane liveness is unknown: ${unknownNames.join(', ')}` };
+    }
+
     for (const w of targetWorkers) {
+      if (w.worktree_path) {
+        try {
+          if (w.worktree_created) {
+            removeWorkerWorktree(sanitized, w.name, leaderCwd);
+          } else {
+            prepareWorkerWorktreeForRemoval(sanitized, w.name, leaderCwd, w.worktree_path);
+          }
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: `Failed to remove worktree for ${w.name}: ${reason}` };
+        }
+      }
       removedNames.push(w.name);
     }
 
-    // Phase 4: Update config
+    // Phase 5: Update config
     const removedSet = new Set(removedNames);
     config.workers = config.workers.filter(w => !removedSet.has(w.name));
     config.worker_count = config.workers.length;

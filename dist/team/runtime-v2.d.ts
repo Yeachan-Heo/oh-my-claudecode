@@ -37,6 +37,13 @@ export interface TeamSnapshotV2 {
         status: WorkerStatus;
         heartbeat: WorkerHeartbeat | null;
         assignedTasks: string[];
+        working_dir?: string;
+        worktree_repo_root?: string;
+        worktree_path?: string;
+        worktree_branch?: string;
+        worktree_detached?: boolean;
+        worktree_created?: boolean;
+        team_state_root?: string;
         turnsWithoutProgress: number;
     }>;
     tasks: {

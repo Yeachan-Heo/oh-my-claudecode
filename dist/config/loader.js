@@ -428,6 +428,12 @@ export function validateTeamConfig(config) {
                 throw new Error(`[OMC] team.ops.defaultAgentType: invalid value "${String(ops.defaultAgentType)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`);
             }
         }
+        if (ops.worktreeMode !== undefined) {
+            const allowed = new Set(["disabled", "off", "detached", "branch", "named"]);
+            if (typeof ops.worktreeMode !== "string" || !allowed.has(ops.worktreeMode)) {
+                throw new Error(`[OMC] team.ops.worktreeMode: invalid value "${String(ops.worktreeMode)}". Allowed: ${[...allowed].join(", ")}`);
+            }
+        }
     }
     const roleRouting = team.roleRouting;
     if (!roleRouting || typeof roleRouting !== "object")

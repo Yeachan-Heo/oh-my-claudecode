@@ -396,6 +396,8 @@ export interface TeamOpsConfig {
     monitorIntervalMs?: number;
     shutdownTimeoutMs?: number;
     costMode?: TeamCostMode;
+    /** Opt-in native team worker worktrees. Disabled unless explicitly set. */
+    worktreeMode?: 'disabled' | 'off' | 'detached' | 'branch' | 'named';
 }
 /** `team` config block in PluginConfig. */
 export interface TeamConfigBlock {

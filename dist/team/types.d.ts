@@ -198,6 +198,7 @@ export interface TeamManifestV2 {
     leader_cwd?: string;
     team_state_root?: string;
     workspace_mode?: 'single' | 'worktree';
+    worktree_mode?: 'disabled' | 'detached' | 'named';
     lifecycle_profile?: 'default' | 'linked_ralph';
     leader_pane_id: string | null;
     hud_pane_id: string | null;
@@ -215,9 +216,11 @@ export interface WorkerInfo {
     pid?: number;
     pane_id?: string;
     working_dir?: string;
+    worktree_repo_root?: string;
     worktree_path?: string;
     worktree_branch?: string;
     worktree_detached?: boolean;
+    worktree_created?: boolean;
     team_state_root?: string;
     /**
      * Verdict-output file path for CLI-worker output contract (AC-7).
@@ -244,6 +247,7 @@ export interface TeamConfig {
     leader_cwd?: string;
     team_state_root?: string;
     workspace_mode?: 'single' | 'worktree';
+    worktree_mode?: 'disabled' | 'detached' | 'named';
     lifecycle_profile?: 'default' | 'linked_ralph';
     leader_pane_id: string | null;
     hud_pane_id: string | null;
@@ -374,6 +378,9 @@ export type ReleaseTaskClaimResult = {
 export interface TeamSummary {
     teamName: string;
     workerCount: number;
+    team_state_root?: string;
+    workspace_mode?: 'single' | 'worktree';
+    worktree_mode?: 'disabled' | 'detached' | 'named';
     tasks: {
         total: number;
         pending: number;
@@ -387,6 +394,13 @@ export interface TeamSummary {
         alive: boolean;
         lastTurnAt: string | null;
         turnsWithoutProgress: number;
+        working_dir?: string;
+        worktree_repo_root?: string;
+        worktree_path?: string;
+        worktree_branch?: string;
+        worktree_detached?: boolean;
+        worktree_created?: boolean;
+        team_state_root?: string;
     }>;
     nonReportingWorkers: string[];
     performance?: TeamSummaryPerformance;

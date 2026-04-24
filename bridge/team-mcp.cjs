@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3584,7 +3584,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse5(baseURI, schemelessOptions), parse5(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3811,7 +3811,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -16673,7 +16673,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -16690,7 +16690,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -16768,7 +16768,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -17029,12 +17029,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -17763,12 +17763,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -18040,7 +18040,7 @@ async function sendToWorker(_sessionName, paneId, message) {
     return false;
   }
 }
-async function isWorkerAlive(paneId) {
+async function getWorkerLiveness(paneId) {
   try {
     const result = await tmuxCmdAsync([
       "display-message",
@@ -18049,10 +18049,13 @@ async function isWorkerAlive(paneId) {
       "-p",
       "#{pane_dead}"
     ]);
-    return result.stdout.trim() === "0";
+    return result.stdout.trim() === "0" ? "alive" : "dead";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+async function isWorkerAlive(paneId) {
+  return await getWorkerLiveness(paneId) === "alive";
 }
 async function killWorkerPanes(opts) {
   const { paneIds, leaderPaneId, teamName, cwd, graceMs = 1e4 } = opts;
@@ -18423,38 +18426,206 @@ function withFileLockSync(lockPath, fn, opts) {
 
 // src/team/git-worktree.ts
 function getWorktreePath(repoRoot, teamName, workerName) {
-  return (0, import_node_path.join)(repoRoot, ".omc", "worktrees", sanitizeName(teamName), sanitizeName(workerName));
+  return (0, import_node_path.join)(repoRoot, ".omc", "team", sanitizeName(teamName), "worktrees", sanitizeName(workerName));
 }
 function getBranchName(teamName, workerName) {
   return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
 }
+function git(repoRoot, args, cwd = repoRoot) {
+  return (0, import_node_child_process.execFileSync)("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
+}
+function isRegisteredWorktreePath(repoRoot, wtPath) {
+  try {
+    const output = git(repoRoot, ["worktree", "list", "--porcelain"]);
+    const resolvedWtPath = (0, import_node_path.resolve)(wtPath);
+    return output.split("\n").some((line) => line.startsWith("worktree ") && (0, import_node_path.resolve)(line.slice("worktree ".length).trim()) === resolvedWtPath);
+  } catch {
+    return false;
+  }
+}
+function normalizeStatusPath(rawPath) {
+  const trimmed = rawPath.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+function statusEntryPath(line) {
+  const payload = line.slice(3);
+  const renameSeparator = " -> ";
+  const renameIndex = payload.indexOf(renameSeparator);
+  return normalizeStatusPath(renameIndex >= 0 ? payload.slice(renameIndex + renameSeparator.length) : payload);
+}
+function isWorktreeDirtyExcept(wtPath, ignoredRootPaths = []) {
+  try {
+    const ignored = new Set(ignoredRootPaths);
+    const entries = (0, import_node_child_process.execFileSync)("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).split("\n").filter((line) => line.trim().length > 0);
+    const relevantEntries = entries.filter((line) => !ignored.has(statusEntryPath(line)));
+    return { dirty: relevantEntries.length > 0, entries: relevantEntries };
+  } catch {
+    return { dirty: true, entries: ["git_status_failed"] };
+  }
+}
 function getMetadataPath(repoRoot, teamName) {
+  return (0, import_node_path.join)(repoRoot, ".omc", "state", "team", sanitizeName(teamName), "worktrees.json");
+}
+function getLegacyMetadataPath(repoRoot, teamName) {
   return (0, import_node_path.join)(repoRoot, ".omc", "state", "team-bridge", sanitizeName(teamName), "worktrees.json");
 }
-function readMetadata(repoRoot, teamName) {
-  const metaPath = getMetadataPath(repoRoot, teamName);
-  if (!(0, import_node_fs.existsSync)(metaPath)) return [];
+function getWorkerStateDir(repoRoot, teamName, workerName) {
+  return (0, import_node_path.join)(repoRoot, ".omc", "state", "team", sanitizeName(teamName), "workers", sanitizeName(workerName));
+}
+function getRootAgentsBackupPath(repoRoot, teamName, workerName) {
+  return (0, import_node_path.join)(getWorkerStateDir(repoRoot, teamName, workerName), "worktree-root-agents.json");
+}
+function readRootAgentsBackup(repoRoot, teamName, workerName) {
+  const backupPath = getRootAgentsBackupPath(repoRoot, teamName, workerName);
+  if (!(0, import_node_fs.existsSync)(backupPath)) return null;
   try {
-    return JSON.parse((0, import_node_fs.readFileSync)(metaPath, "utf-8"));
+    return JSON.parse((0, import_node_fs.readFileSync)(backupPath, "utf-8"));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[omc] warning: worktrees.json parse error: ${msg}
+    process.stderr.write(`[omc] warning: worktree root AGENTS backup parse error: ${msg}
 `);
-    return [];
+    const error2 = new Error(`worktree_root_agents_backup_unreadable:${backupPath}:${msg}`);
+    error2.code = "worktree_root_agents_backup_unreadable";
+    throw error2;
   }
+}
+function restoreWorktreeRootAgents(teamName, workerName, repoRoot, worktreePath) {
+  const backupPath = getRootAgentsBackupPath(repoRoot, teamName, workerName);
+  validateResolvedPath(backupPath, repoRoot);
+  const backup = readRootAgentsBackup(repoRoot, teamName, workerName);
+  if (!backup) return { restored: false, reason: "no_backup" };
+  const resolvedWorktreePath = worktreePath ?? backup.worktreePath;
+  validateResolvedPath(resolvedWorktreePath, repoRoot);
+  if (!(0, import_node_fs.existsSync)(resolvedWorktreePath)) {
+    try {
+      (0, import_node_fs.unlinkSync)(backupPath);
+    } catch {
+    }
+    return { restored: false, reason: "worktree_missing" };
+  }
+  const agentsPath = (0, import_node_path.join)(resolvedWorktreePath, "AGENTS.md");
+  validateResolvedPath(agentsPath, repoRoot);
+  const currentContent = (0, import_node_fs.existsSync)(agentsPath) ? (0, import_node_fs.readFileSync)(agentsPath, "utf-8") : void 0;
+  const isPartialInstallOriginal = backup.hadOriginal && currentContent === (backup.originalContent ?? "");
+  if (currentContent !== void 0 && currentContent !== backup.installedContent && !isPartialInstallOriginal) {
+    return { restored: false, reason: "agents_dirty" };
+  }
+  if (backup.hadOriginal) {
+    (0, import_node_fs.writeFileSync)(agentsPath, backup.originalContent ?? "", "utf-8");
+  } else if ((0, import_node_fs.existsSync)(agentsPath)) {
+    (0, import_node_fs.unlinkSync)(agentsPath);
+  }
+  try {
+    (0, import_node_fs.unlinkSync)(backupPath);
+  } catch {
+  }
+  return { restored: true };
+}
+function readMetadataResult(repoRoot, teamName) {
+  const paths = [getMetadataPath(repoRoot, teamName), getLegacyMetadataPath(repoRoot, teamName)];
+  const byWorker = /* @__PURE__ */ new Map();
+  const issues = [];
+  for (const metaPath of paths) {
+    if (!(0, import_node_fs.existsSync)(metaPath)) continue;
+    try {
+      const entries = JSON.parse((0, import_node_fs.readFileSync)(metaPath, "utf-8"));
+      for (const entry of entries) byWorker.set(entry.workerName, entry);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      issues.push({ path: metaPath, message });
+      process.stderr.write(`[omc] warning: worktrees.json parse error at ${metaPath}: ${message}
+`);
+    }
+  }
+  return { entries: [...byWorker.values()], issues };
+}
+function readMetadata(repoRoot, teamName) {
+  return readMetadataResult(repoRoot, teamName).entries;
+}
+function listRootAgentsBackupIssues(repoRoot, teamName, entries) {
+  const workersDir = (0, import_node_path.join)(repoRoot, ".omc", "state", "team", sanitizeName(teamName), "workers");
+  if (!(0, import_node_fs.existsSync)(workersDir)) return [];
+  const knownWorkers = new Set(entries.map((entry) => sanitizeName(entry.workerName)));
+  const issues = [];
+  for (const workerName of (0, import_node_fs.readdirSync)(workersDir)) {
+    const backupPath = (0, import_node_path.join)(workersDir, workerName, "worktree-root-agents.json");
+    if (!(0, import_node_fs.existsSync)(backupPath)) continue;
+    try {
+      JSON.parse((0, import_node_fs.readFileSync)(backupPath, "utf-8"));
+    } catch (error2) {
+      const message = error2 instanceof Error ? error2.message : String(error2);
+      issues.push({ path: backupPath, message: `worktree_root_agents_backup_unreadable:${workerName}:${message}` });
+      continue;
+    }
+    if (!knownWorkers.has(sanitizeName(workerName))) {
+      issues.push({
+        path: backupPath,
+        message: `orphaned_worktree_root_agents_backup:${workerName}`
+      });
+    }
+  }
+  return issues;
 }
 function writeMetadata(repoRoot, teamName, entries) {
   const metaPath = getMetadataPath(repoRoot, teamName);
   validateResolvedPath(metaPath, repoRoot);
-  const dir = (0, import_node_path.join)(repoRoot, ".omc", "state", "team-bridge", sanitizeName(teamName));
-  ensureDirWithMode(dir);
+  ensureDirWithMode((0, import_node_path.join)(repoRoot, ".omc", "state", "team", sanitizeName(teamName)));
   atomicWriteJson(metaPath, entries);
+}
+function forgetMetadata(repoRoot, teamName, workerName) {
+  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
+  withFileLockSync(metaLockPath, () => {
+    const existing = readMetadata(repoRoot, teamName).filter((entry) => entry.workerName !== workerName);
+    writeMetadata(repoRoot, teamName, existing);
+  });
+}
+function checkWorkerWorktreeRemovalSafety(teamName, workerName, repoRoot, worktreePath) {
+  const wtPath = worktreePath ?? getWorktreePath(repoRoot, teamName, workerName);
+  const backup = readRootAgentsBackup(repoRoot, teamName, workerName);
+  if (!(0, import_node_fs.existsSync)(wtPath)) return;
+  let ignoreRootAgents = false;
+  if (backup) {
+    const agentsPath = (0, import_node_path.join)(wtPath, "AGENTS.md");
+    validateResolvedPath(agentsPath, repoRoot);
+    const currentContent = (0, import_node_fs.existsSync)(agentsPath) ? (0, import_node_fs.readFileSync)(agentsPath, "utf-8") : void 0;
+    const isPartialInstallOriginal = backup.hadOriginal && currentContent === (backup.originalContent ?? "");
+    if (currentContent !== void 0 && currentContent !== backup.installedContent && !isPartialInstallOriginal) {
+      const error2 = new Error(`agents_dirty: preserving modified worktree root AGENTS.md at ${agentsPath}`);
+      error2.code = "agents_dirty";
+      throw error2;
+    }
+    ignoreRootAgents = true;
+  }
+  const dirtyCheck = isWorktreeDirtyExcept(wtPath, ignoreRootAgents ? ["AGENTS.md"] : []);
+  if (dirtyCheck.dirty) {
+    const error2 = new Error(`worktree_dirty: preserving dirty worker worktree at ${wtPath}`);
+    error2.code = "worktree_dirty";
+    throw error2;
+  }
+}
+function prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, worktreePath) {
+  const wtPath = worktreePath ?? getWorktreePath(repoRoot, teamName, workerName);
+  checkWorkerWorktreeRemovalSafety(teamName, workerName, repoRoot, wtPath);
+  const agentsRestore = restoreWorktreeRootAgents(teamName, workerName, repoRoot, wtPath);
+  if (agentsRestore.reason === "agents_dirty") {
+    const error2 = new Error(`agents_dirty: preserving modified worktree root AGENTS.md at ${(0, import_node_path.join)(wtPath, "AGENTS.md")}`);
+    error2.code = "agents_dirty";
+    throw error2;
+  }
 }
 function removeWorkerWorktree(teamName, workerName, repoRoot) {
   const wtPath = getWorktreePath(repoRoot, teamName, workerName);
   const branch = getBranchName(teamName, workerName);
+  prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
   try {
-    (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", "--force", wtPath], { cwd: repoRoot, stdio: "pipe" });
+    (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
   } catch {
   }
   try {
@@ -18465,21 +18636,52 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
   } catch {
   }
-  const metaLockPath = getMetadataPath(repoRoot, teamName) + ".lock";
-  withFileLockSync(metaLockPath, () => {
-    const existing = readMetadata(repoRoot, teamName);
-    const updated = existing.filter((e) => e.workerName !== workerName);
-    writeMetadata(repoRoot, teamName, updated);
-  });
+  if ((0, import_node_fs.existsSync)(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
+    (0, import_node_fs.rmSync)(wtPath, { recursive: true, force: true });
+  }
+  forgetMetadata(repoRoot, teamName, workerName);
+}
+function inspectTeamWorktreeCleanupSafety(teamName, repoRoot) {
+  const metadata = readMetadataResult(repoRoot, teamName);
+  const entries = metadata.entries;
+  const backupIssues = listRootAgentsBackupIssues(repoRoot, teamName, entries);
+  return {
+    hasEvidence: entries.length > 0 || metadata.issues.length > 0 || backupIssues.length > 0,
+    entries,
+    blockers: [
+      ...metadata.issues.map((issue2, index) => ({
+        workerName: `metadata-${index + 1}`,
+        path: issue2.path,
+        reason: `worktree_metadata_unreadable:${issue2.message}`
+      })),
+      ...backupIssues.map((issue2, index) => ({
+        workerName: `agents-backup-${index + 1}`,
+        path: issue2.path,
+        reason: issue2.message
+      }))
+    ]
+  };
 }
 function cleanupTeamWorktrees(teamName, repoRoot) {
-  const entries = readMetadata(repoRoot, teamName);
+  const safety = inspectTeamWorktreeCleanupSafety(teamName, repoRoot);
+  const entries = safety.entries;
+  const removed = [];
+  const preserved = [...safety.blockers];
+  if (preserved.length > 0) {
+    return { removed, preserved };
+  }
   for (const entry of entries) {
     try {
       removeWorkerWorktree(teamName, entry.workerName, repoRoot);
-    } catch {
+      removed.push(entry.workerName);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      preserved.push({ workerName: entry.workerName, path: entry.path, reason });
+      process.stderr.write(`[omc] warning: preserved worktree ${entry.path}: ${reason}
+`);
     }
   }
+  return { removed, preserved };
 }
 
 // src/mcp/team-job-convergence.ts

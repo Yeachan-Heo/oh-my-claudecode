@@ -7,7 +7,7 @@ export interface CliAgentContract {
     parseOutput(rawOutput: string): string;
     /** Whether this agent supports a prompt/headless mode that bypasses TUI input */
     supportsPromptMode?: boolean;
-    /** CLI flag for prompt mode (e.g., '-p' for gemini headless mode) */
+    /** CLI flag for prompt mode (e.g., '-i' for gemini) */
     promptModeFlag?: string;
 }
 export interface WorkerLaunchConfig {
