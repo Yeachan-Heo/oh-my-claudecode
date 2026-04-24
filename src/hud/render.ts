@@ -28,6 +28,7 @@ import { renderPermission } from "./elements/permission.js";
 import { renderThinking } from "./elements/thinking.js";
 import { renderSession } from "./elements/session.js";
 import { renderTokenUsage } from "./elements/token-usage.js";
+import { renderEnterpriseCost } from "./elements/enterprise-cost.js";
 import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
@@ -296,8 +297,12 @@ export async function render(
     }
   }
 
-  // Rate limits (5h and weekly) - data takes priority over error indicator
-  if (enabledElements.rateLimits && context.rateLimitsResult) {
+  // Rate limits (5h and weekly) - data takes priority over error indicator.
+  // Skip for enterprise responses where token-window limits aren't applicable
+  // (the enterpriseCost element replaces this slot for those accounts).
+  const hasEnterpriseData =
+    context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== undefined;
+  if (enabledElements.rateLimits && context.rateLimitsResult && !hasEnterpriseData) {
     if (context.rateLimitsResult.rateLimits) {
       const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars
@@ -347,7 +352,31 @@ export async function render(
     }
   }
 
-  if (enabledElements.showTokens === true) {
+  // Determine effective enterprise mode
+  const isEnterprise = enabledElements.enterpriseMode !== undefined
+    ? enabledElements.enterpriseMode
+    : (
+        (context.subscriptionType ?? '').toLowerCase() === 'enterprise' ||
+        /claude_zero/i.test(context.rateLimitTier ?? '')
+      );
+
+  if (isEnterprise && enabledElements.showEnterpriseCost !== false) {
+    const stale = context.rateLimitsResult?.stale;
+    const cost = renderEnterpriseCost(
+      context.rateLimitsResult?.rateLimits,
+      stale,
+    );
+    if (cost) {
+      rendered.set("enterpriseCost", cost);
+    } else if (enabledElements.showTokens === true) {
+      // Enterprise but no cost data — fall back to token usage
+      const tokenUsage = renderTokenUsage(
+        context.lastRequestTokenUsage,
+        context.sessionTotalTokens,
+      );
+      if (tokenUsage) rendered.set("tokens", tokenUsage);
+    }
+  } else if (enabledElements.showTokens === true) {
     const tokenUsage = renderTokenUsage(
       context.lastRequestTokenUsage,
       context.sessionTotalTokens,
