@@ -820,9 +820,13 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
   const fiveHour = response.five_hour?.utilization;
   const sevenDay = response.seven_day?.utilization;
   const enterpriseCredits = response.extra_usage?.used_credits;
+  const enterpriseCurrency = (response.extra_usage?.currency ?? 'USD').toUpperCase();
+  // Enterprise credits are only usable when we know how to interpret the minor-unit digits;
+  // see the USD guard in the extra_usage branch below for rationale.
+  const hasUsableEnterprise = enterpriseCredits != null && enterpriseCurrency === 'USD';
 
-  // Need at least one valid value (5h/7d for Pro/Max, or used_credits for Enterprise)
-  if (fiveHour == null && sevenDay == null && enterpriseCredits == null) return null;
+  // Need at least one valid value (5h/7d for Pro/Max, or usable enterprise credits)
+  if (fiveHour == null && sevenDay == null && !hasUsableEnterprise) return null;
 
   // Parse ISO 8601 date strings to Date objects
   const parseDate = (dateStr: string | undefined): Date | null => {
@@ -864,11 +868,16 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
   // Add extra (metered) usage if available (Pro subscribers with extra usage allocation)
   const extra = response.extra_usage;
   if (extra != null) {
-    // Enterprise path: used_credits (cents) is present instead of spent_usd/limit_usd
-    if (extra.used_credits != null) {
+    // Enterprise path: used_credits (minor units) is present instead of spent_usd/limit_usd.
+    // Only USD is observed in practice; the /100 divisor below assumes 2-digit minor units.
+    // For any non-USD currency we refuse to guess the minor-unit digit count (JPY/KRW are
+    // 0-digit, TND/BHD are 3-digit per ISO 4217) and skip the enterprise fields — the
+    // renderer will then return null rather than display a wrong figure.
+    const currency = (extra.currency ?? 'USD').toUpperCase();
+    if (extra.used_credits != null && currency === 'USD') {
       result.enterpriseSpentUsd = extra.used_credits / 100;
       result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / 100;
-      result.enterpriseCurrency = extra.currency ?? 'USD';
+      result.enterpriseCurrency = currency;
       // Only compute utilization when there is a positive cap
       if (extra.monthly_limit != null && extra.monthly_limit > 0) {
         result.enterpriseUtilization = clamp((extra.used_credits / extra.monthly_limit) * 100);

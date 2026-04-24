@@ -141,6 +141,60 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
     expect(result!.enterpriseSpentUsd).toBeCloseTo(3333.91, 2);
   });
 
+  it('refuses to populate enterprise fields for non-USD currency (JPY)', () => {
+    // JPY is a zero-digit minor-unit currency per ISO 4217 — 1 JPY = 1 unit (not /100).
+    // Dividing by 100 would be 100x off, so we skip rather than guess.
+    const response = {
+      five_hour: null as unknown as undefined,
+      seven_day: null as unknown as undefined,
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 50000,
+        monthly_limit: null,
+        currency: 'JPY',
+      },
+    };
+    const result = parseUsageResponse(response);
+    // No other usable data + rejected enterprise credits → null
+    expect(result).toBeNull();
+  });
+
+  it('ignores non-USD enterprise credits but still emits rate limits when 5h is present', () => {
+    const response = {
+      five_hour: { utilization: 45 },
+      seven_day: null as unknown as undefined,
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 50000,
+        monthly_limit: null,
+        currency: 'KRW',
+      },
+    };
+    const result = parseUsageResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(45);
+    expect(result!.enterpriseSpentUsd).toBeUndefined();
+    expect(result!.enterpriseCurrency).toBeUndefined();
+  });
+
+  it('accepts currency case-insensitively (usd / Usd / USD)', () => {
+    for (const currency of ['usd', 'Usd', 'USD']) {
+      const result = parseUsageResponse({
+        five_hour: null as unknown as undefined,
+        seven_day: null as unknown as undefined,
+        extra_usage: {
+          is_enabled: true,
+          used_credits: 100000,
+          monthly_limit: null,
+          currency,
+        },
+      });
+      expect(result, `currency=${currency}`).not.toBeNull();
+      expect(result!.enterpriseSpentUsd).toBeCloseTo(1000, 2);
+      expect(result!.enterpriseCurrency).toBe('USD');
+    }
+  });
+
   it('returns null when neither rate-limit buckets nor enterprise credits are present', () => {
     const response = {
       five_hour: null as unknown as undefined,
