@@ -146,6 +146,33 @@ describe('render: rate limits display priority', () => {
   );
 
   it.each(['pro', 'max'] as const)(
+    'renders normal 5h/wk limits for non-enterprise %s when enterprise spend is nonzero',
+    async (subscriptionType) => {
+      const context = makeContext({
+        subscriptionType,
+        rateLimitTier: null,
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 36,
+            weeklyPercent: 32,
+            enterpriseSpentUsd: 12.34,
+            enterpriseLimitUsd: 50,
+            enterpriseCurrency: 'USD',
+          },
+        },
+      });
+
+      const output = await render(context, makeConfig());
+
+      expect(output).toContain('5h:');
+      expect(output).toContain('36%');
+      expect(output).toContain('wk:');
+      expect(output).toContain('32%');
+      expect(output).not.toContain('spent:');
+    },
+  );
+
+  it.each(['pro', 'max'] as const)(
     'renders normal 5h/wk limits for non-enterprise %s when enterprise spend is zero',
     async (subscriptionType) => {
       const context = makeContext({
