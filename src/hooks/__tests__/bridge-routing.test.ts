@@ -1090,13 +1090,13 @@ $ ultrawork search the codebase`,
         const marker = JSON.parse(readFileSync(markerPath, 'utf-8')) as Record<string, unknown>;
         expect(marker.session_id).toBe(sessionId);
         expect(typeof marker.started_at).toBe('string');
-        expect(typeof marker.ppid).toBe('number');
+        expect(marker.ppid).toBeUndefined();
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
     });
 
-    it('reconciles a hard-terminated prior session only when ownership and abandonment are explicit', async () => {
+    it('reconciles a hard-terminated prior session only with reliable durable evidence', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-reconcile-'));
       try {
         execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
@@ -1118,6 +1118,7 @@ $ ultrawork search the codebase`,
             session_id: staleSessionId,
             started_at: '2026-04-20T00:00:00.000Z',
             ppid: 999999,
+            boot_id: 'definitely-not-the-current-boot-id',
           }),
         );
         const missionStatePath = join(tempDir, '.omc', 'state', 'mission-state.json');
@@ -1168,7 +1169,7 @@ $ ultrawork search the codebase`,
       }
     });
 
-    it('leaves prior session state untouched when the recorded parent process is alive', async () => {
+    it('leaves prior session state untouched when only hook-runner parent process evidence is present', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-live-'));
       try {
         execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
@@ -1185,7 +1186,7 @@ $ ultrawork search the codebase`,
           JSON.stringify({
             session_id: priorSessionId,
             started_at: new Date().toISOString(),
-            ppid: process.pid,
+            ppid: 999999,
           }),
         );
 

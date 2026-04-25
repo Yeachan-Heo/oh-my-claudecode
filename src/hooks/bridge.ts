@@ -267,7 +267,10 @@ function writeSessionStartedMarker(directory: string, sessionId?: string): void 
       started_at: new Date().toISOString(),
       cwd: directory,
       pid: process.pid,
-      ppid: process.ppid,
+      // Do not persist process.ppid here: installed hooks run through
+      // scripts/run.cjs, whose short-lived process exits as soon as this
+      // hook returns. Treating that runner PID as owner liveness caused
+      // later SessionStart hooks to falsely clean live session state.
       boot_id: readLinuxBootId(),
     };
     writeFileSync(sessionStartedMarkerPath(directory, sessionId), JSON.stringify(marker, null, 2), {
@@ -349,17 +352,11 @@ function isMarkerAbandoned(marker: SessionStartedMarker): boolean {
     return true;
   }
 
-  if (typeof marker.ppid !== "number" || !Number.isInteger(marker.ppid) || marker.ppid <= 1) {
-    return false;
-  }
-
-  try {
-    process.kill(marker.ppid, 0);
-    return false;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === "ESRCH";
-  }
+  // A SessionStart marker proves the hook ran, not that the recorded hook
+  // process owns the interactive session. In installed hooks the parent is
+  // scripts/run.cjs, which exits immediately after session-start.mjs returns.
+  // Without a durable owner signal, keep active state rather than guessing.
+  return false;
 }
 
 async function reconcileAbandonedSessionStarts(directory: string, currentSessionId?: string): Promise<void> {
