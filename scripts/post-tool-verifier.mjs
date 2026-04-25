@@ -718,6 +718,40 @@ export function isClaudeCodeWriteSuccess(output) {
   return successPatterns.some(pattern => pattern.test(cleaned));
 }
 
+function extractTextFromKnownToolResponseField(value, depth = 0) {
+  if (typeof value === 'string') return [value];
+  if (!value || depth > 4) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap(item => extractTextFromKnownToolResponseField(item, depth + 1));
+  }
+
+  if (typeof value !== 'object') return [];
+
+  const textFields = ['text', 'message', 'result', 'output', 'stdout'];
+  const texts = [];
+  for (const field of textFields) {
+    if (typeof value[field] === 'string') {
+      texts.push(value[field]);
+    }
+  }
+
+  if (
+    'content' in value &&
+    value.content &&
+    (Array.isArray(value.content) || typeof value.content === 'object')
+  ) {
+    texts.push(...extractTextFromKnownToolResponseField(value.content, depth + 1));
+  }
+
+  return texts;
+}
+
+function hasStructuredWriteSuccess(rawResponse) {
+  if (!rawResponse || typeof rawResponse === 'string') return false;
+  return extractTextFromKnownToolResponseField(rawResponse).some(isClaudeCodeWriteSuccess);
+}
+
 // Get agent completion summary from tracking state
 function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL) {
   const trackingFile = join(directory, '.omc', 'state', 'subagent-tracking.json');
@@ -746,7 +780,7 @@ function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL) {
 
 // Generate contextual message
 function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, options = {}) {
-  const { wasTruncated = false, rawLength = 0 } = options;
+  const { wasTruncated = false, rawLength = 0, structuredWriteSuccess = false } = options;
   let message = '';
 
   switch (toolName) {
@@ -797,7 +831,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
     }
 
     case 'Edit':
-      if (!isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
+      if (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
         message = 'Edit operation failed. Verify file exists and content matches exactly.';
       } else if (QUIET_LEVEL === 0) {
         message = 'Code modified. Verify changes work as expected before marking complete.';
@@ -805,7 +839,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
       break;
 
     case 'Write':
-      if (!isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
+      if (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
         message = 'Write operation failed. Check file permissions and directory existence.';
       } else if (QUIET_LEVEL === 0) {
         message = 'File written. Test the changes to ensure they work correctly.';
@@ -862,6 +896,8 @@ async function main() {
 
     const toolName = data.tool_name || data.toolName || '';
     const rawResponse = data.tool_response || data.toolOutput || '';
+    const structuredWriteSuccess =
+      (toolName === 'Write' || toolName === 'Edit') && hasStructuredWriteSuccess(rawResponse);
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
@@ -907,6 +943,7 @@ async function main() {
       generateMessage(toolName, clippedToolOutput, sessionId, toolCount, directory, {
         wasTruncated,
         rawLength: toolOutput.length,
+        structuredWriteSuccess,
       }),
       maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
     );
