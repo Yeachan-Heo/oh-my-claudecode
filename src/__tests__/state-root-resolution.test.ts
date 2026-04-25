@@ -219,7 +219,7 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
     expect(context).not.toContain('Tombstoned ultrawork must not restore');
   });
 
-  it('session-start through run.cjs does not clean prior active state after the hook runner exits', () => {
+  it('session-start through run.cjs does not clean prior active state without durable abandonment evidence', () => {
     const priorSessionId = 'prior-runner-session';
     const currentSessionId = 'current-runner-session';
 
@@ -239,6 +239,9 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
     runHookViaRunner(SESSION_START, {
       hook_event_name: 'SessionStart',
       session_id: priorSessionId,
+      transcript_path: join(fakeProject, '.claude', 'projects', 'prior.jsonl'),
+      source: 'startup',
+      model: 'claude-sonnet-4-6',
       cwd: fakeProject,
     });
 
@@ -251,6 +254,9 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
     runHookViaRunner(SESSION_START, {
       hook_event_name: 'SessionStart',
       session_id: currentSessionId,
+      transcript_path: join(fakeProject, '.claude', 'projects', 'current.jsonl'),
+      source: 'startup',
+      model: 'claude-sonnet-4-6',
       cwd: fakeProject,
     });
 

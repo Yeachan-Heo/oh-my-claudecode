@@ -1096,11 +1096,11 @@ $ ultrawork search the codebase`,
       }
     });
 
-    it('reconciles a hard-terminated prior session only with reliable durable evidence', async () => {
+    it('reconciles a prior session only with durable abandonment evidence', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-reconcile-'));
       try {
         execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
-        const staleSessionId = 'stale-hard-terminated-session';
+        const staleSessionId = 'stale-durable-abandoned-session';
         const currentSessionId = 'current-reconcile-session';
         const staleSessionDir = join(tempDir, '.omc', 'state', 'sessions', staleSessionId);
         mkdirSync(staleSessionDir, { recursive: true });
@@ -1169,12 +1169,12 @@ $ ultrawork search the codebase`,
       }
     });
 
-    it('leaves prior session state untouched when only hook-runner parent process evidence is present', async () => {
+    it('leaves prior session state untouched when only same-boot hook metadata is present', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-live-'));
       try {
         execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
-        const priorSessionId = 'prior-live-session';
-        const currentSessionId = 'current-live-session';
+        const priorSessionId = 'prior-same-boot-session';
+        const currentSessionId = 'current-same-boot-session';
         const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
         mkdirSync(priorSessionDir, { recursive: true });
         writeFileSync(
@@ -1187,6 +1187,9 @@ $ ultrawork search the codebase`,
             session_id: priorSessionId,
             started_at: new Date().toISOString(),
             ppid: 999999,
+            transcript_path: join(tempDir, '.claude', 'projects', 'prior.jsonl'),
+            source: 'startup',
+            model: 'claude-sonnet-4-6',
           }),
         );
 

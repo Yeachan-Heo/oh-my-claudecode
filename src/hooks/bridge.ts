@@ -345,17 +345,27 @@ function cleanupMissionStateForSession(directory: string, sessionId: string): vo
   }
 }
 
-function isMarkerAbandoned(marker: SessionStartedMarker): boolean {
+/**
+ * Return true only when SessionStart has durable abandonment evidence.
+ *
+ * Claude Code SessionStart input currently provides session metadata such as
+ * session_id, transcript_path, cwd, source, model, and agent_type, but no
+ * stable owner process for the interactive session. In installed OMC hooks the
+ * immediate hook parent belongs to scripts/run.cjs and is intentionally
+ * short-lived, so same-boot PID liveness checks are not reliable here. SessionEnd
+ * remains the primary same-boot cleanup path; SessionStart only reconciles
+ * durable leftovers, such as markers from a previous OS boot.
+ */
+function hasDurableAbandonmentEvidence(marker: SessionStartedMarker): boolean {
   const storedBootId = typeof marker.boot_id === "string" ? marker.boot_id : undefined;
   const currentBootId = readLinuxBootId();
   if (storedBootId && currentBootId && storedBootId !== currentBootId) {
     return true;
   }
 
-  // A SessionStart marker proves the hook ran, not that the recorded hook
-  // process owns the interactive session. In installed hooks the parent is
-  // scripts/run.cjs, which exits immediately after session-start.mjs returns.
-  // Without a durable owner signal, keep active state rather than guessing.
+  // Same-boot hard-kill cleanup requires a durable owner signal. Claude Code
+  // does not currently provide one to hooks, so keep active state rather than
+  // guessing from hook-runner process ancestry or transcript metadata.
   return false;
 }
 
@@ -386,7 +396,7 @@ async function reconcileAbandonedSessionStarts(directory: string, currentSession
       continue;
     }
 
-    if (!isMarkerAbandoned(marker)) continue;
+    if (!hasDurableAbandonmentEvidence(marker)) continue;
 
     // Deliberately narrow: clear only OMC session-scoped mode/mission state.
     // Do not call team runtime shutdown here; SessionStart must not kill tmux PIDs.
