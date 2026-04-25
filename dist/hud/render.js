@@ -237,11 +237,20 @@ export async function render(context, config) {
             rendered.set("omcLabel", bold(`[OMC${versionTag}]`));
         }
     }
+    // Determine effective enterprise mode before rendering limits: only real
+    // enterprise accounts replace token-window limits with enterprise cost.
+    const isEnterprise = enabledElements.enterpriseMode !== undefined
+        ? enabledElements.enterpriseMode
+        : ((context.subscriptionType ?? '').toLowerCase() === 'enterprise' ||
+            /claude_zero/i.test(context.rateLimitTier ?? ''));
     // Rate limits (5h and weekly) - data takes priority over error indicator.
-    // Skip for enterprise responses where token-window limits aren't applicable
-    // (the enterpriseCost element replaces this slot for those accounts).
-    const hasEnterpriseData = context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== undefined;
-    if (enabledElements.rateLimits && context.rateLimitsResult && !hasEnterpriseData) {
+    // Enterprise cost data only replaces token-window limits for accounts that
+    // are actually enterprise/claude_zero. Anthropic may include zero-dollar
+    // enterprise fields for non-enterprise paid plans; those must still show
+    // normal 5h/wk limits.
+    const enterpriseCostReplacesRateLimits = isEnterprise &&
+        context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== undefined;
+    if (enabledElements.rateLimits && context.rateLimitsResult && !enterpriseCostReplacesRateLimits) {
         if (context.rateLimitsResult.rateLimits) {
             const stale = context.rateLimitsResult.stale;
             const limits = enabledElements.useBars
@@ -285,11 +294,6 @@ export async function render(context, config) {
                 rendered.set("session", session);
         }
     }
-    // Determine effective enterprise mode
-    const isEnterprise = enabledElements.enterpriseMode !== undefined
-        ? enabledElements.enterpriseMode
-        : ((context.subscriptionType ?? '').toLowerCase() === 'enterprise' ||
-            /claude_zero/i.test(context.rateLimitTier ?? ''));
     if (isEnterprise && enabledElements.showEnterpriseCost !== false) {
         const stale = context.rateLimitsResult?.stale;
         const cost = renderEnterpriseCost(context.rateLimitsResult?.rateLimits, stale);

@@ -145,6 +145,56 @@ describe('render: rate limits display priority', () => {
     },
   );
 
+  it.each(['pro', 'max'] as const)(
+    'renders normal 5h/wk limits for non-enterprise %s when enterprise spend is zero',
+    async (subscriptionType) => {
+      const context = makeContext({
+        subscriptionType,
+        rateLimitTier: null,
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 10,
+            weeklyPercent: 2,
+            enterpriseSpentUsd: 0,
+            enterpriseLimitUsd: 50,
+            enterpriseCurrency: 'USD',
+          },
+        },
+      });
+
+      const output = await render(context, makeConfig());
+
+      expect(output).toContain('5h:');
+      expect(output).toContain('10%');
+      expect(output).toContain('wk:');
+      expect(output).toContain('2%');
+      expect(output).not.toContain('spent:');
+    },
+  );
+
+  it('uses enterprise cost instead of double-rendering 5h/wk for actual enterprise zero spend', async () => {
+    const context = makeContext({
+      subscriptionType: 'enterprise',
+      rateLimitTier: null,
+      rateLimitsResult: {
+        rateLimits: {
+          fiveHourPercent: 10,
+          weeklyPercent: 2,
+          enterpriseSpentUsd: 0,
+          enterpriseLimitUsd: 50,
+          enterpriseCurrency: 'USD',
+        },
+      },
+    });
+
+    const output = await render(context, makeConfig());
+
+    expect(output).toContain('spent:');
+    expect(output).toContain('$0.00/$50.00');
+    expect(output).not.toContain('5h:');
+    expect(output).not.toContain('wk:');
+  });
+
   it('shows [API 429] when error=rate_limited and rateLimits is null', async () => {
     const context = makeContext({
       rateLimitsResult: {

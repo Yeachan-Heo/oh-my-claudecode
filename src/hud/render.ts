@@ -307,12 +307,14 @@ export async function render(
       );
 
   // Rate limits (5h and weekly) - data takes priority over error indicator.
-  // Skip for enterprise responses where token-window limits aren't applicable
-  // (the enterpriseCost element replaces this slot for those accounts).
-  const hasEnterpriseData =
+  // Enterprise cost data only replaces token-window limits for accounts that
+  // are actually enterprise/claude_zero. Anthropic may include zero-dollar
+  // enterprise fields for non-enterprise paid plans; those must still show
+  // normal 5h/wk limits.
+  const enterpriseCostReplacesRateLimits =
     isEnterprise &&
     context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== undefined;
-  if (enabledElements.rateLimits && context.rateLimitsResult && !hasEnterpriseData) {
+  if (enabledElements.rateLimits && context.rateLimitsResult && !enterpriseCostReplacesRateLimits) {
     if (context.rateLimitsResult.rateLimits) {
       const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars
