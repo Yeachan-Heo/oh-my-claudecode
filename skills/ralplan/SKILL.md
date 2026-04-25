@@ -110,6 +110,7 @@ The gate auto-passes when it detects **any** concrete signal. You do not need al
 | Acceptance criteria | `ralph add login - acceptance criteria: ...` | Explicit success definition |
 | Error reference | `ralph fix TypeError in auth` | Specific error to address |
 | Code block | `ralph add: \`\`\`ts ... \`\`\`` | Concrete code provided |
+| omc-issue skill | `/omc-issue 42` or `omc-issue #42` | Explicit issue-driven invocation; spec already exists at `.omc/specs/gh-issue-42.md` |
 | Escape prefix | `force: ralph do it` or `! ralph do it` | Explicit user override |
 
 ### End-to-End Flow Example

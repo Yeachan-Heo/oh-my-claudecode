@@ -39,6 +39,7 @@ export interface IssueInfo {
   body?: string;
   labels?: string[];
   url?: string;
+  author?: string;
 }
 
 /**

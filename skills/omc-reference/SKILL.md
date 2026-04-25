@@ -82,6 +82,9 @@ Invoke built-in workflows via `/oh-my-claudecode:<name>`.
 - `deepinit` — hierarchical AGENTS.md generation
 - `deep-interview` — Socratic ambiguity-gated requirements workflow
 - `ai-slop-cleaner` — regression-safe cleanup workflow
+- `omc-issue` — fetch a GitHub issue, expand to spec, dispatch via autopilot/ralph/ultrawork
+- `omc-seed-issues` — batch seed GitHub issues from project documentation (PRDs, mock-ups, READMEs)
+- `omc-create-issue` — interactive single-issue creation from a free-form idea, with optional 5-slot interview
 
 ### Utility skills
 - `ask`, `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `configure-notifications`

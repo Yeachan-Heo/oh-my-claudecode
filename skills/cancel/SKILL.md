@@ -1,7 +1,7 @@
 ---
 name: cancel
 description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
-argument-hint: "[--force|--all]"
+argument-hint: "[--force|--all] [--purge-issue-artifacts]"
 level: 2
 ---
 
@@ -385,3 +385,28 @@ rm -f .omc/state/team-mcp-workers.json  # Shadow registry
 # Kill all omc-team-* tmux sessions
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^omc-team-' | while read s; do tmux kill-session -t "$s" 2>/dev/null; done
 ```
+
+## Issue Artifact Cleanup (`--purge-issue-artifacts`)
+
+The `omc-seed-issues` and `omc-create-issue` skills produce on-disk artifacts that
+persist across sessions for review and resume. These are NOT cleared by default
+because they may represent work-in-progress drafts the user has not yet created.
+
+When the user invokes `/oh-my-claudecode:cancel --purge-issue-artifacts`, remove:
+
+```bash
+rm -rf .omc/seed-issues/        # omc-seed-issues drafts + manifest + audit log
+rm -rf .omc/created-issues/     # omc-create-issue drafts + manifest + audit log
+```
+
+**IMPORTANT — preserve issue specs:**
+- Spec files at `.omc/specs/gh-issue-*.md` are produced by `omc-issue` (D1) when
+  fetching an issue for execution. These are the equivalent of Phase 0 expansion
+  output and MUST NOT be removed by `--purge-issue-artifacts`.
+- The autopilot skill explicitly looks for `.omc/specs/gh-issue-*.md` to skip
+  Phase 0; deleting them would break in-flight execution.
+
+`--purge-issue-artifacts` may be combined with `--force` / `--all`. When used
+alone (no other cancel flags), it does not affect any active OMC mode state — it
+is purely an opt-in cleanup of the issue subsystem's draft + manifest + audit
+artifacts.

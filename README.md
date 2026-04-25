@@ -309,6 +309,9 @@ These shortcuts run **inside a Claude Code / OMC session**, not as terminal CLI 
 | `/ultrawork` / `ulw`   | Skill / prompt trigger | Maximum parallelism                | `/ultrawork "fix all errors"`                  |
 | `/ralplan` / `ralplan` | Skill / prompt trigger | Iterative planning consensus       | `/ralplan "plan this feature"`                 |
 | `/deep-interview`      | Slash skill           | Socratic requirements clarification | `/deep-interview "vague idea"`                 |
+| `/omc-issue`           | Slash skill           | Fetch GitHub issue → spec → dispatch | `/omc-issue 42`                                |
+| `/omc-seed-issues`     | Slash skill           | Batch seed issues from project docs | `/omc-seed-issues --docs docs/PRD.md`          |
+| `/omc-create-issue`    | Slash skill           | Interactive single-issue creation   | `/omc-create-issue "add dark mode toggle"`     |
 | `deepsearch`           | Prompt trigger        | Codebase-focused search routing     | `deepsearch for auth middleware`               |
 | `ultrathink`           | Prompt trigger        | Deep reasoning mode                 | `ultrathink about this architecture`           |
 | `cancelomc`, `stopomc` | Prompt trigger        | Stop active OMC modes               | `stopomc`                                      |
