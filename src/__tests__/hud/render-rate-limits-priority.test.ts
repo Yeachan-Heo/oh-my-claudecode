@@ -52,6 +52,10 @@ function makeContext(overrides: Partial<HudRenderContext> = {}): HudRenderContex
   };
 }
 
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
 function makeConfig(overrides: Partial<HudConfig> = {}): HudConfig {
   return {
     ...DEFAULT_HUD_CONFIG,
@@ -108,6 +112,32 @@ describe('render: rate limits display priority', () => {
     expect(output).toContain('32%');
     expect(output).toContain('sn:');
     expect(output).toContain('8%');
+  });
+
+  it('renders exact Max 20x cache-shaped rate limits when legacy enterprise spend fields are present', async () => {
+    const context = makeContext({
+      subscriptionType: 'max',
+      rateLimitTier: 'default_claude_max_20x',
+      rateLimitsResult: {
+        rateLimits: {
+          fiveHourPercent: 4,
+          weeklyPercent: 6,
+          enterpriseSpentUsd: 200.5,
+          enterpriseLimitUsd: 200,
+          enterpriseUtilization: 100,
+        },
+      },
+    });
+
+    const output = await render(context, makeConfig());
+    const plain = stripAnsi(output);
+
+    expect(plain.trim()).not.toBe('');
+    expect(plain).toContain('5h:');
+    expect(plain).toContain('4%');
+    expect(plain).toContain('wk:');
+    expect(plain).toContain('6%');
+    expect(plain).not.toContain('spent:');
   });
 
   it.each([
@@ -198,6 +228,31 @@ describe('render: rate limits display priority', () => {
       expect(output).not.toContain('spent:');
     },
   );
+
+  it('renders enterprise cost only for actual enterprise with the same billing fields', async () => {
+    const context = makeContext({
+      subscriptionType: 'enterprise',
+      rateLimitTier: null,
+      rateLimitsResult: {
+        rateLimits: {
+          fiveHourPercent: 4,
+          weeklyPercent: 6,
+          enterpriseSpentUsd: 200.5,
+          enterpriseLimitUsd: 200,
+          enterpriseUtilization: 100,
+        },
+      },
+    });
+
+    const output = await render(context, makeConfig());
+    const plain = stripAnsi(output);
+
+    expect(plain).toContain('spent:');
+    expect(plain).toContain('$200.50/$200.00');
+    expect(plain).toContain('(100%)');
+    expect(plain).not.toContain('5h:');
+    expect(plain).not.toContain('wk:');
+  });
 
   it('uses enterprise cost instead of double-rendering 5h/wk for actual enterprise zero spend', async () => {
     const context = makeContext({
