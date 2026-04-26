@@ -6473,6 +6473,58 @@ import { existsSync as existsSync16, watch as fsWatch } from "fs";
 import { readFile as readFile9, writeFile as writeFile6, mkdir as mkdir8, unlink as unlink2 } from "fs/promises";
 import { join as join19, dirname as dirname13 } from "path";
 import { exec as exec2 } from "child_process";
+function assertSafeWorkerName(workerName) {
+  if (!WORKER_NAME_RE.test(workerName)) {
+    throw new Error(
+      `Invalid worker name for shell hook: "${workerName}" \u2014 must match ${WORKER_NAME_RE}`
+    );
+  }
+}
+function buildHookCommand(workerName) {
+  assertSafeWorkerName(workerName);
+  return `sh -c 'rebase_dir=$(git rev-parse --git-path rebase-merge 2>/dev/null || printf %s .git/rebase-merge); merge_head=$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || printf %s .git/MERGE_HEAD); if [ -d "$rebase_dir" ] || [ -f "$merge_head" ] || [ -e ${SENTINEL_FILENAME} ]; then exit 0; fi; git add -A && (git diff --cached --quiet || git commit -m "auto-commit by worker ${workerName} at $(date -Iseconds)")'`;
+}
+async function mergeSettingsWithHook(settingsPath, hookCommand) {
+  let existing = { hooks: { PostToolUse: [] } };
+  try {
+    const raw = await readFile9(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    existing = {
+      ...parsed,
+      hooks: {
+        PostToolUse: [],
+        ...parsed.hooks ?? {}
+      }
+    };
+  } catch {
+  }
+  const filteredHooks = (existing.hooks.PostToolUse ?? []).filter(
+    (h) => h.matcher !== HOOK_MATCHER
+  );
+  const newEntry = {
+    matcher: HOOK_MATCHER,
+    hooks: [{ type: "command", command: hookCommand }]
+  };
+  return {
+    ...existing,
+    hooks: {
+      ...existing.hooks,
+      PostToolUse: [...filteredHooks, newEntry]
+    }
+  };
+}
+async function installPostToolUseHook(worktreePath, workerName) {
+  assertSafeWorkerName(workerName);
+  if (isHookPaused(worktreePath)) {
+    return;
+  }
+  const claudeDir = join19(worktreePath, ".claude");
+  await mkdir8(claudeDir, { recursive: true });
+  const settingsPath = join19(claudeDir, "settings.json");
+  const hookCommand = buildHookCommand(workerName);
+  const merged = await mergeSettingsWithHook(settingsPath, hookCommand);
+  await writeFile6(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+}
 async function pauseHookViaSentinel(worktreePath) {
   const sentinelPath = join19(worktreePath, SENTINEL_FILENAME);
   await mkdir8(dirname13(sentinelPath), { recursive: true });
@@ -6485,11 +6537,85 @@ async function resumeHookViaSentinel(worktreePath) {
   } catch {
   }
 }
-var SENTINEL_FILENAME;
+function isHookPaused(worktreePath) {
+  return existsSync16(join19(worktreePath, SENTINEL_FILENAME));
+}
+function startFallbackPoller(worktreePath, workerName, opts) {
+  assertSafeWorkerName(workerName);
+  const debounceMs = opts?.intervalMs ?? DEFAULT_POLL_DEBOUNCE_MS;
+  let debounceTimer = null;
+  let stopped = false;
+  const runAutoCommit = () => {
+    if (stopped) return;
+    if (isHookPaused(worktreePath)) return;
+    const cmd = buildHookCommand(workerName);
+    exec2(cmd, { cwd: worktreePath }, (_err) => {
+    });
+  };
+  const scheduleDebounce = () => {
+    if (stopped) return;
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      runAutoCommit();
+    }, debounceMs);
+  };
+  const watcher = fsWatch(worktreePath, { recursive: true }, (eventType, filename) => {
+    if (stopped) return;
+    if (filename && (filename.startsWith(".git") || filename.startsWith(".git/"))) return;
+    scheduleDebounce();
+  });
+  return {
+    stop() {
+      stopped = true;
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      watcher.close();
+    }
+  };
+}
+async function installCommitCadence(ctx) {
+  if (!ctx.enabled) {
+    return { method: "none" };
+  }
+  if (ctx.agentType === "claude") {
+    await installPostToolUseHook(ctx.worktreePath, ctx.workerName);
+    return { method: "hook" };
+  }
+  return { method: "fallback-poll" };
+}
+async function uninstallCommitCadence(ctx) {
+  if (ctx.agentType !== "claude") return;
+  const settingsPath = join19(ctx.worktreePath, ".claude", "settings.json");
+  try {
+    const raw = await readFile9(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const filtered = (parsed.hooks?.PostToolUse ?? []).filter(
+      (h) => h.matcher !== HOOK_MATCHER
+    );
+    const updated = {
+      ...parsed,
+      hooks: {
+        ...parsed.hooks,
+        PostToolUse: filtered
+      }
+    };
+    await writeFile6(settingsPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
+  } catch {
+  }
+}
+var SENTINEL_FILENAME, HOOK_MATCHER, DEFAULT_POLL_DEBOUNCE_MS, WORKER_NAME_RE;
 var init_worker_commit_cadence = __esm({
   "src/team/worker-commit-cadence.ts"() {
     "use strict";
     SENTINEL_FILENAME = ".hook-paused";
+    HOOK_MATCHER = "Write|Edit|MultiEdit";
+    DEFAULT_POLL_DEBOUNCE_MS = 3e3;
+    WORKER_NAME_RE = /^[A-Za-z0-9_-]{1,50}$/;
   }
 });
 
@@ -7127,6 +7253,29 @@ function getTeamOrchestrator(teamName) {
 function unregisterTeamOrchestrator(teamName) {
   orchestratorByTeam.delete(teamName);
 }
+function registerTeamCadence(teamName, context, poller) {
+  const entry = cadenceByTeam.get(teamName) ?? { pollers: [], contexts: [] };
+  entry.contexts.push(context);
+  if (poller) entry.pollers.push(poller);
+  cadenceByTeam.set(teamName, entry);
+}
+async function stopTeamCadence(teamName) {
+  const entry = cadenceByTeam.get(teamName);
+  if (!entry) return;
+  cadenceByTeam.delete(teamName);
+  for (const poller of entry.pollers) {
+    try {
+      poller.stop();
+    } catch {
+    }
+  }
+  for (const context of entry.contexts) {
+    try {
+      await uninstallCommitCadence(context);
+    } catch {
+    }
+  }
+}
 function resolveLeaderBranch(cwd) {
   const out = execFileSync6("git", ["branch", "--show-current"], {
     cwd,
@@ -7377,6 +7526,18 @@ async function spawnV2Worker(opts) {
   });
   if (usePromptMode) {
     launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
+  }
+  if (opts.autoMerge && opts.worktreePath) {
+    const cadenceContext = {
+      teamName: opts.teamName,
+      workerName: opts.workerName,
+      worktreePath: opts.worktreePath,
+      agentType: opts.agentType,
+      enabled: true
+    };
+    const cadence = await installCommitCadence(cadenceContext);
+    const poller = cadence.method === "fallback-poll" ? startFallbackPoller(opts.worktreePath, opts.workerName) : void 0;
+    registerTeamCadence(opts.teamName, cadenceContext, poller);
   }
   const paneConfig = {
     teamName: opts.teamName,
@@ -7818,6 +7979,7 @@ async function startTeamV2(config) {
         cwd: leaderCwd,
         workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
         worktreePath: workersInfo[workerIndex]?.worktree_path,
+        autoMerge: Boolean(config.autoMerge),
         resolvedBinaryPaths,
         ...assignment.model ? { model: assignment.model } : {},
         ...assignment.role ? { role: assignment.role } : {}
@@ -7907,20 +8069,22 @@ async function startTeamV2(config) {
       });
       registerTeamOrchestrator(sanitized, orchestrator);
       for (const w of workersInfo) {
-        try {
-          await orchestrator.registerWorker(w.name);
-        } catch (regErr) {
-          process.stderr.write(
-            `[team/runtime-v2] orchestrator.registerWorker(${w.name}) failed: ${regErr}
-`
-          );
-        }
+        await orchestrator.registerWorker(w.name);
       }
     } catch (orchErr) {
-      process.stderr.write(
-        `[team/runtime-v2] auto-merge orchestrator startup failed (continuing without auto-merge): ${orchErr}
-`
-      );
+      await stopTeamCadence(sanitized);
+      unregisterTeamOrchestrator(sanitized);
+      await rollbackStartedNativeWorktreeStartup({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: orchErr,
+        sessionName: sessionName2,
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode
+      });
+      const reason = orchErr instanceof Error ? orchErr.message : String(orchErr);
+      throw new Error(`auto-merge startup failed: ${reason}`);
     }
   }
   return {
@@ -8460,6 +8624,14 @@ Then exit your session.
   const orchestrator = getTeamOrchestrator(sanitized);
   if (orchestrator) {
     try {
+      const drainResult = await orchestrator.drainAndStop();
+      if (drainResult.unmerged.length > 0) {
+        await appendTeamEvent(sanitized, {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
+        }, cwd).catch(logEventFailure);
+      }
       for (const w of config.workers) {
         try {
           await orchestrator.unregisterWorker(w.name);
@@ -8470,20 +8642,15 @@ Then exit your session.
           );
         }
       }
-      const drainResult = await orchestrator.drainAndStop();
-      if (drainResult.unmerged.length > 0) {
-        await appendTeamEvent(sanitized, {
-          type: "team_leader_nudge",
-          worker: "leader-fixed",
-          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
-        }, cwd).catch(logEventFailure);
-      }
     } catch (err) {
       process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}
 `);
     } finally {
+      await stopTeamCadence(sanitized);
       unregisterTeamOrchestrator(sanitized);
     }
+  } else {
+    await stopTeamCadence(sanitized);
   }
   let preservedWorktrees = 0;
   try {
@@ -8535,7 +8702,7 @@ async function findActiveTeamsV2(cwd) {
   }
   return active;
 }
-var orchestratorByTeam, MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
+var orchestratorByTeam, cadenceByTeam, MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
 var init_runtime_v2 = __esm({
   "src/team/runtime-v2.ts"() {
     "use strict";
@@ -8563,8 +8730,10 @@ var init_runtime_v2 = __esm({
     init_merge_orchestrator();
     init_leader_inbox();
     init_runtime_flags();
+    init_worker_commit_cadence();
     init_runtime_flags();
     orchestratorByTeam = /* @__PURE__ */ new Map();
+    cadenceByTeam = /* @__PURE__ */ new Map();
     MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
     CircuitBreakerV2 = class {

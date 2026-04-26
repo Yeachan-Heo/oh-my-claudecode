@@ -6480,6 +6480,61 @@ var import_promises8 = require("fs/promises");
 var import_path20 = require("path");
 var import_child_process5 = require("child_process");
 var SENTINEL_FILENAME = ".hook-paused";
+var HOOK_MATCHER = "Write|Edit|MultiEdit";
+var DEFAULT_POLL_DEBOUNCE_MS = 3e3;
+var WORKER_NAME_RE = /^[A-Za-z0-9_-]{1,50}$/;
+function assertSafeWorkerName(workerName2) {
+  if (!WORKER_NAME_RE.test(workerName2)) {
+    throw new Error(
+      `Invalid worker name for shell hook: "${workerName2}" \u2014 must match ${WORKER_NAME_RE}`
+    );
+  }
+}
+function buildHookCommand(workerName2) {
+  assertSafeWorkerName(workerName2);
+  return `sh -c 'rebase_dir=$(git rev-parse --git-path rebase-merge 2>/dev/null || printf %s .git/rebase-merge); merge_head=$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || printf %s .git/MERGE_HEAD); if [ -d "$rebase_dir" ] || [ -f "$merge_head" ] || [ -e ${SENTINEL_FILENAME} ]; then exit 0; fi; git add -A && (git diff --cached --quiet || git commit -m "auto-commit by worker ${workerName2} at $(date -Iseconds)")'`;
+}
+async function mergeSettingsWithHook(settingsPath, hookCommand) {
+  let existing = { hooks: { PostToolUse: [] } };
+  try {
+    const raw = await (0, import_promises8.readFile)(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    existing = {
+      ...parsed,
+      hooks: {
+        PostToolUse: [],
+        ...parsed.hooks ?? {}
+      }
+    };
+  } catch {
+  }
+  const filteredHooks = (existing.hooks.PostToolUse ?? []).filter(
+    (h) => h.matcher !== HOOK_MATCHER
+  );
+  const newEntry = {
+    matcher: HOOK_MATCHER,
+    hooks: [{ type: "command", command: hookCommand }]
+  };
+  return {
+    ...existing,
+    hooks: {
+      ...existing.hooks,
+      PostToolUse: [...filteredHooks, newEntry]
+    }
+  };
+}
+async function installPostToolUseHook(worktreePath, workerName2) {
+  assertSafeWorkerName(workerName2);
+  if (isHookPaused(worktreePath)) {
+    return;
+  }
+  const claudeDir = (0, import_path20.join)(worktreePath, ".claude");
+  await (0, import_promises8.mkdir)(claudeDir, { recursive: true });
+  const settingsPath = (0, import_path20.join)(claudeDir, "settings.json");
+  const hookCommand = buildHookCommand(workerName2);
+  const merged = await mergeSettingsWithHook(settingsPath, hookCommand);
+  await (0, import_promises8.writeFile)(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+}
 async function pauseHookViaSentinel(worktreePath) {
   const sentinelPath = (0, import_path20.join)(worktreePath, SENTINEL_FILENAME);
   await (0, import_promises8.mkdir)((0, import_path20.dirname)(sentinelPath), { recursive: true });
@@ -6489,6 +6544,77 @@ async function resumeHookViaSentinel(worktreePath) {
   const sentinelPath = (0, import_path20.join)(worktreePath, SENTINEL_FILENAME);
   try {
     await (0, import_promises8.unlink)(sentinelPath);
+  } catch {
+  }
+}
+function isHookPaused(worktreePath) {
+  return (0, import_fs18.existsSync)((0, import_path20.join)(worktreePath, SENTINEL_FILENAME));
+}
+function startFallbackPoller(worktreePath, workerName2, opts) {
+  assertSafeWorkerName(workerName2);
+  const debounceMs = opts?.intervalMs ?? DEFAULT_POLL_DEBOUNCE_MS;
+  let debounceTimer = null;
+  let stopped = false;
+  const runAutoCommit = () => {
+    if (stopped) return;
+    if (isHookPaused(worktreePath)) return;
+    const cmd = buildHookCommand(workerName2);
+    (0, import_child_process5.exec)(cmd, { cwd: worktreePath }, (_err) => {
+    });
+  };
+  const scheduleDebounce = () => {
+    if (stopped) return;
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      runAutoCommit();
+    }, debounceMs);
+  };
+  const watcher = (0, import_fs18.watch)(worktreePath, { recursive: true }, (eventType, filename) => {
+    if (stopped) return;
+    if (filename && (filename.startsWith(".git") || filename.startsWith(".git/"))) return;
+    scheduleDebounce();
+  });
+  return {
+    stop() {
+      stopped = true;
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      watcher.close();
+    }
+  };
+}
+async function installCommitCadence(ctx) {
+  if (!ctx.enabled) {
+    return { method: "none" };
+  }
+  if (ctx.agentType === "claude") {
+    await installPostToolUseHook(ctx.worktreePath, ctx.workerName);
+    return { method: "hook" };
+  }
+  return { method: "fallback-poll" };
+}
+async function uninstallCommitCadence(ctx) {
+  if (ctx.agentType !== "claude") return;
+  const settingsPath = (0, import_path20.join)(ctx.worktreePath, ".claude", "settings.json");
+  try {
+    const raw = await (0, import_promises8.readFile)(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const filtered = (parsed.hooks?.PostToolUse ?? []).filter(
+      (h) => h.matcher !== HOOK_MATCHER
+    );
+    const updated = {
+      ...parsed,
+      hooks: {
+        ...parsed.hooks,
+        PostToolUse: filtered
+      }
+    };
+    await (0, import_promises8.writeFile)(settingsPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
   } catch {
   }
 }
@@ -7083,6 +7209,7 @@ Cadence resumes once the git rebase state is gone.`;
 // src/team/runtime-v2.ts
 var import_node_child_process4 = require("node:child_process");
 var orchestratorByTeam = /* @__PURE__ */ new Map();
+var cadenceByTeam = /* @__PURE__ */ new Map();
 function registerTeamOrchestrator(teamName, handle) {
   orchestratorByTeam.set(teamName, handle);
 }
@@ -7091,6 +7218,29 @@ function getTeamOrchestrator(teamName) {
 }
 function unregisterTeamOrchestrator(teamName) {
   orchestratorByTeam.delete(teamName);
+}
+function registerTeamCadence(teamName, context, poller) {
+  const entry = cadenceByTeam.get(teamName) ?? { pollers: [], contexts: [] };
+  entry.contexts.push(context);
+  if (poller) entry.pollers.push(poller);
+  cadenceByTeam.set(teamName, entry);
+}
+async function stopTeamCadence(teamName) {
+  const entry = cadenceByTeam.get(teamName);
+  if (!entry) return;
+  cadenceByTeam.delete(teamName);
+  for (const poller of entry.pollers) {
+    try {
+      poller.stop();
+    } catch {
+    }
+  }
+  for (const context of entry.contexts) {
+    try {
+      await uninstallCommitCadence(context);
+    } catch {
+    }
+  }
 }
 function resolveLeaderBranch(cwd) {
   const out = (0, import_node_child_process4.execFileSync)("git", ["branch", "--show-current"], {
@@ -7343,6 +7493,18 @@ async function spawnV2Worker(opts) {
   });
   if (usePromptMode) {
     launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
+  }
+  if (opts.autoMerge && opts.worktreePath) {
+    const cadenceContext = {
+      teamName: opts.teamName,
+      workerName: opts.workerName,
+      worktreePath: opts.worktreePath,
+      agentType: opts.agentType,
+      enabled: true
+    };
+    const cadence = await installCommitCadence(cadenceContext);
+    const poller = cadence.method === "fallback-poll" ? startFallbackPoller(opts.worktreePath, opts.workerName) : void 0;
+    registerTeamCadence(opts.teamName, cadenceContext, poller);
   }
   const paneConfig = {
     teamName: opts.teamName,
@@ -7784,6 +7946,7 @@ async function startTeamV2(config) {
         cwd: leaderCwd,
         workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
         worktreePath: workersInfo[workerIndex]?.worktree_path,
+        autoMerge: Boolean(config.autoMerge),
         resolvedBinaryPaths,
         ...assignment.model ? { model: assignment.model } : {},
         ...assignment.role ? { role: assignment.role } : {}
@@ -7873,20 +8036,22 @@ async function startTeamV2(config) {
       });
       registerTeamOrchestrator(sanitized, orchestrator);
       for (const w of workersInfo) {
-        try {
-          await orchestrator.registerWorker(w.name);
-        } catch (regErr) {
-          process.stderr.write(
-            `[team/runtime-v2] orchestrator.registerWorker(${w.name}) failed: ${regErr}
-`
-          );
-        }
+        await orchestrator.registerWorker(w.name);
       }
     } catch (orchErr) {
-      process.stderr.write(
-        `[team/runtime-v2] auto-merge orchestrator startup failed (continuing without auto-merge): ${orchErr}
-`
-      );
+      await stopTeamCadence(sanitized);
+      unregisterTeamOrchestrator(sanitized);
+      await rollbackStartedNativeWorktreeStartup({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: orchErr,
+        sessionName: sessionName2,
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode
+      });
+      const reason = orchErr instanceof Error ? orchErr.message : String(orchErr);
+      throw new Error(`auto-merge startup failed: ${reason}`);
     }
   }
   return {
@@ -8367,6 +8532,14 @@ Then exit your session.
   const orchestrator = getTeamOrchestrator(sanitized);
   if (orchestrator) {
     try {
+      const drainResult = await orchestrator.drainAndStop();
+      if (drainResult.unmerged.length > 0) {
+        await appendTeamEvent(sanitized, {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
+        }, cwd).catch(logEventFailure);
+      }
       for (const w of config.workers) {
         try {
           await orchestrator.unregisterWorker(w.name);
@@ -8377,20 +8550,15 @@ Then exit your session.
           );
         }
       }
-      const drainResult = await orchestrator.drainAndStop();
-      if (drainResult.unmerged.length > 0) {
-        await appendTeamEvent(sanitized, {
-          type: "team_leader_nudge",
-          worker: "leader-fixed",
-          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
-        }, cwd).catch(logEventFailure);
-      }
     } catch (err) {
       process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}
 `);
     } finally {
+      await stopTeamCadence(sanitized);
       unregisterTeamOrchestrator(sanitized);
     }
+  } else {
+    await stopTeamCadence(sanitized);
   }
   let preservedWorktrees = 0;
   try {

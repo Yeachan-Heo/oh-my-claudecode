@@ -2,7 +2,7 @@ export interface WorkerCadenceContext {
     teamName: string;
     workerName: string;
     worktreePath: string;
-    agentType: 'claude' | 'codex' | 'gemini';
+    agentType: 'claude' | 'codex' | 'gemini' | 'cursor';
     enabled: boolean;
 }
 export type CadenceMethod = 'hook' | 'fallback-poll' | 'none';
@@ -44,7 +44,7 @@ export declare function startFallbackPoller(worktreePath: string, workerName: st
 /**
  * Installs the appropriate commit cadence for the worker agent type.
  * - claude  → PostToolUse hook in .claude/settings.json
- * - codex / gemini → fallback fs-watch poller (caller owns the handle)
+ * - codex / gemini / cursor → fallback fs-watch poller (caller owns the handle)
  *
  * Returns the chosen method. The fallback-poll handle is NOT started here;
  * callers that need the poller should call startFallbackPoller directly.
