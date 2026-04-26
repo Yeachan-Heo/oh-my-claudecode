@@ -38,6 +38,7 @@ Inspired by the [Ouroboros project](https://github.com/Q00/ouroboros) which demo
 
 <Execution_Policy>
 - Ask ONE question at a time -- never batch multiple questions
+- Do NOT yield the turn after `AskUserQuestion` returns the user's answer. Continue the same turn through scoring (2c), reporting (2d), `state_write` (2e), and the next question (2a/2b). Yield only when ambiguity ≤ threshold, the user requests early exit, or a hard cap triggers.
 - Target the WEAKEST clarity dimension with each question
 - Make weakest-dimension targeting explicit every round: name the weakest dimension, state its score/gap, and explain why the next question is aimed there
 - Gather codebase facts via `explore` agent BEFORE asking the user about them
@@ -152,6 +153,8 @@ Round {n} | Targeting: {weakest_dimension} | Why now: {one_sentence_targeting_ra
 ```
 
 Options should include contextually relevant choices plus free-text.
+
+**Do not stop here.** When `AskUserQuestion` returns the user's answer, immediately proceed to Step 2c in the same turn — do not treat the answer as a turn boundary.
 
 ### Step 2c: Score Ambiguity
 
