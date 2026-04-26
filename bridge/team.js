@@ -6240,6 +6240,19 @@ var init_cli_worker_contract = __esm({
   }
 });
 
+// src/team/runtime-flags.ts
+function isRuntimeV2Enabled(env = process.env) {
+  const raw = env.OMC_RUNTIME_V2;
+  if (!raw) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+var init_runtime_flags = __esm({
+  "src/team/runtime-flags.ts"() {
+    "use strict";
+  }
+});
+
 // src/team/merge-coordinator.ts
 import { execFileSync as execFileSync4 } from "node:child_process";
 function validateBranchName(branch) {
@@ -6525,8 +6538,8 @@ function assertLeaderBranchAllowed(leaderBranch) {
   }
 }
 function assertRuntimeV2Gate() {
-  if (process.env.OMC_RUNTIME_V2 !== "1") {
-    throw new Error("auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).");
+  if (!isRuntimeV2Enabled()) {
+    throw new Error("auto-merge requires runtime v2 (OMC_RUNTIME_V2 is explicitly disabled).");
   }
 }
 async function appendEvent(repoRoot, teamName, event) {
@@ -6554,6 +6567,21 @@ function gitRevParseHead(repoRoot, branch) {
     encoding: "utf-8",
     stdio: "pipe"
   }).trim();
+}
+function gitPath(worktreePath, gitPathName) {
+  try {
+    const resolved = execFileSync5("git", ["rev-parse", "--git-path", gitPathName], {
+      cwd: worktreePath,
+      encoding: "utf-8",
+      stdio: "pipe"
+    }).trim();
+    if (resolved) return resolved;
+  } catch {
+  }
+  return join20(worktreePath, ".git", gitPathName);
+}
+function isRebaseInProgress(worktreePath) {
+  return existsSync17(gitPath(worktreePath, "rebase-merge"));
 }
 function isWorktreeRegistered(repoRoot, wtPath) {
   try {
@@ -6641,7 +6669,7 @@ async function startMergeOrchestrator(config) {
     for (const other of workers.values()) {
       if (other.workerName === triggeringWorker) continue;
       const wtPath = other.workerWorktreePath;
-      if (existsSync17(join20(wtPath, ".git", "rebase-merge"))) {
+      if (isRebaseInProgress(wtPath)) {
         await appendEvent(config.repoRoot, config.teamName, {
           type: "rebase_skipped_in_progress",
           worker: other.workerName,
@@ -6809,7 +6837,7 @@ async function startMergeOrchestrator(config) {
       await fanOutRebase(entry.workerName);
     });
   }
-  async function pollOnce() {
+  async function runPollOnce() {
     if (stopped) return;
     for (const entry of workers.values()) {
       const skipModulo = Math.min(30, Math.pow(2, entry.consecutiveFailures));
@@ -6817,8 +6845,7 @@ async function startMergeOrchestrator(config) {
         continue;
       }
       if (pausedWorkers.has(entry.workerName)) {
-        const rebaseDir = join20(entry.workerWorktreePath, ".git", "rebase-merge");
-        if (!existsSync17(rebaseDir)) {
+        if (!isRebaseInProgress(entry.workerWorktreePath)) {
           await handleRebaseResolution(entry);
         } else {
           continue;
@@ -6890,7 +6917,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
   let pollTickCount = 0;
   const interval = setInterval(() => {
     pollTickCount += 1;
-    void pollOnce().catch(() => {
+    void runPollOnce().catch(() => {
     });
   }, pollIntervalMs);
   if (typeof interval.unref === "function") interval.unref();
@@ -6928,6 +6955,9 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
         persistState();
       } catch {
       }
+    },
+    async pollOnce() {
+      await runPollOnce();
     },
     async drainAndStop() {
       stopped = true;
@@ -7025,8 +7055,7 @@ async function recoverFromRestart(config) {
     entries = [];
   }
   for (const entry of entries) {
-    const rebaseDir = join20(entry.path, ".git", "rebase-merge");
-    if (!existsSync17(rebaseDir)) continue;
+    if (!isRebaseInProgress(entry.path)) continue;
     orphanedRebases.push(entry.workerName);
     const message = `### Runtime restart recovery \u2014 your branch is mid-rebase
 
@@ -7035,7 +7064,7 @@ Runtime restarted while your branch was mid-rebase onto \`${config.leaderBranch}
 **Worktree:** \`${entry.path}\`
 
 Cadence remains paused. Resolve and \`git rebase --continue\`, or \`git rebase --abort\` to bail.
-Cadence resumes once \`.git/rebase-merge\` is gone.`;
+Cadence resumes once the git rebase state is gone.`;
     try {
       await appendToInbox(config.teamName, entry.workerName, message, config.cwd);
     } catch {
@@ -7057,6 +7086,7 @@ var init_merge_orchestrator = __esm({
   "src/team/merge-orchestrator.ts"() {
     "use strict";
     init_fs_utils();
+    init_runtime_flags();
     init_tmux_session();
     init_git_worktree();
     init_merge_coordinator();
@@ -7107,12 +7137,6 @@ function resolveLeaderBranch(cwd) {
     throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
   }
   return out;
-}
-function isRuntimeV2Enabled(env = process.env) {
-  const raw = env.OMC_RUNTIME_V2;
-  if (!raw) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !["0", "false", "no", "off"].includes(normalized);
 }
 function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
   const canonicalRoles = new Set(CANONICAL_TEAM_ROLES);
@@ -7943,7 +7967,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
     await writeFile8(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync11, writeFileSync: writeFileSync5 } = await import("fs");
+      const { readFileSync: readFileSync11, writeFileSync: writeFileSync4 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
         const raw = readFileSync11(taskPath2, "utf-8");
@@ -7952,7 +7976,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
           taskData.status = "pending";
           taskData.owner = void 0;
           taskData.claim = void 0;
-          writeFileSync5(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
+          writeFileSync4(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
           requeued.push(task.id);
         }
       });
@@ -7976,7 +8000,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename3 } = await import("fs/promises");
-  const { readFileSync: readFileSync11, writeFileSync: writeFileSync5, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync11, writeFileSync: writeFileSync4, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -8058,7 +8082,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
         if (terminalStatus === "failed") {
           taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
         }
-        writeFileSync5(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
+        writeFileSync4(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
         transitionOk = true;
       });
     } catch {
@@ -8538,6 +8562,8 @@ var init_runtime_v2 = __esm({
     init_cli_worker_contract();
     init_merge_orchestrator();
     init_leader_inbox();
+    init_runtime_flags();
+    init_runtime_flags();
     orchestratorByTeam = /* @__PURE__ */ new Map();
     MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -8571,7 +8597,7 @@ var init_runtime_v2 = __esm({
 // src/cli/team.ts
 import { randomUUID as randomUUID6 } from "crypto";
 import { spawn } from "child_process";
-import { existsSync as existsSync20, mkdirSync as mkdirSync4, readFileSync as readFileSync10, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync20, mkdirSync as mkdirSync3, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "fs";
 import { readFile as readFile11, rm as rm5 } from "fs/promises";
 import { dirname as dirname16, join as join23 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
@@ -9623,7 +9649,7 @@ function resolveRuntimeCliPath(env = process.env) {
 }
 function ensureJobsDir(jobsDir) {
   if (!existsSync20(jobsDir)) {
-    mkdirSync4(jobsDir, { recursive: true });
+    mkdirSync3(jobsDir, { recursive: true });
   }
 }
 function jobPath(jobsDir, jobId) {
@@ -9684,7 +9710,7 @@ function readJobFromDisk(jobId, jobsDir) {
 }
 function writeJobToDisk(jobId, job, jobsDir) {
   ensureJobsDir(jobsDir);
-  writeFileSync4(jobPath(jobsDir, jobId), JSON.stringify(job), "utf-8");
+  writeFileSync3(jobPath(jobsDir, jobId), JSON.stringify(job), "utf-8");
 }
 function parseJobResult(raw) {
   if (!raw) return void 0;

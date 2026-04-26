@@ -35,9 +35,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// ../../../node_modules/commander/lib/error.js
+// node_modules/commander/lib/error.js
 var require_error = __commonJS({
-  "../../../node_modules/commander/lib/error.js"(exports2) {
+  "node_modules/commander/lib/error.js"(exports2) {
     var CommanderError2 = class extends Error {
       /**
        * Constructs the CommanderError class
@@ -70,9 +70,9 @@ var require_error = __commonJS({
   }
 });
 
-// ../../../node_modules/commander/lib/argument.js
+// node_modules/commander/lib/argument.js
 var require_argument = __commonJS({
-  "../../../node_modules/commander/lib/argument.js"(exports2) {
+  "node_modules/commander/lib/argument.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Argument2 = class {
       /**
@@ -197,9 +197,9 @@ var require_argument = __commonJS({
   }
 });
 
-// ../../../node_modules/commander/lib/help.js
+// node_modules/commander/lib/help.js
 var require_help = __commonJS({
-  "../../../node_modules/commander/lib/help.js"(exports2) {
+  "node_modules/commander/lib/help.js"(exports2) {
     var { humanReadableArgName } = require_argument();
     var Help2 = class {
       constructor() {
@@ -611,9 +611,9 @@ var require_help = __commonJS({
   }
 });
 
-// ../../../node_modules/commander/lib/option.js
+// node_modules/commander/lib/option.js
 var require_option = __commonJS({
-  "../../../node_modules/commander/lib/option.js"(exports2) {
+  "node_modules/commander/lib/option.js"(exports2) {
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Option2 = class {
       /**
@@ -883,9 +883,9 @@ var require_option = __commonJS({
   }
 });
 
-// ../../../node_modules/commander/lib/suggestSimilar.js
+// node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS({
-  "../../../node_modules/commander/lib/suggestSimilar.js"(exports2) {
+  "node_modules/commander/lib/suggestSimilar.js"(exports2) {
     var maxDistance = 3;
     function editDistance(a, b) {
       if (Math.abs(a.length - b.length) > maxDistance)
@@ -963,9 +963,9 @@ var require_suggestSimilar = __commonJS({
   }
 });
 
-// ../../../node_modules/commander/lib/command.js
+// node_modules/commander/lib/command.js
 var require_command = __commonJS({
-  "../../../node_modules/commander/lib/command.js"(exports2) {
+  "node_modules/commander/lib/command.js"(exports2) {
     var EventEmitter = require("node:events").EventEmitter;
     var childProcess = require("node:child_process");
     var path22 = require("node:path");
@@ -3006,9 +3006,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
   }
 });
 
-// ../../../node_modules/commander/index.js
+// node_modules/commander/index.js
 var require_commander = __commonJS({
-  "../../../node_modules/commander/index.js"(exports2) {
+  "node_modules/commander/index.js"(exports2) {
     var { Argument: Argument2 } = require_argument();
     var { Command: Command2 } = require_command();
     var { CommanderError: CommanderError2, InvalidArgumentError: InvalidArgumentError2 } = require_error();
@@ -31051,6 +31051,19 @@ var init_cli_worker_contract = __esm({
   }
 });
 
+// src/team/runtime-flags.ts
+function isRuntimeV2Enabled(env2 = process.env) {
+  const raw = env2.OMC_RUNTIME_V2;
+  if (!raw) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+var init_runtime_flags = __esm({
+  "src/team/runtime-flags.ts"() {
+    "use strict";
+  }
+});
+
 // src/team/merge-coordinator.ts
 function validateBranchName(branch) {
   if (!BRANCH_NAME_RE.test(branch)) {
@@ -31332,8 +31345,8 @@ function assertLeaderBranchAllowed(leaderBranch) {
   }
 }
 function assertRuntimeV2Gate() {
-  if (process.env.OMC_RUNTIME_V2 !== "1") {
-    throw new Error("auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).");
+  if (!isRuntimeV2Enabled()) {
+    throw new Error("auto-merge requires runtime v2 (OMC_RUNTIME_V2 is explicitly disabled).");
   }
 }
 async function appendEvent(repoRoot, teamName, event) {
@@ -31361,6 +31374,21 @@ function gitRevParseHead(repoRoot, branch) {
     encoding: "utf-8",
     stdio: "pipe"
   }).trim();
+}
+function gitPath(worktreePath, gitPathName) {
+  try {
+    const resolved = (0, import_node_child_process8.execFileSync)("git", ["rev-parse", "--git-path", gitPathName], {
+      cwd: worktreePath,
+      encoding: "utf-8",
+      stdio: "pipe"
+    }).trim();
+    if (resolved) return resolved;
+  } catch {
+  }
+  return (0, import_node_path8.join)(worktreePath, ".git", gitPathName);
+}
+function isRebaseInProgress(worktreePath) {
+  return (0, import_node_fs7.existsSync)(gitPath(worktreePath, "rebase-merge"));
 }
 function isWorktreeRegistered(repoRoot, wtPath) {
   try {
@@ -31448,7 +31476,7 @@ async function startMergeOrchestrator(config2) {
     for (const other of workers.values()) {
       if (other.workerName === triggeringWorker) continue;
       const wtPath = other.workerWorktreePath;
-      if ((0, import_node_fs7.existsSync)((0, import_node_path8.join)(wtPath, ".git", "rebase-merge"))) {
+      if (isRebaseInProgress(wtPath)) {
         await appendEvent(config2.repoRoot, config2.teamName, {
           type: "rebase_skipped_in_progress",
           worker: other.workerName,
@@ -31616,7 +31644,7 @@ async function startMergeOrchestrator(config2) {
       await fanOutRebase(entry.workerName);
     });
   }
-  async function pollOnce() {
+  async function runPollOnce() {
     if (stopped) return;
     for (const entry of workers.values()) {
       const skipModulo = Math.min(30, Math.pow(2, entry.consecutiveFailures));
@@ -31624,8 +31652,7 @@ async function startMergeOrchestrator(config2) {
         continue;
       }
       if (pausedWorkers.has(entry.workerName)) {
-        const rebaseDir = (0, import_node_path8.join)(entry.workerWorktreePath, ".git", "rebase-merge");
-        if (!(0, import_node_fs7.existsSync)(rebaseDir)) {
+        if (!isRebaseInProgress(entry.workerWorktreePath)) {
           await handleRebaseResolution(entry);
         } else {
           continue;
@@ -31697,7 +31724,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
   let pollTickCount = 0;
   const interval = setInterval(() => {
     pollTickCount += 1;
-    void pollOnce().catch(() => {
+    void runPollOnce().catch(() => {
     });
   }, pollIntervalMs);
   if (typeof interval.unref === "function") interval.unref();
@@ -31735,6 +31762,9 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
         persistState();
       } catch {
       }
+    },
+    async pollOnce() {
+      await runPollOnce();
     },
     async drainAndStop() {
       stopped = true;
@@ -31832,8 +31862,7 @@ async function recoverFromRestart(config2) {
     entries = [];
   }
   for (const entry of entries) {
-    const rebaseDir = (0, import_node_path8.join)(entry.path, ".git", "rebase-merge");
-    if (!(0, import_node_fs7.existsSync)(rebaseDir)) continue;
+    if (!isRebaseInProgress(entry.path)) continue;
     orphanedRebases.push(entry.workerName);
     const message = `### Runtime restart recovery \u2014 your branch is mid-rebase
 
@@ -31842,7 +31871,7 @@ Runtime restarted while your branch was mid-rebase onto \`${config2.leaderBranch
 **Worktree:** \`${entry.path}\`
 
 Cadence remains paused. Resolve and \`git rebase --continue\`, or \`git rebase --abort\` to bail.
-Cadence resumes once \`.git/rebase-merge\` is gone.`;
+Cadence resumes once the git rebase state is gone.`;
     try {
       await appendToInbox(config2.teamName, entry.workerName, message, config2.cwd);
     } catch {
@@ -31868,6 +31897,7 @@ var init_merge_orchestrator = __esm({
     import_promises15 = require("node:fs/promises");
     import_node_path8 = require("node:path");
     init_fs_utils();
+    init_runtime_flags();
     init_tmux_session();
     init_git_worktree();
     init_merge_coordinator();
@@ -31913,12 +31943,6 @@ function resolveLeaderBranch(cwd2) {
     throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
   }
   return out;
-}
-function isRuntimeV2Enabled(env2 = process.env) {
-  const raw = env2.OMC_RUNTIME_V2;
-  if (!raw) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !["0", "false", "no", "off"].includes(normalized);
 }
 function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
   const canonicalRoles = new Set(CANONICAL_TEAM_ROLES);
@@ -32749,7 +32773,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
     await writeFile8(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync90, writeFileSync: writeFileSync39 } = await import("fs");
+      const { readFileSync: readFileSync90, writeFileSync: writeFileSync38 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
         const raw = readFileSync90(taskPath2, "utf-8");
@@ -32758,7 +32782,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
           taskData.status = "pending";
           taskData.owner = void 0;
           taskData.claim = void 0;
-          writeFileSync39(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
+          writeFileSync38(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
           requeued.push(task.id);
         }
       });
@@ -32782,7 +32806,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename3 } = await import("fs/promises");
-  const { readFileSync: readFileSync90, writeFileSync: writeFileSync39, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync90, writeFileSync: writeFileSync38, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config2.workers) {
     const outputFile = worker.output_file;
@@ -32864,7 +32888,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
         if (terminalStatus === "failed") {
           taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
         }
-        writeFileSync39(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
+        writeFileSync38(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
         transitionOk = true;
       });
     } catch {
@@ -33349,6 +33373,8 @@ var init_runtime_v2 = __esm({
     init_merge_orchestrator();
     init_leader_inbox();
     import_node_child_process9 = require("node:child_process");
+    init_runtime_flags();
+    init_runtime_flags();
     orchestratorByTeam = /* @__PURE__ */ new Map();
     MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -35846,9 +35872,9 @@ var init_code_simplifier = __esm({
   }
 });
 
-// ../../../node_modules/safe-regex/lib/analyzer.js
+// node_modules/safe-regex/lib/analyzer.js
 var require_analyzer = __commonJS({
-  "../../../node_modules/safe-regex/lib/analyzer.js"(exports2, module2) {
+  "node_modules/safe-regex/lib/analyzer.js"(exports2, module2) {
     var AnalyzerOptions = class {
       constructor(heuristic_replimit) {
         this.heuristic_replimit = heuristic_replimit;
@@ -35910,9 +35936,9 @@ var require_analyzer = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js
+// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js
 var require_compat_dotall_s_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-dotall-s-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       // Whether `u` flag present. In which case we transform to
@@ -35962,9 +35988,9 @@ var require_compat_dotall_s_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js
+// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js
 var require_compat_named_capturing_groups_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-named-capturing-groups-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       // To track the names of the groups, and return them
@@ -36006,9 +36032,9 @@ var require_compat_named_capturing_groups_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js
+// node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js
 var require_compat_x_flag_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/transforms/compat-x-flag-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       RegExp: function RegExp2(_ref) {
@@ -36021,9 +36047,9 @@ var require_compat_x_flag_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js
+// node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js
 var require_transforms = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/transforms/index.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       // "dotAll" `s` flag
@@ -36036,9 +36062,9 @@ var require_transforms = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/generator/index.js
+// node_modules/regexp-tree/dist/generator/index.js
 var require_generator = __commonJS({
-  "../../../node_modules/regexp-tree/dist/generator/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/generator/index.js"(exports2, module2) {
     "use strict";
     function gen(node) {
       return node ? generator[node.type](node) : "";
@@ -36176,9 +36202,9 @@ var require_generator = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js
+// node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js
 var require_parser_unicode_properties = __commonJS({
-  "../../../node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/parser/unicode/parser-unicode-properties.js"(exports2, module2) {
     "use strict";
     var NON_BINARY_PROP_NAMES_TO_ALIASES = {
       General_Category: "gc",
@@ -36523,9 +36549,9 @@ var require_parser_unicode_properties = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/parser/generated/regexp-tree.js
+// node_modules/regexp-tree/dist/parser/generated/regexp-tree.js
 var require_regexp_tree = __commonJS({
-  "../../../node_modules/regexp-tree/dist/parser/generated/regexp-tree.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/parser/generated/regexp-tree.js"(exports2, module2) {
     "use strict";
     var _slicedToArray = /* @__PURE__ */ (function() {
       function sliceIterator(arr, i) {
@@ -37670,9 +37696,9 @@ var require_regexp_tree = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/parser/index.js
+// node_modules/regexp-tree/dist/parser/index.js
 var require_parser = __commonJS({
-  "../../../node_modules/regexp-tree/dist/parser/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/parser/index.js"(exports2, module2) {
     "use strict";
     var regexpTreeParser = require_regexp_tree();
     var generatedParseFn = regexpTreeParser.parse.bind(regexpTreeParser);
@@ -37684,9 +37710,9 @@ var require_parser = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/traverse/node-path.js
+// node_modules/regexp-tree/dist/traverse/node-path.js
 var require_node_path = __commonJS({
-  "../../../node_modules/regexp-tree/dist/traverse/node-path.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/traverse/node-path.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -38017,9 +38043,9 @@ var require_node_path = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/traverse/index.js
+// node_modules/regexp-tree/dist/traverse/index.js
 var require_traverse = __commonJS({
-  "../../../node_modules/regexp-tree/dist/traverse/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/traverse/index.js"(exports2, module2) {
     "use strict";
     var NodePath = require_node_path();
     function astTraverse(root2) {
@@ -38252,9 +38278,9 @@ var require_traverse = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/transform/index.js
+// node_modules/regexp-tree/dist/transform/index.js
 var require_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/transform/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/transform/index.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -38386,9 +38412,9 @@ var require_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/index.js
+// node_modules/regexp-tree/dist/compat-transpiler/index.js
 var require_compat_transpiler = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/index.js"(exports2, module2) {
     "use strict";
     var compatTransforms = require_transforms();
     var _transform = require_transform();
@@ -38422,9 +38448,9 @@ var require_compat_transpiler = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/utils/clone.js
+// node_modules/regexp-tree/dist/utils/clone.js
 var require_clone = __commonJS({
-  "../../../node_modules/regexp-tree/dist/utils/clone.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/utils/clone.js"(exports2, module2) {
     "use strict";
     module2.exports = function clone2(obj) {
       if (obj === null || typeof obj !== "object") {
@@ -38444,9 +38470,9 @@ var require_clone = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js
 var require_char_surrogate_pair_to_single_unicode_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-surrogate-pair-to-single-unicode-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       shouldRun: function shouldRun(ast) {
@@ -38464,9 +38490,9 @@ var require_char_surrogate_pair_to_single_unicode_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js
 var require_char_code_to_simple_char_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-code-to-simple-char-transform.js"(exports2, module2) {
     "use strict";
     var UPPER_A_CP = "A".codePointAt(0);
     var UPPER_Z_CP = "Z".codePointAt(0);
@@ -38518,9 +38544,9 @@ var require_char_code_to_simple_char_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js
 var require_char_case_insensitive_lowercase_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-case-insensitive-lowercase-transform.js"(exports2, module2) {
     "use strict";
     var UPPER_A_CP = "A".codePointAt(0);
     var UPPER_Z_CP = "Z".codePointAt(0);
@@ -38595,9 +38621,9 @@ var require_char_case_insensitive_lowercase_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js
 var require_char_class_remove_duplicates_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-remove-duplicates-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       CharacterClass: function CharacterClass(path22) {
@@ -38617,9 +38643,9 @@ var require_char_class_remove_duplicates_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/transform/utils.js
+// node_modules/regexp-tree/dist/transform/utils.js
 var require_utils2 = __commonJS({
-  "../../../node_modules/regexp-tree/dist/transform/utils.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/transform/utils.js"(exports2, module2) {
     "use strict";
     function _toConsumableArray(arr) {
       if (Array.isArray(arr)) {
@@ -38678,9 +38704,9 @@ var require_utils2 = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js
 var require_quantifiers_merge_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/quantifiers-merge-transform.js"(exports2, module2) {
     "use strict";
     var _require = require_utils2();
     var increaseQuantifierByOne = _require.increaseQuantifierByOne;
@@ -38746,9 +38772,9 @@ var require_quantifiers_merge_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js
 var require_quantifier_range_to_symbol_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/quantifier-range-to-symbol-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       Quantifier: function Quantifier(path22) {
@@ -38787,9 +38813,9 @@ var require_quantifier_range_to_symbol_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js
 var require_char_class_classranges_to_chars_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-to-chars-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       ClassRange: function ClassRange(path22) {
@@ -38805,9 +38831,9 @@ var require_char_class_classranges_to_chars_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js
 var require_char_class_to_meta_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-meta-transform.js"(exports2, module2) {
     "use strict";
     function _toConsumableArray(arr) {
       if (Array.isArray(arr)) {
@@ -38949,9 +38975,9 @@ var require_char_class_to_meta_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js
 var require_char_class_to_single_char_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-to-single-char-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       CharacterClass: function CharacterClass(path22) {
@@ -39008,9 +39034,9 @@ var require_char_class_to_single_char_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js
 var require_char_escape_unescape_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-escape-unescape-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       _hasXFlag: false,
@@ -39108,9 +39134,9 @@ var require_char_escape_unescape_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js
 var require_char_class_classranges_merge_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/char-class-classranges-merge-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       _hasIUFlags: false,
@@ -39327,9 +39353,9 @@ var require_char_class_classranges_merge_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js
 var require_disjunction_remove_duplicates_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/disjunction-remove-duplicates-transform.js"(exports2, module2) {
     "use strict";
     var NodePath = require_node_path();
     var _require = require_utils2();
@@ -39353,9 +39379,9 @@ var require_disjunction_remove_duplicates_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js
+// node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js
 var require_group_single_chars_to_char_class = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/group-single-chars-to-char-class.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       Disjunction: function Disjunction(path22) {
@@ -39415,9 +39441,9 @@ var require_group_single_chars_to_char_class = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js
 var require_remove_empty_group_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/remove-empty-group-transform.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       Group: function Group(path22) {
@@ -39436,9 +39462,9 @@ var require_remove_empty_group_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js
 var require_ungroup_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/ungroup-transform.js"(exports2, module2) {
     "use strict";
     function _toConsumableArray(arr) {
       if (Array.isArray(arr)) {
@@ -39499,9 +39525,9 @@ var require_ungroup_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js
+// node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js
 var require_combine_repeating_patterns_transform = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/combine-repeating-patterns-transform.js"(exports2, module2) {
     "use strict";
     function _toConsumableArray(arr) {
       if (Array.isArray(arr)) {
@@ -39651,9 +39677,9 @@ var require_combine_repeating_patterns_transform = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/transforms/index.js
+// node_modules/regexp-tree/dist/optimizer/transforms/index.js
 var require_transforms2 = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/transforms/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/transforms/index.js"(exports2, module2) {
     "use strict";
     module2.exports = /* @__PURE__ */ new Map([
       // \ud83d\ude80 -> \u{1f680}
@@ -39692,9 +39718,9 @@ var require_transforms2 = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/optimizer/index.js
+// node_modules/regexp-tree/dist/optimizer/index.js
 var require_optimizer = __commonJS({
-  "../../../node_modules/regexp-tree/dist/optimizer/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/optimizer/index.js"(exports2, module2) {
     "use strict";
     var clone2 = require_clone();
     var parser = require_parser();
@@ -39756,9 +39782,9 @@ var require_optimizer = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js
 var require_special_symbols = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/special-symbols.js"(exports2, module2) {
     "use strict";
     var EPSILON = "\u03B5";
     var EPSILON_CLOSURE = EPSILON + "*";
@@ -39769,9 +39795,9 @@ var require_special_symbols = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js
 var require_nfa = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa.js"(exports2, module2) {
     "use strict";
     var _slicedToArray = /* @__PURE__ */ (function() {
       function sliceIterator(arr, i) {
@@ -40006,9 +40032,9 @@ var require_nfa = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js
 var require_dfa_minimizer = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa-minimizer.js"(exports2, module2) {
     "use strict";
     var _slicedToArray = /* @__PURE__ */ (function() {
       function sliceIterator(arr, i) {
@@ -40346,9 +40372,9 @@ var require_dfa_minimizer = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js
 var require_dfa = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/dfa/dfa.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -40663,9 +40689,9 @@ var require_dfa = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js
 var require_state = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/state.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -40729,9 +40755,9 @@ var require_state = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js
 var require_nfa_state = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-state.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -40928,9 +40954,9 @@ var require_nfa_state = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js
 var require_builders = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/builders.js"(exports2, module2) {
     "use strict";
     var NFA = require_nfa();
     var NFAState = require_nfa_state();
@@ -41058,9 +41084,9 @@ var require_builders = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js
 var require_nfa_from_regexp = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/nfa/nfa-from-regexp.js"(exports2, module2) {
     "use strict";
     function _toConsumableArray(arr) {
       if (Array.isArray(arr)) {
@@ -41142,9 +41168,9 @@ var require_nfa_from_regexp = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js
+// node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js
 var require_finite_automaton = __commonJS({
-  "../../../node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/interpreter/finite-automaton/index.js"(exports2, module2) {
     "use strict";
     var NFA = require_nfa();
     var DFA = require_dfa();
@@ -41192,9 +41218,9 @@ var require_finite_automaton = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js
+// node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js
 var require_runtime = __commonJS({
-  "../../../node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/compat-transpiler/runtime/index.js"(exports2, module2) {
     "use strict";
     var _createClass = /* @__PURE__ */ (function() {
       function defineProperties(target, props) {
@@ -41282,9 +41308,9 @@ var require_runtime = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/dist/regexp-tree.js
+// node_modules/regexp-tree/dist/regexp-tree.js
 var require_regexp_tree2 = __commonJS({
-  "../../../node_modules/regexp-tree/dist/regexp-tree.js"(exports2, module2) {
+  "node_modules/regexp-tree/dist/regexp-tree.js"(exports2, module2) {
     "use strict";
     var compatTranspiler = require_compat_transpiler();
     var generator = require_generator();
@@ -41434,17 +41460,17 @@ var require_regexp_tree2 = __commonJS({
   }
 });
 
-// ../../../node_modules/regexp-tree/index.js
+// node_modules/regexp-tree/index.js
 var require_regexp_tree3 = __commonJS({
-  "../../../node_modules/regexp-tree/index.js"(exports2, module2) {
+  "node_modules/regexp-tree/index.js"(exports2, module2) {
     "use strict";
     module2.exports = require_regexp_tree2();
   }
 });
 
-// ../../../node_modules/safe-regex/lib/heuristic-analyzer.js
+// node_modules/safe-regex/lib/heuristic-analyzer.js
 var require_heuristic_analyzer = __commonJS({
-  "../../../node_modules/safe-regex/lib/heuristic-analyzer.js"(exports2, module2) {
+  "node_modules/safe-regex/lib/heuristic-analyzer.js"(exports2, module2) {
     var regexpTree2 = require_regexp_tree3();
     var analyzer = require_analyzer();
     var HeuristicAnalyzer = class extends analyzer.Analyzer {
@@ -41501,17 +41527,17 @@ var require_heuristic_analyzer = __commonJS({
   }
 });
 
-// ../../../node_modules/safe-regex/lib/analyzer-family.js
+// node_modules/safe-regex/lib/analyzer-family.js
 var require_analyzer_family = __commonJS({
-  "../../../node_modules/safe-regex/lib/analyzer-family.js"(exports2, module2) {
+  "node_modules/safe-regex/lib/analyzer-family.js"(exports2, module2) {
     var heuristicAnalyzer = require_heuristic_analyzer();
     module2.exports = [heuristicAnalyzer];
   }
 });
 
-// ../../../node_modules/safe-regex/index.js
+// node_modules/safe-regex/index.js
 var require_safe_regex = __commonJS({
-  "../../../node_modules/safe-regex/index.js"(exports2, module2) {
+  "node_modules/safe-regex/index.js"(exports2, module2) {
     var analyzer = require_analyzer();
     var analyzerFamily = require_analyzer_family();
     var DEFAULT_SAFE_REP_LIMIT = 25;
@@ -45723,7 +45749,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../../node_modules/commander/esm.mjs
+// node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
 var {
   program,
@@ -45740,7 +45766,7 @@ var {
   Help
 } = import_index.default;
 
-// ../../../node_modules/chalk/source/vendor/ansi-styles/index.js
+// node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
 var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
@@ -45926,7 +45952,7 @@ function assembleStyles() {
 var ansiStyles = assembleStyles();
 var ansi_styles_default = ansiStyles;
 
-// ../../../node_modules/chalk/source/vendor/supports-color/index.js
+// node_modules/chalk/source/vendor/supports-color/index.js
 var import_node_process = __toESM(require("node:process"), 1);
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_tty = __toESM(require("node:tty"), 1);
@@ -46058,7 +46084,7 @@ var supportsColor = {
 };
 var supports_color_default = supportsColor;
 
-// ../../../node_modules/chalk/source/utilities.js
+// node_modules/chalk/source/utilities.js
 function stringReplaceAll(string3, substring, replacer) {
   let index = string3.indexOf(substring);
   if (index === -1) {
@@ -46088,7 +46114,7 @@ function stringEncaseCRLFWithFirstIndex(string3, prefix, postfix, index) {
   return returnValue;
 }
 
-// ../../../node_modules/chalk/source/index.js
+// node_modules/chalk/source/index.js
 var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
 var GENERATOR = /* @__PURE__ */ Symbol("GENERATOR");
 var STYLER = /* @__PURE__ */ Symbol("STYLER");
@@ -46302,7 +46328,7 @@ function toSdkMcpFormat(servers) {
   return result;
 }
 
-// ../../../node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var import_path5 = require("path");
 var import_url2 = require("url");
 var import_events = require("events");
@@ -65921,7 +65947,7 @@ function createSdkMcpServer(options) {
   };
 }
 
-// ../../../node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -66033,7 +66059,7 @@ __export(external_exports, {
   void: () => voidType2
 });
 
-// ../../../node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util2;
 (function(util3) {
   util3.assertEqual = (_) => {
@@ -66167,7 +66193,7 @@ var getParsedType3 = (data) => {
   }
 };
 
-// ../../../node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode2 = util2.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -66285,7 +66311,7 @@ ZodError3.create = (issues) => {
   return error2;
 };
 
-// ../../../node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap2 = (issue2, _ctx) => {
   let message;
   switch (issue2.code) {
@@ -66388,7 +66414,7 @@ var errorMap2 = (issue2, _ctx) => {
 };
 var en_default3 = errorMap2;
 
-// ../../../node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap2 = en_default3;
 function setErrorMap(map) {
   overrideErrorMap2 = map;
@@ -66397,7 +66423,7 @@ function getErrorMap2() {
   return overrideErrorMap2;
 }
 
-// ../../../node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue2 = (params) => {
   const { data, path: path22, errorMaps, issueData } = params;
   const fullPath = [...path22, ...issueData.path || []];
@@ -66507,14 +66533,14 @@ var isDirty2 = (x) => x.status === "dirty";
 var isValid2 = (x) => x.status === "valid";
 var isAsync2 = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../../node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil2;
 (function(errorUtil3) {
   errorUtil3.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil3.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil2 || (errorUtil2 = {}));
 
-// ../../../node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 var ParseInputLazyPath2 = class {
   constructor(parent, value, path22, key) {
     this._cachedPath = [];
@@ -88185,8 +88211,8 @@ function findWorktreeDirs(dir, maxDepth = 3, currentDepth = 0) {
       if (!entry.isDirectory()) continue;
       const fullPath = (0, import_path119.join)(dir, entry.name);
       try {
-        const gitPath = (0, import_path119.join)(fullPath, ".git");
-        const stat2 = (0, import_fs101.statSync)(gitPath);
+        const gitPath2 = (0, import_path119.join)(fullPath, ".git");
+        const stat2 = (0, import_fs101.statSync)(gitPath2);
         if (stat2.isFile()) {
           results.push(fullPath);
           continue;

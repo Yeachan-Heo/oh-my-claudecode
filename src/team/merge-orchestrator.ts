@@ -14,10 +14,10 @@
 //     audit row + leader-inbox audit message for any worker we couldn't merge.
 //
 // Hardening flags wired in:
-//   M1: existing rebase short-circuit (`.git/rebase-merge`).
+//   M1: existing rebase short-circuit (gitdir-aware `rebase-merge`).
 //   M3: refuse main/master leader branch.
 //   M4: dirty-tree audit on rebase resolution.
-//   M5: v2 gate via OMC_RUNTIME_V2=1.
+//   M5: v2 gate via default-on runtime-v2 flag semantics.
 //   M6: persisted SHA state + restart recovery.
 //
 // All git invocations go through `execFileSync` (sync) so vitest can mock the
@@ -60,6 +60,7 @@ import { mkdir, appendFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { atomicWriteJson, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
+import { isRuntimeV2Enabled } from './runtime-flags.js';
 import { sanitizeName } from './tmux-session.js';
 import { listTeamWorktrees, getWorktreePath, getBranchName } from './git-worktree.js';
 import { checkMergeConflicts, mergeWorkerBranch, validateBranchName } from './merge-coordinator.js';
@@ -99,6 +100,8 @@ export interface OrchestratorHandle {
    * has been merged, then stop polling. Bounded by drainTimeoutMs.
    */
   drainAndStop(): Promise<{ unmerged: Array<{ workerName: string; reason: string }> }>;
+  /** Run one poll cycle immediately (testing / debugging). */
+  pollOnce(): Promise<void>;
   /** Inspect in-memory state (testing / debugging). */
   getState(): {
     workers: string[];
@@ -183,8 +186,8 @@ function assertLeaderBranchAllowed(leaderBranch: string): void {
 }
 
 function assertRuntimeV2Gate(): void {
-  if (process.env.OMC_RUNTIME_V2 !== '1') {
-    throw new Error('auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).');
+  if (!isRuntimeV2Enabled()) {
+    throw new Error('auto-merge requires runtime v2 (OMC_RUNTIME_V2 is explicitly disabled).');
   }
 }
 
@@ -252,6 +255,26 @@ function gitRevParseHead(repoRoot: string, branch: string): string {
     encoding: 'utf-8',
     stdio: 'pipe',
   }).trim();
+}
+
+function gitPath(worktreePath: string, gitPathName: string): string {
+  try {
+    const resolved = execFileSync('git', ['rev-parse', '--git-path', gitPathName], {
+      cwd: worktreePath,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    }).trim();
+    if (resolved) return resolved;
+  } catch {
+    // Fall through to the legacy in-worktree .git directory path. This keeps
+    // unit tests and non-git placeholder worktrees safe while real git
+    // worktrees use Git's own gitdir-aware resolution above.
+  }
+  return join(worktreePath, '.git', gitPathName);
+}
+
+function isRebaseInProgress(worktreePath: string): boolean {
+  return existsSync(gitPath(worktreePath, 'rebase-merge'));
 }
 
 function isWorktreeRegistered(repoRoot: string, wtPath: string): boolean {
@@ -369,7 +392,7 @@ export async function startMergeOrchestrator(
       const wtPath = other.workerWorktreePath;
 
       // M1: existing rebase short-circuit.
-      if (existsSync(join(wtPath, '.git', 'rebase-merge'))) {
+      if (isRebaseInProgress(wtPath)) {
         await appendEvent(config.repoRoot, config.teamName, {
           type: 'rebase_skipped_in_progress',
           worker: other.workerName,
@@ -456,7 +479,7 @@ export async function startMergeOrchestrator(
           data: { conflictingFiles },
         });
         // Cadence stays paused. The rebase resolution watcher resumes on
-        // .git/rebase-merge removal (M4 audit, then resume).
+        // git rebase state removal (M4 audit, then resume).
       }
     }
   }
@@ -573,7 +596,7 @@ export async function startMergeOrchestrator(
     });
   }
 
-  async function pollOnce(): Promise<void> {
+  async function runPollOnce(): Promise<void> {
     if (stopped) return;
     for (const entry of workers.values()) {
       // Apply per-worker exponential backoff: skip ticks based on consecutiveFailures.
@@ -584,10 +607,9 @@ export async function startMergeOrchestrator(
       }
 
       // Rebase resolution check (M4): if the worker is paused and the
-      // .git/rebase-merge directory has gone away, audit & resume.
+      // git rebase state has gone away, audit & resume.
       if (pausedWorkers.has(entry.workerName)) {
-        const rebaseDir = join(entry.workerWorktreePath, '.git', 'rebase-merge');
-        if (!existsSync(rebaseDir)) {
+        if (!isRebaseInProgress(entry.workerWorktreePath)) {
           // Resolved (--continue or --abort).
           await handleRebaseResolution(entry);
           // Fall through — also check for new commits.
@@ -674,7 +696,7 @@ export async function startMergeOrchestrator(
   let pollTickCount = 0;
   const interval = setInterval(() => {
     pollTickCount += 1;
-    void pollOnce().catch(() => {
+    void runPollOnce().catch(() => {
       // Errors bubble up here as a defence; per-worker failures already
       // emit events and bump consecutiveFailures inside pollOnce().
     });
@@ -724,6 +746,10 @@ export async function startMergeOrchestrator(
       } catch {
         // best-effort
       }
+    },
+
+    async pollOnce(): Promise<void> {
+      await runPollOnce();
     },
 
     async drainAndStop(): Promise<{ unmerged: Array<{ workerName: string; reason: string }> }> {
@@ -830,7 +856,7 @@ export async function recoverFromRestart(
   }
 
   // Walk every known worker worktree (from worktrees.json metadata) and look
-  // for orphaned `.git/rebase-merge` dirs.
+  // for orphaned gitdir-aware `rebase-merge` dirs.
   const orphanedRebases: string[] = [];
   let entries: Array<{ workerName: string; path: string }> = [];
   try {
@@ -843,8 +869,7 @@ export async function recoverFromRestart(
   }
 
   for (const entry of entries) {
-    const rebaseDir = join(entry.path, '.git', 'rebase-merge');
-    if (!existsSync(rebaseDir)) continue;
+    if (!isRebaseInProgress(entry.path)) continue;
     orphanedRebases.push(entry.workerName);
     const message = `### Runtime restart recovery — your branch is mid-rebase
 
@@ -853,7 +878,7 @@ Runtime restarted while your branch was mid-rebase onto \`${config.leaderBranch}
 **Worktree:** \`${entry.path}\`
 
 Cadence remains paused. Resolve and \`git rebase --continue\`, or \`git rebase --abort\` to bail.
-Cadence resumes once \`.git/rebase-merge\` is gone.`;
+Cadence resumes once the git rebase state is gone.`;
     try {
       await appendToInbox(config.teamName, entry.workerName, message, config.cwd);
     } catch {

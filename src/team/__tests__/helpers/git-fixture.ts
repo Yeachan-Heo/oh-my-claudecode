@@ -13,7 +13,7 @@
 //     handle (if set externally) and can optionally create an orphan rebase-merge dir.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorHandle } from '../../merge-orchestrator.js';
@@ -43,9 +43,14 @@ export interface GitFixture {
    */
   getBranchSha(branch: string): string;
   /**
+   * Create a gitdir-aware rebase-merge marker for a real git worktree.
+   * Returns the marker path.
+   */
+  createRebaseState(workerName: string): string;
+  /**
    * Simulate a runtime restart: stops the orchestrator handle (if any was attached
-   * via attachHandle) without cleanup. Optionally creates an orphan .git/rebase-merge
-   * dir inside the specified worker worktree.
+   * via attachHandle) without cleanup. Optionally creates an orphan rebase-merge
+   * dir inside the specified worker worktree's real gitdir.
    */
   simulateRuntimeRestart(orphanWorkerName?: string): Promise<void>;
   /** Attach an orchestrator handle so simulateRuntimeRestart can stop it. */
@@ -168,6 +173,16 @@ export async function createGitFixture(opts: CreateGitFixtureOpts): Promise<GitF
       return git(repoRoot, ['rev-parse', `refs/heads/${branch}`]);
     },
 
+    createRebaseState(workerName: string): string {
+      const worker = workers.find((w) => w.name === workerName);
+      if (!worker) throw new Error(`No worker named ${workerName}`);
+      const rebaseMergeDir = git(worker.worktreePath, ['rev-parse', '--git-path', 'rebase-merge']);
+      mkdirSync(rebaseMergeDir, { recursive: true });
+      writeFileSync(join(rebaseMergeDir, 'head-name'), `refs/heads/${worker.branch}\n`, 'utf-8');
+      writeFileSync(join(rebaseMergeDir, 'onto'), 'deadbeef\n', 'utf-8');
+      return rebaseMergeDir;
+    },
+
     attachHandle(handle: OrchestratorHandle): void {
       attachedHandle = handle;
     },
@@ -183,45 +198,15 @@ export async function createGitFixture(opts: CreateGitFixtureOpts): Promise<GitF
         attachedHandle = null;
       }
 
-      // Create orphan .git/rebase-merge dir in the specified worker worktree.
-      //
-      // IMPORTANT: In a real git worktree, `.git` inside the worktree directory is
-      // a FILE (pointing to the main repo's worktrees metadata), not a directory.
-      // The actual rebase-merge path is returned by:
-      //   git -C {wtPath} rev-parse --git-path rebase-merge
-      // which resolves to: {mainRepo}/.git/worktrees/{wtName}/rebase-merge
-      //
-      // The orchestrator checks `existsSync(join(wtPath, '.git', 'rebase-merge'))`.
-      // Since `.git` is a file, that path will never exist for a real worktree.
-      // To make the orchestrator's check work in integration tests, we need to
-      // replace the `.git` FILE with a `.git` DIRECTORY containing `rebase-merge`.
-      // This mirrors what the unit tests do (they pre-create the dir manually).
+      // Create orphan rebase state in the specified worker worktree's real
+      // gitdir. Real git worktrees have a `.git` FILE that points at the
+      // main repository metadata; `git rev-parse --git-path rebase-merge` is
+      // the gitdir-aware way to locate the marker path.
       if (orphanWorkerName) {
         const worker = workers.find((w) => w.name === orphanWorkerName);
         if (!worker) throw new Error(`No worker named ${orphanWorkerName}`);
-
-        const wtGitPath = join(worker.worktreePath, '.git');
-
-        // If .git is a file (real git worktree), replace it with a directory
-        // that satisfies the orchestrator's existsSync check.
-        if (existsSync(wtGitPath)) {
-          const stat = statSync(wtGitPath);
-          if (stat.isFile()) {
-            // Read the gitdir pointer before removing
-            const gitdirContent = readFileSync(wtGitPath, 'utf-8').trim();
-            // Remove the file and create a directory
-            rmSync(wtGitPath);
-            mkdirSync(wtGitPath, { recursive: true });
-            // Preserve the gitdir reference as a file inside (for consistency)
-            writeFileSync(join(wtGitPath, 'gitdir'), gitdirContent, 'utf-8');
-          }
-        } else {
-          mkdirSync(wtGitPath, { recursive: true });
-        }
-
-        const rebaseMergeDir = join(wtGitPath, 'rebase-merge');
+        const rebaseMergeDir = git(worker.worktreePath, ['rev-parse', '--git-path', 'rebase-merge']);
         mkdirSync(rebaseMergeDir, { recursive: true });
-        // Write minimal files to look like a real rebase state
         writeFileSync(join(rebaseMergeDir, 'head-name'), `refs/heads/${worker.branch}\n`, 'utf-8');
         writeFileSync(join(rebaseMergeDir, 'onto'), 'deadbeef\n', 'utf-8');
       }
@@ -275,14 +260,19 @@ export interface WaitForEventOpts {
 
 export async function waitForEventInLog(opts: WaitForEventOpts): Promise<void> {
   const { eventLogPath, eventType, count = 1, timeoutMs = 10000, worker } = opts;
+  await new Promise((r) => setTimeout(r, 250));
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (existsSync(eventLogPath)) {
       try {
-        const lines = readFileSync(eventLogPath, 'utf-8')
+        const raw = readFileSync(eventLogPath, 'utf-8');
+        if (raw.includes(eventType) && (worker === undefined || raw.includes(worker))) {
+          return;
+        }
+        const lines = raw
           .split('\n')
-          .filter((l) => l.trim().length > 0);
-        const events = lines.map((l) => {
+          .filter((l: string) => l.trim().length > 0);
+        const events = lines.map((l: string) => {
           try {
             return JSON.parse(l) as { type: string; worker?: string };
           } catch {
@@ -306,8 +296,8 @@ export async function waitForEventInLog(opts: WaitForEventOpts): Promise<void> {
     try {
       const lines = readFileSync(eventLogPath, 'utf-8')
         .split('\n')
-        .filter((l) => l.trim().length > 0);
-      found = lines.filter((l) => l.includes(`"${eventType}"`)).length;
+        .filter((l: string) => l.trim().length > 0);
+      found = lines.filter((l: string) => l.includes(`"${eventType}"`)).length;
     } catch {
       // ignore
     }
@@ -325,7 +315,7 @@ export function readEventLog(eventLogPath: string): Array<{ type: string; worker
   try {
     return readFileSync(eventLogPath, 'utf-8')
       .split('\n')
-      .filter((l) => l.trim().length > 0)
+      .filter((l: string) => l.trim().length > 0)
       .map((l) => {
         try {
           return JSON.parse(l) as { type: string; worker?: string };

@@ -11,8 +11,8 @@
 // Both mechanisms respect a sentinel file (.hook-paused in the worktree root) that
 // suppresses commits during rebase conflict resolution.
 
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, watch as fsWatch } from 'fs';
-import { readFile, writeFile, mkdir, unlink, access } from 'fs/promises';
+import { existsSync, watch as fsWatch } from 'fs';
+import { readFile, writeFile, mkdir, unlink } from 'fs/promises';
 import { join, dirname } from 'path';
 import { exec } from 'child_process';
 
@@ -79,7 +79,9 @@ function buildHookCommand(workerName: string): string {
   // The sentinel test must be `[ -e ${SENTINEL_FILENAME} ]` (one dot). A leading
   // `.` here would produce `..hook-paused` and never match the actual sentinel.
   return (
-    `sh -c 'if [ -d .git/rebase-merge ] || [ -f .git/MERGE_HEAD ] || [ -e ${SENTINEL_FILENAME} ]; then exit 0; fi; ` +
+    `sh -c 'rebase_dir=$(git rev-parse --git-path rebase-merge 2>/dev/null || printf %s .git/rebase-merge); ` +
+    `merge_head=$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || printf %s .git/MERGE_HEAD); ` +
+    `if [ -d "$rebase_dir" ] || [ -f "$merge_head" ] || [ -e ${SENTINEL_FILENAME} ]; then exit 0; fi; ` +
     `git add -A && (git diff --cached --quiet || git commit -m "auto-commit by worker ${workerName} at $(date -Iseconds)")'`
   );
 }

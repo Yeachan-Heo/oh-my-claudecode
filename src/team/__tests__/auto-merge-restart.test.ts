@@ -4,14 +4,13 @@
 // Uses real git via git-fixture helper.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
   createGitFixture,
   orchestratorEventLogPath,
   readEventLog,
-  waitForEventInLog,
   type GitFixture,
 } from './helpers/git-fixture.js';
 import {
@@ -19,7 +18,6 @@ import {
   recoverFromRestart,
   type OrchestratorConfig,
 } from '../merge-orchestrator.js';
-import { sanitizeName } from '../tmux-session.js';
 import { atomicWriteJson } from '../fs-utils.js';
 
 beforeAll(() => {
@@ -44,10 +42,11 @@ describe('M6: restart recovery', () => {
   });
 
   it('recoverFromRestart delivers orphan-rebase mailbox to affected worker', async () => {
-    // Simulate an orphaned rebase state for worker-1
-    await fixture.simulateRuntimeRestart('worker-1');
-
-    const rebaseDir = join(fixture.workers[0].worktreePath, '.git', 'rebase-merge');
+    // Simulate an orphaned rebase state for worker-1 using the real gitdir
+    // path. In a real git worktree `.git` remains a file.
+    const rebaseDir = fixture.createRebaseState('worker-1');
+    expect(readFileSync(join(fixture.workers[0].worktreePath, '.git'), 'utf-8')).toMatch(/^gitdir:/);
+    expect(existsSync(join(fixture.workers[0].worktreePath, '.git', 'rebase-merge'))).toBe(false);
     expect(existsSync(rebaseDir)).toBe(true);
 
     const config: OrchestratorConfig = {
@@ -56,7 +55,7 @@ describe('M6: restart recovery', () => {
       leaderBranch: fixture.leaderBranch,
       cwd: fixture.repoRoot,
       pollIntervalMs: 50,
-    };
+      };
 
     const result = await recoverFromRestart(config);
 
@@ -97,7 +96,7 @@ describe('M6: restart recovery', () => {
       leaderBranch: fixture.leaderBranch,
       cwd: fixture.repoRoot,
       pollIntervalMs: 50,
-    };
+      };
 
     const result = await recoverFromRestart(config);
 
@@ -121,7 +120,7 @@ describe('M6: restart recovery', () => {
       leaderBranch: fixture.leaderBranch,
       cwd: fixture.repoRoot,
       pollIntervalMs: 50,
-    };
+      };
 
     // No auto-merge-state.json exists — should not throw
     const result = await recoverFromRestart(config);
@@ -145,7 +144,7 @@ describe('M6: restart recovery', () => {
       leaderBranch: fixture.leaderBranch,
       cwd: fixture.repoRoot,
       pollIntervalMs: 50,
-      drainTimeoutMs: 1000,
+        drainTimeoutMs: 1000,
     };
 
     const handle = await startMergeOrchestrator(config);

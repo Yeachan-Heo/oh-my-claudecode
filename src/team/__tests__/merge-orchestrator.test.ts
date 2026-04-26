@@ -270,12 +270,14 @@ describe('validateBranchName guard', () => {
 // ---------------------------------------------------------------------------
 
 describe('M5 v2 gate', () => {
-  it('throws when OMC_RUNTIME_V2 is unset', async () => {
+  it('allows unset OMC_RUNTIME_V2 because runtime v2 is default-on', async () => {
     delete process.env.OMC_RUNTIME_V2;
     const repoRoot = makeRepoRoot();
     try {
       const cfg = defaultConfig(repoRoot);
-      await expect(startMergeOrchestrator(cfg)).rejects.toThrow(/OMC_RUNTIME_V2=1/);
+      defaultHappyPath(repoRoot, cfg.leaderBranch);
+      const handle = await startMergeOrchestrator(cfg);
+      await handle.drainAndStop();
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }
@@ -286,7 +288,7 @@ describe('M5 v2 gate', () => {
     const repoRoot = makeRepoRoot();
     try {
       const cfg = defaultConfig(repoRoot);
-      await expect(startMergeOrchestrator(cfg)).rejects.toThrow(/OMC_RUNTIME_V2=1/);
+      await expect(startMergeOrchestrator(cfg)).rejects.toThrow(/runtime v2/);
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

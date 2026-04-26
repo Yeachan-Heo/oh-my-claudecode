@@ -102,6 +102,7 @@ import {
 } from './merge-orchestrator.js';
 import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
 import { execFileSync } from 'node:child_process';
+import { isRuntimeV2Enabled } from './runtime-flags.js';
 
 // ---------------------------------------------------------------------------
 // In-process orchestrator registry (per-team handle for the lifetime of the
@@ -142,12 +143,7 @@ function resolveLeaderBranch(cwd: string): string {
 // Feature flag
 // ---------------------------------------------------------------------------
 
-export function isRuntimeV2Enabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.OMC_RUNTIME_V2;
-  if (!raw) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !['0', 'false', 'no', 'off'].includes(normalized);
-}
+export { isRuntimeV2Enabled } from './runtime-flags.js';
 
 // ---------------------------------------------------------------------------
 // Runtime state (returned by startTeam, consumed by monitorTeam/shutdownTeam)

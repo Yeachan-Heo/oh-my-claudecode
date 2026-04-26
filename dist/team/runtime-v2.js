@@ -43,6 +43,7 @@ import { cliWorkerOutputFilePath, parseCliWorkerVerdict, renderCliWorkerOutputCo
 import { startMergeOrchestrator, recoverFromRestart, } from './merge-orchestrator.js';
 import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
 import { execFileSync } from 'node:child_process';
+import { isRuntimeV2Enabled } from './runtime-flags.js';
 // ---------------------------------------------------------------------------
 // In-process orchestrator registry (per-team handle for the lifetime of the
 // runtime-cli process). Lives at module scope so shutdownTeamV2 can find it.
@@ -75,13 +76,7 @@ function resolveLeaderBranch(cwd) {
 // ---------------------------------------------------------------------------
 // Feature flag
 // ---------------------------------------------------------------------------
-export function isRuntimeV2Enabled(env = process.env) {
-    const raw = env.OMC_RUNTIME_V2;
-    if (!raw)
-        return true;
-    const normalized = raw.trim().toLowerCase();
-    return !['0', 'false', 'no', 'off'].includes(normalized);
-}
+export { isRuntimeV2Enabled } from './runtime-flags.js';
 const MONITOR_SIGNAL_STALE_MS = 30_000;
 // ---------------------------------------------------------------------------
 // Helper: sanitize team name

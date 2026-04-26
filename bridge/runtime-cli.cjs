@@ -6268,6 +6268,16 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_fs2 = require("node:fs");
 var import_promises9 = require("node:fs/promises");
 var import_node_path2 = require("node:path");
+
+// src/team/runtime-flags.ts
+function isRuntimeV2Enabled(env = process.env) {
+  const raw = env.OMC_RUNTIME_V2;
+  if (!raw) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+
+// src/team/merge-orchestrator.ts
 init_tmux_session();
 
 // src/team/merge-coordinator.ts
@@ -6526,8 +6536,8 @@ function assertLeaderBranchAllowed(leaderBranch) {
   }
 }
 function assertRuntimeV2Gate() {
-  if (process.env.OMC_RUNTIME_V2 !== "1") {
-    throw new Error("auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).");
+  if (!isRuntimeV2Enabled()) {
+    throw new Error("auto-merge requires runtime v2 (OMC_RUNTIME_V2 is explicitly disabled).");
   }
 }
 async function appendEvent(repoRoot, teamName, event) {
@@ -6555,6 +6565,21 @@ function gitRevParseHead(repoRoot, branch) {
     encoding: "utf-8",
     stdio: "pipe"
   }).trim();
+}
+function gitPath(worktreePath, gitPathName) {
+  try {
+    const resolved = (0, import_node_child_process3.execFileSync)("git", ["rev-parse", "--git-path", gitPathName], {
+      cwd: worktreePath,
+      encoding: "utf-8",
+      stdio: "pipe"
+    }).trim();
+    if (resolved) return resolved;
+  } catch {
+  }
+  return (0, import_node_path2.join)(worktreePath, ".git", gitPathName);
+}
+function isRebaseInProgress(worktreePath) {
+  return (0, import_node_fs2.existsSync)(gitPath(worktreePath, "rebase-merge"));
 }
 function isWorktreeRegistered(repoRoot, wtPath) {
   try {
@@ -6642,7 +6667,7 @@ async function startMergeOrchestrator(config) {
     for (const other of workers.values()) {
       if (other.workerName === triggeringWorker) continue;
       const wtPath = other.workerWorktreePath;
-      if ((0, import_node_fs2.existsSync)((0, import_node_path2.join)(wtPath, ".git", "rebase-merge"))) {
+      if (isRebaseInProgress(wtPath)) {
         await appendEvent(config.repoRoot, config.teamName, {
           type: "rebase_skipped_in_progress",
           worker: other.workerName,
@@ -6810,7 +6835,7 @@ async function startMergeOrchestrator(config) {
       await fanOutRebase(entry.workerName);
     });
   }
-  async function pollOnce() {
+  async function runPollOnce() {
     if (stopped) return;
     for (const entry of workers.values()) {
       const skipModulo = Math.min(30, Math.pow(2, entry.consecutiveFailures));
@@ -6818,8 +6843,7 @@ async function startMergeOrchestrator(config) {
         continue;
       }
       if (pausedWorkers.has(entry.workerName)) {
-        const rebaseDir = (0, import_node_path2.join)(entry.workerWorktreePath, ".git", "rebase-merge");
-        if (!(0, import_node_fs2.existsSync)(rebaseDir)) {
+        if (!isRebaseInProgress(entry.workerWorktreePath)) {
           await handleRebaseResolution(entry);
         } else {
           continue;
@@ -6891,7 +6915,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
   let pollTickCount = 0;
   const interval = setInterval(() => {
     pollTickCount += 1;
-    void pollOnce().catch(() => {
+    void runPollOnce().catch(() => {
     });
   }, pollIntervalMs);
   if (typeof interval.unref === "function") interval.unref();
@@ -6929,6 +6953,9 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
         persistState();
       } catch {
       }
+    },
+    async pollOnce() {
+      await runPollOnce();
     },
     async drainAndStop() {
       stopped = true;
@@ -7026,8 +7053,7 @@ async function recoverFromRestart(config) {
     entries = [];
   }
   for (const entry of entries) {
-    const rebaseDir = (0, import_node_path2.join)(entry.path, ".git", "rebase-merge");
-    if (!(0, import_node_fs2.existsSync)(rebaseDir)) continue;
+    if (!isRebaseInProgress(entry.path)) continue;
     orphanedRebases.push(entry.workerName);
     const message = `### Runtime restart recovery \u2014 your branch is mid-rebase
 
@@ -7036,7 +7062,7 @@ Runtime restarted while your branch was mid-rebase onto \`${config.leaderBranch}
 **Worktree:** \`${entry.path}\`
 
 Cadence remains paused. Resolve and \`git rebase --continue\`, or \`git rebase --abort\` to bail.
-Cadence resumes once \`.git/rebase-merge\` is gone.`;
+Cadence resumes once the git rebase state is gone.`;
     try {
       await appendToInbox(config.teamName, entry.workerName, message, config.cwd);
     } catch {
@@ -7076,12 +7102,6 @@ function resolveLeaderBranch(cwd) {
     throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
   }
   return out;
-}
-function isRuntimeV2Enabled(env = process.env) {
-  const raw = env.OMC_RUNTIME_V2;
-  if (!raw) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !["0", "false", "no", "off"].includes(normalized);
 }
 var MONITOR_SIGNAL_STALE_MS = 3e4;
 function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
@@ -7887,7 +7907,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename4 } = await import("fs/promises");
-  const { readFileSync: readFileSync11, writeFileSync: writeFileSync4, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync11, writeFileSync: writeFileSync3, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -7969,7 +7989,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
         if (terminalStatus === "failed") {
           taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
         }
-        writeFileSync4(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
+        writeFileSync3(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
         transitionOk = true;
       });
     } catch {

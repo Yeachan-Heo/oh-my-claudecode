@@ -88,7 +88,7 @@ describe('installPostToolUseHook – settings.json shape', () => {
     expect(command).toContain('my-worker');
   });
 
-  it('hook command checks for .git/rebase-merge directory guard', async () => {
+  it('hook command checks gitdir-aware rebase and merge guards', async () => {
     await installPostToolUseHook(worktreePath, 'writer');
 
     const settings = readSettings(worktreePath);
@@ -97,10 +97,12 @@ describe('installPostToolUseHook – settings.json shape', () => {
     const innerHooks = postToolUse[0]['hooks'] as Array<Record<string, unknown>>;
     const command = innerHooks[0]['command'] as string;
 
-    // Must use -d for rebase-merge (it is a directory)
-    expect(command).toContain('-d .git/rebase-merge');
-    // Must check for MERGE_HEAD
-    expect(command).toContain('.git/MERGE_HEAD');
+    // Must resolve rebase-merge and MERGE_HEAD through git so real worktrees
+    // with a .git file are guarded correctly.
+    expect(command).toContain('git rev-parse --git-path rebase-merge');
+    expect(command).toContain('git rev-parse --git-path MERGE_HEAD');
+    expect(command).toContain('-d "$rebase_dir"');
+    expect(command).toContain('-f "$merge_head"');
     // Must check for sentinel
     expect(command).toContain('.hook-paused');
   });

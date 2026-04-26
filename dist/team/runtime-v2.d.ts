@@ -20,7 +20,7 @@ import type { TeamPhase } from './phase-controller.js';
 import { type WorkerPaneLiveness } from './tmux-session.js';
 import type { PluginConfig } from '../shared/types.js';
 import { type CliWorkerOutputPayload } from './cli-worker-contract.js';
-export declare function isRuntimeV2Enabled(env?: NodeJS.ProcessEnv): boolean;
+export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamRuntimeV2 {
     teamName: string;
     sanitizedName: string;
