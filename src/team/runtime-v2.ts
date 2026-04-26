@@ -103,6 +103,13 @@ import {
 import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
 import { execFileSync } from 'node:child_process';
 import { isRuntimeV2Enabled } from './runtime-flags.js';
+import {
+  installCommitCadence,
+  startFallbackPoller,
+  uninstallCommitCadence,
+  type FallbackPollerHandle,
+  type WorkerCadenceContext,
+} from './worker-commit-cadence.js';
 
 // ---------------------------------------------------------------------------
 // In-process orchestrator registry (per-team handle for the lifetime of the
@@ -110,6 +117,7 @@ import { isRuntimeV2Enabled } from './runtime-flags.js';
 // ---------------------------------------------------------------------------
 
 const orchestratorByTeam = new Map<string, OrchestratorHandle>();
+const cadenceByTeam = new Map<string, { pollers: FallbackPollerHandle[]; contexts: WorkerCadenceContext[] }>();
 
 function registerTeamOrchestrator(teamName: string, handle: OrchestratorHandle): void {
   orchestratorByTeam.set(teamName, handle);
@@ -121,6 +129,25 @@ function getTeamOrchestrator(teamName: string): OrchestratorHandle | undefined {
 
 function unregisterTeamOrchestrator(teamName: string): void {
   orchestratorByTeam.delete(teamName);
+}
+
+function registerTeamCadence(teamName: string, context: WorkerCadenceContext, poller?: FallbackPollerHandle): void {
+  const entry = cadenceByTeam.get(teamName) ?? { pollers: [], contexts: [] };
+  entry.contexts.push(context);
+  if (poller) entry.pollers.push(poller);
+  cadenceByTeam.set(teamName, entry);
+}
+
+async function stopTeamCadence(teamName: string): Promise<void> {
+  const entry = cadenceByTeam.get(teamName);
+  if (!entry) return;
+  cadenceByTeam.delete(teamName);
+  for (const poller of entry.pollers) {
+    try { poller.stop(); } catch { /* best-effort cleanup */ }
+  }
+  for (const context of entry.contexts) {
+    try { await uninstallCommitCadence(context); } catch { /* best-effort cleanup */ }
+  }
 }
 
 /**
@@ -493,6 +520,7 @@ interface SpawnV2WorkerOptions {
   cwd: string;
   workerCwd?: string;
   worktreePath?: string;
+  autoMerge?: boolean;
   resolvedBinaryPaths: Partial<Record<CliAgentType, string>>;
   /**
    * Pre-resolved model ID from the team's routing snapshot. When set, overrides
@@ -665,6 +693,21 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   // avoids echoing reviewer/seed prompt text into tmux scrollback.
   if (usePromptMode) {
     launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
+  }
+
+  if (opts.autoMerge && opts.worktreePath) {
+    const cadenceContext: WorkerCadenceContext = {
+      teamName: opts.teamName,
+      workerName: opts.workerName,
+      worktreePath: opts.worktreePath,
+      agentType: opts.agentType,
+      enabled: true,
+    };
+    const cadence = await installCommitCadence(cadenceContext);
+    const poller = cadence.method === 'fallback-poll'
+      ? startFallbackPoller(opts.worktreePath, opts.workerName)
+      : undefined;
+    registerTeamCadence(opts.teamName, cadenceContext, poller);
   }
 
   const paneConfig: WorkerPaneConfig = {
@@ -1187,6 +1230,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       cwd: leaderCwd,
       workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
       worktreePath: workersInfo[workerIndex]?.worktree_path,
+      autoMerge: Boolean(config.autoMerge),
       resolvedBinaryPaths,
       ...(assignment.model ? { model: assignment.model } : {}),
       ...(assignment.role ? { role: assignment.role } : {}),
@@ -1256,9 +1300,9 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`,
   }, leaderCwd).catch(logEventFailure);
 
-  // Auto-merge orchestrator startup (gated on config.autoMerge — Step 6/9 of
-  // the plan). All errors here are non-fatal to team startup: we record them
-  // and continue. The team itself remains functional without auto-merge.
+  // Auto-merge orchestrator startup. Because --auto-merge is an explicit
+  // safety opt-in, startup/registration failures are fatal: continuing would
+  // leave users believing worker edits are being merged when they are not.
   if (config.autoMerge && autoMergeLeaderBranch) {
     try {
       await ensureLeaderInbox(sanitized, leaderCwd);
@@ -1291,20 +1335,25 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       registerTeamOrchestrator(sanitized, orchestrator);
 
       // Register every spawned worker (named worktree mode is enforced above
-      // when autoMerge is on, so worker branches exist).
+      // when autoMerge is on, so worker branches exist). A single failed
+      // registration makes the auto-merge contract unsafe, so fail loudly.
       for (const w of workersInfo) {
-        try {
-          await orchestrator.registerWorker(w.name);
-        } catch (regErr) {
-          process.stderr.write(
-            `[team/runtime-v2] orchestrator.registerWorker(${w.name}) failed: ${regErr}\n`,
-          );
-        }
+        await orchestrator.registerWorker(w.name);
       }
     } catch (orchErr) {
-      process.stderr.write(
-        `[team/runtime-v2] auto-merge orchestrator startup failed (continuing without auto-merge): ${orchErr}\n`,
-      );
+      await stopTeamCadence(sanitized);
+      unregisterTeamOrchestrator(sanitized);
+      await rollbackStartedNativeWorktreeStartup({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: orchErr,
+        sessionName,
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode,
+      });
+      const reason = orchErr instanceof Error ? orchErr.message : String(orchErr);
+      throw new Error(`auto-merge startup failed: ${reason}`);
     }
   }
 
@@ -2067,11 +2116,19 @@ export async function shutdownTeamV2(
   }
 
   // 6a. Drain the merge orchestrator (if attached). Final merge sweep before
-  // cleanupTeamWorktrees touches per-worker worktrees. Bounded by drainTimeoutMs.
+  // unregistering workers or cleanupTeamWorktrees touches per-worker worktrees.
+  // Bounded by drainTimeoutMs.
   const orchestrator = getTeamOrchestrator(sanitized);
   if (orchestrator) {
     try {
-      // Unregister each worker first to halt new poll-driven attempts.
+      const drainResult = await orchestrator.drainAndStop();
+      if (drainResult.unmerged.length > 0) {
+        await appendTeamEvent(sanitized, {
+          type: 'team_leader_nudge',
+          worker: 'leader-fixed',
+          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
+        }, cwd).catch(logEventFailure);
+      }
       for (const w of config.workers) {
         try {
           await orchestrator.unregisterWorker(w.name);
@@ -2081,19 +2138,14 @@ export async function shutdownTeamV2(
           );
         }
       }
-      const drainResult = await orchestrator.drainAndStop();
-      if (drainResult.unmerged.length > 0) {
-        await appendTeamEvent(sanitized, {
-          type: 'team_leader_nudge',
-          worker: 'leader-fixed',
-          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
-        }, cwd).catch(logEventFailure);
-      }
     } catch (err) {
       process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}\n`);
     } finally {
+      await stopTeamCadence(sanitized);
       unregisterTeamOrchestrator(sanitized);
     }
+  } else {
+    await stopTeamCadence(sanitized);
   }
 
   // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
