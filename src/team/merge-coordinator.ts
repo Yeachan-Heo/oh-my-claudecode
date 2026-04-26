@@ -13,8 +13,12 @@ import { listTeamWorktrees } from './git-worktree.js';
 
 const BRANCH_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/;
 
-/** Validate branch name to prevent flag injection in git commands */
-function validateBranchName(branch: string): void {
+/**
+ * Validate branch name to prevent flag injection in git commands.
+ * Exported so other modules (e.g. merge-orchestrator) can guard branch names
+ * before passing them to `git fetch/reset/rebase/rev-parse`.
+ */
+export function validateBranchName(branch: string): void {
   if (!BRANCH_NAME_RE.test(branch)) {
     throw new Error(`Invalid branch name: "${branch}" — must match ${BRANCH_NAME_RE}`);
   }
