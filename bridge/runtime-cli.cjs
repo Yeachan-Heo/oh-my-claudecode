@@ -8368,6 +8368,39 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
   const timeoutMs = options.timeoutMs ?? 15e3;
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
+  const finalizeAutoMerge = async () => {
+    const orchestrator = getTeamOrchestrator(sanitized);
+    if (orchestrator) {
+      try {
+        const drainResult = await orchestrator.drainAndStop();
+        if (drainResult.unmerged.length > 0) {
+          await appendTeamEvent(sanitized, {
+            type: "team_leader_nudge",
+            worker: "leader-fixed",
+            reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
+          }, cwd).catch(logEventFailure);
+        }
+        for (const w of config?.workers ?? []) {
+          try {
+            await orchestrator.unregisterWorker(w.name);
+          } catch (err) {
+            process.stderr.write(
+              `[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}
+`
+            );
+          }
+        }
+      } catch (err) {
+        process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}
+`);
+      } finally {
+        await stopTeamCadence(sanitized);
+        unregisterTeamOrchestrator(sanitized);
+      }
+    } else {
+      await stopTeamCadence(sanitized);
+    }
+  };
   if (!config) {
     const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
     if (cleanupSafety.hasEvidence) {
@@ -8508,6 +8541,7 @@ Then exit your session.
     if (unknownWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(", ")}
 `);
+      await finalizeAutoMerge();
       return;
     }
   } catch (err) {
@@ -8515,6 +8549,7 @@ Then exit your session.
 `);
     if (recordedWorkerPaneIds.length > 0) {
       process.stderr.write("[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n");
+      await finalizeAutoMerge();
       return;
     }
   }
@@ -8529,37 +8564,7 @@ Then exit your session.
       reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`
     }, cwd).catch(logEventFailure);
   }
-  const orchestrator = getTeamOrchestrator(sanitized);
-  if (orchestrator) {
-    try {
-      const drainResult = await orchestrator.drainAndStop();
-      if (drainResult.unmerged.length > 0) {
-        await appendTeamEvent(sanitized, {
-          type: "team_leader_nudge",
-          worker: "leader-fixed",
-          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
-        }, cwd).catch(logEventFailure);
-      }
-      for (const w of config.workers) {
-        try {
-          await orchestrator.unregisterWorker(w.name);
-        } catch (err) {
-          process.stderr.write(
-            `[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}
-`
-          );
-        }
-      }
-    } catch (err) {
-      process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}
-`);
-    } finally {
-      await stopTeamCadence(sanitized);
-      unregisterTeamOrchestrator(sanitized);
-    }
-  } else {
-    await stopTeamCadence(sanitized);
-  }
+  await finalizeAutoMerge();
   let preservedWorktrees = 0;
   try {
     const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);

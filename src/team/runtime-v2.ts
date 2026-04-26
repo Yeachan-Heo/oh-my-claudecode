@@ -1926,6 +1926,38 @@ export async function shutdownTeamV2(
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
 
+  const finalizeAutoMerge = async (): Promise<void> => {
+    const orchestrator = getTeamOrchestrator(sanitized);
+    if (orchestrator) {
+      try {
+        const drainResult = await orchestrator.drainAndStop();
+        if (drainResult.unmerged.length > 0) {
+          await appendTeamEvent(sanitized, {
+            type: 'team_leader_nudge',
+            worker: 'leader-fixed',
+            reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
+          }, cwd).catch(logEventFailure);
+        }
+        for (const w of config?.workers ?? []) {
+          try {
+            await orchestrator.unregisterWorker(w.name);
+          } catch (err) {
+            process.stderr.write(
+              `[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}\n`,
+            );
+          }
+        }
+      } catch (err) {
+        process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}\n`);
+      } finally {
+        await stopTeamCadence(sanitized);
+        unregisterTeamOrchestrator(sanitized);
+      }
+    } else {
+      await stopTeamCadence(sanitized);
+    }
+  };
+
   if (!config) {
     // No config means worker liveness cannot be proven. Worktree metadata and
     // root AGENTS backups live under the scoped state tree, so use non-mutating
@@ -2092,12 +2124,14 @@ export async function shutdownTeamV2(
     if (unknownWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(', ')}
 `);
+      await finalizeAutoMerge();
       return;
     }
   } catch (err) {
     process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}\n`);
     if (recordedWorkerPaneIds.length > 0) {
       process.stderr.write('[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n');
+      await finalizeAutoMerge();
       return;
     }
   }
@@ -2116,37 +2150,9 @@ export async function shutdownTeamV2(
   }
 
   // 6a. Drain the merge orchestrator (if attached). Final merge sweep before
-  // unregistering workers or cleanupTeamWorktrees touches per-worker worktrees.
-  // Bounded by drainTimeoutMs.
-  const orchestrator = getTeamOrchestrator(sanitized);
-  if (orchestrator) {
-    try {
-      const drainResult = await orchestrator.drainAndStop();
-      if (drainResult.unmerged.length > 0) {
-        await appendTeamEvent(sanitized, {
-          type: 'team_leader_nudge',
-          worker: 'leader-fixed',
-          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
-        }, cwd).catch(logEventFailure);
-      }
-      for (const w of config.workers) {
-        try {
-          await orchestrator.unregisterWorker(w.name);
-        } catch (err) {
-          process.stderr.write(
-            `[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}\n`,
-          );
-        }
-      }
-    } catch (err) {
-      process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}\n`);
-    } finally {
-      await stopTeamCadence(sanitized);
-      unregisterTeamOrchestrator(sanitized);
-    }
-  } else {
-    await stopTeamCadence(sanitized);
-  }
+  // cleanupTeamWorktrees touches per-worker worktrees. Also used by preserve-state
+  // exits above so auto-merge shutdown is not skipped when pane liveness is unknown.
+  await finalizeAutoMerge();
 
   // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
   // team state directory too; it contains the metadata and root AGENTS.md backups
