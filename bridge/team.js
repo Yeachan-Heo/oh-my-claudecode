@@ -6730,7 +6730,7 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
   if (existsSync17(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
     return;
   }
-  execFileSync5("git", ["worktree", "add", mergerPath, leaderBranch], {
+  execFileSync5("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
     cwd: repoRoot,
     stdio: "pipe"
   });
@@ -8627,6 +8627,7 @@ Then exit your session.
     if (aliveWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
+      await finalizeAutoMerge();
       return;
     }
     const unknownWorkers = liveness.filter(([, state]) => state === "unknown").map(([paneId]) => paneById.get(paneId) ?? paneId);

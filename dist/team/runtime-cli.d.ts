@@ -5,6 +5,7 @@
  *
  * Bundled as CJS via esbuild (scripts/build-runtime-cli.mjs).
  */
+export declare function assertAutoMergeRuntimeSupported(useV2: boolean, autoMerge: boolean): void;
 interface TaskResult {
     taskId: string;
     status: string;

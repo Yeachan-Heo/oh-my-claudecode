@@ -1638,6 +1638,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         if (aliveWorkers.length > 0) {
             process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(', ')}
 `);
+            await finalizeAutoMerge();
             return;
         }
         const unknownWorkers = liveness

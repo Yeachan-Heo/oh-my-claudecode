@@ -1133,6 +1133,7 @@ var init_file_lock = __esm({
 // src/team/runtime-cli.ts
 var runtime_cli_exports = {};
 __export(runtime_cli_exports, {
+  assertAutoMergeRuntimeSupported: () => assertAutoMergeRuntimeSupported,
   buildCliOutput: () => buildCliOutput,
   buildTerminalCliResult: () => buildTerminalCliResult,
   checkWatchdogFailedMarker: () => checkWatchdogFailedMarker,
@@ -6728,7 +6729,7 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
   if ((0, import_node_fs2.existsSync)(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
     return;
   }
-  (0, import_node_child_process3.execFileSync)("git", ["worktree", "add", mergerPath, leaderBranch], {
+  (0, import_node_child_process3.execFileSync)("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
     cwd: repoRoot,
     stdio: "pipe"
   });
@@ -8535,6 +8536,7 @@ Then exit your session.
     if (aliveWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
+      await finalizeAutoMerge();
       return;
     }
     const unknownWorkers = liveness.filter(([, state]) => state === "unknown").map(([paneId]) => paneById.get(paneId) ?? paneId);
@@ -8583,6 +8585,11 @@ Then exit your session.
 }
 
 // src/team/runtime-cli.ts
+function assertAutoMergeRuntimeSupported(useV2, autoMerge) {
+  if (autoMerge && !useV2) {
+    throw new Error("--auto-merge requires runtime v2; unset OMC_RUNTIME_V2=0 or disable --auto-merge");
+  }
+}
 function getTerminalStatus(taskCounts, expectedTaskCount) {
   const active = taskCounts.pending + taskCounts.inProgress;
   const terminal = taskCounts.completed + taskCounts.failed;
@@ -8742,6 +8749,13 @@ async function main() {
     newWindow
   };
   const useV2 = isRuntimeV2Enabled();
+  try {
+    assertAutoMergeRuntimeSupported(useV2, autoMerge);
+  } catch (err) {
+    process.stderr.write(`[runtime-cli] ${err instanceof Error ? err.message : String(err)}
+`);
+    process.exit(1);
+  }
   let runtime = null;
   let finalStatus = "failed";
   let pollActive = true;
@@ -9048,6 +9062,7 @@ if (require.main === module) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  assertAutoMergeRuntimeSupported,
   buildCliOutput,
   buildTerminalCliResult,
   checkWatchdogFailedMarker,

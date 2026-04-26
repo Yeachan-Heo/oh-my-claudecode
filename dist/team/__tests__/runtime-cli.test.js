@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { buildTerminalCliResult, checkWatchdogFailedMarker, getTerminalStatus, writeResultArtifact, } from '../runtime-cli.js';
+import { assertAutoMergeRuntimeSupported, buildTerminalCliResult, checkWatchdogFailedMarker, getTerminalStatus, writeResultArtifact, } from '../runtime-cli.js';
+describe('runtime-cli auto-merge compatibility', () => {
+    it('rejects explicit auto-merge when runtime v2 is disabled', () => {
+        expect(() => assertAutoMergeRuntimeSupported(false, true)).toThrow(/requires runtime v2/);
+    });
+    it('allows v1 runtime when auto-merge is not requested', () => {
+        expect(() => assertAutoMergeRuntimeSupported(false, false)).not.toThrow();
+    });
+});
 describe('runtime-cli terminal status helper', () => {
     it('returns null when there is still active work', () => {
         expect(getTerminalStatus({ pending: 1, inProgress: 0, completed: 0, failed: 0 }, 1)).toBeNull();

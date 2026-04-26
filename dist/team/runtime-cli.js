@@ -14,6 +14,11 @@ import { deriveTeamLeaderGuidance } from './leader-nudge-guidance.js';
 import { waitForSentinelReadiness } from './sentinel-gate.js';
 import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2 } from './runtime-v2.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+export function assertAutoMergeRuntimeSupported(useV2, autoMerge) {
+    if (autoMerge && !useV2) {
+        throw new Error('--auto-merge requires runtime v2; unset OMC_RUNTIME_V2=0 or disable --auto-merge');
+    }
+}
 export function getTerminalStatus(taskCounts, expectedTaskCount) {
     const active = taskCounts.pending + taskCounts.inProgress;
     const terminal = taskCounts.completed + taskCounts.failed;
@@ -172,6 +177,13 @@ async function main() {
         newWindow,
     };
     const useV2 = isRuntimeV2Enabled();
+    try {
+        assertAutoMergeRuntimeSupported(useV2, autoMerge);
+    }
+    catch (err) {
+        process.stderr.write(`[runtime-cli] ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+    }
     let runtime = null;
     let finalStatus = 'failed';
     let pollActive = true;

@@ -84,10 +84,16 @@ export interface CreateGitFixtureOpts {
   workerCount: number;
   leaderBranchName?: string;
   teamName?: string;
+  keepLeaderBranchCheckedOut?: boolean;
 }
 
 export async function createGitFixture(opts: CreateGitFixtureOpts): Promise<GitFixture> {
-  const { workerCount, leaderBranchName = 'omc-team-test-leader', teamName = 'test-team' } = opts;
+  const {
+    workerCount,
+    leaderBranchName = 'omc-team-test-leader',
+    teamName = 'test-team',
+    keepLeaderBranchCheckedOut = false,
+  } = opts;
 
   // Guard: never allow main/master as leader branch (M3)
   const normalized = leaderBranchName.toLowerCase();
@@ -113,10 +119,10 @@ export async function createGitFixture(opts: CreateGitFixtureOpts): Promise<GitF
   git(repoRoot, ['add', 'README.md']);
   git(repoRoot, ['commit', '-m', 'chore: initial commit']);
 
-  // Detach HEAD so the merger worktree can check out the leader branch without
-  // hitting "already checked out" error (git refuses worktree add for a branch
-  // that's currently checked out in the main worktree).
-  git(repoRoot, ['checkout', '--detach']);
+  if (!keepLeaderBranchCheckedOut) {
+    // Most integration tests do not need the leader branch checked out.
+    git(repoRoot, ['checkout', '--detach']);
+  }
 
   // Create worker worktrees
   const workersDir = join(repoRoot, '.omc', 'team', teamName, 'worktrees');

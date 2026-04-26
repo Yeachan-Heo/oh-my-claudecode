@@ -173,8 +173,9 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
     if (existsSync(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
         return; // reuse
     }
-    // First-time create — let `git worktree add` produce the directory.
-    execFileSync('git', ['worktree', 'add', mergerPath, leaderBranch], {
+    // First-time create — allow the hidden merger worktree to check out the
+    // leader branch even when the normal leader repo already has it checked out.
+    execFileSync('git', ['worktree', 'add', '--force', mergerPath, leaderBranch], {
         cwd: repoRoot,
         stdio: 'pipe',
     });

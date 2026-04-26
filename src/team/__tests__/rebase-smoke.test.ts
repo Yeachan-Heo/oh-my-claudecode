@@ -105,6 +105,29 @@ describe('rebase fan-out after clean merge', () => {
   });
 });
 
+describe('merger worktree startup', () => {
+  let fixture: GitFixture;
+  let handle: OrchestratorHandle | undefined;
+
+  afterEach(async () => {
+    try { await handle?.drainAndStop(); } catch { /* ignore */ }
+    await fixture.cleanup();
+  });
+
+  it('starts when the leader branch is checked out in the leader repo', async () => {
+    fixture = await createGitFixture({
+      workerCount: 1,
+      keepLeaderBranchCheckedOut: true,
+      teamName: 'checked-out-leader-team',
+    });
+    process.env.OMC_RUNTIME_V2 = '1';
+
+    handle = await startMergeOrchestrator(makeConfig(fixture));
+
+    expect(handle.getState().workers).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Rebase conflict: B conflicts with A's merged work
 // ---------------------------------------------------------------------------

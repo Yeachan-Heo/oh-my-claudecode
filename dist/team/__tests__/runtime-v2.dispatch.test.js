@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
     sendToWorker: vi.fn(),
     waitForPaneReady: vi.fn(),
     applyMainVerticalLayout: vi.fn(),
+    killWorkerPanes: vi.fn(async () => undefined),
     killTeamSession: vi.fn(async () => { }),
+    resolveSplitPaneWorkerPaneIds: vi.fn(async (_session, paneIds) => paneIds),
+    getWorkerLiveness: vi.fn(async () => 'dead'),
     execFile: vi.fn(),
     spawnSync: vi.fn(() => ({ status: 0 })),
     tmuxExecAsync: vi.fn(),
@@ -67,7 +70,10 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
         sendToWorker: mocks.sendToWorker,
         waitForPaneReady: mocks.waitForPaneReady,
         applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+        killWorkerPanes: mocks.killWorkerPanes,
         killTeamSession: mocks.killTeamSession,
+        resolveSplitPaneWorkerPaneIds: mocks.resolveSplitPaneWorkerPaneIds,
+        getWorkerLiveness: mocks.getWorkerLiveness,
     };
 });
 vi.mock('../merge-orchestrator.js', () => ({
@@ -89,8 +95,14 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.sendToWorker.mockReset();
         mocks.waitForPaneReady.mockReset();
         mocks.applyMainVerticalLayout.mockReset();
+        mocks.killWorkerPanes.mockReset();
         mocks.killTeamSession.mockReset();
+        mocks.resolveSplitPaneWorkerPaneIds.mockReset();
+        mocks.getWorkerLiveness.mockReset();
         mocks.killTeamSession.mockResolvedValue(undefined);
+        mocks.killWorkerPanes.mockResolvedValue(undefined);
+        mocks.resolveSplitPaneWorkerPaneIds.mockImplementation(async (_session, paneIds) => paneIds);
+        mocks.getWorkerLiveness.mockResolvedValue('dead');
         mocks.execFile.mockReset();
         mocks.spawnSync.mockReset();
         modelContractMocks.buildWorkerArgv.mockReset();
@@ -306,6 +318,34 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(mergeMocks.unregisterWorker).toHaveBeenCalledWith('worker-1');
         expect(mergeMocks.drainAndStop.mock.invocationCallOrder[0])
             .toBeLessThan(mergeMocks.unregisterWorker.mock.invocationCallOrder[0]);
+        expect(cadenceMocks.uninstallCommitCadence).toHaveBeenCalledWith(expect.objectContaining({
+            workerName: 'worker-1',
+            agentType: 'codex',
+        }));
+    });
+    it('drains auto-merge before preserving state for live worker panes on shutdown', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-auto-merge-live-pane-'));
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), 'auto merge live pane test\n', 'utf-8');
+        execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['checkout', '-b', 'feature-auto-merge'], { cwd, stdio: 'pipe' });
+        cadenceMocks.installCommitCadence.mockResolvedValue({ method: 'fallback-poll' });
+        mocks.getWorkerLiveness.mockResolvedValue('alive');
+        const { startTeamV2, shutdownTeamV2 } = await import('../runtime-v2.js');
+        await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['codex'],
+            tasks: [{ subject: 'Auto merge cadence', description: 'Drain before live-pane preserve' }],
+            cwd,
+            autoMerge: true,
+        });
+        await shutdownTeamV2('dispatch-team', cwd, { timeoutMs: 0, force: true });
+        expect(mergeMocks.drainAndStop).toHaveBeenCalledTimes(1);
+        expect(mergeMocks.unregisterWorker).toHaveBeenCalledWith('worker-1');
         expect(cadenceMocks.uninstallCommitCadence).toHaveBeenCalledWith(expect.objectContaining({
             workerName: 'worker-1',
             agentType: 'codex',

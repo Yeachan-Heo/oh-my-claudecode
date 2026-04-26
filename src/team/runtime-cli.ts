@@ -32,6 +32,12 @@ interface CliInput {
   autoMerge?: boolean;
 }
 
+export function assertAutoMergeRuntimeSupported(useV2: boolean, autoMerge: boolean): void {
+  if (autoMerge && !useV2) {
+    throw new Error('--auto-merge requires runtime v2; unset OMC_RUNTIME_V2=0 or disable --auto-merge');
+  }
+}
+
 interface TaskResult {
   taskId: string;
   status: string;
@@ -269,6 +275,12 @@ async function main(): Promise<void> {
   };
 
   const useV2 = isRuntimeV2Enabled();
+  try {
+    assertAutoMergeRuntimeSupported(useV2, autoMerge);
+  } catch (err) {
+    process.stderr.write(`[runtime-cli] ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
   let runtime: TeamRuntime | null = null;
   let finalStatus: 'completed' | 'failed' = 'failed';
   let pollActive = true;
