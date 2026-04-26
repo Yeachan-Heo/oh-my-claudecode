@@ -95,6 +95,23 @@ interface UsageApiResponse {
   };
 }
 
+interface ParseUsageResponseOptions {
+  /** Subscription type from OAuth credentials (for distinguishing Max/Pro overage from Enterprise billing) */
+  subscriptionType?: string | null;
+  /** Rate limit tier from OAuth credentials; claude_zero tiers behave like Enterprise billing */
+  rateLimitTier?: string | null;
+}
+
+function isEnterpriseUsageContext(options?: ParseUsageResponseOptions): boolean {
+  if (!options) return true;
+
+  const subscriptionType = options.subscriptionType?.toLowerCase() ?? null;
+  const rateLimitTier = options.rateLimitTier ?? null;
+  if (subscriptionType == null && rateLimitTier == null) return true;
+
+  return subscriptionType === 'enterprise' || /claude_zero/i.test(rateLimitTier ?? '');
+}
+
 interface ZaiQuotaResponse {
   data?: {
     limits?: Array<{
@@ -816,18 +833,22 @@ function clamp(v: number | undefined): number {
 /**
  * Parse API response into RateLimits
  */
-export function parseUsageResponse(response: UsageApiResponse): RateLimits | null {
+export function parseUsageResponse(response: UsageApiResponse, options?: ParseUsageResponseOptions): RateLimits | null {
   const fiveHour = response.five_hour?.utilization;
   const sevenDay = response.seven_day?.utilization;
   const sonnetSevenDay = response.seven_day_sonnet?.utilization;
   const opusSevenDay = response.seven_day_opus?.utilization;
   const extra = response.extra_usage;
-  const enterpriseCredits = extra?.used_credits;
-  const enterpriseCurrency = (extra?.currency ?? 'USD').toUpperCase();
-  // Enterprise credits are only usable when we know how to interpret the minor-unit digits;
-  // see the USD guard in the extra_usage branch below for rationale.
-  const hasUsableEnterprise = enterpriseCredits != null && enterpriseCurrency === 'USD';
-  const hasUsableExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
+  const usedCredits = extra?.used_credits;
+  const extraCurrency = (extra?.currency ?? 'USD').toUpperCase();
+  const isEnterpriseContext = isEnterpriseUsageContext(options);
+  // used_credits are only usable when we know how to interpret the minor-unit digits;
+  // see the USD guards in the extra_usage branch below for rationale.
+  const hasUsableUsedCredits = usedCredits != null && extraCurrency === 'USD';
+  const hasUsableEnterprise = isEnterpriseContext && hasUsableUsedCredits;
+  const hasUsableUsdExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
+  const hasUsableCreditExtraUsage = !isEnterpriseContext && hasUsableUsedCredits && extra?.monthly_limit != null && extra.monthly_limit > 0;
+  const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
 
   // Need at least one valid value. Model-specific weekly buckets are valid usage data
   // even when generic subscription/window metadata is absent or nullish.
@@ -886,7 +907,7 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
     // 0-digit, TND/BHD are 3-digit per ISO 4217) and skip the enterprise fields — the
     // renderer will then return null rather than display a wrong figure.
     const currency = (extra.currency ?? 'USD').toUpperCase();
-    if (extra.used_credits != null && currency === 'USD') {
+    if (extra.used_credits != null && currency === 'USD' && isEnterpriseContext) {
       result.enterpriseSpentUsd = extra.used_credits / 100;
       result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / 100;
       result.enterpriseCurrency = currency;
@@ -895,6 +916,17 @@ export function parseUsageResponse(response: UsageApiResponse): RateLimits | nul
         result.enterpriseUtilization = clamp((extra.used_credits / extra.monthly_limit) * 100);
       }
       // resets_at not provided in enterprise response — leave enterpriseResetsAt unset
+    } else if (extra.used_credits != null && currency === 'USD' && !isEnterpriseContext && extra.monthly_limit != null && extra.monthly_limit > 0) {
+      // Max/Pro organization overage path: the API can use the enterprise-shaped
+      // used_credits/monthly_limit fields even though the account should still render
+      // normal token-window limits. Treat those minor-unit values as extra usage.
+      const spentUsd = extra.used_credits / 100;
+      result.extraUsageSpentUsd = spentUsd;
+      result.extraUsageLimitUsd = extra.monthly_limit / 100;
+      result.extraUsagePercent = extra.utilization != null
+        ? clamp(extra.utilization)
+        : clamp((extra.used_credits / extra.monthly_limit) * 100);
+      result.extraUsageResetsAt = parseDate(extra.resets_at);
     } else if (extra.limit_usd != null && extra.limit_usd > 0) {
       // Pro metered path
       const spentUsd = extra.spent_usd ?? 0;
@@ -1245,10 +1277,15 @@ export async function getUsage(): Promise<UsageResult> {
         }
 
         const accessToken = creds.accessToken;
+        const subscriptionType = creds.subscriptionType;
+        const rateLimitTier = creds.rateLimitTier;
         return fetchAndCacheUsage({
           source: 'anthropic',
           fetchFn: () => fetchUsageFromApi(accessToken),
-          parseFn: parseUsageResponse,
+          parseFn: (data) => parseUsageResponse(data, {
+            subscriptionType,
+            rateLimitTier,
+          }),
           cache,
           pollIntervalMs,
         });

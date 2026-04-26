@@ -670,6 +670,64 @@ describe('getUsage routing', () => {
     expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
   });
 
+  it('passes OAuth subscription metadata so Max used_credits overage stays extra usage', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.credentials.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.credentials.json')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'valid-token',
+            refreshToken: 'refresh-token',
+            expiresAt: Date.now() + 60_000,
+            subscriptionType: 'max',
+            rateLimitTier: 'default_claude_max_20x',
+          },
+        });
+      }
+      return '{}';
+    });
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 3 },
+          seven_day: { utilization: 16 },
+          seven_day_sonnet: { utilization: 0 },
+          extra_usage: {
+            is_enabled: true,
+            used_credits: 2726,
+            monthly_limit: 5000,
+            currency: 'USD',
+          },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.error).toBeUndefined();
+    expect(result.rateLimits).toMatchObject({
+      fiveHourPercent: 3,
+      weeklyPercent: 16,
+      sonnetWeeklyPercent: 0,
+      extraUsageSpentUsd: 27.26,
+      extraUsageLimitUsd: 50,
+      extraUsagePercent: 54.52,
+    });
+    expect(result.rateLimits!.enterpriseSpentUsd).toBeUndefined();
+    expect(result.rateLimits!.enterpriseLimitUsd).toBeUndefined();
+  });
+
   it('returns getUsage rateLimits when OAuth credentials lack subscription metadata', async () => {
     const mockedExistsSync = vi.mocked(fs.existsSync);
     const mockedReadFileSync = vi.mocked(fs.readFileSync);
