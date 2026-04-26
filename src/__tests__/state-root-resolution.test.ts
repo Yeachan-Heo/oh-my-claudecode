@@ -66,6 +66,33 @@ function getCentralizedOmcRoot(projectDir: string, stateDir: string): string {
   }
 }
 
+function writeWorkflowTombstone(
+  omcRoot: string,
+  sessionId: string,
+  mode: 'ralph' | 'ultrawork',
+): void {
+  const sessionDir = join(omcRoot, 'state', 'sessions', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    join(sessionDir, 'skill-active-state.json'),
+    JSON.stringify({
+      version: 2,
+      active_skills: {
+        [mode]: {
+          skill_name: mode,
+          started_at: '2026-04-26T00:00:00.000Z',
+          completed_at: new Date().toISOString(),
+          session_id: sessionId,
+          mode_state_path: `${mode}-state.json`,
+          initialized_mode: mode,
+          initialized_state_path: join(omcRoot, 'state', `${mode}-state.json`),
+          initialized_session_state_path: join(sessionDir, `${mode}-state.json`),
+        },
+      },
+    }, null, 2),
+  );
+}
+
 describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
   let tempDir: string;
   let fakeProject: string;
@@ -115,6 +142,63 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
     const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
       .hookSpecificOutput?.additionalContext ?? '';
     expect(context).toContain('[RALPH LOOP RESTORED]');
+  });
+
+  it('session-start ignores tombstoned stale ralph restore state after cancel', () => {
+    const sessionId = 'test-session-tombstoned-ralph';
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ralph-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'Tombstoned task must not restore',
+        iteration: 12,
+        max_iterations: 100,
+      }),
+    );
+    writeWorkflowTombstone(omcRoot, sessionId, 'ralph');
+
+    const output = runHook(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[RALPH LOOP RESTORED]');
+    expect(context).not.toContain('Tombstoned task must not restore');
+  });
+
+  it('session-start ignores tombstoned stale ultrawork restore state after cancel', () => {
+    const sessionId = 'test-session-tombstoned-ultrawork';
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'ultrawork-state.json'),
+      JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        started_at: '2026-04-26T00:00:00.000Z',
+        original_prompt: 'Tombstoned ultrawork must not restore',
+      }),
+    );
+    writeWorkflowTombstone(omcRoot, sessionId, 'ultrawork');
+
+    const output = runHook(SESSION_START, {
+      hook_event_name: 'SessionStart',
+      session_id: sessionId,
+      cwd: fakeProject,
+    });
+
+    const context = (output as { hookSpecificOutput?: { additionalContext?: string } })
+      .hookSpecificOutput?.additionalContext ?? '';
+    expect(context).not.toContain('[ULTRAWORK MODE RESTORED]');
+    expect(context).not.toContain('Tombstoned ultrawork must not restore');
   });
 
   // ────────────────────────────────────────────────────────────────────────────

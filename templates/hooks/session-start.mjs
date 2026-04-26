@@ -55,6 +55,30 @@ function writeJsonFile(path, data) {
   }
 }
 
+
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+const WORKFLOW_SLOT_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isWorkflowSlotTombstonedForMode(directory, mode, sessionId) {
+  const safeSessionId = typeof sessionId === 'string' && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const ledgerPath = safeSessionId
+    ? join(directory, '.omc', 'state', 'sessions', safeSessionId, 'skill-active-state.json')
+    : join(directory, '.omc', 'state', 'skill-active-state.json');
+  const ledger = readJsonFile(ledgerPath);
+  const slot = ledger?.active_skills?.[mode];
+  if (!slot || typeof slot !== 'object') return false;
+  if (typeof slot.completed_at !== 'string' || !slot.completed_at) return false;
+  const completedAt = new Date(slot.completed_at).getTime();
+  if (!Number.isFinite(completedAt)) return true;
+  return Date.now() - completedAt < WORKFLOW_SLOT_TOMBSTONE_TTL_MS;
+}
+
+function shouldRestoreModeState(directory, mode, state, sessionId) {
+  if (!state?.active) return false;
+  if (isWorkflowSlotTombstonedForMode(directory, mode, sessionId)) return false;
+  return true;
+}
+
 async function checkForUpdates(currentVersion) {
   const cacheFile = join(homedir(), '.omc', 'update-check.json');
   const now = Date.now();
@@ -515,7 +539,7 @@ To update, run: omc update
           ultraworkCandidate.collision.state,
         ),
       );
-    } else if (ultraworkCandidate.restore) {
+    } else if (shouldRestoreModeState(directory, 'ultrawork', ultraworkCandidate.restore, sessionId)) {
       const ultraworkState = ultraworkCandidate.restore;
       messages.push(`<session-restore>
 

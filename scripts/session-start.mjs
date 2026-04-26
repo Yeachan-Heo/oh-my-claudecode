@@ -48,6 +48,30 @@ function readJsonFile(path) {
   }
 }
 
+
+const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+const WORKFLOW_SLOT_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isWorkflowSlotTombstonedForMode(omcRoot, mode, sessionId) {
+  const safeSessionId = typeof sessionId === 'string' && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const ledgerPath = safeSessionId
+    ? join(omcRoot, 'state', 'sessions', safeSessionId, 'skill-active-state.json')
+    : join(omcRoot, 'state', 'skill-active-state.json');
+  const ledger = readJsonFile(ledgerPath);
+  const slot = ledger?.active_skills?.[mode];
+  if (!slot || typeof slot !== 'object') return false;
+  if (typeof slot.completed_at !== 'string' || !slot.completed_at) return false;
+  const completedAt = new Date(slot.completed_at).getTime();
+  if (!Number.isFinite(completedAt)) return true;
+  return Date.now() - completedAt < WORKFLOW_SLOT_TOMBSTONE_TTL_MS;
+}
+
+function shouldRestoreModeState(omcRoot, mode, state, sessionId) {
+  if (!state?.active) return false;
+  if (isWorkflowSlotTombstonedForMode(omcRoot, mode, sessionId)) return false;
+  return true;
+}
+
 function getRuntimeBaseDir() {
   return process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
 }
@@ -563,7 +587,7 @@ async function main() {
       ultraworkState = readJsonFile(join(omcRoot, 'state', 'ultrawork-state.json'));
     }
 
-    if (ultraworkState?.active) {
+    if (shouldRestoreModeState(omcRoot, 'ultrawork', ultraworkState, sessionId)) {
       messages.push(`<session-restore>
 
 [ULTRAWORK MODE RESTORED]
@@ -596,7 +620,7 @@ Treat this as prior-session context only. Prioritize the user's newest request, 
         ralphState = readJsonFile(join(omcRoot, 'ralph-state.json'));
       }
     }
-    if (ralphState?.active) {
+    if (shouldRestoreModeState(omcRoot, 'ralph', ralphState, sessionId)) {
       messages.push(`<session-restore>
 
 [RALPH LOOP RESTORED]
