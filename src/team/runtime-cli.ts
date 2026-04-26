@@ -28,6 +28,8 @@ interface CliInput {
   pollIntervalMs?: number;
   sentinelGateTimeoutMs?: number;
   sentinelGatePollIntervalMs?: number;
+  /** v2-only: when true, start the merge orchestrator (auto-merge + fan-out rebase). */
+  autoMerge?: boolean;
 }
 
 interface TaskResult {
@@ -251,6 +253,7 @@ async function main(): Promise<void> {
     pollIntervalMs = 5000,
     sentinelGateTimeoutMs = 30_000,
     sentinelGatePollIntervalMs = 250,
+    autoMerge = false,
   } = input;
 
   const workerCount = input.workerCount ?? agentTypes.length;
@@ -345,6 +348,7 @@ async function main(): Promise<void> {
         tasks,
         cwd,
         newWindow,
+        autoMerge,
       });
       const v2PaneIds = v2Runtime.config.workers
         .map(w => w.pane_id)
