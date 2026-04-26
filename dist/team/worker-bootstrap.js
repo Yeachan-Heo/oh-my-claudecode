@@ -2,6 +2,8 @@ import { mkdir, writeFile, appendFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { sanitizePromptContent } from '../agents/prompt-helpers.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
+import { sanitizeName } from './tmux-session.js';
+import { validateResolvedPath } from './fs-utils.js';
 const DEFAULT_INSTRUCTION_STATE_ROOT = '.omc/state';
 function buildInstructionPath(...parts) {
     return join(...parts).replaceAll('\\', '/');
@@ -209,9 +211,16 @@ export async function composeInitialInbox(teamName, workerName, content, cwd, cl
 }
 /**
  * Append a message to the worker inbox.
+ *
+ * Sanitizes both `teamName` and `workerName` (mirroring the leader-inbox
+ * pattern) and validates the resolved path stays under `cwd` to prevent
+ * traversal — callers in `merge-orchestrator` may pass un-sanitized names.
  */
 export async function appendToInbox(teamName, workerName, message, cwd) {
-    const inboxPath = join(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
+    const safeTeam = sanitizeName(teamName);
+    const safeWorker = sanitizeName(workerName);
+    const inboxPath = join(cwd, `.omc/state/team/${safeTeam}/workers/${safeWorker}/inbox.md`);
+    validateResolvedPath(inboxPath, cwd);
     await mkdir(dirname(inboxPath), { recursive: true });
     await appendFile(inboxPath, `\n\n---\n${message}`, 'utf-8');
 }

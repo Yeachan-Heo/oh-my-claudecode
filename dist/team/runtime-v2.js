@@ -40,6 +40,38 @@ import { buildResolvedRoutingSnapshot, getRoleRoutingSpec } from './stage-router
 import { routeTaskToRole } from './role-router.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
 import { cliWorkerOutputFilePath, parseCliWorkerVerdict, renderCliWorkerOutputContract, shouldInjectContract, } from './cli-worker-contract.js';
+import { startMergeOrchestrator, recoverFromRestart, } from './merge-orchestrator.js';
+import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
+import { execFileSync } from 'node:child_process';
+// ---------------------------------------------------------------------------
+// In-process orchestrator registry (per-team handle for the lifetime of the
+// runtime-cli process). Lives at module scope so shutdownTeamV2 can find it.
+// ---------------------------------------------------------------------------
+const orchestratorByTeam = new Map();
+function registerTeamOrchestrator(teamName, handle) {
+    orchestratorByTeam.set(teamName, handle);
+}
+function getTeamOrchestrator(teamName) {
+    return orchestratorByTeam.get(teamName);
+}
+function unregisterTeamOrchestrator(teamName) {
+    orchestratorByTeam.delete(teamName);
+}
+/**
+ * Resolve the leader's current branch via `git branch --show-current` from cwd.
+ * Throws if not a git repo or HEAD is detached.
+ */
+function resolveLeaderBranch(cwd) {
+    const out = execFileSync('git', ['branch', '--show-current'], {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (!out) {
+        throw new Error('auto-merge requires a non-detached leader branch (git branch --show-current returned empty)');
+    }
+    return out;
+}
 // ---------------------------------------------------------------------------
 // Feature flag
 // ---------------------------------------------------------------------------
@@ -477,7 +509,24 @@ export async function startTeamV2(config) {
     // do NOT change routing — user must recreate the team to pick up changes.
     const pluginCfg = config.pluginConfig ?? loadConfig();
     const resolvedRouting = buildResolvedRoutingSnapshot(pluginCfg);
-    const worktreeMode = normalizeTeamWorktreeMode(process.env.OMC_TEAM_WORKTREE_MODE ?? pluginCfg.team?.ops?.worktreeMode);
+    let worktreeMode = normalizeTeamWorktreeMode(process.env.OMC_TEAM_WORKTREE_MODE ?? pluginCfg.team?.ops?.worktreeMode);
+    // Auto-merge gate (M5 + M3 hardening). Forces worktreeMode='named' so each
+    // worker has a real branch the orchestrator can merge from.
+    let autoMergeLeaderBranch;
+    if (config.autoMerge) {
+        if (!isRuntimeV2Enabled()) {
+            throw new Error('auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).');
+        }
+        autoMergeLeaderBranch = resolveLeaderBranch(leaderCwd);
+        const stripped = autoMergeLeaderBranch.replace(/^refs\/heads\//i, '').toLowerCase();
+        if (stripped === 'main' || stripped === 'master') {
+            throw new Error('auto-merge refuses main/master leader branch — use a feature branch');
+        }
+        if (worktreeMode !== 'named') {
+            // Force named-branch worktree mode so workers get a real branch.
+            worktreeMode = 'named';
+        }
+    }
     const workspaceMode = worktreeMode === 'disabled' ? 'single' : 'worktree';
     // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
     // AC-8: missing/untrusted binaries fall back to the snapshot's Claude tuple at
@@ -849,6 +898,49 @@ export async function startTeamV2(config) {
         worker: 'leader-fixed',
         reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`,
     }, leaderCwd).catch(logEventFailure);
+    // Auto-merge orchestrator startup (gated on config.autoMerge — Step 6/9 of
+    // the plan). All errors here are non-fatal to team startup: we record them
+    // and continue. The team itself remains functional without auto-merge.
+    if (config.autoMerge && autoMergeLeaderBranch) {
+        try {
+            await ensureLeaderInbox(sanitized, leaderCwd);
+            // Seed an introductory leader-inbox note so the leader knows the inbox
+            // exists and where to read it. This mirrors the worker bootstrap pattern.
+            await appendToLeaderInbox(sanitized, extendLeaderBootstrapPrompt(sanitized), leaderCwd);
+            // M6: try to recover from a previous run before starting fresh.
+            try {
+                await recoverFromRestart({
+                    teamName: sanitized,
+                    repoRoot: leaderCwd,
+                    leaderBranch: autoMergeLeaderBranch,
+                    cwd: leaderCwd,
+                });
+            }
+            catch (recErr) {
+                process.stderr.write(`[team/runtime-v2] auto-merge recover-from-restart failed: ${recErr}\n`);
+            }
+            const orchestrator = await startMergeOrchestrator({
+                teamName: sanitized,
+                repoRoot: leaderCwd,
+                leaderBranch: autoMergeLeaderBranch,
+                cwd: leaderCwd,
+            });
+            registerTeamOrchestrator(sanitized, orchestrator);
+            // Register every spawned worker (named worktree mode is enforced above
+            // when autoMerge is on, so worker branches exist).
+            for (const w of workersInfo) {
+                try {
+                    await orchestrator.registerWorker(w.name);
+                }
+                catch (regErr) {
+                    process.stderr.write(`[team/runtime-v2] orchestrator.registerWorker(${w.name}) failed: ${regErr}\n`);
+                }
+            }
+        }
+        catch (orchErr) {
+            process.stderr.write(`[team/runtime-v2] auto-merge orchestrator startup failed (continuing without auto-merge): ${orchErr}\n`);
+        }
+    }
     return {
         teamName: sanitized,
         sanitizedName: sanitized,
@@ -1497,6 +1589,36 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             worker: 'leader-fixed',
             reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
         }, cwd).catch(logEventFailure);
+    }
+    // 6a. Drain the merge orchestrator (if attached). Final merge sweep before
+    // cleanupTeamWorktrees touches per-worker worktrees. Bounded by drainTimeoutMs.
+    const orchestrator = getTeamOrchestrator(sanitized);
+    if (orchestrator) {
+        try {
+            // Unregister each worker first to halt new poll-driven attempts.
+            for (const w of config.workers) {
+                try {
+                    await orchestrator.unregisterWorker(w.name);
+                }
+                catch (err) {
+                    process.stderr.write(`[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}\n`);
+                }
+            }
+            const drainResult = await orchestrator.drainAndStop();
+            if (drainResult.unmerged.length > 0) {
+                await appendTeamEvent(sanitized, {
+                    type: 'team_leader_nudge',
+                    worker: 'leader-fixed',
+                    reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
+                }, cwd).catch(logEventFailure);
+            }
+        }
+        catch (err) {
+            process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}\n`);
+        }
+        finally {
+            unregisterTeamOrchestrator(sanitized);
+        }
     }
     // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
     // team state directory too; it contains the metadata and root AGENTS.md backups

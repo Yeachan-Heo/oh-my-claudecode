@@ -34,6 +34,10 @@ export declare function generateWorkerOverlay(params: WorkerBootstrapParams): st
 export declare function composeInitialInbox(teamName: string, workerName: string, content: string, cwd: string, cliOutputContract?: string): Promise<void>;
 /**
  * Append a message to the worker inbox.
+ *
+ * Sanitizes both `teamName` and `workerName` (mirroring the leader-inbox
+ * pattern) and validates the resolved path stays under `cwd` to prevent
+ * traversal — callers in `merge-orchestrator` may pass un-sanitized names.
  */
 export declare function appendToInbox(teamName: string, workerName: string, message: string, cwd: string): Promise<void>;
 export { getWorkerEnv } from './model-contract.js';

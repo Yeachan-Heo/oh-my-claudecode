@@ -1,3 +1,9 @@
+/**
+ * Validate branch name to prevent flag injection in git commands.
+ * Exported so other modules (e.g. merge-orchestrator) can guard branch names
+ * before passing them to `git fetch/reset/rebase/rev-parse`.
+ */
+export declare function validateBranchName(branch: string): void;
 export interface MergeResult {
     workerName: string;
     branch: string;

@@ -4731,6 +4731,17 @@ async function composeInitialInbox(teamName, workerName, content, cwd, cliOutput
 ${cliOutputContract}` : content;
   await writeFile3(inboxPath, finalContent, "utf-8");
 }
+async function appendToInbox(teamName, workerName, message, cwd) {
+  const safeTeam = sanitizeName(teamName);
+  const safeWorker = sanitizeName(workerName);
+  const inboxPath = join13(cwd, `.omc/state/team/${safeTeam}/workers/${safeWorker}/inbox.md`);
+  validateResolvedPath(inboxPath, cwd);
+  await mkdir3(dirname7(inboxPath), { recursive: true });
+  await appendFile2(inboxPath, `
+
+---
+${message}`, "utf-8");
+}
 async function ensureWorkerStateDir(teamName, workerName, cwd) {
   const workerDir = join13(cwd, `.omc/state/team/${teamName}/workers/${workerName}`);
   await mkdir3(workerDir, { recursive: true });
@@ -4753,6 +4764,8 @@ var init_worker_bootstrap = __esm({
     "use strict";
     init_prompt_helpers();
     init_omc_cli_rendering();
+    init_tmux_session();
+    init_fs_utils();
     init_model_contract();
     DEFAULT_INSTRUCTION_STATE_ROOT = ".omc/state";
   }
@@ -5389,6 +5402,9 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     forgetMetadataUnlocked(repoRoot, teamName, workerName);
   });
 }
+function listTeamWorktrees(teamName, repoRoot) {
+  return readMetadata(repoRoot, teamName);
+}
 function inspectTeamWorktreeCleanupSafety(teamName, repoRoot) {
   const metadata = readMetadataResult(repoRoot, teamName);
   const entries = metadata.entries;
@@ -5516,10 +5532,10 @@ async function readJsonSafe3(filePath) {
   }
 }
 async function writeAtomic2(filePath, data) {
-  const { writeFile: writeFile6 } = await import("fs/promises");
+  const { writeFile: writeFile8 } = await import("fs/promises");
   await mkdir5(dirname10(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeFile6(tmpPath, data, "utf-8");
+  await writeFile8(tmpPath, data, "utf-8");
   const { rename: rename3 } = await import("fs/promises");
   await rename3(tmpPath, filePath);
 }
@@ -6224,6 +6240,835 @@ var init_cli_worker_contract = __esm({
   }
 });
 
+// src/team/merge-coordinator.ts
+import { execFileSync as execFileSync4 } from "node:child_process";
+function validateBranchName(branch) {
+  if (!BRANCH_NAME_RE.test(branch)) {
+    throw new Error(`Invalid branch name: "${branch}" \u2014 must match ${BRANCH_NAME_RE}`);
+  }
+}
+function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
+  validateBranchName(workerBranch);
+  validateBranchName(baseBranch);
+  try {
+    execFileSync4(
+      "git",
+      ["merge-tree", "--write-tree", baseBranch, workerBranch],
+      { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    );
+    return [];
+  } catch (err) {
+    const error = err;
+    if (error.status === 1 && typeof error.stdout === "string") {
+      const lines = error.stdout.split("\n");
+      const conflicts = [];
+      for (const line of lines) {
+        const match = line.match(/^CONFLICT\s.*?:\s+.*?\s+in\s+(.+)$/);
+        if (match) {
+          conflicts.push(match[1].trim());
+        }
+      }
+      return conflicts.length > 0 ? conflicts : ["(merge-tree reported conflicts)"];
+    }
+  }
+  const mergeBase = execFileSync4(
+    "git",
+    ["merge-base", baseBranch, workerBranch],
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+  ).trim();
+  const baseDiff = execFileSync4(
+    "git",
+    ["diff", "--name-only", mergeBase, baseBranch],
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+  ).trim();
+  const workerDiff = execFileSync4(
+    "git",
+    ["diff", "--name-only", mergeBase, workerBranch],
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+  ).trim();
+  if (!baseDiff || !workerDiff) {
+    return [];
+  }
+  const baseFiles = new Set(baseDiff.split("\n").filter((f) => f));
+  const workerFiles = workerDiff.split("\n").filter((f) => f);
+  return workerFiles.filter((f) => baseFiles.has(f));
+}
+function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
+  validateBranchName(workerBranch);
+  validateBranchName(baseBranch);
+  const workerName = workerBranch.split("/").pop() || workerBranch;
+  try {
+    try {
+      execFileSync4("git", ["diff-index", "--quiet", "HEAD", "--"], {
+        cwd: repoRoot,
+        stdio: "pipe"
+      });
+    } catch {
+      throw new Error("Working tree has uncommitted changes \u2014 commit or stash before merging");
+    }
+    execFileSync4("git", ["checkout", baseBranch], {
+      cwd: repoRoot,
+      stdio: "pipe"
+    });
+    execFileSync4("git", ["merge", "--no-ff", "-m", `Merge ${workerBranch} into ${baseBranch}`, workerBranch], {
+      cwd: repoRoot,
+      stdio: "pipe"
+    });
+    const mergeCommit = execFileSync4("git", ["rev-parse", "HEAD"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      stdio: "pipe"
+    }).trim();
+    return {
+      workerName,
+      branch: workerBranch,
+      success: true,
+      conflicts: [],
+      mergeCommit
+    };
+  } catch (_err) {
+    try {
+      execFileSync4("git", ["merge", "--abort"], { cwd: repoRoot, stdio: "pipe" });
+    } catch {
+    }
+    const conflicts = checkMergeConflicts(workerBranch, baseBranch, repoRoot);
+    return {
+      workerName,
+      branch: workerBranch,
+      success: false,
+      conflicts
+    };
+  }
+}
+var BRANCH_NAME_RE;
+var init_merge_coordinator = __esm({
+  "src/team/merge-coordinator.ts"() {
+    "use strict";
+    init_git_worktree();
+    BRANCH_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/;
+  }
+});
+
+// src/team/leader-inbox.ts
+import { appendFile as appendFile4, mkdir as mkdir7, writeFile as writeFile5 } from "fs/promises";
+import { existsSync as existsSync15 } from "fs";
+import { dirname as dirname12, join as join18 } from "path";
+function leaderInboxPath(teamName, cwd) {
+  const safe = sanitizeName(teamName);
+  return join18(cwd, `.omc/state/team/${safe}/leader/inbox.md`);
+}
+async function ensureLeaderInbox(teamName, cwd) {
+  const inboxPath = leaderInboxPath(teamName, cwd);
+  validateResolvedPath(inboxPath, cwd);
+  await mkdir7(dirname12(inboxPath), { recursive: true });
+  if (!existsSync15(inboxPath)) {
+    await writeFile5(inboxPath, LEADER_INBOX_HEADER, "utf-8");
+  }
+  return inboxPath;
+}
+async function appendToLeaderInbox(teamName, message, cwd) {
+  const inboxPath = leaderInboxPath(teamName, cwd);
+  validateResolvedPath(inboxPath, cwd);
+  await mkdir7(dirname12(inboxPath), { recursive: true });
+  await appendFile4(inboxPath, `
+
+---
+${message}`, "utf-8");
+}
+function extendLeaderBootstrapPrompt(teamName) {
+  const safe = sanitizeName(teamName);
+  const path4 = `.omc/state/team/${safe}/leader/inbox.md`;
+  return `Runtime notifications appear at ${path4} \u2014 check this file periodically and after long-running operations.`;
+}
+var LEADER_INBOX_HEADER;
+var init_leader_inbox = __esm({
+  "src/team/leader-inbox.ts"() {
+    "use strict";
+    init_tmux_session();
+    init_fs_utils();
+    LEADER_INBOX_HEADER = `# Leader Inbox
+
+Runtime notifications (merge conflicts, rebase events, etc.) appear here.
+Check this file periodically and after long-running operations.
+
+---
+`;
+  }
+});
+
+// src/team/conflict-mailbox.ts
+function sanitizeConflictPath(path4) {
+  return path4.replace(/[`\r\n]/g, "?");
+}
+function formatMergeConflictForLeader(args) {
+  const { workerName, workerBranch, leaderBranch, conflictingFiles, mergeBaseSha, observedAt } = args;
+  const ts = new Date(observedAt).toISOString();
+  const safeFiles = conflictingFiles.map(sanitizeConflictPath);
+  const fileList = safeFiles.map((f) => `- \`${f}\``).join("\n");
+  return `### Merge conflict: ${workerName} \u2192 ${leaderBranch}
+
+**Worker branch:** \`${workerBranch}\`
+**Leader branch:** \`${leaderBranch}\`
+**Merge base:** \`${mergeBaseSha}\`
+**Observed at:** ${ts}
+
+**Conflicting files:**
+${fileList}
+
+**Leader: choose strategy.** To resolve, run:
+
+\`\`\`sh
+git checkout ${leaderBranch} && git merge --no-ff ${workerBranch}
+# resolve conflicts in the files listed above
+git add ${safeFiles.join(" ")}
+git commit
+\`\`\`
+
+Or abort with \`git merge --abort\` to defer resolution.`;
+}
+function formatRebaseConflictForWorker(args) {
+  const { workerName, workerBranch, leaderBranch, conflictingFiles, baseSha, worktreePath, observedAt } = args;
+  const ts = new Date(observedAt).toISOString();
+  const safeFiles = conflictingFiles.map(sanitizeConflictPath);
+  const fileList = safeFiles.map((f) => `- \`${f}\``).join("\n");
+  return `### Rebase conflict: ${workerName} onto ${leaderBranch}
+
+**Worker branch:** \`${workerBranch}\`
+**Base branch:** \`${leaderBranch}\`
+**Base SHA:** \`${baseSha}\`
+**Worktree:** \`${worktreePath}\`
+**Observed at:** ${ts}
+
+**Conflicting files:**
+${fileList}
+
+Resolve conflicts in your own pane, then \`git add <files>\` and \`git rebase --continue\`.
+Cadence stays paused until \`.git/rebase-merge\` is gone.
+
+Or run \`git rebase --abort\` to bail and return to the pre-rebase state.`;
+}
+var init_conflict_mailbox = __esm({
+  "src/team/conflict-mailbox.ts"() {
+    "use strict";
+    init_worker_bootstrap();
+    init_leader_inbox();
+  }
+});
+
+// src/team/worker-commit-cadence.ts
+import { existsSync as existsSync16, watch as fsWatch } from "fs";
+import { readFile as readFile9, writeFile as writeFile6, mkdir as mkdir8, unlink as unlink2 } from "fs/promises";
+import { join as join19, dirname as dirname13 } from "path";
+import { exec as exec2 } from "child_process";
+async function pauseHookViaSentinel(worktreePath) {
+  const sentinelPath = join19(worktreePath, SENTINEL_FILENAME);
+  await mkdir8(dirname13(sentinelPath), { recursive: true });
+  await writeFile6(sentinelPath, "", "utf-8");
+}
+async function resumeHookViaSentinel(worktreePath) {
+  const sentinelPath = join19(worktreePath, SENTINEL_FILENAME);
+  try {
+    await unlink2(sentinelPath);
+  } catch {
+  }
+}
+var SENTINEL_FILENAME;
+var init_worker_commit_cadence = __esm({
+  "src/team/worker-commit-cadence.ts"() {
+    "use strict";
+    SENTINEL_FILENAME = ".hook-paused";
+  }
+});
+
+// src/team/merge-orchestrator.ts
+import { execFileSync as execFileSync5 } from "node:child_process";
+import { existsSync as existsSync17 } from "node:fs";
+import { mkdir as mkdir9, appendFile as appendFile5 } from "node:fs/promises";
+import { dirname as dirname14, join as join20 } from "node:path";
+function mergerWorktreePathFor(repoRoot, teamName) {
+  return join20(repoRoot, ".omc", "team", sanitizeName(teamName), "merger");
+}
+function persistedStatePath(repoRoot, teamName) {
+  return join20(
+    repoRoot,
+    ".omc",
+    "state",
+    "team",
+    sanitizeName(teamName),
+    "auto-merge-state.json"
+  );
+}
+function teardownAuditPath(repoRoot, teamName) {
+  return join20(
+    repoRoot,
+    ".omc",
+    "state",
+    "team",
+    sanitizeName(teamName),
+    "teardown-audit.jsonl"
+  );
+}
+function orchestratorEventLogPath(repoRoot, teamName) {
+  return join20(
+    repoRoot,
+    ".omc",
+    "state",
+    "team",
+    sanitizeName(teamName),
+    "orchestrator-events.jsonl"
+  );
+}
+function assertLeaderBranchAllowed(leaderBranch) {
+  const stripped = leaderBranch.replace(/^refs\/heads\//i, "").toLowerCase();
+  if (stripped === "main" || stripped === "master") {
+    throw new Error("auto-merge refuses main/master leader branch \u2014 use a feature branch");
+  }
+}
+function assertRuntimeV2Gate() {
+  if (process.env.OMC_RUNTIME_V2 !== "1") {
+    throw new Error("auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).");
+  }
+}
+async function appendEvent(repoRoot, teamName, event) {
+  const path4 = orchestratorEventLogPath(repoRoot, teamName);
+  await mkdir9(dirname14(path4), { recursive: true });
+  const full = {
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    team: teamName,
+    ...event
+  };
+  await appendFile5(path4, `${JSON.stringify(full)}
+`, "utf-8");
+}
+function createMutex() {
+  let lock = Promise.resolve();
+  return (fn) => {
+    const next = lock.then(fn, fn);
+    lock = next.catch(() => void 0);
+    return next;
+  };
+}
+function gitRevParseHead(repoRoot, branch) {
+  return execFileSync5("git", ["rev-parse", `refs/heads/${branch}`], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    stdio: "pipe"
+  }).trim();
+}
+function isWorktreeRegistered(repoRoot, wtPath) {
+  try {
+    const out = execFileSync5("git", ["worktree", "list", "--porcelain"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      stdio: "pipe"
+    });
+    for (const line of out.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        if (line.slice("worktree ".length).trim() === wtPath) return true;
+      }
+    }
+  } catch {
+  }
+  return false;
+}
+function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
+  ensureDirWithMode(dirname14(mergerPath));
+  if (existsSync17(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
+    return;
+  }
+  execFileSync5("git", ["worktree", "add", mergerPath, leaderBranch], {
+    cwd: repoRoot,
+    stdio: "pipe"
+  });
+}
+function preflightMergerWorktree(mergerPath, leaderBranch) {
+  try {
+    execFileSync5("git", ["fetch", "--no-tags", "origin", leaderBranch], {
+      cwd: mergerPath,
+      stdio: "pipe"
+    });
+  } catch {
+  }
+  execFileSync5("git", ["reset", "--hard", leaderBranch], {
+    cwd: mergerPath,
+    stdio: "pipe"
+  });
+}
+function parseUUFiles(porcelainOutput) {
+  const files = [];
+  for (const line of porcelainOutput.split("\n")) {
+    if (line.startsWith("UU ")) {
+      files.push(line.slice(3).trim());
+    } else if (line.startsWith("AA ") || line.startsWith("DD ")) {
+      files.push(line.slice(3).trim());
+    }
+  }
+  return files;
+}
+async function startMergeOrchestrator(config) {
+  assertRuntimeV2Gate();
+  assertLeaderBranchAllowed(config.leaderBranch);
+  validateBranchName(config.leaderBranch);
+  const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const drainTimeoutMs = config.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+  const mergerPath = mergerWorktreePathFor(config.repoRoot, config.teamName);
+  validateResolvedPath(mergerPath, config.repoRoot);
+  ensureMergerWorktree(config.repoRoot, mergerPath, config.leaderBranch);
+  await ensureLeaderInbox(config.teamName, config.cwd);
+  const persistedPath = persistedStatePath(config.repoRoot, config.teamName);
+  let persisted = { lastShas: {} };
+  if (existsSync17(persistedPath)) {
+    try {
+      const { readFileSync: readFileSync11 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync11(persistedPath, "utf-8"));
+    } catch {
+      persisted = { lastShas: {} };
+    }
+  }
+  const workers = /* @__PURE__ */ new Map();
+  const pausedWorkers = /* @__PURE__ */ new Set();
+  const mutex = createMutex();
+  let stopped = false;
+  function persistState() {
+    const payload = {
+      lastShas: Object.fromEntries(
+        Array.from(workers.values()).map((w) => [w.workerName, w.lastObservedSha])
+      )
+    };
+    atomicWriteJson(persistedPath, payload);
+  }
+  async function fanOutRebase(triggeringWorker) {
+    for (const other of workers.values()) {
+      if (other.workerName === triggeringWorker) continue;
+      const wtPath = other.workerWorktreePath;
+      if (existsSync17(join20(wtPath, ".git", "rebase-merge"))) {
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "rebase_skipped_in_progress",
+          worker: other.workerName,
+          reason: "rebase-already-in-progress"
+        });
+        continue;
+      }
+      await appendEvent(config.repoRoot, config.teamName, {
+        type: "rebase_triggered",
+        worker: other.workerName
+      });
+      await pauseHookViaSentinel(wtPath);
+      pausedWorkers.add(other.workerName);
+      try {
+        execFileSync5("git", ["fetch", "--no-tags", "origin", config.leaderBranch], {
+          cwd: wtPath,
+          stdio: "pipe"
+        });
+      } catch {
+      }
+      try {
+        execFileSync5("git", ["rebase", config.leaderBranch], {
+          cwd: wtPath,
+          stdio: "pipe"
+        });
+        await resumeHookViaSentinel(wtPath);
+        pausedWorkers.delete(other.workerName);
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "rebase_succeeded",
+          worker: other.workerName
+        });
+      } catch {
+        let conflictingFiles = [];
+        try {
+          const status = execFileSync5("git", ["status", "--porcelain"], {
+            cwd: wtPath,
+            encoding: "utf-8",
+            stdio: "pipe"
+          });
+          conflictingFiles = parseUUFiles(status);
+        } catch {
+          conflictingFiles = ["(rebase status unavailable)"];
+        }
+        const baseSha = (() => {
+          try {
+            return execFileSync5("git", ["rev-parse", `refs/heads/${config.leaderBranch}`], {
+              cwd: config.repoRoot,
+              encoding: "utf-8",
+              stdio: "pipe"
+            }).trim();
+          } catch {
+            return "unknown";
+          }
+        })();
+        const message = formatRebaseConflictForWorker({
+          workerName: other.workerName,
+          workerBranch: other.workerBranch,
+          leaderBranch: config.leaderBranch,
+          conflictingFiles,
+          baseSha,
+          worktreePath: wtPath,
+          observedAt: Date.now()
+        });
+        try {
+          await appendToInbox(config.teamName, other.workerName, message, config.cwd);
+        } catch {
+        }
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "rebase_conflict",
+          worker: other.workerName,
+          data: { conflictingFiles }
+        });
+      }
+    }
+  }
+  async function attemptMergeForWorker(entry) {
+    await mutex(async () => {
+      const targetSha = entry.lastObservedSha;
+      await appendEvent(config.repoRoot, config.teamName, {
+        type: "merge_attempted",
+        worker: entry.workerName,
+        data: { targetSha }
+      });
+      try {
+        preflightMergerWorktree(mergerPath, config.leaderBranch);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        entry.consecutiveFailures += 1;
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "merge_conflict",
+          worker: entry.workerName,
+          reason: `preflight_failed:${reason}`
+        });
+        return;
+      }
+      const conflicts = checkMergeConflicts(
+        entry.workerBranch,
+        config.leaderBranch,
+        mergerPath
+      );
+      if (conflicts.length > 0) {
+        let mergeBaseSha = "unknown";
+        try {
+          mergeBaseSha = execFileSync5(
+            "git",
+            ["merge-base", config.leaderBranch, entry.workerBranch],
+            { cwd: mergerPath, encoding: "utf-8", stdio: "pipe" }
+          ).trim();
+        } catch {
+        }
+        const message = formatMergeConflictForLeader({
+          workerName: entry.workerName,
+          workerBranch: entry.workerBranch,
+          leaderBranch: config.leaderBranch,
+          conflictingFiles: conflicts,
+          mergeBaseSha,
+          observedAt: Date.now()
+        });
+        try {
+          await appendToLeaderInbox(config.teamName, message, config.cwd);
+        } catch {
+        }
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "merge_conflict",
+          worker: entry.workerName,
+          data: { conflictingFiles: conflicts, mergeBaseSha }
+        });
+        entry.consecutiveFailures += 1;
+        return;
+      }
+      const result = mergeWorkerBranch(
+        entry.workerBranch,
+        config.leaderBranch,
+        mergerPath
+      );
+      if (!result.success) {
+        const message = formatMergeConflictForLeader({
+          workerName: entry.workerName,
+          workerBranch: entry.workerBranch,
+          leaderBranch: config.leaderBranch,
+          conflictingFiles: result.conflicts.length > 0 ? result.conflicts : ["(merge failed after clean check)"],
+          mergeBaseSha: "unknown",
+          observedAt: Date.now()
+        });
+        try {
+          await appendToLeaderInbox(config.teamName, message, config.cwd);
+        } catch {
+        }
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "merge_conflict",
+          worker: entry.workerName,
+          data: { conflictingFiles: result.conflicts }
+        });
+        entry.consecutiveFailures += 1;
+        return;
+      }
+      entry.lastMergedSha = targetSha;
+      entry.consecutiveFailures = 0;
+      await appendEvent(config.repoRoot, config.teamName, {
+        type: "merge_succeeded",
+        worker: entry.workerName,
+        data: { mergeCommit: result.mergeCommit, targetSha }
+      });
+      if (stopped) return;
+      await fanOutRebase(entry.workerName);
+    });
+  }
+  async function pollOnce() {
+    if (stopped) return;
+    for (const entry of workers.values()) {
+      const skipModulo = Math.min(30, Math.pow(2, entry.consecutiveFailures));
+      if (skipModulo > 1 && pollTickCount % skipModulo !== 0) {
+        continue;
+      }
+      if (pausedWorkers.has(entry.workerName)) {
+        const rebaseDir = join20(entry.workerWorktreePath, ".git", "rebase-merge");
+        if (!existsSync17(rebaseDir)) {
+          await handleRebaseResolution(entry);
+        } else {
+          continue;
+        }
+      }
+      let currentSha;
+      try {
+        currentSha = gitRevParseHead(config.repoRoot, entry.workerBranch);
+      } catch (err) {
+        entry.consecutiveFailures += 1;
+        const reason = err instanceof Error ? err.message : String(err);
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "commit_observed",
+          worker: entry.workerName,
+          reason: `rev_parse_failed:${reason}`
+        });
+        continue;
+      }
+      if (currentSha && currentSha !== entry.lastObservedSha) {
+        entry.lastObservedSha = currentSha;
+        try {
+          persistState();
+        } catch {
+        }
+        await appendEvent(config.repoRoot, config.teamName, {
+          type: "commit_observed",
+          worker: entry.workerName,
+          data: { sha: currentSha }
+        });
+        try {
+          await attemptMergeForWorker(entry);
+        } catch (err) {
+          entry.consecutiveFailures += 1;
+          const reason = err instanceof Error ? err.message : String(err);
+          await appendEvent(config.repoRoot, config.teamName, {
+            type: "merge_conflict",
+            worker: entry.workerName,
+            reason: `merge_threw:${reason}`
+          });
+        }
+      }
+    }
+  }
+  async function handleRebaseResolution(entry) {
+    pausedWorkers.delete(entry.workerName);
+    try {
+      const status = execFileSync5("git", ["status", "--porcelain"], {
+        cwd: entry.workerWorktreePath,
+        encoding: "utf-8",
+        stdio: "pipe"
+      }).trim();
+      if (status.length > 0) {
+        const dirtyFiles = status.split("\n").map((l) => l.trim().replace(/^\S+\s+/, "")).filter((s) => s.length > 0);
+        const audit = `## Auto-commit audit: the following files were modified during rebase pause and will be folded into the next auto-commit:
+${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
+        try {
+          await appendToInbox(config.teamName, entry.workerName, audit, config.cwd);
+        } catch {
+        }
+      }
+    } catch {
+    }
+    await resumeHookViaSentinel(entry.workerWorktreePath);
+    await appendEvent(config.repoRoot, config.teamName, {
+      type: "rebase_resolved",
+      worker: entry.workerName
+    });
+  }
+  let pollTickCount = 0;
+  const interval = setInterval(() => {
+    pollTickCount += 1;
+    void pollOnce().catch(() => {
+    });
+  }, pollIntervalMs);
+  if (typeof interval.unref === "function") interval.unref();
+  return {
+    async registerWorker(workerName) {
+      if (workers.has(workerName)) return;
+      const workerBranch = getBranchName(config.teamName, workerName);
+      validateBranchName(workerBranch);
+      const wtPath = getWorktreePath(config.repoRoot, config.teamName, workerName);
+      let seedSha = persisted.lastShas[workerName] ?? "";
+      if (!seedSha) {
+        try {
+          seedSha = gitRevParseHead(config.repoRoot, workerBranch);
+        } catch {
+          seedSha = "";
+        }
+      }
+      workers.set(workerName, {
+        workerName,
+        workerBranch,
+        workerWorktreePath: wtPath,
+        lastObservedSha: seedSha,
+        lastMergedSha: seedSha,
+        consecutiveFailures: 0
+      });
+      try {
+        persistState();
+      } catch {
+      }
+    },
+    async unregisterWorker(workerName) {
+      workers.delete(workerName);
+      pausedWorkers.delete(workerName);
+      try {
+        persistState();
+      } catch {
+      }
+    },
+    async drainAndStop() {
+      stopped = true;
+      clearInterval(interval);
+      const start = Date.now();
+      const unmerged = [];
+      const candidates = Array.from(workers.values()).filter(
+        (w) => w.lastObservedSha && w.lastObservedSha !== w.lastMergedSha
+      );
+      for (const entry of candidates) {
+        const remaining = drainTimeoutMs - (Date.now() - start);
+        if (remaining <= 0) {
+          unmerged.push({ workerName: entry.workerName, reason: "drain-timeout" });
+          continue;
+        }
+        const merged = await Promise.race([
+          (async () => {
+            try {
+              await attemptMergeForWorker(entry);
+              return true;
+            } catch {
+              return false;
+            }
+          })(),
+          new Promise((resolve5) => {
+            const t = setTimeout(() => resolve5(false), remaining);
+            if (typeof t.unref === "function") t.unref();
+          })
+        ]);
+        if (!merged || entry.lastMergedSha !== entry.lastObservedSha) {
+          unmerged.push({
+            workerName: entry.workerName,
+            reason: merged ? "merge-conflict" : "drain-timeout"
+          });
+        }
+      }
+      if (unmerged.length > 0) {
+        const auditPath = teardownAuditPath(config.repoRoot, config.teamName);
+        await mkdir9(dirname14(auditPath), { recursive: true });
+        for (const u of unmerged) {
+          const row = JSON.stringify({
+            type: "unmerged_at_shutdown",
+            ts: (/* @__PURE__ */ new Date()).toISOString(),
+            team: config.teamName,
+            worker: u.workerName,
+            reason: u.reason
+          });
+          try {
+            await appendFile5(auditPath, `${row}
+`, "utf-8");
+          } catch {
+          }
+        }
+        const message = `## Teardown audit: unmerged worker branches at shutdown
+
+${unmerged.map((u) => `- ${u.workerName}: ${u.reason}`).join("\n")}`;
+        try {
+          await appendToLeaderInbox(config.teamName, message, config.cwd);
+        } catch {
+        }
+      }
+      return { unmerged };
+    },
+    getState() {
+      return {
+        workers: Array.from(workers.keys()),
+        lastShas: Object.fromEntries(
+          Array.from(workers.values()).map((w) => [w.workerName, w.lastObservedSha])
+        ),
+        mergerWorktreePath: mergerPath
+      };
+    }
+  };
+}
+async function recoverFromRestart(config) {
+  const persistedPath = persistedStatePath(config.repoRoot, config.teamName);
+  let persistedShasLoaded = 0;
+  if (existsSync17(persistedPath)) {
+    try {
+      const { readFileSync: readFileSync11 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync11(persistedPath, "utf-8"));
+      persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
+    } catch {
+      persistedShasLoaded = 0;
+    }
+  }
+  const orphanedRebases = [];
+  let entries = [];
+  try {
+    entries = listTeamWorktrees(config.teamName, config.repoRoot).map((w) => ({
+      workerName: w.workerName,
+      path: w.path
+    }));
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    const rebaseDir = join20(entry.path, ".git", "rebase-merge");
+    if (!existsSync17(rebaseDir)) continue;
+    orphanedRebases.push(entry.workerName);
+    const message = `### Runtime restart recovery \u2014 your branch is mid-rebase
+
+Runtime restarted while your branch was mid-rebase onto \`${config.leaderBranch}\`.
+
+**Worktree:** \`${entry.path}\`
+
+Cadence remains paused. Resolve and \`git rebase --continue\`, or \`git rebase --abort\` to bail.
+Cadence resumes once \`.git/rebase-merge\` is gone.`;
+    try {
+      await appendToInbox(config.teamName, entry.workerName, message, config.cwd);
+    } catch {
+    }
+  }
+  if (orphanedRebases.length > 0 || persistedShasLoaded > 0) {
+    try {
+      await appendEvent(config.repoRoot, config.teamName, {
+        type: "restart_recovery",
+        data: { orphanedRebases, persistedShasLoaded }
+      });
+    } catch {
+    }
+  }
+  return { orphanedRebases, persistedShasLoaded };
+}
+var DEFAULT_POLL_INTERVAL_MS, DEFAULT_DRAIN_TIMEOUT_MS;
+var init_merge_orchestrator = __esm({
+  "src/team/merge-orchestrator.ts"() {
+    "use strict";
+    init_fs_utils();
+    init_tmux_session();
+    init_git_worktree();
+    init_merge_coordinator();
+    init_worker_bootstrap();
+    init_leader_inbox();
+    init_conflict_mailbox();
+    init_worker_commit_cadence();
+    DEFAULT_POLL_INTERVAL_MS = 1e3;
+    DEFAULT_DRAIN_TIMEOUT_MS = 1e4;
+  }
+});
+
 // src/team/runtime-v2.ts
 var runtime_v2_exports = {};
 __export(runtime_v2_exports, {
@@ -6238,10 +7083,31 @@ __export(runtime_v2_exports, {
   startTeamV2: () => startTeamV2,
   writeWatchdogFailedMarker: () => writeWatchdogFailedMarker
 });
-import { join as join18, resolve as resolve4 } from "path";
-import { existsSync as existsSync15 } from "fs";
-import { mkdir as mkdir7, readdir as readdir2, readFile as readFile9, rm as rm4, writeFile as writeFile5 } from "fs/promises";
+import { join as join21, resolve as resolve4 } from "path";
+import { existsSync as existsSync18 } from "fs";
+import { mkdir as mkdir10, readdir as readdir2, readFile as readFile10, rm as rm4, writeFile as writeFile7 } from "fs/promises";
 import { performance } from "perf_hooks";
+import { execFileSync as execFileSync6 } from "node:child_process";
+function registerTeamOrchestrator(teamName, handle) {
+  orchestratorByTeam.set(teamName, handle);
+}
+function getTeamOrchestrator(teamName) {
+  return orchestratorByTeam.get(teamName);
+}
+function unregisterTeamOrchestrator(teamName) {
+  orchestratorByTeam.delete(teamName);
+}
+function resolveLeaderBranch(cwd) {
+  const out = execFileSync6("git", ["branch", "--show-current"], {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"]
+  }).trim();
+  if (!out) {
+    throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
+  }
+  return out;
+}
 function isRuntimeV2Enabled(env = process.env) {
   const raw = env.OMC_RUNTIME_V2;
   if (!raw) return true;
@@ -6389,7 +7255,7 @@ function hasWorkerStatusProgress(status, taskId) {
 }
 async function hasWorkerTaskClaimEvidence(teamName, workerName, cwd, taskId) {
   try {
-    const raw = await readFile9(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), "utf-8");
+    const raw = await readFile10(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), "utf-8");
     const task = JSON.parse(raw);
     return task.owner === workerName && ["in_progress", "completed", "failed"].includes(task.status);
   } catch {
@@ -6591,16 +7457,16 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
       await rm4(teamRoot, { recursive: true, force: true });
       return;
     }
-    await mkdir7(teamRoot, { recursive: true });
-    await writeFile5(join18(teamRoot, "startup-failure.json"), JSON.stringify({
+    await mkdir10(teamRoot, { recursive: true });
+    await writeFile7(join21(teamRoot, "startup-failure.json"), JSON.stringify({
       reason: "startup_failed_before_config_persisted",
       error: errorMessage,
       preserved: cleanup.preserved,
       recorded_at: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2), "utf-8");
   } catch (rollbackError) {
-    await mkdir7(teamRoot, { recursive: true });
-    await writeFile5(join18(teamRoot, "startup-failure.json"), JSON.stringify({
+    await mkdir10(teamRoot, { recursive: true });
+    await writeFile7(join21(teamRoot, "startup-failure.json"), JSON.stringify({
       reason: "startup_failed_before_config_persisted",
       error: errorMessage,
       rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
@@ -6630,9 +7496,23 @@ async function startTeamV2(config) {
   validateTeamName(sanitized);
   const pluginCfg = config.pluginConfig ?? loadConfig();
   const resolvedRouting = buildResolvedRoutingSnapshot(pluginCfg);
-  const worktreeMode = normalizeTeamWorktreeMode(
+  let worktreeMode = normalizeTeamWorktreeMode(
     process.env.OMC_TEAM_WORKTREE_MODE ?? pluginCfg.team?.ops?.worktreeMode
   );
+  let autoMergeLeaderBranch;
+  if (config.autoMerge) {
+    if (!isRuntimeV2Enabled()) {
+      throw new Error("auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).");
+    }
+    autoMergeLeaderBranch = resolveLeaderBranch(leaderCwd);
+    const stripped = autoMergeLeaderBranch.replace(/^refs\/heads\//i, "").toLowerCase();
+    if (stripped === "main" || stripped === "master") {
+      throw new Error("auto-merge refuses main/master leader branch \u2014 use a feature branch");
+    }
+    if (worktreeMode !== "named") {
+      worktreeMode = "named";
+    }
+  }
   const workspaceMode = worktreeMode === "disabled" ? "single" : "worktree";
   const agentTypes = config.agentTypes;
   const resolvedBinaryPaths = {};
@@ -6662,9 +7542,9 @@ async function startTeamV2(config) {
     } catch {
     }
   }
-  await mkdir7(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-  await mkdir7(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-  await mkdir7(join18(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
+  await mkdir10(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
+  await mkdir10(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
+  await mkdir10(join21(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
   const missingBinaryLogFailure = createSwallowedErrorLogger(
     "team.runtime-v2.startTeamV2 cli_binary_missing event failed"
   );
@@ -6682,8 +7562,8 @@ async function startTeamV2(config) {
   for (let i = 0; i < config.tasks.length; i++) {
     const taskId = String(i + 1);
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    await mkdir7(join18(taskFilePath, ".."), { recursive: true });
-    await writeFile5(taskFilePath, JSON.stringify({
+    await mkdir10(join21(taskFilePath, ".."), { recursive: true });
+    await writeFile7(taskFilePath, JSON.stringify({
       id: taskId,
       subject: config.tasks[i].subject,
       description: config.tasks[i].description,
@@ -6755,7 +7635,7 @@ async function startTeamV2(config) {
       });
       const worktree = workerWorktrees.get(wName);
       if (worktree) {
-        const overlayContent = await readFile9(overlayPath, "utf-8");
+        const overlayContent = await readFile10(overlayPath, "utf-8");
         installWorktreeRootAgents(sanitized, wName, leaderCwd, worktree.path, overlayContent);
       }
     }
@@ -6865,7 +7745,7 @@ async function startTeamV2(config) {
     next_worker_index: teamConfig.next_worker_index
   };
   try {
-    await writeFile5(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), "utf-8");
+    await writeFile7(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), "utf-8");
   } catch (error) {
     await rollbackStartedNativeWorktreeStartup({
       teamName: sanitized,
@@ -6976,6 +7856,49 @@ async function startTeamV2(config) {
     worker: "leader-fixed",
     reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`
   }, leaderCwd).catch(logEventFailure);
+  if (config.autoMerge && autoMergeLeaderBranch) {
+    try {
+      await ensureLeaderInbox(sanitized, leaderCwd);
+      await appendToLeaderInbox(
+        sanitized,
+        extendLeaderBootstrapPrompt(sanitized),
+        leaderCwd
+      );
+      try {
+        await recoverFromRestart({
+          teamName: sanitized,
+          repoRoot: leaderCwd,
+          leaderBranch: autoMergeLeaderBranch,
+          cwd: leaderCwd
+        });
+      } catch (recErr) {
+        process.stderr.write(`[team/runtime-v2] auto-merge recover-from-restart failed: ${recErr}
+`);
+      }
+      const orchestrator = await startMergeOrchestrator({
+        teamName: sanitized,
+        repoRoot: leaderCwd,
+        leaderBranch: autoMergeLeaderBranch,
+        cwd: leaderCwd
+      });
+      registerTeamOrchestrator(sanitized, orchestrator);
+      for (const w of workersInfo) {
+        try {
+          await orchestrator.registerWorker(w.name);
+        } catch (regErr) {
+          process.stderr.write(
+            `[team/runtime-v2] orchestrator.registerWorker(${w.name}) failed: ${regErr}
+`
+          );
+        }
+      }
+    } catch (orchErr) {
+      process.stderr.write(
+        `[team/runtime-v2] auto-merge orchestrator startup failed (continuing without auto-merge): ${orchErr}
+`
+      );
+    }
+  }
   return {
     teamName: sanitized,
     sanitizedName: sanitized,
@@ -6986,16 +7909,16 @@ async function startTeamV2(config) {
   };
 }
 async function writeWatchdogFailedMarker(teamName, cwd, reason) {
-  const { writeFile: writeFile6 } = await import("fs/promises");
+  const { writeFile: writeFile8 } = await import("fs/promises");
   const marker = {
     failedAt: Date.now(),
     reason,
     writtenBy: "runtime-v2"
   };
   const root = absPath(cwd, TeamPaths.root(sanitizeTeamName(teamName)));
-  const markerPath = join18(root, "watchdog-failed.json");
-  await mkdir7(root, { recursive: true });
-  await writeFile6(markerPath, JSON.stringify(marker, null, 2), "utf-8");
+  const markerPath = join21(root, "watchdog-failed.json");
+  await mkdir10(root, { recursive: true });
+  await writeFile8(markerPath, JSON.stringify(marker, null, 2), "utf-8");
 }
 async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
   const logEventFailure = createSwallowedErrorLogger(
@@ -7015,12 +7938,12 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
       retryCount: 0,
       lastFailedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    const { writeFile: writeFile6 } = await import("fs/promises");
-    await mkdir7(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
-    await writeFile6(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
+    const { writeFile: writeFile8 } = await import("fs/promises");
+    await mkdir10(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
+    await writeFile8(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync11, writeFileSync: writeFileSync4 } = await import("fs");
+      const { readFileSync: readFileSync11, writeFileSync: writeFileSync5 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
         const raw = readFileSync11(taskPath2, "utf-8");
@@ -7029,7 +7952,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
           taskData.status = "pending";
           taskData.owner = void 0;
           taskData.claim = void 0;
-          writeFileSync4(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
+          writeFileSync5(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
           requeued.push(task.id);
         }
       });
@@ -7053,7 +7976,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename3 } = await import("fs/promises");
-  const { readFileSync: readFileSync11, writeFileSync: writeFileSync4, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync11, writeFileSync: writeFileSync5, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -7066,7 +7989,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     }
     let payload;
     try {
-      const raw = await readFile9(outputFile, "utf-8");
+      const raw = await readFile10(outputFile, "utf-8");
       payload = parseCliWorkerVerdict(raw);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -7135,7 +8058,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
         if (terminalStatus === "failed") {
           taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
         }
-        writeFileSync4(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
+        writeFileSync5(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
         transitionOk = true;
       });
     } catch {
@@ -7510,6 +8433,34 @@ Then exit your session.
       reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`
     }, cwd).catch(logEventFailure);
   }
+  const orchestrator = getTeamOrchestrator(sanitized);
+  if (orchestrator) {
+    try {
+      for (const w of config.workers) {
+        try {
+          await orchestrator.unregisterWorker(w.name);
+        } catch (err) {
+          process.stderr.write(
+            `[team/runtime-v2] orchestrator.unregisterWorker(${w.name}) failed: ${err}
+`
+          );
+        }
+      }
+      const drainResult = await orchestrator.drainAndStop();
+      if (drainResult.unmerged.length > 0) {
+        await appendTeamEvent(sanitized, {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`
+        }, cwd).catch(logEventFailure);
+      }
+    } catch (err) {
+      process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}
+`);
+    } finally {
+      unregisterTeamOrchestrator(sanitized);
+    }
+  }
   let preservedWorktrees = 0;
   try {
     const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
@@ -7546,8 +8497,8 @@ async function resumeTeamV2(teamName, cwd) {
   }
 }
 async function findActiveTeamsV2(cwd) {
-  const root = join18(cwd, ".omc", "state", "team");
-  if (!existsSync15(root)) return [];
+  const root = join21(cwd, ".omc", "state", "team");
+  if (!existsSync18(root)) return [];
   const entries = await readdir2(root, { withFileTypes: true });
   const active = [];
   for (const e of entries) {
@@ -7560,7 +8511,7 @@ async function findActiveTeamsV2(cwd) {
   }
   return active;
 }
-var MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
+var orchestratorByTeam, MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
 var init_runtime_v2 = __esm({
   "src/team/runtime-v2.ts"() {
     "use strict";
@@ -7585,6 +8536,9 @@ var init_runtime_v2 = __esm({
     init_role_router();
     init_types2();
     init_cli_worker_contract();
+    init_merge_orchestrator();
+    init_leader_inbox();
+    orchestratorByTeam = /* @__PURE__ */ new Map();
     MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
     CircuitBreakerV2 = class {
@@ -7617,9 +8571,9 @@ var init_runtime_v2 = __esm({
 // src/cli/team.ts
 import { randomUUID as randomUUID6 } from "crypto";
 import { spawn } from "child_process";
-import { existsSync as existsSync17, mkdirSync as mkdirSync3, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "fs";
-import { readFile as readFile10, rm as rm5 } from "fs/promises";
-import { dirname as dirname13, join as join20 } from "path";
+import { existsSync as existsSync20, mkdirSync as mkdirSync4, readFileSync as readFileSync10, writeFileSync as writeFileSync4 } from "fs";
+import { readFile as readFile11, rm as rm5 } from "fs/promises";
+import { dirname as dirname16, join as join23 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/team/api-interop.ts
@@ -7629,8 +8583,8 @@ init_mcp_comm();
 init_tmux_session();
 init_dispatch_queue();
 init_worker_bootstrap();
-import { existsSync as existsSync16, readFileSync as readFileSync9 } from "node:fs";
-import { dirname as dirname12, join as join19, resolve as resolvePath } from "node:path";
+import { existsSync as existsSync19, readFileSync as readFileSync9 } from "node:fs";
+import { dirname as dirname15, join as join22, resolve as resolvePath } from "node:path";
 
 // src/team/runtime.ts
 init_tmux_utils();
@@ -7906,8 +8860,8 @@ function parseValidatedTaskIdArray(value, fieldName) {
 }
 function teamStateExists(teamName, candidateCwd) {
   if (!TEAM_NAME_SAFE_PATTERN.test(teamName)) return false;
-  const teamRoot = join19(candidateCwd, ".omc", "state", "team", teamName);
-  return existsSync16(join19(teamRoot, "config.json")) || existsSync16(join19(teamRoot, "tasks")) || existsSync16(teamRoot);
+  const teamRoot = join22(candidateCwd, ".omc", "state", "team", teamName);
+  return existsSync19(join22(teamRoot, "config.json")) || existsSync19(join22(teamRoot, "tasks")) || existsSync19(teamRoot);
 }
 function parseTeamWorkerEnv(raw) {
   if (typeof raw !== "string" || raw.trim() === "") return null;
@@ -7961,7 +8915,7 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
   await teamCleanup(teamName, cwd);
 }
 function readTeamStateRootFromFile(path4) {
-  if (!existsSync16(path4)) return null;
+  if (!existsSync19(path4)) return null;
   try {
     const parsed = JSON.parse(readFileSync9(path4, "utf8"));
     return typeof parsed.team_state_root === "string" && parsed.team_state_root.trim() !== "" ? parsed.team_state_root.trim() : null;
@@ -7977,7 +8931,7 @@ function stateRootToWorkingDirectory(stateRoot2) {
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return dirname12(dirname12(dirname12(dirname12(absolute))));
+      return dirname15(dirname15(dirname15(dirname15(absolute))));
     }
   }
   for (const marker of ["/.omc/state", "/.omx/state"]) {
@@ -7985,22 +8939,22 @@ function stateRootToWorkingDirectory(stateRoot2) {
     if (idx >= 0) {
       const workspaceRoot = absolute.slice(0, idx);
       if (workspaceRoot && workspaceRoot !== "/") return workspaceRoot;
-      return dirname12(dirname12(absolute));
+      return dirname15(dirname15(absolute));
     }
   }
-  return dirname12(dirname12(absolute));
+  return dirname15(dirname15(absolute));
 }
 function resolveTeamWorkingDirectoryFromMetadata(teamName, candidateCwd, workerContext) {
-  const teamRoot = join19(candidateCwd, ".omc", "state", "team", teamName);
-  if (!existsSync16(teamRoot)) return null;
+  const teamRoot = join22(candidateCwd, ".omc", "state", "team", teamName);
+  if (!existsSync19(teamRoot)) return null;
   if (workerContext?.teamName === teamName) {
-    const workerRoot = readTeamStateRootFromFile(join19(teamRoot, "workers", workerContext.workerName, "identity.json"));
+    const workerRoot = readTeamStateRootFromFile(join22(teamRoot, "workers", workerContext.workerName, "identity.json"));
     if (workerRoot) return stateRootToWorkingDirectory(workerRoot);
   }
-  const fromConfig = readTeamStateRootFromFile(join19(teamRoot, "config.json"));
+  const fromConfig = readTeamStateRootFromFile(join22(teamRoot, "config.json"));
   if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
   for (const manifestName of ["manifest.json", "manifest.v2.json"]) {
-    const fromManifest = readTeamStateRootFromFile(join19(teamRoot, manifestName));
+    const fromManifest = readTeamStateRootFromFile(join22(teamRoot, manifestName));
     if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
   }
   return null;
@@ -8027,7 +8981,7 @@ function resolveTeamWorkingDirectory(teamName, preferredCwd) {
       if (teamStateExists(normalizedTeamName, cursor)) {
         return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor, workerContext) ?? cursor;
       }
-      const parent = dirname12(cursor);
+      const parent = dirname15(cursor);
       if (!parent || parent === cursor) break;
       cursor = parent;
     }
@@ -8664,25 +9618,25 @@ function resolveRuntimeCliPath(env = process.env) {
   if (env.OMC_RUNTIME_CLI_PATH) {
     return env.OMC_RUNTIME_CLI_PATH;
   }
-  const moduleDir = dirname13(fileURLToPath3(import.meta.url));
-  return join20(moduleDir, "../../bridge/runtime-cli.cjs");
+  const moduleDir = dirname16(fileURLToPath3(import.meta.url));
+  return join23(moduleDir, "../../bridge/runtime-cli.cjs");
 }
 function ensureJobsDir(jobsDir) {
-  if (!existsSync17(jobsDir)) {
-    mkdirSync3(jobsDir, { recursive: true });
+  if (!existsSync20(jobsDir)) {
+    mkdirSync4(jobsDir, { recursive: true });
   }
 }
 function jobPath(jobsDir, jobId) {
-  return join20(jobsDir, `${jobId}.json`);
+  return join23(jobsDir, `${jobId}.json`);
 }
 function resultArtifactPath(jobsDir, jobId) {
-  return join20(jobsDir, `${jobId}-result.json`);
+  return join23(jobsDir, `${jobId}-result.json`);
 }
 function panesArtifactPath(jobsDir, jobId) {
-  return join20(jobsDir, `${jobId}-panes.json`);
+  return join23(jobsDir, `${jobId}-panes.json`);
 }
 function teamStateRoot2(cwd, teamName) {
-  return join20(cwd, ".omc", "state", "team", teamName);
+  return join23(cwd, ".omc", "state", "team", teamName);
 }
 function validateJobId(jobId) {
   if (!JOB_ID_PATTERN.test(jobId)) {
@@ -8697,7 +9651,7 @@ function parseJsonSafe(content) {
   }
 }
 async function resolveCleanupPaneEvidence(job, jobsDir, jobId) {
-  const paneArtifact = await readFile10(panesArtifactPath(jobsDir, jobId), "utf-8").then((content) => parseJsonSafe(content)).catch(() => null);
+  const paneArtifact = await readFile11(panesArtifactPath(jobsDir, jobId), "utf-8").then((content) => parseJsonSafe(content)).catch(() => null);
   if (paneArtifact?.paneIds?.length) return { paneArtifact };
   const config = await readTeamConfig(job.teamName, job.cwd).catch(() => null);
   if (!config) {
@@ -8730,7 +9684,7 @@ function readJobFromDisk(jobId, jobsDir) {
 }
 function writeJobToDisk(jobId, job, jobsDir) {
   ensureJobsDir(jobsDir);
-  writeFileSync3(jobPath(jobsDir, jobId), JSON.stringify(job), "utf-8");
+  writeFileSync4(jobPath(jobsDir, jobId), JSON.stringify(job), "utf-8");
 }
 function parseJobResult(raw) {
   if (!raw) return void 0;
@@ -8841,7 +9795,8 @@ async function startTeamJob(input) {
     newWindow: input.newWindow,
     pollIntervalMs: input.pollIntervalMs,
     sentinelGateTimeoutMs: input.sentinelGateTimeoutMs,
-    sentinelGatePollIntervalMs: input.sentinelGatePollIntervalMs
+    sentinelGatePollIntervalMs: input.sentinelGatePollIntervalMs,
+    autoMerge: input.autoMerge
   };
   if (child.stdin && typeof child.stdin.on === "function") {
     child.stdin.on("error", () => {
@@ -9139,7 +10094,7 @@ async function teamCleanupCommand(jobId, cleanupOptions = {}, options = {}) {
 }
 var TEAM_USAGE = `
 Usage:
-  omc team start --agent <claude|codex|gemini|cursor>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--json]
+  omc team start --agent <claude|codex|gemini|cursor>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--auto-merge] [--json]
   omc team status <job_id|team_name> [--json] [--cwd DIR]
   omc team wait <job_id> [--timeout-ms MS] [--json]
   omc team cleanup <job_id> [--grace-ms MS] [--json]
@@ -9151,6 +10106,13 @@ Usage:
 Worktrees:
   Native per-worker git worktree mode is opt-in/config-gated with team.ops.worktreeMode or OMC_TEAM_WORKTREE_MODE=detached|named.
   Status JSON includes workspace_mode, worktree_mode, team_state_root, and per-worker worktree metadata.
+
+Auto-merge (v2-only):
+  --auto-merge          Enable per-commit auto-merge to leader and auto-rebase fanout.
+                        Each worker runs in a dedicated git worktree on omc-team/{team}/{worker}.
+                        Bursts of rapid worker commits coalesce to a single merge of HEAD.
+                        Requires OMC_RUNTIME_V2=1. Leader branch must not be 'main' or 'master'.
+                        Equivalent to OMC_TEAMS_AUTO_MERGE=1.
 
 Examples:
   omc team start --agent codex --count 2 --task "review auth flow" --new-window
@@ -9177,6 +10139,7 @@ function parseStartArgs(args) {
   let pollIntervalMs;
   let sentinelGateTimeoutMs;
   let sentinelGatePollIntervalMs;
+  let autoMerge = process.env.OMC_TEAMS_AUTO_MERGE === "1";
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
     const next = args[i + 1];
@@ -9186,6 +10149,10 @@ function parseStartArgs(args) {
     }
     if (token === "--new-window") {
       newWindow = true;
+      continue;
+    }
+    if (token === "--auto-merge") {
+      autoMerge = true;
       continue;
     }
     if (token === "--agent") {
@@ -9305,7 +10272,8 @@ function parseStartArgs(args) {
       ...newWindow ? { newWindow: true } : {},
       ...pollIntervalMs != null ? { pollIntervalMs } : {},
       ...sentinelGateTimeoutMs != null ? { sentinelGateTimeoutMs } : {},
-      ...sentinelGatePollIntervalMs != null ? { sentinelGatePollIntervalMs } : {}
+      ...sentinelGatePollIntervalMs != null ? { sentinelGatePollIntervalMs } : {},
+      ...autoMerge ? { autoMerge: true } : {}
     },
     json
   };
@@ -9496,6 +10464,7 @@ function parseLegacyStartAlias(args) {
   let json = false;
   let cwd = process.cwd();
   let newWindow = false;
+  let autoMerge = process.env.OMC_TEAMS_AUTO_MERGE === "1";
   const taskParts = [];
   for (let i = index; i < args.length; i += 1) {
     const token = args[i];
@@ -9506,6 +10475,10 @@ function parseLegacyStartAlias(args) {
     }
     if (token === "--new-window") {
       newWindow = true;
+      continue;
+    }
+    if (token === "--auto-merge") {
+      autoMerge = true;
       continue;
     }
     if (token === "--cwd") {
@@ -9531,7 +10504,8 @@ function parseLegacyStartAlias(args) {
     ralph,
     json,
     cwd,
-    ...newWindow ? { newWindow: true } : {}
+    ...newWindow ? { newWindow: true } : {},
+    ...autoMerge ? { autoMerge: true } : {}
   };
 }
 async function teamCommand(argv) {
@@ -9607,7 +10581,8 @@ async function teamCommand(argv) {
         agentTypes: Array.from({ length: legacy.workerCount }, () => legacy.agentType),
         tasks,
         cwd: legacy.cwd,
-        ...legacy.newWindow ? { newWindow: true } : {}
+        ...legacy.newWindow ? { newWindow: true } : {},
+        ...legacy.autoMerge ? { autoMerge: true } : {}
       });
       output(result, legacy.json);
       return;

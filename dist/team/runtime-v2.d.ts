@@ -98,6 +98,12 @@ export interface StartTeamV2Config {
      * team (stickiness guarantee per plan AC-10 / R11).
      */
     pluginConfig?: PluginConfig;
+    /**
+     * v2-only: when true, start the merge orchestrator. Forces worktreeMode to
+     * 'named' (worker branches must exist) and rejects 'main'/'master' leader
+     * branch. See merge-orchestrator.ts.
+     */
+    autoMerge?: boolean;
 }
 /**
  * Start a team with the v2 event-driven runtime.

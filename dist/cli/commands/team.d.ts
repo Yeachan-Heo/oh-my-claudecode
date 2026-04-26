@@ -48,6 +48,7 @@ export interface ParsedTeamArgs {
     teamName: string;
     json: boolean;
     newWindow: boolean;
+    autoMerge: boolean;
 }
 export declare function assertTeamSpawnAllowed(cwd: string, env?: NodeJS.ProcessEnv): Promise<void>;
 /** @internal Exported for testing */

@@ -160,7 +160,7 @@ async function main() {
         process.stderr.write(`[runtime-cli] Missing required fields: ${missing.join(', ')}\n`);
         process.exit(1);
     }
-    const { teamName, agentTypes, tasks, cwd, newWindow = false, pollIntervalMs = 5000, sentinelGateTimeoutMs = 30_000, sentinelGatePollIntervalMs = 250, } = input;
+    const { teamName, agentTypes, tasks, cwd, newWindow = false, pollIntervalMs = 5000, sentinelGateTimeoutMs = 30_000, sentinelGatePollIntervalMs = 250, autoMerge = false, } = input;
     const workerCount = input.workerCount ?? agentTypes.length;
     const stateRoot = join(cwd, `.omc/state/team/${teamName}`);
     const config = {
@@ -236,6 +236,7 @@ async function main() {
                 tasks,
                 cwd,
                 newWindow,
+                autoMerge,
             });
             const v2PaneIds = v2Runtime.config.workers
                 .map(w => w.pane_id)

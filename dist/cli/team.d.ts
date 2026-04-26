@@ -21,6 +21,12 @@ export interface TeamStartInput {
     pollIntervalMs?: number;
     sentinelGateTimeoutMs?: number;
     sentinelGatePollIntervalMs?: number;
+    /**
+     * When true, the v2 runtime starts the merge orchestrator: per-commit
+     * auto-merge to the leader branch and auto-rebase fanout to other workers.
+     * Equivalent to setting OMC_TEAMS_AUTO_MERGE=1. Requires OMC_RUNTIME_V2=1.
+     */
+    autoMerge?: boolean;
 }
 export interface TeamStartResult {
     jobId: string;
