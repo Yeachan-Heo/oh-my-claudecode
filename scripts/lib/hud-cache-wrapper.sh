@@ -36,6 +36,9 @@ SESSION_KEY=$(extract_json_string session_id)
 if [ -z "$SESSION_KEY" ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
   SESSION_KEY=$CLAUDE_SESSION_ID
 fi
+if [ -z "$SESSION_KEY" ] && [ -n "${CLAUDECODE_SESSION_ID:-}" ]; then
+  SESSION_KEY=$CLAUDECODE_SESSION_ID
+fi
 TRANSCRIPT_PATH=$(extract_json_string transcript_path)
 if [ -z "$SESSION_KEY" ] && [ -n "$TRANSCRIPT_PATH" ]; then
   SESSION_KEY=$(printf '%s\n' "$TRANSCRIPT_PATH" | sed -n 's/.*\([0-9a-fA-F][0-9a-fA-F-]\{35\}\).*/\1/p' | head -1)

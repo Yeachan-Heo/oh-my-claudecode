@@ -188,4 +188,73 @@ describe('HUD cached statusLine launcher', () => {
     }
   });
 
+
+  it('uses legacy CLAUDECODE_SESSION_ID when newer env and stdin session_id are absent', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.legacy-env-session-123.txt'), 'LEGACY ENV SESSION HUD\n');
+      mkdirSync(join(staged.cacheDir, 'render.legacy-env-session-123.lock'));
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        CLAUDE_CONFIG_DIR: staged.dir,
+        CLAUDECODE_SESSION_ID: 'legacy-env-session-123',
+        OMC_HUD_CACHE_DIR: staged.cacheDir,
+      };
+      delete env.CLAUDE_SESSION_ID;
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: JSON.stringify({ cwd: '/tmp/same-worktree', model: { id: 'claude' } }),
+        encoding: 'utf8',
+        env,
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('LEGACY ENV SESSION HUD\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers CLAUDE_SESSION_ID over legacy CLAUDECODE_SESSION_ID', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.new-env-session.txt'), 'NEW ENV SESSION HUD\n');
+      writeFileSync(join(staged.cacheDir, 'statusline.legacy-env-session.txt'), 'LEGACY ENV SESSION HUD\n');
+      mkdirSync(join(staged.cacheDir, 'render.new-env-session.lock'));
+      mkdirSync(join(staged.cacheDir, 'render.legacy-env-session.lock'));
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: JSON.stringify({ cwd: '/tmp/same-worktree', model: { id: 'claude' } }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          CLAUDE_SESSION_ID: 'new-env-session',
+          CLAUDECODE_SESSION_ID: 'legacy-env-session',
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('NEW ENV SESSION HUD\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
 });
