@@ -758,12 +758,12 @@ function isStructuredEnvelopePayloadField(fieldName) {
     'diff',
     'lines',
     'line',
-    'text',
-    'message',
-    'output',
-    'stdout',
-    'stderr',
   ]).has(fieldName.toLowerCase());
+}
+
+function isStructuredEnvelopeStatusTextField(fieldName) {
+  return new Set(['message', 'output', 'stdout', 'stderr', 'text', 'result'])
+    .has(fieldName.toLowerCase());
 }
 
 function hasExplicitStructuredFailureIndicator(value, depth = 0, fieldName = '') {
@@ -778,6 +778,14 @@ function hasExplicitStructuredFailureIndicator(value, depth = 0, fieldName = '')
 
   for (const [key, fieldValue] of Object.entries(value)) {
     const normalizedKey = key.toLowerCase();
+    if (
+      typeof fieldValue === 'string' &&
+      isStructuredEnvelopeStatusTextField(key) &&
+      detectWriteFailure(fieldValue)
+    ) {
+      return true;
+    }
+
     if (
       (normalizedKey.includes('error') || normalizedKey.includes('fail')) &&
       fieldValue !== false &&

@@ -663,6 +663,57 @@ describe('post-tool hook structured Write/Edit envelopes (issue #2840)', () => {
     expect(out.hookSpecificOutput?.additionalContext).not.toContain('Edit operation failed');
   });
 
+  it.each(['message', 'output', 'stdout', 'stderr'])(
+    'does not trust Write-shaped envelopes with %s failure status text',
+    field => {
+      const out = runPostToolVerifier({
+        tool_name: 'Write',
+        tool_response: {
+          type: 'create',
+          filePath: `/tmp/issue-2841-write-${field}.ts`,
+          [field]: 'error: failed to write',
+          content: { error: 'payload key remains ignored' },
+        },
+        session_id: `issue-2841-write-${field}-status-failure`,
+        cwd: process.cwd(),
+      });
+
+      expect(out.hookSpecificOutput?.additionalContext).toContain('Write operation failed');
+    },
+  );
+
+  it.each(['message', 'output', 'stdout', 'stderr'])(
+    'does not trust Edit-shaped envelopes with %s failure status text',
+    field => {
+      const out = runPostToolVerifier({
+        tool_name: 'Edit',
+        tool_response: {
+          filePath: `/tmp/issue-2841-edit-${field}.ts`,
+          [field]: 'error: failed to edit',
+          oldString: '{"error":"payload fixture"}',
+          newString: '{"failure":"payload fixture"}',
+          originalFile: '{"error":"payload fixture","failure":"payload fixture"}',
+          structuredPatch: [
+            {
+              oldStart: 1,
+              oldLines: 1,
+              newStart: 1,
+              newLines: 1,
+              lines: [
+                { error: '-payload fixture key, not tool status' },
+                { failure: '+payload fixture key, not tool status' },
+              ],
+            },
+          ],
+        },
+        session_id: `issue-2841-edit-${field}-status-failure`,
+        cwd: process.cwd(),
+      });
+
+      expect(out.hookSpecificOutput?.additionalContext).toContain('Edit operation failed');
+    },
+  );
+
   it('does not trust Write-shaped envelopes with explicit failure fields', () => {
     const out = runPostToolVerifier({
       tool_name: 'Write',
