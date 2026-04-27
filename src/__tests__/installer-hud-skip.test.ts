@@ -168,4 +168,12 @@ describe('isOmcStatusLine', () => {
       command: 'sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/find-node.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs'
     })).toBe(true);
   });
+
+
+  it('should recognize cached HUD statusLine as OMC', () => {
+    expect(isOmcStatusLine({
+      type: 'command',
+      command: 'sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud-cache.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs'
+    })).toBe(true);
+  });
 });

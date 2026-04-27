@@ -68,6 +68,11 @@ describe('HUD marketplace resolution', () => {
       statusLine?: { command?: string };
     };
     expect(settings.statusLine?.command).toContain(`${join(configDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
+    if (process.platform !== 'win32') {
+      expect(settings.statusLine?.command).toContain('omc-hud-cache.sh');
+      expect(existsSync(join(configDir, 'hud', 'omc-hud-cache.sh'))).toBe(true);
+      expect(existsSync(join(configDir, 'hud', 'find-node.sh'))).toBe(true);
+    }
     expect(existsSync(join(configDir, '.omc-config.json'))).toBe(true);
 
     const content = readFileSync(hudScriptPath, 'utf-8');

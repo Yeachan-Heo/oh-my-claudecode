@@ -72,6 +72,8 @@ describe('install() standalone hook reconciliation', () => {
     expect((writtenSettings as { statusLine?: { command?: string } }).statusLine?.command).toContain(
       `${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`,
     );
+    expect((writtenSettings as { statusLine?: { command?: string } }).statusLine?.command).toContain('omc-hud-cache.sh');
+    expect(readFileSync(join(testClaudeDir, 'hud', 'omc-hud-cache.sh'), 'utf-8')).toContain('HUD cached statusLine launcher');
     expect(readFileSync(join(testClaudeDir, 'hud', 'omc-hud.mjs'), 'utf-8')).toContain(
       'const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);',
     );
