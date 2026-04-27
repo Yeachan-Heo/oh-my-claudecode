@@ -123,4 +123,69 @@ describe('HUD cached statusLine launcher', () => {
     }
   });
 
+
+  it('uses CLAUDE_SESSION_ID when stdin has no session_id', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.env-session-123.txt'), 'ENV SESSION HUD\n');
+      mkdirSync(join(staged.cacheDir, 'render.env-session-123.lock'));
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: JSON.stringify({ cwd: '/tmp/same-worktree', model: { id: 'claude' } }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          CLAUDE_SESSION_ID: 'env-session-123',
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('ENV SESSION HUD\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not collide same-cwd sessions when transcript_path is missing but CLAUDE_SESSION_ID differs', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.env-session-a.txt'), 'ENV SESSION A\n');
+      writeFileSync(join(staged.cacheDir, 'statusline.env-session-b.txt'), 'ENV SESSION B\n');
+      mkdirSync(join(staged.cacheDir, 'render.env-session-a.lock'));
+      mkdirSync(join(staged.cacheDir, 'render.env-session-b.lock'));
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const runForEnvSession = (sessionId: string) => spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: JSON.stringify({ cwd: '/tmp/same-worktree', model: { id: 'claude' } }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          CLAUDE_SESSION_ID: sessionId,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(runForEnvSession('env-session-a').stdout).toBe('ENV SESSION A\n');
+      expect(runForEnvSession('env-session-b').stdout).toBe('ENV SESSION B\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
 });

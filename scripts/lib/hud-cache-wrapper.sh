@@ -33,13 +33,21 @@ extract_json_string() {
 }
 
 SESSION_KEY=$(extract_json_string session_id)
+if [ -z "$SESSION_KEY" ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+  SESSION_KEY=$CLAUDE_SESSION_ID
+fi
 TRANSCRIPT_PATH=$(extract_json_string transcript_path)
-if [ -z "$SESSION_KEY" ]; then
+if [ -z "$SESSION_KEY" ] && [ -n "$TRANSCRIPT_PATH" ]; then
   SESSION_KEY=$(printf '%s\n' "$TRANSCRIPT_PATH" | sed -n 's/.*\([0-9a-fA-F][0-9a-fA-F-]\{35\}\).*/\1/p' | head -1)
+  if [ -z "$SESSION_KEY" ]; then
+    SESSION_KEY=$(printf '%s\n' "$TRANSCRIPT_PATH" | cksum 2>/dev/null | awk '{print "transcript-" $1}')
+  fi
 fi
 if [ -z "$SESSION_KEY" ]; then
   CWD_VALUE=$(extract_json_string cwd)
-  SESSION_KEY=$(printf '%s|%s\n' "$TRANSCRIPT_PATH" "$CWD_VALUE" | cksum 2>/dev/null | awk '{print $1}')
+  if [ -n "$CWD_VALUE" ]; then
+    SESSION_KEY=$(printf '%s\n' "$CWD_VALUE" | cksum 2>/dev/null | awk '{print "cwd-" $1}')
+  fi
 fi
 if [ -z "$SESSION_KEY" ]; then
   SESSION_KEY=default
