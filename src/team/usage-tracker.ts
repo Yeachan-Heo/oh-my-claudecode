@@ -4,7 +4,7 @@
  * Usage tracker for team sessions.
  *
  * Tracks wall-clock time and prompt/response character counts per task.
- * NOTE: Token counts are not available from Codex/Gemini CLI output.
+ * NOTE: Token counts are not available from Codex/Gemini/Mistral CLI output.
  * Character counts serve as a rough proxy for usage estimation.
  *
  * Storage: append-only JSONL at .omc/logs/team-usage-{team}.jsonl
@@ -17,7 +17,7 @@ import { appendFileWithMode, ensureDirWithMode, validateResolvedPath } from './f
 export interface TaskUsageRecord {
   taskId: string;
   workerName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'mistral';
   model: string;
   startedAt: string;
   completedAt: string;
@@ -28,7 +28,7 @@ export interface TaskUsageRecord {
 
 export interface WorkerUsageSummary {
   workerName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'mistral';
   model: string;
   taskCount: number;
   totalWallClockMs: number;

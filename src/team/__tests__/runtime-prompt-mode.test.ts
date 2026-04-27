@@ -87,7 +87,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { spawnWorkerForTask, type TeamRuntime } from '../runtime.js';
 
-function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude'): TeamRuntime {
+function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude' | 'mistral'): TeamRuntime {
   return {
     teamName: 'test-team',
     sessionName: 'test-session:0',
@@ -176,6 +176,52 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
 
   it('gemini worker writes inbox before spawn', async () => {
     const runtime = makeRuntime(cwd, 'gemini');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+    const content = readFileSync(inboxPath, 'utf-8');
+    expect(content).toContain('Initial Task Assignment');
+    expect(content).toContain('Test task');
+    expect(content).toContain('Do something');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('mistral worker launch args include -p flag with inbox path', async () => {
+    const runtime = makeRuntime(cwd, 'mistral');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'-p'");
+    expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('mistral worker skips trust-confirm (no "1" sent via send-keys)', async () => {
+    const runtime = makeRuntime(cwd, 'mistral');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const literalMessages = tmuxCalls.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args[args.length - 1]);
+
+    const trustConfirmSent = literalMessages.some(msg => msg === '1');
+    expect(trustConfirmSent).toBe(false);
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('mistral worker writes inbox before spawn', async () => {
+    const runtime = makeRuntime(cwd, 'mistral');
 
     await spawnWorkerForTask(runtime, 'worker-1', 0);
 

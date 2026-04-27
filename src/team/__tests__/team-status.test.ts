@@ -42,7 +42,7 @@ function writeHeartbeatFile(data: HeartbeatData): void {
   atomicWriteJson(hbPath, data);
 }
 
-function makeWorker(name: string, provider: 'codex' | 'gemini' = 'codex'): McpWorkerMember {
+function makeWorker(name: string, provider: 'codex' | 'gemini' | 'mistral' = 'codex'): McpWorkerMember {
   return {
     agentId: `${name}@${TEST_TEAM}`,
     name,
@@ -56,7 +56,7 @@ function makeWorker(name: string, provider: 'codex' | 'gemini' = 'codex'): McpWo
   };
 }
 
-function makeHeartbeat(workerName: string, provider: 'codex' | 'gemini' = 'codex', ageMs: number = 0): HeartbeatData {
+function makeHeartbeat(workerName: string, provider: 'codex' | 'gemini' | 'mistral' = 'codex', ageMs: number = 0): HeartbeatData {
   return {
     workerName,
     teamName: TEST_TEAM,
@@ -129,6 +129,24 @@ describe('getTeamStatus', () => {
     expect(status.taskSummary.pending).toBe(1);
     expect(status.usage.taskCount).toBe(0);
     expect(status.performance.totalMs).toBeGreaterThanOrEqual(status.performance.taskScanMs);
+  });
+
+  it('aggregates mistral worker status with heartbeats', () => {
+    const w1 = makeWorker('m1', 'mistral');
+    writeWorkerRegistry([w1]);
+
+    writeHeartbeatFile(makeHeartbeat('m1', 'mistral', 1000));
+
+    writeTask(makeTask('1', 'm1', 'in_progress'));
+
+    const status = getTeamStatus(TEST_TEAM, WORK_DIR);
+
+    expect(status.workers).toHaveLength(1);
+
+    const sw1 = status.workers.find(w => w.workerName === 'm1')!;
+    expect(sw1.provider).toBe('mistral');
+    expect(sw1.isAlive).toBe(true);
+    expect(sw1.taskStats.inProgress).toBe(1);
   });
 
   it('detects dead workers via heartbeat age', () => {

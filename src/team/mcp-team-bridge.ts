@@ -166,9 +166,9 @@ function validateModelName(model: string | undefined): void {
 
 /** Validate provider is one of allowed values */
 function validateProvider(provider: string): void {
-  if (provider !== "codex" && provider !== "gemini") {
+  if (provider !== "codex" && provider !== "gemini" && provider !== "mistral") {
     throw new Error(
-      `Invalid provider: ${provider}. Must be 'codex' or 'gemini'`,
+      `Invalid provider: ${provider}. Must be 'codex', 'gemini', or 'mistral'`,
     );
   }
 }
@@ -368,7 +368,7 @@ export function recordTaskCompletionUsage(args: {
   taskId: string;
   promptFile: string;
   outputFile: string;
-  provider: "codex" | "gemini";
+  provider: "codex" | "gemini" | "mistral";
   startedAt: number;
   startedAtIso: string;
 }): void {
@@ -443,12 +443,47 @@ function parseCodexOutput(output: string): string {
   return messages.join("\n") || output;
 }
 
+/** Maximum accumulated size for parseVibeStreamingOutput (1MB) */
+const MAX_VIBE_OUTPUT_SIZE = 1024 * 1024;
+
+/**
+ * Parse vibe --output streaming JSONL to extract assistant text responses.
+ * Each line is a JSON object with a "role" field. Lines where role === "assistant"
+ * contain the assistant's reply in the "content" field.
+ */
+function parseVibeStreamingOutput(output: string): string {
+  const lines = output
+    .trim()
+    .split("\n")
+    .filter((l) => l.trim());
+  const messages: string[] = [];
+  let totalSize = 0;
+
+  for (const line of lines) {
+    if (totalSize >= MAX_VIBE_OUTPUT_SIZE) {
+      messages.push("[output truncated]");
+      break;
+    }
+    try {
+      const event = JSON.parse(line);
+      if (event.role === "assistant" && typeof event.content === "string") {
+        messages.push(event.content);
+        totalSize += event.content.length;
+      }
+    } catch {
+      /* skip non-JSON lines */
+    }
+  }
+
+  return messages.join("\n") || output.trim();
+}
+
 /**
  * Spawn a CLI process and return both the child handle and a result promise.
  * This allows the bridge to kill the child on shutdown while still awaiting the result.
  */
 function spawnCliProcess(
-  provider: "codex" | "gemini",
+  provider: "codex" | "gemini" | "mistral",
   prompt: string,
   model: string | undefined,
   cwd: string,
@@ -471,6 +506,14 @@ function spawnCliProcess(
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check",
     ];
+  } else if (provider === "mistral") {
+    cmd = "vibe";
+    // -p requires the prompt as its value (vibe does not read prompt from stdin).
+    // --output streaming emits newline-delimited JSON; parsed by parseVibeStreamingOutput.
+    // Verified: `vibe -p "..." --output streaming` works; stdin-only mode errors with
+    // "No prompt provided for programmatic mode".
+    args = ["-p", prompt, "--output", "streaming", "--agent", "auto-approve"];
+    // vibe ignores model param — selection is via --agent / TOML profile
   } else {
     cmd = "gemini";
     args = ["--approval-mode", "yolo"];
@@ -508,8 +551,14 @@ function spawnCliProcess(
         settled = true;
         clearTimeout(timeoutHandle);
         if (code === 0) {
-          const response =
-            provider === "codex" ? parseCodexOutput(stdout) : stdout.trim();
+          let response: string;
+          if (provider === "codex") {
+            response = parseCodexOutput(stdout);
+          } else if (provider === "mistral") {
+            response = parseVibeStreamingOutput(stdout);
+          } else {
+            response = stdout.trim();
+          }
           resolve(response);
         } else {
           const detail = stderr || stdout.trim() || "No output";
@@ -526,17 +575,22 @@ function spawnCliProcess(
       }
     });
 
-    // Write prompt via stdin
-    child.stdin?.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutHandle);
-        child.kill("SIGTERM");
-        reject(new Error(`Stdin write error: ${err.message}`));
-      }
-    });
-    child.stdin?.write(prompt);
-    child.stdin?.end();
+    // Write prompt via stdin for codex and gemini.
+    // mistral (vibe) receives the prompt as the -p flag value; no stdin write needed.
+    if (provider !== "mistral") {
+      child.stdin?.on("error", (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutHandle);
+          child.kill("SIGTERM");
+          reject(new Error(`Stdin write error: ${err.message}`));
+        }
+      });
+      child.stdin?.write(prompt);
+      child.stdin?.end();
+    } else {
+      child.stdin?.end();
+    }
   });
 
   return { child, result };

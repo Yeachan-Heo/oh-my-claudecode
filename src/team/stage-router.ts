@@ -127,12 +127,17 @@ function resolveClaudeModel(
 /**
  * Resolve a user-supplied `model` value for an external provider worker.
  *
- * Tier names are Claude-centric and not meaningful for codex/gemini, so tier
- * input (or absent input) maps to the provider's builtin default. Only an
- * explicit non-tier model ID is passed through.
+ * Tier names are Claude-centric and not meaningful for codex/gemini/mistral,
+ * so tier input (or absent input) maps to the provider's builtin default.
+ * Only an explicit non-tier model ID is passed through.
+ *
+ * Mistral (vibe) selects its model via the agent profile in
+ * ~/.vibe/agents/*.toml, not a CLI flag — the resolved value is therefore
+ * discarded by the mistral contract's buildLaunchArgs. An empty string is
+ * returned when no explicit model is provided.
  */
 function resolveExternalModel(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'mistral',
   raw: string | undefined,
   cfg: PluginConfig,
 ): string {
@@ -143,7 +148,10 @@ function resolveExternalModel(
   if (provider === 'codex') {
     return defaults?.codexModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
   }
-  return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+  if (provider === 'gemini') {
+    return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+  }
+  return '';
 }
 
 /**

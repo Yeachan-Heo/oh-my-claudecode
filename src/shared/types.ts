@@ -341,7 +341,9 @@ export type DelegationProvider =
   /** Use /team to coordinate Codex CLI workers in tmux panes. */
   | "codex"
   /** Use /team to coordinate Gemini CLI workers in tmux panes. */
-  | "gemini";
+  | "gemini"
+  /** Use /team to coordinate Mistral (vibe) CLI workers in tmux panes. */
+  | "mistral";
 
 /** Tool type for delegation routing — only Claude Task is supported. */
 export type DelegationTool = "Task";
@@ -414,7 +416,7 @@ export const CANONICAL_TEAM_ROLES = [
 export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
 
 /** Provider for /team role routing. */
-export type TeamRoleProvider = 'claude' | 'codex' | 'gemini';
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'mistral';
 
 /** Tier name accepted in role-assignment `model` field. */
 export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';

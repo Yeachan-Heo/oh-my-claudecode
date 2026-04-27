@@ -143,5 +143,23 @@ describe('worker-restart', () => {
       expect(config.provider).toBe('gemini');
       expect(config.model).toBe('gemini-3-pro-preview');
     });
+
+    it('preserves provider=mistral after restart synthesis', () => {
+      const worker: McpWorkerMember = {
+        agentId: 'agent-3',
+        name: 'mistral-worker',
+        agentType: 'mcp-mistral',
+        model: 'codestral-2-latest',
+        joinedAt: Date.now(),
+        tmuxPaneId: 'omc-team-test-mistral-worker',
+        cwd: '/home/user/project',
+        backendType: 'tmux',
+        subscriptions: [],
+      };
+
+      const config = synthesizeBridgeConfig(worker, 'my-team');
+      expect(config.provider).toBe('mistral');
+      expect(config.model).toBe('codestral-2-latest');
+    });
   });
 });

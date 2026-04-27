@@ -106,6 +106,13 @@ describe('model-contract', () => {
       expect(c.agentType).toBe('gemini');
       expect(c.binary).toBe('gemini');
     });
+    it('returns contract for mistral with vibe binary and prompt-mode support', () => {
+      const c = getContract('mistral');
+      expect(c.agentType).toBe('mistral');
+      expect(c.binary).toBe('vibe');
+      expect(c.supportsPromptMode).toBe(true);
+      expect(c.promptModeFlag).toBe('-p');
+    });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
@@ -135,6 +142,24 @@ describe('model-contract', () => {
         const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
         clearSecurityConfigCache();
         expect(() => getContract('gemini')).toThrow('blocked by security policy');
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
+
+    it('blocks mistral when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('mistral')).toThrow('blocked by security policy');
       } finally {
         if (origSecurity === undefined) {
           delete process.env.OMC_SECURITY;

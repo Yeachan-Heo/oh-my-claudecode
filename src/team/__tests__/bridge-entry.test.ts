@@ -46,6 +46,10 @@ describe('bridge-entry security', () => {
     expect(source).toContain("config.provider !== 'gemini'");
   });
 
+  it('validates provider includes mistral', () => {
+    expect(source).toContain("config.provider !== 'mistral'");
+  });
+
   it('has signal handlers for graceful cleanup', () => {
     expect(source).toContain('SIGINT');
     expect(source).toContain('SIGTERM');

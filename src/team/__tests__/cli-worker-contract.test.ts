@@ -21,6 +21,11 @@ describe('cli-worker-contract', () => {
       expect(shouldInjectContract('code-reviewer', 'gemini')).toBe(true);
     });
 
+    it('returns true for reviewer roles on mistral', () => {
+      expect(shouldInjectContract('critic', 'mistral')).toBe(true);
+      expect(shouldInjectContract('code-reviewer', 'mistral')).toBe(true);
+    });
+
     it('returns false for claude workers regardless of role', () => {
       expect(shouldInjectContract('critic', 'claude')).toBe(false);
       expect(shouldInjectContract('code-reviewer', 'claude')).toBe(false);
@@ -30,6 +35,7 @@ describe('cli-worker-contract', () => {
       expect(shouldInjectContract('executor', 'codex')).toBe(false);
       expect(shouldInjectContract('architect', 'gemini')).toBe(false);
       expect(shouldInjectContract('planner', 'codex')).toBe(false);
+      expect(shouldInjectContract('architect', 'mistral')).toBe(false);
     });
 
     it('returns false for null/undefined inputs', () => {

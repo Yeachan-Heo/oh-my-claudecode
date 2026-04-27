@@ -6,6 +6,7 @@ const availability = vi.hoisted(() => ({
   codex: false,
   gemini: false,
   cursor: false,
+  mistral: false,
 }));
 
 vi.mock('../team/model-contract.js', () => ({
@@ -23,6 +24,7 @@ describe('runtime-guidance: ralplan/plan/ralph Codex availability', () => {
     availability.codex = false;
     availability.gemini = false;
     availability.cursor = false;
+    availability.mistral = false;
   });
 
   describe('renderSkillRuntimeGuidance for plan-family skills', () => {

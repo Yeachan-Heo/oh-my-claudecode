@@ -152,6 +152,7 @@ describe('scaleUp launch config', () => {
   it.each([
     ['codex', ['/usr/bin/codex', 'exec', '--dangerously-bypass-approvals-and-sandbox']],
     ['gemini', ['/usr/bin/gemini', '--approval-mode', 'yolo']],
+    ['mistral', ['/usr/bin/vibe', '--agent', 'auto-approve', '-p', 'streaming']],
   ] as const)('uses model-contract launch argv for %s scale-up workers', async (
     agentType: CliAgentType,
     workerArgv: readonly string[],

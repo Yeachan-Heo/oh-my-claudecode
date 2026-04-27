@@ -809,6 +809,21 @@ describe('team-registration edge cases', () => {
       expect(config.members).toHaveLength(1);
       expect(config.members[0].agentType).toBe('mcp-gemini');
     });
+
+    it('replaces existing entry with same name for mistral', () => {
+      const configPath = join(CONFIG_DIR, 'config.json');
+      writeFileSync(configPath, JSON.stringify({
+        teamName: REG_TEAM,
+        members: [{ name: 'myworker', backendType: 'tmux', agentType: 'mcp-codex' }],
+      }));
+
+      writeProbeResult(REG_DIR, { probeResult: 'pass', probedAt: '', version: '' });
+      registerMcpWorker(REG_TEAM, 'myworker', 'mistral', 'codestral-2-latest', 'sess-x', '/cwd', REG_DIR);
+
+      const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+      expect(config.members).toHaveLength(1);
+      expect(config.members[0].agentType).toBe('mcp-mistral');
+    });
   });
 
   describe('unregisterMcpWorker with corrupt config.json', () => {

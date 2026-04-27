@@ -10,7 +10,7 @@ describe('runtime types', () => {
     const config: TeamConfig = {
       teamName: 'test',
       workerCount: 2,
-      agentTypes: ['codex', 'gemini'],
+      agentTypes: ['codex', 'gemini', 'mistral'],
       tasks: [{ subject: 'Task 1', description: 'Do something' }],
       cwd: '/tmp',
     };

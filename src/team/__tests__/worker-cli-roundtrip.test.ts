@@ -48,6 +48,18 @@ describe('WorkerInfo.worker_cli round-trip', () => {
     expect(out.worker_cli).toBe('gemini');
   });
 
+  it('preserves worker_cli=mistral through JSON serialization', () => {
+    const w: WorkerInfo = {
+      name: 'worker-5',
+      index: 5,
+      role: 'executor',
+      worker_cli: 'mistral',
+      assigned_tasks: [],
+    };
+    const out = roundtrip(w);
+    expect(out.worker_cli).toBe('mistral');
+  });
+
   it('omits worker_cli when undefined (legacy entries)', () => {
     const w: WorkerInfo = {
       name: 'worker-legacy',

@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'mistral';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -238,6 +238,27 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       // Minimal flags — cursor-agent owns its own session/auth state.
       // The model is selected interactively inside cursor-agent itself.
       return [...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
+  mistral: {
+    agentType: 'mistral',
+    binary: 'vibe',
+    installInstructions: 'Install Mistral Vibe CLI: see https://docs.mistral.ai/',
+    // Vibe has both an interactive REPL (default) and programmatic mode (-p),
+    // mirroring gemini. Team workers launch as persistent panes; reviewer-style
+    // roles use the verdict-output contract via prompt mode.
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(_model?: string, extraFlags: string[] = []): string[] {
+      // 'auto-approve' is vibe's built-in unattended agent, analogous to
+      // claude's --dangerously-skip-permissions and gemini's --approval-mode yolo.
+      // Model selection happens via the vibe agent profile (~/.vibe/agents/*.toml),
+      // so the model parameter is intentionally ignored. Override the agent by
+      // passing ['--agent', '<name>'] through extraFlags upstream.
+      return ['--agent', 'auto-approve', ...extraFlags];
     },
     parseOutput(rawOutput: string): string {
       return rawOutput.trim();

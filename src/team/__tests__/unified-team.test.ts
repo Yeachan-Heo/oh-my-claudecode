@@ -19,11 +19,13 @@ describe('unified-team', () => {
   });
 
   function registerWorker(name: string, agentType: string = 'mcp-codex') {
+    const provider = agentType === 'mcp-codex' ? 'codex' : agentType === 'mcp-mistral' ? 'mistral' : 'gemini';
+    const model = agentType === 'mcp-codex' ? 'gpt-5.3-codex' : agentType === 'mcp-mistral' ? 'codestral-2-latest' : 'gemini-3.1-pro-preview';
     registerMcpWorker(
       teamName,
       name,
-      agentType === 'mcp-codex' ? 'codex' : 'gemini',
-      agentType === 'mcp-codex' ? 'gpt-5.3-codex' : 'gemini-3.1-pro-preview',
+      provider,
+      model,
       `tmux-${name}`,
       testDir,
       testDir
@@ -94,6 +96,16 @@ describe('unified-team', () => {
       const members = getTeamMembers(teamName, testDir);
       expect(members).toHaveLength(1);
       expect(members[0].backend).toBe('mcp-codex');
+    });
+
+    it('includes mcp-mistral workers from shadow registry', () => {
+      registerWorker('mistral-1', 'mcp-mistral');
+
+      const members = getTeamMembers(teamName, testDir);
+      expect(members).toHaveLength(1);
+
+      const mistral = members.find(m => m.name === 'mistral-1');
+      expect(mistral).toBeDefined();
     });
   });
 });

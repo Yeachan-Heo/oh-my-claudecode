@@ -77,7 +77,7 @@ export function getRegistrationStrategy(workingDirectory: string): 'config' | 's
 export function registerMcpWorker(
   teamName: string,
   workerName: string,
-  provider: 'codex' | 'gemini' | 'claude',
+  provider: 'codex' | 'gemini' | 'claude' | 'mistral',
   model: string,
   tmuxTarget: string,
   cwd: string,

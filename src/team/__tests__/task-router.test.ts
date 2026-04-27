@@ -19,8 +19,9 @@ describe('task-router', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  function registerWorker(name: string, provider: 'codex' | 'gemini' = 'codex', status: 'polling' | 'executing' | 'quarantined' = 'polling') {
-    registerMcpWorker(teamName, name, provider, provider === 'codex' ? 'gpt-5.3-codex' : 'gemini-3-pro', `${teamName}-${name}`, testDir, testDir);
+  function registerWorker(name: string, provider: 'codex' | 'gemini' | 'mistral' = 'codex', status: 'polling' | 'executing' | 'quarantined' = 'polling') {
+    const model = provider === 'codex' ? 'gpt-5.3-codex' : provider === 'gemini' ? 'gemini-3-pro' : 'codestral-2-latest';
+    registerMcpWorker(teamName, name, provider, model, `${teamName}-${name}`, testDir, testDir);
     writeHeartbeat(testDir, {
       workerName: name,
       teamName,
@@ -138,6 +139,18 @@ describe('task-router', () => {
       expect(decisions[0].reason).toBeTruthy();
       expect(decisions[0].confidence).toBeGreaterThan(0);
       expect(decisions[0].confidence).toBeLessThanOrEqual(1);
+    });
+
+    it('routes to mistral worker for code review capabilities', () => {
+      registerWorker('mistral-1', 'mistral');
+
+      const tasks = [makeTask('t1', 'Review code')];
+      const decisions = routeTasks(teamName, testDir, tasks, {
+        t1: ['code-review'],
+      });
+
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0].assignedTo).toBe('mistral-1');
     });
   });
 });

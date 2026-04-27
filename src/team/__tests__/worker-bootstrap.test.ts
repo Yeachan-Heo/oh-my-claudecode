@@ -156,6 +156,9 @@ describe('worker-bootstrap', () => {
       const geminiOverlay = generateWorkerOverlay({ ...baseParams, agentType: 'gemini' });
       expect(geminiOverlay).toContain('Agent-Type Guidance (gemini)');
       expect(geminiOverlay).toContain('milestone');
+
+      const mistralOverlay = generateWorkerOverlay({ ...baseParams, agentType: 'mistral' });
+      expect(mistralOverlay).toContain('Agent-Type Guidance (mistral / vibe)');
     });
     it('documents CLI lifecycle examples that match the active team api contract', () => {
       const overlay = generateWorkerOverlay(baseParams);
@@ -186,6 +189,13 @@ describe('worker-bootstrap', () => {
       expect(env.OMC_TEAM_WORKER).toBe('my-team/worker-2');
       expect(env.OMC_TEAM_NAME).toBe('my-team');
       expect(env.OMC_WORKER_AGENT_TYPE).toBe('gemini');
+    });
+
+    it('returns correct env vars for mistral', () => {
+      const env = getWorkerEnv('my-team', 'worker-3', 'mistral');
+      expect(env.OMC_TEAM_WORKER).toBe('my-team/worker-3');
+      expect(env.OMC_TEAM_NAME).toBe('my-team');
+      expect(env.OMC_WORKER_AGENT_TYPE).toBe('mistral');
     });
   });
 });

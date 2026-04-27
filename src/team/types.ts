@@ -15,7 +15,7 @@ import type { CanonicalTeamRole, RoleAssignment } from '../shared/types.js';
 export interface BridgeConfig {
   teamName: string;
   workerName: string;
-  provider: 'codex' | 'gemini';
+  provider: 'codex' | 'gemini' | 'mistral';
   model?: string;
   workingDirectory: string;
   pollIntervalMs: number;       // default: 3000
@@ -90,7 +90,7 @@ export interface DrainSignal {
 export interface McpWorkerMember {
   agentId: string;          // "{workerName}@{teamName}"
   name: string;             // workerName
-  agentType: string;        // "mcp-codex" | "mcp-gemini"
+  agentType: string;        // e.g. "mcp-codex", "tmux-mistral", etc. — see WorkerBackend type
   model: string;
   joinedAt: number;         // Date.now()
   tmuxPaneId: string;       // tmux session name
@@ -103,7 +103,7 @@ export interface McpWorkerMember {
 export interface HeartbeatData {
   workerName: string;
   teamName: string;
-  provider: 'codex' | 'gemini' | 'claude';
+  provider: 'codex' | 'gemini' | 'claude' | 'mistral';
   pid: number;
   lastPollAt: string;       // ISO timestamp of last poll cycle
   currentTaskId?: string;   // task being executed, if any
@@ -126,7 +126,7 @@ export interface ConfigProbeResult {
 /** Sidecar mapping task IDs to execution modes */
 export interface TaskModeMap {
   teamName: string;
-  taskModes: Record<string, 'mcp_codex' | 'mcp_gemini' | 'claude_worker'>;
+  taskModes: Record<string, 'mcp_codex' | 'mcp_gemini' | 'mcp_mistral' | 'claude_worker'>;
 }
 
 /** Failure sidecar for a task */
@@ -138,7 +138,7 @@ export interface TaskFailureSidecar {
 }
 
 /** Worker backend type */
-export type WorkerBackend = 'claude-native' | 'mcp-codex' | 'mcp-gemini' | 'tmux-claude' | 'tmux-codex' | 'tmux-gemini' | 'tmux-cursor';
+export type WorkerBackend = 'claude-native' | 'mcp-codex' | 'mcp-gemini' | 'mcp-mistral' | 'tmux-claude' | 'tmux-codex' | 'tmux-gemini' | 'tmux-mistral' | 'tmux-cursor';
 
 /** Worker capability tag */
 export type WorkerCapability =
@@ -254,7 +254,7 @@ export interface WorkerInfo {
   name: string;
   index: number;
   role: string;
-  worker_cli?: 'codex' | 'claude' | 'gemini' | 'cursor';
+  worker_cli?: 'codex' | 'claude' | 'gemini' | 'cursor' | 'mistral';
   assigned_tasks: string[];
   pid?: number;
   pane_id?: string;

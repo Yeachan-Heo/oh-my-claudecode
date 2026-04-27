@@ -1,13 +1,13 @@
 ---
 name: omc-teams
-description: CLI-team runtime for claude, codex, or gemini workers in tmux panes when you need process-based parallel execution
+description: CLI-team runtime for claude, codex, gemini, or mistral (vibe) workers in tmux panes when you need process-based parallel execution
 aliases: []
 level: 4
 ---
 
 # OMC Teams Skill
 
-Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Supports `claude`, `codex`, and `gemini` agent types.
+Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Supports `claude`, `codex`, `gemini`, and `mistral` agent types.
 
 `/omc-teams` is a legacy compatibility skill for the CLI-first runtime: use `omc team ...` commands (not deprecated MCP runtime tools).
 
@@ -17,12 +17,13 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 /oh-my-claudecode:omc-teams N:claude "task description"
 /oh-my-claudecode:omc-teams N:codex "task description"
 /oh-my-claudecode:omc-teams N:gemini "task description"
+/oh-my-claudecode:omc-teams N:mistral "task description"
 ```
 
 ### Parameters
 
 - **N** - Number of CLI workers (1-10)
-- **agent-type** - `claude` (Claude CLI), `codex` (OpenAI Codex CLI), or `gemini` (Google Gemini CLI)
+- **agent-type** - `claude` (Claude CLI), `codex` (OpenAI Codex CLI), `gemini` (Google Gemini CLI), or `mistral` (Mistral Vibe CLI)
 - **task** - Task description to distribute across all workers
 
 ### Examples
@@ -31,6 +32,7 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 /omc-teams 2:claude "implement auth module with tests"
 /omc-teams 2:codex "review the auth module for security issues"
 /omc-teams 3:gemini "redesign UI components for accessibility"
+/omc-teams 2:mistral "refactor logging to structured JSON across the data layer"
 ```
 
 ## Requirements
@@ -40,6 +42,7 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 - **claude** CLI: `npm install -g @anthropic-ai/claude-code`
 - **codex** CLI: `npm install -g @openai/codex`
 - **gemini** CLI: `npm install -g @google/gemini-cli`
+- **mistral** CLI (`vibe`): `uv tool install mistral-vibe` (or `pipx install mistral-vibe`), then `vibe --setup` to configure the API key. The team runtime invokes vibe's built-in `auto-approve` agent for unattended work; model selection lives in `~/.vibe/agents/*.toml`.
 
 ## Workflow
 
@@ -66,12 +69,12 @@ tmux display-message -p '#S'
 Extract:
 
 - `N` — worker count (1–10)
-- `agent-type` — `claude|codex|gemini`
+- `agent-type` — `claude|codex|gemini|mistral`
 - `task` — task description
 
 Validate before decomposing or running anything:
 
-- Reject unsupported agent types up front. `/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**.
+- Reject unsupported agent types up front. `/omc-teams` only supports **`claude`**, **`codex`**, **`gemini`**, and **`mistral`**.
 - If the user asks for an unsupported type such as `expert`, explain that `/omc-teams` launches external CLI workers only.
 - For native Claude Code team agents/roles, direct them to **`/oh-my-claudecode:team`** instead.
 
@@ -96,6 +99,7 @@ working directory before launch:
 - Do not anchor the launch cwd to only the repo containing `.omc/plans/...` when
   target repos are siblings; that strands `codex`, `claude`, and `gemini` workers in
   the plan repo instead of the implementation workspace.
+- The same applies to `mistral` (vibe) workers — they share the single launch cwd.
 - If no safe shared workspace root can be identified, do not launch `/omc-teams`.
   Report the single-cwd constraint and ask for, or derive from evidence, the intended
   workspace root.
@@ -111,7 +115,7 @@ state_write(mode="team", current_phase="team-exec", active=true)
 Start workers via CLI:
 
 ```bash
-omc team <N>:<claude|codex|gemini> "<task>"
+omc team <N>:<claude|codex|gemini|mistral> "<task>"
 ```
 
 For the multi-repo case resolved in Phase 2.5, launch from the shared workspace root
@@ -175,9 +179,10 @@ If encountered, switch to `omc team ...` CLI commands.
 | ---------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
 | `not inside tmux`            | Requested in-place pane topology from a non-tmux surface | Start tmux and rerun, or let `omc team` use its detached-session fallback           |
 | `cmux surface detected`      | Running inside cmux without `$TMUX` | Use the normal `omc team ...` flow; OMC will launch a detached tmux session         |
-| `Unsupported agent type`     | Requested agent is not claude/codex/gemini | Use `claude`, `codex`, or `gemini`; for native Claude Code agents use `/oh-my-claudecode:team` |
+| `Unsupported agent type`     | Requested agent is not claude/codex/gemini/mistral | Use `claude`, `codex`, `gemini`, or `mistral`; for native Claude Code agents use `/oh-my-claudecode:team` |
 | `codex: command not found`   | Codex CLI not installed             | `npm install -g @openai/codex`                                                      |
 | `gemini: command not found`  | Gemini CLI not installed            | `npm install -g @google/gemini-cli`                                                 |
+| `vibe: command not found`    | Mistral Vibe CLI not installed      | `uv tool install mistral-vibe` (or `pipx install mistral-vibe`), then `vibe --setup` to log in |
 | `Team <name> is not running` | stale or missing runtime state      | `omc team status <team-name>` then `omc team shutdown <team-name> --force` if stale |
 | `status: failed`             | Workers exited with incomplete work | inspect runtime output, narrow scope, rerun                                         |
 
@@ -185,7 +190,7 @@ If encountered, switch to `omc team ...` CLI commands.
 
 | Aspect       | `/team`                                   | `/omc-teams`                                         |
 | ------------ | ----------------------------------------- | ---------------------------------------------------- |
-| Worker type  | Claude Code native team agents            | claude / codex / gemini CLI processes in tmux        |
+| Worker type  | Claude Code native team agents            | claude / codex / gemini / mistral CLI processes in tmux |
 | Invocation   | `TeamCreate` / `Task` / `SendMessage`     | `omc team [N:agent]` + `status` + `shutdown` + `api` |
 | Coordination | Native team messaging and staged pipeline | tmux worker runtime + CLI API state files            |
 | Use when     | You want Claude-native team orchestration | You want external CLI worker execution               |

@@ -556,6 +556,56 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps mistral (vibe) prompt-mode launch args to a short inbox pointer and waits for claim evidence', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-mistral-prompt-'));
+
+    modelContractMocks.isPromptModeAgent.mockImplementation((agentType?: string) => agentType === 'mistral');
+    mocks.spawnWorkerInPane.mockImplementation(async () => {
+      const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
+      const canonicalTaskPath = join(taskDir, 'task-1.json');
+      const legacyTaskPath = join(taskDir, '1.json');
+      const taskPath = await readFile(canonicalTaskPath, 'utf-8')
+        .then(() => canonicalTaskPath)
+        .catch(async () => {
+          await readFile(legacyTaskPath, 'utf-8');
+          return legacyTaskPath;
+        });
+      const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
+      await writeFile(taskPath, JSON.stringify({
+        ...existing,
+        status: 'in_progress',
+        owner: 'worker-1',
+      }, null, 2), 'utf-8');
+    });
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['mistral'],
+      tasks: [{
+        subject: 'Dispatch test',
+        description: 'Verify mistral prompt-mode inbox pointer.',
+      }],
+      cwd,
+    });
+
+    expect(modelContractMocks.getPromptModeArgs).toHaveBeenCalledWith(
+      'mistral',
+      expect.stringContaining('.omc/state/team/dispatch-team/workers/worker-1/inbox.md'),
+    );
+    expect(mocks.spawnWorkerInPane).toHaveBeenCalledWith(
+      'dispatch-session',
+      '%2',
+      expect.objectContaining({
+        launchBinary: '/usr/bin/mistral',
+      }),
+    );
+    expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+    expect(mocks.sendToWorker).not.toHaveBeenCalled();
+  });
+
   it('keeps gemini prompt-mode launch args to a short inbox pointer and waits for claim evidence', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-gemini-prompt-'));
 

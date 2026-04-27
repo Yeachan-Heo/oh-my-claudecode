@@ -19,6 +19,8 @@ const DEFAULT_CAPABILITIES: Record<WorkerBackend, WorkerCapability[]> = {
   'tmux-codex': ['code-review', 'security-review', 'architecture', 'refactoring'],
   'tmux-gemini': ['ui-design', 'documentation', 'research', 'code-edit'],
   'tmux-cursor': ['code-edit', 'refactoring', 'general'],
+  'mcp-mistral': ['code-review', 'security-review', 'architecture', 'refactoring'],
+  'tmux-mistral': ['code-review', 'security-review', 'architecture', 'refactoring'],
 };
 
 /**

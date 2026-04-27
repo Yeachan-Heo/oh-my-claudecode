@@ -9,7 +9,7 @@ import type { WorkerCapability } from '../types.js';
 
 function makeMember(
   name: string,
-  backend: 'claude-native' | 'mcp-codex' | 'mcp-gemini',
+  backend: 'claude-native' | 'mcp-codex' | 'mcp-gemini' | 'mcp-mistral',
   capabilities: WorkerCapability[],
   status: 'active' | 'idle' | 'dead' = 'active'
 ): UnifiedTeamMember {
@@ -46,6 +46,13 @@ describe('capabilities', () => {
       expect(caps).toContain('ui-design');
       expect(caps).toContain('documentation');
       expect(caps).toContain('research');
+    });
+
+    it('returns capabilities for mcp-mistral', () => {
+      const caps = getDefaultCapabilities('mcp-mistral');
+      expect(caps).toContain('code-review');
+      expect(caps).toContain('security-review');
+      expect(caps).toContain('architecture');
     });
 
     it('returns a copy, not a reference', () => {
@@ -97,6 +104,14 @@ describe('capabilities', () => {
       const ranked = rankWorkersForTask([w1, w2, w3], ['code-review', 'security-review']);
       expect(ranked[0].name).toBe('codex'); // perfect match
       expect(ranked.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('ranks mistral worker for code-review task', () => {
+      const w1 = makeMember('mistral', 'mcp-mistral', ['code-review', 'security-review', 'architecture', 'refactoring']);
+      const w2 = makeMember('gemini', 'mcp-gemini', ['ui-design', 'documentation']);
+
+      const ranked = rankWorkersForTask([w1, w2], ['code-review']);
+      expect(ranked[0].name).toBe('mistral');
     });
 
     it('excludes workers with score 0', () => {

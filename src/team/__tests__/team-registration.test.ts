@@ -74,6 +74,15 @@ describe('registerMcpWorker / unregisterMcpWorker', () => {
     expect(workers[0].agentType).toBe('mcp-gemini');
   });
 
+  it('registers mistral worker and deduplicates on re-register', () => {
+    registerMcpWorker(TEST_TEAM, 'myworker', 'mistral', 'codestral-2-latest', 'sess-x', '/cwd', TEST_DIR);
+    registerMcpWorker(TEST_TEAM, 'myworker', 'mistral', 'codestral-2-latest', 'sess-y', '/cwd2', TEST_DIR);
+    const workers = listMcpWorkers(TEST_TEAM, TEST_DIR);
+    expect(workers).toHaveLength(1);
+    expect(workers[0].agentType).toBe('mcp-mistral');
+    expect(workers[0].name).toBe('myworker');
+  });
+
   it('registers multiple workers', () => {
     registerMcpWorker(TEST_TEAM, 'w1', 'codex', 'gpt-5', 'sess1', '/cwd', TEST_DIR);
     registerMcpWorker(TEST_TEAM, 'w2', 'gemini', 'gemini-pro', 'sess2', '/cwd', TEST_DIR);

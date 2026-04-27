@@ -139,4 +139,18 @@ describe('buildResolvedRoutingSnapshot', () => {
     expect(snap['code-reviewer'].primary.provider).toBe('gemini');
     expect(snap['code-reviewer'].fallback.provider).toBe('claude');
   });
+
+  it('routes critic to mistral primary with claude fallback', () => {
+    const cfg: PluginConfig = {
+      team: {
+        roleRouting: {
+          critic: { provider: 'mistral', model: 'codestral-2-latest' },
+        },
+      },
+    };
+    const snap = buildResolvedRoutingSnapshot(cfg);
+    expect(snap.critic.primary.provider).toBe('mistral');
+    expect(snap.critic.primary.model).toBe('codestral-2-latest');
+    expect(snap.critic.fallback.provider).toBe('claude');
+  });
 });

@@ -90,6 +90,16 @@ describe('stage-router resolveRoleAssignment', () => {
       expect(out.agent).toBe('codeReviewer');
     });
 
+    it('respects provider=mistral with explicit model passthrough', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { critic: { provider: 'mistral', model: 'codestral-2-latest' } } },
+      };
+      const out = resolveRoleAssignment('critic', cfg);
+      expect(out.provider).toBe('mistral');
+      expect(out.model).toBe('codestral-2-latest');
+      expect(out.agent).toBe('critic');
+    });
+
     it('resolves tier name (HIGH) into Claude opus model for claude provider', () => {
       const cfg: PluginConfig = {
         team: { roleRouting: { executor: { provider: 'claude', model: 'HIGH' } } },
@@ -162,6 +172,17 @@ describe('stage-router resolveRoleAssignment', () => {
       };
       const snap = buildResolvedRoutingSnapshot(cfg);
       expect(snap['code-reviewer'].primary.provider).toBe('codex');
+    });
+  });
+
+  describe('mistral routing', () => {
+    it('routes executor to mistral provider with explicit model', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { executor: { provider: 'mistral', model: 'codestral-2-latest' } } },
+      };
+      const out = resolveRoleAssignment('executor', cfg);
+      expect(out.provider).toBe('mistral');
+      expect(out.model).toBe('codestral-2-latest');
     });
   });
 });

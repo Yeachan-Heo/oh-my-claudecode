@@ -7,15 +7,15 @@ import { fileURLToPath } from 'url';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
 export const ASK_USAGE = [
-  'Usage: omc ask <claude|codex|gemini> <question or task>',
-  '   or: omc ask <claude|codex|gemini> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini> --agent-prompt=<role> --prompt "<prompt>"',
+  'Usage: omc ask <claude|codex|gemini|mistral> <question or task>',
+  '   or: omc ask <claude|codex|gemini|mistral> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|mistral> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|mistral> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|mistral> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|mistral> --agent-prompt=<role> --prompt "<prompt>"',
 ].join('\n');
 
-const ASK_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
+const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'mistral'] as const;
 export type AskProvider = (typeof ASK_PROVIDERS)[number];
 const ASK_PROVIDER_SET = new Set<string>(ASK_PROVIDERS);
 
