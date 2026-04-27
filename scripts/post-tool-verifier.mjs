@@ -747,11 +747,31 @@ function extractTextFromKnownToolResponseField(value, depth = 0) {
   return texts;
 }
 
-function hasExplicitStructuredFailureIndicator(value, depth = 0) {
+function isStructuredEnvelopePayloadField(fieldName) {
+  return new Set([
+    'content',
+    'oldstring',
+    'newstring',
+    'originalfile',
+    'structuredpatch',
+    'patch',
+    'diff',
+    'lines',
+    'line',
+    'text',
+    'message',
+    'output',
+    'stdout',
+    'stderr',
+  ]).has(fieldName.toLowerCase());
+}
+
+function hasExplicitStructuredFailureIndicator(value, depth = 0, fieldName = '') {
   if (!value || typeof value === 'string' || depth > 4) return false;
+  if (fieldName && isStructuredEnvelopePayloadField(fieldName)) return false;
 
   if (Array.isArray(value)) {
-    return value.some(item => hasExplicitStructuredFailureIndicator(item, depth + 1));
+    return value.some(item => hasExplicitStructuredFailureIndicator(item, depth + 1, fieldName));
   }
 
   if (typeof value !== 'object') return false;
@@ -770,7 +790,7 @@ function hasExplicitStructuredFailureIndicator(value, depth = 0) {
       return true;
     }
 
-    if (hasExplicitStructuredFailureIndicator(fieldValue, depth + 1)) {
+    if (hasExplicitStructuredFailureIndicator(fieldValue, depth + 1, key)) {
       return true;
     }
   }

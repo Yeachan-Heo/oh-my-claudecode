@@ -612,6 +612,57 @@ describe('post-tool hook structured Write/Edit envelopes (issue #2840)', () => {
     expect(out.hookSpecificOutput?.additionalContext).not.toContain('Write operation failed');
   });
 
+  it('trusts Write success envelopes with payload JSON containing error and failure keys', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Write',
+      tool_response: {
+        type: 'create',
+        filePath: '/tmp/issue-2841-write-payload.ts',
+        content: {
+          error: 'payload fixture key, not tool status',
+          failure: 'payload fixture key, not tool status',
+          nested: {
+            failedReason: 'payload fixture key, not tool status',
+          },
+        },
+      },
+      session_id: 'issue-2841-write-payload-keys-success',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('File written.');
+    expect(out.hookSpecificOutput?.additionalContext).not.toContain('Write operation failed');
+  });
+
+  it('trusts Edit success envelopes with payload fields containing error and failure keys', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: {
+        filePath: '/tmp/issue-2841-edit-payload.ts',
+        oldString: '{"error":"old payload fixture","failure":"old payload fixture"}',
+        newString: '{"error":"new payload fixture","failure":"new payload fixture"}',
+        originalFile: '{"error":"original payload fixture","failure":"original payload fixture"}',
+        structuredPatch: [
+          {
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: [
+              { error: '-payload fixture key, not tool status' },
+              { failure: '+payload fixture key, not tool status' },
+            ],
+          },
+        ],
+      },
+      session_id: 'issue-2841-edit-payload-keys-success',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Code modified.');
+    expect(out.hookSpecificOutput?.additionalContext).not.toContain('Edit operation failed');
+  });
+
   it('does not trust Write-shaped envelopes with explicit failure fields', () => {
     const out = runPostToolVerifier({
       tool_name: 'Write',
