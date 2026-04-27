@@ -747,6 +747,37 @@ function extractTextFromKnownToolResponseField(value, depth = 0) {
   return texts;
 }
 
+function hasExplicitStructuredFailureIndicator(value, depth = 0) {
+  if (!value || typeof value === 'string' || depth > 4) return false;
+
+  if (Array.isArray(value)) {
+    return value.some(item => hasExplicitStructuredFailureIndicator(item, depth + 1));
+  }
+
+  if (typeof value !== 'object') return false;
+
+  for (const [key, fieldValue] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    if (
+      (normalizedKey.includes('error') || normalizedKey.includes('fail')) &&
+      fieldValue !== false &&
+      fieldValue !== 0 &&
+      fieldValue !== null &&
+      fieldValue !== undefined &&
+      !(typeof fieldValue === 'string' && fieldValue.trim() === '') &&
+      !(Array.isArray(fieldValue) && fieldValue.length === 0)
+    ) {
+      return true;
+    }
+
+    if (hasExplicitStructuredFailureIndicator(fieldValue, depth + 1)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function hasEditEnvelopeSuccess(value, depth = 0) {
   if (!value || typeof value === 'string' || depth > 4) return false;
 
@@ -755,6 +786,8 @@ function hasEditEnvelopeSuccess(value, depth = 0) {
   }
 
   if (typeof value !== 'object') return false;
+
+  if (hasExplicitStructuredFailureIndicator(value, depth)) return false;
 
   if (typeof value.filePath === 'string' && Array.isArray(value.structuredPatch)) {
     return true;
@@ -772,6 +805,8 @@ function hasWriteEnvelopeSuccess(value, depth = 0) {
 
   if (typeof value !== 'object') return false;
 
+  if (hasExplicitStructuredFailureIndicator(value, depth)) return false;
+
   if (
     typeof value.filePath === 'string' &&
     (value.type === 'create' || value.type === 'update')
@@ -787,6 +822,11 @@ function hasStructuredWriteSuccess(rawResponse, toolName = '') {
   if (toolName === 'Edit' && hasEditEnvelopeSuccess(rawResponse)) return true;
   if (toolName === 'Write' && hasWriteEnvelopeSuccess(rawResponse)) return true;
   return extractTextFromKnownToolResponseField(rawResponse).some(isClaudeCodeWriteSuccess);
+}
+
+function hasStructuredWriteFailure(rawResponse) {
+  if (!rawResponse || typeof rawResponse === 'string') return false;
+  return hasExplicitStructuredFailureIndicator(rawResponse);
 }
 
 // Get agent completion summary from tracking state
@@ -817,7 +857,12 @@ function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL) {
 
 // Generate contextual message
 function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, options = {}) {
-  const { wasTruncated = false, rawLength = 0, structuredWriteSuccess = false } = options;
+  const {
+    wasTruncated = false,
+    rawLength = 0,
+    structuredWriteSuccess = false,
+    structuredWriteFailure = false,
+  } = options;
   let message = '';
 
   switch (toolName) {
@@ -868,7 +913,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
     }
 
     case 'Edit':
-      if (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
+      if (structuredWriteFailure || (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput))) {
         message = 'Edit operation failed. Verify file exists and content matches exactly.';
       } else if (QUIET_LEVEL === 0) {
         message = 'Code modified. Verify changes work as expected before marking complete.';
@@ -876,7 +921,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
       break;
 
     case 'Write':
-      if (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput)) {
+      if (structuredWriteFailure || (!structuredWriteSuccess && !isClaudeCodeWriteSuccess(toolOutput) && detectWriteFailure(toolOutput))) {
         message = 'Write operation failed. Check file permissions and directory existence.';
       } else if (QUIET_LEVEL === 0) {
         message = 'File written. Test the changes to ensure they work correctly.';
@@ -935,6 +980,8 @@ async function main() {
     const rawResponse = data.tool_response || data.toolOutput || '';
     const structuredWriteSuccess =
       (toolName === 'Write' || toolName === 'Edit') && hasStructuredWriteSuccess(rawResponse, toolName);
+    const structuredWriteFailure =
+      (toolName === 'Write' || toolName === 'Edit') && hasStructuredWriteFailure(rawResponse);
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
@@ -981,6 +1028,7 @@ async function main() {
         wasTruncated,
         rawLength: toolOutput.length,
         structuredWriteSuccess,
+        structuredWriteFailure,
       }),
       maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
     );

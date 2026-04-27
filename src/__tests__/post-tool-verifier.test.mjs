@@ -612,6 +612,92 @@ describe('post-tool hook structured Write/Edit envelopes (issue #2840)', () => {
     expect(out.hookSpecificOutput?.additionalContext).not.toContain('Write operation failed');
   });
 
+  it('does not trust Write-shaped envelopes with explicit failure fields', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Write',
+      tool_response: {
+        type: 'create',
+        filePath: '/tmp/issue-2841-write.ts',
+        error: 'failed to write',
+        content: 'File content that would otherwise be valid.',
+      },
+      session_id: 'issue-2841-write-envelope-error',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Write operation failed');
+  });
+
+  it('does not trust nested Write-shaped envelopes with explicit failure fields', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Write',
+      tool_response: {
+        result: {
+          type: 'update',
+          filePath: '/tmp/issue-2841-nested-write.ts',
+          failure: 'operation failed',
+          content: 'File content that would otherwise be valid.',
+        },
+      },
+      session_id: 'issue-2841-nested-write-envelope-failure',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Write operation failed');
+  });
+
+  it('does not trust Edit-shaped envelopes with explicit error fields', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: {
+        filePath: '/tmp/issue-2841-edit.ts',
+        error: 'failed to edit',
+        oldString: 'const before = true;',
+        newString: 'const after = true;',
+        structuredPatch: [
+          {
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: ['-const before = true;', '+const after = true;'],
+          },
+        ],
+      },
+      session_id: 'issue-2841-edit-envelope-error',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Edit operation failed');
+  });
+
+  it('does not trust nested Edit-shaped envelopes with explicit failure fields', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: {
+        data: {
+          filePath: '/tmp/issue-2841-nested-edit.ts',
+          failure: 'operation failed',
+          oldString: 'const before = true;',
+          newString: 'const after = true;',
+          structuredPatch: [
+            {
+              oldStart: 1,
+              oldLines: 1,
+              newStart: 1,
+              newLines: 1,
+              lines: ['-const before = true;', '+const after = true;'],
+            },
+          ],
+        },
+      },
+      session_id: 'issue-2841-nested-edit-envelope-failure',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Edit operation failed');
+  });
+
   it('keeps plain string Write failure detection unchanged', () => {
     const out = runPostToolVerifier({
       tool_name: 'Write',
