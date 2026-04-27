@@ -20,6 +20,7 @@ import {
 } from "../../lib/mode-state-io.js";
 import {
   ensurePrdForStartup,
+  findPrdPath,
   readPrd,
   getPrdStatus,
   formatNextStoryPrompt,
@@ -312,6 +313,8 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
       basename(directory),
       branchName,
       normalizedPrompt,
+      undefined,
+      sessionId,
     );
 
     if (!startupPrd.ok) {
@@ -336,7 +339,7 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
       prd_mode: true,
     };
 
-    const prdCompletion = getPrdCompletionStatus(directory);
+    const prdCompletion = getPrdCompletionStatus(directory, sessionId);
     if (prdCompletion.nextStory) {
       state.current_story_id = prdCompletion.nextStory.id;
     }
@@ -395,21 +398,21 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
 /**
  * Check if PRD mode is available (prd.json exists)
  */
-export function hasPrd(directory: string): boolean {
-  const prd = readPrd(directory);
+export function hasPrd(directory: string, sessionId?: string): boolean {
+  const prd = readPrd(directory, sessionId);
   return prd !== null;
 }
 
 /**
  * Get PRD completion status for ralph
  */
-export function getPrdCompletionStatus(directory: string): {
+export function getPrdCompletionStatus(directory: string, sessionId?: string): {
   hasPrd: boolean;
   allComplete: boolean;
   status: PRDStatus | null;
   nextStory: UserStory | null;
 } {
-  const prd = readPrd(directory);
+  const prd = readPrd(directory, sessionId);
 
   if (!prd) {
     return {
@@ -434,7 +437,7 @@ export function getPrdCompletionStatus(directory: string): {
  * Get context injection for ralph continuation
  * Includes PRD current story and progress memory
  */
-export function getRalphContext(directory: string): string {
+export function getRalphContext(directory: string, sessionId?: string): string {
   const parts: string[] = [];
 
   // Add progress context (patterns, learnings)
@@ -444,9 +447,9 @@ export function getRalphContext(directory: string): string {
   }
 
   // Add current story from PRD
-  const prdStatus = getPrdCompletionStatus(directory);
+  const prdStatus = getPrdCompletionStatus(directory, sessionId);
   if (prdStatus.hasPrd && prdStatus.nextStory) {
-    parts.push(formatNextStoryPrompt(prdStatus.nextStory));
+    parts.push(formatNextStoryPrompt(prdStatus.nextStory, findPrdPath(directory, sessionId) ?? undefined));
   }
 
   // Add PRD status summary
@@ -462,21 +465,21 @@ export function getRalphContext(directory: string): string {
 /**
  * Update ralph state with current story
  */
-export function setCurrentStory(directory: string, storyId: string): boolean {
-  const state = readRalphState(directory);
+export function setCurrentStory(directory: string, storyId: string, sessionId?: string): boolean {
+  const state = readRalphState(directory, sessionId);
   if (!state) {
     return false;
   }
 
   state.current_story_id = storyId;
-  return writeRalphState(directory, state);
+  return writeRalphState(directory, state, sessionId);
 }
 
 /**
  * Enable PRD mode in ralph state
  */
-export function enablePrdMode(directory: string): boolean {
-  const state = readRalphState(directory);
+export function enablePrdMode(directory: string, sessionId?: string): boolean {
+  const state = readRalphState(directory, sessionId);
   if (!state) {
     return false;
   }
@@ -486,7 +489,7 @@ export function enablePrdMode(directory: string): boolean {
   // Initialize progress.txt if it doesn't exist
   initProgress(directory);
 
-  return writeRalphState(directory, state);
+  return writeRalphState(directory, state, sessionId);
 }
 
 /**
@@ -554,8 +557,8 @@ export function getTeamPhaseDirective(
 /**
  * Check if ralph should complete based on PRD status
  */
-export function shouldCompleteByPrd(directory: string): boolean {
-  const status = getPrdCompletionStatus(directory);
+export function shouldCompleteByPrd(directory: string, sessionId?: string): boolean {
+  const status = getPrdCompletionStatus(directory, sessionId);
   return status.hasPrd && status.allComplete;
 }
 

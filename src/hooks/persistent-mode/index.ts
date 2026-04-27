@@ -31,6 +31,7 @@ import {
   writeRalphState,
   incrementRalphIteration,
   clearRalphState,
+  findPrdPath,
   getPrdCompletionStatus,
   getRalphContext,
   getStory,
@@ -862,12 +863,12 @@ async function checkRalphLoop(
       // Check for architect approval
       if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
         if (verificationState.verification_scope === 'story' && verificationState.story_id) {
-          markStoryArchitectVerified(workingDir, verificationState.story_id);
+          markStoryArchitectVerified(workingDir, verificationState.story_id, undefined, sessionId);
           clearVerificationState(workingDir, sessionId);
 
           const refreshedState = readRalphState(workingDir, sessionId);
           if (refreshedState) {
-            const refreshedPrd = getPrdCompletionStatus(workingDir);
+            const refreshedPrd = getPrdCompletionStatus(workingDir, sessionId);
             refreshedState.current_story_id = refreshedPrd.nextStory?.id;
             writeRalphState(workingDir, refreshedState, sessionId);
           }
@@ -919,7 +920,7 @@ async function checkRalphLoop(
 
     if (verificationState?.pending) {
       const storyUnderReview = verificationState.story_id
-        ? getStory(workingDir, verificationState.story_id) ?? undefined
+        ? getStory(workingDir, verificationState.story_id, sessionId) ?? undefined
         : undefined;
 
       // Verification still pending - remind to run the selected reviewer
@@ -936,9 +937,9 @@ async function checkRalphLoop(
     }
   }
 
-  const prdStatus = getPrdCompletionStatus(workingDir);
+  const prdStatus = getPrdCompletionStatus(workingDir, sessionId);
   const currentStory = state.current_story_id
-    ? getStory(workingDir, state.current_story_id)
+    ? getStory(workingDir, state.current_story_id, sessionId)
     : prdStatus.nextStory;
 
   if (currentStory?.passes && currentStory.architectVerified !== true) {
@@ -1032,9 +1033,10 @@ async function checkRalphLoop(
   }
 
   // Get PRD context for injection
-  const ralphContext = getRalphContext(workingDir);
+  const ralphContext = getRalphContext(workingDir, sessionId);
+  const activePrdPath = prdStatus.hasPrd ? findPrdPath(workingDir, sessionId) : null;
   const prdInstruction = prdStatus.hasPrd
-    ? `2. Check prd.json - verify the current story's acceptance criteria are met, then mark it passes: true. Are ALL stories complete?`
+    ? `2. Check ${activePrdPath ?? 'prd.json'} - verify the current story's acceptance criteria are met, then mark it passes: true. Are ALL stories complete?`
     : `2. Check your todo list - are ALL items marked complete?`;
 
   const continuationPrompt = `<ralph-continuation>
