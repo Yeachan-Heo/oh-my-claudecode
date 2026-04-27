@@ -747,8 +747,45 @@ function extractTextFromKnownToolResponseField(value, depth = 0) {
   return texts;
 }
 
-function hasStructuredWriteSuccess(rawResponse) {
+function hasEditEnvelopeSuccess(value, depth = 0) {
+  if (!value || typeof value === 'string' || depth > 4) return false;
+
+  if (Array.isArray(value)) {
+    return value.some(item => hasEditEnvelopeSuccess(item, depth + 1));
+  }
+
+  if (typeof value !== 'object') return false;
+
+  if (typeof value.filePath === 'string' && Array.isArray(value.structuredPatch)) {
+    return true;
+  }
+
+  return Object.values(value).some(item => hasEditEnvelopeSuccess(item, depth + 1));
+}
+
+function hasWriteEnvelopeSuccess(value, depth = 0) {
+  if (!value || typeof value === 'string' || depth > 4) return false;
+
+  if (Array.isArray(value)) {
+    return value.some(item => hasWriteEnvelopeSuccess(item, depth + 1));
+  }
+
+  if (typeof value !== 'object') return false;
+
+  if (
+    typeof value.filePath === 'string' &&
+    (value.type === 'create' || value.type === 'update')
+  ) {
+    return true;
+  }
+
+  return Object.values(value).some(item => hasWriteEnvelopeSuccess(item, depth + 1));
+}
+
+function hasStructuredWriteSuccess(rawResponse, toolName = '') {
   if (!rawResponse || typeof rawResponse === 'string') return false;
+  if (toolName === 'Edit' && hasEditEnvelopeSuccess(rawResponse)) return true;
+  if (toolName === 'Write' && hasWriteEnvelopeSuccess(rawResponse)) return true;
   return extractTextFromKnownToolResponseField(rawResponse).some(isClaudeCodeWriteSuccess);
 }
 
@@ -897,7 +934,7 @@ async function main() {
     const toolName = data.tool_name || data.toolName || '';
     const rawResponse = data.tool_response || data.toolOutput || '';
     const structuredWriteSuccess =
-      (toolName === 'Write' || toolName === 'Edit') && hasStructuredWriteSuccess(rawResponse);
+      (toolName === 'Write' || toolName === 'Edit') && hasStructuredWriteSuccess(rawResponse, toolName);
     const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';

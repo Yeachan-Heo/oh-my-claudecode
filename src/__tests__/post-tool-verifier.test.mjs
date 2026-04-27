@@ -569,6 +569,61 @@ describe('post-tool hook regression coverage (issue #2615)', () => {
   });
 });
 
+describe('post-tool hook structured Write/Edit envelopes (issue #2840)', () => {
+  it('trusts real Edit success envelopes before scanning embedded source fields', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: {
+        filePath: '/tmp/issue-2840-edit.ts',
+        oldString: 'throw new Error("old fixture")',
+        newString: 'expect(output).toContain("error: boom")',
+        originalFile: 'error: fixture prose\nfailed to write fixture',
+        structuredPatch: [
+          {
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: ['-throw new Error("old fixture")', '+expect(output).toContain("error: boom")'],
+          },
+        ],
+      },
+      session_id: 'issue-2840-edit-envelope',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Code modified.');
+    expect(out.hookSpecificOutput?.additionalContext).not.toContain('Edit operation failed');
+  });
+
+  it.each(['create', 'update'])('trusts real Write %s success envelopes before scanning content', type => {
+    const out = runPostToolVerifier({
+      tool_name: 'Write',
+      tool_response: {
+        type,
+        filePath: `/tmp/issue-2840-${type}.ts`,
+        content: 'const message = "error: fixture only";\n// failed to write appears in content',
+      },
+      session_id: `issue-2840-write-${type}-envelope`,
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('File written.');
+    expect(out.hookSpecificOutput?.additionalContext).not.toContain('Write operation failed');
+  });
+
+  it('keeps plain string Write failure detection unchanged', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Write',
+      tool_response: 'error: failed to write file',
+      session_id: 'issue-2840-string-write-failure',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Write operation failed');
+  });
+});
+
 describe('OMC_QUIET hook message suppression (issue #1646)', () => {
   it('suppresses routine success/advice messages at OMC_QUIET=1 while keeping failures', () => {
     const edit = runPostToolVerifier(
