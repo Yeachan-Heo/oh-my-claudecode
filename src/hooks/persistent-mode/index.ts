@@ -896,7 +896,7 @@ async function checkRalphLoop(
       const rejection = checkArchitectRejectionInTranscript(sessionId);
       if (verificationState && rejection.rejected) {
         if (verificationState.verification_scope === 'story' && verificationState.story_id) {
-          markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback);
+          markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback, sessionId);
         }
         // Architect rejected - continue with feedback
         recordArchitectFeedback(workingDir, false, rejection.feedback, sessionId);
