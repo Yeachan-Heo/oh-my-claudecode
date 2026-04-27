@@ -283,7 +283,7 @@ describe('Ralph verification flow', () => {
     expect(result.mode).toBe('ralph');
     expect(result.message).toContain('US-002');
 
-    const updatedPrd = readPrd(testDir);
+    const updatedPrd = readPrd(testDir, sessionId);
     expect(updatedPrd?.userStories[0].architectVerified).toBe(true);
 
     const updatedState = readRalphState(testDir, sessionId);
@@ -384,7 +384,7 @@ describe('Ralph verification flow', () => {
     expect(result.message).toContain('request-id="current-request"');
     expect(result.message).toContain('story-id="US-001"');
 
-    const updatedPrd = readPrd(testDir);
+    const updatedPrd = readPrd(testDir, sessionId);
     expect(updatedPrd?.userStories[0].architectVerified).toBe(false);
 
     const updatedState = readRalphState(testDir, sessionId);
@@ -459,7 +459,7 @@ describe('Ralph verification flow', () => {
     expect(result.message).toContain('request-id="current-request"');
     expect(result.message).toContain('story-id="US-001"');
 
-    const updatedPrd = readPrd(testDir);
+    const updatedPrd = readPrd(testDir, sessionId);
     expect(updatedPrd?.userStories[0].architectVerified).toBe(false);
 
     const updatedState = readRalphState(testDir, sessionId);

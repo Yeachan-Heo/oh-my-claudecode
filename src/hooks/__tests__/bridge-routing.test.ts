@@ -590,9 +590,11 @@ $ ultrawork search the codebase`,
         expect(result.continue).toBe(true);
 
         const ralphPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
-        const prdPath = join(tempDir, '.omc', 'prd.json');
+        const prdPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'prd.json');
+        const legacyPrdPath = join(tempDir, '.omc', 'prd.json');
         expect(existsSync(ralphPath)).toBe(true);
         expect(existsSync(prdPath)).toBe(true);
+        expect(existsSync(legacyPrdPath)).toBe(false);
 
         const ralphState = JSON.parse(readFileSync(ralphPath, 'utf-8')) as { prompt?: string; prd_mode?: boolean };
         expect(ralphState.prompt).toBe(
