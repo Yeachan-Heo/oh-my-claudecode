@@ -90,8 +90,10 @@ jobs:
           # Capture exit code of omc update itself (PIPESTATUS[0])
           # npm install may emit deprecation warnings to stderr — those are not
           # omc errors. Filter those out and fail on everything else.
+          set +e
           omc update 1>"$RUNNER_TEMP/omc-update.stdout.log" 2>"$RUNNER_TEMP/omc-update.stderr.log"
           UPDATE_EXIT=$?
+          set -e
 
           # Check for non-npm stderr (omc warnings/errors/exceptions)
           # Exclude npm deprecation warnings: "npm deprecated ..." or lines not starting with npm/
@@ -106,7 +108,10 @@ jobs:
 
           if [ "$UPDATE_EXIT" -ne 0 ]; then
             echo "FAIL: omc update exited with code $UPDATE_EXIT"
+            echo "Full stdout:"
             cat "$RUNNER_TEMP/omc-update.stdout.log"
+            echo "Full stderr:"
+            cat "$RUNNER_TEMP/omc-update.stderr.log"
             exit 1
           fi
 
