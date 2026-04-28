@@ -421,6 +421,12 @@ describe('Builtin Skills', () => {
       expect(raw).toContain('Wait until the summary exists before ambiguity scoring');
       expect(raw).toContain('Do not ask the next `AskUserQuestion`, score ambiguity, or hand off to execution from an over-budget raw transcript.');
       expect(raw).toContain('Preserve the AskUserQuestion path for OMC-native interaction');
+      expect(raw).toContain('Consult accumulated local planning knowledge');
+      expect(raw).toContain('glob `.omc/specs/deep-*.md` and `.omc/plans/*.md`');
+      expect(raw).toContain('before designing Round 1 questions');
+      expect(raw).toContain('`.omc/specs/deep-interview-{slug}.md` exactly');
+      expect(raw).toContain('Ephemeral interview artifacts');
+      expect(raw).toContain('`.omc/state/` or in-memory state via `state_write`');
 
       expect(raw).not.toContain('omx question');
       expect(raw).not.toContain('(default: 20%)');
@@ -481,6 +487,11 @@ describe('Builtin Skills', () => {
       expect(raw).toContain('Interview continues until ambiguity ≤ <resolvedThresholdPercent>');
       expect(raw).toContain('"deepInterview":');
       expect(raw).toContain('"ambiguityThreshold": <resolvedThreshold>');
+      expect(raw).toContain('glob `.omc/specs/deep-*.md` and `.omc/plans/*.md`');
+      expect(raw).toContain('later Round 1 interview design');
+      expect(raw).toContain('`.omc/specs/deep-dive-trace-{slug}.md`');
+      expect(raw).toContain('`.omc/specs/deep-dive-{slug}.md`');
+      expect(raw).toContain('`.omc/state/` or `state_write` for ephemeral artifacts');
 
       expect(raw).not.toContain('omc.deepDive.ambiguityThreshold');
       expect(raw).not.toContain('"threshold": 0.2,');
