@@ -43,17 +43,20 @@ describe('MODEL ROUTING OVERRIDE message — three-site sync', () => {
   it('all three emission sites produce byte-equal override text', async () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1';
 
-    const scriptUrl = pathToFileURL(
-      resolve(__dirname, '../../scripts/session-start.mjs'),
+    // Import the shared constant from the side-effect-free lib modules instead
+    // of the hook entrypoints (which call main() at load time). Both lib copies
+    // (scripts/lib/ and templates/hooks/lib/) are checked for mutual equality.
+    const scriptsLibUrl = pathToFileURL(
+      resolve(__dirname, '../../scripts/lib/model-routing-override-message.mjs'),
     ).href;
-    const scriptMod = await import(scriptUrl);
-    const scriptSlice = extractOverrideBlock(scriptMod.MODEL_ROUTING_OVERRIDE_MESSAGE);
+    const scriptsLibMod = await import(scriptsLibUrl);
+    const scriptsSlice = extractOverrideBlock(scriptsLibMod.MODEL_ROUTING_OVERRIDE_MESSAGE);
 
-    const templateUrl = pathToFileURL(
-      resolve(__dirname, '../../templates/hooks/session-start.mjs'),
+    const templateLibUrl = pathToFileURL(
+      resolve(__dirname, '../../templates/hooks/lib/model-routing-override-message.mjs'),
     ).href;
-    const templateMod = await import(templateUrl);
-    const templateSlice = extractOverrideBlock(templateMod.MODEL_ROUTING_OVERRIDE_MESSAGE);
+    const templateLibMod = await import(templateLibUrl);
+    const templateSlice = extractOverrideBlock(templateLibMod.MODEL_ROUTING_OVERRIDE_MESSAGE);
 
     const bridge = await import('../hooks/bridge.js');
     const result = await bridge.processHook('session-start', {
@@ -63,16 +66,16 @@ describe('MODEL ROUTING OVERRIDE message — three-site sync', () => {
     const parsed = typeof result === 'string' ? JSON.parse(result) : result;
     const bridgeBlock = extractOverrideBlock(parsed.message ?? '');
 
-    expect(scriptSlice).not.toBe('');
+    expect(scriptsSlice).not.toBe('');
     expect(templateSlice).not.toBe('');
     expect(bridgeBlock).not.toBe('');
 
     // 3-way byte-equal (unconditional — no guard).
-    expect(scriptSlice).toBe(templateSlice);
-    expect(bridgeBlock).toBe(scriptSlice);
+    expect(templateSlice).toBe(scriptsSlice);
+    expect(bridgeBlock).toBe(scriptsSlice);
 
     // Prescriptive shape applied to all three.
-    for (const block of [scriptSlice, templateSlice, bridgeBlock]) {
+    for (const block of [scriptsSlice, templateSlice, bridgeBlock]) {
       expect(block).toMatch(
         /ANTHROPIC_DEFAULT_SONNET_MODEL|CLAUDE_CODE_BEDROCK_SONNET_MODEL|OMC_SUBAGENT_MODEL/,
       );
