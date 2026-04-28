@@ -67,6 +67,10 @@ The name "deep dive" naturally implies this flow: first dig deep into the proble
      2. **Config / environment / orchestration cause**
      3. **Measurement / artifact / assumption mismatch cause**
    - For brownfield: run `explore` agent to identify relevant codebase areas, store as `codebase_context` for later injection
+4.5. **Load runtime settings**:
+   - Read `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` and `./.claude/settings.json` (project overrides user)
+   - Resolve `omc.deepInterview.ambiguityThreshold` into `<resolvedThreshold>`; if it is undefined, use `0.2`
+   - Derive `<resolvedThresholdPercent>` from `<resolvedThreshold>` and substitute both placeholders throughout the remaining instructions before continuing
 5. **Initialize state** via `state_write(mode="deep-interview")`:
 
 ```json
@@ -85,7 +89,7 @@ The name "deep dive" naturally implies this flow: first dig deep into the proble
     "spec_path": null,
     "rounds": [],
     "current_ambiguity": 1.0,
-    "threshold": 0.2,
+    "threshold": <resolvedThreshold>,
     "codebase_context": null,
     "challenge_modes_used": [],
     "ontology_snapshots": []
@@ -253,7 +257,7 @@ No overrides to the interview mechanics themselves — only the 3 initialization
 
 ### Spec Generation
 
-When ambiguity ≤ threshold (default 0.2), generate the spec in **standard deep-interview format** with one addition:
+When ambiguity ≤ the resolved threshold for this run, generate the spec in **standard deep-interview format** with one addition:
 
 - All standard sections: Goal, Constraints, Non-Goals, Acceptance Criteria, Assumptions Exposed, Technical Context, Ontology, Ontology Convergence, Interview Transcript
 - **Additional section: "Trace Findings"** — summarizes the trace results (most likely explanation, per-lane critical unknowns resolved, evidence that shaped the interview)
@@ -303,7 +307,7 @@ Stage 1: Deep Dive               Stage 2: Ralplan                Stage 3: Autopi
 │ Interview (Socratic)│───>│ Architect reviews         │───>│ Phase 3: QA cycling  │
 │ 3-point injection   │    │ Critic validates          │    │ Phase 4: Validation  │
 │ Spec crystallization│    │ Loop until consensus      │    │ Phase 5: Cleanup     │
-│ Gate: ≤20% ambiguity│    │ ADR + RALPLAN-DR summary  │    │                      │
+│ Gate: ≤<resolvedThresholdPercent> ambiguity│    │ ADR + RALPLAN-DR summary  │    │                      │
 └─────────────────────┘    └───────────────────────────┘    └──────────────────────┘
 Output: spec.md            Output: consensus-plan.md        Output: working code
 ```
@@ -347,7 +351,7 @@ User: /deep-dive "Production DAG fails intermittently on the transformation step
     Q1: "What's the expected data volume range and is there a peak period?"
     Q2: "Does the DAG have memory limits configured in its resource pool?"
     Q3: "How does the retry behavior interact with the scheduler?"
-  → Interview continues until ambiguity ≤ 20%
+  → Interview continues until ambiguity ≤ <resolvedThresholdPercent>
 
 [Phase 5] Spec ready. User selects ralplan → autopilot.
   → omc-plan --consensus --direct runs on the spec
@@ -433,8 +437,10 @@ Optional settings in `.claude/settings.json`:
 ```json
 {
   "omc": {
+    "deepInterview": {
+      "ambiguityThreshold": <resolvedThreshold>
+    },
     "deepDive": {
-      "ambiguityThreshold": 0.2,
       "defaultTraceLanes": 3,
       "enableTeamMode": true,
       "sequentialFallback": true
