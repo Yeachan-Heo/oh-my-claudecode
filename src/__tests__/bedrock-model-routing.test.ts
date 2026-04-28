@@ -458,7 +458,10 @@ describe('Bedrock model routing repro', () => {
 
       // Should contain Bedrock override instruction
       expect(parsed.message).toContain('MODEL ROUTING OVERRIDE');
-      expect(parsed.message).toContain('Do NOT pass the `model` parameter');
+      expect(parsed.message).toContain('tier alias');
+      expect(parsed.message).toMatch(/\b(sonnet|opus|haiku)\b/);
+      expect(parsed.message).not.toContain('Do NOT pass the `model` parameter');
+      expect(parsed.message).not.toContain('Omit it entirely');
     });
 
     it('does NOT inject override when not on Bedrock', async () => {

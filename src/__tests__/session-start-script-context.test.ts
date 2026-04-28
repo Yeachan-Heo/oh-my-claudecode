@@ -190,7 +190,10 @@ ${'- oversized startup guidance\n'.repeat(700)}
 
     expect(output.continue).toBe(true);
     expect(context).toContain('[MODEL ROUTING OVERRIDE');
-    expect(context).toContain('Do NOT pass the `model` parameter');
+    expect(context).toContain('tier alias');
+    expect(context).toMatch(/\b(sonnet|opus|haiku)\b/);
+    expect(context).not.toContain('Do NOT pass the `model` parameter');
+    expect(context).not.toContain('Omit it entirely');
     expect(context.length).toBeLessThanOrEqual(6000);
   });
 

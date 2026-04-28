@@ -2064,9 +2064,18 @@ Please continue working on these tasks.
 
 [MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
 
-This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
-Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
-The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
+This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy such as CC Switch / LiteLLM).
+
+How to pass \`model\` on Task/Agent calls:
+- Prefer a tier alias: \`model: "sonnet"\`, \`model: "opus"\`, or \`model: "haiku"\`. OMC's pre-tool enforcer resolves these to provider-safe IDs when one of these env vars is set: \`ANTHROPIC_DEFAULT_SONNET_MODEL\` (and sibling \`ANTHROPIC_DEFAULT_OPUS_MODEL\` / \`ANTHROPIC_DEFAULT_HAIKU_MODEL\`), \`CLAUDE_CODE_BEDROCK_SONNET_MODEL\` (and sibling \`CLAUDE_CODE_BEDROCK_OPUS_MODEL\` / \`CLAUDE_CODE_BEDROCK_HAIKU_MODEL\`), or \`OMC_SUBAGENT_MODEL\`.
+- If none of those env vars are configured, the enforcer will deny the tier alias with an env-var configuration hint — set one of them in your \`settings.json\` env or shell profile.
+- The enforcer denies full provider-specific IDs and tier aliases it cannot resolve. It also denies any model ID carrying a \`[1m]\` context-window suffix (sub-agents cannot inherit \`[1m]\`).
+
+When the session model carries a \`[1m]\` suffix, passing a tier alias is REQUIRED — omitting \`model\` will be denied.
+
+When the session model has no \`[1m]\` suffix, omitting \`model\` is safe UNLESS a custom sub-agent definition pins a bare Anthropic model ID (e.g. \`model: claude-sonnet-4-6\` in agent frontmatter), in which case the enforcer will deny with tier-alias guidance. Shipped OMC agents pin tier aliases and are unaffected. Custom sub-agents should pin tier aliases (not bare Anthropic IDs) in their frontmatter.
+
+The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" applies here — subject to the resolution prerequisites above.
 
 </system-reminder>`);
     }
@@ -2242,6 +2251,14 @@ function processPreToolUse(input: HookInput): HookOutput {
     );
   }
 
+  // NOTE: DEAD CODE in production — kept only for Vitest-driven regression coverage.
+  // Production PreToolUse is wired in `hooks/hooks.json` to
+  // `scripts/pre-tool-enforcer.mjs` (NOT this bridge). This block is reachable
+  // only via `processHook('pre-tool-use', ...)` which is called from tests under
+  // src/**/__tests__/. The emitted message here is kept wording-aligned with the
+  // enforcer to prevent accidental drift, but must NOT be relied on to shape LLM
+  // behavior in production. Tracked for deletion — see the Open Questions entry
+  // at `.omc/plans/open-questions.md` under the model-routing alignment section.
   // Force-inherit: deny Task/Agent calls that carry a `model` parameter when
   // forceInherit is enabled (Bedrock, Vertex, CC Switch, etc.).
   // Claude Code's hook protocol does not support modifiedInput, so we cannot
@@ -2260,7 +2277,7 @@ function processPreToolUse(input: HookInput): HookOutput {
         // Use permissionDecision:"deny" — the only PreToolUse mechanism
         // Claude Code supports for blocking a specific tool call with
         // feedback. modifiedInput is NOT supported by the hook protocol.
-        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Do NOT pass the \`model\` parameter on ${input.toolName} calls — remove \`model\` and retry so agents inherit the parent session's model. The model "${inputModel}" is not valid for this provider.`;
+        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Pass model as a tier alias on ${input.toolName} calls: model="sonnet" | "opus" | "haiku". Requires ANTHROPIC_DEFAULT_*_MODEL, CLAUDE_CODE_BEDROCK_*_MODEL, or OMC_SUBAGENT_MODEL to be set. The model "${inputModel}" is not valid for this provider.`;
         return {
           continue: true,
           hookSpecificOutput: {
