@@ -140,6 +140,35 @@ describe('render: rate limits display priority', () => {
     expect(plain).not.toContain('spent:');
   });
 
+  it('renders Max 20x 5h/wk/sn limits when enterprise spent exists but enterprise limit is null', async () => {
+    const context = makeContext({
+      subscriptionType: 'max',
+      rateLimitTier: 'default_claude_max_20x',
+      rateLimitsResult: {
+        rateLimits: {
+          fiveHourPercent: 36,
+          weeklyPercent: 32,
+          sonnetWeeklyPercent: 8,
+          enterpriseSpentUsd: 12.34,
+          enterpriseLimitUsd: null,
+          enterpriseCurrency: 'USD',
+        },
+      },
+    });
+
+    const output = await render(context, makeConfig());
+    const plain = stripAnsi(output);
+
+    expect(plain.trim()).not.toBe('');
+    expect(plain).toContain('5h:');
+    expect(plain).toContain('36%');
+    expect(plain).toContain('wk:');
+    expect(plain).toContain('32%');
+    expect(plain).toContain('sn:');
+    expect(plain).toContain('8%');
+    expect(plain).not.toContain('spent:');
+  });
+
   it.each([
     ['zero', 0],
     ['negative', -1],
