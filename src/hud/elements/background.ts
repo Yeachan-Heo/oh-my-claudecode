@@ -4,7 +4,8 @@
  * Renders background task count display.
  */
 
-import type { BackgroundTask } from '../types.js';
+import type { BackgroundTask, HudLabels } from '../types.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 import { RESET } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
 
@@ -21,7 +22,10 @@ const MAX_CONCURRENT = 5;
  *
  * Format: bg:3/5
  */
-export function renderBackground(tasks: BackgroundTask[]): string | null {
+export function renderBackground(
+  tasks: BackgroundTask[],
+  labels: Pick<HudLabels, 'background'> = DEFAULT_HUD_LABELS,
+): string | null {
   const running = tasks.filter((t) => t.status === 'running').length;
 
   if (running === 0) {
@@ -38,7 +42,7 @@ export function renderBackground(tasks: BackgroundTask[]): string | null {
     color = GREEN; // Plenty of room
   }
 
-  return `bg:${color}${running}/${MAX_CONCURRENT}${RESET}`;
+  return `${labels.background}:${color}${running}/${MAX_CONCURRENT}${RESET}`;
 }
 
 /**
@@ -46,7 +50,10 @@ export function renderBackground(tasks: BackgroundTask[]): string | null {
  *
  * Format: bg:3/5 [explore,architect,...]
  */
-export function renderBackgroundDetailed(tasks: BackgroundTask[]): string | null {
+export function renderBackgroundDetailed(
+  tasks: BackgroundTask[],
+  labels: Pick<HudLabels, 'background'> = DEFAULT_HUD_LABELS,
+): string | null {
   const running = tasks.filter((t) => t.status === 'running');
 
   if (running.length === 0) {
@@ -75,5 +82,5 @@ export function renderBackgroundDetailed(tasks: BackgroundTask[]): string | null
   });
 
   const suffix = running.length > 3 ? ',+' + (running.length - 3) : '';
-  return `bg:${color}${running.length}/${MAX_CONCURRENT}${RESET} ${DIM}[${descriptions.join(',')}${suffix}]${RESET}`;
+  return `${labels.background}:${color}${running.length}/${MAX_CONCURRENT}${RESET} ${DIM}[${descriptions.join(',')}${suffix}]${RESET}`;
 }

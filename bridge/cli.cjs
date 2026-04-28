@@ -14091,11 +14091,68 @@ var init_mission_board = __esm({
 });
 
 // src/hud/types.ts
-var DEFAULT_ELEMENT_ORDER, DEFAULT_HUD_USAGE_POLL_INTERVAL_MS, DEFAULT_HUD_CONFIG, PRESET_CONFIGS;
+function isHudLocale(value) {
+  return value === "en" || value === "zh-CN";
+}
+function sanitizeHudLabels(labels) {
+  if (!labels || typeof labels !== "object") return {};
+  const sanitized = {};
+  for (const key of HUD_LABEL_KEYS) {
+    const value = labels[key];
+    if (typeof value === "string" && value.length > 0) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+function resolveHudLabels(locale, labels) {
+  return {
+    ...DEFAULT_HUD_LABELS,
+    ...isHudLocale(locale) ? HUD_LOCALE_LABELS[locale] : {},
+    ...sanitizeHudLabels(labels)
+  };
+}
+var DEFAULT_HUD_LABELS, HUD_LOCALE_LABELS, HUD_LABEL_KEYS, DEFAULT_ELEMENT_ORDER, DEFAULT_HUD_USAGE_POLL_INTERVAL_MS, DEFAULT_HUD_CONFIG, PRESET_CONFIGS;
 var init_types4 = __esm({
   "src/hud/types.ts"() {
     "use strict";
     init_mission_board();
+    DEFAULT_HUD_LABELS = {
+      context: "ctx",
+      tokens: "tok",
+      tool: "T",
+      agent: "A",
+      skill: "S",
+      ralph: "ralph",
+      background: "bg",
+      thinking: "thinking",
+      staged: "+",
+      modified: "!",
+      untracked: "?",
+      ahead: "\u21E1",
+      behind: "\u21E3"
+    };
+    HUD_LOCALE_LABELS = {
+      en: DEFAULT_HUD_LABELS,
+      "zh-CN": {
+        context: "\u4E0A\u4E0B\u6587",
+        tokens: "\u4EE4\u724C",
+        tool: "\u5DE5\u5177",
+        agent: "\u667A\u80FD\u4F53",
+        skill: "\u6280\u80FD",
+        ralph: "\u5FAA\u73AF",
+        background: "\u540E\u53F0",
+        thinking: "\u601D\u8003",
+        staged: "\u5DF2\u6682\u5B58",
+        modified: "\u5DF2\u4FEE\u6539",
+        untracked: "\u672A\u8DDF\u8E2A",
+        ahead: "\u9886\u5148",
+        behind: "\u843D\u540E"
+      }
+    };
+    HUD_LABEL_KEYS = Object.freeze(
+      Object.keys(DEFAULT_HUD_LABELS)
+    );
     DEFAULT_ELEMENT_ORDER = {
       line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "model", "apiKeySource", "profile"],
       main: [
@@ -14125,6 +14182,8 @@ var init_types4 = __esm({
     DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1e3;
     DEFAULT_HUD_CONFIG = {
       preset: "focused",
+      locale: "en",
+      labels: DEFAULT_HUD_LABELS,
       elements: {
         cwd: false,
         // Disabled by default for backward compatibility
@@ -14706,7 +14765,12 @@ function readHudConfig() {
           missionBoard: mergeMissionBoardConfig(
             legacyConfig?.missionBoard,
             settings.omcHud.missionBoard
-          )
+          ),
+          locale: isHudLocale(settings.omcHud.locale) ? settings.omcHud.locale : legacyConfig?.locale,
+          labels: {
+            ...sanitizeHudLabels(legacyConfig?.labels),
+            ...sanitizeHudLabels(settings.omcHud.labels)
+          }
         });
       }
     } catch (error2) {
@@ -14731,8 +14795,11 @@ function mergeWithDefaults(config2) {
     ...config2.missionBoard,
     enabled: missionBoardEnabled
   };
+  const locale = isHudLocale(config2.locale) ? config2.locale : DEFAULT_HUD_CONFIG.locale;
   return {
     preset,
+    locale,
+    labels: resolveHudLabels(locale, config2.labels),
     elements: {
       ...DEFAULT_HUD_CONFIG.elements,
       // Base defaults
@@ -43762,7 +43829,7 @@ var init_colors = __esm({
 });
 
 // src/hud/elements/ralph.ts
-function renderRalph(state, thresholds) {
+function renderRalph(state, thresholds, labels = DEFAULT_HUD_LABELS) {
   if (!state?.active) {
     return null;
   }
@@ -43777,12 +43844,13 @@ function renderRalph(state, thresholds) {
   } else {
     color = GREEN2;
   }
-  return `ralph:${color}${iteration}/${maxIterations}${RESET}`;
+  return `${labels.ralph}:${color}${iteration}/${maxIterations}${RESET}`;
 }
 var RED2, YELLOW2, GREEN2;
 var init_ralph2 = __esm({
   "src/hud/elements/ralph.ts"() {
     "use strict";
+    init_types4();
     init_colors();
     RED2 = "\x1B[31m";
     YELLOW2 = "\x1B[33m";
@@ -44312,23 +44380,24 @@ function getStableContextDisplayPercent(percent, thresholds, displayScope) {
   lastDisplayUpdatedAt = now;
   return safePercent;
 }
-function renderContext(percent, thresholds, displayScope) {
+function renderContext(percent, thresholds, displayScope, labels = DEFAULT_HUD_LABELS) {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
-  return `ctx:${color}${safePercent}%${suffix}${RESET}`;
+  return `${labels.context}:${color}${safePercent}%${suffix}${RESET}`;
 }
-function renderContextWithBar(percent, thresholds, barWidth = 10, displayScope) {
+function renderContextWithBar(percent, thresholds, barWidth = 10, displayScope, labels = DEFAULT_HUD_LABELS) {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
   const filled = Math.round(safePercent / 100 * barWidth);
   const empty = barWidth - filled;
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
   const bar = `${color}${"\u2588".repeat(filled)}${DIM3}${"\u2591".repeat(empty)}${RESET}`;
-  return `ctx:[${bar}]${color}${safePercent}%${suffix}${RESET}`;
+  return `${labels.context}:[${bar}]${color}${safePercent}%${suffix}${RESET}`;
 }
 var GREEN4, YELLOW4, RED3, DIM3, CONTEXT_DISPLAY_HYSTERESIS, CONTEXT_DISPLAY_STATE_TTL_MS, lastDisplayedPercent, lastDisplayedSeverity, lastDisplayScope, lastDisplayUpdatedAt;
 var init_context = __esm({
   "src/hud/elements/context.ts"() {
     "use strict";
+    init_types4();
     init_colors();
     GREEN4 = "\x1B[32m";
     YELLOW4 = "\x1B[33m";
@@ -44344,7 +44413,7 @@ var init_context = __esm({
 });
 
 // src/hud/elements/background.ts
-function renderBackground(tasks) {
+function renderBackground(tasks, labels = DEFAULT_HUD_LABELS) {
   const running = tasks.filter((t) => t.status === "running").length;
   if (running === 0) {
     return null;
@@ -44357,12 +44426,13 @@ function renderBackground(tasks) {
   } else {
     color = GREEN5;
   }
-  return `bg:${color}${running}/${MAX_CONCURRENT}${RESET}`;
+  return `${labels.background}:${color}${running}/${MAX_CONCURRENT}${RESET}`;
 }
 var CYAN4, GREEN5, YELLOW5, MAX_CONCURRENT;
 var init_background = __esm({
   "src/hud/elements/background.ts"() {
     "use strict";
+    init_types4();
     init_colors();
     init_string_width();
     CYAN4 = "\x1B[36m";
@@ -44602,7 +44672,7 @@ var init_permission = __esm({
 });
 
 // src/hud/elements/thinking.ts
-function renderThinking(state, format = "text") {
+function renderThinking(state, format = "text", labels = DEFAULT_HUD_LABELS) {
   if (!state?.active) return null;
   switch (format) {
     case "bubble":
@@ -44612,7 +44682,7 @@ function renderThinking(state, format = "text") {
     case "face":
       return "\u{1F914}";
     case "text":
-      return `${CYAN6}thinking${RESET}`;
+      return `${CYAN6}${labels.thinking}${RESET}`;
     default:
       return "\u{1F4AD}";
   }
@@ -44621,6 +44691,7 @@ var CYAN6;
 var init_thinking = __esm({
   "src/hud/elements/thinking.ts"() {
     "use strict";
+    init_types4();
     init_colors();
     CYAN6 = "\x1B[36m";
   }
@@ -44640,12 +44711,12 @@ var init_session = __esm({
 });
 
 // src/hud/elements/token-usage.ts
-function renderTokenUsage(usage, sessionTotalTokens) {
+function renderTokenUsage(usage, sessionTotalTokens, labels = DEFAULT_HUD_LABELS) {
   if (!usage) return null;
   const hasUsage = usage.inputTokens > 0 || usage.outputTokens > 0;
   if (!hasUsage) return null;
   const parts = [
-    `tok:i${formatTokenCount(usage.inputTokens)}/o${formatTokenCount(usage.outputTokens)}`
+    `${labels.tokens}:i${formatTokenCount(usage.inputTokens)}/o${formatTokenCount(usage.outputTokens)}`
   ];
   if (usage.reasoningTokens && usage.reasoningTokens > 0) {
     parts.push(`r${formatTokenCount(usage.reasoningTokens)}`);
@@ -44658,6 +44729,7 @@ function renderTokenUsage(usage, sessionTotalTokens) {
 var init_token_usage = __esm({
   "src/hud/elements/token-usage.ts"() {
     "use strict";
+    init_types4();
     init_formatting();
   }
 });
@@ -45011,7 +45083,7 @@ function getGitStatusCounts(cwd2) {
   statusCache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS3 });
   return result;
 }
-function renderGitStatus(cwd2) {
+function renderGitStatus(cwd2, labels = DEFAULT_HUD_LABELS) {
   const counts = getGitStatusCounts(cwd2);
   if (!counts) return null;
   const { staged, modified, untracked, ahead, behind } = counts;
@@ -45019,11 +45091,11 @@ function renderGitStatus(cwd2) {
     return null;
   }
   const parts = [];
-  if (staged > 0) parts.push(`${green("+")}${staged}`);
-  if (modified > 0) parts.push(`${red("!")}${modified}`);
-  if (untracked > 0) parts.push(`${cyan("?")}${untracked}`);
-  if (ahead > 0) parts.push(`${green("\u21E1")}${ahead}`);
-  if (behind > 0) parts.push(`${red("\u21E3")}${behind}`);
+  if (staged > 0) parts.push(`${green(labels.staged)}${staged}`);
+  if (modified > 0) parts.push(`${red(labels.modified)}${modified}`);
+  if (untracked > 0) parts.push(`${cyan(labels.untracked)}${untracked}`);
+  if (ahead > 0) parts.push(`${green(labels.ahead)}${ahead}`);
+  if (behind > 0) parts.push(`${red(labels.behind)}${behind}`);
   return parts.join(" ");
 }
 var import_node_child_process10, import_node_fs9, import_node_path13, CACHE_TTL_MS3, repoCache, branchCache, worktreeCache, statusCache;
@@ -45034,6 +45106,7 @@ var init_git = __esm({
     import_node_fs9 = require("node:fs");
     import_node_path13 = require("node:path");
     init_colors();
+    init_types4();
     CACHE_TTL_MS3 = 3e4;
     repoCache = /* @__PURE__ */ new Map();
     branchCache = /* @__PURE__ */ new Map();
@@ -45126,17 +45199,17 @@ function shouldUseAscii(format = "auto") {
   if (format === "emoji") return false;
   return process.platform === "win32" || isWSL();
 }
-function getIcons(format = "auto") {
+function getIcons(format = "auto", labels = DEFAULT_HUD_LABELS) {
   const useAscii = shouldUseAscii(format);
   return {
-    tool: useAscii ? "T:" : "\u{1F527}",
-    agent: useAscii ? "A:" : "\u{1F916}",
-    skill: useAscii ? "S:" : "\u26A1"
+    tool: useAscii ? `${labels.tool}:` : "\u{1F527}",
+    agent: useAscii ? `${labels.agent}:` : "\u{1F916}",
+    skill: useAscii ? `${labels.skill}:` : "\u26A1"
   };
 }
-function renderCallCounts(toolCalls, agentInvocations, skillUsages, format = "auto") {
+function renderCallCounts(toolCalls, agentInvocations, skillUsages, format = "auto", labels = DEFAULT_HUD_LABELS) {
   const parts = [];
-  const icons = getIcons(format);
+  const icons = getIcons(format, labels);
   if (toolCalls > 0) {
     parts.push(`${icons.tool}${toolCalls}`);
   }
@@ -45152,6 +45225,7 @@ var init_call_counts = __esm({
   "src/hud/elements/call-counts.ts"() {
     "use strict";
     init_platform();
+    init_types4();
   }
 });
 
@@ -45306,6 +45380,7 @@ function limitOutputLines(lines, maxLines) {
 }
 async function render(context, config2) {
   const { elements: enabledElements } = config2;
+  const hudLabels = config2.labels ?? DEFAULT_HUD_LABELS;
   const rendered = /* @__PURE__ */ new Map();
   const renderedDetail = /* @__PURE__ */ new Map();
   if (enabledElements.hostname) {
@@ -45329,7 +45404,7 @@ async function render(context, config2) {
     if (gitBranchElement) rendered.set("gitBranch", gitBranchElement);
   }
   if (enabledElements.gitStatus) {
-    const gitStatusElement = renderGitStatus(context.cwd);
+    const gitStatusElement = renderGitStatus(context.cwd, hudLabels);
     if (gitStatusElement) rendered.set("gitStatus", gitStatusElement);
   }
   if (enabledElements.model && context.modelName) {
@@ -45385,7 +45460,8 @@ async function render(context, config2) {
   if (enabledElements.thinking && context.thinkingState) {
     const thinking = renderThinking(
       context.thinkingState,
-      enabledElements.thinkingFormat
+      enabledElements.thinkingFormat,
+      hudLabels
     );
     if (thinking) rendered.set("thinking", thinking);
   }
@@ -45411,19 +45487,21 @@ async function render(context, config2) {
     } else if (enabledElements.showTokens === true) {
       const tokenUsage = renderTokenUsage(
         context.lastRequestTokenUsage,
-        context.sessionTotalTokens
+        context.sessionTotalTokens,
+        hudLabels
       );
       if (tokenUsage) rendered.set("tokens", tokenUsage);
     }
   } else if (enabledElements.showTokens === true) {
     const tokenUsage = renderTokenUsage(
       context.lastRequestTokenUsage,
-      context.sessionTotalTokens
+      context.sessionTotalTokens,
+      hudLabels
     );
     if (tokenUsage) rendered.set("tokens", tokenUsage);
   }
   if (enabledElements.ralph && context.ralph) {
-    const ralph = renderRalph(context.ralph, config2.thresholds);
+    const ralph = renderRalph(context.ralph, config2.thresholds, hudLabels);
     if (ralph) rendered.set("ralph", ralph);
   }
   if (enabledElements.autopilot && context.autopilot) {
@@ -45451,11 +45529,13 @@ async function render(context, config2) {
       context.contextPercent,
       config2.thresholds,
       10,
-      context.contextDisplayScope
+      context.contextDisplayScope,
+      hudLabels
     ) : renderContext(
       context.contextPercent,
       config2.thresholds,
-      context.contextDisplayScope
+      context.contextDisplayScope,
+      hudLabels
     );
     if (ctx) rendered.set("contextBar", ctx);
   }
@@ -45474,7 +45554,7 @@ async function render(context, config2) {
     }
   }
   if (enabledElements.backgroundTasks) {
-    const bg = renderBackground(context.backgroundTasks);
+    const bg = renderBackground(context.backgroundTasks, hudLabels);
     if (bg) rendered.set("background", bg);
   }
   const showCounts = enabledElements.showCallCounts ?? true;
@@ -45483,7 +45563,8 @@ async function render(context, config2) {
       context.toolCallCount,
       context.agentCallCount,
       context.skillCallCount,
-      enabledElements.callCountsFormat ?? "auto"
+      enabledElements.callCountsFormat ?? "auto",
+      hudLabels
     );
     if (counts) rendered.set("callCounts", counts);
   }

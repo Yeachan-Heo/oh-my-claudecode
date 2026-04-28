@@ -455,6 +455,93 @@ export type ModelFormat = 'short' | 'versioned' | 'full';
 
 export type CallCountsFormat = 'auto' | 'emoji' | 'ascii';
 
+export type HudLocale = 'en' | 'zh-CN';
+
+export interface HudLabels {
+  context: string;
+  tokens: string;
+  tool: string;
+  agent: string;
+  skill: string;
+  ralph: string;
+  background: string;
+  thinking: string;
+  staged: string;
+  modified: string;
+  untracked: string;
+  ahead: string;
+  behind: string;
+}
+
+export const DEFAULT_HUD_LABELS: HudLabels = {
+  context: 'ctx',
+  tokens: 'tok',
+  tool: 'T',
+  agent: 'A',
+  skill: 'S',
+  ralph: 'ralph',
+  background: 'bg',
+  thinking: 'thinking',
+  staged: '+',
+  modified: '!',
+  untracked: '?',
+  ahead: '⇡',
+  behind: '⇣',
+};
+
+export const HUD_LOCALE_LABELS: Record<HudLocale, HudLabels> = {
+  en: DEFAULT_HUD_LABELS,
+  'zh-CN': {
+    context: '上下文',
+    tokens: '令牌',
+    tool: '工具',
+    agent: '智能体',
+    skill: '技能',
+    ralph: '循环',
+    background: '后台',
+    thinking: '思考',
+    staged: '已暂存',
+    modified: '已修改',
+    untracked: '未跟踪',
+    ahead: '领先',
+    behind: '落后',
+  },
+};
+
+export const HUD_LABEL_KEYS = Object.freeze(
+  Object.keys(DEFAULT_HUD_LABELS) as Array<keyof HudLabels>,
+);
+
+export function isHudLocale(value: unknown): value is HudLocale {
+  return value === 'en' || value === 'zh-CN';
+}
+
+export function sanitizeHudLabels(
+  labels: Partial<Record<keyof HudLabels, unknown>> | undefined,
+): Partial<HudLabels> {
+  if (!labels || typeof labels !== 'object') return {};
+
+  const sanitized: Partial<HudLabels> = {};
+  for (const key of HUD_LABEL_KEYS) {
+    const value = labels[key];
+    if (typeof value === 'string' && value.length > 0) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+export function resolveHudLabels(
+  locale?: unknown,
+  labels?: Partial<Record<keyof HudLabels, unknown>>,
+): HudLabels {
+  return {
+    ...DEFAULT_HUD_LABELS,
+    ...(isHudLocale(locale) ? HUD_LOCALE_LABELS[locale] : {}),
+    ...sanitizeHudLabels(labels),
+  };
+}
+
 export interface HudElementConfig {
   cwd: boolean;              // Show working directory
   cwdFormat: CwdFormat;      // Path display format
@@ -557,6 +644,10 @@ export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
 
 export interface HudConfig {
   preset: HudPreset;
+  /** Optional HUD-label locale preset. Unsupported values are ignored. */
+  locale?: HudLocale;
+  /** Resolved HUD-only labels. Omitted configs fall back to DEFAULT_HUD_LABELS at render boundaries. */
+  labels?: HudLabels;
   elements: HudElementConfig;
   thresholds: HudThresholds;
   staleTaskThresholdMinutes: number; // Default 30
@@ -581,6 +672,8 @@ export const DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1000;
 
 export const DEFAULT_HUD_CONFIG: HudConfig = {
   preset: 'focused',
+  locale: 'en',
+  labels: DEFAULT_HUD_LABELS,
   elements: {
     cwd: false,               // Disabled by default for backward compatibility
     cwdFormat: 'relative',

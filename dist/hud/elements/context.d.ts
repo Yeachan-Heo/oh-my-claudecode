@@ -3,7 +3,7 @@
  *
  * Renders context window usage display.
  */
-import type { HudThresholds } from '../types.js';
+import type { HudLabels, HudThresholds } from '../types.js';
 /**
  * Reset cached context display state.
  * Useful for test isolation and fresh render sessions.
@@ -19,11 +19,11 @@ export declare function getStableContextDisplayPercent(percent: number, threshol
  *
  * Format: ctx:67%
  */
-export declare function renderContext(percent: number, thresholds: HudThresholds, displayScope?: string | null): string | null;
+export declare function renderContext(percent: number, thresholds: HudThresholds, displayScope?: string | null, labels?: Pick<HudLabels, 'context'>): string | null;
 /**
  * Render context window with visual bar.
  *
  * Format: ctx:[████░░░░░░]67%
  */
-export declare function renderContextWithBar(percent: number, thresholds: HudThresholds, barWidth?: number, displayScope?: string | null): string | null;
+export declare function renderContextWithBar(percent: number, thresholds: HudThresholds, barWidth?: number, displayScope?: string | null, labels?: Pick<HudLabels, 'context'>): string | null;
 //# sourceMappingURL=context.d.ts.map

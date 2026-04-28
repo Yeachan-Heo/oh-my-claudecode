@@ -348,6 +348,28 @@ export type CwdFormat = 'relative' | 'absolute' | 'folder';
  */
 export type ModelFormat = 'short' | 'versioned' | 'full';
 export type CallCountsFormat = 'auto' | 'emoji' | 'ascii';
+export type HudLocale = 'en' | 'zh-CN';
+export interface HudLabels {
+    context: string;
+    tokens: string;
+    tool: string;
+    agent: string;
+    skill: string;
+    ralph: string;
+    background: string;
+    thinking: string;
+    staged: string;
+    modified: string;
+    untracked: string;
+    ahead: string;
+    behind: string;
+}
+export declare const DEFAULT_HUD_LABELS: HudLabels;
+export declare const HUD_LOCALE_LABELS: Record<HudLocale, HudLabels>;
+export declare const HUD_LABEL_KEYS: readonly (keyof HudLabels)[];
+export declare function isHudLocale(value: unknown): value is HudLocale;
+export declare function sanitizeHudLabels(labels: Partial<Record<keyof HudLabels, unknown>> | undefined): Partial<HudLabels>;
+export declare function resolveHudLabels(locale?: unknown, labels?: Partial<Record<keyof HudLabels, unknown>>): HudLabels;
 export interface HudElementConfig {
     cwd: boolean;
     cwdFormat: CwdFormat;
@@ -430,6 +452,10 @@ export interface LayoutConfig {
 export declare const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig>;
 export interface HudConfig {
     preset: HudPreset;
+    /** Optional HUD-label locale preset. Unsupported values are ignored. */
+    locale?: HudLocale;
+    /** Resolved HUD-only labels. Omitted configs fall back to DEFAULT_HUD_LABELS at render boundaries. */
+    labels?: HudLabels;
     elements: HudElementConfig;
     thresholds: HudThresholds;
     staleTaskThresholdMinutes: number;

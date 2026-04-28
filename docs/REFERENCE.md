@@ -905,12 +905,29 @@ Configure HUD elements in `~/.claude/settings.json`:
 | `autopilot`  | Show autopilot status                                                                             | `true`  |
 | `showTokens` | Show transcript-derived token usage (`tok:i1.2k/o340`, plus `r...` reasoning and `s...` session total when reliable) | `false` |
 
-Additional `omcHud` layout options (top-level):
+Additional `omcHud` layout and label options (top-level):
 
 | Option     | Description                                                                       | Default    |
 | ---------- | --------------------------------------------------------------------------------- | ---------- |
 | `maxWidth` | Maximum HUD line width (terminal columns)                                         | unset      |
 | `wrapMode` | `truncate` (ellipsis) or `wrap` (break at `\|` boundaries) when `maxWidth` is set | `truncate` |
+| `locale`   | HUD label preset. Supported values: `en`, `zh-CN`                                 | `en`       |
+| `labels`   | Per-label HUD text overrides; supported keys only                                 | unset      |
+
+`locale` and `labels` affect only HUD labels. English remains the default, unsupported locale values and unknown label keys are ignored, and explicit `labels` override the locale preset. Supported label keys are `context`, `tokens`, `tool`, `agent`, `skill`, `ralph`, `background`, `thinking`, `staged`, `modified`, `untracked`, `ahead`, and `behind`.
+
+Example:
+
+```json
+{
+  "omcHud": {
+    "locale": "zh-CN",
+    "labels": {
+      "context": "CTX"
+    }
+  }
+}
+```
 
 Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode`
 

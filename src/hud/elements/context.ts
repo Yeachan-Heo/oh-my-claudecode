@@ -4,7 +4,8 @@
  * Renders context window usage display.
  */
 
-import type { HudThresholds } from '../types.js';
+import type { HudLabels, HudThresholds } from '../types.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 import { RESET } from '../colors.js';
 
 const GREEN = '\x1b[32m';
@@ -128,11 +129,12 @@ export function renderContext(
   percent: number,
   thresholds: HudThresholds,
   displayScope?: string | null,
+  labels: Pick<HudLabels, 'context'> = DEFAULT_HUD_LABELS,
 ): string | null {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
 
-  return `ctx:${color}${safePercent}%${suffix}${RESET}`;
+  return `${labels.context}:${color}${safePercent}%${suffix}${RESET}`;
 }
 
 /**
@@ -145,6 +147,7 @@ export function renderContextWithBar(
   thresholds: HudThresholds,
   barWidth: number = 10,
   displayScope?: string | null,
+  labels: Pick<HudLabels, 'context'> = DEFAULT_HUD_LABELS,
 ): string | null {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
   const filled = Math.round((safePercent / 100) * barWidth);
@@ -152,5 +155,5 @@ export function renderContextWithBar(
 
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
   const bar = `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
-  return `ctx:[${bar}]${color}${safePercent}%${suffix}${RESET}`;
+  return `${labels.context}:[${bar}]${color}${safePercent}%${suffix}${RESET}`;
 }

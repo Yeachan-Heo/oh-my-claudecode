@@ -7,6 +7,7 @@ import { execSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { dim, cyan, green, red } from '../colors.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 const CACHE_TTL_MS = 30_000;
 const repoCache = new Map();
 const branchCache = new Map();
@@ -233,7 +234,7 @@ export function getGitStatusCounts(cwd) {
  * @param cwd - Working directory
  * @returns Formatted status or null if clean or not in a git repo
  */
-export function renderGitStatus(cwd) {
+export function renderGitStatus(cwd, labels = DEFAULT_HUD_LABELS) {
     const counts = getGitStatusCounts(cwd);
     if (!counts)
         return null;
@@ -243,15 +244,15 @@ export function renderGitStatus(cwd) {
     }
     const parts = [];
     if (staged > 0)
-        parts.push(`${green('+')}${staged}`);
+        parts.push(`${green(labels.staged)}${staged}`);
     if (modified > 0)
-        parts.push(`${red('!')}${modified}`);
+        parts.push(`${red(labels.modified)}${modified}`);
     if (untracked > 0)
-        parts.push(`${cyan('?')}${untracked}`);
+        parts.push(`${cyan(labels.untracked)}${untracked}`);
     if (ahead > 0)
-        parts.push(`${green('⇡')}${ahead}`);
+        parts.push(`${green(labels.ahead)}${ahead}`);
     if (behind > 0)
-        parts.push(`${red('⇣')}${behind}`);
+        parts.push(`${red(labels.behind)}${behind}`);
     return parts.join(' ');
 }
 //# sourceMappingURL=git.js.map

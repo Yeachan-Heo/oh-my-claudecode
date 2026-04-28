@@ -143,5 +143,23 @@ describe('renderGitStatus', () => {
         expect(result).toContain('⇣');
         expect(result).toContain('4');
     });
+    it('uses configured status labels without changing counts', () => {
+        mockedExecSync.mockReturnValue(('## main...origin/main [ahead 2, behind 4]\n' +
+            'A  staged.ts\n' +
+            ' M modified.ts\n' +
+            '?? new.ts\n'));
+        const result = renderGitStatus('/tmp', {
+            staged: '已暂存',
+            modified: '已修改',
+            untracked: '未跟踪',
+            ahead: '领先',
+            behind: '落后',
+        });
+        expect(result).toContain('已暂存');
+        expect(result).toContain('已修改');
+        expect(result).toContain('未跟踪');
+        expect(result).toContain('领先');
+        expect(result).toContain('落后');
+    });
 });
 //# sourceMappingURL=git-status.test.js.map

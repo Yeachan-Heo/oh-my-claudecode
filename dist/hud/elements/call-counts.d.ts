@@ -7,7 +7,7 @@
  * Format: 🔧42 🤖7 ⚡3  (emoji)
  * Format: T:42 A:7 S:3   (ASCII fallback / explicit override)
  */
-import type { CallCountsFormat } from '../types.js';
+import type { CallCountsFormat, HudLabels } from '../types.js';
 /**
  * Render call counts badge.
  *
@@ -18,5 +18,5 @@ import type { CallCountsFormat } from '../types.js';
  * @param agentInvocations - Total Task/proxy_Task calls seen in transcript
  * @param skillUsages - Total Skill/proxy_Skill calls seen in transcript
  */
-export declare function renderCallCounts(toolCalls: number, agentInvocations: number, skillUsages: number, format?: CallCountsFormat): string | null;
+export declare function renderCallCounts(toolCalls: number, agentInvocations: number, skillUsages: number, format?: CallCountsFormat, labels?: Pick<HudLabels, 'tool' | 'agent' | 'skill'>): string | null;
 //# sourceMappingURL=call-counts.d.ts.map

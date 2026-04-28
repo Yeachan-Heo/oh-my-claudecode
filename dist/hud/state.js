@@ -9,7 +9,7 @@ import { join } from "path";
 import { getClaudeConfigDir } from "../utils/config-dir.js";
 import { validateWorkingDirectory, getOmcRoot, ensureSessionStateDir, resolveSessionStatePath, } from "../lib/worktree-paths.js";
 import { atomicWriteFileSync, atomicWriteJsonSync, } from "../lib/atomic-write.js";
-import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from "./types.js";
+import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS, isHudLocale, resolveHudLabels, sanitizeHudLabels, } from "./types.js";
 import { DEFAULT_MISSION_BOARD_CONFIG } from "./mission-board.js";
 import { cleanupStaleBackgroundTasks, markOrphanedTasksAsStale, } from "./background-cleanup.js";
 // ============================================================================
@@ -248,6 +248,13 @@ export function readHudConfig() {
                     thresholds: mergeThresholds(legacyConfig?.thresholds, settings.omcHud.thresholds),
                     contextLimitWarning: mergeContextLimitWarning(legacyConfig?.contextLimitWarning, settings.omcHud.contextLimitWarning),
                     missionBoard: mergeMissionBoardConfig(legacyConfig?.missionBoard, settings.omcHud.missionBoard),
+                    locale: isHudLocale(settings.omcHud.locale)
+                        ? settings.omcHud.locale
+                        : legacyConfig?.locale,
+                    labels: {
+                        ...sanitizeHudLabels(legacyConfig?.labels),
+                        ...sanitizeHudLabels(settings.omcHud.labels),
+                    },
                 });
             }
         }
@@ -276,8 +283,13 @@ function mergeWithDefaults(config) {
         ...config.missionBoard,
         enabled: missionBoardEnabled,
     };
+    const locale = isHudLocale(config.locale)
+        ? config.locale
+        : DEFAULT_HUD_CONFIG.locale;
     return {
         preset,
+        locale,
+        labels: resolveHudLabels(locale, config.labels),
         elements: {
             ...DEFAULT_HUD_CONFIG.elements, // Base defaults
             ...presetElements, // Preset overrides
@@ -326,6 +338,11 @@ export function writeHudConfig(config) {
             thresholds: mergeThresholds(legacyConfig?.thresholds, config.thresholds),
             contextLimitWarning: mergeContextLimitWarning(legacyConfig?.contextLimitWarning, config.contextLimitWarning),
             missionBoard: mergeMissionBoardConfig(legacyConfig?.missionBoard, config.missionBoard),
+            locale: isHudLocale(config.locale) ? config.locale : legacyConfig?.locale,
+            labels: {
+                ...sanitizeHudLabels(legacyConfig?.labels),
+                ...sanitizeHudLabels(config.labels),
+            },
         });
         settings.omcHud = mergedConfig;
         atomicWriteFileSync(settingsFile, JSON.stringify(settings, null, 2));

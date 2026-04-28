@@ -25,8 +25,16 @@ import type {
   HudElementConfig,
   HudThresholds,
   ContextLimitWarningConfig,
+  HudLabels,
+  HudLocale,
 } from "./types.js";
-import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from "./types.js";
+import {
+  DEFAULT_HUD_CONFIG,
+  PRESET_CONFIGS,
+  isHudLocale,
+  resolveHudLabels,
+  sanitizeHudLabels,
+} from "./types.js";
 import { DEFAULT_MISSION_BOARD_CONFIG } from "./mission-board.js";
 import {
   cleanupStaleBackgroundTasks,
@@ -173,8 +181,10 @@ function ensureHudStateDir(directory?: string, sessionId?: string): void {
 
 type HudConfigInput = Omit<
   Partial<HudConfig>,
-  "elements" | "thresholds" | "contextLimitWarning" | "missionBoard"
+  "elements" | "thresholds" | "contextLimitWarning" | "missionBoard" | "labels"
 > & {
+  locale?: unknown;
+  labels?: Partial<Record<keyof HudLabels, unknown>>;
   elements?: Partial<HudElementConfig>;
   thresholds?: Partial<HudThresholds>;
   contextLimitWarning?: Partial<ContextLimitWarningConfig>;
@@ -360,6 +370,13 @@ export function readHudConfig(): HudConfig {
             legacyConfig?.missionBoard,
             settings.omcHud.missionBoard,
           ),
+          locale: isHudLocale(settings.omcHud.locale)
+            ? settings.omcHud.locale
+            : legacyConfig?.locale,
+          labels: {
+            ...sanitizeHudLabels(legacyConfig?.labels),
+            ...sanitizeHudLabels(settings.omcHud.labels),
+          },
         });
       }
     } catch (error) {
@@ -395,8 +412,14 @@ function mergeWithDefaults(config: HudConfigInput): HudConfig {
     enabled: missionBoardEnabled,
   };
 
+  const locale: HudLocale | undefined = isHudLocale(config.locale)
+    ? config.locale
+    : DEFAULT_HUD_CONFIG.locale;
+
   return {
     preset,
+    locale,
+    labels: resolveHudLabels(locale, config.labels),
     elements: {
       ...DEFAULT_HUD_CONFIG.elements, // Base defaults
       ...presetElements, // Preset overrides
@@ -456,6 +479,11 @@ export function writeHudConfig(config: HudConfig): boolean {
         legacyConfig?.missionBoard,
         config.missionBoard,
       ),
+      locale: isHudLocale(config.locale) ? config.locale : legacyConfig?.locale,
+      labels: {
+        ...sanitizeHudLabels(legacyConfig?.labels),
+        ...sanitizeHudLabels(config.labels),
+      },
     });
 
     settings.omcHud = mergedConfig;

@@ -4,7 +4,8 @@
  * Renders extended thinking mode indicator with configurable format.
  */
 
-import type { ThinkingState, ThinkingFormat } from '../types.js';
+import type { ThinkingState, ThinkingFormat, HudLabels } from '../types.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 import { RESET } from '../colors.js';
 
 const CYAN = '\x1b[36m';
@@ -18,7 +19,8 @@ const CYAN = '\x1b[36m';
  */
 export function renderThinking(
   state: ThinkingState | null,
-  format: ThinkingFormat = 'text'
+  format: ThinkingFormat = 'text',
+  labels: Pick<HudLabels, 'thinking'> = DEFAULT_HUD_LABELS,
 ): string | null {
   if (!state?.active) return null;
 
@@ -30,7 +32,7 @@ export function renderThinking(
     case 'face':
       return '🤔';
     case 'text':
-      return `${CYAN}thinking${RESET}`;
+      return `${CYAN}${labels.thinking}${RESET}`;
     default:
       return '💭';
   }

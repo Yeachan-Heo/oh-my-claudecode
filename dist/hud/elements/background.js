@@ -3,6 +3,7 @@
  *
  * Renders background task count display.
  */
+import { DEFAULT_HUD_LABELS } from '../types.js';
 import { RESET } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
 const CYAN = '\x1b[36m';
@@ -16,7 +17,7 @@ const MAX_CONCURRENT = 5;
  *
  * Format: bg:3/5
  */
-export function renderBackground(tasks) {
+export function renderBackground(tasks, labels = DEFAULT_HUD_LABELS) {
     const running = tasks.filter((t) => t.status === 'running').length;
     if (running === 0) {
         return null;
@@ -32,14 +33,14 @@ export function renderBackground(tasks) {
     else {
         color = GREEN; // Plenty of room
     }
-    return `bg:${color}${running}/${MAX_CONCURRENT}${RESET}`;
+    return `${labels.background}:${color}${running}/${MAX_CONCURRENT}${RESET}`;
 }
 /**
  * Render background tasks with descriptions (for full mode).
  *
  * Format: bg:3/5 [explore,architect,...]
  */
-export function renderBackgroundDetailed(tasks) {
+export function renderBackgroundDetailed(tasks, labels = DEFAULT_HUD_LABELS) {
     const running = tasks.filter((t) => t.status === 'running');
     if (running.length === 0) {
         return null;
@@ -66,6 +67,6 @@ export function renderBackgroundDetailed(tasks) {
         return truncateToWidth(t.description, 8, '');
     });
     const suffix = running.length > 3 ? ',+' + (running.length - 3) : '';
-    return `bg:${color}${running.length}/${MAX_CONCURRENT}${RESET} ${DIM}[${descriptions.join(',')}${suffix}]${RESET}`;
+    return `${labels.background}:${color}${running.length}/${MAX_CONCURRENT}${RESET} ${DIM}[${descriptions.join(',')}${suffix}]${RESET}`;
 }
 //# sourceMappingURL=background.js.map

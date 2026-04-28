@@ -3,6 +3,7 @@
  *
  * Renders Ralph loop iteration display.
  */
+import { DEFAULT_HUD_LABELS } from '../types.js';
 import { RESET } from '../colors.js';
 // ANSI color codes for inline use
 const RED = '\x1b[31m';
@@ -14,7 +15,7 @@ const GREEN = '\x1b[32m';
  *
  * Format: ralph:3/10
  */
-export function renderRalph(state, thresholds) {
+export function renderRalph(state, thresholds, labels = DEFAULT_HUD_LABELS) {
     if (!state?.active) {
         return null;
     }
@@ -31,6 +32,6 @@ export function renderRalph(state, thresholds) {
     else {
         color = GREEN;
     }
-    return `ralph:${color}${iteration}/${maxIterations}${RESET}`;
+    return `${labels.ralph}:${color}${iteration}/${maxIterations}${RESET}`;
 }
 //# sourceMappingURL=ralph.js.map

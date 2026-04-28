@@ -12,7 +12,8 @@
 // multi-byte emoji correctly, causing HUD layout corruption.
 // WSL terminals may also lack emoji support.
 import { isWSL } from '../../platform/index.js';
-import type { CallCountsFormat } from '../types.js';
+import type { CallCountsFormat, HudLabels } from '../types.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 
 function shouldUseAscii(format: CallCountsFormat = 'auto'): boolean {
   if (format === 'ascii') return true;
@@ -20,12 +21,15 @@ function shouldUseAscii(format: CallCountsFormat = 'auto'): boolean {
   return process.platform === 'win32' || isWSL();
 }
 
-function getIcons(format: CallCountsFormat = 'auto') {
+function getIcons(
+  format: CallCountsFormat = 'auto',
+  labels: Pick<HudLabels, 'tool' | 'agent' | 'skill'> = DEFAULT_HUD_LABELS,
+) {
   const useAscii = shouldUseAscii(format);
   return {
-    tool: useAscii ? 'T:' : '\u{1F527}',
-    agent: useAscii ? 'A:' : '\u{1F916}',
-    skill: useAscii ? 'S:' : '\u26A1',
+    tool: useAscii ? `${labels.tool}:` : '\u{1F527}',
+    agent: useAscii ? `${labels.agent}:` : '\u{1F916}',
+    skill: useAscii ? `${labels.skill}:` : '\u26A1',
   };
 }
 
@@ -44,9 +48,10 @@ export function renderCallCounts(
   agentInvocations: number,
   skillUsages: number,
   format: CallCountsFormat = 'auto',
+  labels: Pick<HudLabels, 'tool' | 'agent' | 'skill'> = DEFAULT_HUD_LABELS,
 ): string | null {
   const parts: string[] = [];
-  const icons = getIcons(format);
+  const icons = getIcons(format, labels);
 
   if (toolCalls > 0) {
     parts.push(`${icons.tool}${toolCalls}`);
