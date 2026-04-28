@@ -335,13 +335,22 @@ const SESSION_END_MODE_STATE_FILES = [
   'skill-active-state.json',
 ];
 
-const MODEL_ROUTING_OVERRIDE_MESSAGE = `<system-reminder>
+export const MODEL_ROUTING_OVERRIDE_MESSAGE = `<system-reminder>
 
 [MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
 
-This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
-Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
-The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
+This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy such as CC Switch / LiteLLM).
+
+How to pass \`model\` on Task/Agent calls:
+- Prefer a tier alias: \`model: "sonnet"\`, \`model: "opus"\`, or \`model: "haiku"\`. OMC's pre-tool enforcer resolves these to provider-safe IDs when one of these env vars is set: \`ANTHROPIC_DEFAULT_SONNET_MODEL\` (and sibling \`ANTHROPIC_DEFAULT_OPUS_MODEL\` / \`ANTHROPIC_DEFAULT_HAIKU_MODEL\`), \`CLAUDE_CODE_BEDROCK_SONNET_MODEL\` (and sibling \`CLAUDE_CODE_BEDROCK_OPUS_MODEL\` / \`CLAUDE_CODE_BEDROCK_HAIKU_MODEL\`), or \`OMC_SUBAGENT_MODEL\`.
+- If none of those env vars are configured, the enforcer will deny the tier alias with an env-var configuration hint — set one of them in your \`settings.json\` env or shell profile.
+- The enforcer denies full provider-specific IDs and tier aliases it cannot resolve. It also denies any model ID carrying a \`[1m]\` context-window suffix (sub-agents cannot inherit \`[1m]\`).
+
+When the session model carries a \`[1m]\` suffix, passing a tier alias is REQUIRED — omitting \`model\` will be denied.
+
+When the session model has no \`[1m]\` suffix, omitting \`model\` is safe UNLESS a custom sub-agent definition pins a bare Anthropic model ID (e.g. \`model: claude-sonnet-4-6\` in agent frontmatter), in which case the enforcer will deny with tier-alias guidance. Shipped OMC agents pin tier aliases and are unaffected. Custom sub-agents should pin tier aliases (not bare Anthropic IDs) in their frontmatter.
+
+The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" applies here — subject to the resolution prerequisites above.
 
 </system-reminder>`;
 
