@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpa
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { OmcPaths } from "../../lib/worktree-paths.js";
+import { parseYamlMetadata } from "./parser.js";
 import { expandTriggers } from "./transliteration-map.js";
 // Re-export constants
 export const USER_SKILLS_DIR = join(homedir(), ".claude", "skills", "omc-learned");
@@ -78,7 +79,9 @@ function getSkillMetadataCache(projectRoot) {
             const parsed = parseSkillFile(content);
             if (!parsed)
                 continue;
-            const triggers = parsed.metadata.triggers ?? [];
+            const triggers = (parsed.metadata.triggers ?? [])
+                .map((trigger) => trigger.trim())
+                .filter(Boolean);
             if (triggers.length === 0)
                 continue;
             const name = parsed.metadata.name || basename(candidate.path, SKILL_EXTENSION);
@@ -347,114 +350,6 @@ export function parseSkillFile(content) {
             errors: [`YAML parse error: ${e}`],
         };
     }
-}
-/**
- * Simple YAML parser for skill frontmatter.
- * Handles: id, name, description, triggers, tags, matching, model, agent
- */
-function parseYamlMetadata(yamlContent) {
-    const lines = yamlContent.split("\n");
-    const metadata = {};
-    let i = 0;
-    while (i < lines.length) {
-        const line = lines[i];
-        const colonIndex = line.indexOf(":");
-        if (colonIndex === -1) {
-            i++;
-            continue;
-        }
-        const key = line.slice(0, colonIndex).trim();
-        const rawValue = line.slice(colonIndex + 1).trim();
-        switch (key) {
-            case "id":
-                metadata.id = parseStringValue(rawValue);
-                break;
-            case "name":
-                metadata.name = parseStringValue(rawValue);
-                break;
-            case "description":
-                metadata.description = parseStringValue(rawValue);
-                break;
-            case "model":
-                metadata.model = parseStringValue(rawValue);
-                break;
-            case "agent":
-                metadata.agent = parseStringValue(rawValue);
-                break;
-            case "matching":
-                metadata.matching = parseStringValue(rawValue);
-                break;
-            case "triggers":
-            case "tags": {
-                const { value, consumed } = parseArrayValue(rawValue, lines, i);
-                if (key === "triggers") {
-                    metadata.triggers = Array.isArray(value)
-                        ? value
-                        : value
-                            ? [value]
-                            : [];
-                }
-                else {
-                    metadata.tags = Array.isArray(value) ? value : value ? [value] : [];
-                }
-                i += consumed - 1;
-                break;
-            }
-        }
-        i++;
-    }
-    return metadata;
-}
-function parseStringValue(value) {
-    if (!value)
-        return "";
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-        return value.slice(1, -1);
-    }
-    return value;
-}
-function parseArrayValue(rawValue, lines, currentIndex) {
-    // Inline array: ["a", "b"]
-    if (rawValue.startsWith("[")) {
-        const endIdx = rawValue.lastIndexOf("]");
-        if (endIdx === -1)
-            return { value: [], consumed: 1 };
-        const content = rawValue.slice(1, endIdx).trim();
-        if (!content)
-            return { value: [], consumed: 1 };
-        const items = content
-            .split(",")
-            .map((s) => parseStringValue(s.trim()))
-            .filter(Boolean);
-        return { value: items, consumed: 1 };
-    }
-    // Multi-line array
-    if (!rawValue || rawValue === "") {
-        const items = [];
-        let consumed = 1;
-        for (let j = currentIndex + 1; j < lines.length; j++) {
-            const nextLine = lines[j];
-            const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
-            if (arrayMatch) {
-                const itemValue = parseStringValue(arrayMatch[1].trim());
-                if (itemValue)
-                    items.push(itemValue);
-                consumed++;
-            }
-            else if (nextLine.trim() === "") {
-                consumed++;
-            }
-            else {
-                break;
-            }
-        }
-        if (items.length > 0) {
-            return { value: items, consumed };
-        }
-    }
-    // Single value
-    return { value: parseStringValue(rawValue), consumed: 1 };
 }
 // =============================================================================
 // Matching

@@ -36,39 +36,28 @@ export declare const omcToolsServer: import("@anthropic-ai/claude-agent-sdk").Mc
  * Only includes tools that are enabled (not disabled via OMC_DISABLE_TOOLS).
  */
 export declare const omcToolNames: string[];
+interface ToolNameFilterOptions {
+    includeLsp?: boolean;
+    includeAst?: boolean;
+    includePython?: boolean;
+    includeSkills?: boolean;
+    includeState?: boolean;
+    includeNotepad?: boolean;
+    includeMemory?: boolean;
+    includeTrace?: boolean;
+    includeInterop?: boolean;
+    includeSharedMemory?: boolean;
+    includeDeepinit?: boolean;
+    includeWiki?: boolean;
+}
 /**
  * Get tool names filtered by category.
  * Uses category metadata instead of string heuristics.
  */
-export declare function getOmcToolNames(options?: {
-    includeLsp?: boolean;
-    includeAst?: boolean;
-    includePython?: boolean;
-    includeSkills?: boolean;
-    includeState?: boolean;
-    includeNotepad?: boolean;
-    includeMemory?: boolean;
-    includeTrace?: boolean;
-    includeInterop?: boolean;
-    includeSharedMemory?: boolean;
-    includeDeepinit?: boolean;
-    includeWiki?: boolean;
-}): string[];
+export declare function getOmcToolNames(options?: ToolNameFilterOptions): string[];
 /**
  * Test-only helper for deterministic category-filter verification independent of env startup state.
  */
-export declare function _getAllToolNamesForTests(options?: {
-    includeLsp?: boolean;
-    includeAst?: boolean;
-    includePython?: boolean;
-    includeSkills?: boolean;
-    includeState?: boolean;
-    includeNotepad?: boolean;
-    includeMemory?: boolean;
-    includeTrace?: boolean;
-    includeInterop?: boolean;
-    includeSharedMemory?: boolean;
-    includeDeepinit?: boolean;
-    includeWiki?: boolean;
-}): string[];
+export declare function _getAllToolNamesForTests(options?: ToolNameFilterOptions): string[];
+export {};
 //# sourceMappingURL=omc-tools-server.d.ts.map

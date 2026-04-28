@@ -55,6 +55,26 @@ describe('processSessionEnd mode state cleanup (issue #1427)', () => {
         });
         expect(fs.existsSync(sessionStatePath)).toBe(false);
     });
+    it('removes the SessionStart marker for a normally ending session', async () => {
+        const sessionId = 'pid-2816-ended';
+        const sessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+        fs.mkdirSync(sessionDir, { recursive: true });
+        const markerPath = path.join(sessionDir, 'session-started.json');
+        fs.writeFileSync(markerPath, JSON.stringify({
+            session_id: sessionId,
+            started_at: '2026-04-20T00:00:00.000Z',
+            ppid: process.pid,
+        }), 'utf-8');
+        await processSessionEnd({
+            session_id: sessionId,
+            transcript_path: transcriptPath,
+            cwd: tmpDir,
+            permission_mode: 'default',
+            hook_event_name: 'SessionEnd',
+            reason: 'clear',
+        });
+        expect(fs.existsSync(markerPath)).toBe(false);
+    });
     it('does not remove another session\'s session-scoped state', async () => {
         const endingSessionId = 'pid-1427-ending';
         const otherSessionId = 'pid-1427-other';

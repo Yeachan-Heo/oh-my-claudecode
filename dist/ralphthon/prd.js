@@ -152,9 +152,15 @@ export function getRalphthonPrdStatus(prd) {
         nextHardeningTask,
     };
 }
-// ============================================================================
-// Task Operations
-// ============================================================================
+function incrementRetry(task, maxRetries) {
+    task.retries += 1;
+    const skipped = task.retries >= maxRetries;
+    if (skipped) {
+        task.status = "skipped";
+        task.notes = `Skipped after ${task.retries} failed attempts`;
+    }
+    return { retries: task.retries, skipped };
+}
 /**
  * Update a story task's status
  */
@@ -186,14 +192,9 @@ export function incrementTaskRetry(directory, storyId, taskId, maxRetries) {
     const task = story.tasks.find((t) => t.id === taskId);
     if (!task)
         return { retries: 0, skipped: false };
-    task.retries += 1;
-    const skipped = task.retries >= maxRetries;
-    if (skipped) {
-        task.status = "skipped";
-        task.notes = `Skipped after ${task.retries} failed attempts`;
-    }
+    const result = incrementRetry(task, maxRetries);
     writeRalphthonPrd(directory, prd);
-    return { retries: task.retries, skipped };
+    return result;
 }
 /**
  * Update a hardening task's status
@@ -220,14 +221,9 @@ export function incrementHardeningTaskRetry(directory, taskId, maxRetries) {
     const task = prd.hardening.find((t) => t.id === taskId);
     if (!task)
         return { retries: 0, skipped: false };
-    task.retries += 1;
-    const skipped = task.retries >= maxRetries;
-    if (skipped) {
-        task.status = "skipped";
-        task.notes = `Skipped after ${task.retries} failed attempts`;
-    }
+    const result = incrementRetry(task, maxRetries);
     writeRalphthonPrd(directory, prd);
-    return { retries: task.retries, skipped };
+    return result;
 }
 /**
  * Add hardening tasks to the PRD for a new wave

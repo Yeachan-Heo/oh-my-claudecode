@@ -25,6 +25,48 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
         expect(result).not.toBeNull();
         expect(result.enterpriseSpentUsd).toBeCloseTo(3333.91, 2);
     });
+    it('keeps used_credits as enterprise cost when subscription metadata is unknown', () => {
+        const response = {
+            ...baseResponse,
+            five_hour: { utilization: 0 },
+            extra_usage: {
+                is_enabled: true,
+                used_credits: 333391,
+                monthly_limit: null,
+                currency: 'USD',
+            },
+        };
+        const result = parseUsageResponse(response, {
+            subscriptionType: null,
+            rateLimitTier: null,
+        });
+        expect(result).not.toBeNull();
+        expect(result.enterpriseSpentUsd).toBeCloseTo(3333.91, 2);
+        expect(result.enterpriseLimitUsd).toBeNull();
+        expect(result.extraUsageSpentUsd).toBeUndefined();
+    });
+    it('keeps used_credits as enterprise cost for explicit enterprise subscriptions', () => {
+        const response = {
+            ...baseResponse,
+            five_hour: { utilization: 0 },
+            extra_usage: {
+                is_enabled: true,
+                used_credits: 333391,
+                monthly_limit: 500000,
+                currency: 'USD',
+            },
+        };
+        const result = parseUsageResponse(response, {
+            subscriptionType: 'enterprise',
+            rateLimitTier: 'default_claude_zero',
+        });
+        expect(result).not.toBeNull();
+        expect(result.enterpriseSpentUsd).toBeCloseTo(3333.91, 2);
+        expect(result.enterpriseLimitUsd).toBeCloseTo(5000, 2);
+        expect(result.enterpriseUtilization).toBeCloseTo(66.6782, 4);
+        expect(result.extraUsageSpentUsd).toBeUndefined();
+        expect(result.extraUsageLimitUsd).toBeUndefined();
+    });
     it('sets enterpriseLimitUsd to null when monthly_limit is null', () => {
         const response = {
             ...baseResponse,

@@ -374,6 +374,44 @@ describe('Builtin Skills', () => {
             expect(raw).not.toContain('"ambiguityThreshold": 0.2,');
             expect(raw).not.toContain('ambiguity ≤ 20%');
         });
+        it('loads deep-dive ambiguityThreshold from deep-interview settings before state init and updates threshold copy', () => {
+            const profileDir = mkdtempSync(join(tmpdir(), 'omc-deep-dive-profile-'));
+            const projectDir = mkdtempSync(join(tmpdir(), 'omc-deep-dive-project-'));
+            tempDirs.push(profileDir, projectDir);
+            process.env.CLAUDE_CONFIG_DIR = profileDir;
+            writeFileSync(join(profileDir, 'settings.json'), JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.18 } } }));
+            mkdirSync(join(projectDir, '.claude'), { recursive: true });
+            writeFileSync(join(projectDir, '.claude', 'settings.json'), JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.11 } } }));
+            process.chdir(projectDir);
+            clearSkillsCache();
+            const skill = getBuiltinSkill('deep-dive');
+            expect(skill).toBeDefined();
+            const t = skill.template;
+            expect(t).toContain('Load runtime settings');
+            expect(t).toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `0.11`');
+            expect(t).toContain('"threshold": 0.11,');
+            expect(t).toContain('When ambiguity ≤ the resolved threshold for this run');
+            expect(t).toContain('Gate: ≤11% ambiguity');
+            expect(t).toContain('Interview continues until ambiguity ≤ 11%');
+            expect(t.indexOf('Load runtime settings')).toBeLessThan(t.indexOf('Initialize state') ?? Number.POSITIVE_INFINITY);
+            expect(t).not.toContain('"threshold": 0.2,');
+            expect(t).not.toContain('omc.deepDive.ambiguityThreshold');
+        });
+        it('ships config-aware deep-dive SKILL.md using the deep-interview threshold namespace', () => {
+            const raw = readFileSync(join(originalCwd, 'skills', 'deep-dive', 'SKILL.md'), 'utf-8');
+            expect(raw).toContain('Load runtime settings');
+            expect(raw).toContain('Read `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` and `./.claude/settings.json`');
+            expect(raw).toContain('Resolve `omc.deepInterview.ambiguityThreshold` into `<resolvedThreshold>`');
+            expect(raw).toContain('"threshold": <resolvedThreshold>,');
+            expect(raw).toContain('Gate: ≤<resolvedThresholdPercent> ambiguity');
+            expect(raw).toContain('Interview continues until ambiguity ≤ <resolvedThresholdPercent>');
+            expect(raw).toContain('"deepInterview":');
+            expect(raw).toContain('"ambiguityThreshold": <resolvedThreshold>');
+            expect(raw).not.toContain('omc.deepDive.ambiguityThreshold');
+            expect(raw).not.toContain('"threshold": 0.2,');
+            expect(raw).not.toContain('Gate: ≤20% ambiguity');
+            expect(raw).not.toContain('ambiguity ≤ 20%');
+        });
         it('renders deep-interview summary-gate hardening while preserving AskUserQuestion transport', () => {
             const skill = getBuiltinSkill('deep-interview');
             expect(skill).toBeDefined();

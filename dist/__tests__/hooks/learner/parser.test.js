@@ -147,6 +147,36 @@ Content.`;
             expect(result.valid).toBe(false);
             expect(result.errors).toContain("Missing required field: triggers");
         });
+        it("should fail validation when triggers is an empty scalar", () => {
+            const content = `---
+name: Test Skill
+description: Test description
+triggers:
+---
+
+Content.`;
+            const result = parseSkillFile(content);
+            expect(result.valid).toBe(false);
+            expect(result.errors).toContain("Missing required field: triggers");
+            expect(result.metadata.triggers).toEqual([]);
+        });
+        it("should ignore blank trigger entries while preserving valid triggers", () => {
+            const content = `---
+name: Test Skill
+description: Test description
+triggers:
+  -
+  - ""
+  - "   "
+  - valid
+  - " spaced "
+---
+
+Content.`;
+            const result = parseSkillFile(content);
+            expect(result.valid).toBe(true);
+            expect(result.metadata.triggers).toEqual(["valid", "spaced"]);
+        });
     });
     describe("edge cases", () => {
         it("should handle inline triggers array", () => {

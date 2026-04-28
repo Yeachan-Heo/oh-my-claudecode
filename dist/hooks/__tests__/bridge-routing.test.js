@@ -472,9 +472,11 @@ $ ultrawork search the codebase`,
                 });
                 expect(result.continue).toBe(true);
                 const ralphPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
-                const prdPath = join(tempDir, '.omc', 'prd.json');
+                const prdPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'prd.json');
+                const legacyPrdPath = join(tempDir, '.omc', 'prd.json');
                 expect(existsSync(ralphPath)).toBe(true);
                 expect(existsSync(prdPath)).toBe(true);
+                expect(existsSync(legacyPrdPath)).toBe(false);
                 const ralphState = JSON.parse(readFileSync(ralphPath, 'utf-8'));
                 expect(ralphState.prompt).toBe('ralph fix the startup gate in src/hooks/bridge.ts and src/hooks/ralph/loop.ts by removing legacy bypass handling, preserving critic flag support, keeping linked ultrawork activation intact, adding focused regression coverage for keyword and skill entrypoints, confirming the startup PRD scaffold is still created, and avoiding unrelated orchestration behavior changes anywhere else in this worktree');
                 expect(ralphState.prd_mode).toBe(true);
@@ -824,6 +826,134 @@ $ ultrawork search the codebase`,
             };
             const result = await processHook('session-start', input);
             expect(result.continue).toBe(true);
+        });
+        it('writes a durable started marker on session-start', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-marker-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'session-start-marker';
+                const result = await processHook('session-start', {
+                    sessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const markerPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'session-started.json');
+                expect(existsSync(markerPath)).toBe(true);
+                const marker = JSON.parse(readFileSync(markerPath, 'utf-8'));
+                expect(marker.session_id).toBe(sessionId);
+                expect(typeof marker.started_at).toBe('string');
+                expect(marker.ppid).toBeUndefined();
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('reconciles a prior session only with durable abandonment evidence', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-reconcile-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const staleSessionId = 'stale-durable-abandoned-session';
+                const currentSessionId = 'current-reconcile-session';
+                const staleSessionDir = join(tempDir, '.omc', 'state', 'sessions', staleSessionId);
+                mkdirSync(staleSessionDir, { recursive: true });
+                writeFileSync(join(staleSessionDir, 'ralph-state.json'), JSON.stringify({
+                    active: true,
+                    session_id: staleSessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                }));
+                writeFileSync(join(staleSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: staleSessionId,
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    ppid: 999999,
+                    boot_id: 'definitely-not-the-current-boot-id',
+                }));
+                const missionStatePath = join(tempDir, '.omc', 'state', 'mission-state.json');
+                const legacyRalphStatePath = join(tempDir, '.omc', 'state', 'ralph-state.json');
+                const otherLegacyAutopilotStatePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+                writeFileSync(legacyRalphStatePath, JSON.stringify({
+                    active: true,
+                    started_at: '2026-04-19T00:00:00.000Z',
+                }));
+                writeFileSync(otherLegacyAutopilotStatePath, JSON.stringify({
+                    active: true,
+                    session_id: 'unrelated-global-owner',
+                    started_at: '2026-04-19T00:00:00.000Z',
+                }));
+                writeFileSync(missionStatePath, JSON.stringify({
+                    missions: [
+                        { id: `ralph-${staleSessionId}`, source: 'session' },
+                        { id: 'team-still-owned', source: 'team' },
+                    ],
+                }));
+                const result = await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(existsSync(join(staleSessionDir, 'ralph-state.json'))).toBe(false);
+                expect(existsSync(join(staleSessionDir, 'session-started.json'))).toBe(false);
+                const missionState = JSON.parse(readFileSync(missionStatePath, 'utf-8'));
+                expect(missionState.missions).toEqual([{ id: 'team-still-owned', source: 'team' }]);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
+                expect(existsSync(legacyRalphStatePath)).toBe(true);
+                expect(existsSync(otherLegacyAutopilotStatePath)).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('leaves prior session state untouched when only same-boot hook metadata is present', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-live-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const priorSessionId = 'prior-same-boot-session';
+                const currentSessionId = 'current-same-boot-session';
+                const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+                mkdirSync(priorSessionDir, { recursive: true });
+                writeFileSync(join(priorSessionDir, 'ultrawork-state.json'), JSON.stringify({ active: true, session_id: priorSessionId }));
+                writeFileSync(join(priorSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: priorSessionId,
+                    started_at: new Date().toISOString(),
+                    ppid: 999999,
+                    transcript_path: join(tempDir, '.claude', 'projects', 'prior.jsonl'),
+                    source: 'startup',
+                    model: 'claude-sonnet-4-6',
+                }));
+                await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(existsSync(join(priorSessionDir, 'ultrawork-state.json'))).toBe(true);
+                expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('leaves prior session state untouched when the marker ownership is ambiguous', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-session-start-ambiguous-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const priorSessionId = 'prior-ambiguous-session';
+                const currentSessionId = 'current-ambiguous-session';
+                const priorSessionDir = join(tempDir, '.omc', 'state', 'sessions', priorSessionId);
+                mkdirSync(priorSessionDir, { recursive: true });
+                writeFileSync(join(priorSessionDir, 'team-state.json'), JSON.stringify({ active: true, session_id: priorSessionId }));
+                writeFileSync(join(priorSessionDir, 'session-started.json'), JSON.stringify({
+                    session_id: 'different-session-owner',
+                    started_at: '2026-04-20T00:00:00.000Z',
+                    ppid: 999999,
+                }));
+                await processHook('session-start', {
+                    sessionId: currentSessionId,
+                    directory: tempDir,
+                });
+                expect(existsSync(join(priorSessionDir, 'team-state.json'))).toBe(true);
+                expect(existsSync(join(priorSessionDir, 'session-started.json'))).toBe(true);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
         });
         it('should restore canonical team context when coarse team-state drifts away', async () => {
             const tempDir = process.cwd();

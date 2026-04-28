@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, createRalphLoopHook, readRalphState, findPrdPath, initPrd, readPrd, writePrd, } from '../hooks/ralph/index.js';
+import { detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, createRalphLoopHook, readRalphState, findPrdPath, getSessionPrdPath, initPrd, readPrd, writePrd, } from '../hooks/ralph/index.js';
 import { getArchitectVerificationPrompt, startVerification, detectArchitectApproval, detectArchitectRejection, } from '../hooks/ralph/verifier.js';
 describe('Ralph PRD-Mandatory', () => {
     let testDir;
@@ -205,6 +205,16 @@ describe('Ralph PRD-Mandatory', () => {
             expect(state.prd_mode).toBe(true);
             expect(state.prompt).toBe('test prompt');
             expect(findPrdPath(testDir)).not.toBeNull();
+        });
+        it('creates separate startup PRDs for two sessions in the same project', () => {
+            const hook = createRalphLoopHook(testDir);
+            expect(hook.startLoop('session-a', 'implement feature A')).toBe(true);
+            expect(hook.startLoop('session-b', 'implement feature B')).toBe(true);
+            expect(findPrdPath(testDir, 'session-a')).toBe(getSessionPrdPath(testDir, 'session-a'));
+            expect(findPrdPath(testDir, 'session-b')).toBe(getSessionPrdPath(testDir, 'session-b'));
+            expect(readPrd(testDir, 'session-a')?.description).toBe('implement feature A');
+            expect(readPrd(testDir, 'session-b')?.description).toBe('implement feature B');
+            expect(readPrd(testDir, 'session-a')?.description).not.toBe(readPrd(testDir, 'session-b')?.description);
         });
         it('should refuse to start when an existing prd.json is invalid', () => {
             const invalidPrdPath = join(testDir, 'prd.json');

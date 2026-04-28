@@ -11,29 +11,42 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { getOmcRoot, clearWorktreeCache } from '../lib/worktree-paths.js';
 const NODE = process.execPath;
 const REPO_ROOT = resolve(join(__dirname, '..', '..'));
 const SESSION_START = join(REPO_ROOT, 'scripts', 'session-start.mjs');
+const HOOK_RUNNER = join(REPO_ROOT, 'scripts', 'run.cjs');
 const STOP_HOOK = join(REPO_ROOT, 'scripts', 'persistent-mode.cjs');
 const PRE_TOOL_ENFORCER = join(REPO_ROOT, 'scripts', 'pre-tool-enforcer.mjs');
-/** Run a hook script synchronously and return the parsed JSON output. */
-function runHook(scriptPath, input, extraEnv = {}) {
+function buildHookEnv(extraEnv = {}) {
     const env = {};
     for (const [k, v] of Object.entries(process.env)) {
         if (v !== undefined)
             env[k] = v;
     }
-    // Remove OMC_STATE_DIR from parent env so only extraEnv controls it
+    // Remove OMC_STATE_DIR from parent env so only extraEnv controls it.
     delete env.OMC_STATE_DIR;
-    Object.assign(env, { CLAUDE_PLUGIN_ROOT: REPO_ROOT }, extraEnv);
+    return { ...env, CLAUDE_PLUGIN_ROOT: REPO_ROOT, ...extraEnv };
+}
+/** Run a hook script synchronously and return the parsed JSON output. */
+function runHook(scriptPath, input, extraEnv = {}) {
     const raw = execFileSync(NODE, [scriptPath], {
         input: JSON.stringify(input),
         encoding: 'utf-8',
-        env,
+        env: buildHookEnv(extraEnv),
+        timeout: 15000,
+    }).trim();
+    return JSON.parse(raw);
+}
+/** Run a hook script through the installed hook runner path and return parsed JSON output. */
+function runHookViaRunner(scriptPath, input, extraEnv = {}) {
+    const raw = execFileSync(NODE, [HOOK_RUNNER, scriptPath], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+        env: buildHookEnv(extraEnv),
         timeout: 15000,
     }).trim();
     return JSON.parse(raw);
@@ -58,6 +71,25 @@ function getCentralizedOmcRoot(projectDir, stateDir) {
         }
         clearWorktreeCache();
     }
+}
+function writeWorkflowTombstone(omcRoot, sessionId, mode) {
+    const sessionDir = join(omcRoot, 'state', 'sessions', sessionId);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, 'skill-active-state.json'), JSON.stringify({
+        version: 2,
+        active_skills: {
+            [mode]: {
+                skill_name: mode,
+                started_at: '2026-04-26T00:00:00.000Z',
+                completed_at: new Date().toISOString(),
+                session_id: sessionId,
+                mode_state_path: `${mode}-state.json`,
+                initialized_mode: mode,
+                initialized_state_path: join(omcRoot, 'state', `${mode}-state.json`),
+                initialized_session_state_path: join(sessionDir, `${mode}-state.json`),
+            },
+        },
+    }, null, 2));
 }
 describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
     let tempDir;
@@ -99,6 +131,88 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
         const context = output
             .hookSpecificOutput?.additionalContext ?? '';
         expect(context).toContain('[RALPH LOOP RESTORED]');
+    });
+    it('session-start ignores tombstoned stale ralph restore state after cancel', () => {
+        const sessionId = 'test-session-tombstoned-ralph';
+        const omcRoot = join(fakeProject, '.omc');
+        const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(join(stateDir, 'ralph-state.json'), JSON.stringify({
+            active: true,
+            session_id: sessionId,
+            prompt: 'Tombstoned task must not restore',
+            iteration: 12,
+            max_iterations: 100,
+        }));
+        writeWorkflowTombstone(omcRoot, sessionId, 'ralph');
+        const output = runHook(SESSION_START, {
+            hook_event_name: 'SessionStart',
+            session_id: sessionId,
+            cwd: fakeProject,
+        });
+        const context = output
+            .hookSpecificOutput?.additionalContext ?? '';
+        expect(context).not.toContain('[RALPH LOOP RESTORED]');
+        expect(context).not.toContain('Tombstoned task must not restore');
+    });
+    it('session-start ignores tombstoned stale ultrawork restore state after cancel', () => {
+        const sessionId = 'test-session-tombstoned-ultrawork';
+        const omcRoot = join(fakeProject, '.omc');
+        const stateDir = join(omcRoot, 'state', 'sessions', sessionId);
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(join(stateDir, 'ultrawork-state.json'), JSON.stringify({
+            active: true,
+            session_id: sessionId,
+            started_at: '2026-04-26T00:00:00.000Z',
+            original_prompt: 'Tombstoned ultrawork must not restore',
+        }));
+        writeWorkflowTombstone(omcRoot, sessionId, 'ultrawork');
+        const output = runHook(SESSION_START, {
+            hook_event_name: 'SessionStart',
+            session_id: sessionId,
+            cwd: fakeProject,
+        });
+        const context = output
+            .hookSpecificOutput?.additionalContext ?? '';
+        expect(context).not.toContain('[ULTRAWORK MODE RESTORED]');
+        expect(context).not.toContain('Tombstoned ultrawork must not restore');
+    });
+    it('session-start through run.cjs does not clean prior active state without durable abandonment evidence', () => {
+        const priorSessionId = 'prior-runner-session';
+        const currentSessionId = 'current-runner-session';
+        const priorStateDir = join(fakeProject, '.omc', 'state', 'sessions', priorSessionId);
+        mkdirSync(priorStateDir, { recursive: true });
+        writeFileSync(join(priorStateDir, 'ralph-state.json'), JSON.stringify({
+            active: true,
+            session_id: priorSessionId,
+            prompt: 'Runner-created prior session state must survive',
+            iteration: 1,
+            max_iterations: 5,
+        }));
+        runHookViaRunner(SESSION_START, {
+            hook_event_name: 'SessionStart',
+            session_id: priorSessionId,
+            transcript_path: join(fakeProject, '.claude', 'projects', 'prior.jsonl'),
+            source: 'startup',
+            model: 'claude-sonnet-4-6',
+            cwd: fakeProject,
+        });
+        const markerPath = join(priorStateDir, 'session-started.json');
+        expect(existsSync(markerPath)).toBe(true);
+        const marker = JSON.parse(readFileSync(markerPath, 'utf-8'));
+        expect(marker.session_id).toBe(priorSessionId);
+        expect(marker.ppid).toBeUndefined();
+        runHookViaRunner(SESSION_START, {
+            hook_event_name: 'SessionStart',
+            session_id: currentSessionId,
+            transcript_path: join(fakeProject, '.claude', 'projects', 'current.jsonl'),
+            source: 'startup',
+            model: 'claude-sonnet-4-6',
+            cwd: fakeProject,
+        });
+        expect(existsSync(join(priorStateDir, 'ralph-state.json'))).toBe(true);
+        expect(existsSync(markerPath)).toBe(true);
+        expect(existsSync(join(fakeProject, '.omc', 'state', 'sessions', currentSessionId, 'session-started.json'))).toBe(true);
     });
     // ────────────────────────────────────────────────────────────────────────────
     // 2. Custom OMC_STATE_DIR — session-start

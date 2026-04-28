@@ -28,6 +28,12 @@ export interface SkillMetadata {
     usageCount?: number;
     /** Tags for categorization */
     tags?: string[];
+    /** Trigger matching strategy for skill injection */
+    matching?: 'exact' | 'fuzzy';
+    /** Preferred model hint for skill execution */
+    model?: string;
+    /** Preferred agent hint for skill execution */
+    agent?: string;
 }
 /**
  * Parsed skill file with content.

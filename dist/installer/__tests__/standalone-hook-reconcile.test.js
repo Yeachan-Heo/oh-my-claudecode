@@ -58,6 +58,8 @@ describe('install() standalone hook reconciliation', () => {
         expect(writtenSettings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command).toBe(`node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`);
         expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(`node "${join(testClaudeDir, 'hooks', 'session-start.mjs').replace(/\\/g, '/')}"`);
         expect(writtenSettings.statusLine?.command).toContain(`${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
+        expect(writtenSettings.statusLine?.command).toContain('omc-hud-cache.sh');
+        expect(readFileSync(join(testClaudeDir, 'hud', 'omc-hud-cache.sh'), 'utf-8')).toContain('HUD cached statusLine launcher');
         expect(readFileSync(join(testClaudeDir, 'hud', 'omc-hud.mjs'), 'utf-8')).toContain('const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);');
         expect(readFileSync(join(testClaudeDir, 'hud', 'lib', 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');
         expect(readFileSync(join(testClaudeDir, 'hooks', 'lib', 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');

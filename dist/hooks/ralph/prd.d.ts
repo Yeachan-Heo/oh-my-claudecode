@@ -71,17 +71,28 @@ export declare function getPrdPath(directory: string): string;
  */
 export declare function getOmcPrdPath(directory: string): string;
 /**
- * Find prd.json in a directory (checks both root and .omc)
+ * Get the session-scoped transient PRD path.
  */
-export declare function findPrdPath(directory: string): string | null;
+export declare function getSessionPrdPath(directory: string, sessionId: string): string;
+/**
+ * Get the legacy state-manager PRD path used by older builds.
+ */
+export declare function getLegacyStatePrdPath(directory: string): string;
+/**
+ * Find prd.json in a directory.
+ *
+ * With a session ID, active PRD state is read from the session-scoped path
+ * first, then legacy project-level paths are treated as migration inputs.
+ */
+export declare function findPrdPath(directory: string, sessionId?: string): string | null;
 /**
  * Read PRD from disk
  */
-export declare function readPrd(directory: string): PRD | null;
+export declare function readPrd(directory: string, sessionId?: string): PRD | null;
 /**
  * Write PRD to disk
  */
-export declare function writePrd(directory: string, prd: PRD): boolean;
+export declare function writePrd(directory: string, prd: PRD, sessionId?: string): boolean;
 /**
  * Get the status of a PRD
  */
@@ -89,23 +100,23 @@ export declare function getPrdStatus(prd: PRD): PRDStatus;
 /**
  * Mark a story as complete (passes: true)
  */
-export declare function markStoryComplete(directory: string, storyId: string, notes?: string): boolean;
+export declare function markStoryComplete(directory: string, storyId: string, notes?: string, sessionId?: string): boolean;
 /**
  * Mark a story as incomplete (passes: false)
  */
-export declare function markStoryIncomplete(directory: string, storyId: string, notes?: string): boolean;
+export declare function markStoryIncomplete(directory: string, storyId: string, notes?: string, sessionId?: string): boolean;
 /**
  * Mark a story as architect-verified after reviewer approval
  */
-export declare function markStoryArchitectVerified(directory: string, storyId: string, notes?: string): boolean;
+export declare function markStoryArchitectVerified(directory: string, storyId: string, notes?: string, sessionId?: string): boolean;
 /**
  * Get a specific story by ID
  */
-export declare function getStory(directory: string, storyId: string): UserStory | null;
+export declare function getStory(directory: string, storyId: string, sessionId?: string): UserStory | null;
 /**
  * Get the next incomplete story (highest priority)
  */
-export declare function getNextStory(directory: string): UserStory | null;
+export declare function getNextStory(directory: string, sessionId?: string): UserStory | null;
 /**
  * Input type for creating user stories (priority is optional)
  */
@@ -123,13 +134,13 @@ export declare function createSimplePrd(project: string, branchName: string, tas
 /**
  * Initialize a PRD in a directory
  */
-export declare function initPrd(directory: string, project: string, branchName: string, description: string, stories?: UserStoryInput[]): boolean;
+export declare function initPrd(directory: string, project: string, branchName: string, description: string, stories?: UserStoryInput[], sessionId?: string): boolean;
 /**
  * Ensure Ralph startup has a valid PRD.json to work from.
  * - Missing PRD -> create scaffold
  * - Invalid PRD -> fail clearly
  */
-export declare function ensurePrdForStartup(directory: string, project: string, branchName: string, description: string, stories?: UserStoryInput[]): EnsurePrdForStartupResult;
+export declare function ensurePrdForStartup(directory: string, project: string, branchName: string, description: string, stories?: UserStoryInput[], sessionId?: string): EnsurePrdForStartupResult;
 /**
  * Format PRD status as a string for display
  */
@@ -145,5 +156,5 @@ export declare function formatPrd(prd: PRD): string;
 /**
  * Format next story prompt for injection into ralph
  */
-export declare function formatNextStoryPrompt(story: UserStory): string;
+export declare function formatNextStoryPrompt(story: UserStory, prdPath?: string): string;
 //# sourceMappingURL=prd.d.ts.map

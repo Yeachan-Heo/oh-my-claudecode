@@ -12,8 +12,8 @@
  * - notes: Optional notes from implementation
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { dirname, join } from 'path';
+import { ensureSessionStateDir, getOmcRoot, getSessionStateDir } from '../../lib/worktree-paths.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -102,9 +102,30 @@ export function getOmcPrdPath(directory) {
     return join(getOmcRoot(directory), PRD_FILENAME);
 }
 /**
- * Find prd.json in a directory (checks both root and .omc)
+ * Get the session-scoped transient PRD path.
  */
-export function findPrdPath(directory) {
+export function getSessionPrdPath(directory, sessionId) {
+    return join(getSessionStateDir(sessionId, directory), PRD_FILENAME);
+}
+/**
+ * Get the legacy state-manager PRD path used by older builds.
+ */
+export function getLegacyStatePrdPath(directory) {
+    return join(getOmcRoot(directory), 'state', PRD_FILENAME);
+}
+/**
+ * Find prd.json in a directory.
+ *
+ * With a session ID, active PRD state is read from the session-scoped path
+ * first, then legacy project-level paths are treated as migration inputs.
+ */
+export function findPrdPath(directory, sessionId) {
+    if (sessionId) {
+        const sessionPath = getSessionPrdPath(directory, sessionId);
+        if (existsSync(sessionPath)) {
+            return sessionPath;
+        }
+    }
     const rootPath = getPrdPath(directory);
     if (existsSync(rootPath)) {
         return rootPath;
@@ -113,13 +134,17 @@ export function findPrdPath(directory) {
     if (existsSync(omcPath)) {
         return omcPath;
     }
+    const legacyStatePath = getLegacyStatePrdPath(directory);
+    if (existsSync(legacyStatePath)) {
+        return legacyStatePath;
+    }
     return null;
 }
 /**
  * Read PRD from disk
  */
-export function readPrd(directory) {
-    const prdPath = findPrdPath(directory);
+export function readPrd(directory, sessionId) {
+    const prdPath = findPrdPath(directory, sessionId);
     if (!prdPath) {
         return null;
     }
@@ -128,22 +153,24 @@ export function readPrd(directory) {
 /**
  * Write PRD to disk
  */
-export function writePrd(directory, prd) {
-    // Prefer writing to existing location, or .omc by default
-    let prdPath = findPrdPath(directory);
-    if (!prdPath) {
-        const omcDir = getOmcRoot(directory);
-        if (!existsSync(omcDir)) {
-            try {
-                mkdirSync(omcDir, { recursive: true });
-            }
-            catch {
-                return false;
-            }
+export function writePrd(directory, prd, sessionId) {
+    let prdPath;
+    if (sessionId) {
+        try {
+            ensureSessionStateDir(sessionId, directory);
         }
-        prdPath = getOmcPrdPath(directory);
+        catch {
+            return false;
+        }
+        prdPath = getSessionPrdPath(directory, sessionId);
+    }
+    else {
+        // Backward compatibility for direct callers without a session ID:
+        // prefer writing to an existing legacy location, or .omc by default.
+        prdPath = findPrdPath(directory) ?? getOmcPrdPath(directory);
     }
     try {
+        mkdirSync(dirname(prdPath), { recursive: true });
         writeFileSync(prdPath, JSON.stringify(prd, null, 2));
         return true;
     }
@@ -175,8 +202,8 @@ export function getPrdStatus(prd) {
 /**
  * Mark a story as complete (passes: true)
  */
-export function markStoryComplete(directory, storyId, notes) {
-    const prd = readPrd(directory);
+export function markStoryComplete(directory, storyId, notes, sessionId) {
+    const prd = readPrd(directory, sessionId);
     if (!prd) {
         return false;
     }
@@ -189,13 +216,13 @@ export function markStoryComplete(directory, storyId, notes) {
     if (notes) {
         story.notes = notes;
     }
-    return writePrd(directory, prd);
+    return writePrd(directory, prd, sessionId);
 }
 /**
  * Mark a story as incomplete (passes: false)
  */
-export function markStoryIncomplete(directory, storyId, notes) {
-    const prd = readPrd(directory);
+export function markStoryIncomplete(directory, storyId, notes, sessionId) {
+    const prd = readPrd(directory, sessionId);
     if (!prd) {
         return false;
     }
@@ -208,13 +235,13 @@ export function markStoryIncomplete(directory, storyId, notes) {
     if (notes) {
         story.notes = notes;
     }
-    return writePrd(directory, prd);
+    return writePrd(directory, prd, sessionId);
 }
 /**
  * Mark a story as architect-verified after reviewer approval
  */
-export function markStoryArchitectVerified(directory, storyId, notes) {
-    const prd = readPrd(directory);
+export function markStoryArchitectVerified(directory, storyId, notes, sessionId) {
+    const prd = readPrd(directory, sessionId);
     if (!prd) {
         return false;
     }
@@ -226,13 +253,13 @@ export function markStoryArchitectVerified(directory, storyId, notes) {
     if (notes) {
         story.notes = notes;
     }
-    return writePrd(directory, prd);
+    return writePrd(directory, prd, sessionId);
 }
 /**
  * Get a specific story by ID
  */
-export function getStory(directory, storyId) {
-    const prd = readPrd(directory);
+export function getStory(directory, storyId, sessionId) {
+    const prd = readPrd(directory, sessionId);
     if (!prd) {
         return null;
     }
@@ -241,8 +268,8 @@ export function getStory(directory, storyId) {
 /**
  * Get the next incomplete story (highest priority)
  */
-export function getNextStory(directory) {
-    const prd = readPrd(directory);
+export function getNextStory(directory, sessionId) {
+    const prd = readPrd(directory, sessionId);
     if (!prd) {
         return null;
     }
@@ -287,23 +314,23 @@ export function createSimplePrd(project, branchName, taskDescription) {
 /**
  * Initialize a PRD in a directory
  */
-export function initPrd(directory, project, branchName, description, stories) {
+export function initPrd(directory, project, branchName, description, stories, sessionId) {
     const prd = stories
         ? createPrd(project, branchName, description, stories)
         : createSimplePrd(project, branchName, description);
-    return writePrd(directory, prd);
+    return writePrd(directory, prd, sessionId);
 }
 /**
  * Ensure Ralph startup has a valid PRD.json to work from.
  * - Missing PRD -> create scaffold
  * - Invalid PRD -> fail clearly
  */
-export function ensurePrdForStartup(directory, project, branchName, description, stories) {
-    const existingPath = findPrdPath(directory);
+export function ensurePrdForStartup(directory, project, branchName, description, stories, sessionId) {
+    const existingPath = findPrdPath(directory, sessionId);
     if (!existingPath) {
-        const created = initPrd(directory, project, branchName, description, stories);
-        const createdPath = findPrdPath(directory);
-        const prd = created ? readPrd(directory) : null;
+        const created = initPrd(directory, project, branchName, description, stories, sessionId);
+        const createdPath = findPrdPath(directory, sessionId);
+        const prd = created ? readPrd(directory, sessionId) : null;
         if (!created || !createdPath || !prd) {
             return {
                 ok: false,
@@ -338,6 +365,25 @@ export function ensurePrdForStartup(directory, project, branchName, description,
             path: existingPath,
             error: `${existingPath} must contain at least one user story for Ralph to start.`
         };
+    }
+    if (sessionId) {
+        const sessionPath = getSessionPrdPath(directory, sessionId);
+        if (existingPath !== sessionPath) {
+            if (!writePrd(directory, parsed.prd, sessionId)) {
+                return {
+                    ok: false,
+                    created: false,
+                    path: existingPath,
+                    error: `Ralph found ${existingPath}, but failed to migrate it to session-scoped ${sessionPath}.`
+                };
+            }
+            return {
+                ok: true,
+                created: false,
+                path: sessionPath,
+                prd: parsed.prd
+            };
+        }
     }
     return {
         ok: true,
@@ -420,7 +466,7 @@ export function formatPrd(prd) {
 /**
  * Format next story prompt for injection into ralph
  */
-export function formatNextStoryPrompt(story) {
+export function formatNextStoryPrompt(story, prdPath) {
     return `<current-story>
 
 ## Current Story: ${story.id} - ${story.title}
@@ -430,11 +476,11 @@ ${story.description}
 **Acceptance Criteria:**
 ${story.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
-**Instructions:**
+${prdPath ? `**Active PRD file:** ${prdPath}\n\n` : ''}**Instructions:**
 1. Implement this story completely
 2. Verify ALL acceptance criteria are met
 3. Run quality checks (tests, typecheck, lint)
-4. When complete, mark story as passes: true in prd.json
+4. When complete, mark story as passes: true in the active PRD file
 5. If ALL stories are done, run \`/oh-my-claudecode:cancel\` to cleanly exit ralph mode and clean up all state files
 
 </current-story>

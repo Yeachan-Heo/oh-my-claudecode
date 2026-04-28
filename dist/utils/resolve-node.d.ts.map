@@ -1,1 +1,1 @@
-{"version":3,"file":"resolve-node.d.ts","sourceRoot":"","sources":["../../src/utils/resolve-node.ts"],"names":[],"mappings":"AAWA;;;;;;;;;;;;;;;;;;;GAmBG;AACH,wBAAgB,iBAAiB,IAAI,MAAM,CAsE1C;AAED;;;;GAIG;AACH,wBAAgB,iBAAiB,CAAC,QAAQ,EAAE,MAAM,EAAE,GAAG,MAAM,GAAG,SAAS,CAcxE"}
+{"version":3,"file":"resolve-node.d.ts","sourceRoot":"","sources":["../../src/utils/resolve-node.ts"],"names":[],"mappings":"AA0BA;;;;;;;;;;;;;;;;;;;GAmBG;AACH,wBAAgB,iBAAiB,IAAI,MAAM,CAmD1C;AAED;;;;GAIG;AACH,wBAAgB,iBAAiB,CAAC,QAAQ,EAAE,MAAM,EAAE,GAAG,MAAM,GAAG,SAAS,CAcxE"}

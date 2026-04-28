@@ -251,10 +251,77 @@ describe('Ralph verification flow', () => {
         expect(result.shouldBlock).toBe(true);
         expect(result.mode).toBe('ralph');
         expect(result.message).toContain('US-002');
-        const updatedPrd = readPrd(testDir);
+        const updatedPrd = readPrd(testDir, sessionId);
         expect(updatedPrd?.userStories[0].architectVerified).toBe(true);
         const updatedState = readRalphState(testDir, sessionId);
         expect(updatedState?.current_story_id).toBe('US-002');
+    });
+    it('marks a rejected story incomplete in the session-scoped PRD without mutating legacy PRD', async () => {
+        const sessionId = 'ralph-story-rejected-session-prd';
+        const sessionDir = join(testDir, '.omc', 'state', 'sessions', sessionId);
+        mkdirSync(sessionDir, { recursive: true });
+        const sessionPrd = {
+            project: 'Test',
+            branchName: 'ralph/test',
+            description: 'Story rejection updates session PRD',
+            userStories: [
+                {
+                    id: 'US-001',
+                    title: 'Rejected story',
+                    description: 'Should be reopened when reviewer rejects it',
+                    acceptanceCriteria: ['Current story criterion'],
+                    priority: 1,
+                    passes: true,
+                    architectVerified: false,
+                    notes: 'Implementation claimed complete',
+                },
+            ],
+        };
+        const legacyPrd = {
+            project: 'Legacy',
+            branchName: 'legacy/test',
+            description: 'Legacy PRD must not be mutated by session rejection',
+            userStories: [
+                {
+                    id: 'US-001',
+                    title: 'Legacy story',
+                    description: 'Legacy project-scoped state',
+                    acceptanceCriteria: ['Legacy criterion'],
+                    priority: 1,
+                    passes: true,
+                    architectVerified: false,
+                    notes: 'legacy sentinel',
+                },
+            ],
+        };
+        writePrd(testDir, sessionPrd, sessionId);
+        writePrd(testDir, legacyPrd);
+        writeRalphState(sessionId, { current_story_id: 'US-001' });
+        writeFileSync(join(sessionDir, 'ralph-verification-state.json'), JSON.stringify({
+            pending: true,
+            completion_claim: 'US-001 is ready to progress',
+            verification_attempts: 0,
+            max_verification_attempts: 3,
+            requested_at: new Date().toISOString(),
+            original_task: 'Implement issue #2847',
+            critic_mode: 'architect',
+            verification_scope: 'story',
+            story_id: 'US-001',
+            request_id: 'rejected-story-request',
+        }));
+        const transcriptDir = join(claudeConfigDir, 'sessions', sessionId);
+        mkdirSync(transcriptDir, { recursive: true });
+        writeFileSync(join(transcriptDir, 'transcript.md'), 'Reviewer: Needs tests before progression. Issues found.\n');
+        const result = await checkPersistentModes(sessionId, testDir);
+        expect(result.shouldBlock).toBe(true);
+        expect(result.mode).toBe('ralph');
+        expect(result.message).toContain('Needs tests before progression.');
+        const updatedSessionPrd = readPrd(testDir, sessionId);
+        expect(updatedSessionPrd?.userStories[0].passes).toBe(false);
+        expect(updatedSessionPrd?.userStories[0].architectVerified).toBe(false);
+        expect(updatedSessionPrd?.userStories[0].notes).toBe('Needs tests before progression.');
+        const legacyPrdPath = join(testDir, '.omc', 'prd.json');
+        expect(JSON.parse(readFileSync(legacyPrdPath, 'utf-8'))).toEqual(legacyPrd);
     });
     it('does not reuse stale earlier story approval from transcript tail', async () => {
         const sessionId = 'ralph-story-stale-approval';
@@ -344,7 +411,7 @@ describe('Ralph verification flow', () => {
         expect(result.mode).toBe('ralph');
         expect(result.message).toContain('request-id="current-request"');
         expect(result.message).toContain('story-id="US-001"');
-        const updatedPrd = readPrd(testDir);
+        const updatedPrd = readPrd(testDir, sessionId);
         expect(updatedPrd?.userStories[0].architectVerified).toBe(false);
         const updatedState = readRalphState(testDir, sessionId);
         expect(updatedState?.current_story_id).toBe('US-001');
@@ -411,7 +478,7 @@ describe('Ralph verification flow', () => {
         expect(result.mode).toBe('ralph');
         expect(result.message).toContain('request-id="current-request"');
         expect(result.message).toContain('story-id="US-001"');
-        const updatedPrd = readPrd(testDir);
+        const updatedPrd = readPrd(testDir, sessionId);
         expect(updatedPrd?.userStories[0].architectVerified).toBe(false);
         const updatedState = readRalphState(testDir, sessionId);
         expect(updatedState?.current_story_id).toBe('US-001');

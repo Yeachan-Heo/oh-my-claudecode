@@ -41,7 +41,7 @@ Auto-merge (v2-only):
                         Equivalent to OMC_TEAMS_AUTO_MERGE=1.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
-  code-reviewer, security-reviewer, test-engineer, debugger, designer, writer, scientist
+  code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
 `;
 const TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]

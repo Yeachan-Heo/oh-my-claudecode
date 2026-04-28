@@ -27861,6 +27861,15 @@ function parseYamlMetadata(yamlContent) {
       case "sessionId":
         metadata.sessionId = parseStringValue(rawValue);
         break;
+      case "model":
+        metadata.model = parseStringValue(rawValue);
+        break;
+      case "agent":
+        metadata.agent = parseStringValue(rawValue);
+        break;
+      case "matching":
+        metadata.matching = parseStringValue(rawValue);
+        break;
       case "quality":
         metadata.quality = parseInt(rawValue, 10) || void 0;
         break;
@@ -27871,9 +27880,9 @@ function parseYamlMetadata(yamlContent) {
       case "tags": {
         const { value, consumed } = parseArrayValue(rawValue, lines, i);
         if (key === "triggers") {
-          metadata.triggers = Array.isArray(value) ? value : [value];
+          metadata.triggers = normalizeStringArray(value);
         } else {
-          metadata.tags = Array.isArray(value) ? value : [value];
+          metadata.tags = normalizeStringArray(value);
         }
         i += consumed - 1;
         break;
@@ -27889,6 +27898,10 @@ function parseStringValue(value) {
     return value.slice(1, -1);
   }
   return value;
+}
+function normalizeStringArray(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => item.trim()).filter(Boolean);
 }
 function parseArrayValue(rawValue, lines, currentIndex) {
   if (rawValue.startsWith("[")) {

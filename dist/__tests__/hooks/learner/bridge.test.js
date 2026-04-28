@@ -245,6 +245,31 @@ Body`);
             const matches = matchSkillsForInjection("Help me with React components", testProjectRoot, "test-session");
             expect(matches).toHaveLength(0);
         });
+        it("should not match skills with empty scalar triggers", () => {
+            const skillsDir = join(testProjectRoot, ".omc", "skills");
+            mkdirSync(skillsDir, { recursive: true });
+            writeFileSync(join(skillsDir, "blank-trigger-skill.md"), "---\nname: Blank Trigger\ntriggers:\n---\nBlank trigger instructions");
+            const matches = matchSkillsForInjection("Help me with React components", testProjectRoot, "blank-trigger-session");
+            expect(matches).toHaveLength(0);
+        });
+        it("should ignore blank trigger entries while matching valid triggers", () => {
+            const skillsDir = join(testProjectRoot, ".omc", "skills");
+            mkdirSync(skillsDir, { recursive: true });
+            writeFileSync(join(skillsDir, "mixed-trigger-skill.md"), `---
+name: Mixed Trigger
+triggers:
+  -
+  - ""
+  - "   "
+  - deploy
+---
+Mixed trigger instructions`);
+            const unrelatedMatches = matchSkillsForInjection("Help me with React components", testProjectRoot, "mixed-trigger-unrelated-session");
+            const validMatches = matchSkillsForInjection("Please deploy the app", testProjectRoot, "mixed-trigger-valid-session");
+            expect(unrelatedMatches).toHaveLength(0);
+            expect(validMatches).toHaveLength(1);
+            expect(validMatches[0].triggers).toEqual(["deploy"]);
+        });
         it("should use fuzzy matching when opt-in", () => {
             const skillsDir = join(testProjectRoot, ".omc", "skills");
             mkdirSync(skillsDir, { recursive: true });

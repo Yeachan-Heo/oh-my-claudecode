@@ -42,22 +42,7 @@ export function parseFrontmatter(content) {
  * Supports inline YAML list: `aliases: [foo, bar]` or single value.
  */
 export function parseFrontmatterAliases(rawAliases) {
-    if (!rawAliases)
-        return [];
-    const trimmed = rawAliases.trim();
-    if (!trimmed)
-        return [];
-    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        const inner = trimmed.slice(1, -1).trim();
-        if (!inner)
-            return [];
-        return inner
-            .split(',')
-            .map((alias) => stripOptionalQuotes(alias))
-            .filter((alias) => alias.length > 0);
-    }
-    const singleAlias = stripOptionalQuotes(trimmed);
-    return singleAlias ? [singleAlias] : [];
+    return parseFrontmatterList(rawAliases);
 }
 /**
  * Parse a generic frontmatter list field into an array of strings.

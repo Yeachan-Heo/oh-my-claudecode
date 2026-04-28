@@ -60,7 +60,7 @@ export function parseSkillFile(rawContent) {
 /**
  * Parse YAML metadata without external library.
  */
-function parseYamlMetadata(yamlContent) {
+export function parseYamlMetadata(yamlContent) {
     const lines = yamlContent.split('\n');
     const metadata = {};
     let i = 0;
@@ -92,6 +92,15 @@ function parseYamlMetadata(yamlContent) {
             case 'sessionId':
                 metadata.sessionId = parseStringValue(rawValue);
                 break;
+            case 'model':
+                metadata.model = parseStringValue(rawValue);
+                break;
+            case 'agent':
+                metadata.agent = parseStringValue(rawValue);
+                break;
+            case 'matching':
+                metadata.matching = parseStringValue(rawValue);
+                break;
             case 'quality':
                 metadata.quality = parseInt(rawValue, 10) || undefined;
                 break;
@@ -102,10 +111,10 @@ function parseYamlMetadata(yamlContent) {
             case 'tags': {
                 const { value, consumed } = parseArrayValue(rawValue, lines, i);
                 if (key === 'triggers') {
-                    metadata.triggers = Array.isArray(value) ? value : [value];
+                    metadata.triggers = normalizeStringArray(value);
                 }
                 else {
-                    metadata.tags = Array.isArray(value) ? value : [value];
+                    metadata.tags = normalizeStringArray(value);
                 }
                 i += consumed - 1;
                 break;
@@ -115,7 +124,7 @@ function parseYamlMetadata(yamlContent) {
     }
     return metadata;
 }
-function parseStringValue(value) {
+export function parseStringValue(value) {
     if (!value)
         return '';
     if ((value.startsWith('"') && value.endsWith('"')) ||
@@ -124,7 +133,11 @@ function parseStringValue(value) {
     }
     return value;
 }
-function parseArrayValue(rawValue, lines, currentIndex) {
+function normalizeStringArray(value) {
+    const values = Array.isArray(value) ? value : [value];
+    return values.map((item) => item.trim()).filter(Boolean);
+}
+export function parseArrayValue(rawValue, lines, currentIndex) {
     // Inline array: ["a", "b"]
     if (rawValue.startsWith('[')) {
         const endIdx = rawValue.lastIndexOf(']');

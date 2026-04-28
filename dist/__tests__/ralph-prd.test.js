@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { readPrd, writePrd, findPrdPath, getPrdStatus, markStoryComplete, markStoryIncomplete, markStoryArchitectVerified, getStory, getNextStory, createPrd, createSimplePrd, initPrd, ensurePrdForStartup, formatPrdStatus, formatStory, PRD_FILENAME } from '../hooks/ralph/index.js';
+import { readPrd, writePrd, findPrdPath, getPrdStatus, getSessionPrdPath, markStoryComplete, markStoryIncomplete, markStoryArchitectVerified, getStory, getNextStory, createPrd, createSimplePrd, initPrd, ensurePrdForStartup, formatPrdStatus, formatStory, PRD_FILENAME } from '../hooks/ralph/index.js';
 describe('Ralph PRD Module', () => {
     let testDir;
     beforeEach(() => {
@@ -79,6 +79,44 @@ describe('Ralph PRD Module', () => {
         it('should create .omc directory when writing', () => {
             writePrd(testDir, samplePrd);
             expect(existsSync(join(testDir, '.omc'))).toBe(true);
+        });
+        it('isolates transient PRDs for concurrent sessions in the same project', () => {
+            const sessionA = 'session-a';
+            const sessionB = 'session-b';
+            const prdA = {
+                ...samplePrd,
+                project: 'Session A',
+                userStories: [
+                    { ...samplePrd.userStories[0], id: 'US-A', title: 'A story' }
+                ]
+            };
+            const prdB = {
+                ...samplePrd,
+                project: 'Session B',
+                userStories: [
+                    { ...samplePrd.userStories[0], id: 'US-B', title: 'B story' }
+                ]
+            };
+            expect(writePrd(testDir, prdA, sessionA)).toBe(true);
+            expect(writePrd(testDir, prdB, sessionB)).toBe(true);
+            expect(readPrd(testDir, sessionA)?.project).toBe('Session A');
+            expect(readPrd(testDir, sessionA)?.userStories[0].id).toBe('US-A');
+            expect(readPrd(testDir, sessionB)?.project).toBe('Session B');
+            expect(readPrd(testDir, sessionB)?.userStories[0].id).toBe('US-B');
+            expect(findPrdPath(testDir, sessionA)).toBe(getSessionPrdPath(testDir, sessionA));
+            expect(findPrdPath(testDir, sessionB)).toBe(getSessionPrdPath(testDir, sessionB));
+            expect(existsSync(join(testDir, '.omc', 'prd.json'))).toBe(false);
+        });
+        it('migrates an existing project PRD into the requesting session without mutating the legacy file', () => {
+            const legacyPrd = { ...samplePrd, project: 'Legacy Project' };
+            const legacyPath = join(testDir, '.omc', 'prd.json');
+            mkdirSync(join(testDir, '.omc'), { recursive: true });
+            writeFileSync(legacyPath, JSON.stringify(legacyPrd, null, 2));
+            const result = ensurePrdForStartup(testDir, 'New Project', 'branch', 'New task', undefined, 'session-a');
+            expect(result.ok).toBe(true);
+            expect(result.path).toBe(getSessionPrdPath(testDir, 'session-a'));
+            expect(readPrd(testDir, 'session-a')?.project).toBe('Legacy Project');
+            expect(JSON.parse(readFileSync(legacyPath, 'utf-8')).project).toBe('Legacy Project');
         });
         it('should return null for malformed JSON', () => {
             const prdPath = join(testDir, PRD_FILENAME);

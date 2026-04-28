@@ -40,6 +40,12 @@ interface UsageApiResponse {
         currency?: string;
     };
 }
+interface ParseUsageResponseOptions {
+    /** Subscription type from OAuth credentials (for distinguishing Max/Pro overage from Enterprise billing) */
+    subscriptionType?: string | null;
+    /** Rate limit tier from OAuth credentials; claude_zero tiers behave like Enterprise billing */
+    rateLimitTier?: string | null;
+}
 interface ZaiQuotaResponse {
     data?: {
         limits?: Array<{
@@ -100,7 +106,7 @@ export declare function getSubscriptionInfo(): {
 /**
  * Parse API response into RateLimits
  */
-export declare function parseUsageResponse(response: UsageApiResponse): RateLimits | null;
+export declare function parseUsageResponse(response: UsageApiResponse, options?: ParseUsageResponseOptions): RateLimits | null;
 /**
  * Parse z.ai API response into RateLimits.
  *

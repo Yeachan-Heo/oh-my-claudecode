@@ -45,6 +45,9 @@ function makeContext(overrides = {}) {
         ...overrides,
     };
 }
+function stripAnsi(value) {
+    return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
 function makeConfig(overrides = {}) {
     return {
         ...DEFAULT_HUD_CONFIG,
@@ -77,6 +80,188 @@ describe('render: rate limits display priority', () => {
         // Should show percentage data, NOT [API 429]
         expect(output).toContain('45%');
         expect(output).not.toContain('[API 429]');
+    });
+    it('renders 5h/wk/sn rate limits when subscription info is unavailable', async () => {
+        const context = makeContext({
+            subscriptionType: null,
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 36,
+                    weeklyPercent: 32,
+                    sonnetWeeklyPercent: 8,
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('5h:');
+        expect(output).toContain('36%');
+        expect(output).toContain('wk:');
+        expect(output).toContain('32%');
+        expect(output).toContain('sn:');
+        expect(output).toContain('8%');
+    });
+    it('renders exact Max 20x cache-shaped rate limits when legacy enterprise spend fields are present', async () => {
+        const context = makeContext({
+            subscriptionType: 'max',
+            rateLimitTier: 'default_claude_max_20x',
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 4,
+                    weeklyPercent: 6,
+                    enterpriseSpentUsd: 200.5,
+                    enterpriseLimitUsd: 200,
+                    enterpriseUtilization: 100,
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        const plain = stripAnsi(output);
+        expect(plain.trim()).not.toBe('');
+        expect(plain).toContain('5h:');
+        expect(plain).toContain('4%');
+        expect(plain).toContain('wk:');
+        expect(plain).toContain('6%');
+        expect(plain).not.toContain('spent:');
+    });
+    it('renders Max 20x 5h/wk/sn limits when enterprise spent exists but enterprise limit is null', async () => {
+        const context = makeContext({
+            subscriptionType: 'max',
+            rateLimitTier: 'default_claude_max_20x',
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 36,
+                    weeklyPercent: 32,
+                    sonnetWeeklyPercent: 8,
+                    enterpriseSpentUsd: 12.34,
+                    enterpriseLimitUsd: null,
+                    enterpriseCurrency: 'USD',
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        const plain = stripAnsi(output);
+        expect(plain.trim()).not.toBe('');
+        expect(plain).toContain('5h:');
+        expect(plain).toContain('36%');
+        expect(plain).toContain('wk:');
+        expect(plain).toContain('32%');
+        expect(plain).toContain('sn:');
+        expect(plain).toContain('8%');
+        expect(plain).not.toContain('spent:');
+    });
+    it.each([
+        ['zero', 0],
+        ['negative', -1],
+        ['null', null],
+        ['undefined', undefined],
+    ])('renders normal rate limits for Max-like responses with %s enterprise limit', async (_caseName, enterpriseLimitUsd) => {
+        const context = makeContext({
+            subscriptionType: 'max',
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 36,
+                    weeklyPercent: 32,
+                    sonnetWeeklyPercent: 8,
+                    enterpriseSpentUsd: 12.34,
+                    enterpriseLimitUsd,
+                    enterpriseCurrency: 'USD',
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('5h:');
+        expect(output).toContain('36%');
+        expect(output).toContain('wk:');
+        expect(output).toContain('32%');
+        expect(output).toContain('sn:');
+        expect(output).toContain('8%');
+        expect(output).not.toContain('spent:');
+    });
+    it.each(['pro', 'max'])('renders normal 5h/wk limits for non-enterprise %s when enterprise spend is nonzero', async (subscriptionType) => {
+        const context = makeContext({
+            subscriptionType,
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 36,
+                    weeklyPercent: 32,
+                    enterpriseSpentUsd: 12.34,
+                    enterpriseLimitUsd: 50,
+                    enterpriseCurrency: 'USD',
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('5h:');
+        expect(output).toContain('36%');
+        expect(output).toContain('wk:');
+        expect(output).toContain('32%');
+        expect(output).not.toContain('spent:');
+    });
+    it.each(['pro', 'max'])('renders normal 5h/wk limits for non-enterprise %s when enterprise spend is zero', async (subscriptionType) => {
+        const context = makeContext({
+            subscriptionType,
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 10,
+                    weeklyPercent: 2,
+                    enterpriseSpentUsd: 0,
+                    enterpriseLimitUsd: 50,
+                    enterpriseCurrency: 'USD',
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('5h:');
+        expect(output).toContain('10%');
+        expect(output).toContain('wk:');
+        expect(output).toContain('2%');
+        expect(output).not.toContain('spent:');
+    });
+    it('renders enterprise cost only for actual enterprise with the same billing fields', async () => {
+        const context = makeContext({
+            subscriptionType: 'enterprise',
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 4,
+                    weeklyPercent: 6,
+                    enterpriseSpentUsd: 200.5,
+                    enterpriseLimitUsd: 200,
+                    enterpriseUtilization: 100,
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        const plain = stripAnsi(output);
+        expect(plain).toContain('spent:');
+        expect(plain).toContain('$200.50/$200.00');
+        expect(plain).toContain('(100%)');
+        expect(plain).not.toContain('5h:');
+        expect(plain).not.toContain('wk:');
+    });
+    it('uses enterprise cost instead of double-rendering 5h/wk for actual enterprise zero spend', async () => {
+        const context = makeContext({
+            subscriptionType: 'enterprise',
+            rateLimitTier: null,
+            rateLimitsResult: {
+                rateLimits: {
+                    fiveHourPercent: 10,
+                    weeklyPercent: 2,
+                    enterpriseSpentUsd: 0,
+                    enterpriseLimitUsd: 50,
+                    enterpriseCurrency: 'USD',
+                },
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('spent:');
+        expect(output).toContain('$0.00/$50.00');
+        expect(output).not.toContain('5h:');
+        expect(output).not.toContain('wk:');
     });
     it('shows [API 429] when error=rate_limited and rateLimits is null', async () => {
         const context = makeContext({

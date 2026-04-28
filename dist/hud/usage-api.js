@@ -36,6 +36,15 @@ const TOKEN_REFRESH_URL_PATH = '/v1/oauth/token';
  * This is the production value; can be overridden via CLAUDE_CODE_OAUTH_CLIENT_ID env var.
  */
 const DEFAULT_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+function isEnterpriseUsageContext(options) {
+    if (!options)
+        return true;
+    const subscriptionType = options.subscriptionType?.toLowerCase() ?? null;
+    const rateLimitTier = options.rateLimitTier ?? null;
+    if (subscriptionType == null && rateLimitTier == null)
+        return true;
+    return subscriptionType === 'enterprise' || /claude_zero/i.test(rateLimitTier ?? '');
+}
 // z.ai `unit` code for the weekly TOKENS_LIMIT bucket (observed, undocumented)
 const ZAI_UNIT_WEEK = 6;
 /**
@@ -633,16 +642,30 @@ function clamp(v) {
 /**
  * Parse API response into RateLimits
  */
-export function parseUsageResponse(response) {
+export function parseUsageResponse(response, options) {
     const fiveHour = response.five_hour?.utilization;
     const sevenDay = response.seven_day?.utilization;
-    const enterpriseCredits = response.extra_usage?.used_credits;
-    const enterpriseCurrency = (response.extra_usage?.currency ?? 'USD').toUpperCase();
-    // Enterprise credits are only usable when we know how to interpret the minor-unit digits;
-    // see the USD guard in the extra_usage branch below for rationale.
-    const hasUsableEnterprise = enterpriseCredits != null && enterpriseCurrency === 'USD';
-    // Need at least one valid value (5h/7d for Pro/Max, or usable enterprise credits)
-    if (fiveHour == null && sevenDay == null && !hasUsableEnterprise)
+    const sonnetSevenDay = response.seven_day_sonnet?.utilization;
+    const opusSevenDay = response.seven_day_opus?.utilization;
+    const extra = response.extra_usage;
+    const usedCredits = extra?.used_credits;
+    const extraCurrency = (extra?.currency ?? 'USD').toUpperCase();
+    const isEnterpriseContext = isEnterpriseUsageContext(options);
+    // used_credits are only usable when we know how to interpret the minor-unit digits;
+    // see the USD guards in the extra_usage branch below for rationale.
+    const hasUsableUsedCredits = usedCredits != null && extraCurrency === 'USD';
+    const hasUsableEnterprise = isEnterpriseContext && hasUsableUsedCredits;
+    const hasUsableUsdExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
+    const hasUsableCreditExtraUsage = !isEnterpriseContext && hasUsableUsedCredits && extra?.monthly_limit != null && extra.monthly_limit > 0;
+    const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
+    // Need at least one valid value. Model-specific weekly buckets are valid usage data
+    // even when generic subscription/window metadata is absent or nullish.
+    if (fiveHour == null &&
+        sevenDay == null &&
+        sonnetSevenDay == null &&
+        opusSevenDay == null &&
+        !hasUsableEnterprise &&
+        !hasUsableExtraUsage)
         return null;
     // Parse ISO 8601 date strings to Date objects
     const parseDate = (dateStr) => {
@@ -658,28 +681,27 @@ export function parseUsageResponse(response) {
     };
     // Per-model quotas are at the top level (flat structure)
     // e.g., response.seven_day_sonnet, response.seven_day_opus
-    const sonnetSevenDay = response.seven_day_sonnet?.utilization;
     const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
     const result = {
         fiveHourPercent: clamp(fiveHour),
-        weeklyPercent: clamp(sevenDay),
         fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
-        weeklyResetsAt: parseDate(response.seven_day?.resets_at),
     };
+    if (sevenDay != null) {
+        result.weeklyPercent = clamp(sevenDay);
+        result.weeklyResetsAt = parseDate(response.seven_day?.resets_at);
+    }
     // Add Sonnet-specific quota if available from API
     if (sonnetSevenDay != null) {
         result.sonnetWeeklyPercent = clamp(sonnetSevenDay);
         result.sonnetWeeklyResetsAt = parseDate(sonnetResetsAt);
     }
     // Add Opus-specific quota if available from API
-    const opusSevenDay = response.seven_day_opus?.utilization;
     const opusResetsAt = response.seven_day_opus?.resets_at;
     if (opusSevenDay != null) {
         result.opusWeeklyPercent = clamp(opusSevenDay);
         result.opusWeeklyResetsAt = parseDate(opusResetsAt);
     }
     // Add extra (metered) usage if available (Pro subscribers with extra usage allocation)
-    const extra = response.extra_usage;
     if (extra != null) {
         // Enterprise path: used_credits (minor units) is present instead of spent_usd/limit_usd.
         // Only USD is observed in practice; the /100 divisor below assumes 2-digit minor units.
@@ -687,7 +709,7 @@ export function parseUsageResponse(response) {
         // 0-digit, TND/BHD are 3-digit per ISO 4217) and skip the enterprise fields — the
         // renderer will then return null rather than display a wrong figure.
         const currency = (extra.currency ?? 'USD').toUpperCase();
-        if (extra.used_credits != null && currency === 'USD') {
+        if (extra.used_credits != null && currency === 'USD' && isEnterpriseContext) {
             result.enterpriseSpentUsd = extra.used_credits / 100;
             result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / 100;
             result.enterpriseCurrency = currency;
@@ -696,6 +718,18 @@ export function parseUsageResponse(response) {
                 result.enterpriseUtilization = clamp((extra.used_credits / extra.monthly_limit) * 100);
             }
             // resets_at not provided in enterprise response — leave enterpriseResetsAt unset
+        }
+        else if (extra.used_credits != null && currency === 'USD' && !isEnterpriseContext && extra.monthly_limit != null && extra.monthly_limit > 0) {
+            // Max/Pro organization overage path: the API can use the enterprise-shaped
+            // used_credits/monthly_limit fields even though the account should still render
+            // normal token-window limits. Treat those minor-unit values as extra usage.
+            const spentUsd = extra.used_credits / 100;
+            result.extraUsageSpentUsd = spentUsd;
+            result.extraUsageLimitUsd = extra.monthly_limit / 100;
+            result.extraUsagePercent = extra.utilization != null
+                ? clamp(extra.utilization)
+                : clamp((extra.used_credits / extra.monthly_limit) * 100);
+            result.extraUsageResetsAt = parseDate(extra.resets_at);
         }
         else if (extra.limit_usd != null && extra.limit_usd > 0) {
             // Pro metered path
@@ -1012,10 +1046,15 @@ export async function getUsage() {
                     }
                 }
                 const accessToken = creds.accessToken;
+                const subscriptionType = creds.subscriptionType;
+                const rateLimitTier = creds.rateLimitTier;
                 return fetchAndCacheUsage({
                     source: 'anthropic',
                     fetchFn: () => fetchUsageFromApi(accessToken),
-                    parseFn: parseUsageResponse,
+                    parseFn: (data) => parseUsageResponse(data, {
+                        subscriptionType,
+                        rateLimitTier,
+                    }),
                     cache,
                     pollIntervalMs,
                 });

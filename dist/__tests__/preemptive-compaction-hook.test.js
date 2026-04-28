@@ -227,4 +227,67 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
         });
     });
 });
+describe('post-tool-verifier Write/Edit response envelopes', () => {
+    const longFailureProse = [
+        'The following fixture text documents prior failures and must not be treated as the tool status.',
+        'x'.repeat(430),
+        'error: fixture prose only',
+        'no such file: fixture prose only',
+        'permission denied: fixture prose only',
+    ].join('\n');
+    it('trusts Write success markers extracted from object response fields before JSON stringify analysis', () => {
+        const result = runPostToolVerifier({
+            cwd: makeTempDir(),
+            tool_name: 'Write',
+            session_id: 'write-object-success-envelope-test',
+            tool_response: {
+                result: 'File written successfully at: /tmp/example.txt',
+                content: longFailureProse,
+            },
+        }, { OMC_QUIET: '2' });
+        expect(result).toEqual({ continue: true, suppressOutput: true });
+    });
+    it('trusts Edit success markers extracted from object response message before JSON stringify analysis', () => {
+        const result = runPostToolVerifier({
+            cwd: makeTempDir(),
+            tool_name: 'Edit',
+            session_id: 'edit-object-success-envelope-test',
+            tool_response: {
+                message: 'The file /tmp/example.txt has been updated successfully.',
+                content: longFailureProse,
+            },
+        }, { OMC_QUIET: '2' });
+        expect(result).toEqual({ continue: true, suppressOutput: true });
+    });
+    it('keeps real plain string Write failures failing', () => {
+        const result = runPostToolVerifier({
+            cwd: makeTempDir(),
+            tool_name: 'Write',
+            session_id: 'write-string-failure-test',
+            tool_response: 'Error: failed to write file',
+        }, { OMC_QUIET: '2' });
+        expect(result).toEqual({
+            continue: true,
+            hookSpecificOutput: {
+                hookEventName: 'PostToolUse',
+                additionalContext: 'Write operation failed. Check file permissions and directory existence.',
+            },
+        });
+    });
+    it('keeps real plain string Edit failures failing', () => {
+        const result = runPostToolVerifier({
+            cwd: makeTempDir(),
+            tool_name: 'Edit',
+            session_id: 'edit-string-failure-test',
+            tool_response: 'Error: failed to edit file',
+        }, { OMC_QUIET: '2' });
+        expect(result).toEqual({
+            continue: true,
+            hookSpecificOutput: {
+                hookEventName: 'PostToolUse',
+                additionalContext: 'Edit operation failed. Verify file exists and content matches exactly.',
+            },
+        });
+    });
+});
 //# sourceMappingURL=preemptive-compaction-hook.test.js.map

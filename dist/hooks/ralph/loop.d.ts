@@ -97,11 +97,11 @@ export declare function createRalphLoopHook(directory: string): RalphLoopHook;
 /**
  * Check if PRD mode is available (prd.json exists)
  */
-export declare function hasPrd(directory: string): boolean;
+export declare function hasPrd(directory: string, sessionId?: string): boolean;
 /**
  * Get PRD completion status for ralph
  */
-export declare function getPrdCompletionStatus(directory: string): {
+export declare function getPrdCompletionStatus(directory: string, sessionId?: string): {
     hasPrd: boolean;
     allComplete: boolean;
     status: PRDStatus | null;
@@ -111,15 +111,15 @@ export declare function getPrdCompletionStatus(directory: string): {
  * Get context injection for ralph continuation
  * Includes PRD current story and progress memory
  */
-export declare function getRalphContext(directory: string): string;
+export declare function getRalphContext(directory: string, sessionId?: string): string;
 /**
  * Update ralph state with current story
  */
-export declare function setCurrentStory(directory: string, storyId: string): boolean;
+export declare function setCurrentStory(directory: string, storyId: string, sessionId?: string): boolean;
 /**
  * Enable PRD mode in ralph state
  */
-export declare function enablePrdMode(directory: string): boolean;
+export declare function enablePrdMode(directory: string, sessionId?: string): boolean;
 /**
  * Record progress after completing a story
  */
@@ -139,6 +139,6 @@ export declare function getTeamPhaseDirective(directory: string, sessionId?: str
 /**
  * Check if ralph should complete based on PRD status
  */
-export declare function shouldCompleteByPrd(directory: string): boolean;
+export declare function shouldCompleteByPrd(directory: string, sessionId?: string): boolean;
 export type { PRD, PRDStatus, UserStory } from "./prd.js";
 //# sourceMappingURL=loop.d.ts.map

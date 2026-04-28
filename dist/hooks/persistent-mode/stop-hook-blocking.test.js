@@ -41,6 +41,25 @@ function writeLegacyModeState(tempDir, fileName, state) {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, fileName), JSON.stringify(state, null, 2));
 }
+function writeWorkflowTombstone(tempDir, sessionId, mode) {
+    const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, "skill-active-state.json"), JSON.stringify({
+        version: 2,
+        active_skills: {
+            [mode]: {
+                skill_name: mode,
+                started_at: new Date(Date.now() - 60_000).toISOString(),
+                completed_at: new Date().toISOString(),
+                session_id: sessionId,
+                mode_state_path: `${mode}-state.json`,
+                initialized_mode: mode,
+                initialized_state_path: join(tempDir, ".omc", "state", `${mode}-state.json`),
+                initialized_session_state_path: join(sessionDir, `${mode}-state.json`),
+            },
+        },
+    }, null, 2));
+}
 function resolveCentralizedStateDir(directory, customStateDir) {
     const previous = process.env.OMC_STATE_DIR;
     process.env.OMC_STATE_DIR = customStateDir;
@@ -355,6 +374,67 @@ describe("Stop Hook Blocking Contract", () => {
             const output = createHookOutput(result);
             expect(output.continue).toBe(true);
         });
+        it("does not fire ralph stop reinforcement when authoritative registry is empty after cancel tombstone", async () => {
+            const sessionId = "ralph-stale-restored-after-cancel";
+            const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, "ralph-state.json"), JSON.stringify({
+                active: true,
+                iteration: 7,
+                max_iterations: 100,
+                session_id: sessionId,
+                started_at: new Date().toISOString(),
+                last_checked_at: new Date().toISOString(),
+                prompt: "stale restored task",
+            }, null, 2));
+            writeWorkflowTombstone(tempDir, sessionId, "ralph");
+            const { getActiveModes } = await import("../mode-registry/index.js");
+            expect(getActiveModes(tempDir, sessionId)).not.toContain("ralph");
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(false);
+            expect(result.mode).toBe("none");
+            expect(result.message).not.toContain("[RALPH LOOP");
+        });
+        it("does not fire ultrawork stop reinforcement when authoritative registry is empty after cancel tombstone", async () => {
+            const sessionId = "ultrawork-stale-restored-after-cancel";
+            const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writePendingTodo(tempDir, "pending work should not revive stale ultrawork");
+            writeFileSync(join(sessionDir, "ultrawork-state.json"), JSON.stringify({
+                active: true,
+                started_at: new Date().toISOString(),
+                original_prompt: "stale restored ultrawork",
+                session_id: sessionId,
+                reinforcement_count: 3,
+                last_checked_at: new Date().toISOString(),
+            }, null, 2));
+            writeWorkflowTombstone(tempDir, sessionId, "ultrawork");
+            const { getActiveModes } = await import("../mode-registry/index.js");
+            expect(getActiveModes(tempDir, sessionId)).not.toContain("ultrawork");
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.mode).not.toBe("ultrawork");
+            expect(result.message).not.toContain("[ULTRAWORK");
+        });
+        it("still fires ralph stop reinforcement when authoritative registry reports active ralph", async () => {
+            const sessionId = "ralph-active-registry";
+            const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, "ralph-state.json"), JSON.stringify({
+                active: true,
+                iteration: 1,
+                max_iterations: 100,
+                session_id: sessionId,
+                started_at: new Date().toISOString(),
+                last_checked_at: new Date().toISOString(),
+                prompt: "active task",
+            }, null, 2));
+            const { getActiveModes } = await import("../mode-registry/index.js");
+            expect(getActiveModes(tempDir, sessionId)).toContain("ralph");
+            const result = await checkPersistentModes(sessionId, tempDir);
+            expect(result.shouldBlock).toBe(true);
+            expect(result.mode).toBe("ralph");
+            expect(result.message).toContain("[RALPH - ITERATION");
+        });
         it("allows stop after broad clear removes leftover session-scoped state", async () => {
             const sessionA = "test-broad-clear-a";
             const sessionB = "test-broad-clear-b";
@@ -590,6 +670,25 @@ describe("Stop Hook Blocking Contract", () => {
             const output = runScript({ directory: tempDir, sessionId });
             expect(output.decision).toBe("block");
         });
+        it("returns continue: true for tombstoned stale ralph state", () => {
+            const sessionId = "ralph-mjs-tombstoned";
+            const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, "ralph-state.json"), JSON.stringify({
+                active: true,
+                iteration: 9,
+                max_iterations: 100,
+                session_id: sessionId,
+                started_at: new Date().toISOString(),
+                last_checked_at: new Date().toISOString(),
+                prompt: "stale restored ralph",
+            }));
+            writeWorkflowTombstone(tempDir, sessionId, "ralph");
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.continue).toBe(true);
+            expect(output.decision).toBeUndefined();
+            expect(String(output.reason || "")).not.toContain("[RALPH LOOP");
+        });
         it("returns decision: block when ultrawork is active", () => {
             const sessionId = "ultrawork-mjs-test";
             const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -604,6 +703,24 @@ describe("Stop Hook Blocking Contract", () => {
             }));
             const output = runScript({ directory: tempDir, sessionId });
             expect(output.decision).toBe("block");
+        });
+        it("returns continue: true for tombstoned stale ultrawork state", () => {
+            const sessionId = "ultrawork-mjs-tombstoned";
+            const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, "ultrawork-state.json"), JSON.stringify({
+                active: true,
+                started_at: new Date().toISOString(),
+                original_prompt: "stale restored ultrawork",
+                session_id: sessionId,
+                reinforcement_count: 0,
+                last_checked_at: new Date().toISOString(),
+            }));
+            writeWorkflowTombstone(tempDir, sessionId, "ultrawork");
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.continue).toBe(true);
+            expect(output.decision).toBeUndefined();
+            expect(String(output.reason || "")).not.toContain("[ULTRAWORK");
         });
         it("returns continue: true for stale legacy ultrawork state without a session", () => {
             const staleAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();

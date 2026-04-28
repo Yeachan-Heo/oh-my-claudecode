@@ -9,6 +9,7 @@ import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js
 import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
+const SESSION_STARTED_MARKER_FILE = 'session-started.json';
 function hasExplicitNotificationConfig(profileName) {
     const config = getOMCConfig();
     if (profileName) {
@@ -489,6 +490,23 @@ export function cleanupMissionState(directory, sessionId) {
         return 0;
     }
 }
+function cleanupSessionStartedMarker(directory, sessionId) {
+    try {
+        validateSessionId(sessionId);
+    }
+    catch {
+        return;
+    }
+    try {
+        const markerPath = path.join(getOmcRoot(directory), 'state', 'sessions', sessionId, SESSION_STARTED_MARKER_FILE);
+        if (fs.existsSync(markerPath)) {
+            fs.unlinkSync(markerPath);
+        }
+    }
+    catch {
+        // Best-effort marker cleanup only; SessionEnd cleanup must continue.
+    }
+}
 function extractTeamNameFromState(state) {
     if (!state || typeof state !== 'object')
         return null;
@@ -629,6 +647,9 @@ export async function processSessionEnd(input) {
     // Clean up mission-state.json entries belonging to this session
     // Without this, the HUD keeps showing stale mode/mission info
     cleanupMissionState(directory, input.session_id);
+    // Mark this session as normally ended so SessionStart reconciliation does
+    // not treat it as hard-terminated.
+    cleanupSessionStartedMarker(directory, input.session_id);
     // Clean up Python REPL bridge sessions used in this transcript (#641).
     // Best-effort only: session end should not fail because cleanup fails.
     try {

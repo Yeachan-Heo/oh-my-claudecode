@@ -3,8 +3,23 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 const EPHEMERAL_NODE_PATH_MARKERS = ['hostedtoolcache', '/runner/', '\\runner\\'];
+const SYSTEM_NODE_PATHS = ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
 function isKnownEphemeralNodePath(nodePath) {
     return EPHEMERAL_NODE_PATH_MARKERS.some(marker => nodePath.includes(marker));
+}
+function resolveLatestVersionedNode(baseDir, nodeSegments) {
+    if (!existsSync(baseDir))
+        return undefined;
+    try {
+        const latest = pickLatestVersion(readdirSync(baseDir));
+        if (!latest)
+            return undefined;
+        const nodePath = join(baseDir, latest, ...nodeSegments);
+        return existsSync(nodePath) ? nodePath : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 /**
  * Resolve the absolute path to the Node.js binary.
@@ -53,20 +68,9 @@ export function resolveNodeBinary() {
     }
     const home = homedir();
     // 3. nvm: ~/.nvm/versions/node/<version>/bin/node
-    const nvmBase = join(home, '.nvm', 'versions', 'node');
-    if (existsSync(nvmBase)) {
-        try {
-            const latest = pickLatestVersion(readdirSync(nvmBase));
-            if (latest) {
-                const nodePath = join(nvmBase, latest, 'bin', 'node');
-                if (existsSync(nodePath))
-                    return nodePath;
-            }
-        }
-        catch {
-            // ignore directory read errors
-        }
-    }
+    const nvmNode = resolveLatestVersionedNode(join(home, '.nvm', 'versions', 'node'), ['bin', 'node']);
+    if (nvmNode)
+        return nvmNode;
     // 4. fnm: multiple possible base directories
     const fnmBases = [
         join(home, '.fnm', 'node-versions'),
@@ -74,22 +78,12 @@ export function resolveNodeBinary() {
         join(home, '.local', 'share', 'fnm', 'node-versions'),
     ];
     for (const fnmBase of fnmBases) {
-        if (existsSync(fnmBase)) {
-            try {
-                const latest = pickLatestVersion(readdirSync(fnmBase));
-                if (latest) {
-                    const nodePath = join(fnmBase, latest, 'installation', 'bin', 'node');
-                    if (existsSync(nodePath))
-                        return nodePath;
-                }
-            }
-            catch {
-                // ignore directory read errors
-            }
-        }
+        const fnmNode = resolveLatestVersionedNode(fnmBase, ['installation', 'bin', 'node']);
+        if (fnmNode)
+            return fnmNode;
     }
     // 5. Common system / Homebrew paths
-    for (const p of ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']) {
+    for (const p of SYSTEM_NODE_PATHS) {
         if (existsSync(p))
             return p;
     }

@@ -85,6 +85,48 @@ describe('parseUsageResponse — extra_usage', () => {
         expect(result.extraUsageSpentUsd).toBe(0);
         expect(result.extraUsagePercent).toBe(0);
     });
+    it('parses Max organization overage used_credits as extra usage without enterprise fields', () => {
+        const result = parseUsageResponse({
+            five_hour: { utilization: 3 },
+            seven_day: { utilization: 16 },
+            seven_day_sonnet: { utilization: 0 },
+            extra_usage: {
+                is_enabled: true,
+                used_credits: 2726,
+                monthly_limit: 5000,
+                currency: 'USD',
+            },
+        }, {
+            subscriptionType: 'max',
+            rateLimitTier: 'default_claude_max_20x',
+        });
+        expect(result).not.toBeNull();
+        expect(result.fiveHourPercent).toBe(3);
+        expect(result.weeklyPercent).toBe(16);
+        expect(result.sonnetWeeklyPercent).toBe(0);
+        expect(result.extraUsageSpentUsd).toBeCloseTo(27.26, 2);
+        expect(result.extraUsageLimitUsd).toBeCloseTo(50, 2);
+        expect(result.extraUsagePercent).toBeCloseTo(54.52, 2);
+        expect(result.enterpriseSpentUsd).toBeUndefined();
+        expect(result.enterpriseLimitUsd).toBeUndefined();
+        expect(result.enterpriseUtilization).toBeUndefined();
+    });
+    it('uses API utilization for non-enterprise used_credits overage when present', () => {
+        const result = parseUsageResponse({
+            five_hour: { utilization: 10 },
+            extra_usage: {
+                used_credits: 1000,
+                monthly_limit: 5000,
+                utilization: 30,
+                currency: 'USD',
+            },
+        }, { subscriptionType: 'pro', rateLimitTier: 'default' });
+        expect(result).not.toBeNull();
+        expect(result.extraUsagePercent).toBe(30);
+        expect(result.extraUsageSpentUsd).toBeCloseTo(10, 2);
+        expect(result.extraUsageLimitUsd).toBeCloseTo(50, 2);
+        expect(result.enterpriseSpentUsd).toBeUndefined();
+    });
 });
 // ---------------------------------------------------------------------------
 // renderRateLimits — extra usage display

@@ -68,6 +68,113 @@ var OmcPaths = {
   DEEPINIT_MANIFEST: ".omc/deepinit-manifest.json"
 };
 
+// src/hooks/learner/parser.ts
+function parseYamlMetadata(yamlContent) {
+  const lines = yamlContent.split("\n");
+  const metadata = {};
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const colonIndex = line.indexOf(":");
+    if (colonIndex === -1) {
+      i++;
+      continue;
+    }
+    const key = line.slice(0, colonIndex).trim();
+    const rawValue = line.slice(colonIndex + 1).trim();
+    switch (key) {
+      case "id":
+        metadata.id = parseStringValue(rawValue);
+        break;
+      case "name":
+        metadata.name = parseStringValue(rawValue);
+        break;
+      case "description":
+        metadata.description = parseStringValue(rawValue);
+        break;
+      case "source":
+        metadata.source = parseStringValue(rawValue);
+        break;
+      case "createdAt":
+        metadata.createdAt = parseStringValue(rawValue);
+        break;
+      case "sessionId":
+        metadata.sessionId = parseStringValue(rawValue);
+        break;
+      case "model":
+        metadata.model = parseStringValue(rawValue);
+        break;
+      case "agent":
+        metadata.agent = parseStringValue(rawValue);
+        break;
+      case "matching":
+        metadata.matching = parseStringValue(rawValue);
+        break;
+      case "quality":
+        metadata.quality = parseInt(rawValue, 10) || void 0;
+        break;
+      case "usageCount":
+        metadata.usageCount = parseInt(rawValue, 10) || 0;
+        break;
+      case "triggers":
+      case "tags": {
+        const { value, consumed } = parseArrayValue(rawValue, lines, i);
+        if (key === "triggers") {
+          metadata.triggers = normalizeStringArray(value);
+        } else {
+          metadata.tags = normalizeStringArray(value);
+        }
+        i += consumed - 1;
+        break;
+      }
+    }
+    i++;
+  }
+  return metadata;
+}
+function parseStringValue(value) {
+  if (!value) return "";
+  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+function normalizeStringArray(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => item.trim()).filter(Boolean);
+}
+function parseArrayValue(rawValue, lines, currentIndex) {
+  if (rawValue.startsWith("[")) {
+    const endIdx = rawValue.lastIndexOf("]");
+    if (endIdx === -1) return { value: [], consumed: 1 };
+    const content = rawValue.slice(1, endIdx).trim();
+    if (!content) return { value: [], consumed: 1 };
+    const items = content.split(",").map((s) => parseStringValue(s.trim())).filter(Boolean);
+    return { value: items, consumed: 1 };
+  }
+  if (!rawValue || rawValue === "") {
+    const items = [];
+    let consumed = 1;
+    for (let j = currentIndex + 1; j < lines.length; j++) {
+      const nextLine = lines[j];
+      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
+      if (arrayMatch) {
+        const itemValue = parseStringValue(arrayMatch[1].trim());
+        if (itemValue) items.push(itemValue);
+        consumed++;
+      } else if (nextLine.trim() === "") {
+        consumed++;
+      } else {
+        break;
+      }
+    }
+    if (items.length > 0) {
+      return { value: items, consumed };
+    }
+  }
+  return { value: parseStringValue(rawValue), consumed: 1 };
+}
+
 // src/hooks/learner/transliteration-map.ts
 var KOREAN_MAP = {
   // === deep-dive skill ===
@@ -143,7 +250,7 @@ function getSkillMetadataCache(projectRoot) {
       const content = (0, import_fs2.readFileSync)(candidate.path, "utf-8");
       const parsed = parseSkillFile(content);
       if (!parsed) continue;
-      const triggers = parsed.metadata.triggers ?? [];
+      const triggers = (parsed.metadata.triggers ?? []).map((trigger) => trigger.trim()).filter(Boolean);
       if (triggers.length === 0) continue;
       const name = parsed.metadata.name || (0, import_path3.basename)(candidate.path, SKILL_EXTENSION);
       skills.push({
@@ -329,92 +436,6 @@ function parseSkillFile(content) {
       errors: [`YAML parse error: ${e}`]
     };
   }
-}
-function parseYamlMetadata(yamlContent) {
-  const lines = yamlContent.split("\n");
-  const metadata = {};
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const colonIndex = line.indexOf(":");
-    if (colonIndex === -1) {
-      i++;
-      continue;
-    }
-    const key = line.slice(0, colonIndex).trim();
-    const rawValue = line.slice(colonIndex + 1).trim();
-    switch (key) {
-      case "id":
-        metadata.id = parseStringValue(rawValue);
-        break;
-      case "name":
-        metadata.name = parseStringValue(rawValue);
-        break;
-      case "description":
-        metadata.description = parseStringValue(rawValue);
-        break;
-      case "model":
-        metadata.model = parseStringValue(rawValue);
-        break;
-      case "agent":
-        metadata.agent = parseStringValue(rawValue);
-        break;
-      case "matching":
-        metadata.matching = parseStringValue(rawValue);
-        break;
-      case "triggers":
-      case "tags": {
-        const { value, consumed } = parseArrayValue(rawValue, lines, i);
-        if (key === "triggers") {
-          metadata.triggers = Array.isArray(value) ? value : value ? [value] : [];
-        } else {
-          metadata.tags = Array.isArray(value) ? value : value ? [value] : [];
-        }
-        i += consumed - 1;
-        break;
-      }
-    }
-    i++;
-  }
-  return metadata;
-}
-function parseStringValue(value) {
-  if (!value) return "";
-  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-function parseArrayValue(rawValue, lines, currentIndex) {
-  if (rawValue.startsWith("[")) {
-    const endIdx = rawValue.lastIndexOf("]");
-    if (endIdx === -1) return { value: [], consumed: 1 };
-    const content = rawValue.slice(1, endIdx).trim();
-    if (!content) return { value: [], consumed: 1 };
-    const items = content.split(",").map((s) => parseStringValue(s.trim())).filter(Boolean);
-    return { value: items, consumed: 1 };
-  }
-  if (!rawValue || rawValue === "") {
-    const items = [];
-    let consumed = 1;
-    for (let j = currentIndex + 1; j < lines.length; j++) {
-      const nextLine = lines[j];
-      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
-      if (arrayMatch) {
-        const itemValue = parseStringValue(arrayMatch[1].trim());
-        if (itemValue) items.push(itemValue);
-        consumed++;
-      } else if (nextLine.trim() === "") {
-        consumed++;
-      } else {
-        break;
-      }
-    }
-    if (items.length > 0) {
-      return { value: items, consumed };
-    }
-  }
-  return { value: parseStringValue(rawValue), consumed: 1 };
 }
 function levenshteinDistance(str1, str2) {
   const m = str1.length;

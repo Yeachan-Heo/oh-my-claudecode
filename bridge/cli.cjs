@@ -6753,6 +6753,15 @@ function parseYamlMetadata(yamlContent) {
       case "sessionId":
         metadata.sessionId = parseStringValue(rawValue);
         break;
+      case "model":
+        metadata.model = parseStringValue(rawValue);
+        break;
+      case "agent":
+        metadata.agent = parseStringValue(rawValue);
+        break;
+      case "matching":
+        metadata.matching = parseStringValue(rawValue);
+        break;
       case "quality":
         metadata.quality = parseInt(rawValue, 10) || void 0;
         break;
@@ -6763,9 +6772,9 @@ function parseYamlMetadata(yamlContent) {
       case "tags": {
         const { value, consumed } = parseArrayValue(rawValue, lines, i);
         if (key === "triggers") {
-          metadata.triggers = Array.isArray(value) ? value : [value];
+          metadata.triggers = normalizeStringArray(value);
         } else {
-          metadata.tags = Array.isArray(value) ? value : [value];
+          metadata.tags = normalizeStringArray(value);
         }
         i += consumed - 1;
         break;
@@ -6781,6 +6790,10 @@ function parseStringValue(value) {
     return value.slice(1, -1);
   }
   return value;
+}
+function normalizeStringArray(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => item.trim()).filter(Boolean);
 }
 function parseArrayValue(rawValue, lines, currentIndex) {
   if (rawValue.startsWith("[")) {
@@ -8512,6 +8525,17 @@ var init_version = __esm({
 function isKnownEphemeralNodePath(nodePath) {
   return EPHEMERAL_NODE_PATH_MARKERS.some((marker) => nodePath.includes(marker));
 }
+function resolveLatestVersionedNode(baseDir, nodeSegments) {
+  if (!(0, import_fs34.existsSync)(baseDir)) return void 0;
+  try {
+    const latest2 = pickLatestVersion((0, import_fs34.readdirSync)(baseDir));
+    if (!latest2) return void 0;
+    const nodePath = (0, import_path46.join)(baseDir, latest2, ...nodeSegments);
+    return (0, import_fs34.existsSync)(nodePath) ? nodePath : void 0;
+  } catch {
+    return void 0;
+  }
+}
 function resolveNodeBinary() {
   try {
     const cmd = process.platform === "win32" ? "where node" : "which node";
@@ -8528,35 +8552,18 @@ function resolveNodeBinary() {
     return "node";
   }
   const home = (0, import_os9.homedir)();
-  const nvmBase = (0, import_path46.join)(home, ".nvm", "versions", "node");
-  if ((0, import_fs34.existsSync)(nvmBase)) {
-    try {
-      const latest2 = pickLatestVersion((0, import_fs34.readdirSync)(nvmBase));
-      if (latest2) {
-        const nodePath = (0, import_path46.join)(nvmBase, latest2, "bin", "node");
-        if ((0, import_fs34.existsSync)(nodePath)) return nodePath;
-      }
-    } catch {
-    }
-  }
+  const nvmNode = resolveLatestVersionedNode((0, import_path46.join)(home, ".nvm", "versions", "node"), ["bin", "node"]);
+  if (nvmNode) return nvmNode;
   const fnmBases = [
     (0, import_path46.join)(home, ".fnm", "node-versions"),
     (0, import_path46.join)(home, "Library", "Application Support", "fnm", "node-versions"),
     (0, import_path46.join)(home, ".local", "share", "fnm", "node-versions")
   ];
   for (const fnmBase of fnmBases) {
-    if ((0, import_fs34.existsSync)(fnmBase)) {
-      try {
-        const latest2 = pickLatestVersion((0, import_fs34.readdirSync)(fnmBase));
-        if (latest2) {
-          const nodePath = (0, import_path46.join)(fnmBase, latest2, "installation", "bin", "node");
-          if ((0, import_fs34.existsSync)(nodePath)) return nodePath;
-        }
-      } catch {
-      }
-    }
+    const fnmNode = resolveLatestVersionedNode(fnmBase, ["installation", "bin", "node"]);
+    if (fnmNode) return fnmNode;
   }
-  for (const p of ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]) {
+  for (const p of SYSTEM_NODE_PATHS) {
     if ((0, import_fs34.existsSync)(p)) return p;
   }
   return "node";
@@ -8573,7 +8580,7 @@ function pickLatestVersion(versions) {
     return 0;
   })[0];
 }
-var import_fs34, import_child_process12, import_path46, import_os9, EPHEMERAL_NODE_PATH_MARKERS;
+var import_fs34, import_child_process12, import_path46, import_os9, EPHEMERAL_NODE_PATH_MARKERS, SYSTEM_NODE_PATHS;
 var init_resolve_node = __esm({
   "src/utils/resolve-node.ts"() {
     "use strict";
@@ -8582,6 +8589,7 @@ var init_resolve_node = __esm({
     import_path46 = require("path");
     import_os9 = require("os");
     EPHEMERAL_NODE_PATH_MARKERS = ["hostedtoolcache", "/runner/", "\\runner\\"];
+    SYSTEM_NODE_PATHS = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
   }
 });
 
@@ -8611,16 +8619,7 @@ function parseFrontmatter2(content) {
   return { metadata, body };
 }
 function parseFrontmatterAliases(rawAliases) {
-  if (!rawAliases) return [];
-  const trimmed = rawAliases.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    const inner = trimmed.slice(1, -1).trim();
-    if (!inner) return [];
-    return inner.split(",").map((alias) => stripOptionalQuotes(alias)).filter((alias) => alias.length > 0);
-  }
-  const singleAlias = stripOptionalQuotes(trimmed);
-  return singleAlias ? [singleAlias] : [];
+  return parseFrontmatterList(rawAliases);
 }
 function parseFrontmatterList(rawValue) {
   if (!rawValue) return [];
@@ -9359,9 +9358,16 @@ function isDefaultClaudeConfigDirPath(configDir) {
 function quoteShellArg(value) {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
-function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath) {
+function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath, cacheWrapperPath) {
   if (isWindows()) {
     return `${quoteShellArg(nodeBin)} ${quoteShellArg(hudScriptPath)}`;
+  }
+  const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
+  if (cacheWrapperPath) {
+    if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
+      return "sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud-cache.sh ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
+    }
+    return `sh ${quoteShellArg(cacheWrapperPath.replace(/\\/g, "/"))} ${quoteShellArg(normalizedHudScriptPath)}`;
   }
   if (isDefaultClaudeConfigDirPath(CLAUDE_CONFIG_DIR)) {
     if (findNodePath) {
@@ -9369,7 +9375,6 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath) {
     }
     return "node ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hud/omc-hud.mjs";
   }
-  const normalizedHudScriptPath = hudScriptPath.replace(/\\/g, "/");
   if (findNodePath) {
     return `sh ${quoteShellArg(findNodePath.replace(/\\/g, "/"))} ${quoteShellArg(normalizedHudScriptPath)}`;
   }
@@ -9521,6 +9526,8 @@ function configureInstallerSettings(baseSettings, context) {
       try {
         const findNodeSrc = (0, import_path49.join)(getPackageDir3(), "scripts", "find-node.sh");
         const findNodeDest = (0, import_path49.join)(HUD_DIR, "find-node.sh");
+        const cacheWrapperSrc = (0, import_path49.join)(getPackageDir3(), "scripts", "lib", "hud-cache-wrapper.sh");
+        const cacheWrapperDest = (0, import_path49.join)(HUD_DIR, "omc-hud-cache.sh");
         const configDirHelperSrc = (0, import_path49.join)(getPackageDir3(), "scripts", "lib", "config-dir.sh");
         const hudLibDir = (0, import_path49.join)(HUD_DIR, "lib");
         const configDirHelperDest = (0, import_path49.join)(hudLibDir, "config-dir.sh");
@@ -9528,10 +9535,12 @@ function configureInstallerSettings(baseSettings, context) {
           (0, import_fs37.mkdirSync)(hudLibDir, { recursive: true });
         }
         (0, import_fs37.copyFileSync)(findNodeSrc, findNodeDest);
+        (0, import_fs37.copyFileSync)(cacheWrapperSrc, cacheWrapperDest);
         (0, import_fs37.copyFileSync)(configDirHelperSrc, configDirHelperDest);
         (0, import_fs37.chmodSync)(findNodeDest, 493);
+        (0, import_fs37.chmodSync)(cacheWrapperDest, 493);
         (0, import_fs37.chmodSync)(configDirHelperDest, 493);
-        statusLineCommand = buildStatusLineCommand(nodeBin, context.hudScriptPath.replace(/\\/g, "/"), findNodeDest);
+        statusLineCommand = buildStatusLineCommand(nodeBin, context.hudScriptPath.replace(/\\/g, "/"), findNodeDest, cacheWrapperDest);
       } catch {
         statusLineCommand = buildStatusLineCommand(nodeBin, context.hudScriptPath.replace(/\\/g, "/"));
       }
@@ -11459,7 +11468,19 @@ function getPrdPath(directory) {
 function getOmcPrdPath(directory) {
   return (0, import_path51.join)(getOmcRoot(directory), PRD_FILENAME);
 }
-function findPrdPath(directory) {
+function getSessionPrdPath(directory, sessionId) {
+  return (0, import_path51.join)(getSessionStateDir(sessionId, directory), PRD_FILENAME);
+}
+function getLegacyStatePrdPath(directory) {
+  return (0, import_path51.join)(getOmcRoot(directory), "state", PRD_FILENAME);
+}
+function findPrdPath(directory, sessionId) {
+  if (sessionId) {
+    const sessionPath = getSessionPrdPath(directory, sessionId);
+    if ((0, import_fs39.existsSync)(sessionPath)) {
+      return sessionPath;
+    }
+  }
   const rootPath = getPrdPath(directory);
   if ((0, import_fs39.existsSync)(rootPath)) {
     return rootPath;
@@ -11468,29 +11489,33 @@ function findPrdPath(directory) {
   if ((0, import_fs39.existsSync)(omcPath)) {
     return omcPath;
   }
+  const legacyStatePath = getLegacyStatePrdPath(directory);
+  if ((0, import_fs39.existsSync)(legacyStatePath)) {
+    return legacyStatePath;
+  }
   return null;
 }
-function readPrd(directory) {
-  const prdPath = findPrdPath(directory);
+function readPrd(directory, sessionId) {
+  const prdPath = findPrdPath(directory, sessionId);
   if (!prdPath) {
     return null;
   }
   return readPrdFromPath(prdPath).prd ?? null;
 }
-function writePrd(directory, prd) {
-  let prdPath = findPrdPath(directory);
-  if (!prdPath) {
-    const omcDir = getOmcRoot(directory);
-    if (!(0, import_fs39.existsSync)(omcDir)) {
-      try {
-        (0, import_fs39.mkdirSync)(omcDir, { recursive: true });
-      } catch {
-        return false;
-      }
+function writePrd(directory, prd, sessionId) {
+  let prdPath;
+  if (sessionId) {
+    try {
+      ensureSessionStateDir(sessionId, directory);
+    } catch {
+      return false;
     }
-    prdPath = getOmcPrdPath(directory);
+    prdPath = getSessionPrdPath(directory, sessionId);
+  } else {
+    prdPath = findPrdPath(directory) ?? getOmcPrdPath(directory);
   }
   try {
+    (0, import_fs39.mkdirSync)((0, import_path51.dirname)(prdPath), { recursive: true });
     (0, import_fs39.writeFileSync)(prdPath, JSON.stringify(prd, null, 2));
     return true;
   } catch {
@@ -11511,8 +11536,8 @@ function getPrdStatus(prd) {
     incompleteIds: pending.map((s) => s.id)
   };
 }
-function markStoryComplete(directory, storyId, notes) {
-  const prd = readPrd(directory);
+function markStoryComplete(directory, storyId, notes, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return false;
   }
@@ -11525,10 +11550,10 @@ function markStoryComplete(directory, storyId, notes) {
   if (notes) {
     story.notes = notes;
   }
-  return writePrd(directory, prd);
+  return writePrd(directory, prd, sessionId);
 }
-function markStoryIncomplete(directory, storyId, notes) {
-  const prd = readPrd(directory);
+function markStoryIncomplete(directory, storyId, notes, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return false;
   }
@@ -11541,10 +11566,10 @@ function markStoryIncomplete(directory, storyId, notes) {
   if (notes) {
     story.notes = notes;
   }
-  return writePrd(directory, prd);
+  return writePrd(directory, prd, sessionId);
 }
-function markStoryArchitectVerified(directory, storyId, notes) {
-  const prd = readPrd(directory);
+function markStoryArchitectVerified(directory, storyId, notes, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return false;
   }
@@ -11556,17 +11581,17 @@ function markStoryArchitectVerified(directory, storyId, notes) {
   if (notes) {
     story.notes = notes;
   }
-  return writePrd(directory, prd);
+  return writePrd(directory, prd, sessionId);
 }
-function getStory(directory, storyId) {
-  const prd = readPrd(directory);
+function getStory(directory, storyId, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return null;
   }
   return prd.userStories.find((s) => s.id === storyId) || null;
 }
-function getNextStory(directory) {
-  const prd = readPrd(directory);
+function getNextStory(directory, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return null;
   }
@@ -11602,16 +11627,16 @@ function createSimplePrd(project, branchName, taskDescription) {
     }
   ]);
 }
-function initPrd(directory, project, branchName, description, stories) {
+function initPrd(directory, project, branchName, description, stories, sessionId) {
   const prd = stories ? createPrd(project, branchName, description, stories) : createSimplePrd(project, branchName, description);
-  return writePrd(directory, prd);
+  return writePrd(directory, prd, sessionId);
 }
-function ensurePrdForStartup(directory, project, branchName, description, stories) {
-  const existingPath = findPrdPath(directory);
+function ensurePrdForStartup(directory, project, branchName, description, stories, sessionId) {
+  const existingPath = findPrdPath(directory, sessionId);
   if (!existingPath) {
-    const created = initPrd(directory, project, branchName, description, stories);
-    const createdPath = findPrdPath(directory);
-    const prd = created ? readPrd(directory) : null;
+    const created = initPrd(directory, project, branchName, description, stories, sessionId);
+    const createdPath = findPrdPath(directory, sessionId);
+    const prd = created ? readPrd(directory, sessionId) : null;
     if (!created || !createdPath || !prd) {
       return {
         ok: false,
@@ -11646,6 +11671,25 @@ function ensurePrdForStartup(directory, project, branchName, description, storie
       path: existingPath,
       error: `${existingPath} must contain at least one user story for Ralph to start.`
     };
+  }
+  if (sessionId) {
+    const sessionPath = getSessionPrdPath(directory, sessionId);
+    if (existingPath !== sessionPath) {
+      if (!writePrd(directory, parsed.prd, sessionId)) {
+        return {
+          ok: false,
+          created: false,
+          path: existingPath,
+          error: `Ralph found ${existingPath}, but failed to migrate it to session-scoped ${sessionPath}.`
+        };
+      }
+      return {
+        ok: true,
+        created: false,
+        path: sessionPath,
+        prd: parsed.prd
+      };
+    }
   }
   return {
     ok: true,
@@ -11707,7 +11751,7 @@ function formatPrd(prd) {
   }
   return lines.join("\n");
 }
-function formatNextStoryPrompt(story) {
+function formatNextStoryPrompt(story, prdPath) {
   return `<current-story>
 
 ## Current Story: ${story.id} - ${story.title}
@@ -11717,11 +11761,13 @@ ${story.description}
 **Acceptance Criteria:**
 ${story.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
-**Instructions:**
+${prdPath ? `**Active PRD file:** ${prdPath}
+
+` : ""}**Instructions:**
 1. Implement this story completely
 2. Verify ALL acceptance criteria are met
 3. Run quality checks (tests, typecheck, lint)
-4. When complete, mark story as passes: true in prd.json
+4. When complete, mark story as passes: true in the active PRD file
 5. If ALL stories are done, run \`/oh-my-claudecode:cancel\` to cleanly exit ralph mode and clean up all state files
 
 </current-story>
@@ -12526,7 +12572,9 @@ function createRalphLoopHook(directory) {
       directory,
       (0, import_path54.basename)(directory),
       branchName,
-      normalizedPrompt
+      normalizedPrompt,
+      void 0,
+      sessionId
     );
     if (!startupPrd.ok) {
       console.error(`[RALPH PRD REQUIRED] ${startupPrd.error}`);
@@ -12547,7 +12595,7 @@ function createRalphLoopHook(directory) {
       critic_mode: options?.criticMode ?? detectCriticModeFlag(prompt) ?? DEFAULT_RALPH_CRITIC_MODE,
       prd_mode: true
     };
-    const prdCompletion = getPrdCompletionStatus(directory);
+    const prdCompletion = getPrdCompletionStatus(directory, sessionId);
     if (prdCompletion.nextStory) {
       state.current_story_id = prdCompletion.nextStory.id;
     }
@@ -12586,12 +12634,12 @@ function createRalphLoopHook(directory) {
     getState
   };
 }
-function hasPrd(directory) {
-  const prd = readPrd(directory);
+function hasPrd(directory, sessionId) {
+  const prd = readPrd(directory, sessionId);
   return prd !== null;
 }
-function getPrdCompletionStatus(directory) {
-  const prd = readPrd(directory);
+function getPrdCompletionStatus(directory, sessionId) {
+  const prd = readPrd(directory, sessionId);
   if (!prd) {
     return {
       hasPrd: false,
@@ -12608,15 +12656,15 @@ function getPrdCompletionStatus(directory) {
     nextStory: status.nextStory
   };
 }
-function getRalphContext(directory) {
+function getRalphContext(directory, sessionId) {
   const parts = [];
   const progressContext = getProgressContext(directory);
   if (progressContext) {
     parts.push(progressContext);
   }
-  const prdStatus = getPrdCompletionStatus(directory);
+  const prdStatus = getPrdCompletionStatus(directory, sessionId);
   if (prdStatus.hasPrd && prdStatus.nextStory) {
-    parts.push(formatNextStoryPrompt(prdStatus.nextStory));
+    parts.push(formatNextStoryPrompt(prdStatus.nextStory, findPrdPath(directory, sessionId) ?? void 0));
   }
   if (prdStatus.status) {
     parts.push(
@@ -12628,22 +12676,22 @@ ${formatPrdStatus(prdStatus.status)}
   }
   return parts.join("\n");
 }
-function setCurrentStory(directory, storyId) {
-  const state = readRalphState(directory);
+function setCurrentStory(directory, storyId, sessionId) {
+  const state = readRalphState(directory, sessionId);
   if (!state) {
     return false;
   }
   state.current_story_id = storyId;
-  return writeRalphState(directory, state);
+  return writeRalphState(directory, state, sessionId);
 }
-function enablePrdMode(directory) {
-  const state = readRalphState(directory);
+function enablePrdMode(directory, sessionId) {
+  const state = readRalphState(directory, sessionId);
   if (!state) {
     return false;
   }
   state.prd_mode = true;
   initProgress(directory);
-  return writeRalphState(directory, state);
+  return writeRalphState(directory, state, sessionId);
 }
 function recordStoryProgress(directory, storyId, implementation, filesChanged, learnings) {
   return appendProgress(directory, {
@@ -12679,8 +12727,8 @@ function getTeamPhaseDirective(directory, sessionId) {
   }
   return null;
 }
-function shouldCompleteByPrd(directory) {
-  const status = getPrdCompletionStatus(directory);
+function shouldCompleteByPrd(directory, sessionId) {
+  const status = getPrdCompletionStatus(directory, sessionId);
   return status.hasPrd && status.allComplete;
 }
 var import_child_process15, import_fs44, import_path54, RALPH_CRITIC_MODES, DEFAULT_MAX_ITERATIONS, DEFAULT_RALPH_CRITIC_MODE;
@@ -13060,6 +13108,7 @@ __export(ralph_exports, {
   formatStory: () => formatStory,
   getArchitectRejectionContinuationPrompt: () => getArchitectRejectionContinuationPrompt,
   getArchitectVerificationPrompt: () => getArchitectVerificationPrompt,
+  getLegacyStatePrdPath: () => getLegacyStatePrdPath,
   getNextStory: () => getNextStory,
   getOmcPrdPath: () => getOmcPrdPath,
   getOmcProgressPath: () => getOmcProgressPath,
@@ -13071,6 +13120,7 @@ __export(ralph_exports, {
   getProgressPath: () => getProgressPath,
   getRalphContext: () => getRalphContext,
   getRecentLearnings: () => getRecentLearnings,
+  getSessionPrdPath: () => getSessionPrdPath,
   getStory: () => getStory,
   getTeamPhaseDirective: () => getTeamPhaseDirective,
   hasPrd: () => hasPrd,
@@ -18530,11 +18580,11 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     if (sessionId) {
       if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
         if (verificationState.verification_scope === "story" && verificationState.story_id) {
-          markStoryArchitectVerified(workingDir, verificationState.story_id);
+          markStoryArchitectVerified(workingDir, verificationState.story_id, void 0, sessionId);
           clearVerificationState(workingDir, sessionId);
           const refreshedState = readRalphState(workingDir, sessionId);
           if (refreshedState) {
-            const refreshedPrd = getPrdCompletionStatus(workingDir);
+            const refreshedPrd = getPrdCompletionStatus(workingDir, sessionId);
             refreshedState.current_story_id = refreshedPrd.nextStory?.id;
             writeRalphState(workingDir, refreshedState, sessionId);
           }
@@ -18554,7 +18604,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
       const rejection = checkArchitectRejectionInTranscript(sessionId);
       if (verificationState && rejection.rejected) {
         if (verificationState.verification_scope === "story" && verificationState.story_id) {
-          markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback);
+          markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback, sessionId);
         }
         recordArchitectFeedback(workingDir, false, rejection.feedback, sessionId);
         const updatedVerification = readVerificationState(workingDir, sessionId);
@@ -18574,7 +18624,7 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
       }
     }
     if (verificationState?.pending) {
-      const storyUnderReview = verificationState.story_id ? getStory(workingDir, verificationState.story_id) ?? void 0 : void 0;
+      const storyUnderReview = verificationState.story_id ? getStory(workingDir, verificationState.story_id, sessionId) ?? void 0 : void 0;
       const verificationPrompt = getArchitectVerificationPrompt(verificationState, storyUnderReview);
       return {
         shouldBlock: true,
@@ -18587,8 +18637,8 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
       };
     }
   }
-  const prdStatus = getPrdCompletionStatus(workingDir);
-  const currentStory = state.current_story_id ? getStory(workingDir, state.current_story_id) : prdStatus.nextStory;
+  const prdStatus = getPrdCompletionStatus(workingDir, sessionId);
+  const currentStory = state.current_story_id ? getStory(workingDir, state.current_story_id, sessionId) : prdStatus.nextStory;
   if (currentStory?.passes && currentStory.architectVerified !== true) {
     const startedVerification = startVerification(
       workingDir,
@@ -18661,8 +18711,9 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
   if (!newState) {
     return null;
   }
-  const ralphContext = getRalphContext(workingDir);
-  const prdInstruction = prdStatus.hasPrd ? `2. Check prd.json - verify the current story's acceptance criteria are met, then mark it passes: true. Are ALL stories complete?` : `2. Check your todo list - are ALL items marked complete?`;
+  const ralphContext = getRalphContext(workingDir, sessionId);
+  const activePrdPath = prdStatus.hasPrd ? findPrdPath(workingDir, sessionId) : null;
+  const prdInstruction = prdStatus.hasPrd ? `2. Check ${activePrdPath ?? "prd.json"} - verify the current story's acceptance criteria are met, then mark it passes: true. Are ALL stories complete?` : `2. Check your todo list - are ALL items marked complete?`;
   const continuationPrompt = `<ralph-continuation>
 ${errorGuidance ? errorGuidance + "\n" : ""}
 [RALPH - ITERATION ${newState.iteration}/${newState.max_iterations}]
@@ -19151,7 +19202,7 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
     };
   };
   const runRalphPriority = async () => {
-    if (tombstonedWorkflowModes.has("ralph")) return null;
+    if (tombstonedWorkflowModes.has("ralph") || !isModeActive("ralph", workingDir, sessionId)) return null;
     return checkRalphLoop(sessionId, workingDir, cancelInProgress);
   };
   if (autopilotPriorityFirst) {
@@ -19181,7 +19232,7 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
       return teamResult;
     }
   }
-  if (!tombstonedWorkflowModes.has("ultrawork")) {
+  if (!tombstonedWorkflowModes.has("ultrawork") && isModeActive("ultrawork", workingDir, sessionId)) {
     const ultraworkResult = await checkUltrawork(sessionId, workingDir, hasIncompleteTodos, cancelInProgress);
     if (ultraworkResult) {
       return ultraworkResult;
@@ -19236,6 +19287,7 @@ var init_persistent_mode = __esm({
     init_state();
     init_subagent_tracker();
     init_truncate_prompt();
+    init_mode_registry();
     CANCEL_SIGNAL_TTL_MS2 = 3e4;
     STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
     todoContinuationAttempts = /* @__PURE__ */ new Map();
@@ -34792,6 +34844,20 @@ function cleanupMissionState(directory, sessionId) {
     return 0;
   }
 }
+function cleanupSessionStartedMarker(directory, sessionId) {
+  try {
+    validateSessionId(sessionId);
+  } catch {
+    return;
+  }
+  try {
+    const markerPath = path16.join(getOmcRoot(directory), "state", "sessions", sessionId, SESSION_STARTED_MARKER_FILE);
+    if (fs12.existsSync(markerPath)) {
+      fs12.unlinkSync(markerPath);
+    }
+  } catch {
+  }
+}
 function extractTeamNameFromState(state) {
   if (!state || typeof state !== "object") return null;
   const rawTeamName = state.team_name ?? state.teamName;
@@ -34894,6 +34960,7 @@ async function processSessionEnd(input) {
   cleanupTransientState(directory, input.session_id);
   cleanupModeStates(directory, input.session_id);
   cleanupMissionState(directory, input.session_id);
+  cleanupSessionStartedMarker(directory, input.session_id);
   try {
     const pythonSessionIds = await extractPythonReplSessionIdsFromTranscript(input.transcript_path);
     if (pythonSessionIds.length > 0) {
@@ -34953,7 +35020,7 @@ async function processSessionEnd(input) {
 async function handleSessionEnd(input) {
   return processSessionEnd(input);
 }
-var fs12, path16, readline, PYTHON_REPL_TOOL_NAMES;
+var fs12, path16, readline, SESSION_STARTED_MARKER_FILE, PYTHON_REPL_TOOL_NAMES;
 var init_session_end = __esm({
   "src/hooks/session-end/index.ts"() {
     "use strict";
@@ -34968,6 +35035,7 @@ var init_session_end = __esm({
     init_worktree_paths();
     init_mode_names();
     init_mode_state_io();
+    SESSION_STARTED_MARKER_FILE = "session-started.json";
     PYTHON_REPL_TOOL_NAMES = /* @__PURE__ */ new Set(["python_repl", "mcp__t__python_repl"]);
   }
 });
@@ -41769,6 +41837,13 @@ var require_safe_regex = __commonJS({
 });
 
 // src/hud/usage-api.ts
+function isEnterpriseUsageContext(options) {
+  if (!options) return true;
+  const subscriptionType = options.subscriptionType?.toLowerCase() ?? null;
+  const rateLimitTier = options.rateLimitTier ?? null;
+  if (subscriptionType == null && rateLimitTier == null) return true;
+  return subscriptionType === "enterprise" || /claude_zero/i.test(rateLimitTier ?? "");
+}
 function isZaiHost(urlString) {
   try {
     const url = new URL(urlString);
@@ -42246,13 +42321,21 @@ function clamp(v) {
   if (v == null || !isFinite(v)) return 0;
   return Math.max(0, Math.min(100, v));
 }
-function parseUsageResponse(response) {
+function parseUsageResponse(response, options) {
   const fiveHour = response.five_hour?.utilization;
   const sevenDay = response.seven_day?.utilization;
-  const enterpriseCredits = response.extra_usage?.used_credits;
-  const enterpriseCurrency = (response.extra_usage?.currency ?? "USD").toUpperCase();
-  const hasUsableEnterprise = enterpriseCredits != null && enterpriseCurrency === "USD";
-  if (fiveHour == null && sevenDay == null && !hasUsableEnterprise) return null;
+  const sonnetSevenDay = response.seven_day_sonnet?.utilization;
+  const opusSevenDay = response.seven_day_opus?.utilization;
+  const extra = response.extra_usage;
+  const usedCredits = extra?.used_credits;
+  const extraCurrency = (extra?.currency ?? "USD").toUpperCase();
+  const isEnterpriseContext = isEnterpriseUsageContext(options);
+  const hasUsableUsedCredits = usedCredits != null && extraCurrency === "USD";
+  const hasUsableEnterprise = isEnterpriseContext && hasUsableUsedCredits;
+  const hasUsableUsdExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
+  const hasUsableCreditExtraUsage = !isEnterpriseContext && hasUsableUsedCredits && extra?.monthly_limit != null && extra.monthly_limit > 0;
+  const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
+  if (fiveHour == null && sevenDay == null && sonnetSevenDay == null && opusSevenDay == null && !hasUsableEnterprise && !hasUsableExtraUsage) return null;
   const parseDate = (dateStr) => {
     if (!dateStr) return null;
     try {
@@ -42262,34 +42345,39 @@ function parseUsageResponse(response) {
       return null;
     }
   };
-  const sonnetSevenDay = response.seven_day_sonnet?.utilization;
   const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
   const result = {
     fiveHourPercent: clamp(fiveHour),
-    weeklyPercent: clamp(sevenDay),
-    fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
-    weeklyResetsAt: parseDate(response.seven_day?.resets_at)
+    fiveHourResetsAt: parseDate(response.five_hour?.resets_at)
   };
+  if (sevenDay != null) {
+    result.weeklyPercent = clamp(sevenDay);
+    result.weeklyResetsAt = parseDate(response.seven_day?.resets_at);
+  }
   if (sonnetSevenDay != null) {
     result.sonnetWeeklyPercent = clamp(sonnetSevenDay);
     result.sonnetWeeklyResetsAt = parseDate(sonnetResetsAt);
   }
-  const opusSevenDay = response.seven_day_opus?.utilization;
   const opusResetsAt = response.seven_day_opus?.resets_at;
   if (opusSevenDay != null) {
     result.opusWeeklyPercent = clamp(opusSevenDay);
     result.opusWeeklyResetsAt = parseDate(opusResetsAt);
   }
-  const extra = response.extra_usage;
   if (extra != null) {
     const currency = (extra.currency ?? "USD").toUpperCase();
-    if (extra.used_credits != null && currency === "USD") {
+    if (extra.used_credits != null && currency === "USD" && isEnterpriseContext) {
       result.enterpriseSpentUsd = extra.used_credits / 100;
       result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / 100;
       result.enterpriseCurrency = currency;
       if (extra.monthly_limit != null && extra.monthly_limit > 0) {
         result.enterpriseUtilization = clamp(extra.used_credits / extra.monthly_limit * 100);
       }
+    } else if (extra.used_credits != null && currency === "USD" && !isEnterpriseContext && extra.monthly_limit != null && extra.monthly_limit > 0) {
+      const spentUsd = extra.used_credits / 100;
+      result.extraUsageSpentUsd = spentUsd;
+      result.extraUsageLimitUsd = extra.monthly_limit / 100;
+      result.extraUsagePercent = extra.utilization != null ? clamp(extra.utilization) : clamp(extra.used_credits / extra.monthly_limit * 100);
+      result.extraUsageResetsAt = parseDate(extra.resets_at);
     } else if (extra.limit_usd != null && extra.limit_usd > 0) {
       const spentUsd = extra.spent_usd ?? 0;
       result.extraUsageSpentUsd = spentUsd;
@@ -42548,10 +42636,15 @@ async function getUsage() {
           }
         }
         const accessToken = creds.accessToken;
+        const subscriptionType = creds.subscriptionType;
+        const rateLimitTier = creds.rateLimitTier;
         return fetchAndCacheUsage({
           source: "anthropic",
           fetchFn: () => fetchUsageFromApi(accessToken),
-          parseFn: parseUsageResponse,
+          parseFn: (data) => parseUsageResponse(data, {
+            subscriptionType,
+            rateLimitTier
+          }),
           cache,
           pollIntervalMs
         });
@@ -43624,6 +43717,9 @@ var init_custom_rate_provider = __esm({
 function green(text) {
   return `${GREEN}${text}${RESET}`;
 }
+function yellow(text) {
+  return `${YELLOW}${text}${RESET}`;
+}
 function red(text) {
   return `${RED}${text}${RESET}`;
 }
@@ -44496,15 +44592,12 @@ var init_limits = __esm({
 // src/hud/elements/permission.ts
 function renderPermission(pending) {
   if (!pending) return null;
-  return `${YELLOW7}APPROVE?${RESET} ${DIM5}${pending.toolName.toLowerCase()}${RESET}:${pending.targetSummary}`;
+  return `${yellow("APPROVE?")} ${dim(pending.toolName.toLowerCase())}:${pending.targetSummary}`;
 }
-var YELLOW7, DIM5;
 var init_permission = __esm({
   "src/hud/elements/permission.ts"() {
     "use strict";
     init_colors();
-    YELLOW7 = "\x1B[33m";
-    DIM5 = "\x1B[2m";
   }
 });
 
@@ -44536,17 +44629,13 @@ var init_thinking = __esm({
 // src/hud/elements/session.ts
 function renderSession(session) {
   if (!session) return null;
-  const color = session.health === "critical" ? RED5 : session.health === "warning" ? YELLOW8 : GREEN8;
-  return `session:${color}${session.durationMinutes}m${RESET}`;
+  const colorize = session.health === "critical" ? red : session.health === "warning" ? yellow : green;
+  return `session:${colorize(`${session.durationMinutes}m`)}`;
 }
-var GREEN8, YELLOW8, RED5;
 var init_session = __esm({
   "src/hud/elements/session.ts"() {
     "use strict";
     init_colors();
-    GREEN8 = "\x1B[32m";
-    YELLOW8 = "\x1B[33m";
-    RED5 = "\x1B[31m";
   }
 });
 
@@ -44575,9 +44664,9 @@ var init_token_usage = __esm({
 
 // src/hud/elements/enterprise-cost.ts
 function getColor2(percent) {
-  if (percent >= CRITICAL_THRESHOLD3) return RED6;
-  if (percent >= WARNING_THRESHOLD2) return YELLOW9;
-  return GREEN9;
+  if (percent >= CRITICAL_THRESHOLD3) return RED5;
+  if (percent >= WARNING_THRESHOLD2) return YELLOW7;
+  return GREEN8;
 }
 function formatMoney(amount) {
   const [intPart, decPart] = amount.toFixed(2).split(".");
@@ -44589,28 +44678,28 @@ function currencyPrefix(currency) {
 }
 function renderEnterpriseCost(limits, stale) {
   if (!limits || limits.enterpriseSpentUsd === void 0) return null;
-  const staleMarker = stale ? `${DIM6}*${RESET}` : "";
+  const staleMarker = stale ? `${DIM5}*${RESET}` : "";
   const currency = limits.enterpriseCurrency ?? "USD";
   const prefix = currencyPrefix(currency);
   const spentStr = formatMoney(limits.enterpriseSpentUsd);
   if (limits.enterpriseLimitUsd == null) {
-    return `${DIM6}spent:${RESET}${prefix}${spentStr}${staleMarker}`;
+    return `${DIM5}spent:${RESET}${prefix}${spentStr}${staleMarker}`;
   }
   const limitStr = formatMoney(limits.enterpriseLimitUsd);
   const utilization = limits.enterpriseUtilization ?? 0;
   const rounded = Math.min(100, Math.max(0, Math.round(utilization)));
   const color = getColor2(rounded);
-  return `${DIM6}spent:${RESET}${prefix}${spentStr}/${prefix}${limitStr} ${color}(${rounded}%)${RESET}${staleMarker}`;
+  return `${DIM5}spent:${RESET}${prefix}${spentStr}/${prefix}${limitStr} ${color}(${rounded}%)${RESET}${staleMarker}`;
 }
-var GREEN9, YELLOW9, RED6, DIM6, WARNING_THRESHOLD2, CRITICAL_THRESHOLD3;
+var GREEN8, YELLOW7, RED5, DIM5, WARNING_THRESHOLD2, CRITICAL_THRESHOLD3;
 var init_enterprise_cost = __esm({
   "src/hud/elements/enterprise-cost.ts"() {
     "use strict";
     init_colors();
-    GREEN9 = "\x1B[32m";
-    YELLOW9 = "\x1B[33m";
-    RED6 = "\x1B[31m";
-    DIM6 = "\x1B[2m";
+    GREEN8 = "\x1B[32m";
+    YELLOW7 = "\x1B[33m";
+    RED5 = "\x1B[31m";
+    DIM5 = "\x1B[2m";
     WARNING_THRESHOLD2 = 70;
     CRITICAL_THRESHOLD3 = 90;
   }
@@ -44656,16 +44745,16 @@ function renderAutopilot(state, _thresholds) {
   let phaseColor;
   switch (phase) {
     case "complete":
-      phaseColor = GREEN10;
+      phaseColor = GREEN9;
       break;
     case "failed":
-      phaseColor = RED7;
+      phaseColor = RED6;
       break;
     case "validation":
       phaseColor = MAGENTA3;
       break;
     case "qa":
-      phaseColor = YELLOW10;
+      phaseColor = YELLOW8;
       break;
     default:
       phaseColor = CYAN7;
@@ -44675,7 +44764,7 @@ function renderAutopilot(state, _thresholds) {
     output += ` (iter ${iteration}/${maxIterations})`;
   }
   if (phase === "execution" && tasksTotal && tasksTotal > 0) {
-    const taskColor = tasksCompleted === tasksTotal ? GREEN10 : YELLOW10;
+    const taskColor = tasksCompleted === tasksTotal ? GREEN9 : YELLOW8;
     output += ` | Tasks: ${taskColor}${tasksCompleted || 0}/${tasksTotal}${RESET}`;
   }
   if (filesCreated && filesCreated > 0) {
@@ -44683,15 +44772,15 @@ function renderAutopilot(state, _thresholds) {
   }
   return output;
 }
-var CYAN7, GREEN10, YELLOW10, RED7, MAGENTA3, PHASE_NAMES, PHASE_INDEX;
+var CYAN7, GREEN9, YELLOW8, RED6, MAGENTA3, PHASE_NAMES, PHASE_INDEX;
 var init_autopilot2 = __esm({
   "src/hud/elements/autopilot.ts"() {
     "use strict";
     init_colors();
     CYAN7 = "\x1B[36m";
-    GREEN10 = "\x1B[32m";
-    YELLOW10 = "\x1B[33m";
-    RED7 = "\x1B[31m";
+    GREEN9 = "\x1B[32m";
+    YELLOW8 = "\x1B[33m";
+    RED6 = "\x1B[31m";
     MAGENTA3 = "\x1B[35m";
     PHASE_NAMES = {
       expansion: "Expand",
@@ -45073,18 +45162,18 @@ function renderContextLimitWarning(contextPercent, threshold, autoCompact) {
     return null;
   }
   const isCritical = safePercent >= 90;
-  const color = isCritical ? RED8 : YELLOW11;
+  const color = isCritical ? RED7 : YELLOW9;
   const icon = isCritical ? "!!" : "!";
   const action = autoCompact ? "(auto-compact queued)" : "run /compact";
   return `${color}${BOLD2}[${icon}] ctx ${safePercent}% >= ${threshold}% threshold - ${action}${RESET}`;
 }
-var YELLOW11, RED8, BOLD2;
+var YELLOW9, RED7, BOLD2;
 var init_context_warning = __esm({
   "src/hud/elements/context-warning.ts"() {
     "use strict";
     init_colors();
-    YELLOW11 = "\x1B[33m";
-    RED8 = "\x1B[31m";
+    YELLOW9 = "\x1B[33m";
+    RED7 = "\x1B[31m";
     BOLD2 = "\x1B[1m";
   }
 });
@@ -45268,8 +45357,9 @@ async function render(context, config2) {
       rendered.set("omcLabel", bold(`[OMC${versionTag}]`));
     }
   }
-  const hasEnterpriseData = context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== void 0;
-  if (enabledElements.rateLimits && context.rateLimitsResult && !hasEnterpriseData) {
+  const isEnterprise = enabledElements.enterpriseMode !== void 0 ? enabledElements.enterpriseMode : (context.subscriptionType ?? "").toLowerCase() === "enterprise" || /claude_zero/i.test(context.rateLimitTier ?? "");
+  const enterpriseCostReplacesRateLimits = isEnterprise && context.rateLimitsResult?.rateLimits?.enterpriseSpentUsd !== void 0;
+  if (enabledElements.rateLimits && context.rateLimitsResult && !enterpriseCostReplacesRateLimits) {
     if (context.rateLimitsResult.rateLimits) {
       const stale = context.rateLimitsResult.stale;
       const limits = enabledElements.useBars ? renderRateLimitsWithBar(
@@ -45310,7 +45400,6 @@ async function render(context, config2) {
       if (session) rendered.set("session", session);
     }
   }
-  const isEnterprise = enabledElements.enterpriseMode !== void 0 ? enabledElements.enterpriseMode : (context.subscriptionType ?? "").toLowerCase() === "enterprise" || /claude_zero/i.test(context.rateLimitTier ?? "");
   if (isEnterprise && enabledElements.showEnterpriseCost !== false) {
     const stale = context.rateLimitsResult?.stale;
     const cost = renderEnterpriseCost(
@@ -45796,7 +45885,13 @@ async function main2(watchMode = false, skipInit = false) {
     const missionBoardEnabled = config2.missionBoard?.enabled ?? config2.elements.missionBoard ?? false;
     const missionBoard = missionBoardEnabled ? await refreshMissionBoardState(cwd2, config2.missionBoard) : null;
     const contextPercent = getContextPercent(stdin);
-    const subscriptionInfo = getSubscriptionInfo();
+    const subscriptionInfo = (() => {
+      try {
+        return getSubscriptionInfo() ?? { subscriptionType: null, rateLimitTier: null };
+      } catch {
+        return { subscriptionType: null, rateLimitTier: null };
+      }
+    })();
     const context = {
       contextPercent,
       contextDisplayScope: currentSessionId ?? cwd2,
@@ -79210,7 +79305,7 @@ var omcToolNames = enabledTools.map((t) => `mcp__t__${t.name}`);
 var toolCategoryMap = new Map(
   allTools.map((t) => [`mcp__t__${t.name}`, t.category])
 );
-function getOmcToolNames(options) {
+function getExcludedCategories(options) {
   const {
     includeLsp = true,
     includeAst = true,
@@ -79238,11 +79333,18 @@ function getOmcToolNames(options) {
   if (!includeSharedMemory) excludedCategories.add(TOOL_CATEGORIES.SHARED_MEMORY);
   if (!includeDeepinit) excludedCategories.add(TOOL_CATEGORIES.DEEPINIT);
   if (!includeWiki) excludedCategories.add(TOOL_CATEGORIES.WIKI);
-  if (excludedCategories.size === 0) return [...omcToolNames];
-  return omcToolNames.filter((name) => {
-    const category = toolCategoryMap.get(name);
+  return excludedCategories;
+}
+function filterToolNames(names, categoriesByName, options) {
+  const excludedCategories = getExcludedCategories(options);
+  if (excludedCategories.size === 0) return [...names];
+  return names.filter((name) => {
+    const category = categoriesByName.get(name);
     return !category || !excludedCategories.has(category);
   });
+}
+function getOmcToolNames(options) {
+  return filterToolNames(omcToolNames, toolCategoryMap, options);
 }
 
 // src/features/magic-keywords.ts
@@ -80422,6 +80524,7 @@ var import_fs81 = require("fs");
 var import_path98 = require("path");
 init_worktree_paths();
 init_mode_state_io();
+init_mode_names();
 init_omc_cli_rendering();
 init_swallowed_error();
 init_team_canonical_state();
@@ -81572,6 +81675,8 @@ var MODE_CONFIRMATION_SKILL_MAP = {
 };
 var SESSION_START_CONTEXT_BUDGET = 6e3;
 var SESSION_START_OMISSION_NOTICE = "[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]";
+var SESSION_STARTED_MARKER_FILE2 = "session-started.json";
+var LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
 function compactBudgetedText2(text, maxChars) {
   const notice = "\n...[truncated to preserve SessionStart context budget]";
   if (!text || text.length <= maxChars) return text || "";
@@ -81610,6 +81715,136 @@ function buildSessionStartAdditionalContext(messages) {
     used += separatorLength + message.length;
   }
   return selected.join("\n");
+}
+function readLinuxBootId() {
+  try {
+    if (!(0, import_fs81.existsSync)(LINUX_BOOT_ID_PATH)) return void 0;
+    const bootId = (0, import_fs81.readFileSync)(LINUX_BOOT_ID_PATH, "utf-8").trim();
+    return bootId.length > 0 ? bootId : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function sessionStateDir(directory, sessionId) {
+  return (0, import_path98.join)(getOmcRoot(directory), "state", "sessions", sessionId);
+}
+function sessionStartedMarkerPath(directory, sessionId) {
+  return (0, import_path98.join)(sessionStateDir(directory, sessionId), SESSION_STARTED_MARKER_FILE2);
+}
+function readJsonObject2(filePath) {
+  try {
+    if (!(0, import_fs81.existsSync)(filePath)) return null;
+    const parsed = JSON.parse((0, import_fs81.readFileSync)(filePath, "utf-8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeSessionStartedMarker(directory, sessionId) {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+  try {
+    const dir = sessionStateDir(directory, sessionId);
+    (0, import_fs81.mkdirSync)(dir, { recursive: true });
+    const marker = {
+      session_id: sessionId,
+      started_at: (/* @__PURE__ */ new Date()).toISOString(),
+      cwd: directory,
+      pid: process.pid,
+      // Do not persist process.ppid here: installed hooks run through
+      // scripts/run.cjs, whose short-lived process exits as soon as this
+      // hook returns. Treating that runner PID as owner liveness caused
+      // later SessionStart hooks to falsely clean live session state.
+      boot_id: readLinuxBootId()
+    };
+    (0, import_fs81.writeFileSync)(sessionStartedMarkerPath(directory, sessionId), JSON.stringify(marker, null, 2), {
+      encoding: "utf-8",
+      mode: 384
+    });
+  } catch {
+  }
+}
+function removeSessionStartedMarker(directory, sessionId) {
+  if (!sessionId || !SAFE_SESSION_ID_PATTERN.test(sessionId)) return;
+  try {
+    const markerPath = sessionStartedMarkerPath(directory, sessionId);
+    if ((0, import_fs81.existsSync)(markerPath)) {
+      (0, import_fs81.unlinkSync)(markerPath);
+    }
+  } catch {
+  }
+}
+function hasSessionEndSummary(directory, sessionId) {
+  return (0, import_fs81.existsSync)((0, import_path98.join)(getOmcRoot(directory), "sessions", `${sessionId}.json`));
+}
+function cleanupSessionModeStateFiles(directory, sessionId) {
+  const dir = sessionStateDir(directory, sessionId);
+  for (const { file } of SESSION_END_MODE_STATE_FILES) {
+    const filePath = (0, import_path98.join)(dir, file);
+    const state = readJsonObject2(filePath);
+    if (state?.active === true || file === "skill-active-state.json") {
+      try {
+        (0, import_fs81.unlinkSync)(filePath);
+      } catch {
+      }
+    }
+  }
+}
+function cleanupMissionStateForSession(directory, sessionId) {
+  const missionStatePath = (0, import_path98.join)(getOmcRoot(directory), "state", "mission-state.json");
+  const parsed = readJsonObject2(missionStatePath);
+  if (!Array.isArray(parsed?.missions)) return;
+  const before = parsed.missions.length;
+  parsed.missions = parsed.missions.filter((mission) => {
+    if (mission.source !== "session") return true;
+    const missionId = typeof mission.id === "string" ? mission.id : "";
+    return !missionId.includes(sessionId);
+  });
+  if (parsed.missions.length === before) return;
+  try {
+    parsed.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    (0, import_fs81.writeFileSync)(missionStatePath, JSON.stringify(parsed, null, 2));
+  } catch {
+  }
+}
+function hasDurableAbandonmentEvidence(marker) {
+  const storedBootId = typeof marker.boot_id === "string" ? marker.boot_id : void 0;
+  const currentBootId = readLinuxBootId();
+  if (storedBootId && currentBootId && storedBootId !== currentBootId) {
+    return true;
+  }
+  return false;
+}
+async function reconcileAbandonedSessionStarts(directory, currentSessionId) {
+  const sessionsDir = (0, import_path98.join)(getOmcRoot(directory), "state", "sessions");
+  if (!(0, import_fs81.existsSync)(sessionsDir)) return;
+  let entries;
+  try {
+    entries = (0, import_fs81.readdirSync)(sessionsDir);
+  } catch {
+    return;
+  }
+  for (const sessionId of entries) {
+    if (!SAFE_SESSION_ID_PATTERN.test(sessionId) || sessionId === currentSessionId) continue;
+    const markerPath = sessionStartedMarkerPath(directory, sessionId);
+    const marker = readJsonObject2(markerPath);
+    if (!marker) continue;
+    if (marker.session_id !== sessionId) continue;
+    if (hasSessionEndSummary(directory, sessionId)) {
+      removeSessionStartedMarker(directory, sessionId);
+      continue;
+    }
+    if (!hasDurableAbandonmentEvidence(marker)) continue;
+    cleanupSessionModeStateFiles(directory, sessionId);
+    cleanupMissionStateForSession(directory, sessionId);
+    removeSessionStartedMarker(directory, sessionId);
+    try {
+      const remaining = (0, import_fs81.readdirSync)(sessionStateDir(directory, sessionId));
+      if (remaining.length === 0) {
+        (0, import_fs81.rmdirSync)(sessionStateDir(directory, sessionId));
+      }
+    } catch {
+    }
+  }
 }
 function getExtraField(input, key) {
   return input[key];
@@ -82512,6 +82747,8 @@ When team verification passes or cancel is requested, allow terminal cleanup beh
 async function processSessionStart(input) {
   const sessionId = input.sessionId;
   const directory = resolveToWorktreeRoot(input.directory);
+  writeSessionStartedMarker(directory, sessionId);
+  await reconcileAbandonedSessionStarts(directory, sessionId);
   const { initSilentAutoUpdate: initSilentAutoUpdate2 } = await Promise.resolve().then(() => (init_auto_update(), auto_update_exports));
   const { readAutopilotState: readAutopilotState2 } = await Promise.resolve().then(() => (init_autopilot(), autopilot_exports));
   const { readUltraworkState: readUltraworkState2 } = await Promise.resolve().then(() => (init_ultrawork2(), ultrawork_exports));
@@ -83818,7 +84055,7 @@ function toSafeSkillName(name) {
   const normalized = name.trim();
   return CC_NATIVE_COMMANDS2.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
 }
-function readJsonObject2(path22) {
+function readJsonObject3(path22) {
   if (!(0, import_fs86.existsSync)(path22)) {
     return null;
   }
@@ -83830,7 +84067,7 @@ function readJsonObject2(path22) {
   }
 }
 function readDeepInterviewThresholdFromSettings(path22) {
-  const settings = readJsonObject2(path22);
+  const settings = readJsonObject3(path22);
   const omc = settings?.omc;
   if (!omc || typeof omc !== "object" || Array.isArray(omc)) {
     return null;
@@ -86399,7 +86636,7 @@ Auto-merge (v2-only):
                         Equivalent to OMC_TEAMS_AUTO_MERGE=1.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
-  code-reviewer, security-reviewer, test-engineer, debugger, designer, writer, scientist
+  code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
 `;
 var TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]
