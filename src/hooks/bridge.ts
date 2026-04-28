@@ -2071,7 +2071,7 @@ How to pass \`model\` on Task/Agent calls:
 - If none of those env vars are configured, the enforcer will deny the tier alias with an env-var configuration hint — set one of them in your \`settings.json\` env or shell profile.
 - The enforcer denies tier aliases it cannot resolve. It also denies provider-specific IDs that carry a \`[1m]\` context-window suffix or otherwise fail subagent-safe validation (sub-agents cannot inherit \`[1m]\`). Valid provider-specific IDs without extended-context suffixes are allowed.
 
-When the session model carries a \`[1m]\` suffix, passing a tier alias is REQUIRED — omitting \`model\` will be denied.
+When the session model carries a \`[1m]\` suffix, passing an explicit \`model\` is REQUIRED — omitting it will be denied (sub-agents cannot inherit the \`[1m]\` suffix). Use a tier alias (preferred, requires resolver env vars above) or a subagent-safe provider-specific ID without the \`[1m]\` suffix.
 
 When the session model has no \`[1m]\` suffix, omitting \`model\` is safe UNLESS a custom sub-agent definition pins a bare Anthropic model ID (e.g. \`model: claude-sonnet-4-6\` in agent frontmatter), in which case the enforcer will deny with tier-alias guidance. Shipped OMC agents pin tier aliases and are unaffected. Custom sub-agents should pin tier aliases (not bare Anthropic IDs) in their frontmatter.
 
@@ -2277,7 +2277,7 @@ function processPreToolUse(input: HookInput): HookOutput {
         // Use permissionDecision:"deny" — the only PreToolUse mechanism
         // Claude Code supports for blocking a specific tool call with
         // feedback. modifiedInput is NOT supported by the hook protocol.
-        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Pass model as a tier alias on ${input.toolName} calls: model="sonnet" | "opus" | "haiku". Requires ANTHROPIC_DEFAULT_*_MODEL, CLAUDE_CODE_BEDROCK_*_MODEL, or OMC_SUBAGENT_MODEL to be set. The model "${inputModel}" is not valid for this provider.`;
+        const denyReason = `[MODEL ROUTING] This environment uses a non-standard provider (Bedrock/Vertex/proxy). Omit the \`model\` parameter on ${input.toolName} calls so agents inherit the parent session's model. The model "${inputModel}" was rejected.`;
         return {
           continue: true,
           hookSpecificOutput: {
