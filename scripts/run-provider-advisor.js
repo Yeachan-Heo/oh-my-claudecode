@@ -22,13 +22,34 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
   }
   if (provider === 'gemini') {
-    return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+    // Per gemini-cli docs (cli/tutorials/automation.md), stdin is treated as
+    // CONTEXT for the -p instruction, not as the prompt itself — so the full
+    // prompt MUST go through -p. On Windows with shell:true, Node sets
+    // windowsVerbatimArguments=true automatically when shell is cmd.exe (see
+    // Node child_process docs, "shell" option), disabling auto-quoting. As a
+    // result, prompts containing spaces get split into multiple args by
+    // cmd.exe and gemini emits "Cannot use both positional prompt and -p".
+    // Fix: manually CMD-quote the prompt arg on Windows shell paths (CMD
+    // doubles inner quotes via "" escape).
+    const promptArg = SHOULD_USE_WINDOWS_SHELL
+      ? `"${prompt.replace(/"/g, '""')}"`
+      : prompt;
+    return ['-p', promptArg, '--yolo'];
   }
   return ['-p', prompt];
 }
 
 function shouldPipePromptViaStdin(provider, prompt) {
   if (provider !== 'codex' && provider !== 'gemini') {
+    return false;
+  }
+
+  // Gemini CLI does NOT support reading the full prompt from stdin — the
+  // canonical pattern is `gemini -p "<instruction>"` with stdin used as
+  // optional context (see gemini-cli docs). Earlier OMC behavior of dropping
+  // -p when piping via stdin made gemini run interactive on Windows (no TTY)
+  // and hang. Always pass prompt via argv for gemini.
+  if (provider === 'gemini') {
     return false;
   }
 
