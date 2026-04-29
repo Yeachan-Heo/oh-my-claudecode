@@ -14,6 +14,7 @@ export declare const BUILTIN_EXTERNAL_MODEL_DEFAULTS: {
     readonly codexModel: "gpt-5.3-codex";
     readonly geminiModel: "gemini-3.1-pro-preview";
 };
+export declare function resolveInheritedModelFromEnv(): string | undefined;
 export declare function hasTierModelEnvOverrides(): boolean;
 export declare function getDefaultModelHigh(): string;
 export declare function getDefaultModelMedium(): string;

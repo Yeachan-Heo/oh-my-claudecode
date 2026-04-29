@@ -1,4 +1,7 @@
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
+const DIRECT_MODEL_ENV_KEYS = ['CLAUDE_MODEL', 'ANTHROPIC_MODEL'];
+const INHERIT_TIER_PRIORITY = ['MEDIUM', 'HIGH', 'LOW'];
+const CLAUDE_TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
 const TIER_ENV_KEYS = {
     LOW: [
         'OMC_MODEL_LOW',
@@ -68,9 +71,44 @@ export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
  * User/project config overrides are applied later by the config loader
  * via deepMerge, so they take precedence over these defaults.
  */
+function readEnvValue(key) {
+    const value = process.env[key]?.trim();
+    return value || undefined;
+}
 function resolveTierModelFromEnv(tier) {
     for (const key of TIER_ENV_KEYS[tier]) {
-        const value = process.env[key]?.trim();
+        const value = readEnvValue(key);
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
+}
+function getProviderDetectionModelEnvValues() {
+    for (const key of DIRECT_MODEL_ENV_KEYS) {
+        const value = readEnvValue(key);
+        if (value) {
+            return [value];
+        }
+    }
+    const values = new Set();
+    for (const tier of INHERIT_TIER_PRIORITY) {
+        const value = resolveTierModelFromEnv(tier);
+        if (value) {
+            values.add(value);
+        }
+    }
+    return [...values];
+}
+export function resolveInheritedModelFromEnv() {
+    for (const key of DIRECT_MODEL_ENV_KEYS) {
+        const value = readEnvValue(key);
+        if (value) {
+            return value;
+        }
+    }
+    for (const tier of INHERIT_TIER_PRIORITY) {
+        const value = resolveTierModelFromEnv(tier);
         if (value) {
             return value;
         }
@@ -79,8 +117,7 @@ function resolveTierModelFromEnv(tier) {
 }
 export function hasTierModelEnvOverrides() {
     return Object.values(TIER_ENV_KEYS).some((keys) => keys.some((key) => {
-        const value = process.env[key]?.trim();
-        return Boolean(value);
+        return Boolean(readEnvValue(key));
     }));
 }
 export function getDefaultModelHigh() {
@@ -151,17 +188,19 @@ export function isBedrock() {
     if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
         return true;
     }
-    // Fallback: detect Bedrock model ID patterns in CLAUDE_MODEL / ANTHROPIC_MODEL
+    // Fallback: detect Bedrock model ID patterns in the active model env value.
+    // Direct session model env vars win over lower-precedence tier defaults, so a
+    // stale tier/default env must not mark a standard Claude session as Bedrock.
     // Covers region prefixes (us, eu, ap), cross-region (global), and bare (anthropic.)
-    const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-    if (modelId && /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
-        return true;
-    }
-    if (modelId
-        && /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
-        && /:(inference-profile|application-inference-profile)\//i.test(modelId)
-        && modelId.toLowerCase().includes('claude')) {
-        return true;
+    for (const modelId of getProviderDetectionModelEnvValues()) {
+        if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
+            return true;
+        }
+        if (/^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
+            && /:(inference-profile|application-inference-profile)\//i.test(modelId)
+            && modelId.toLowerCase().includes('claude')) {
+            return true;
+        }
     }
     return false;
 }
@@ -229,10 +268,11 @@ export function isVertexAI() {
     if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
         return true;
     }
-    // Fallback: detect vertex_ai/ prefix in model ID
-    const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-    if (modelId && modelId.toLowerCase().startsWith('vertex_ai/')) {
-        return true;
+    // Fallback: detect vertex_ai/ prefix in the active model env value.
+    for (const modelId of getProviderDetectionModelEnvValues()) {
+        if (modelId.toLowerCase().startsWith('vertex_ai/')) {
+            return true;
+        }
     }
     return false;
 }
@@ -260,12 +300,16 @@ export function isNonClaudeProvider() {
     if (isVertexAI()) {
         return true;
     }
-    // Check CLAUDE_MODEL / ANTHROPIC_MODEL for non-Claude model IDs
+    // Check the active model env value for non-Claude model IDs.
+    // Direct CLAUDE_MODEL/ANTHROPIC_MODEL env vars intentionally short-circuit
+    // lower-precedence tier defaults so stale tier envs do not force inheritance.
     // Note: this check comes AFTER Bedrock/Vertex because their model IDs
     // contain "claude" and would incorrectly return false here.
-    const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-    if (modelId && !modelId.toLowerCase().includes('claude')) {
-        return true;
+    for (const modelId of getProviderDetectionModelEnvValues()) {
+        const lower = modelId.toLowerCase();
+        if (!lower.includes('claude') && !CLAUDE_TIER_ALIASES.has(lower)) {
+            return true;
+        }
     }
     // Custom base URL suggests a proxy/gateway (CC Switch, LiteLLM, OneAPI, etc.)
     const baseUrl = process.env.ANTHROPIC_BASE_URL || '';

@@ -21,6 +21,15 @@ describe('isNonClaudeProvider (issue #1201)', () => {
     'OMC_ROUTING_FORCE_INHERIT',
     'CLAUDE_CODE_USE_BEDROCK',
     'CLAUDE_CODE_USE_VERTEX',
+    'OMC_MODEL_HIGH',
+    'OMC_MODEL_MEDIUM',
+    'OMC_MODEL_LOW',
+    'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+    'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+    'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   ];
 
   beforeEach(() => {
@@ -82,6 +91,16 @@ describe('isNonClaudeProvider (issue #1201)', () => {
   it('is case-insensitive for Claude detection in model name', () => {
     process.env.CLAUDE_MODEL = 'Claude-Sonnet-4-6';
     expect(isNonClaudeProvider()).toBe(false);
+  });
+
+  it('returns true when ANTHROPIC_DEFAULT_SONNET_MODEL is non-Claude', () => {
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k2.6:cloud';
+    expect(isNonClaudeProvider()).toBe(true);
+  });
+
+  it('returns true when OMC_MODEL_MEDIUM is non-Claude', () => {
+    process.env.OMC_MODEL_MEDIUM = 'glm-5.1:cloud';
+    expect(isNonClaudeProvider()).toBe(true);
   });
 
   // --- Bedrock detection ---
@@ -270,6 +289,15 @@ describe('loadConfig auto-enables forceInherit for non-Claude providers (issue #
     'OMC_ROUTING_FORCE_INHERIT',
     'CLAUDE_CODE_USE_BEDROCK',
     'CLAUDE_CODE_USE_VERTEX',
+    'OMC_MODEL_HIGH',
+    'OMC_MODEL_MEDIUM',
+    'OMC_MODEL_LOW',
+    'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+    'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+    'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   ];
 
   beforeEach(() => {

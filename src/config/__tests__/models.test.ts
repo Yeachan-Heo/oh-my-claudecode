@@ -7,11 +7,23 @@ import {
   resolveClaudeFamily,
   hasExtendedContextSuffix,
   isSubagentSafeModelId,
+  resolveInheritedModelFromEnv,
 } from '../models.js';
 import { saveAndClear, restore } from './test-helpers.js';
 
-const BEDROCK_KEYS = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL'] as const;
-const VERTEX_KEYS = ['CLAUDE_CODE_USE_VERTEX', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL'] as const;
+const TIER_MODEL_ENV_KEYS = [
+  'OMC_MODEL_HIGH',
+  'OMC_MODEL_MEDIUM',
+  'OMC_MODEL_LOW',
+  'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+  'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+  'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+] as const;
+const BEDROCK_KEYS = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', ...TIER_MODEL_ENV_KEYS] as const;
+const VERTEX_KEYS = ['CLAUDE_CODE_USE_VERTEX', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', ...TIER_MODEL_ENV_KEYS] as const;
 const ALL_KEYS = [
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
@@ -19,6 +31,7 @@ const ALL_KEYS = [
   'ANTHROPIC_MODEL',
   'ANTHROPIC_BASE_URL',
   'OMC_ROUTING_FORCE_INHERIT',
+  ...TIER_MODEL_ENV_KEYS,
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -87,6 +100,11 @@ describe('isBedrock()', () => {
     expect(isBedrock()).toBe(true);
   });
 
+  it('detects Bedrock model IDs from tier model env vars', () => {
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'global.anthropic.claude-sonnet-4-6-v1:0';
+    expect(isBedrock()).toBe(true);
+  });
+
   it('returns false for bare Anthropic model IDs', () => {
     process.env.ANTHROPIC_MODEL = 'claude-sonnet-4-6';
     expect(isBedrock()).toBe(false);
@@ -113,6 +131,11 @@ describe('isVertexAI()', () => {
 
   it('detects vertex_ai/ prefix in ANTHROPIC_MODEL', () => {
     process.env.ANTHROPIC_MODEL = 'vertex_ai/claude-sonnet-4-6@20250301';
+    expect(isVertexAI()).toBe(true);
+  });
+
+  it('detects Vertex model IDs from tier model env vars', () => {
+    process.env.OMC_MODEL_MEDIUM = 'vertex_ai/claude-sonnet-4-6@20250301';
     expect(isVertexAI()).toBe(true);
   });
 
@@ -165,6 +188,42 @@ describe('isNonClaudeProvider()', () => {
     expect(isNonClaudeProvider()).toBe(true);
   });
 
+  it('returns true when Anthropic tier defaults target a non-Claude provider', () => {
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k2.6:cloud';
+    expect(isNonClaudeProvider()).toBe(true);
+  });
+
+  it('returns true when OMC tier defaults target a non-Claude provider', () => {
+    process.env.OMC_MODEL_MEDIUM = 'glm-5.1:cloud';
+    expect(isNonClaudeProvider()).toBe(true);
+  });
+
+  it('lets a direct Claude CLAUDE_MODEL beat a stale non-Claude ANTHROPIC_MODEL', () => {
+    process.env.CLAUDE_MODEL = 'claude-sonnet-4-6';
+    process.env.ANTHROPIC_MODEL = 'kimi-k2.6:cloud';
+
+    expect(isNonClaudeProvider()).toBe(false);
+  });
+
+  it('lets a direct Claude CLAUDE_MODEL beat stale non-Claude tier defaults', () => {
+    process.env.CLAUDE_MODEL = 'claude-sonnet-4-6';
+    process.env.OMC_MODEL_MEDIUM = 'glm-5.1:cloud';
+
+    expect(isNonClaudeProvider()).toBe(false);
+  });
+
+  it('lets a direct Claude ANTHROPIC_MODEL beat stale non-Claude tier defaults', () => {
+    process.env.ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+    process.env.OMC_MODEL_MEDIUM = 'glm-5.1:cloud';
+
+    expect(isNonClaudeProvider()).toBe(false);
+  });
+
+  it('does not treat bare tier aliases as non-Claude provider IDs', () => {
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'sonnet';
+    expect(isNonClaudeProvider()).toBe(false);
+  });
+
   it('returns false for standard Anthropic API bare model IDs', () => {
     process.env.ANTHROPIC_MODEL = 'claude-sonnet-4-6';
     expect(isNonClaudeProvider()).toBe(false);
@@ -172,6 +231,41 @@ describe('isNonClaudeProvider()', () => {
 
   it('returns false when no env vars are set', () => {
     expect(isNonClaudeProvider()).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// resolveInheritedModelFromEnv()
+// ---------------------------------------------------------------------------
+describe('resolveInheritedModelFromEnv()', () => {
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => { saved = saveAndClear(ALL_KEYS); });
+  afterEach(() => { restore(saved); });
+
+  it('prefers explicit session model env vars over tier defaults', () => {
+    process.env.CLAUDE_MODEL = 'claude-session-parent';
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k2.6:cloud';
+
+    expect(resolveInheritedModelFromEnv()).toBe('claude-session-parent');
+  });
+
+  it('falls back to the medium tier env model for forceInherit without session model vars', () => {
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'glm-5.1:cloud';
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k2.6:cloud';
+
+    expect(resolveInheritedModelFromEnv()).toBe('kimi-k2.6:cloud');
+  });
+
+  it('uses OMC tier model env vars as inherit fallback when provider envs are absent', () => {
+    process.env.OMC_MODEL_MEDIUM = 'gpt-5.3:proxy';
+
+    expect(resolveInheritedModelFromEnv()).toBe('gpt-5.3:proxy');
+  });
+
+  it('returns undefined instead of a built-in Claude fallback when no model env is configured', () => {
+    expect(resolveInheritedModelFromEnv()).toBeUndefined();
   });
 });
 

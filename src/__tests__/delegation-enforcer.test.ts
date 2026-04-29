@@ -364,7 +364,23 @@ describe('delegation-enforcer', () => {
   });
 
   describe('env-resolved agent defaults (issue #1415)', () => {
-    it('injects Bedrock family env model IDs instead of hardcoded tier aliases', () => {
+    it('strips model for Bedrock family env IDs because forceInherit auto-enables', () => {
+      process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'executor'
+      };
+
+      const result = enforceModel(input);
+
+      expect(result.injected).toBe(false);
+      expect(result.model).toBe('inherit');
+      expect(result.modifiedInput.model).toBeUndefined();
+    });
+
+    it('normalizes Bedrock family env model IDs when forceInherit is explicitly disabled', () => {
+      process.env.OMC_ROUTING_FORCE_INHERIT = 'false';
       process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
       const input: AgentInput = {
         description: 'Test task',
@@ -375,7 +391,6 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
 
       expect(result.injected).toBe(true);
-      // Even with Bedrock env vars, enforceModel normalizes to CC aliases
       expect(result.model).toBe('sonnet');
       expect(result.modifiedInput.model).toBe('sonnet');
     });
