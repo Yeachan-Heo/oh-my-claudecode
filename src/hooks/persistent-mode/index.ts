@@ -72,7 +72,7 @@ export interface PersistentModeResult {
   /** Message to inject into context */
   message: string;
   /** Which mode triggered the block */
-  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'deep-interview' | 'none';
   /** Additional metadata */
   metadata?: {
     todoCount?: number;
@@ -1268,6 +1268,37 @@ interface RalplanState {
   status?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Deep Interview enforcement (standalone Socratic loop)
+//
+// Deep Interview is a per-question loop: the skill calls AskUserQuestion,
+// receives the answer, then is supposed to keep working in the SAME turn
+// (score → state_write → ask the next question) until ambiguity drops below
+// the threshold. Without a stop-hook, Claude defaults to yielding the turn
+// after AskUserQuestion returns, forcing the user to re-prompt every round.
+// This block re-enforces the "do not yield mid-loop" rule from SKILL.md.
+// ---------------------------------------------------------------------------
+
+const DEEP_INTERVIEW_STOP_BLOCKER_MAX = 30;
+const DEEP_INTERVIEW_STOP_BLOCKER_TTL_MS = 45 * 60 * 1000; // 45 min
+
+interface DeepInterviewState {
+  active: boolean;
+  session_id?: string;
+  current_phase?: string;
+  awaiting_confirmation?: boolean;
+  user_exit_requested?: boolean;
+  last_checked_at?: string;
+  updated_at?: string;
+  started_at?: string;
+  state?: {
+    current_ambiguity?: number;
+    threshold?: number;
+    rounds?: unknown[];
+    user_exit_requested?: boolean;
+  };
+}
+
 interface AutoresearchStopState {
   active: boolean;
   session_id?: string;
@@ -1535,6 +1566,118 @@ When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
 
 `,
     mode: 'ralplan',
+  };
+}
+
+/**
+ * Check Deep Interview state and determine if it should reinforce.
+ *
+ * Blocks the stop event when an interview is mid-loop so the agent continues
+ * scoring (2c), reporting (2d), state_write (2e), and asking the next
+ * question (2a/2b) in the same turn instead of yielding after AskUserQuestion.
+ * Allows the stop when ambiguity has dropped to the threshold, the user
+ * requested early exit, or the circuit breaker fires.
+ */
+async function checkDeepInterview(
+  sessionId?: string,
+  directory?: string,
+  cancelInProgress?: boolean
+): Promise<PersistentModeResult | null> {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readModeState<DeepInterviewState>('deep-interview', workingDir, sessionId);
+  const stateRecord = state as any;
+  const hasTimestampFields = Boolean(
+    stateRecord &&
+    ['last_checked_at', 'updated_at', 'started_at'].some((key) =>
+      typeof stateRecord[key] === 'string' && String(stateRecord[key]).length > 0,
+    ),
+  );
+
+  if (!state || !state.active || (hasTimestampFields && isStaleState(state))) {
+    return null;
+  }
+
+  // Session isolation
+  if (sessionId && state.session_id && state.session_id !== sessionId) {
+    return null;
+  }
+
+  if (isAwaitingConfirmation(state)) {
+    return null;
+  }
+
+  // Honor user-requested early exit (top-level or nested under state).
+  if (state.user_exit_requested === true || state.state?.user_exit_requested === true) {
+    writeStopBreaker(workingDir, 'deep-interview', 0, sessionId);
+    return { shouldBlock: false, message: '', mode: 'deep-interview' };
+  }
+
+  // Terminal: ambiguity dropped to or below threshold — interview is complete,
+  // skill is now writing the spec / handing off. Allow the stop so the
+  // pipeline (deep-interview → omc-plan → autopilot) can proceed.
+  const ambiguity = state.state?.current_ambiguity;
+  const threshold = state.state?.threshold;
+  if (
+    typeof ambiguity === 'number' &&
+    typeof threshold === 'number' &&
+    ambiguity <= threshold
+  ) {
+    writeStopBreaker(workingDir, 'deep-interview', 0, sessionId);
+    return { shouldBlock: false, message: '', mode: 'deep-interview' };
+  }
+
+  // Cancel-in-progress bypass
+  if (cancelInProgress) {
+    return { shouldBlock: false, message: '', mode: 'deep-interview' };
+  }
+
+  // Circuit breaker: never reinforce more than DEEP_INTERVIEW_STOP_BLOCKER_MAX
+  // times for the same stuck loop. After that, allow stop and deactivate so a
+  // future invocation can start cleanly.
+  const breakerCount =
+    readStopBreaker(workingDir, 'deep-interview', sessionId, DEEP_INTERVIEW_STOP_BLOCKER_TTL_MS) + 1;
+  if (breakerCount > DEEP_INTERVIEW_STOP_BLOCKER_MAX) {
+    writeStopBreaker(workingDir, 'deep-interview', 0, sessionId);
+
+    (state as unknown as Record<string, unknown>).active = false;
+    (state as unknown as Record<string, unknown>).deactivated_reason = 'stop_breaker_exhausted';
+    (state as unknown as Record<string, unknown>).completed_at = new Date().toISOString();
+    writeModeState('deep-interview', state as unknown as Record<string, unknown>, workingDir, sessionId);
+
+    return {
+      shouldBlock: false,
+      message: `[DEEP-INTERVIEW CIRCUIT BREAKER] Stop enforcement exceeded ${DEEP_INTERVIEW_STOP_BLOCKER_MAX} reinforcements. Allowing stop and deactivating stale interview state to prevent infinite restart loops.`,
+      mode: 'deep-interview',
+    };
+  }
+  writeStopBreaker(workingDir, 'deep-interview', breakerCount, sessionId);
+
+  const roundCount = Array.isArray(state.state?.rounds) ? state.state!.rounds!.length : 0;
+  const ambiguityPctText =
+    typeof ambiguity === 'number' ? `${Math.round(ambiguity * 100)}%` : 'unknown';
+  const thresholdPctText =
+    typeof threshold === 'number' ? `${Math.round(threshold * 100)}%` : 'unknown';
+
+  return {
+    shouldBlock: true,
+    message: `<deep-interview-continuation>
+
+[DEEP-INTERVIEW LOOP - Round ${roundCount} | Ambiguity ${ambiguityPctText} (target ≤ ${thresholdPctText}) | Reinforcement ${breakerCount}/${DEEP_INTERVIEW_STOP_BLOCKER_MAX}]
+
+The Socratic interview loop is active. The user just answered AskUserQuestion — do NOT yield the turn. In this same turn:
+  1. Score ambiguity across all clarity dimensions (Step 2c)
+  2. Show the user the round summary + new ambiguity score (Step 2d)
+  3. Persist state via \`state_write\` (Step 2e)
+  4. Ask the next question targeting the weakest dimension (Steps 2a/2b)
+
+Yield only when ambiguity drops to or below the threshold, the user requests early exit, or the hard cap fires. To exit early at this score, the user must say "stop" / "exit" / "I'm done" — otherwise continue.
+
+</deep-interview-continuation>
+
+---
+
+`,
+    mode: 'deep-interview',
   };
 }
 
@@ -1919,6 +2062,17 @@ export async function checkPersistentModes(
     const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
     if (teamResult) {
       return teamResult;
+    }
+  }
+
+  // Priority 1.9: Deep Interview (standalone Socratic loop)
+  // The skill calls AskUserQuestion every round and is supposed to keep going
+  // through 2c/2d/2e/next-question in the same turn. Without this hook, Claude
+  // yields after AskUserQuestion and the user has to re-prompt every round.
+  if (!tombstonedWorkflowModes.has('deep-interview')) {
+    const deepInterviewResult = await checkDeepInterview(sessionId, workingDir, cancelInProgress);
+    if (deepInterviewResult) {
+      return deepInterviewResult;
     }
   }
 
