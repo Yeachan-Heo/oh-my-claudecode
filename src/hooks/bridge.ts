@@ -2071,7 +2071,7 @@ How to pass \`model\` on Task/Agent calls:
 - If none of those env vars are configured, the enforcer will deny the tier alias with an env-var configuration hint — set one of them in your \`settings.json\` env or shell profile.
 - The enforcer denies tier aliases it cannot resolve. It also denies provider-specific IDs that carry a \`[1m]\` context-window suffix or otherwise fail subagent-safe validation (sub-agents cannot inherit \`[1m]\`). Valid provider-specific IDs without extended-context suffixes are allowed.
 
-When the session model carries a \`[1m]\` suffix, passing an explicit \`model\` is REQUIRED — omitting it will be denied (sub-agents cannot inherit the \`[1m]\` suffix). Use a tier alias (preferred, requires resolver env vars above) or a subagent-safe provider-specific ID without the \`[1m]\` suffix.
+When the session model carries a \`[1m]\` suffix, passing an explicit \`model\` is REQUIRED — omitting it will be denied (sub-agents cannot inherit the \`[1m]\` suffix). Use a tier alias (requires resolver env vars above); the Agent tool schema does not accept provider-specific IDs, so tier aliases are the only valid option.
 
 When the session model has no \`[1m]\` suffix, omitting \`model\` is safe UNLESS a custom sub-agent definition pins a bare Anthropic model ID (e.g. \`model: claude-sonnet-4-6\` in agent frontmatter). When resolver env vars are configured, the enforcer will deny that call with tier-alias guidance; when they are absent, the call is not denied by the enforcer but will fail at the provider. Either way, custom sub-agents should pin tier aliases (not bare Anthropic IDs) in their frontmatter. Shipped OMC agents already do this and are unaffected.
 
