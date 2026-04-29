@@ -33,6 +33,9 @@ function runPreToolEnforcerWithEnv(input, env = {}) {
             OMC_SUBAGENT_MODEL: '',
             CLAUDE_MODEL: '',
             ANTHROPIC_MODEL: '',
+            ANTHROPIC_BASE_URL: '',
+            CLAUDE_CODE_USE_BEDROCK: '',
+            CLAUDE_CODE_USE_VERTEX: '',
             // Reset tier-resolution chain env vars (resolveTierAliasToSafeModel reads these).
             OMC_MODEL_LOW: '',
             OMC_MODEL_MEDIUM: '',
@@ -445,6 +448,70 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
         });
         expect(output.continue).toBe(true);
         expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+    });
+    it.each([
+        ['sonnet', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'glm-5.1:cloud', 'session-tier-proxy-sonnet'],
+        ['opus', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'glm-5.1:cloud', 'session-tier-proxy-opus'],
+        ['haiku', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'glm-5.1:cloud', 'session-tier-proxy-haiku'],
+    ])('allows tier alias %s via proxy ANTHROPIC_DEFAULT_*_MODEL when non-Claude routing is active', (tier, envKey, proxyModel, sessionId) => {
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: { subagent_type: 'oh-my-claudecode:executor', model: tier },
+            cwd: tempDir,
+            session_id: sessionId,
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: 'true',
+            OMC_SUBAGENT_MODEL: '',
+            [envKey]: proxyModel,
+        });
+        expect(output.continue).toBe(true);
+        expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+    });
+    it('blocks tier alias when proxy ANTHROPIC_DEFAULT_*_MODEL is only whitespace', () => {
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+            cwd: tempDir,
+            session_id: 'session-tier-proxy-empty',
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: 'true',
+            OMC_SUBAGENT_MODEL: '',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: '   ',
+        });
+        const hookOutput = output.hookSpecificOutput;
+        expect(hookOutput.permissionDecisionReason).toContain('MODEL ROUTING');
+    });
+    it('preserves provider-specific validation for CLAUDE_CODE_BEDROCK_*_MODEL in proxy mode', () => {
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+            cwd: tempDir,
+            session_id: 'session-tier-proxy-invalid-bedrock-var',
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: 'true',
+            OMC_SUBAGENT_MODEL: '',
+            CLAUDE_CODE_BEDROCK_SONNET_MODEL: 'glm-5.1:cloud',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+        });
+        const hookOutput = output.hookSpecificOutput;
+        expect(hookOutput.permissionDecisionReason).toContain('MODEL ROUTING');
+    });
+    it('does not broadly accept proxy ANTHROPIC_DEFAULT_*_MODEL in normal Claude force-inherit config', () => {
+        const configDir = join(tempDir, '.omc');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'config.json'), JSON.stringify({ routing: { forceInherit: true } }));
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+            cwd: tempDir,
+            session_id: 'session-tier-normal-claude-proxy-default',
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: '',
+            OMC_SUBAGENT_MODEL: '',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.1:cloud',
+        });
+        const hookOutput = output.hookSpecificOutput;
+        expect(hookOutput.permissionDecisionReason).toContain('MODEL ROUTING');
     });
     it('OMC_SUBAGENT_MODEL takes priority over ANTHROPIC_DEFAULT_*_MODEL when both set', () => {
         const output = runPreToolEnforcerWithEnv({
