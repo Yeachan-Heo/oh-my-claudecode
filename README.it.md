@@ -158,7 +158,7 @@ Avvolgi l'handler in server.py:42 con try/except ClientDisconnectedError...
 ```
 
 **Gestione competenze:** `/skill list | add | remove | edit | search`
-**Auto-apprendimento:** `/learner` estrae pattern riutilizzabili con criteri di qualità rigorosi
+**Auto-apprendimento:** `/skillify` estrae pattern riutilizzabili con criteri di qualità rigorosi
 **Auto-iniezione:** Le competenze corrispondenti si caricano automaticamente nel contesto — nessuna chiamata manuale necessaria
 
 [Lista completa delle funzionalità →](docs/REFERENCE.md)

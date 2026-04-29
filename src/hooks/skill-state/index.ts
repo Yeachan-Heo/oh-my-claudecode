@@ -136,6 +136,7 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
   'external-context': 'medium',
   'ai-slop-cleaner': 'medium',
   sciomc: 'medium',
+  skillify: 'medium',
   learner: 'medium',
   'omc-setup': 'medium',
   setup: 'medium',

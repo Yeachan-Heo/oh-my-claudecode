@@ -18,11 +18,13 @@ describe('builtin skill drafting contracts for learned skills (issue #2425)', ()
     clearSkillsCache();
   });
 
-  it('learner skill instructs writing YAML frontmatter and flat learned-skill file paths', () => {
+  it('learner remains a deprecated alias of canonical skillify', () => {
     const learner = getBuiltinSkill('learner');
 
     expect(learner).toBeDefined();
-    expect(learner!.template).toContain('MUST start with YAML frontmatter');
+    expect(learner!.aliasOf).toBe('skillify');
+    expect(learner!.deprecatedAlias).toBe(true);
+    expect(learner!.template).toContain('Prefer `/oh-my-claudecode:skillify`');
     expect(learner!.template).toContain('Do **not** write plain markdown without frontmatter.');
     expect(learner!.template).toContain('.omc/skills/<skill-name>.md');
     expect(learner!.template).toContain('skills/omc-learned/<skill-name>.md');

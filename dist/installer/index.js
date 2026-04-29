@@ -57,7 +57,6 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
     'remember',
     'verify',
     'debug',
-    'skillify',
 ]);
 /**
  * Detects the newest installed OMC version from persistent metadata or

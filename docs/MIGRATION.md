@@ -473,9 +473,9 @@ Your request              Claude's action
 
 You don't ask for delegation - it happens automatically.
 
-#### 3. Learned Skills (`/oh-my-claudecode:learner`)
+#### 3. Learned Skills (`/oh-my-claudecode:skillify`)
 
-Extract reusable insights from problem-solving:
+Extract reusable insights from problem-solving. `/oh-my-claudecode:learner` remains as a deprecated compatibility alias:
 
 ```bash
 # After solving a tricky bug:

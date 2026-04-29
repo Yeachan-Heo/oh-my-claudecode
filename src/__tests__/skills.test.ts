@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (34 canonical + 1 alias)', () => {
+    it('should return correct number of skills (34 canonical + 2 aliases)', () => {
       const skills = createBuiltinSkills();
-      // 35 entries: 34 canonical skills + 1 deprecated alias (psm)
-      expect(skills).toHaveLength(35);
+      // 36 entries: 34 canonical skills + 2 deprecated aliases (learner, psm)
+      expect(skills).toHaveLength(36);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -135,6 +135,7 @@ describe('Builtin Skills', () => {
         'omc-doctor',
         'external-context',
         'hud',
+        'skillify',
         'learner',
         'mcp-setup',
         'omc-setup',
@@ -169,6 +170,22 @@ describe('Builtin Skills', () => {
       const skillNames = skills.map((s) => s.name);
       const uniqueNames = new Set(skillNames);
       expect(uniqueNames.size).toBe(skillNames.length);
+    });
+
+    it('exposes learner as a deprecated alias for canonical skillify', () => {
+      const skillify = getBuiltinSkill('skillify');
+      const learner = getBuiltinSkill('learner');
+
+      expect(skillify).toBeDefined();
+      expect(skillify!.aliasOf).toBeUndefined();
+      expect(skillify!.aliases).toContain('learner');
+      expect(learner).toBeDefined();
+      expect(learner!.aliasOf).toBe('skillify');
+      expect(learner!.deprecatedAlias).toBe(true);
+      expect(learner!.deprecationMessage).toContain('Use "skillify" instead');
+      expect(listBuiltinSkillNames()).toContain('skillify');
+      expect(listBuiltinSkillNames()).not.toContain('learner');
+      expect(listBuiltinSkillNames({ includeAliases: true })).toContain('learner');
     });
   });
 
@@ -670,8 +687,8 @@ describe('Builtin Skills', () => {
     it('should include aliases when explicitly requested', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
-      // swarm alias removed in #1131, psm still exists
-      expect(names).toHaveLength(35);
+      // swarm alias removed in #1131; psm and learner aliases still exist
+      expect(names).toHaveLength(36);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('autoresearch');
       expect(names).toContain('self-improve');
@@ -680,6 +697,7 @@ describe('Builtin Skills', () => {
       expect(names).toContain('wiki');
       expect(names).not.toContain('swarm');
       expect(names).toContain('psm');
+      expect(names).toContain('learner');
     });
   });
 
@@ -706,12 +724,12 @@ describe('Builtin Skills', () => {
   });
 
   describe('skininthegamebros-only builtin skills', () => {
-    it('keeps skininthegamebros-only skills hidden by default', () => {
+    it('keeps skininthegamebros-only skills hidden by default while skillify remains public', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
       expect(names).not.toContain('remember');
       expect(names).not.toContain('verify');
       expect(names).not.toContain('debug');
-      expect(names).not.toContain('skillify');
+      expect(names).toContain('skillify');
     });
 
     it('surfaces skininthegamebros-only skills when USER_TYPE=ant', () => {

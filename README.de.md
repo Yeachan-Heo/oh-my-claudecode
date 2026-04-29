@@ -167,7 +167,7 @@ Umschließen Sie den Handler bei server.py:42 mit try/except ClientDisconnectedE
 ```
 
 **Skill-Verwaltung:** `/skill list | add | remove | edit | search`
-**Auto-Lernen:** `/learner` extrahiert wiederverwendbare Muster mit strengen Qualitätskriterien
+**Auto-Lernen:** `/skillify` extrahiert wiederverwendbare Muster mit strengen Qualitätskriterien
 **Auto-Injektion:** Passende Skills werden automatisch in den Kontext geladen — kein manueller Aufruf nötig
 
 [Vollständige Feature-Liste →](docs/REFERENCE.md)

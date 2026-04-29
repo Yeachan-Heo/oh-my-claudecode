@@ -50,7 +50,7 @@ const SKILL_PROTECTION = {
   // Medium protection (5 reinforcements)
   'code-review': 'medium', 'security-review': 'medium', plan: 'medium',
   ralplan: 'medium', review: 'medium', 'external-context': 'medium',
-  sciomc: 'medium', learner: 'medium', 'omc-setup': 'medium',
+  sciomc: 'medium', skillify: 'medium', learner: 'medium', 'omc-setup': 'medium',
   'mcp-setup': 'medium', 'project-session-manager': 'medium',
   'writer-memory': 'medium', 'ralph-init': 'medium', ccg: 'medium',
   // Heavy protection (10 reinforcements)

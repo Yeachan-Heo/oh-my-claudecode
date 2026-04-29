@@ -10633,8 +10633,7 @@ var init_installer = __esm({
     SKININTHEGAMEBROS_ONLY_SKILLS = /* @__PURE__ */ new Set([
       "remember",
       "verify",
-      "debug",
-      "skillify"
+      "debug"
     ]);
     OMC_HOOK_FILENAMES = /* @__PURE__ */ new Set([
       "keyword-detector.mjs",
@@ -16247,6 +16246,7 @@ var init_skill_state = __esm({
       "external-context": "medium",
       "ai-slop-cleaner": "medium",
       sciomc: "medium",
+      skillify: "medium",
       learner: "medium",
       "omc-setup": "medium",
       setup: "medium",
@@ -84047,8 +84047,7 @@ var CC_NATIVE_COMMANDS2 = /* @__PURE__ */ new Set([
 var SKININTHEGAMEBROS_ONLY_SKILLS2 = /* @__PURE__ */ new Set([
   "remember",
   "verify",
-  "debug",
-  "skillify"
+  "debug"
 ]);
 var DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD = 0.2;
 function toSafeSkillName(name) {
@@ -84160,7 +84159,11 @@ function loadSkillsFromDirectory() {
   const skills = [];
   const seenNames = /* @__PURE__ */ new Set();
   try {
-    const entries = (0, import_fs86.readdirSync)(SKILLS_DIR2, { withFileTypes: true });
+    const entries = (0, import_fs86.readdirSync)(SKILLS_DIR2, { withFileTypes: true }).sort((a, b) => {
+      if (a.name === "skillify") return -1;
+      if (b.name === "skillify") return 1;
+      return a.name.localeCompare(b.name);
+    });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       if (SKININTHEGAMEBROS_ONLY_SKILLS2.has(entry.name) && !isSkininthegamebrosUser()) {

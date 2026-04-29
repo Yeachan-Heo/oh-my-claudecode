@@ -51,7 +51,7 @@ function writeEnabledPluginSettings(claudeConfigDir) {
     writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }, null, 2));
 }
 function getBundledSkillNames() {
-    const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug', 'skillify']);
+    const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug']);
     return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name)

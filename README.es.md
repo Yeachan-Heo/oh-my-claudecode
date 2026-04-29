@@ -194,7 +194,7 @@ Envuelve el handler en server.py:42 con try/except ClientDisconnectedError...
 ```
 
 **Gestión de habilidades:** `/skill list | add | remove | edit | search`
-**Auto-aprendizaje:** `/learner` extrae patrones reutilizables con estrictos criterios de calidad
+**Auto-aprendizaje:** `/skillify` extrae patrones reutilizables con estrictos criterios de calidad
 **Auto-inyección:** Las habilidades coincidentes se cargan en el contexto automáticamente — sin necesidad de invocación manual
 
 [Lista completa de características →](docs/REFERENCE.md)

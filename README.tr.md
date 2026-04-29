@@ -167,7 +167,7 @@ server.py:42'deki handler'ı try/except ClientDisconnectedError ile sarın...
 ```
 
 **Beceri yönetimi:** `/skill list | add | remove | edit | search`
-**Otomatik öğrenme:** `/learner` katı kalite standartlarıyla yeniden kullanılabilir kalıplar çıkarır
+**Otomatik öğrenme:** `/skillify` katı kalite standartlarıyla yeniden kullanılabilir kalıplar çıkarır
 **Otomatik enjeksiyon:** Eşleşen beceriler otomatik olarak bağlama yüklenir — manuel çağrı gerekmez
 
 [Tam özellik listesi →](docs/REFERENCE.md)

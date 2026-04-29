@@ -203,7 +203,7 @@ Bọc handler tại server.py:42 trong try/except ClientDisconnectedError...
 ```
 
 **Quản lý kỹ năng:** `/skill list | add | remove | edit | search`
-**Tự động học:** `/learner` trích xuất các mẫu tái sử dụng với tiêu chuẩn chất lượng nghiêm ngặt
+**Tự động học:** `/skillify` trích xuất các mẫu tái sử dụng với tiêu chuẩn chất lượng nghiêm ngặt
 **Tự động tiêm:** Các kỹ năng phù hợp được tải vào ngữ cảnh tự động — không cần gọi thủ công
 
 [Danh sách tính năng đầy đủ →](docs/REFERENCE.md)

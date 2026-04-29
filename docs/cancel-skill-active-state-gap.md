@@ -10,7 +10,7 @@ TTL expires.
 
 ## Reproduction
 
-1. Invoke a `medium`-protected skill (e.g. `sciomc`, `learner`, `release`)
+1. Invoke a `medium`-protected skill (e.g. `sciomc`, `skillify`, `release`)
 2. Before the skill completes, invoke `/oh-my-claudecode:cancel`
 3. Observe: stop hook continues to block with `[SKILL ACTIVE: sciomc]`
    reinforcements 1/5 → 2/5 → ... until limit or 15-min TTL

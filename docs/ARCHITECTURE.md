@@ -275,7 +275,7 @@ ralplan this feature
 | `hud` | Status bar configuration | `/oh-my-claudecode:hud` |
 | `omc-setup` | Initial setup wizard | `/oh-my-claudecode:omc-setup` |
 | `omc-doctor` | Diagnose installation | `/oh-my-claudecode:omc-doctor` |
-| `learner` | Extract reusable skills from session | `/oh-my-claudecode:learner` |
+| `skillify` | Extract reusable skills from session | `/oh-my-claudecode:skillify` (`learner` deprecated alias) |
 | `skill` | Manage local skills (list/add/remove) | `/oh-my-claudecode:skill` |
 | `trace` | Evidence-driven causal tracing | `/oh-my-claudecode:trace` |
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |

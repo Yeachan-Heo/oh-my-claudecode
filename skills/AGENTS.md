@@ -51,7 +51,8 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | File | Skill | Purpose |
 |-----------|-------|---------|
 | `ai-slop-cleaner/SKILL.md` | ai-slop-cleaner | Regression-safe cleanup workflow for AI-generated code slop |
-| `learner/SKILL.md` | learner | Extract reusable skill from session |
+| `skillify/SKILL.md` | skillify | Extract reusable skill from session |
+| `learner/SKILL.md` | learner | Deprecated compatibility alias/internal implementation history for skillify |
 | `ask/SKILL.md` | ask | Ask Claude, Codex, or Gemini via `omc ask` and capture an artifact |
 | `note/SKILL.md` | note | Save notes for compaction resilience |
 | `cancel/SKILL.md` | cancel | Cancel any active OMC mode |
@@ -128,7 +129,7 @@ Any configurable options.
 2. Define purpose, workflow, and usage
 3. Add to skill registry (auto-detected from frontmatter)
 4. Optionally add activation triggers
-5. Create corresponding `commands/new-skill.md` file (mirror)
+5. Create corresponding plugin-scoped skill/slash surface via `skills/new-skill/SKILL.md` (and generated artifacts when the build requires them)
 6. Update `docs/REFERENCE.md` (Skills section, count)
 7. If execution mode skill, also create `src/hooks/new-skill/` hook
 
@@ -179,7 +180,7 @@ None - pure markdown files.
 | Cleanup | ai-slop-cleaner | "deslop", "anti-slop", cleanup/refactor + slop smells |
 | Planning | omc-plan, ralplan, deep-interview, ralph-init | "plan this", "interview me", "ouroboros" |
 | Exploration | deepinit, sciomc, external-context | "deepinit", "research" |
-| Utility | learner, note, cancel, hud, setup, omc-doctor, omc-setup, omc-help, mcp-setup | "stop", "cancel" |
+| Utility | skillify, learner (deprecated alias), note, cancel, hud, setup, omc-doctor, omc-setup, omc-help, mcp-setup | "stop", "cancel" |
 | Domain | psm, writer-memory, release | psm context |
 
 ## Auto-Activation

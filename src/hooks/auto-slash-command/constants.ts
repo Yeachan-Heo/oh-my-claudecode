@@ -23,6 +23,7 @@ export const EXCLUDED_COMMANDS = new Set([
   'ralph',
   'oh-my-claudecode:ralplan',
   'oh-my-claudecode:ultraqa',
+  'oh-my-claudecode:skillify',
   'oh-my-claudecode:learner',
   'oh-my-claudecode:plan',
   'oh-my-claudecode:cancel',

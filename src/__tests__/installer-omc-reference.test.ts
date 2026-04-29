@@ -71,7 +71,7 @@ function writeEnabledPluginSettings(claudeConfigDir: string): void {
 }
 
 function getBundledSkillNames(): string[] {
-  const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug', 'skillify']);
+  const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug']);
 
   return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
     .filter(entry => entry.isDirectory())

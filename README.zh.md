@@ -203,7 +203,7 @@ source: extracted
 ```
 
 **技能管理：** `/skill list | add | remove | edit | search`
-**自动学习：** `/learner` 以严格的质量标准提取可复用模式
+**自动学习：** `/skillify` 以严格的质量标准提取可复用模式
 **自动注入：** 匹配的技能自动加载到上下文中 — 无需手动调用
 
 [完整功能列表 →](docs/REFERENCE.md)

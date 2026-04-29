@@ -6,6 +6,8 @@ level: 7
 
 # Learner Skill
 
+> Deprecated compatibility alias: use `/oh-my-claudecode:skillify` for new skill extraction workflows. This file remains for internal implementation/history and compatibility.
+
 This is a Level 7 (self-improving) skill. It has two distinct sections:
 - **Expertise**: Domain knowledge about what makes a good skill. Updated automatically as patterns are discovered.
 - **Workflow**: Stable extraction procedure. Rarely changes.

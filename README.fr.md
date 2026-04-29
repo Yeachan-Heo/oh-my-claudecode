@@ -167,7 +167,7 @@ Enveloppez le handler à server.py:42 dans try/except ClientDisconnectedError...
 ```
 
 **Gestion des compétences :** `/skill list | add | remove | edit | search`
-**Auto-apprentissage :** `/learner` extrait des patterns réutilisables avec des critères de qualité stricts
+**Auto-apprentissage :** `/skillify` extrait des patterns réutilisables avec des critères de qualité stricts
 **Auto-injection :** Les compétences correspondantes se chargent automatiquement dans le contexte — aucun rappel manuel nécessaire
 
 [Liste complète des fonctionnalités →](docs/REFERENCE.md)

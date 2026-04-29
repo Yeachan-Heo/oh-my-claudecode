@@ -109,6 +109,7 @@ const SKILL_PROTECTION = {
     'external-context': 'medium',
     'ai-slop-cleaner': 'medium',
     sciomc: 'medium',
+    skillify: 'medium',
     learner: 'medium',
     'omc-setup': 'medium',
     setup: 'medium',

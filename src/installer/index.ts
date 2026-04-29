@@ -68,7 +68,6 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
   'remember',
   'verify',
   'debug',
-  'skillify',
 ]);
 
 /**

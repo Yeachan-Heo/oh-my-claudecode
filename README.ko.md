@@ -207,7 +207,7 @@ server.py:42의 핸들러를 try/except ClientDisconnectedError로 감싸세요.
 ```
 
 **스킬 관리:** `/skill list | add | remove | edit | search`
-**자동 학습:** `/learner`가 엄격한 품질 기준으로 재사용 가능한 패턴을 추출합니다
+**자동 학습:** `/skillify`가 엄격한 품질 기준으로 재사용 가능한 패턴을 추출합니다
 **자동 주입:** 매칭되는 스킬이 컨텍스트에 자동으로 로드됩니다 — 수동 호출 불필요
 
 [전체 기능 목록 →](docs/REFERENCE.md)
