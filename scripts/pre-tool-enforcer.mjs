@@ -47,14 +47,27 @@ function isVertexProviderEnv() {
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   return !!modelId && modelId.toLowerCase().startsWith('vertex_ai/');
 }
+function getActiveModelIds() {
+  return [process.env.CLAUDE_MODEL || '', process.env.ANTHROPIC_MODEL || ''].filter(Boolean);
+}
+function isNormalClaudeModelId(modelId) {
+  const lower = (modelId || '').toLowerCase();
+  return Boolean(lower) && lower.includes('claude') && !isProviderSpecificModelId(modelId);
+}
+function hasNormalClaudeActiveModel() {
+  return getActiveModelIds().some(isNormalClaudeModelId);
+}
+function isConfigForceInheritProxyEnv() {
+  const config = loadOmcConfig();
+  return config.routing?.forceInherit === true && !hasNormalClaudeActiveModel();
+}
 function isNonClaudeProviderEnv() {
-  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') return true;
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   if (modelId && !modelId.toLowerCase().includes('claude')) return true;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
-  return false;
+  return isConfigForceInheritProxyEnv();
 }
 function acceptsProxyAnthropicDefaultTierValue(key, value) {
   return key.startsWith('ANTHROPIC_DEFAULT_')

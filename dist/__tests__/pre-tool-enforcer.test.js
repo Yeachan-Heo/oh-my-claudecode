@@ -462,6 +462,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
         }, {
             OMC_ROUTING_FORCE_INHERIT: 'true',
             OMC_SUBAGENT_MODEL: '',
+            ANTHROPIC_MODEL: 'glm-5.1:cloud',
             [envKey]: proxyModel,
         });
         expect(output.continue).toBe(true);
@@ -496,7 +497,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
         const hookOutput = output.hookSpecificOutput;
         expect(hookOutput.permissionDecisionReason).toContain('MODEL ROUTING');
     });
-    it('does not broadly accept proxy ANTHROPIC_DEFAULT_*_MODEL in normal Claude force-inherit config', () => {
+    it('allows proxy ANTHROPIC_DEFAULT_*_MODEL in config force-inherit mode when no normal Claude model is active', () => {
         const configDir = join(tempDir, '.omc');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'config.json'), JSON.stringify({ routing: { forceInherit: true } }));
@@ -504,10 +505,25 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
             tool_name: 'Agent',
             toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
             cwd: tempDir,
-            session_id: 'session-tier-normal-claude-proxy-default',
+            session_id: 'session-tier-config-proxy-default',
         }, {
-            OMC_ROUTING_FORCE_INHERIT: '',
+            OMC_ROUTING_FORCE_INHERIT: 'true',
             OMC_SUBAGENT_MODEL: '',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.1:cloud',
+        });
+        expect(output.continue).toBe(true);
+        expect(JSON.stringify(output)).not.toContain('MODEL ROUTING');
+    });
+    it('rejects proxy ANTHROPIC_DEFAULT_*_MODEL when env force-inherit runs under a normal Claude active model', () => {
+        const output = runPreToolEnforcerWithEnv({
+            tool_name: 'Agent',
+            toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+            cwd: tempDir,
+            session_id: 'session-tier-env-force-normal-claude-proxy-default',
+        }, {
+            OMC_ROUTING_FORCE_INHERIT: 'true',
+            OMC_SUBAGENT_MODEL: '',
+            ANTHROPIC_MODEL: 'claude-sonnet-4-5',
             ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.1:cloud',
         });
         const hookOutput = output.hookSpecificOutput;
