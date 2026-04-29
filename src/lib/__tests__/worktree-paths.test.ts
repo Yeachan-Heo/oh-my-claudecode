@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, existsSync, mkdtempSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import {
@@ -25,6 +25,9 @@ import {
   getWorktreeRoot,
   getProjectIdentifier,
   clearDualDirWarnings,
+  getSharedOmcRoot,
+  migrateOmcpContentToOmc,
+  clearOmcpContentWarnings,
 } from '../worktree-paths.js';
 
 const TEST_DIR = '/tmp/worktree-paths-test';
@@ -676,6 +679,145 @@ describe('worktree-paths', () => {
       const projectId = getProjectIdentifier(TEST_DIR);
       expect(result).toBe(join(stateDir, projectId, 'state'));
       expect(existsSync(result)).toBe(true);
+    });
+  });
+
+  describe('getSharedOmcRoot', () => {
+    beforeEach(() => {
+      clearOmcpContentWarnings();
+    });
+
+    it('returns the same path as getOmcRoot in the local case', () => {
+      expect(getSharedOmcRoot(TEST_DIR)).toBe(getOmcRoot(TEST_DIR));
+      expect(getSharedOmcRoot(TEST_DIR)).toBe(join(TEST_DIR, '.omc'));
+    });
+
+    it('returns the same path as getOmcRoot when OMC_STATE_DIR is set', () => {
+      const stateDir = mkdtempSync('/tmp/shared-root-state-');
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        expect(getSharedOmcRoot(TEST_DIR)).toBe(getOmcRoot(TEST_DIR));
+      } finally {
+        delete process.env.OMC_STATE_DIR;
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('migrateOmcpContentToOmc (reverse migration)', () => {
+    beforeEach(() => {
+      clearOmcpContentWarnings();
+    });
+
+    it('moves notepad.md and project-memory.json from .omcp/ into .omc/', () => {
+      const omcp = join(TEST_DIR, '.omcp');
+      mkdirSync(omcp, { recursive: true });
+      writeFileSync(join(omcp, 'notepad.md'), 'note', 'utf-8');
+      writeFileSync(join(omcp, 'project-memory.json'), '{}', 'utf-8');
+
+      const moved = migrateOmcpContentToOmc(TEST_DIR);
+
+      expect(moved).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'notepad.md'))).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'project-memory.json'))).toBe(true);
+      expect(existsSync(join(omcp, 'notepad.md'))).toBe(false);
+      expect(existsSync(join(omcp, 'project-memory.json'))).toBe(false);
+      expect(readFileSync(join(TEST_DIR, '.omc', 'notepad.md'), 'utf-8')).toBe('note');
+    });
+
+    it('merges plans/, research/, notepads/ into .omc/', () => {
+      const omcp = join(TEST_DIR, '.omcp');
+      mkdirSync(join(omcp, 'plans'), { recursive: true });
+      mkdirSync(join(omcp, 'research', 'spike-a'), { recursive: true });
+      mkdirSync(join(omcp, 'notepads', 'plan-x'), { recursive: true });
+      writeFileSync(join(omcp, 'plans', 'feature.md'), 'plan', 'utf-8');
+      writeFileSync(join(omcp, 'research', 'spike-a', 'notes.md'), 'r', 'utf-8');
+      writeFileSync(join(omcp, 'notepads', 'plan-x', 'wisdom.md'), 'w', 'utf-8');
+
+      const moved = migrateOmcpContentToOmc(TEST_DIR);
+
+      expect(moved).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'plans', 'feature.md'))).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'research', 'spike-a', 'notes.md'))).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'notepads', 'plan-x', 'wisdom.md'))).toBe(true);
+    });
+
+    it('keeps the .omc/ copy and warns once when both exist', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const omcp = join(TEST_DIR, '.omcp');
+        const omc = join(TEST_DIR, '.omc');
+        mkdirSync(omcp, { recursive: true });
+        mkdirSync(omc, { recursive: true });
+        writeFileSync(join(omcp, 'notepad.md'), 'old', 'utf-8');
+        writeFileSync(join(omc, 'notepad.md'), 'new', 'utf-8');
+
+        migrateOmcpContentToOmc(TEST_DIR);
+        migrateOmcpContentToOmc(TEST_DIR);
+
+        expect(readFileSync(join(omc, 'notepad.md'), 'utf-8')).toBe('new');
+        expect(existsSync(join(omcp, 'notepad.md'))).toBe(true);
+        const conflictWarns = warnSpy.mock.calls.filter(c =>
+          typeof c[0] === 'string' && c[0].includes('omc-share') && c[0].includes('Both')
+        );
+        expect(conflictWarns.length).toBe(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('is idempotent (no-op on second call after migration)', () => {
+      const omcp = join(TEST_DIR, '.omcp');
+      mkdirSync(omcp, { recursive: true });
+      writeFileSync(join(omcp, 'notepad.md'), 'note', 'utf-8');
+
+      expect(migrateOmcpContentToOmc(TEST_DIR)).toBe(true);
+      expect(migrateOmcpContentToOmc(TEST_DIR)).toBe(false);
+    });
+
+    it('is a no-op when .omcp/ does not exist', () => {
+      expect(migrateOmcpContentToOmc(TEST_DIR)).toBe(false);
+      expect(existsSync(join(TEST_DIR, '.omc'))).toBe(false);
+    });
+
+    it('is skipped when OMC_STATE_DIR is set', () => {
+      const stateDir = mkdtempSync('/tmp/omcp-content-mig-');
+      try {
+        process.env.OMC_STATE_DIR = stateDir;
+        const omcp = join(TEST_DIR, '.omcp');
+        mkdirSync(omcp, { recursive: true });
+        writeFileSync(join(omcp, 'notepad.md'), 'note', 'utf-8');
+
+        expect(migrateOmcpContentToOmc(TEST_DIR)).toBe(false);
+        expect(existsSync(join(omcp, 'notepad.md'))).toBe(true);
+      } finally {
+        delete process.env.OMC_STATE_DIR;
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not move plugin-private state under .omcp/state/', () => {
+      const omcp = join(TEST_DIR, '.omcp');
+      mkdirSync(join(omcp, 'state', 'sessions', 'pid-123'), { recursive: true });
+      writeFileSync(join(omcp, 'state', 'ralph-state.json'), '{}', 'utf-8');
+
+      migrateOmcpContentToOmc(TEST_DIR);
+
+      // State stays in .omcp/, never moves to .omc/
+      expect(existsSync(join(omcp, 'state', 'ralph-state.json'))).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'state'))).toBe(false);
+    });
+
+    it('runs automatically on getOmcRoot in the local case', () => {
+      const omcp = join(TEST_DIR, '.omcp');
+      mkdirSync(omcp, { recursive: true });
+      writeFileSync(join(omcp, 'notepad.md'), 'auto', 'utf-8');
+
+      // Calling getOmcRoot triggers the migration
+      getOmcRoot(TEST_DIR);
+
+      expect(existsSync(join(TEST_DIR, '.omc', 'notepad.md'))).toBe(true);
+      expect(readFileSync(join(TEST_DIR, '.omc', 'notepad.md'), 'utf-8')).toBe('auto');
     });
   });
 });
