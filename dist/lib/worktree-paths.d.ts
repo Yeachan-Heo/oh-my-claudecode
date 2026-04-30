@@ -253,4 +253,16 @@ export declare function resolveTranscriptPath(transcriptPath: string | undefined
  * @throws Error if workingDirectory is outside trusted root
  */
 export declare function validateWorkingDirectory(workingDirectory?: string): string;
+/**
+ * Validate a workingDirectory while permitting linked git worktrees for the
+ * same repository.
+ *
+ * This preserves validateWorkingDirectory's default cwd behavior and its
+ * same-root/subdirectory normalization, but allows a per-call directory to
+ * resolve to a sibling manual `git worktree` when both worktrees share the
+ * same git common directory. Other unrelated git repositories still fall back
+ * to the trusted startup cwd, and non-repo paths outside the trusted root are
+ * rejected.
+ */
+export declare function validateWorkingDirectoryOrLinkedWorktree(workingDirectory?: string): string;
 //# sourceMappingURL=worktree-paths.d.ts.map

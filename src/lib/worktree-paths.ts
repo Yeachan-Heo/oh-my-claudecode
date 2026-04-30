@@ -774,3 +774,87 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
   // never the subdirectory, to prevent .omc/ creation in subdirs (#576).
   return trustedRoot;
 }
+
+function getGitCommonDir(cwd: string): string | null {
+  try {
+    const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000,
+    }).trim();
+    return realpathSync(commonDir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate a workingDirectory while permitting linked git worktrees for the
+ * same repository.
+ *
+ * This preserves validateWorkingDirectory's default cwd behavior and its
+ * same-root/subdirectory normalization, but allows a per-call directory to
+ * resolve to a sibling manual `git worktree` when both worktrees share the
+ * same git common directory. Other unrelated git repositories still fall back
+ * to the trusted startup cwd, and non-repo paths outside the trusted root are
+ * rejected.
+ */
+export function validateWorkingDirectoryOrLinkedWorktree(workingDirectory?: string): string {
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+
+  if (!workingDirectory) {
+    return trustedRoot;
+  }
+
+  const resolved = resolve(workingDirectory);
+
+  let trustedRootReal: string;
+  try {
+    trustedRootReal = realpathSync(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+
+  const providedRoot = getWorktreeRoot(resolved);
+
+  if (providedRoot) {
+    let providedRootReal: string;
+    try {
+      providedRootReal = realpathSync(providedRoot);
+    } catch {
+      throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+    }
+
+    if (providedRootReal === trustedRootReal) {
+      return providedRoot;
+    }
+
+    const trustedCommonDir = getGitCommonDir(trustedRoot);
+    const providedCommonDir = getGitCommonDir(providedRoot);
+    if (trustedCommonDir && providedCommonDir && providedCommonDir === trustedCommonDir) {
+      return providedRoot;
+    }
+
+    console.error('[worktree] workingDirectory resolved to different git worktree root, using trusted root', {
+      workingDirectory: resolved,
+      providedRoot: providedRootReal,
+      trustedRoot: trustedRootReal,
+    });
+    return trustedRoot;
+  }
+
+  let resolvedReal: string;
+  try {
+    resolvedReal = realpathSync(resolved);
+  } catch {
+    throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+  }
+
+  const rel = relative(trustedRootReal, resolvedReal);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`workingDirectory '${workingDirectory}' is outside the trusted worktree root '${trustedRoot}'.`);
+  }
+
+  return trustedRoot;
+}

@@ -5689,6 +5689,66 @@ function validateWorkingDirectory(workingDirectory) {
   }
   return trustedRoot;
 }
+function getGitCommonDir(cwd2) {
+  try {
+    const commonDir = (0, import_child_process6.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+      cwd: cwd2,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5e3
+    }).trim();
+    return (0, import_fs12.realpathSync)(commonDir);
+  } catch {
+    return null;
+  }
+}
+function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
+  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  if (!workingDirectory) {
+    return trustedRoot;
+  }
+  const resolved = (0, import_path17.resolve)(workingDirectory);
+  let trustedRootReal;
+  try {
+    trustedRootReal = (0, import_fs12.realpathSync)(trustedRoot);
+  } catch {
+    trustedRootReal = trustedRoot;
+  }
+  const providedRoot = getWorktreeRoot(resolved);
+  if (providedRoot) {
+    let providedRootReal;
+    try {
+      providedRootReal = (0, import_fs12.realpathSync)(providedRoot);
+    } catch {
+      throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+    }
+    if (providedRootReal === trustedRootReal) {
+      return providedRoot;
+    }
+    const trustedCommonDir = getGitCommonDir(trustedRoot);
+    const providedCommonDir = getGitCommonDir(providedRoot);
+    if (trustedCommonDir && providedCommonDir && providedCommonDir === trustedCommonDir) {
+      return providedRoot;
+    }
+    console.error("[worktree] workingDirectory resolved to different git worktree root, using trusted root", {
+      workingDirectory: resolved,
+      providedRoot: providedRootReal,
+      trustedRoot: trustedRootReal
+    });
+    return trustedRoot;
+  }
+  let resolvedReal;
+  try {
+    resolvedReal = (0, import_fs12.realpathSync)(resolved);
+  } catch {
+    throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
+  }
+  const rel = (0, import_path17.relative)(trustedRootReal, resolvedReal);
+  if (rel.startsWith("..") || (0, import_path17.isAbsolute)(rel)) {
+    throw new Error(`workingDirectory '${workingDirectory}' is outside the trusted worktree root '${trustedRoot}'.`);
+  }
+  return trustedRoot;
+}
 var import_crypto4, import_child_process6, import_fs12, import_os4, import_path17, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, dualDirWarnings, SESSION_ID_REGEX;
 var init_worktree_paths = __esm({
   "src/lib/worktree-paths.ts"() {
@@ -79081,7 +79141,7 @@ var wikiIngestTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const result = ingestKnowledge(root2, {
         title: args.title,
         content: args.content,
@@ -79122,7 +79182,7 @@ var wikiQueryTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const matches = queryWiki(root2, args.query, {
         tags: args.tags,
         category: args.category,
@@ -79171,7 +79231,7 @@ var wikiLintTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const report = lintWiki(root2);
       if (report.issues.length === 0) {
         return {
@@ -79219,7 +79279,7 @@ var wikiAddTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const slug = titleToSlug(args.title);
       if (readPage(root2, slug)) {
         return {
@@ -79262,7 +79322,7 @@ var wikiListTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const index = readIndex(root2);
       if (!index) {
         const pages = listPages(root2);
@@ -79308,7 +79368,7 @@ var wikiReadTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const filename = args.page.endsWith(".md") ? args.page : `${args.page}.md`;
       const page = readPage(root2, filename);
       if (!page) {
@@ -79356,7 +79416,7 @@ var wikiDeleteTool = {
   },
   handler: async (args) => {
     try {
-      const root2 = validateWorkingDirectory(args.workingDirectory);
+      const root2 = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
       const filename = args.page.endsWith(".md") ? args.page : `${args.page}.md`;
       const deleted = deletePage(root2, filename);
       if (!deleted) {

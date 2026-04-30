@@ -5,7 +5,7 @@
  * wiki_ingest, wiki_query, wiki_lint, wiki_add, wiki_list, wiki_read, wiki_delete
  */
 import { z } from 'zod';
-import { validateWorkingDirectory, } from '../lib/worktree-paths.js';
+import { validateWorkingDirectoryOrLinkedWorktree, } from '../lib/worktree-paths.js';
 import { readPage, listPages, readIndex, deletePage, appendLog, titleToSlug, } from '../hooks/wiki/index.js';
 import { ingestKnowledge } from '../hooks/wiki/ingest.js';
 import { queryWiki } from '../hooks/wiki/query.js';
@@ -31,7 +31,7 @@ export const wikiIngestTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const result = ingestKnowledge(root, {
                 title: args.title,
                 content: args.content,
@@ -73,7 +73,7 @@ export const wikiQueryTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const matches = queryWiki(root, args.query, {
                 tags: args.tags,
                 category: args.category,
@@ -122,7 +122,7 @@ export const wikiLintTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const report = lintWiki(root);
             if (report.issues.length === 0) {
                 return {
@@ -171,7 +171,7 @@ export const wikiAddTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const slug = titleToSlug(args.title);
             // Guard: reject if page already exists — use wiki_ingest to merge
             if (readPage(root, slug)) {
@@ -219,7 +219,7 @@ export const wikiListTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const index = readIndex(root);
             if (!index) {
                 const pages = listPages(root);
@@ -268,7 +268,7 @@ export const wikiReadTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const filename = args.page.endsWith('.md') ? args.page : `${args.page}.md`;
             const page = readPage(root, filename);
             if (!page) {
@@ -319,7 +319,7 @@ export const wikiDeleteTool = {
     },
     handler: async (args) => {
         try {
-            const root = validateWorkingDirectory(args.workingDirectory);
+            const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const filename = args.page.endsWith('.md') ? args.page : `${args.page}.md`;
             const deleted = deletePage(root, filename);
             if (!deleted) {
