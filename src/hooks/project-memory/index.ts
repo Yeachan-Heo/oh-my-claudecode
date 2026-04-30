@@ -13,6 +13,7 @@ import {
 } from "./storage.js";
 import { detectProjectEnvironment } from "./detector.js";
 import { formatContextSummary } from "./formatter.js";
+import { mergeProjectMemory } from "../../lib/project-memory-merge.js";
 
 /**
  * Session caches to prevent duplicate injection.
@@ -54,12 +55,8 @@ export async function registerProjectMemoryContext(
 
     if (!memory || shouldRescan(memory)) {
       const existing = memory;
-      memory = await detectProjectEnvironment(projectRoot);
-      if (existing) {
-        memory.customNotes = existing.customNotes;
-        memory.userDirectives = existing.userDirectives;
-        memory.hotPaths = existing.hotPaths;
-      }
+      const detected = await detectProjectEnvironment(projectRoot);
+      memory = existing ? mergeProjectMemory(existing, detected) : detected;
       await saveProjectMemory(projectRoot, memory);
     }
 
@@ -101,12 +98,8 @@ export async function rescanProjectEnvironment(
   projectRoot: string,
 ): Promise<void> {
   const existing = await loadProjectMemory(projectRoot);
-  const memory = await detectProjectEnvironment(projectRoot);
-  if (existing) {
-    memory.customNotes = existing.customNotes;
-    memory.userDirectives = existing.userDirectives;
-    memory.hotPaths = existing.hotPaths;
-  }
+  const detected = await detectProjectEnvironment(projectRoot);
+  const memory = existing ? mergeProjectMemory(existing, detected) : detected;
   await saveProjectMemory(projectRoot, memory);
 }
 

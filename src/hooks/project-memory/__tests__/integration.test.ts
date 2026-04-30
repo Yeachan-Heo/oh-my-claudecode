@@ -264,6 +264,72 @@ describe("Project Memory Integration", () => {
     });
   });
 
+  describe("Rescan preserves unknown fields on disk", () => {
+    it("should preserve fields not produced by detectProjectEnvironment across rescan in registerProjectMemoryContext", async () => {
+      const packageJson = {
+        name: "test",
+        scripts: { build: "tsc" },
+        devDependencies: { typescript: "^5.0.0" },
+      };
+      await fs.writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(packageJson),
+      );
+      await fs.writeFile(path.join(tempDir, "tsconfig.json"), "{}");
+
+      const sessionId = "test-session-unknown-register";
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const memory = await loadProjectMemory(tempDir);
+      expect(memory).not.toBeNull();
+
+      const memoryPath = getMemoryPath(tempDir);
+      const onDisk = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      onDisk.customField = { written: "by-mcp-tool", count: 7 };
+      onDisk.anotherUnknownField = ["a", "b"];
+      onDisk.lastScanned = Date.now() - 25 * 60 * 60 * 1000;
+      await fs.writeFile(memoryPath, JSON.stringify(onDisk, null, 2));
+
+      clearProjectMemorySession(sessionId);
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const after = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      expect(after.customField).toEqual({ written: "by-mcp-tool", count: 7 });
+      expect(after.anotherUnknownField).toEqual(["a", "b"]);
+      const age = Date.now() - after.lastScanned;
+      expect(age).toBeLessThan(5000);
+      contextCollector.clear(sessionId);
+    });
+
+    it("should preserve unknown fields across rescanProjectEnvironment", async () => {
+      const packageJson = {
+        name: "test",
+        scripts: { build: "tsc" },
+        devDependencies: { typescript: "^5.0.0" },
+      };
+      await fs.writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(packageJson),
+      );
+      await fs.writeFile(path.join(tempDir, "tsconfig.json"), "{}");
+
+      const sessionId = "test-session-unknown-rescan";
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const memoryPath = getMemoryPath(tempDir);
+      const onDisk = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      onDisk.customField = { written: "by-mcp-tool", count: 7 };
+      await fs.writeFile(memoryPath, JSON.stringify(onDisk, null, 2));
+
+      const { rescanProjectEnvironment } = await import("../index.js");
+      await rescanProjectEnvironment(tempDir);
+
+      const after = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      expect(after.customField).toEqual({ written: "by-mcp-tool", count: 7 });
+      contextCollector.clear(sessionId);
+    });
+  });
+
   describe("End-to-end PostToolUse learning flow", () => {
     it("should learn build command from Bash execution", async () => {
       const packageJson = { name: "test", scripts: {} };
