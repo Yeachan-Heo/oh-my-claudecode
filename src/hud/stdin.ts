@@ -241,13 +241,15 @@ function parseResetDate(value: number | string | undefined): Date | null {
 }
 
 /**
- * Get total tokens from stdin context_window.current_usage
+ * Get total tokens from stdin context_window.current_usage.
+ * Includes cache_read_input_tokens for accurate totals with cached contexts.
  */
 function getTotalTokens(stdin: StatuslineStdin): number {
   const usage = getCurrentUsage(stdin);
   return (
     (usage?.input_tokens ?? 0) +
-    (usage?.cache_creation_input_tokens ?? 0)
+    (usage?.cache_creation_input_tokens ?? 0) +
+    (usage?.cache_read_input_tokens ?? 0)
   );
 }
 
@@ -316,15 +318,33 @@ export function stabilizeContextPercent(
 
 /**
  * Get context window usage percentage.
- * Prefers native percentage from Claude Code statusline stdin, falls back to manual calculation.
+ * Three-tier fallback:
+ *   1. Native `used_percentage` from Claude Code statusline stdin
+ *   2. Manual calculation from `current_usage` tokens / `context_window_size`
+ *   3. `total_input_tokens` / `context_window_size` for non-Anthropic providers
+ *      (e.g. GLM via proxy) that report zero in both `used_percentage` and
+ *      `current_usage`. This is a session-cumulative estimate — imperfect but
+ *      far better than showing 0%.
  */
 export function getContextPercent(stdin: StatuslineStdin): number {
   const nativePercent = getRoundedNativeContextPercent(stdin);
-  if (nativePercent !== null) {
+  if (nativePercent !== null && nativePercent > 0) {
     return nativePercent;
   }
 
-  return getManualContextPercent(stdin) ?? 0;
+  const manualPercent = getManualContextPercent(stdin);
+  if (manualPercent !== null && manualPercent > 0) {
+    return manualPercent;
+  }
+
+  // Fallback for non-Anthropic providers that don't populate usage fields.
+  const totalInput = stdin.context_window?.total_input_tokens;
+  const windowSize = stdin.context_window?.context_window_size;
+  if (totalInput && totalInput > 0 && windowSize && windowSize > 0) {
+    return Math.min(100, Math.round((totalInput / windowSize) * 100));
+  }
+
+  return 0;
 }
 
 /**
