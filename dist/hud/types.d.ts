@@ -41,6 +41,7 @@ export interface StatuslineStdin {
     /** Context window metrics from Claude Code statusline stdin */
     context_window?: {
         context_window_size?: number;
+        total_input_tokens?: number;
         used_percentage?: number;
         current_usage?: {
             input_tokens?: number;
