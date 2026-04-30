@@ -330,6 +330,102 @@ describe("Project Memory Integration", () => {
     });
   });
 
+  describe("Rescan replaces schema-known fields when removed", () => {
+    it("should drop a stale language that is no longer present in the project", async () => {
+      const packageJson = {
+        name: "test",
+        scripts: { build: "tsc" },
+        devDependencies: { typescript: "^5.0.0" },
+      };
+      await fs.writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(packageJson),
+      );
+      await fs.writeFile(path.join(tempDir, "tsconfig.json"), "{}");
+
+      const sessionId = "test-session-stale-language";
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const memoryPath = getMemoryPath(tempDir);
+      const onDisk = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      onDisk.techStack.languages.push({
+        name: "Python",
+        version: null,
+        confidence: "high",
+        markers: ["pyproject.toml"],
+      });
+      onDisk.lastScanned = Date.now() - 25 * 60 * 60 * 1000;
+      await fs.writeFile(memoryPath, JSON.stringify(onDisk, null, 2));
+
+      clearProjectMemorySession(sessionId);
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const after = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      const languageNames = after.techStack.languages.map(
+        (l: { name: string }) => l.name,
+      );
+      expect(languageNames).not.toContain("Python");
+      contextCollector.clear(sessionId);
+    });
+
+    it("should drop a stale npm script that is no longer in package.json", async () => {
+      const packageJson = {
+        name: "test",
+        scripts: { build: "tsc" },
+        devDependencies: { typescript: "^5.0.0" },
+      };
+      await fs.writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(packageJson),
+      );
+      await fs.writeFile(path.join(tempDir, "tsconfig.json"), "{}");
+
+      const sessionId = "test-session-stale-script";
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const memoryPath = getMemoryPath(tempDir);
+      const onDisk = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      onDisk.build.scripts.removedScript = "echo gone";
+      onDisk.lastScanned = Date.now() - 25 * 60 * 60 * 1000;
+      await fs.writeFile(memoryPath, JSON.stringify(onDisk, null, 2));
+
+      clearProjectMemorySession(sessionId);
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const after = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      expect(after.build.scripts).not.toHaveProperty("removedScript");
+      contextCollector.clear(sessionId);
+    });
+
+    it("should drop a stale workspace via rescanProjectEnvironment", async () => {
+      const packageJson = {
+        name: "test",
+        scripts: { build: "tsc" },
+        devDependencies: { typescript: "^5.0.0" },
+      };
+      await fs.writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(packageJson),
+      );
+      await fs.writeFile(path.join(tempDir, "tsconfig.json"), "{}");
+
+      const sessionId = "test-session-stale-workspace";
+      await registerProjectMemoryContext(sessionId, tempDir);
+
+      const memoryPath = getMemoryPath(tempDir);
+      const onDisk = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      onDisk.structure.workspaces.push("apps/old-removed");
+      await fs.writeFile(memoryPath, JSON.stringify(onDisk, null, 2));
+
+      const { rescanProjectEnvironment } = await import("../index.js");
+      await rescanProjectEnvironment(tempDir);
+
+      const after = JSON.parse(await fs.readFile(memoryPath, "utf-8"));
+      expect(after.structure.workspaces).not.toContain("apps/old-removed");
+      contextCollector.clear(sessionId);
+    });
+  });
+
   describe("End-to-end PostToolUse learning flow", () => {
     it("should learn build command from Bash execution", async () => {
       const packageJson = { name: "test", scripts: {} };

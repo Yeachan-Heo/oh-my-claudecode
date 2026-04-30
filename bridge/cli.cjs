@@ -75680,6 +75680,65 @@ var import_path34 = __toESM(require("path"), 1);
 // src/hooks/project-memory/hot-path-tracker.ts
 var import_path33 = __toESM(require("path"), 1);
 
+// src/hooks/project-memory/directive-detector.ts
+function addDirective(directives, newDirective) {
+  const isDuplicate = directives.some(
+    (d) => d.directive.toLowerCase() === newDirective.directive.toLowerCase()
+  );
+  if (!isDuplicate) {
+    directives.push(newDirective);
+    if (directives.length > 20) {
+      directives.sort((a, b) => {
+        if (a.priority !== b.priority) {
+          return a.priority === "high" ? -1 : 1;
+        }
+        return b.timestamp - a.timestamp;
+      });
+      directives.splice(20);
+    }
+  }
+  return directives;
+}
+
+// src/hooks/project-memory/learner.ts
+var writeMutexes = /* @__PURE__ */ new Map();
+function withMutex(projectRoot, fn) {
+  const prev = writeMutexes.get(projectRoot) ?? Promise.resolve();
+  const next = prev.then(() => fn()).catch(() => fn());
+  const tail = next.then(
+    () => {
+    },
+    () => {
+    }
+  );
+  writeMutexes.set(projectRoot, tail);
+  return next;
+}
+async function addCustomNote(projectRoot, category, content) {
+  return withMutex(projectRoot, async () => {
+    await withProjectMemoryLock(projectRoot, async () => {
+      try {
+        const memory = await loadProjectMemory(projectRoot);
+        if (!memory) {
+          return;
+        }
+        memory.customNotes.push({
+          timestamp: Date.now(),
+          source: "manual",
+          category,
+          content
+        });
+        if (memory.customNotes.length > 20) {
+          memory.customNotes = memory.customNotes.slice(-20);
+        }
+        await saveProjectMemory(projectRoot, memory);
+      } catch (error2) {
+        console.error("Error adding custom note:", error2);
+      }
+    });
+  });
+}
+
 // src/lib/project-memory-merge.ts
 function isPlainObject3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp);
@@ -75785,65 +75844,6 @@ function mergeProjectMemory(existing, incoming) {
   );
   merged.lastScanned = incoming.lastScanned ?? existing.lastScanned;
   return merged;
-}
-
-// src/hooks/project-memory/directive-detector.ts
-function addDirective(directives, newDirective) {
-  const isDuplicate = directives.some(
-    (d) => d.directive.toLowerCase() === newDirective.directive.toLowerCase()
-  );
-  if (!isDuplicate) {
-    directives.push(newDirective);
-    if (directives.length > 20) {
-      directives.sort((a, b) => {
-        if (a.priority !== b.priority) {
-          return a.priority === "high" ? -1 : 1;
-        }
-        return b.timestamp - a.timestamp;
-      });
-      directives.splice(20);
-    }
-  }
-  return directives;
-}
-
-// src/hooks/project-memory/learner.ts
-var writeMutexes = /* @__PURE__ */ new Map();
-function withMutex(projectRoot, fn) {
-  const prev = writeMutexes.get(projectRoot) ?? Promise.resolve();
-  const next = prev.then(() => fn()).catch(() => fn());
-  const tail = next.then(
-    () => {
-    },
-    () => {
-    }
-  );
-  writeMutexes.set(projectRoot, tail);
-  return next;
-}
-async function addCustomNote(projectRoot, category, content) {
-  return withMutex(projectRoot, async () => {
-    await withProjectMemoryLock(projectRoot, async () => {
-      try {
-        const memory = await loadProjectMemory(projectRoot);
-        if (!memory) {
-          return;
-        }
-        memory.customNotes.push({
-          timestamp: Date.now(),
-          source: "manual",
-          category,
-          content
-        });
-        if (memory.customNotes.length > 20) {
-          memory.customNotes = memory.customNotes.slice(-20);
-        }
-        await saveProjectMemory(projectRoot, memory);
-      } catch (error2) {
-        console.error("Error adding custom note:", error2);
-      }
-    });
-  });
 }
 
 // src/tools/memory-tools.ts
