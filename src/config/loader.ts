@@ -24,7 +24,7 @@ import { parseJsonc } from "../utils/jsonc.js";
 import {
   getDefaultTierModels,
   BUILTIN_EXTERNAL_MODEL_DEFAULTS,
-  isNonClaudeProvider,
+  shouldAutoForceInherit,
 } from "./models.js";
 import { normalizeDelegationRole } from "../features/delegation-routing/types.js";
 
@@ -624,7 +624,7 @@ export function loadConfig(): PluginConfig {
   if (
     config.routing?.forceInherit !== true &&
     process.env.OMC_ROUTING_FORCE_INHERIT === undefined &&
-    isNonClaudeProvider()
+    shouldAutoForceInherit()
   ) {
     config.routing = {
       ...config.routing,

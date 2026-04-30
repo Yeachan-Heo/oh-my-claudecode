@@ -11,7 +11,7 @@ import { join, dirname } from "path";
 import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES, } from "../shared/types.js";
 import { getConfigDir } from "../utils/paths.js";
 import { parseJsonc } from "../utils/jsonc.js";
-import { getDefaultTierModels, BUILTIN_EXTERNAL_MODEL_DEFAULTS, isNonClaudeProvider, } from "./models.js";
+import { getDefaultTierModels, BUILTIN_EXTERNAL_MODEL_DEFAULTS, shouldAutoForceInherit, } from "./models.js";
 import { normalizeDelegationRole } from "../features/delegation-routing/types.js";
 /**
  * Default configuration.
@@ -525,7 +525,7 @@ export function loadConfig() {
     // tier names (sonnet/opus/haiku) causes 400 errors on these platforms.
     if (config.routing?.forceInherit !== true &&
         process.env.OMC_ROUTING_FORCE_INHERIT === undefined &&
-        isNonClaudeProvider()) {
+        shouldAutoForceInherit()) {
         config.routing = {
             ...config.routing,
             forceInherit: true,

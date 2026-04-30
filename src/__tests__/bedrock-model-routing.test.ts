@@ -203,7 +203,7 @@ describe('Bedrock model routing repro', () => {
   // but CLAUDE_CODE_USE_BEDROCK and CLAUDE_MODEL/ANTHROPIC_MODEL are missing
 
   describe('SCENARIO B: Bedrock tier env vars set without session model env vars', () => {
-    it('full chain: tier env Bedrock models enable forceInherit and avoid unsafe injection', async () => {
+    it('full chain: tier env Bedrock models do not globally force inherit', async () => {
       // ── Setup: user has Bedrock-format models in ANTHROPIC_DEFAULT_*_MODEL
       //    (as shown in their settings) but CLAUDE_CODE_USE_BEDROCK is not set ──
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'global.anthropic.claude-sonnet-4-6-v1:0';
@@ -215,10 +215,10 @@ describe('Bedrock model routing repro', () => {
       expect(isBedrock()).toBe(true);
       expect(isNonClaudeProvider()).toBe(true);
 
-      // 2. forceInherit is auto-enabled so spawned agents inherit safely.
+      // 2. tier-only provider IDs do not globally force all spawned agents to inherit.
       const { loadConfig } = await import('../config/loader.js');
       const config = loadConfig();
-      expect(config.routing?.forceInherit).toBe(true);
+      expect(config.routing?.forceInherit).toBe(false);
 
       // 3. BUT tier model resolution DOES read the Bedrock IDs
       const { getDefaultModelMedium, getDefaultModelHigh, getDefaultModelLow } =
@@ -232,16 +232,17 @@ describe('Bedrock model routing repro', () => {
       expect(config.agents?.architect?.model).toBe('global.anthropic.claude-opus-4-6-v1:0');
       expect(config.agents?.explore?.model).toBe('global.anthropic.claude-haiku-4-5-v1:0');
 
-      // 5. enforceModel strips the model so the Agent/Task call inherits from CC.
+      // 5. enforceModel injects the configured tier provider ID for that agent,
+      // instead of collapsing every agent call into inheritance mode.
       const { enforceModel } = await import('../features/delegation-enforcer.js');
       const result = enforceModel({
         description: 'Implement feature',
         prompt: 'Write the code',
         subagent_type: 'oh-my-claudecode:executor',
       });
-      expect(result.injected).toBe(false);
-      expect(result.model).toBe('inherit');
-      expect(result.modifiedInput.model).toBeUndefined();
+      expect(result.injected).toBe(true);
+      expect(result.model).toBe('global.anthropic.claude-sonnet-4-6-v1:0');
+      expect(result.modifiedInput.model).toBe('global.anthropic.claude-sonnet-4-6-v1:0');
     });
 
     it('isBedrock detects Bedrock patterns in tier env vars', async () => {
@@ -451,7 +452,10 @@ describe('Bedrock model routing repro', () => {
 
       // Should contain Bedrock override instruction
       expect(parsed.message).toContain('MODEL ROUTING OVERRIDE');
-      expect(parsed.message).toContain('Do NOT pass the `model` parameter');
+      expect(parsed.message).toContain('tier alias');
+      expect(parsed.message).toMatch(/\b(sonnet|opus|haiku)\b/);
+      expect(parsed.message).not.toContain('Do NOT pass the `model` parameter');
+      expect(parsed.message).not.toContain('Omit it entirely');
     });
 
     it('does NOT inject override when not on Bedrock', async () => {

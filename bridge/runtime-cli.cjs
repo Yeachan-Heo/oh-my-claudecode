@@ -1511,12 +1511,19 @@ function resolveTierModelFromEnv(tier) {
   }
   return void 0;
 }
-function getProviderDetectionModelEnvValues() {
+function getDirectModelEnvValue() {
   for (const key of DIRECT_MODEL_ENV_KEYS) {
     const value = readEnvValue(key);
     if (value) {
-      return [value];
+      return value;
     }
+  }
+  return void 0;
+}
+function getProviderDetectionModelEnvValues() {
+  const directModel = getDirectModelEnvValue();
+  if (directModel) {
+    return [directModel];
   }
   const values = /* @__PURE__ */ new Set();
   for (const tier of INHERIT_TIER_PRIORITY) {
@@ -1526,6 +1533,10 @@ function getProviderDetectionModelEnvValues() {
     }
   }
   return [...values];
+}
+function getDirectProviderDetectionModelEnvValues() {
+  const directModel = getDirectModelEnvValue();
+  return directModel ? [directModel] : [];
 }
 function getDefaultModelHigh() {
   return resolveTierModelFromEnv("HIGH") || BUILTIN_TIER_MODEL_DEFAULTS.HIGH;
@@ -1551,11 +1562,8 @@ function resolveClaudeFamily(modelId) {
   if (lower.includes("haiku")) return "HAIKU";
   return null;
 }
-function isBedrock() {
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
-    return true;
-  }
-  for (const modelId of getProviderDetectionModelEnvValues()) {
+function hasBedrockModelId(modelIds) {
+  for (const modelId of modelIds) {
     if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
       return true;
     }
@@ -1564,6 +1572,12 @@ function isBedrock() {
     }
   }
   return false;
+}
+function isBedrock() {
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
+    return true;
+  }
+  return hasBedrockModelId(getProviderDetectionModelEnvValues());
 }
 function isProviderSpecificModelId(modelId) {
   if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
@@ -1581,28 +1595,33 @@ function isVertexAI() {
   if (process.env.CLAUDE_CODE_USE_VERTEX === "1") {
     return true;
   }
-  for (const modelId of getProviderDetectionModelEnvValues()) {
-    if (modelId.toLowerCase().startsWith("vertex_ai/")) {
+  return hasVertexModelId(getProviderDetectionModelEnvValues());
+}
+function hasVertexModelId(modelIds) {
+  return modelIds.some((modelId) => modelId.toLowerCase().startsWith("vertex_ai/"));
+}
+function hasNonClaudeModelId(modelIds) {
+  for (const modelId of modelIds) {
+    const lower = modelId.toLowerCase();
+    if (!lower.includes("claude") && !CLAUDE_TIER_ALIASES.has(lower)) {
       return true;
     }
   }
   return false;
 }
-function isNonClaudeProvider() {
+function shouldAutoForceInherit() {
   if (process.env.OMC_ROUTING_FORCE_INHERIT === "true") {
     return true;
   }
-  if (isBedrock()) {
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
     return true;
   }
-  if (isVertexAI()) {
+  if (process.env.CLAUDE_CODE_USE_VERTEX === "1") {
     return true;
   }
-  for (const modelId of getProviderDetectionModelEnvValues()) {
-    const lower = modelId.toLowerCase();
-    if (!lower.includes("claude") && !CLAUDE_TIER_ALIASES.has(lower)) {
-      return true;
-    }
+  const directModelValues = getDirectProviderDetectionModelEnvValues();
+  if (hasBedrockModelId(directModelValues) || hasVertexModelId(directModelValues) || hasNonClaudeModelId(directModelValues)) {
+    return true;
   }
   const baseUrl = process.env.ANTHROPIC_BASE_URL || "";
   if (baseUrl) {
@@ -2101,7 +2120,7 @@ function loadConfig() {
   }
   const envConfig = loadEnvConfig();
   config = deepMerge(config, envConfig);
-  if (config.routing?.forceInherit !== true && process.env.OMC_ROUTING_FORCE_INHERIT === void 0 && isNonClaudeProvider()) {
+  if (config.routing?.forceInherit !== true && process.env.OMC_ROUTING_FORCE_INHERIT === void 0 && shouldAutoForceInherit()) {
     config.routing = {
       ...config.routing,
       forceInherit: true
@@ -2601,6 +2620,9 @@ var FAMILY_TO_ALIAS = {
   HAIKU: "haiku"
 };
 function normalizeToCcAlias(model) {
+  if (isProviderSpecificModelId(model)) {
+    return model;
+  }
   const family = resolveClaudeFamily(model);
   return family ? FAMILY_TO_ALIAS[family] ?? model : model;
 }

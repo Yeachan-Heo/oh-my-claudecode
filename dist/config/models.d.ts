@@ -105,4 +105,11 @@ export declare function isVertexAI(): boolean;
  * - A custom ANTHROPIC_BASE_URL points to a non-Anthropic endpoint
  */
 export declare function isNonClaudeProvider(): boolean;
+/**
+ * Detect whether provider state should globally force Agent/Task calls to
+ * inherit the parent session model. Tier model env overrides intentionally do
+ * not trigger this by themselves: they are configured per-tier defaults for
+ * OMC routing, not proof that every delegated agent should drop its model.
+ */
+export declare function shouldAutoForceInherit(): boolean;
 //# sourceMappingURL=models.d.ts.map

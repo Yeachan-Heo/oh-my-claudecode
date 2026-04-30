@@ -323,6 +323,15 @@ describe('loadConfig auto-enables forceInherit for non-Claude providers (issue #
     expect(config.routing?.forceInherit).toBe(true);
   });
 
+  it('does not auto-enable forceInherit for partial OMC tier env overrides', () => {
+    process.env.OMC_MODEL_HIGH = 'glm-5.1:cloud';
+    const config = loadConfig();
+
+    expect(config.routing?.forceInherit).toBe(false);
+    expect(config.agents?.architect?.model).toBe('glm-5.1:cloud');
+    expect(config.agents?.executor?.model).toContain('claude-sonnet');
+  });
+
   it('auto-enables forceInherit when ANTHROPIC_BASE_URL is non-Anthropic', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://litellm.example.com/v1';
     const config = loadConfig();

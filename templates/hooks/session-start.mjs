@@ -143,15 +143,7 @@ const OMC_STARTUP_GUIDANCE_MAX_CHARS = 8000;
 const SESSION_START_CONTEXT_BUDGET = 6000;
 const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
 
-const MODEL_ROUTING_OVERRIDE_MESSAGE = `<system-reminder>
-
-[MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
-
-This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
-Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
-The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
-
-</system-reminder>`;
+const { MODEL_ROUTING_OVERRIDE_MESSAGE } = await import(pathToFileURL(join(__dirname, 'lib', 'model-routing-override-message.mjs')).href);
 
 function isTruthyProviderFlag(value) {
   return value === '1' || value === 'true';

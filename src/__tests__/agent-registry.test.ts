@@ -10,6 +10,9 @@ const __dirname = path.dirname(__filename);
 const MODEL_ENV_KEYS = [
   'CLAUDE_MODEL',
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
   'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
   'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
   'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',
@@ -135,15 +138,25 @@ describe('Agent Registry Validation', () => {
     expect(agents.architect?.model).toBe('kimi-k2.6:cloud');
   });
 
-  test('auto forceInherit plus tier env fallback avoids hardcoded Claude agent models', () => {
+  test('tier env fallback avoids hardcoded Claude agent models without global forceInherit', () => {
     process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'glm-5.1:cloud';
     process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k2.6:cloud';
 
     const agents = getAgentDefinitions();
 
     expect(agents.executor?.model).toBe('kimi-k2.6:cloud');
-    expect(agents.architect?.model).toBe('kimi-k2.6:cloud');
+    expect(agents.architect?.model).toBe('glm-5.1:cloud');
     expect(agents.architect?.model).not.toBe('claude-opus-4-7');
+  });
+
+  test('partial tier env override does not collapse all agents to inherit', () => {
+    process.env.OMC_MODEL_HIGH = 'glm-5.1:cloud';
+
+    const agents = getAgentDefinitions();
+
+    expect(agents.architect?.model).toBe('glm-5.1:cloud');
+    expect(agents.executor?.model).toContain('claude-sonnet');
+    expect(agents.executor?.model).not.toBe('glm-5.1:cloud');
   });
 
   test('explicit override model still wins when forceInherit is enabled', async () => {

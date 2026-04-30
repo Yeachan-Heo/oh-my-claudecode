@@ -16,7 +16,7 @@
 import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
-import { resolveClaudeFamily } from '../config/models.js';
+import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
 import type { PluginConfig } from '../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +89,10 @@ const FAMILY_TO_ALIAS: Record<string, string> = {
 
 /** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku) if possible */
 export function normalizeToCcAlias(model: string): string {
+  if (isProviderSpecificModelId(model)) {
+    return model;
+  }
+
   const family = resolveClaudeFamily(model);
   return family ? (FAMILY_TO_ALIAS[family] ?? model) : model;
 }
@@ -299,6 +303,7 @@ export function getModelForAgent(agentType: string): string {
     throw new Error(`No default model defined for agent: ${normalizedType}`);
   }
 
-  // Normalize to CC-supported aliases (sonnet/opus/haiku)
+  // Normalize standard Anthropic IDs to CC-supported aliases (sonnet/opus/haiku),
+  // while preserving provider-specific IDs such as Bedrock/Vertex paths.
   return normalizeToCcAlias(agentDef.model);
 }

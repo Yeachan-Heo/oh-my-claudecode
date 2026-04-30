@@ -335,15 +335,8 @@ const SESSION_END_MODE_STATE_FILES = [
   'skill-active-state.json',
 ];
 
-const MODEL_ROUTING_OVERRIDE_MESSAGE = `<system-reminder>
-
-[MODEL ROUTING OVERRIDE — NON-STANDARD PROVIDER DETECTED]
-
-This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy).
-Do NOT pass the \`model\` parameter on Task/Agent calls. Omit it entirely so agents inherit the parent session's model.
-The CLAUDE.md instruction "Pass model on Task calls: haiku, sonnet, opus" does NOT apply here.
-
-</system-reminder>`;
+import { MODEL_ROUTING_OVERRIDE_MESSAGE } from './lib/model-routing-override-message.mjs';
+export { MODEL_ROUTING_OVERRIDE_MESSAGE };
 
 function isTruthyProviderFlag(value) {
   return value === '1' || value === 'true';

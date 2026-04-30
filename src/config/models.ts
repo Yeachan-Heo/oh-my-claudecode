@@ -98,12 +98,21 @@ function resolveTierModelFromEnv(tier: ModelTier): string | undefined {
   return undefined;
 }
 
-function getProviderDetectionModelEnvValues(): string[] {
+function getDirectModelEnvValue(): string | undefined {
   for (const key of DIRECT_MODEL_ENV_KEYS) {
     const value = readEnvValue(key);
     if (value) {
-      return [value];
+      return value;
     }
+  }
+
+  return undefined;
+}
+
+function getProviderDetectionModelEnvValues(): string[] {
+  const directModel = getDirectModelEnvValue();
+  if (directModel) {
+    return [directModel];
   }
 
   const values = new Set<string>();
@@ -117,12 +126,15 @@ function getProviderDetectionModelEnvValues(): string[] {
   return [...values];
 }
 
+function getDirectProviderDetectionModelEnvValues(): string[] {
+  const directModel = getDirectModelEnvValue();
+  return directModel ? [directModel] : [];
+}
+
 export function resolveInheritedModelFromEnv(): string | undefined {
-  for (const key of DIRECT_MODEL_ENV_KEYS) {
-    const value = readEnvValue(key);
-    if (value) {
-      return value;
-    }
+  const directModel = getDirectModelEnvValue();
+  if (directModel) {
+    return directModel;
   }
 
   for (const tier of INHERIT_TIER_PRIORITY) {
@@ -198,6 +210,24 @@ export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini'): st
     : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 
+
+function hasBedrockModelId(modelIds: readonly string[]): boolean {
+  for (const modelId of modelIds) {
+    if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
+      return true;
+    }
+    if (
+      /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
+      && /:(inference-profile|application-inference-profile)\//i.test(modelId)
+      && modelId.toLowerCase().includes('claude')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Detect whether Claude Code is running on AWS Bedrock.
  *
@@ -221,20 +251,7 @@ export function isBedrock(): boolean {
   // Direct session model env vars win over lower-precedence tier defaults, so a
   // stale tier/default env must not mark a standard Claude session as Bedrock.
   // Covers region prefixes (us, eu, ap), cross-region (global), and bare (anthropic.)
-  for (const modelId of getProviderDetectionModelEnvValues()) {
-    if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
-      return true;
-    }
-    if (
-      /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
-      && /:(inference-profile|application-inference-profile)\//i.test(modelId)
-      && modelId.toLowerCase().includes('claude')
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  return hasBedrockModelId(getProviderDetectionModelEnvValues());
 }
 
 /**
@@ -306,8 +323,17 @@ export function isVertexAI(): boolean {
   }
 
   // Fallback: detect vertex_ai/ prefix in the active model env value.
-  for (const modelId of getProviderDetectionModelEnvValues()) {
-    if (modelId.toLowerCase().startsWith('vertex_ai/')) {
+  return hasVertexModelId(getProviderDetectionModelEnvValues());
+}
+
+function hasVertexModelId(modelIds: readonly string[]): boolean {
+  return modelIds.some((modelId) => modelId.toLowerCase().startsWith('vertex_ai/'));
+}
+
+function hasNonClaudeModelId(modelIds: readonly string[]): boolean {
+  for (const modelId of modelIds) {
+    const lower = modelId.toLowerCase();
+    if (!lower.includes('claude') && !CLAUDE_TIER_ALIASES.has(lower)) {
       return true;
     }
   }
@@ -347,11 +373,8 @@ export function isNonClaudeProvider(): boolean {
   // lower-precedence tier defaults so stale tier envs do not force inheritance.
   // Note: this check comes AFTER Bedrock/Vertex because their model IDs
   // contain "claude" and would incorrectly return false here.
-  for (const modelId of getProviderDetectionModelEnvValues()) {
-    const lower = modelId.toLowerCase();
-    if (!lower.includes('claude') && !CLAUDE_TIER_ALIASES.has(lower)) {
-      return true;
-    }
+  if (hasNonClaudeModelId(getProviderDetectionModelEnvValues())) {
+    return true;
   }
 
   // Custom base URL suggests a proxy/gateway (CC Switch, LiteLLM, OneAPI, etc.)
@@ -362,6 +385,49 @@ export function isNonClaudeProvider(): boolean {
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Rejecting ANTHROPIC_BASE_URL: ${validation.reason}`);
       // Treat invalid URLs as non-Claude to prevent potential SSRF
+      return true;
+    }
+    if (!baseUrl.includes('anthropic.com')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detect whether provider state should globally force Agent/Task calls to
+ * inherit the parent session model. Tier model env overrides intentionally do
+ * not trigger this by themselves: they are configured per-tier defaults for
+ * OMC routing, not proof that every delegated agent should drop its model.
+ */
+export function shouldAutoForceInherit(): boolean {
+  if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') {
+    return true;
+  }
+
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+    return true;
+  }
+
+  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+    return true;
+  }
+
+  const directModelValues = getDirectProviderDetectionModelEnvValues();
+  if (
+    hasBedrockModelId(directModelValues)
+    || hasVertexModelId(directModelValues)
+    || hasNonClaudeModelId(directModelValues)
+  ) {
+    return true;
+  }
+
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+  if (baseUrl) {
+    const validation = validateAnthropicBaseUrl(baseUrl);
+    if (!validation.allowed) {
+      console.error(`[SSRF Guard] Rejecting ANTHROPIC_BASE_URL: ${validation.reason}`);
       return true;
     }
     if (!baseUrl.includes('anthropic.com')) {

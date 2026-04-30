@@ -8,6 +8,7 @@ import {
   hasExtendedContextSuffix,
   isSubagentSafeModelId,
   resolveInheritedModelFromEnv,
+  shouldAutoForceInherit,
 } from '../models.js';
 import { saveAndClear, restore } from './test-helpers.js';
 
@@ -196,6 +197,20 @@ describe('isNonClaudeProvider()', () => {
   it('returns true when OMC tier defaults target a non-Claude provider', () => {
     process.env.OMC_MODEL_MEDIUM = 'glm-5.1:cloud';
     expect(isNonClaudeProvider()).toBe(true);
+  });
+
+  it('does not globally force inheritance for tier-only non-Claude defaults', () => {
+    process.env.OMC_MODEL_HIGH = 'glm-5.1:cloud';
+
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(shouldAutoForceInherit()).toBe(false);
+  });
+
+  it('does globally force inheritance for direct non-Claude session models', () => {
+    process.env.CLAUDE_MODEL = 'glm-5.1:cloud';
+
+    expect(isNonClaudeProvider()).toBe(true);
+    expect(shouldAutoForceInherit()).toBe(true);
   });
 
   it('lets a direct Claude CLAUDE_MODEL beat a stale non-Claude ANTHROPIC_MODEL', () => {
