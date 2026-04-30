@@ -530,6 +530,35 @@ describe('post-tool hook regression coverage (issue #2615)', () => {
     expect(out.hookSpecificOutput?.additionalContext).not.toContain('Edit operation failed');
   });
 
+  it('prefers exact Claude Code edit success output over embedded diagnostics', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: [
+        'The file has been updated successfully.',
+        '',
+        'diagnostic fixture: Error: failed to write',
+        'No such file or directory',
+      ].join('\n'),
+      session_id: 'issue-2876-exact-edit-success',
+      cwd: process.cwd(),
+    });
+
+    expect(isClaudeCodeWriteSuccess('The file has been updated successfully.')).toBe(true);
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Code modified.');
+    expect(out.hookSpecificOutput?.additionalContext).not.toContain('Edit operation failed');
+  });
+
+  it('keeps exact edit failure text classified as an Edit failure', () => {
+    const out = runPostToolVerifier({
+      tool_name: 'Edit',
+      tool_response: 'Error: failed to edit file',
+      session_id: 'issue-2876-edit-failure',
+      cwd: process.cwd(),
+    });
+
+    expect(out.hookSpecificOutput?.additionalContext).toContain('Edit operation failed');
+  });
+
   it('prefers canonical write success output over serialized tool output with diagnostics', () => {
     const out = runPostToolVerifier({
       tool_name: 'Write',

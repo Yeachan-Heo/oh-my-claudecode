@@ -710,6 +710,7 @@ export function isClaudeCodeWriteSuccess(output) {
 
   const cleaned = stripClaudeTempCwdErrors(output);
   const successPatterns = [
+    /(^|\n)The file has been updated successfully\.?(\n|$)/i,
     /(^|\n)The file .+ has been updated successfully\.?(\n|$)/i,
     /(^|\n)File (?:created|written|updated) successfully(?:\s+at:\s*.+)?\.?(\n|$)/i,
     /(^|\n).*file state is current in your context\b.*(\n|$)/i,
