@@ -157,6 +157,64 @@ function readAgentDefinitionModel(subagentType) {
   }
 }
 
+
+const SLOP_RISK_TOOL_NAMES = new Set([
+  'Task',
+  'TaskCreate',
+  'TaskUpdate',
+  'Agent',
+  'Bash',
+  'Edit',
+  'MultiEdit',
+  'Write',
+  'NotebookEdit',
+]);
+const SLOP_FALLBACK_LANGUAGE_PATTERN = /\b(?:fallback|fall\s+back|workaround|work\s+around)\b/i;
+
+function collectStringValues(value, output = [], depth = 0) {
+  if (depth > 5 || output.length > 100) return output;
+  if (typeof value === 'string') {
+    output.push(value);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, output, depth + 1);
+    return output;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      // Skip hook/runtime metadata so warnings are driven by user-authored tool intent.
+      if (/^(cwd|directory|session_?id|transcript_?path|hook_event_name)$/i.test(key)) continue;
+      collectStringValues(child, output, depth + 1);
+    }
+  }
+  return output;
+}
+
+function generateSlopWarning(data, toolName) {
+  if (!SLOP_RISK_TOOL_NAMES.has(toolName)) return '';
+  const toolInput = data.toolInput || data.tool_input || {};
+  const promptLikeFields = {
+    prompt: data.prompt,
+    userPrompt: data.userPrompt,
+    user_prompt: data.user_prompt,
+    message: data.message,
+  };
+  const inspectedText = collectStringValues(toolInput)
+    .concat(collectStringValues(promptLikeFields))
+    .join('\n');
+  if (!SLOP_FALLBACK_LANGUAGE_PATTERN.test(inspectedText)) return '';
+
+  return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
+    'Do not make potential slop: avoid ad-hoc fallback layers, workaround shims, or environment-specific patches unless explicitly justified. ' +
+    'For architecture concerns, consult the architect for a concrete design first. ' +
+    'If this seems environment-specific, ask the user to confirm constraints before proceeding.';
+}
+
+function combineHookMessages(...messages) {
+  return messages.filter(Boolean).join('\n\n');
+}
+
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const MODE_STATE_FILES = [
   'autopilot-state.json',
@@ -907,6 +965,7 @@ async function main() {
       }
     }
 
+    const slopWarning = generateSlopWarning(data, toolName);
     let message;
     if (toolName === 'Task' || toolName === 'TaskCreate' || toolName === 'TaskUpdate') {
       const toolInput = data.toolInput || data.tool_input || null;
@@ -914,6 +973,7 @@ async function main() {
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
+    message = combineHookMessages(slopWarning, message);
 
     if (!message) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));

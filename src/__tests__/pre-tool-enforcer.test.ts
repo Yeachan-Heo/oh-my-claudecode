@@ -421,6 +421,66 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(output).toEqual({ continue: true, suppressOutput: true });
   });
 
+  it('warns without blocking when Task prompt uses fallback or workaround language', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Implement a fallback',
+        prompt: 'Add a workaround if the normal architecture is hard.',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-warning',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    const context = String(hookSpecificOutput.additionalContext);
+    expect(output.continue).toBe(true);
+    expect(hookSpecificOutput.hookEventName).toBe('PreToolUse');
+    expect(context).toContain('[SLOP WARNING]');
+    expect(context).toContain('Do not make potential slop');
+    expect(context).toContain('consult the architect');
+    expect(context).toContain('ask the user to confirm constraints');
+    expect(context).toContain('Spawning agent');
+    expect(hookSpecificOutput).not.toHaveProperty('permissionDecision');
+  });
+
+  it('keeps slop warning visible even when routine reminders are quieted', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Bash',
+        toolInput: {
+          command: 'node scripts/add-fallback-workaround.mjs',
+        },
+        cwd: tempDir,
+        session_id: 'session-slop-warning-quiet',
+      },
+      { OMC_QUIET: '2' },
+    );
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    const context = String(hookSpecificOutput.additionalContext);
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[SLOP WARNING]');
+    expect(context).not.toContain('Use parallel execution');
+  });
+
+  it('does not warn for read-only search tools that mention fallback as the query', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Grep',
+      toolInput: {
+        pattern: 'fallback|workaround',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-search',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+    expect(String(hookSpecificOutput.additionalContext)).toContain('Combine searches in parallel');
+  });
+
   it('blocks agent-heavy Task preflight when transcript context budget is exhausted', () => {
     const transcriptPath = join(tempDir, 'transcript.jsonl');
     writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
