@@ -64,24 +64,25 @@ describe('HUD stdin context percent', () => {
         expect(getContextPercent(current)).toBe(52);
         expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(54);
     });
-    it('ignores cache_read_input_tokens in the manual fallback calculation', () => {
+    it('includes cache_read_input_tokens in the manual fallback calculation', () => {
         const stdin = makeStdin({
             context_window: {
                 context_window_size: 1000,
                 current_usage: {
                     input_tokens: 120,
                     cache_creation_input_tokens: 30,
-                    cache_read_input_tokens: 250_000,
+                    cache_read_input_tokens: 50,
                 },
             },
         });
-        expect(getContextPercent(stdin)).toBe(15);
+        expect(getContextPercent(stdin)).toBe(20);
     });
-    it('keeps preferring native percentage even when cache reads are huge', () => {
+    it('keeps preferring positive native percentage even when fallback totals are higher', () => {
         const stdin = makeStdin({
             context_window: {
                 used_percentage: 54,
                 context_window_size: 1000,
+                total_input_tokens: 900,
                 current_usage: {
                     input_tokens: 120,
                     cache_creation_input_tokens: 30,
@@ -115,7 +116,7 @@ describe('HUD stdin context percent', () => {
         });
         expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(20);
     });
-    it('does not let cache-read spikes interfere with stabilization decisions', () => {
+    it('uses cache-read totals in stabilization decisions', () => {
         const previous = makeStdin({
             context_window: {
                 used_percentage: 54,
@@ -137,8 +138,91 @@ describe('HUD stdin context percent', () => {
                 },
             },
         });
-        expect(getContextPercent(current)).toBe(52);
-        expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(54);
+        expect(getContextPercent(current)).toBe(100);
+        expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(100);
+    });
+    it('falls back to total_input_tokens when native and manual usage are zero', () => {
+        const stdin = makeStdin({
+            context_window: {
+                used_percentage: 0,
+                context_window_size: 1_000_000,
+                total_input_tokens: 325_291,
+                current_usage: {
+                    input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        });
+        expect(getContextPercent(stdin)).toBe(33);
+    });
+    it('keeps a legitimate all-zero session at zero', () => {
+        const stdin = makeStdin({
+            context_window: {
+                used_percentage: 0,
+                context_window_size: 1_000_000,
+                total_input_tokens: 0,
+                current_usage: {
+                    input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        });
+        expect(getContextPercent(stdin)).toBe(0);
+        expect(getContextPercent(stabilizeContextPercent(stdin, makeStdin({
+            context_window: {
+                used_percentage: 1,
+                context_window_size: 1_000_000,
+                current_usage: {
+                    input_tokens: 10_000,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        })))).toBe(0);
+    });
+    it('lets manual usage win over total_input_tokens when native usage is zero', () => {
+        const stdin = makeStdin({
+            context_window: {
+                used_percentage: 0,
+                context_window_size: 1000,
+                total_input_tokens: 900,
+                current_usage: {
+                    input_tokens: 120,
+                    cache_creation_input_tokens: 30,
+                    cache_read_input_tokens: 50,
+                },
+            },
+        });
+        expect(getContextPercent(stdin)).toBe(20);
+    });
+    it('can stabilize a zero native percentage using a close total_input_tokens fallback', () => {
+        const previous = makeStdin({
+            context_window: {
+                used_percentage: 34,
+                context_window_size: 1_000_000,
+                current_usage: {
+                    input_tokens: 340_000,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        });
+        const current = makeStdin({
+            context_window: {
+                used_percentage: 0,
+                context_window_size: 1_000_000,
+                total_input_tokens: 325_291,
+                current_usage: {
+                    input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+        });
+        expect(getContextPercent(current)).toBe(33);
+        expect(getContextPercent(stabilizeContextPercent(current, previous))).toBe(34);
     });
 });
 describe('HUD stdin model display', () => {

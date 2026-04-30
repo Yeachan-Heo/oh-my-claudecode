@@ -37,7 +37,9 @@ export declare function readStdin(): Promise<StatuslineStdin | null>;
 export declare function stabilizeContextPercent(stdin: StatuslineStdin, previousStdin: StatuslineStdin | null | undefined): StatuslineStdin;
 /**
  * Get context window usage percentage.
- * Prefers native percentage from Claude Code statusline stdin, falls back to manual calculation.
+ * Prefers a positive native percentage from Claude Code statusline stdin,
+ * then positive current_usage tokens, then positive total_input_tokens for
+ * Anthropic-compatible providers that report zeroed native usage.
  */
 export declare function getContextPercent(stdin: StatuslineStdin): number;
 /**

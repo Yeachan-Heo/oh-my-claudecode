@@ -247,13 +247,26 @@ function getTotalTokens(stdin: StatuslineStdin): number {
   const usage = getCurrentUsage(stdin);
   return (
     (usage?.input_tokens ?? 0) +
-    (usage?.cache_creation_input_tokens ?? 0)
+    (usage?.cache_creation_input_tokens ?? 0) +
+    (usage?.cache_read_input_tokens ?? 0)
   );
+}
+
+function getTotalInputTokens(stdin: StatuslineStdin): number {
+  return stdin.context_window?.total_input_tokens ?? 0;
 }
 
 function getRoundedNativeContextPercent(stdin: StatuslineStdin | null | undefined): number | null {
   const nativePercent = stdin?.context_window?.used_percentage;
   if (typeof nativePercent !== 'number' || Number.isNaN(nativePercent)) {
+    return null;
+  }
+  return Math.min(100, Math.max(0, Math.round(nativePercent)));
+}
+
+function getPositiveNativeContextPercent(stdin: StatuslineStdin | null | undefined): number | null {
+  const nativePercent = stdin?.context_window?.used_percentage;
+  if (typeof nativePercent !== 'number' || Number.isNaN(nativePercent) || nativePercent <= 0) {
     return null;
   }
   return Math.min(100, Math.max(0, Math.round(nativePercent)));
@@ -267,6 +280,25 @@ function getManualContextPercent(stdin: StatuslineStdin): number | null {
 
   const totalTokens = getTotalTokens(stdin);
   return Math.min(100, Math.round((totalTokens / size) * 100));
+}
+
+function getPositiveManualContextPercent(stdin: StatuslineStdin): number | null {
+  const manualPercent = getManualContextPercent(stdin);
+  return manualPercent !== null && manualPercent > 0 ? manualPercent : null;
+}
+
+function getTotalInputContextPercent(stdin: StatuslineStdin): number | null {
+  const size = stdin.context_window?.context_window_size;
+  if (!size || size <= 0) {
+    return null;
+  }
+
+  const totalInputTokens = getTotalInputTokens(stdin);
+  if (totalInputTokens <= 0) {
+    return null;
+  }
+
+  return Math.min(100, Math.round((totalInputTokens / size) * 100));
 }
 
 function isSameContextStream(current: StatuslineStdin, previous: StatuslineStdin): boolean {
@@ -284,7 +316,7 @@ export function stabilizeContextPercent(
   stdin: StatuslineStdin,
   previousStdin: StatuslineStdin | null | undefined,
 ): StatuslineStdin {
-  if (getRoundedNativeContextPercent(stdin) !== null) {
+  if (getPositiveNativeContextPercent(stdin) !== null) {
     return stdin;
   }
 
@@ -297,10 +329,13 @@ export function stabilizeContextPercent(
     return stdin;
   }
 
-  const manualPercent = getManualContextPercent(stdin);
+  const fallbackPercent = getPositiveManualContextPercent(stdin) ?? getTotalInputContextPercent(stdin);
+  if (fallbackPercent === null && getRoundedNativeContextPercent(stdin) === 0) {
+    return stdin;
+  }
   if (
-    manualPercent !== null
-    && Math.abs(manualPercent - previousNativePercent) > TRANSIENT_CONTEXT_PERCENT_TOLERANCE
+    fallbackPercent !== null
+    && Math.abs(fallbackPercent - previousNativePercent) > TRANSIENT_CONTEXT_PERCENT_TOLERANCE
   ) {
     return stdin;
   }
@@ -316,15 +351,17 @@ export function stabilizeContextPercent(
 
 /**
  * Get context window usage percentage.
- * Prefers native percentage from Claude Code statusline stdin, falls back to manual calculation.
+ * Prefers a positive native percentage from Claude Code statusline stdin,
+ * then positive current_usage tokens, then positive total_input_tokens for
+ * Anthropic-compatible providers that report zeroed native usage.
  */
 export function getContextPercent(stdin: StatuslineStdin): number {
-  const nativePercent = getRoundedNativeContextPercent(stdin);
-  if (nativePercent !== null) {
-    return nativePercent;
-  }
-
-  return getManualContextPercent(stdin) ?? 0;
+  return (
+    getPositiveNativeContextPercent(stdin)
+    ?? getPositiveManualContextPercent(stdin)
+    ?? getTotalInputContextPercent(stdin)
+    ?? 0
+  );
 }
 
 /**
