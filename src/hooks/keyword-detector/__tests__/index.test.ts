@@ -2055,6 +2055,27 @@ This article argues that fake popularity signals damage trust in open source.`;
     });
   });
 
+  // Japanese keyword activation parity sentinel.
+  // Gap recorded in docs/japanese-keyword-routing-gap.md. KEYWORD_PATTERNS
+  // currently has 12 Korean transliteration aliases and 0 Japanese ones.
+  // Each it.todo here is a 1:1 sentinel for a Korean alias that lacks its
+  // Japanese counterpart. Convert each `it.todo` to `it` (and add a real
+  // assertion) when the matching alias is added to KEYWORD_PATTERNS.
+  describe.todo('Japanese keyword activation parity', () => {
+    it.todo('detects ラルフ as ralph keyword');
+    it.todo('detects オートパイロット as autopilot keyword');
+    it.todo('detects ウルトラワーク as ultrawork keyword');
+    it.todo('detects ラルプラン as ralplan keyword');
+    it.todo('detects テストファースト as tdd keyword');
+    it.todo('detects コードレビュー as code-review keyword');
+    it.todo('detects セキュリティレビュー as security-review keyword');
+    it.todo('detects ウルトラシンク as ultrathink keyword');
+    it.todo('detects ディープサーチ as deepsearch keyword');
+    it.todo('detects ディープ分析 as analyze keyword');
+    it.todo('detects ディープインタビュー as deep-interview keyword');
+    it.todo('detects シーシージー as ccg keyword');
+  });
+
   // -------------------------------------------------------------------------
   // Intent-pattern guards (spec h) — file paths, code fences, and backticks
   // must NOT trigger keyword detection
