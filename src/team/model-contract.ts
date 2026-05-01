@@ -157,6 +157,17 @@ export const _testInternals = {
   getTrustedPrefixes,
 };
 
+/**
+ * Detect parent launch env for Claude Code API-key auth.
+ *
+ * Claude Code's `--dangerously-skip-permissions` only bypasses permission
+ * prompts. When an API key is present, `--bare` is needed to avoid the
+ * interactive OAuth/session login path for team worker panes.
+ */
+export function shouldUseClaudeBareMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return typeof env.ANTHROPIC_API_KEY === 'string' && env.ANTHROPIC_API_KEY.trim().length > 0;
+}
+
 const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
   claude: {
     agentType: 'claude',
@@ -164,6 +175,9 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     installInstructions: 'Install Claude CLI: https://claude.ai/download',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
       const args = ['--dangerously-skip-permissions'];
+      if (shouldUseClaudeBareMode() && !extraFlags.includes('--bare')) {
+        args.push('--bare');
+      }
       if (model) {
         // Provider-specific model IDs (Bedrock, Vertex) must be passed as-is.
         // Normalizing them to aliases like "sonnet" causes Claude Code to expand

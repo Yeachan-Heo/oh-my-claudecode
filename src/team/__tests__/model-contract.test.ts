@@ -14,6 +14,7 @@ import {
   clearResolvedPathCache,
   validateCliBinaryPath,
   resolveClaudeWorkerModel,
+  shouldUseClaudeBareMode,
   _testInternals,
 } from '../model-contract.js';
 
@@ -31,6 +32,28 @@ function setProcessPlatform(platform: NodeJS.Platform): () => void {
   return () => {
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   };
+}
+
+function withAnthropicApiKey(value: string | undefined, fn: () => void): void {
+  const original = process.env.ANTHROPIC_API_KEY;
+  if (value === undefined) {
+    delete process.env.ANTHROPIC_API_KEY;
+  } else {
+    process.env.ANTHROPIC_API_KEY = value;
+  }
+  try {
+    fn();
+  } finally {
+    if (original === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = original;
+    }
+  }
+}
+
+function countArg(args: string[], expected: string): number {
+  return args.filter(arg => arg === expected).length;
 }
 
 describe('model-contract', () => {
@@ -170,6 +193,37 @@ describe('model-contract', () => {
       const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
       expect(args).toContain('--dangerously-skip-permissions');
     });
+    it('detects Claude bare mode only for non-empty ANTHROPIC_API_KEY', () => {
+      expect(shouldUseClaudeBareMode({ ANTHROPIC_API_KEY: 'sk-test' })).toBe(true);
+      expect(shouldUseClaudeBareMode({ ANTHROPIC_API_KEY: '' })).toBe(false);
+      expect(shouldUseClaudeBareMode({ ANTHROPIC_API_KEY: '   ' })).toBe(false);
+      expect(shouldUseClaudeBareMode({})).toBe(false);
+    });
+    it('claude omits --bare when ANTHROPIC_API_KEY is absent, empty, or whitespace', () => {
+      for (const value of [undefined, '', '   ']) {
+        withAnthropicApiKey(value, () => {
+          const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+          expect(args).toContain('--dangerously-skip-permissions');
+          expect(args).not.toContain('--bare');
+        });
+      }
+    });
+    it('claude includes --bare with API-key auth and dedupes exact extra flag', () => {
+      withAnthropicApiKey('sk-test', () => {
+        const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+        expect(args).toContain('--dangerously-skip-permissions');
+        expect(args).toContain('--bare');
+        expect(countArg(args, '--bare')).toBe(1);
+
+        const deduped = buildLaunchArgs('claude', {
+          teamName: 't',
+          workerName: 'w',
+          cwd: '/tmp',
+          extraFlags: ['--bare'],
+        });
+        expect(countArg(deduped, '--bare')).toBe(1);
+      });
+    });
     it('codex includes --dangerously-bypass-approvals-and-sandbox', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp' });
       expect(args).not.toContain('exec');
@@ -194,10 +248,14 @@ describe('model-contract', () => {
       expect(args).not.toContain('claude-sonnet-4-6');
     });
     it('passes Bedrock model ID through without normalization for claude agent (issue #1695)', () => {
-      const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'us.anthropic.claude-opus-4-6-v1:0' });
-      expect(args).toContain('--model');
-      expect(args).toContain('us.anthropic.claude-opus-4-6-v1:0');
-      expect(args).not.toContain('opus');
+      withAnthropicApiKey('sk-test', () => {
+        const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'us.anthropic.claude-opus-4-6-v1:0' });
+        expect(args).toContain('--bare');
+        expect(countArg(args, '--bare')).toBe(1);
+        expect(args).toContain('--model');
+        expect(args).toContain('us.anthropic.claude-opus-4-6-v1:0');
+        expect(args).not.toContain('opus');
+      });
     });
     it('passes Bedrock ARN model ID through without normalization (issue #1695)', () => {
       const arn = 'arn:aws:bedrock:us-east-2:123456789012:inference-profile/global.anthropic.claude-sonnet-4-6-v1:0';
@@ -287,10 +345,15 @@ describe('model-contract', () => {
       const mockSpawnSync = vi.mocked(spawnSync);
       mockSpawnSync.mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any);
 
-      const argv = buildWorkerArgv('claude', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' });
+      let argv: string[] = [];
+      withAnthropicApiKey('sk-test', () => {
+        argv = buildWorkerArgv('claude', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' });
+      });
 
       expect(argv[0]).toBe('claude');
       expect(argv).toContain('--dangerously-skip-permissions');
+      expect(argv).toContain('--bare');
+      expect(countArg(argv, '--bare')).toBe(1);
       expect(argv).not.toContain('exec');
       expect(mockSpawnSync).toHaveBeenCalledWith('which', ['claude'], { timeout: 5000, encoding: 'utf8' });
       mockSpawnSync.mockRestore();
