@@ -266,12 +266,12 @@ Continue working until the task is truly done.
 `;
 
 /**
- * Prompt translation message - injected when non-English input detected
- * Reminds users to write prompts in English for consistent agent routing
+ * Routing-only nudge appended when a non-Latin script prompt is detected.
+ * Scope, non-goals, and rename history: docs/HOOKS.md "Keyword Routing Hint".
  */
-export const PROMPT_TRANSLATION_MESSAGE = `[PROMPT TRANSLATION] Non-English input detected.
-When delegating via Task(), write prompt arguments in English for consistent agent routing.
-Respond to the user in their original language.
+export const KEYWORD_ROUTING_HINT_MESSAGE = `[KEYWORD ROUTING HINT] Non-Latin script input detected.
+When delegating via Task(), use English keywords (e.g. "ralph", "autopilot") so keyword routing stays stable. The full prompt body can remain in the user's language.
+Reply to the user in their original language.
 `;
 
 // =============================================================================

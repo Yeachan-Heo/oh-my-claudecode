@@ -356,6 +356,19 @@ Magic keywords automatically activate OMC skills or execution modes when specifi
 - **Team worker protection**: Disabled when the `OMC_TEAM_WORKER` environment variable is set (prevents infinite spawning)
 - **Disable**: Set `DISABLE_OMC=1` or `OMC_SKIP_HOOKS=keyword-detector`
 
+### Keyword Routing Hint (non-Latin script prompts)
+
+When the sanitized prompt contains non-Latin script characters, keyword-detector appends a one-shot reminder labeled `[KEYWORD ROUTING HINT]`. The constant is `KEYWORD_ROUTING_HINT_MESSAGE` (`src/installer/hooks.ts`); the detection regex is `NON_LATIN_SCRIPT_PATTERN` (`src/hooks/keyword-detector/index.ts`).
+
+**Primary goal**: keep mode-routing keywords (`ralph`, `autopilot`, …) reaching the keyword detector in their canonical English form. Transliterated or translated variants would otherwise miss the dispatcher.
+
+**Non-goals**:
+
+- Output-language enforcement. The trailing "Reply to the user in their original language." line is defense-in-depth, not the reason this hint exists.
+- Latin-script non-English detection (Spanish, French, German, …). Those write English keywords as-is, so routing is unaffected and they intentionally fall outside `NON_LATIN_SCRIPT_PATTERN`.
+
+**Rename history**: previously named `PROMPT_TRANSLATION_MESSAGE` with label `[PROMPT TRANSLATION]`; renamed because the old label implied output-language control beyond the routing-only scope.
+
 ### Execution Mode Keywords
 
 These keywords invoke a skill and create a state file.

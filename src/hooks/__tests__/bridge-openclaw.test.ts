@@ -122,7 +122,7 @@ describe("bridge-level regression tests", () => {
     resetSkipHooksCache();
   });
 
-  it("keyword-detector injects translation message for non-Latin prompts", async () => {
+  it("keyword-detector injects routing hint for non-Latin prompts", async () => {
     const input: HookInput = {
       sessionId: "test-session",
       prompt: "이 코드를 수정해줘",
@@ -131,13 +131,12 @@ describe("bridge-level regression tests", () => {
 
     const result = await processHook("keyword-detector", input);
 
-    // The result should contain the PROMPT_TRANSLATION_MESSAGE
     expect(result.message).toBeDefined();
-    expect(result.message).toContain("[PROMPT TRANSLATION]");
-    expect(result.message).toContain("Non-English input detected");
+    expect(result.message).toContain("[KEYWORD ROUTING HINT]");
+    expect(result.message).toContain("Non-Latin script input detected");
   });
 
-  it("keyword-detector does NOT inject translation message for Latin prompts", async () => {
+  it("keyword-detector does NOT inject routing hint for Latin prompts", async () => {
     const input: HookInput = {
       sessionId: "test-session",
       prompt: "fix the bug in auth.ts",
@@ -146,9 +145,9 @@ describe("bridge-level regression tests", () => {
 
     const result = await processHook("keyword-detector", input);
 
-    // Should not contain translation message for English text
+    // Should not contain routing hint for English text
     const msg = result.message || "";
-    expect(msg).not.toContain("[PROMPT TRANSLATION]");
+    expect(msg).not.toContain("[KEYWORD ROUTING HINT]");
   });
 
   it("pre-tool-use emits only the dedicated ask-user-question OpenClaw signal", async () => {

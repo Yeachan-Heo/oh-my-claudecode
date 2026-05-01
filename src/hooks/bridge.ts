@@ -91,7 +91,7 @@ import {
   CODE_REVIEW_MESSAGE,
   SECURITY_REVIEW_MESSAGE,
   RALPH_MESSAGE,
-  PROMPT_TRANSLATION_MESSAGE,
+  KEYWORD_ROUTING_HINT_MESSAGE,
 } from "../installer/hooks.js";
 import { getUltraworkMessage } from "./keyword-detector/ultrawork/index.js";
 // Agent dashboard is used in pre/post-tool-use hot path
@@ -1491,7 +1491,7 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 
   const sanitizedText = sanitizeForKeywordDetection(cleanedText);
   if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
-    messages.push(PROMPT_TRANSLATION_MESSAGE);
+    messages.push(KEYWORD_ROUTING_HINT_MESSAGE);
   }
 
   // Wake OpenClaw gateway for keyword-detector (non-blocking, fires for all prompts)
