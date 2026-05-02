@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockedCalls = vi.hoisted(() => ({
     execFileArgs: [],
     splitCount: 0,
+    // When set, overrides the response for `display-message -p '#S:#I #{pane_id}'`
+    // so a test can simulate cmux returning UUID-style pane ids.
+    contextOverride: null,
 }));
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
@@ -14,6 +17,9 @@ vi.mock('child_process', async (importOriginal) => {
             return { stdout: 'omx:5 %99\n', stderr: '' };
         }
         if (args[0] === 'display-message' && args.includes('#S:#I #{pane_id}')) {
+            if (mockedCalls.contextOverride) {
+                return { stdout: mockedCalls.contextOverride, stderr: '' };
+            }
             return { stdout: 'fallback:2 %42\n', stderr: '' };
         }
         if (args[0] === 'display-message' && args.includes('#S:#I')) {
@@ -92,6 +98,7 @@ describe('createTeamSession context resolution', () => {
     beforeEach(() => {
         mockedCalls.execFileArgs = [];
         mockedCalls.splitCount = 0;
+        mockedCalls.contextOverride = null;
     });
     afterEach(() => {
         vi.unstubAllEnvs();
@@ -158,6 +165,20 @@ describe('createTeamSession context resolution', () => {
         expect(session.sessionName).toBe('omx:5');
         expect(session.workerPaneIds).toEqual(['%501']);
         expect(session.sessionMode).toBe('dedicated-window');
+    });
+    // Regression: cmux's `__tmux-compat` shim returns UUID-format pane ids
+    // (`%<UUID>`) instead of tmux's numeric `%<integer>`. The previous parser
+    // (`/^(\S+)\s+(%\d+)$/`) rejected these and threw
+    // `Failed to resolve tmux context: "cmux:0 %<UUID>"`, blocking
+    // `cmux omc team` end-to-end. The new parser accepts both shapes.
+    it('accepts UUID-style pane ids returned by cmux __tmux-compat', async () => {
+        vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
+        vi.stubEnv('TMUX_PANE', '');
+        vi.stubEnv('CMUX_SURFACE_ID', 'cmux-surface');
+        mockedCalls.contextOverride = 'cmux:0 %7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A\n';
+        const session = await createTeamSession('cmux-uuid-team', 0, '/tmp');
+        expect(session.leaderPaneId).toBe('%7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A');
+        expect(session.sessionName).toBe('cmux:0');
     });
 });
 //# sourceMappingURL=tmux-session.create-team.test.js.map

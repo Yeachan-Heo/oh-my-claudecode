@@ -461,7 +461,22 @@ async function spawnV2Worker(opts) {
         };
     }
     if (opts.agentType === 'claude') {
-        const settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, 6);
+        let settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, 6);
+        if (!settled) {
+            // Race: in cmux backends, the equivalent of `tmux send-keys` is
+            // `surface.send_text`, which writes bytes directly to the surface
+            // buffer rather than queueing them at the pane's stdin like real
+            // tmux does. When the dispatch fires while claude is still capturing
+            // the TTY, the trigger bytes can be lost — claude ends up running
+            // but never received its inbox notification.
+            //
+            // Re-deliver the trigger now that claude has had time to settle.
+            // Bypass `queueInboxInstruction` so the existing inbox correlation
+            // key doesn't dedupe us out. If this re-delivery fails too, fall
+            // through to the original failure path.
+            await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
+            settled = await waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, 6);
+        }
         if (!settled) {
             return {
                 paneId,

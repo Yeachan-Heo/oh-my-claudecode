@@ -9,7 +9,7 @@ import { existsSync } from 'fs';
 import { join, basename, isAbsolute, win32 } from 'path';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
-import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
+import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync, PANE_ID_VALIDATOR, TMUX_CONTEXT_PATTERN, } from '../cli/tmux-utils.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const TMUX_SESSION_PREFIX = 'omc-team';
 export function detectTeamMultiplexerContext(env = process.env) {
@@ -398,7 +398,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
     // Prefer the invoking pane from environment to avoid focus races when users
     // switch tmux windows during startup (issue #966).
     const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
-    const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
+    const envPaneId = PANE_ID_VALIDATOR.test(envPaneIdRaw) ? envPaneIdRaw : '';
     let sessionAndWindow = '';
     let leaderPaneId = envPaneId;
     let sessionMode = inTmux ? 'split-pane' : 'detached-session';
@@ -414,7 +414,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
             '-c', cwd,
         ], { stripTmux: true });
         const detachedLine = detachedResult.stdout.trim();
-        const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
+        const detachedMatch = detachedLine.match(TMUX_CONTEXT_PATTERN);
         if (!detachedMatch) {
             throw new Error(`Failed to create detached tmux session: "${detachedLine}"`);
         }
@@ -439,7 +439,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
             'display-message', '-p', '#S:#I #{pane_id}',
         ]);
         const contextLine = contextResult.stdout.trim();
-        const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+        const contextMatch = contextLine.match(TMUX_CONTEXT_PATTERN);
         if (!contextMatch) {
             throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
         }
@@ -456,7 +456,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
             '-c', cwd,
         ]);
         const newWindowLine = newWindowResult.stdout.trim();
-        const newWindowMatch = newWindowLine.match(/^(\S+)\s+(%\d+)$/);
+        const newWindowMatch = newWindowLine.match(TMUX_CONTEXT_PATTERN);
         if (!newWindowMatch) {
             throw new Error(`Failed to create team tmux window: "${newWindowLine}"`);
         }
@@ -606,6 +606,41 @@ export async function waitForPaneReady(paneId, opts = {}) {
 function paneTailContainsLiteralLine(captured, text) {
     return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
+/**
+ * Tighter "is the input still buffered?" check used by sendToWorker submit
+ * confirmation. Returns true only when the captured tail's *last input prompt*
+ * (`❯`/`›`/`>`) still has the message inline — i.e. it was typed but not yet
+ * submitted.
+ *
+ * `paneTailContainsLiteralLine` returns true when the message appears anywhere
+ * in the last 80 lines, including claude's rendered conversation history of
+ * already-submitted messages. That makes confirmation flap for short claude
+ * responses (the rendered message never scrolls out of the tail), which causes
+ * `notifyPaneWithRetry` to spuriously re-send the trigger many times. This
+ * helper looks only at the *bottom* prompt's input area.
+ */
+function paneInputStillContainsMessage(captured, text) {
+    const target = normalizeTmuxCapture(text);
+    if (target === '')
+        return false;
+    const lines = captured
+        .split('\n')
+        .map(line => line.replace(/\r/g, '').trimEnd());
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i];
+        if (line.trim() === '')
+            continue;
+        const promptMatch = line.match(/^\s*[›>❯]\s*(.*)$/u);
+        if (promptMatch) {
+            const inputArea = normalizeTmuxCapture(promptMatch[1]);
+            return inputArea !== '' && inputArea.includes(target);
+        }
+        // Non-prompt content found before any prompt below the message — the TUI
+        // has rendered conversation output, so the message was already consumed.
+        return false;
+    }
+    return false;
+}
 async function paneInCopyMode(paneId) {
     try {
         const result = await tmuxCmdAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
@@ -683,9 +718,12 @@ export async function sendToWorker(_sessionName, paneId, message) {
                 await sendKey('C-m');
             }
             await sleep(140);
-            // Check if text is still visible in the pane — if not, it was submitted
+            // Check if the message is still buffered in the bottom prompt — if not,
+            // it was submitted. Use the input-prompt check (not whole-tail) because
+            // TUIs render submitted messages into their conversation history, and a
+            // whole-tail check would flap forever for short responses.
             const checkCapture = await capturePaneAsync(paneId);
-            if (!paneTailContainsLiteralLine(checkCapture, message))
+            if (!paneInputStillContainsMessage(checkCapture, message))
                 return true;
             await sleep(140);
         }
@@ -719,7 +757,7 @@ export async function sendToWorker(_sessionName, paneId, message) {
                 await sendKey('C-m');
                 await sleep(140);
                 const retryCapture = await capturePaneAsync(paneId);
-                if (!paneTailContainsLiteralLine(retryCapture, message))
+                if (!paneInputStillContainsMessage(retryCapture, message))
                     return true;
             }
         }
@@ -739,7 +777,7 @@ export async function sendToWorker(_sessionName, paneId, message) {
         if (!finalCheckCapture || finalCheckCapture.trim() === '') {
             return false;
         }
-        return !paneTailContainsLiteralLine(finalCheckCapture, message);
+        return !paneInputStillContainsMessage(finalCheckCapture, message);
     }
     catch {
         return false;
@@ -821,7 +859,7 @@ export async function killWorkerPanes(opts) {
     }
 }
 function isPaneId(value) {
-    return typeof value === 'string' && /^%\d+$/.test(value.trim());
+    return typeof value === 'string' && PANE_ID_VALIDATOR.test(value.trim());
 }
 function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
     const unique = new Set();

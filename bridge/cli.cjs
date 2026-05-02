@@ -23201,13 +23201,16 @@ function wrapWithLoginShell(command) {
 function quoteShellArg2(value) {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
-var import_child_process19, import_path70, import_util8;
+var import_child_process19, import_path70, import_util8, PANE_ID_SOURCE, PANE_ID_VALIDATOR, TMUX_CONTEXT_PATTERN;
 var init_tmux_utils = __esm({
   "src/cli/tmux-utils.ts"() {
     "use strict";
     import_child_process19 = require("child_process");
     import_path70 = require("path");
     import_util8 = require("util");
+    PANE_ID_SOURCE = "%[\\w-]+";
+    PANE_ID_VALIDATOR = new RegExp(`^${PANE_ID_SOURCE}$`);
+    TMUX_CONTEXT_PATTERN = new RegExp(`^(\\S+)\\s+(${PANE_ID_SOURCE})$`);
   }
 });
 
@@ -23264,13 +23267,13 @@ function formatTmuxInfo() {
 function getCurrentTmuxPaneId() {
   if (!process.env.TMUX) return null;
   const envPane = process.env.TMUX_PANE;
-  if (envPane && /^%\d+$/.test(envPane)) return envPane;
+  if (envPane && PANE_ID_VALIDATOR.test(envPane)) return envPane;
   try {
     const paneId = tmuxShell("display-message -p '#{pane_id}'", {
       timeout: 3e3,
       stdio: ["pipe", "pipe", "pipe"]
     }).trim();
-    return paneId && /^%\d+$/.test(paneId) ? paneId : null;
+    return paneId && PANE_ID_VALIDATOR.test(paneId) ? paneId : null;
   } catch {
     return null;
   }
@@ -24000,7 +24003,7 @@ __export(pane_fresh_capture_exports, {
   getPaneHistorySize: () => getPaneHistorySize
 });
 function isValidPaneId(paneId) {
-  return /^%\d+$/.test(paneId);
+  return PANE_ID_VALIDATOR.test(paneId);
 }
 function readPaneTailState(stateDir) {
   const path22 = (0, import_path71.join)(stateDir, STATE_FILE2);
@@ -24102,7 +24105,7 @@ __export(tmux_detector_exports, {
   sendToPane: () => sendToPane
 });
 function isValidPaneId2(paneId) {
-  return /^%\d+$/.test(paneId);
+  return PANE_ID_VALIDATOR.test(paneId);
 }
 function sanitizeForTmux(text) {
   return text.replace(/'/g, "'\\''");
@@ -29007,7 +29010,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
     validateTmux();
   }
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
+  const envPaneId = PANE_ID_VALIDATOR.test(envPaneIdRaw) ? envPaneIdRaw : "";
   let sessionAndWindow = "";
   let leaderPaneId = envPaneId;
   let sessionMode = inTmux ? "split-pane" : "detached-session";
@@ -29025,7 +29028,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       cwd2
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
-    const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
+    const detachedMatch = detachedLine.match(TMUX_CONTEXT_PATTERN);
     if (!detachedMatch) {
       throw new Error(`Failed to create detached tmux session: "${detachedLine}"`);
     }
@@ -29054,7 +29057,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       "#S:#I #{pane_id}"
     ]);
     const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+    const contextMatch = contextLine.match(TMUX_CONTEXT_PATTERN);
     if (!contextMatch) {
       throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
     }
@@ -29078,7 +29081,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       cwd2
     ]);
     const newWindowLine = newWindowResult.stdout.trim();
-    const newWindowMatch = newWindowLine.match(/^(\S+)\s+(%\d+)$/);
+    const newWindowMatch = newWindowLine.match(TMUX_CONTEXT_PATTERN);
     if (!newWindowMatch) {
       throw new Error(`Failed to create team tmux window: "${newWindowLine}"`);
     }
@@ -29214,6 +29217,22 @@ async function waitForPaneReady(paneId, opts = {}) {
 function paneTailContainsLiteralLine(captured, text) {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
+function paneInputStillContainsMessage(captured, text) {
+  const target = normalizeTmuxCapture(text);
+  if (target === "") return false;
+  const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trimEnd());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    const promptMatch = line.match(/^\s*[›>❯]\s*(.*)$/u);
+    if (promptMatch) {
+      const inputArea = normalizeTmuxCapture(promptMatch[1]);
+      return inputArea !== "" && inputArea.includes(target);
+    }
+    return false;
+  }
+  return false;
+}
 async function paneInCopyMode(paneId) {
   try {
     const result = await tmuxCmdAsync(["display-message", "-t", paneId, "-p", "#{pane_in_mode}"]);
@@ -29269,7 +29288,7 @@ async function sendToWorker(_sessionName, paneId, message) {
       }
       await sleep4(140);
       const checkCapture = await capturePaneAsync(paneId);
-      if (!paneTailContainsLiteralLine(checkCapture, message)) return true;
+      if (!paneInputStillContainsMessage(checkCapture, message)) return true;
       await sleep4(140);
     }
     if (await paneInCopyMode(paneId)) {
@@ -29300,7 +29319,7 @@ async function sendToWorker(_sessionName, paneId, message) {
         await sendKey("C-m");
         await sleep4(140);
         const retryCapture = await capturePaneAsync(paneId);
-        if (!paneTailContainsLiteralLine(retryCapture, message)) return true;
+        if (!paneInputStillContainsMessage(retryCapture, message)) return true;
       }
     }
     if (await paneInCopyMode(paneId)) {
@@ -29314,7 +29333,7 @@ async function sendToWorker(_sessionName, paneId, message) {
     if (!finalCheckCapture || finalCheckCapture.trim() === "") {
       return false;
     }
-    return !paneTailContainsLiteralLine(finalCheckCapture, message);
+    return !paneInputStillContainsMessage(finalCheckCapture, message);
   } catch {
     return false;
   }
@@ -29377,7 +29396,7 @@ async function killWorkerPanes(opts) {
   }
 }
 function isPaneId(value) {
-  return typeof value === "string" && /^%\d+$/.test(value.trim());
+  return typeof value === "string" && PANE_ID_VALIDATOR.test(value.trim());
 }
 function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
   const unique = /* @__PURE__ */ new Set();
@@ -32453,13 +32472,23 @@ async function spawnV2Worker(opts) {
     };
   }
   if (opts.agentType === "claude") {
-    const settled = await waitForWorkerStartupEvidence(
+    let settled = await waitForWorkerStartupEvidence(
       opts.teamName,
       opts.workerName,
       opts.taskId,
       opts.cwd,
       6
     );
+    if (!settled) {
+      await notifyStartupInbox(opts.sessionName, paneId, inboxTriggerMessage);
+      settled = await waitForWorkerStartupEvidence(
+        opts.teamName,
+        opts.workerName,
+        opts.taskId,
+        opts.cwd,
+        6
+      );
+    }
     if (!settled) {
       return {
         paneId,

@@ -17802,6 +17802,9 @@ function validateTeamName(teamName) {
 var import_child_process = require("child_process");
 var import_path = require("path");
 var import_util5 = require("util");
+var PANE_ID_SOURCE = "%[\\w-]+";
+var PANE_ID_VALIDATOR = new RegExp(`^${PANE_ID_SOURCE}$`);
+var TMUX_CONTEXT_PATTERN = new RegExp(`^(\\S+)\\s+(${PANE_ID_SOURCE})$`);
 function tmuxEnv() {
   const { TMUX: _, ...env } = process.env;
   return env;
@@ -17935,6 +17938,22 @@ function paneLooksReady(captured) {
 function paneTailContainsLiteralLine(captured, text) {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
+function paneInputStillContainsMessage(captured, text) {
+  const target = normalizeTmuxCapture(text);
+  if (target === "") return false;
+  const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trimEnd());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    const promptMatch = line.match(/^\s*[›>❯]\s*(.*)$/u);
+    if (promptMatch) {
+      const inputArea = normalizeTmuxCapture(promptMatch[1]);
+      return inputArea !== "" && inputArea.includes(target);
+    }
+    return false;
+  }
+  return false;
+}
 async function paneInCopyMode(paneId) {
   try {
     const result = await tmuxCmdAsync(["display-message", "-t", paneId, "-p", "#{pane_in_mode}"]);
@@ -17990,7 +18009,7 @@ async function sendToWorker(_sessionName, paneId, message) {
       }
       await sleep(140);
       const checkCapture = await capturePaneAsync(paneId);
-      if (!paneTailContainsLiteralLine(checkCapture, message)) return true;
+      if (!paneInputStillContainsMessage(checkCapture, message)) return true;
       await sleep(140);
     }
     if (await paneInCopyMode(paneId)) {
@@ -18021,7 +18040,7 @@ async function sendToWorker(_sessionName, paneId, message) {
         await sendKey("C-m");
         await sleep(140);
         const retryCapture = await capturePaneAsync(paneId);
-        if (!paneTailContainsLiteralLine(retryCapture, message)) return true;
+        if (!paneInputStillContainsMessage(retryCapture, message)) return true;
       }
     }
     if (await paneInCopyMode(paneId)) {
@@ -18035,7 +18054,7 @@ async function sendToWorker(_sessionName, paneId, message) {
     if (!finalCheckCapture || finalCheckCapture.trim() === "") {
       return false;
     }
-    return !paneTailContainsLiteralLine(finalCheckCapture, message);
+    return !paneInputStillContainsMessage(finalCheckCapture, message);
   } catch {
     return false;
   }

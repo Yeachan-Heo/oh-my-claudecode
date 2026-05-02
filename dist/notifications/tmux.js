@@ -3,7 +3,7 @@
  *
  * Detects the current tmux session name for inclusion in notification payloads.
  */
-import { tmuxShell } from "../cli/tmux-utils.js";
+import { tmuxShell, PANE_ID_VALIDATOR } from "../cli/tmux-utils.js";
 /**
  * Get the current tmux session name.
  * Returns null if not running inside tmux.
@@ -82,7 +82,7 @@ export function getCurrentTmuxPaneId() {
         return null;
     // Prefer $TMUX_PANE (set by tmux automatically)
     const envPane = process.env.TMUX_PANE;
-    if (envPane && /^%\d+$/.test(envPane))
+    if (envPane && PANE_ID_VALIDATOR.test(envPane))
         return envPane;
     // Fallback: ask tmux directly (similar to getCurrentTmuxSession)
     try {
@@ -90,7 +90,7 @@ export function getCurrentTmuxPaneId() {
             timeout: 3000,
             stdio: ["pipe", "pipe", "pipe"],
         }).trim();
-        return paneId && /^%\d+$/.test(paneId) ? paneId : null;
+        return paneId && PANE_ID_VALIDATOR.test(paneId) ? paneId : null;
     }
     catch {
         return null;
