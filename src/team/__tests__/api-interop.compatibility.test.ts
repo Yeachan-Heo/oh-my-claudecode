@@ -99,6 +99,54 @@ describe('team api compatibility (task + mailbox legacy formats)', () => {
     expect(typeof canonical.messages[0]?.notified_at).toBe('string');
   });
 
+  it('threads delegation plans through the real team api create-task flow and enforces completion evidence', async () => {
+    const created = await executeTeamApiOperation('create-task', {
+      team_name: teamName,
+      subject: 'Investigate flaky runtime behavior',
+      description: 'Investigate flaky runtime behavior across the team runtime',
+      owner: 'worker-1',
+      delegation: {
+        mode: 'auto',
+        required_parallel_probe: true,
+        skip_allowed_reason_required: true,
+      },
+    }, cwd);
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const createdData = created.data as { task?: { id?: string; delegation?: { mode?: string; required_parallel_probe?: boolean } } };
+    expect(createdData.task?.id).toBe('2');
+    expect(createdData.task?.delegation).toMatchObject({
+      mode: 'auto',
+      required_parallel_probe: true,
+    });
+
+    const claimResult = await executeTeamApiOperation('claim-task', {
+      team_name: teamName,
+      task_id: '2',
+      worker: 'worker-1',
+    }, cwd);
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    const claimData = claimResult.data as { ok?: boolean; claimToken?: string };
+    expect(claimData.ok).toBe(true);
+
+    const missing = await executeTeamApiOperation('transition-task-status', {
+      team_name: teamName,
+      task_id: '2',
+      from: 'in_progress',
+      to: 'completed',
+      claim_token: claimData.claimToken,
+      result: 'Summary: done\nVerification: targeted test',
+    }, cwd);
+
+    expect(missing.ok).toBe(true);
+    if (!missing.ok) return;
+    const missingData = missing.data as { ok?: boolean; error?: string };
+    expect(missingData.ok).toBe(false);
+    expect(missingData.error).toBe('missing_delegation_compliance_evidence');
+  });
+
   it('rejects broad delegated task completion without spawn evidence or skip reason', async () => {
     const taskPath = join(cwd, '.omc', 'state', 'team', teamName, 'tasks', 'task-1.json');
     await writeFile(taskPath, JSON.stringify({

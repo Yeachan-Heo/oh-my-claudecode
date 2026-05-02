@@ -237,6 +237,40 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session');
   });
 
+  it('persists startup task delegation plans and gives executable result evidence instructions', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-delegation-startup-'));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{
+        subject: 'Investigate flaky runtime behavior',
+        description: 'Investigate flaky runtime behavior across the team runtime',
+        delegation: {
+          mode: 'auto',
+          required_parallel_probe: true,
+          skip_allowed_reason_required: true,
+        },
+      }],
+      cwd,
+    });
+
+    const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+    const task = JSON.parse(await readFile(taskPath, 'utf-8')) as { delegation?: { mode?: string; required_parallel_probe?: boolean } };
+    expect(task.delegation).toMatchObject({
+      mode: 'auto',
+      required_parallel_probe: true,
+    });
+
+    const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
+    const inbox = await readFile(inboxPath, 'utf-8');
+    expect(inbox).toContain('"result"');
+    expect(inbox).toContain('Subagent skip reason:');
+    expect(inbox).toContain('only when explicitly allowed by the leader');
+  });
+
 
   it('persists runtime-v2 worktree contract fields for split-pane teams', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-worktree-contract-'));

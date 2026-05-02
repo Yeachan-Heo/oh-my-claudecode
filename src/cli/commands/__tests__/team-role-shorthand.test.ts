@@ -69,4 +69,37 @@ describe('teamCommand role-only shorthand', () => {
       ],
     }));
   });
+
+  it('threads broad-task delegation evidence guards through teamCommand startup', async () => {
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['2:codex', 'investigate flaky runtime behavior']);
+
+    expect(runtimeV2Mocks.startTeamV2).toHaveBeenCalledWith(expect.objectContaining({
+      workerCount: 2,
+      agentTypes: ['codex', 'codex'],
+      tasks: [
+        expect.objectContaining({
+          subject: 'Worker 1: investigate flaky runtime behavior',
+          description: 'investigate flaky runtime behavior',
+          owner: 'worker-1',
+          delegation: expect.objectContaining({
+            mode: 'auto',
+            required_parallel_probe: true,
+            skip_allowed_reason_required: true,
+          }),
+        }),
+        expect.objectContaining({
+          subject: 'Worker 2: investigate flaky runtime behavior',
+          description: 'investigate flaky runtime behavior',
+          owner: 'worker-2',
+          delegation: expect.objectContaining({
+            mode: 'auto',
+            required_parallel_probe: true,
+            skip_allowed_reason_required: true,
+          }),
+        }),
+      ],
+    }));
+  });
 });

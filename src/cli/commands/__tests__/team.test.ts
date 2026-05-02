@@ -379,4 +379,28 @@ describe('buildStartupTasks', () => {
       { subject: 'Worker 2: fix tests', description: 'fix tests' },
     ]);
   });
+
+  it('attaches delegation evidence guard plans for broad startup tasks', () => {
+    const parsed = parseTeamArgs(['2:codex', 'investigate flaky runtime behavior']);
+    expect(buildStartupTasks(parsed)).toEqual([
+      expect.objectContaining({
+        subject: 'Worker 1: investigate flaky runtime behavior',
+        description: 'investigate flaky runtime behavior',
+        delegation: expect.objectContaining({
+          mode: 'auto',
+          required_parallel_probe: true,
+          skip_allowed_reason_required: true,
+        }),
+      }),
+      expect.objectContaining({
+        subject: 'Worker 2: investigate flaky runtime behavior',
+        description: 'investigate flaky runtime behavior',
+        delegation: expect.objectContaining({
+          mode: 'auto',
+          required_parallel_probe: true,
+          skip_allowed_reason_required: true,
+        }),
+      }),
+    ]);
+  });
 });

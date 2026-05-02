@@ -50,8 +50,9 @@ import { shutdownTeam } from './runtime.js';
 import { shutdownTeamV2 } from './runtime-v2.js';
 import { inspectTeamWorktreeCleanupSafety } from './git-worktree.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import type { TeamTaskDelegationPlan } from './types.js';
 
-const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change']);
+const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change', 'delegation']);
 const TEAM_UPDATE_TASK_REQUEST_FIELDS = new Set(['team_name', 'task_id', 'workingDirectory', ...TEAM_UPDATE_TASK_MUTABLE_FIELDS]);
 
 export const LEGACY_TEAM_MCP_TOOLS = [
@@ -143,6 +144,61 @@ function parseValidatedTaskIdArray(value: unknown, fieldName: string): string[] 
     taskIds.push(normalized);
   }
   return taskIds;
+}
+
+function parseTaskDelegationPlan(value: unknown): TeamTaskDelegationPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('delegation must be an object');
+  }
+  const raw = value as Record<string, unknown>;
+  const mode = raw.mode;
+  if (mode !== 'none' && mode !== 'optional' && mode !== 'auto' && mode !== 'required') {
+    throw new Error('delegation.mode must be one of: none, optional, auto, required');
+  }
+  const plan: TeamTaskDelegationPlan = { mode };
+  if ('max_parallel_subtasks' in raw) {
+    if (!isFiniteInteger(raw.max_parallel_subtasks) || raw.max_parallel_subtasks < 1) {
+      throw new Error('delegation.max_parallel_subtasks must be a positive integer when provided');
+    }
+    plan.max_parallel_subtasks = raw.max_parallel_subtasks;
+  }
+  if ('required_parallel_probe' in raw) {
+    if (typeof raw.required_parallel_probe !== 'boolean') throw new Error('delegation.required_parallel_probe must be a boolean when provided');
+    plan.required_parallel_probe = raw.required_parallel_probe;
+  }
+  if ('spawn_before_serial_search_threshold' in raw) {
+    if (!isFiniteInteger(raw.spawn_before_serial_search_threshold) || raw.spawn_before_serial_search_threshold < 1) {
+      throw new Error('delegation.spawn_before_serial_search_threshold must be a positive integer when provided');
+    }
+    plan.spawn_before_serial_search_threshold = raw.spawn_before_serial_search_threshold;
+  }
+  if ('child_model_policy' in raw) {
+    const policy = raw.child_model_policy;
+    if (policy !== 'standard' && policy !== 'fast' && policy !== 'inherit' && policy !== 'frontier') {
+      throw new Error('delegation.child_model_policy must be one of: standard, fast, inherit, frontier');
+    }
+    plan.child_model_policy = policy;
+  }
+  if ('child_model' in raw) {
+    if (typeof raw.child_model !== 'string') throw new Error('delegation.child_model must be a string when provided');
+    plan.child_model = raw.child_model;
+  }
+  if ('subtask_candidates' in raw) {
+    if (!Array.isArray(raw.subtask_candidates) || !raw.subtask_candidates.every((item) => typeof item === 'string')) {
+      throw new Error('delegation.subtask_candidates must be an array of strings when provided');
+    }
+    plan.subtask_candidates = raw.subtask_candidates;
+  }
+  if ('child_report_format' in raw) {
+    const format = raw.child_report_format;
+    if (format !== 'bullets' && format !== 'json') throw new Error('delegation.child_report_format must be bullets or json when provided');
+    plan.child_report_format = format;
+  }
+  if ('skip_allowed_reason_required' in raw) {
+    if (typeof raw.skip_allowed_reason_required !== 'boolean') throw new Error('delegation.skip_allowed_reason_required must be a boolean when provided');
+    plan.skip_allowed_reason_required = raw.skip_allowed_reason_required;
+  }
+  return plan;
 }
 
 function teamStateExists(teamName: string, candidateCwd: string): boolean {
@@ -652,8 +708,17 @@ export async function executeTeamApiOperation(
         const owner = args.owner as string | undefined;
         const blockedBy = args.blocked_by as string[] | undefined;
         const requiresCodeChange = args.requires_code_change as boolean | undefined;
+        let delegation: TeamTaskDelegationPlan | undefined;
+        if ('delegation' in args) {
+          try {
+            delegation = parseTaskDelegationPlan(args.delegation);
+          } catch (error) {
+            return { ok: false, operation, error: { code: 'invalid_input', message: (error as Error).message } };
+          }
+        }
         const task = await teamCreateTask(teamName, {
           subject, description, status: 'pending', owner: owner || undefined, blocked_by: blockedBy, requires_code_change: requiresCodeChange,
+          ...(delegation ? { delegation } : {}),
         }, cwd);
         return { ok: true, operation, data: { task } };
       }
@@ -713,6 +778,13 @@ export async function executeTeamApiOperation(
         if ('blocked_by' in args) {
           try {
             updates.blocked_by = parseValidatedTaskIdArray(args.blocked_by, 'blocked_by');
+          } catch (error) {
+            return { ok: false, operation, error: { code: 'invalid_input', message: (error as Error).message } };
+          }
+        }
+        if ('delegation' in args) {
+          try {
+            updates.delegation = parseTaskDelegationPlan(args.delegation);
           } catch (error) {
             return { ok: false, operation, error: { code: 'invalid_input', message: (error as Error).message } };
           }
