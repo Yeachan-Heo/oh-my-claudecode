@@ -86604,13 +86604,13 @@ var TEAM_API_OPERATIONS = [
   "read-stall-state",
   "get-summary",
   "cleanup",
+  "orphan-cleanup",
   "write-shutdown-request",
   "read-shutdown-ack",
   "read-monitor-snapshot",
   "write-monitor-snapshot",
   "read-task-approval",
-  "write-task-approval",
-  "orphan-cleanup"
+  "write-task-approval"
 ];
 var TEAM_STATE_EVENT_WINDOW = 50;
 function isFiniteInteger(value) {

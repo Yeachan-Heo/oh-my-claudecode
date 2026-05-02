@@ -72,13 +72,13 @@ export const TEAM_API_OPERATIONS = [
     'read-stall-state',
     'get-summary',
     'cleanup',
+    'orphan-cleanup',
     'write-shutdown-request',
     'read-shutdown-ack',
     'read-monitor-snapshot',
     'write-monitor-snapshot',
     'read-task-approval',
     'write-task-approval',
-    'orphan-cleanup',
 ];
 const TEAM_STATE_EVENT_WINDOW = 50;
 function isFiniteInteger(value) {
