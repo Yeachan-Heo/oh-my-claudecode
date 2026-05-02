@@ -11,6 +11,7 @@
  * - waitForDispatchReceipt: poll with exponential backoff
  */
 import { enqueueDispatchRequest, readDispatchRequest, transitionDispatchRequest, markDispatchRequestNotified, } from './dispatch-queue.js';
+import { broadcastMessage as defaultBroadcastMessage, listMailboxMessages as defaultListMailboxMessages, markMessageNotified as defaultMarkMessageNotified, sendDirectMessage as defaultSendDirectMessage, writeWorkerInbox as defaultWriteWorkerInbox, } from './state.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 // ── Internal helpers ───────────────────────────────────────────────────────
 function isConfirmedNotification(outcome) {
@@ -71,6 +72,7 @@ export async function queueInboxInstruction(params) {
         worker_index: params.workerIndex,
         pane_id: params.paneId,
         trigger_message: params.triggerMessage,
+        intent: params.intent,
         transport_preference: params.transportPreference,
         fallback_allowed: params.fallbackAllowed,
         inbox_correlation_key: params.inboxCorrelationKey,
@@ -84,7 +86,7 @@ export async function queueInboxInstruction(params) {
         };
     }
     try {
-        await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+        await (params.deps?.writeWorkerInbox ?? defaultWriteWorkerInbox)(params.teamName, params.workerName, params.inbox, params.cwd);
     }
     catch (error) {
         await markImmediateDispatchFailure({
@@ -115,13 +117,38 @@ export async function queueInboxInstruction(params) {
     return outcome;
 }
 export async function queueDirectMailboxMessage(params) {
-    const message = await params.deps.sendDirectMessage(params.teamName, params.fromWorker, params.toWorker, params.body, params.cwd);
+    const existingMessage = (await defaultListMailboxMessages(params.teamName, params.toWorker, params.cwd))
+        .find((candidate) => candidate.from_worker === params.fromWorker
+        && candidate.to_worker === params.toWorker
+        && candidate.body === params.body
+        && candidate.notified_at
+        && !candidate.delivered_at);
+    if (existingMessage) {
+        return {
+            ok: true,
+            transport: params.toWorker === 'leader-fixed' ? 'mailbox' : fallbackTransportForPreference(params.transportPreference),
+            reason: 'existing_message_already_notified',
+            message_id: existingMessage.message_id,
+            to_worker: params.toWorker,
+        };
+    }
+    const message = await (params.deps?.sendDirectMessage ?? defaultSendDirectMessage)(params.teamName, params.fromWorker, params.toWorker, params.body, params.cwd);
+    if (message.notified_at && !message.delivered_at) {
+        return {
+            ok: true,
+            transport: params.toWorker === 'leader-fixed' ? 'mailbox' : fallbackTransportForPreference(params.transportPreference),
+            reason: 'existing_message_already_notified',
+            message_id: message.message_id,
+            to_worker: params.toWorker,
+        };
+    }
     const queued = await enqueueDispatchRequest(params.teamName, {
         kind: 'mailbox',
         to_worker: params.toWorker,
         worker_index: params.toWorkerIndex,
         pane_id: params.toPaneId,
         trigger_message: params.triggerMessage,
+        intent: params.intent,
         message_id: message.message_id,
         transport_preference: params.transportPreference,
         fallback_allowed: params.fallbackAllowed,
@@ -156,7 +183,7 @@ export async function queueDirectMailboxMessage(params) {
         return outcome;
     }
     if (isConfirmedNotification(outcome)) {
-        await params.deps.markMessageNotified(params.teamName, params.toWorker, message.message_id, params.cwd);
+        await (params.deps?.markMessageNotified ?? defaultMarkMessageNotified)(params.teamName, params.toWorker, message.message_id, params.cwd);
         await markDispatchRequestNotified(params.teamName, queued.request.request_id, { message_id: message.message_id, last_reason: outcome.reason }, params.cwd);
     }
     else {
@@ -171,7 +198,7 @@ export async function queueDirectMailboxMessage(params) {
     return outcome;
 }
 export async function queueBroadcastMailboxMessage(params) {
-    const messages = await params.deps.broadcastMessage(params.teamName, params.fromWorker, params.body, params.cwd);
+    const messages = await (params.deps?.broadcastMessage ?? defaultBroadcastMessage)(params.teamName, params.fromWorker, params.body, params.cwd);
     const recipientByName = new Map(params.recipients.map((r) => [r.workerName, r]));
     const outcomes = [];
     for (const message of messages) {
@@ -184,6 +211,7 @@ export async function queueBroadcastMailboxMessage(params) {
             worker_index: recipient.workerIndex,
             pane_id: recipient.paneId,
             trigger_message: params.triggerFor(recipient.workerName),
+            intent: params.intentFor?.(recipient.workerName),
             message_id: message.message_id,
             transport_preference: params.transportPreference,
             fallback_allowed: params.fallbackAllowed,
@@ -212,7 +240,7 @@ export async function queueBroadcastMailboxMessage(params) {
         };
         outcomes.push(outcome);
         if (isConfirmedNotification(outcome)) {
-            await params.deps.markMessageNotified(params.teamName, recipient.workerName, message.message_id, params.cwd);
+            await (params.deps?.markMessageNotified ?? defaultMarkMessageNotified)(params.teamName, recipient.workerName, message.message_id, params.cwd);
             await markDispatchRequestNotified(params.teamName, queued.request.request_id, { message_id: message.message_id, last_reason: outcome.reason }, params.cwd);
         }
         else {

@@ -162,6 +162,7 @@ export function normalizeDispatchRequest(teamName, raw, nowIso = new Date().toIS
         delivered_at: typeof raw.delivered_at === 'string' && raw.delivered_at !== '' ? raw.delivered_at : undefined,
         failed_at: typeof raw.failed_at === 'string' && raw.failed_at !== '' ? raw.failed_at : undefined,
         last_reason: typeof raw.last_reason === 'string' && raw.last_reason !== '' ? raw.last_reason : undefined,
+        intent: typeof raw.intent === 'string' ? raw.intent : undefined,
     };
 }
 // ── Dedup ──────────────────────────────────────────────────────────────────

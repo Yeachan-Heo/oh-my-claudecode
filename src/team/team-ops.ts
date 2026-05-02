@@ -136,6 +136,7 @@ function isTeamTask(value: unknown): value is TeamTask {
 // Simple file-based lock (best-effort, non-blocking)
 async function withLock<T>(lockDir: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
   const STALE_MS = 30_000;
+  await mkdir(dirname(lockDir), { recursive: true });
   try {
     await mkdir(lockDir, { recursive: false });
   } catch (err) {
@@ -564,6 +565,14 @@ export async function teamSendMessage(
 ): Promise<TeamMailboxMessage> {
   return withMailboxLock(teamName, toWorker, cwd, async () => {
     const mailbox = await readMailbox(teamName, toWorker, cwd);
+    const existing = mailbox.messages.find((candidate) =>
+      candidate.from_worker === fromWorker
+      && candidate.to_worker === toWorker
+      && candidate.body === body
+      && !candidate.delivered_at,
+    );
+    if (existing) return existing;
+
     const message: TeamMailboxMessage = {
       message_id: randomUUID(),
       from_worker: fromWorker,

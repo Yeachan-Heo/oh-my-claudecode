@@ -11,6 +11,8 @@
  * - waitForDispatchReceipt: poll with exponential backoff
  */
 import { type TeamDispatchRequest, type TeamDispatchRequestInput } from './dispatch-queue.js';
+import type { TeamMailboxMessage } from './types.js';
+import type { TeamReminderIntent } from './reminder-intents.js';
 export interface TeamNotifierTarget {
     workerName: string;
     workerIndex?: number;
@@ -35,14 +37,8 @@ export interface InboxWriter {
 }
 /** Dependency interface for mailbox message operations */
 export interface MailboxSender {
-    sendDirectMessage(teamName: string, fromWorker: string, toWorker: string, body: string, cwd: string): Promise<{
-        message_id: string;
-        to_worker: string;
-    }>;
-    broadcastMessage(teamName: string, fromWorker: string, body: string, cwd: string): Promise<Array<{
-        message_id: string;
-        to_worker: string;
-    }>>;
+    sendDirectMessage(teamName: string, fromWorker: string, toWorker: string, body: string, cwd: string): Promise<TeamMailboxMessage>;
+    broadcastMessage(teamName: string, fromWorker: string, body: string, cwd: string): Promise<TeamMailboxMessage[]>;
     markMessageNotified(teamName: string, workerName: string, messageId: string, cwd: string): Promise<void>;
 }
 export interface QueueInboxParams {
@@ -57,7 +53,8 @@ export interface QueueInboxParams {
     fallbackAllowed?: boolean;
     inboxCorrelationKey?: string;
     notify: TeamNotifier;
-    deps: InboxWriter;
+    intent?: TeamReminderIntent;
+    deps?: InboxWriter;
 }
 export declare function queueInboxInstruction(params: QueueInboxParams): Promise<DispatchOutcome>;
 export interface QueueDirectMessageParams {
@@ -72,7 +69,8 @@ export interface QueueDirectMessageParams {
     transportPreference?: TeamDispatchRequestInput['transport_preference'];
     fallbackAllowed?: boolean;
     notify: TeamNotifier;
-    deps: MailboxSender;
+    intent?: TeamReminderIntent;
+    deps?: MailboxSender;
 }
 export declare function queueDirectMailboxMessage(params: QueueDirectMessageParams): Promise<DispatchOutcome>;
 export interface QueueBroadcastParams {
@@ -86,10 +84,12 @@ export interface QueueBroadcastParams {
     body: string;
     cwd: string;
     triggerFor: (workerName: string) => string;
+    intentFor?: (workerName: string) => TeamReminderIntent;
     transportPreference?: TeamDispatchRequestInput['transport_preference'];
     fallbackAllowed?: boolean;
     notify: TeamNotifier;
-    deps: MailboxSender;
+    intent?: TeamReminderIntent;
+    deps?: MailboxSender;
 }
 export declare function queueBroadcastMailboxMessage(params: QueueBroadcastParams): Promise<DispatchOutcome[]>;
 export declare function waitForDispatchReceipt(teamName: string, requestId: string, cwd: string, options: {

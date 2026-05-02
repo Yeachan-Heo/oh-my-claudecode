@@ -310,6 +310,7 @@ export interface TeamDispatchRequest {
     delivered_at?: string;
     failed_at?: string;
     last_reason?: string;
+    intent?: TeamReminderIntent;
 }
 /** Input for creating a dispatch request */
 export interface TeamDispatchRequestInput {
@@ -323,6 +324,7 @@ export interface TeamDispatchRequestInput {
     transport_preference?: TeamDispatchTransportPreference;
     fallback_allowed?: boolean;
     last_reason?: string;
+    intent?: TeamReminderIntent;
 }
 /** Team event emitted by the event bus */
 export interface TeamEvent {

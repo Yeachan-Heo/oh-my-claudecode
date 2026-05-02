@@ -1259,9 +1259,9 @@ __export(runtime_cli_exports, {
   writeResultArtifact: () => writeResultArtifact
 });
 module.exports = __toCommonJS(runtime_cli_exports);
-var import_fs20 = require("fs");
-var import_promises11 = require("fs/promises");
-var import_path22 = require("path");
+var import_fs22 = require("fs");
+var import_promises14 = require("fs/promises");
+var import_path24 = require("path");
 
 // src/team/runtime.ts
 var import_promises3 = require("fs/promises");
@@ -4468,8 +4468,8 @@ async function monitorTeam(teamName, cwd, workerPaneIds) {
   const taskScanStartedAt = Date.now();
   const taskCounts = { pending: 0, inProgress: 0, completed: 0, failed: 0 };
   try {
-    const { readdir: readdir2 } = await import("fs/promises");
-    const taskFiles = await readdir2((0, import_path14.join)(root, "tasks"));
+    const { readdir: readdir3 } = await import("fs/promises");
+    const taskFiles = await readdir3((0, import_path14.join)(root, "tasks"));
     for (const f of taskFiles.filter((f2) => f2.endsWith(".json"))) {
       const task = await readJsonSafe((0, import_path14.join)(root, "tasks", f));
       if (task?.status === "pending") taskCounts.pending++;
@@ -5451,9 +5451,9 @@ async function waitForSentinelReadiness(options = {}) {
 
 // src/team/runtime-v2.ts
 init_tmux_utils();
-var import_path21 = require("path");
-var import_fs19 = require("fs");
-var import_promises10 = require("fs/promises");
+var import_path23 = require("path");
+var import_fs21 = require("fs");
+var import_promises13 = require("fs/promises");
 var import_perf_hooks = require("perf_hooks");
 
 // src/team/allocation-policy.ts
@@ -5796,10 +5796,10 @@ async function readJsonSafe2(filePath) {
   }
 }
 async function writeAtomic(filePath, data) {
-  const { writeFile: writeFile8 } = await import("fs/promises");
+  const { writeFile: writeFile9 } = await import("fs/promises");
   await (0, import_promises5.mkdir)((0, import_path17.dirname)(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeFile8(tmpPath, data, "utf-8");
+  await writeFile9(tmpPath, data, "utf-8");
   const { rename: rename4 } = await import("fs/promises");
   await rename4(tmpPath, filePath);
 }
@@ -5911,8 +5911,8 @@ async function readShutdownAck(teamName, workerName2, cwd, requestedAfter) {
 async function listTasksFromFiles(teamName, cwd) {
   const tasksDir = absPath(cwd, TeamPaths.tasks(teamName));
   if (!(0, import_fs15.existsSync)(tasksDir)) return [];
-  const { readdir: readdir2 } = await import("fs/promises");
-  const entries = await readdir2(tasksDir);
+  const { readdir: readdir3 } = await import("fs/promises");
+  const entries = await readdir3(tasksDir);
   const tasks = [];
   for (const entry of entries) {
     const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
@@ -5954,9 +5954,9 @@ async function saveTeamConfig(config, cwd) {
 }
 async function cleanupTeamState(teamName, cwd) {
   const root = absPath(cwd, TeamPaths.root(teamName));
-  const { rm: rm4 } = await import("fs/promises");
+  const { rm: rm5 } = await import("fs/promises");
   try {
-    await rm4(root, { recursive: true, force: true });
+    await rm5(root, { recursive: true, force: true });
   } catch {
   }
 }
@@ -6132,7 +6132,8 @@ function normalizeDispatchRequest(teamName, raw, nowIso = (/* @__PURE__ */ new D
     notified_at: typeof raw.notified_at === "string" && raw.notified_at !== "" ? raw.notified_at : void 0,
     delivered_at: typeof raw.delivered_at === "string" && raw.delivered_at !== "" ? raw.delivered_at : void 0,
     failed_at: typeof raw.failed_at === "string" && raw.failed_at !== "" ? raw.failed_at : void 0,
-    last_reason: typeof raw.last_reason === "string" && raw.last_reason !== "" ? raw.last_reason : void 0
+    last_reason: typeof raw.last_reason === "string" && raw.last_reason !== "" ? raw.last_reason : void 0,
+    intent: typeof raw.intent === "string" ? raw.intent : void 0
   };
 }
 function equivalentPendingDispatch(existing, input) {
@@ -6221,6 +6222,39 @@ async function markDispatchRequestNotified(teamName, requestId, patch = {}, cwd)
   return await transitionDispatchRequest(teamName, requestId, current.status, "notified", patch, cwd);
 }
 
+// src/team/state.ts
+var import_promises9 = require("fs/promises");
+var import_fs18 = require("fs");
+var import_path20 = require("path");
+
+// src/team/team-ops.ts
+var import_promises8 = require("node:fs/promises");
+var import_node_path2 = require("node:path");
+
+// src/team/state/tasks.ts
+var import_crypto3 = require("crypto");
+var import_path19 = require("path");
+var import_fs17 = require("fs");
+var import_promises7 = require("fs/promises");
+
+// src/team/team-ops.ts
+async function writeAtomic2(path4, data) {
+  const tmp = `${path4}.${process.pid}.tmp`;
+  await (0, import_promises8.mkdir)((0, import_node_path2.dirname)(path4), { recursive: true });
+  await (0, import_promises8.writeFile)(tmp, data, "utf8");
+  const { rename: rename4 } = await import("node:fs/promises");
+  await rename4(tmp, path4);
+}
+async function teamWriteWorkerInbox(teamName, workerName2, prompt, cwd) {
+  const p = absPath(cwd, TeamPaths.inbox(teamName, workerName2));
+  await writeAtomic2(p, prompt);
+}
+
+// src/team/state.ts
+async function writeWorkerInbox2(teamName, workerName2, prompt, cwd) {
+  return teamWriteWorkerInbox(teamName, workerName2, prompt, cwd);
+}
+
 // src/team/mcp-comm.ts
 function isConfirmedNotification(outcome) {
   if (!outcome.ok) return false;
@@ -6266,6 +6300,7 @@ async function queueInboxInstruction(params) {
       worker_index: params.workerIndex,
       pane_id: params.paneId,
       trigger_message: params.triggerMessage,
+      intent: params.intent,
       transport_preference: params.transportPreference,
       fallback_allowed: params.fallbackAllowed,
       inbox_correlation_key: params.inboxCorrelationKey
@@ -6281,7 +6316,7 @@ async function queueInboxInstruction(params) {
     };
   }
   try {
-    await params.deps.writeWorkerInbox(params.teamName, params.workerName, params.inbox, params.cwd);
+    await (params.deps?.writeWorkerInbox ?? writeWorkerInbox2)(params.teamName, params.workerName, params.inbox, params.cwd);
   } catch (error) {
     await markImmediateDispatchFailure({
       teamName: params.teamName,
@@ -6722,8 +6757,8 @@ function cliWorkerOutputFilePath(teamStateRootAbs, workerName2) {
 // src/team/merge-orchestrator.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_fs2 = require("node:fs");
-var import_promises9 = require("node:fs/promises");
-var import_node_path2 = require("node:path");
+var import_promises12 = require("node:fs/promises");
+var import_node_path3 = require("node:path");
 
 // src/team/runtime-flags.ts
 function isRuntimeV2Enabled(env = process.env) {
@@ -6839,9 +6874,9 @@ function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
 }
 
 // src/team/leader-inbox.ts
-var import_promises7 = require("fs/promises");
-var import_fs17 = require("fs");
-var import_path19 = require("path");
+var import_promises10 = require("fs/promises");
+var import_fs19 = require("fs");
+var import_path21 = require("path");
 init_tmux_session();
 var LEADER_INBOX_HEADER = `# Leader Inbox
 
@@ -6852,22 +6887,22 @@ Check this file periodically and after long-running operations.
 `;
 function leaderInboxPath(teamName, cwd) {
   const safe = sanitizeName(teamName);
-  return (0, import_path19.join)(cwd, `.omc/state/team/${safe}/leader/inbox.md`);
+  return (0, import_path21.join)(cwd, `.omc/state/team/${safe}/leader/inbox.md`);
 }
 async function ensureLeaderInbox(teamName, cwd) {
   const inboxPath = leaderInboxPath(teamName, cwd);
   validateResolvedPath(inboxPath, cwd);
-  await (0, import_promises7.mkdir)((0, import_path19.dirname)(inboxPath), { recursive: true });
-  if (!(0, import_fs17.existsSync)(inboxPath)) {
-    await (0, import_promises7.writeFile)(inboxPath, LEADER_INBOX_HEADER, "utf-8");
+  await (0, import_promises10.mkdir)((0, import_path21.dirname)(inboxPath), { recursive: true });
+  if (!(0, import_fs19.existsSync)(inboxPath)) {
+    await (0, import_promises10.writeFile)(inboxPath, LEADER_INBOX_HEADER, "utf-8");
   }
   return inboxPath;
 }
 async function appendToLeaderInbox(teamName, message, cwd) {
   const inboxPath = leaderInboxPath(teamName, cwd);
   validateResolvedPath(inboxPath, cwd);
-  await (0, import_promises7.mkdir)((0, import_path19.dirname)(inboxPath), { recursive: true });
-  await (0, import_promises7.appendFile)(inboxPath, `
+  await (0, import_promises10.mkdir)((0, import_path21.dirname)(inboxPath), { recursive: true });
+  await (0, import_promises10.appendFile)(inboxPath, `
 
 ---
 ${message}`, "utf-8");
@@ -6931,9 +6966,9 @@ Or run \`git rebase --abort\` to bail and return to the pre-rebase state.`;
 }
 
 // src/team/worker-commit-cadence.ts
-var import_fs18 = require("fs");
-var import_promises8 = require("fs/promises");
-var import_path20 = require("path");
+var import_fs20 = require("fs");
+var import_promises11 = require("fs/promises");
+var import_path22 = require("path");
 var import_child_process5 = require("child_process");
 var SENTINEL_FILENAME = ".hook-paused";
 var HOOK_MATCHER = "Write|Edit|MultiEdit";
@@ -6953,7 +6988,7 @@ function buildHookCommand(workerName2) {
 async function mergeSettingsWithHook(settingsPath, hookCommand) {
   let existing = { hooks: { PostToolUse: [] } };
   try {
-    const raw = await (0, import_promises8.readFile)(settingsPath, "utf-8");
+    const raw = await (0, import_promises11.readFile)(settingsPath, "utf-8");
     const parsed = JSON.parse(raw);
     existing = {
       ...parsed,
@@ -6984,27 +7019,27 @@ async function installPostToolUseHook(worktreePath, workerName2) {
   if (isHookPaused(worktreePath)) {
     return;
   }
-  const claudeDir = (0, import_path20.join)(worktreePath, ".claude");
-  await (0, import_promises8.mkdir)(claudeDir, { recursive: true });
-  const settingsPath = (0, import_path20.join)(claudeDir, "settings.json");
+  const claudeDir = (0, import_path22.join)(worktreePath, ".claude");
+  await (0, import_promises11.mkdir)(claudeDir, { recursive: true });
+  const settingsPath = (0, import_path22.join)(claudeDir, "settings.json");
   const hookCommand = buildHookCommand(workerName2);
   const merged = await mergeSettingsWithHook(settingsPath, hookCommand);
-  await (0, import_promises8.writeFile)(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+  await (0, import_promises11.writeFile)(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 }
 async function pauseHookViaSentinel(worktreePath) {
-  const sentinelPath = (0, import_path20.join)(worktreePath, SENTINEL_FILENAME);
-  await (0, import_promises8.mkdir)((0, import_path20.dirname)(sentinelPath), { recursive: true });
-  await (0, import_promises8.writeFile)(sentinelPath, "", "utf-8");
+  const sentinelPath = (0, import_path22.join)(worktreePath, SENTINEL_FILENAME);
+  await (0, import_promises11.mkdir)((0, import_path22.dirname)(sentinelPath), { recursive: true });
+  await (0, import_promises11.writeFile)(sentinelPath, "", "utf-8");
 }
 async function resumeHookViaSentinel(worktreePath) {
-  const sentinelPath = (0, import_path20.join)(worktreePath, SENTINEL_FILENAME);
+  const sentinelPath = (0, import_path22.join)(worktreePath, SENTINEL_FILENAME);
   try {
-    await (0, import_promises8.unlink)(sentinelPath);
+    await (0, import_promises11.unlink)(sentinelPath);
   } catch {
   }
 }
 function isHookPaused(worktreePath) {
-  return (0, import_fs18.existsSync)((0, import_path20.join)(worktreePath, SENTINEL_FILENAME));
+  return (0, import_fs20.existsSync)((0, import_path22.join)(worktreePath, SENTINEL_FILENAME));
 }
 function startFallbackPoller(worktreePath, workerName2, opts) {
   assertSafeWorkerName(workerName2);
@@ -7028,7 +7063,7 @@ function startFallbackPoller(worktreePath, workerName2, opts) {
       runAutoCommit();
     }, debounceMs);
   };
-  const watcher = (0, import_fs18.watch)(worktreePath, { recursive: true }, (eventType, filename) => {
+  const watcher = (0, import_fs20.watch)(worktreePath, { recursive: true }, (eventType, filename) => {
     if (stopped) return;
     if (filename && (filename.startsWith(".git") || filename.startsWith(".git/"))) return;
     scheduleDebounce();
@@ -7056,9 +7091,9 @@ async function installCommitCadence(ctx) {
 }
 async function uninstallCommitCadence(ctx) {
   if (ctx.agentType !== "claude") return;
-  const settingsPath = (0, import_path20.join)(ctx.worktreePath, ".claude", "settings.json");
+  const settingsPath = (0, import_path22.join)(ctx.worktreePath, ".claude", "settings.json");
   try {
-    const raw = await (0, import_promises8.readFile)(settingsPath, "utf-8");
+    const raw = await (0, import_promises11.readFile)(settingsPath, "utf-8");
     const parsed = JSON.parse(raw);
     const filtered = (parsed.hooks?.PostToolUse ?? []).filter(
       (h) => h.matcher !== HOOK_MATCHER
@@ -7070,7 +7105,7 @@ async function uninstallCommitCadence(ctx) {
         PostToolUse: filtered
       }
     };
-    await (0, import_promises8.writeFile)(settingsPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
+    await (0, import_promises11.writeFile)(settingsPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
   } catch {
   }
 }
@@ -7079,10 +7114,10 @@ async function uninstallCommitCadence(ctx) {
 var DEFAULT_POLL_INTERVAL_MS = 1e3;
 var DEFAULT_DRAIN_TIMEOUT_MS = 1e4;
 function mergerWorktreePathFor(repoRoot, teamName) {
-  return (0, import_node_path2.join)(repoRoot, ".omc", "team", sanitizeName(teamName), "merger");
+  return (0, import_node_path3.join)(repoRoot, ".omc", "team", sanitizeName(teamName), "merger");
 }
 function persistedStatePath(repoRoot, teamName) {
-  return (0, import_node_path2.join)(
+  return (0, import_node_path3.join)(
     repoRoot,
     ".omc",
     "state",
@@ -7092,7 +7127,7 @@ function persistedStatePath(repoRoot, teamName) {
   );
 }
 function teardownAuditPath(repoRoot, teamName) {
-  return (0, import_node_path2.join)(
+  return (0, import_node_path3.join)(
     repoRoot,
     ".omc",
     "state",
@@ -7102,7 +7137,7 @@ function teardownAuditPath(repoRoot, teamName) {
   );
 }
 function orchestratorEventLogPath(repoRoot, teamName) {
-  return (0, import_node_path2.join)(
+  return (0, import_node_path3.join)(
     repoRoot,
     ".omc",
     "state",
@@ -7124,13 +7159,13 @@ function assertRuntimeV2Gate() {
 }
 async function appendEvent(repoRoot, teamName, event) {
   const path4 = orchestratorEventLogPath(repoRoot, teamName);
-  await (0, import_promises9.mkdir)((0, import_node_path2.dirname)(path4), { recursive: true });
+  await (0, import_promises12.mkdir)((0, import_node_path3.dirname)(path4), { recursive: true });
   const full = {
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     team: teamName,
     ...event
   };
-  await (0, import_promises9.appendFile)(path4, `${JSON.stringify(full)}
+  await (0, import_promises12.appendFile)(path4, `${JSON.stringify(full)}
 `, "utf-8");
 }
 function createMutex() {
@@ -7158,7 +7193,7 @@ function gitPath(worktreePath, gitPathName) {
     if (resolved) return resolved;
   } catch {
   }
-  return (0, import_node_path2.join)(worktreePath, ".git", gitPathName);
+  return (0, import_node_path3.join)(worktreePath, ".git", gitPathName);
 }
 function isRebaseInProgress(worktreePath) {
   return (0, import_node_fs2.existsSync)(gitPath(worktreePath, "rebase-merge"));
@@ -7180,7 +7215,7 @@ function isWorktreeRegistered(repoRoot, wtPath) {
   return false;
 }
 function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
-  ensureDirWithMode((0, import_node_path2.dirname)(mergerPath));
+  ensureDirWithMode((0, import_node_path3.dirname)(mergerPath));
   if ((0, import_node_fs2.existsSync)(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
     return;
   }
@@ -7576,7 +7611,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
       }
       if (unmerged.length > 0) {
         const auditPath = teardownAuditPath(config.repoRoot, config.teamName);
-        await (0, import_promises9.mkdir)((0, import_node_path2.dirname)(auditPath), { recursive: true });
+        await (0, import_promises12.mkdir)((0, import_node_path3.dirname)(auditPath), { recursive: true });
         for (const u of unmerged) {
           const row = JSON.stringify({
             type: "unmerged_at_shutdown",
@@ -7586,7 +7621,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
             reason: u.reason
           });
           try {
-            await (0, import_promises9.appendFile)(auditPath, `${row}
+            await (0, import_promises12.appendFile)(auditPath, `${row}
 `, "utf-8");
           } catch {
           }
@@ -7852,7 +7887,7 @@ function hasWorkerStatusProgress(status, taskId) {
 }
 async function hasWorkerTaskClaimEvidence(teamName, workerName2, cwd, taskId) {
   try {
-    const raw = await (0, import_promises10.readFile)(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), "utf-8");
+    const raw = await (0, import_promises13.readFile)(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), "utf-8");
     const task = JSON.parse(raw);
     return task.owner === workerName2 && ["in_progress", "completed", "failed"].includes(task.status);
   } catch {
@@ -8070,19 +8105,19 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
   try {
     const cleanup = cleanupTeamWorktrees(teamName, cwd);
     if (cleanup.preserved.length === 0) {
-      await (0, import_promises10.rm)(teamRoot, { recursive: true, force: true });
+      await (0, import_promises13.rm)(teamRoot, { recursive: true, force: true });
       return;
     }
-    await (0, import_promises10.mkdir)(teamRoot, { recursive: true });
-    await (0, import_promises10.writeFile)((0, import_path21.join)(teamRoot, "startup-failure.json"), JSON.stringify({
+    await (0, import_promises13.mkdir)(teamRoot, { recursive: true });
+    await (0, import_promises13.writeFile)((0, import_path23.join)(teamRoot, "startup-failure.json"), JSON.stringify({
       reason: "startup_failed_before_config_persisted",
       error: errorMessage,
       preserved: cleanup.preserved,
       recorded_at: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2), "utf-8");
   } catch (rollbackError) {
-    await (0, import_promises10.mkdir)(teamRoot, { recursive: true });
-    await (0, import_promises10.writeFile)((0, import_path21.join)(teamRoot, "startup-failure.json"), JSON.stringify({
+    await (0, import_promises13.mkdir)(teamRoot, { recursive: true });
+    await (0, import_promises13.writeFile)((0, import_path23.join)(teamRoot, "startup-failure.json"), JSON.stringify({
       reason: "startup_failed_before_config_persisted",
       error: errorMessage,
       rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
@@ -8108,7 +8143,7 @@ async function rollbackStartedNativeWorktreeStartup(args) {
 }
 async function startTeamV2(config) {
   const sanitized = sanitizeTeamName(config.teamName);
-  const leaderCwd = (0, import_path21.resolve)(config.cwd);
+  const leaderCwd = (0, import_path23.resolve)(config.cwd);
   validateTeamName(sanitized);
   const pluginCfg = config.pluginConfig ?? loadConfig();
   const resolvedRouting = buildResolvedRoutingSnapshot(pluginCfg);
@@ -8158,9 +8193,9 @@ async function startTeamV2(config) {
     } catch {
     }
   }
-  await (0, import_promises10.mkdir)(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-  await (0, import_promises10.mkdir)(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-  await (0, import_promises10.mkdir)((0, import_path21.join)(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
+  await (0, import_promises13.mkdir)(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
+  await (0, import_promises13.mkdir)(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
+  await (0, import_promises13.mkdir)((0, import_path23.join)(leaderCwd, ".omc", "state", "team", sanitized, "mailbox"), { recursive: true });
   const missingBinaryLogFailure = createSwallowedErrorLogger(
     "team.runtime-v2.startTeamV2 cli_binary_missing event failed"
   );
@@ -8178,8 +8213,8 @@ async function startTeamV2(config) {
   for (let i = 0; i < config.tasks.length; i++) {
     const taskId = String(i + 1);
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    await (0, import_promises10.mkdir)((0, import_path21.join)(taskFilePath, ".."), { recursive: true });
-    await (0, import_promises10.writeFile)(taskFilePath, JSON.stringify({
+    await (0, import_promises13.mkdir)((0, import_path23.join)(taskFilePath, ".."), { recursive: true });
+    await (0, import_promises13.writeFile)(taskFilePath, JSON.stringify({
       id: taskId,
       subject: config.tasks[i].subject,
       description: config.tasks[i].description,
@@ -8252,7 +8287,7 @@ async function startTeamV2(config) {
       });
       const worktree = workerWorktrees.get(wName);
       if (worktree) {
-        const overlayContent = await (0, import_promises10.readFile)(overlayPath, "utf-8");
+        const overlayContent = await (0, import_promises13.readFile)(overlayPath, "utf-8");
         installWorktreeRootAgents(sanitized, wName, leaderCwd, worktree.path, overlayContent);
       }
     }
@@ -8362,7 +8397,7 @@ async function startTeamV2(config) {
     next_worker_index: teamConfig.next_worker_index
   };
   try {
-    await (0, import_promises10.writeFile)(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), "utf-8");
+    await (0, import_promises13.writeFile)(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), "utf-8");
   } catch (error) {
     await rollbackStartedNativeWorktreeStartup({
       teamName: sanitized,
@@ -8550,7 +8585,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     }
     let payload;
     try {
-      const raw = await (0, import_promises10.readFile)(outputFile, "utf-8");
+      const raw = await (0, import_promises13.readFile)(outputFile, "utf-8");
       payload = parseCliWorkerVerdict(raw);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -9071,10 +9106,10 @@ function parseWatchdogFailedAt(marker) {
   throw new Error("watchdog marker missing valid failedAt");
 }
 async function checkWatchdogFailedMarker(stateRoot2, startTime) {
-  const markerPath = (0, import_path22.join)(stateRoot2, "watchdog-failed.json");
+  const markerPath = (0, import_path24.join)(stateRoot2, "watchdog-failed.json");
   let raw;
   try {
-    raw = await (0, import_promises11.readFile)(markerPath, "utf-8");
+    raw = await (0, import_promises14.readFile)(markerPath, "utf-8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") return { failed: false };
@@ -9096,21 +9131,21 @@ async function checkWatchdogFailedMarker(stateRoot2, startTime) {
     return { failed: true, reason: `Watchdog marked team failed at ${new Date(failedAt).toISOString()}` };
   }
   try {
-    await (0, import_promises11.unlink)(markerPath);
+    await (0, import_promises14.unlink)(markerPath);
   } catch {
   }
   return { failed: false };
 }
 async function writeResultArtifact(output, finishedAt, jobId = process.env.OMC_JOB_ID, omcJobsDir = process.env.OMC_JOBS_DIR) {
   if (!jobId || !omcJobsDir) return;
-  const resultPath = (0, import_path22.join)(omcJobsDir, `${jobId}-result.json`);
+  const resultPath = (0, import_path24.join)(omcJobsDir, `${jobId}-result.json`);
   const tmpPath = `${resultPath}.tmp`;
-  await (0, import_promises11.writeFile)(
+  await (0, import_promises14.writeFile)(
     tmpPath,
     JSON.stringify({ ...output, finishedAt }),
     "utf-8"
   );
-  await (0, import_promises11.rename)(tmpPath, resultPath);
+  await (0, import_promises14.rename)(tmpPath, resultPath);
 }
 function buildCliOutput(stateRoot2, teamName, status, workerCount, startTimeMs) {
   const taskResults = collectTaskResults(stateRoot2);
@@ -9135,20 +9170,20 @@ function buildTerminalCliResult(stateRoot2, teamName, phase, workerCount, startT
 async function writePanesFile(jobId, paneIds, leaderPaneId, sessionName2, ownsWindow) {
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
-  const panesPath = (0, import_path22.join)(omcJobsDir, `${jobId}-panes.json`);
-  await (0, import_promises11.writeFile)(
+  const panesPath = (0, import_path24.join)(omcJobsDir, `${jobId}-panes.json`);
+  await (0, import_promises14.writeFile)(
     panesPath + ".tmp",
     JSON.stringify({ paneIds: [...paneIds], leaderPaneId, sessionName: sessionName2, ownsWindow })
   );
-  await (0, import_promises11.rename)(panesPath + ".tmp", panesPath);
+  await (0, import_promises14.rename)(panesPath + ".tmp", panesPath);
 }
 function collectTaskResults(stateRoot2) {
-  const tasksDir = (0, import_path22.join)(stateRoot2, "tasks");
+  const tasksDir = (0, import_path24.join)(stateRoot2, "tasks");
   try {
-    const files = (0, import_fs20.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
+    const files = (0, import_fs22.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
-        const raw = (0, import_fs20.readFileSync)((0, import_path22.join)(tasksDir, f), "utf-8");
+        const raw = (0, import_fs22.readFileSync)((0, import_path24.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
         return {
           taskId: task.id ?? f.replace(".json", ""),
@@ -9203,7 +9238,7 @@ async function main() {
     autoMerge = false
   } = input;
   const workerCount = input.workerCount ?? agentTypes.length;
-  const stateRoot2 = (0, import_path22.join)(cwd, `.omc/state/team/${teamName}`);
+  const stateRoot2 = (0, import_path24.join)(cwd, `.omc/state/team/${teamName}`);
   const config = {
     teamName,
     workerCount,
@@ -9405,7 +9440,7 @@ async function main() {
       if (snap.allTasksTerminal) {
         const hasFailures = snap.tasks.failed > 0;
         if (!hasFailures) {
-          const sentinelLogPath = (0, import_path22.join)(cwd, "sentinel_stop.jsonl");
+          const sentinelLogPath = (0, import_path24.join)(cwd, "sentinel_stop.jsonl");
           const gateResult = await waitForSentinelReadiness({
             workspace: cwd,
             logPath: sentinelLogPath,
@@ -9482,7 +9517,7 @@ async function main() {
     mismatchStreak = 0;
     const terminalStatus = getTerminalStatus(snap.taskCounts, expectedTaskCount);
     if (terminalStatus === "completed") {
-      const sentinelLogPath = (0, import_path22.join)(cwd, "sentinel_stop.jsonl");
+      const sentinelLogPath = (0, import_path24.join)(cwd, "sentinel_stop.jsonl");
       const gateResult = await waitForSentinelReadiness({
         workspace: cwd,
         logPath: sentinelLogPath,
