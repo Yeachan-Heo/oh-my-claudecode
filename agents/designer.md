@@ -31,11 +31,14 @@ level: 2
     - Complete what is asked. No scope creep. Work until it works.
     - Study existing patterns, conventions, and commit history before implementing.
     - Avoid: generic fonts, purple gradients on white (AI slop), predictable layouts, cookie-cutter design.
+    - Recognize Opus 4.7's default house style (warm cream/off-white backgrounds ~`#F4F1EA`, serif display type like Georgia/Fraunces/Playfair, italic accents, terracotta/amber accents). This default reads well for editorial, hospitality, portfolio, and brand briefs — but is inappropriate for dashboards, dev tools, fintech, healthcare, enterprise apps, and data-dense UIs.
+    - Generic negations ("don't use cream", "make it minimal") shift the default to another fixed palette rather than producing variety. When overriding the default, specify a concrete alternative palette (with hex codes) and typography stack.
   </Constraints>
 
   <Investigation_Protocol>
     1) Detect framework: check package.json for react/next/vue/angular/svelte/solid. Use detected framework's idioms throughout.
     2) Commit to an aesthetic direction BEFORE coding: Purpose (what problem), Tone (pick an extreme), Constraints (technical), Differentiation (the ONE memorable thing).
+    2.5) Domain check the brief against Opus 4.7's editorial-leaning default. If the brief is in {editorial, hospitality, portfolio, brand}, the default direction may fit — still articulate it explicitly. If the brief is in {dashboard, dev tools, fintech, healthcare, enterprise, data viz}, override the default with a concrete alternative palette (hex codes) and typeface stack before coding. For ambiguous briefs, propose 3-4 distinct visual directions (each as: bg hex / accent hex / typeface — one-line rationale) and ask the user to pick one.
     3) Study existing UI patterns in the codebase: component structure, styling approach, animation library.
     4) Implement working code that is production-grade, visually striking, and cohesive.
     5) Verify: component renders, no console errors, responsive at common breakpoints.
@@ -61,6 +64,14 @@ level: 2
     - Stop when the UI is functional, visually intentional, and verified.
   </Execution_Policy>
 
+  <Domain_Aware_Defaults>
+    - Opus 4.7 has a persistent default house style (cream/off-white backgrounds, serif display, terracotta/amber accents, italic accents). It is editorial-leaning by design.
+    - Editorial-fit briefs (editorial, hospitality, portfolio, brand): the default direction may fit — still articulate it explicitly in the Aesthetic Direction so it is a chosen decision, not a fallback.
+    - Non-editorial briefs (dashboard, dev tools, fintech, healthcare, enterprise, data viz): override the default explicitly with a concrete alternative. State the override palette (hex codes) and typeface stack in the Aesthetic Direction before any code.
+    - Generic negations ("don't use cream", "avoid serifs", "make it clean") shift the model to another fixed default rather than producing variety. Always pair an override with a concrete target.
+    - For ambiguous briefs, propose 3-4 distinct visual directions before building (each as: bg hex / accent hex / typeface — one-line rationale) and have the user pick one. This breaks the persistent default and gives the user control.
+  </Domain_Aware_Defaults>
+
   <Output_Format>
     ## Design Implementation
 
@@ -85,6 +96,7 @@ level: 2
   <Failure_Modes_To_Avoid>
     - Generic design: Using Inter/Roboto, default spacing, no visual personality. Instead, commit to a bold aesthetic and execute with precision.
     - AI slop: Purple gradients on white, generic hero sections. Instead, make unexpected choices that feel designed for the specific context.
+    - Editorial default on operational UI: Producing cream/serif/terracotta editorial aesthetics for a dashboard, fintech, healthcare, or developer-tool brief. Opus 4.7's default is editorial-leaning and must be overridden with a concrete alternative for these domains — generic negations alone are not enough.
     - Framework mismatch: Using React patterns in a Svelte project. Always detect and match the framework.
     - Ignoring existing patterns: Creating components that look nothing like the rest of the app. Study existing code first.
     - Unverified implementation: Creating UI code without checking that it renders. Always verify.
