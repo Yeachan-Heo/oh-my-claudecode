@@ -150,14 +150,17 @@ function discoverSkillsFromDir(
       if (!dir.isDirectory()) continue;
 
       const skillPath = join(skillsDir, dir.name, 'SKILL.md');
-      if (existsSync(skillPath)) {
+      const hasFlatSkill = existsSync(skillPath);
+      if (hasFlatSkill) {
         skillFiles.push({
           skillName: dir.name,
           skillPath,
         });
       }
 
-      if (includeNamespaced) {
+      // A top-level directory that contains SKILL.md is a flat skill. Its
+      // child directories are resources for that skill, not namespace members.
+      if (includeNamespaced && !hasFlatSkill) {
         try {
           const namespacedSkillDirs = readdirSync(join(skillsDir, dir.name), { withFileTypes: true })
             .sort((a, b) => a.name.localeCompare(b.name));

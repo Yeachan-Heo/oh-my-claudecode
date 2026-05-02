@@ -247,6 +247,55 @@ Compatibility body`
     expect(result.replacementText).toContain('`templates/`');
   });
 
+  it('does not expose nested SKILL.md files under flat .agents skills as namespaced commands', async () => {
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'flat', 'examples'), { recursive: true });
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'flat', 'SKILL.md'),
+      `---
+name: flat
+description: Flat compatibility skill
+---
+
+Flat body`
+    );
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'flat', 'examples', 'SKILL.md'),
+      `---
+name: examples
+description: Nested examples instructions
+---
+
+Examples body`
+    );
+
+    const { findCommand, executeSlashCommand, listAvailableCommandsWithOptions } = await loadExecutor();
+
+    expect(findCommand('flat')?.metadata.description).toBe('Flat compatibility skill');
+    expect(findCommand('flat:examples')).toBeNull();
+    expect(listAvailableCommandsWithOptions({ includeAliases: true })
+      .some((command) => command.name.startsWith('flat:'))).toBe(false);
+
+    const nestedResult = executeSlashCommand({
+      command: 'flat:examples',
+      args: '',
+      raw: '/flat:examples',
+    });
+
+    expect(nestedResult.success).toBe(false);
+    expect(nestedResult.error).toContain('Command "/flat:examples" not found');
+
+    const result = executeSlashCommand({
+      command: 'flat',
+      args: '',
+      raw: '/flat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.replacementText).toContain('Flat body');
+    expect(result.replacementText).toContain('## Skill Resources');
+    expect(result.replacementText).toContain('`examples/`');
+  });
+
   it('discovers namespaced project-local compatibility skills from .agents/skills/<namespace>/<skill>/SKILL.md', async () => {
     mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'deploy', 'templates'), { recursive: true });
     writeFileSync(
