@@ -13,7 +13,7 @@ export const AUTO_SLASH_COMMAND_TAG_OPEN = '<auto-slash-command>';
 export const AUTO_SLASH_COMMAND_TAG_CLOSE = '</auto-slash-command>';
 
 /** Pattern to detect slash commands at start of message */
-export const SLASH_COMMAND_PATTERN = /^\/([a-zA-Z][\w-]*)\s*(.*)/;
+export const SLASH_COMMAND_PATTERN = /^\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\s*(.*)/;
 
 /**
  * Commands that should NOT be auto-expanded

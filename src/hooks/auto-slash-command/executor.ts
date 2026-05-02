@@ -18,7 +18,7 @@ import type {
 } from './types.js';
 import { resolveLiveData } from './live-data.js';
 import { parseFrontmatter, parseFrontmatterAliases, stripOptionalQuotes } from '../../utils/frontmatter.js';
-import { formatOmcCliInvocation, rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
+import { rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
 import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../utils/skill-pipeline.js';
 import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from '../../features/builtin-skills/runtime-guidance.js';
@@ -60,6 +60,20 @@ function getFrontmatterString(
   if (!value) return undefined;
   const normalized = stripOptionalQuotes(value);
   return normalized.length > 0 ? normalized : undefined;
+}
+
+interface SkillFileCandidate {
+  namespace?: string;
+  skillName: string;
+  skillPath: string;
+}
+
+function toSkillCommandName(name: string, namespace?: string): string {
+  const normalized = name.trim();
+  const namespacedName = namespace && !normalized.includes(':')
+    ? `${namespace}:${normalized}`
+    : normalized;
+  return toSafeSkillName(namespacedName);
 }
 
 /**
@@ -116,30 +130,66 @@ function discoverCommandsFromDir(
   return commands;
 }
 
-function discoverSkillsFromDir(skillsDir: string): CommandInfo[] {
+function discoverSkillsFromDir(
+  skillsDir: string,
+  options?: { includeNamespaced?: boolean },
+): CommandInfo[] {
   if (!existsSync(skillsDir)) {
     return [];
   }
 
   const skillCommands: CommandInfo[] = [];
+  const includeNamespaced = options?.includeNamespaced ?? false;
 
   try {
-    const skillDirs = readdirSync(skillsDir, { withFileTypes: true });
+    const skillDirs = readdirSync(skillsDir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const skillFiles: SkillFileCandidate[] = [];
+
     for (const dir of skillDirs) {
       if (!dir.isDirectory()) continue;
 
       const skillPath = join(skillsDir, dir.name, 'SKILL.md');
-      if (!existsSync(skillPath)) continue;
+      if (existsSync(skillPath)) {
+        skillFiles.push({
+          skillName: dir.name,
+          skillPath,
+        });
+      }
 
+      if (includeNamespaced) {
+        try {
+          const namespacedSkillDirs = readdirSync(join(skillsDir, dir.name), { withFileTypes: true })
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+          for (const skillDir of namespacedSkillDirs) {
+            if (!skillDir.isDirectory()) continue;
+
+            const namespacedSkillPath = join(skillsDir, dir.name, skillDir.name, 'SKILL.md');
+            if (!existsSync(namespacedSkillPath)) continue;
+
+            skillFiles.push({
+              namespace: dir.name,
+              skillName: skillDir.name,
+              skillPath: namespacedSkillPath,
+            });
+          }
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    for (const skillFile of skillFiles) {
       try {
-        const content = readFileSync(skillPath, 'utf-8');
+        const content = readFileSync(skillFile.skillPath, 'utf-8');
         const { metadata: fm, body } = parseFrontmatter(content);
 
-        const rawName = getFrontmatterString(fm, 'name') || dir.name;
-        const canonicalName = toSafeSkillName(rawName);
+        const rawName = getFrontmatterString(fm, 'name') || skillFile.skillName;
+        const canonicalName = toSkillCommandName(rawName, skillFile.namespace);
         const aliases = Array.from(new Set(
           parseFrontmatterAliases(fm.aliases)
-            .map((alias: string) => toSafeSkillName(alias))
+            .map((alias: string) => toSkillCommandName(alias, skillFile.namespace))
             .filter((alias: string) => alias.toLowerCase() !== canonicalName.toLowerCase())
         ));
         const commandNames = [canonicalName, ...aliases];
@@ -168,7 +218,7 @@ function discoverSkillsFromDir(skillsDir: string): CommandInfo[] {
 
           skillCommands.push({
             name: commandName,
-            path: skillPath,
+            path: skillFile.skillPath,
             metadata,
             content: body,
             scope: 'skill',
@@ -198,7 +248,7 @@ export function discoverAllCommands(): CommandInfo[] {
   const userCommands = discoverCommandsFromDir(userCommandsDir, 'user');
   const projectCommands = discoverCommandsFromDir(projectCommandsDir, 'project');
   const projectOmcSkills = discoverSkillsFromDir(projectOmcSkillsDir);
-  const projectAgentSkills = discoverSkillsFromDir(projectAgentSkillsDir);
+  const projectAgentSkills = discoverSkillsFromDir(projectAgentSkillsDir, { includeNamespaced: true });
   const userSkills = discoverSkillsFromDir(userSkillsDir);
   const builtinSkills = discoverSkillsFromDir(getSkillsDir());
 

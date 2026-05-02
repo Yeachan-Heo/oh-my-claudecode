@@ -18,6 +18,11 @@ async function loadExecutor() {
   return import('../hooks/auto-slash-command/executor.js');
 }
 
+async function loadDetector() {
+  vi.resetModules();
+  return import('../hooks/auto-slash-command/detector.js');
+}
+
 describe('auto slash aliases + skill guidance', () => {
   beforeEach(() => {
     tempConfigDir = join(tmpdir(), `omc-auto-slash-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -240,6 +245,113 @@ Compatibility body`
     expect(result.replacementText).toContain('## Skill Resources');
     expect(result.replacementText).toContain('.agents/skills/compat-skill');
     expect(result.replacementText).toContain('`templates/`');
+  });
+
+  it('discovers namespaced project-local compatibility skills from .agents/skills/<namespace>/<skill>/SKILL.md', async () => {
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'deploy', 'templates'), { recursive: true });
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'deploy', 'SKILL.md'),
+      `---
+description: Namespaced deploy skill
+aliases: [ship]
+---
+
+Deploy body`
+    );
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'deploy', 'templates', 'plan.txt'),
+      'plan'
+    );
+
+    const { parseSlashCommand } = await loadDetector();
+    const { findCommand, executeSlashCommand, listAvailableCommandsWithOptions } = await loadExecutor();
+
+    expect(parseSlashCommand('/vendor:deploy production')?.command).toBe('vendor:deploy');
+    expect(findCommand('vendor:deploy')?.scope).toBe('skill');
+    expect(findCommand('vendor:ship')?.metadata.aliasOf).toBe('vendor:deploy');
+    expect(listAvailableCommandsWithOptions({ includeAliases: true }).some((command) => command.name === 'vendor:deploy')).toBe(true);
+
+    const result = executeSlashCommand({
+      command: 'vendor:deploy',
+      args: 'production',
+      raw: '/vendor:deploy production',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.replacementText).toContain('<command-name>/vendor:deploy</command-name>');
+    expect(result.replacementText).toContain('Namespaced deploy skill');
+    expect(result.replacementText).toContain('Deploy body');
+    expect(result.replacementText).toContain('.agents/skills/vendor/deploy');
+  });
+
+  it('keeps namespaced skill names scoped when frontmatter names collide with native slash commands', async () => {
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'review'), { recursive: true });
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'review', 'SKILL.md'),
+      `---
+name: review
+description: Scoped review skill
+aliases: [plan]
+---
+
+Review body`
+    );
+
+    const { findCommand } = await loadExecutor();
+
+    expect(findCommand('vendor:review')?.metadata.description).toBe('Scoped review skill');
+    expect(findCommand('vendor:plan')?.metadata.aliasOf).toBe('vendor:review');
+    expect(findCommand('vendor:omc-review')).toBeNull();
+    expect(findCommand('omc-review')).toBeNull();
+  });
+
+  it('ignores invalid deeper nested skills and de-duplicates colliding namespaced commands', async () => {
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'alpha'), { recursive: true });
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'beta'), { recursive: true });
+    mkdirSync(join(tempProjectDir, '.agents', 'skills', 'vendor', 'alpha', 'nested'), { recursive: true });
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'alpha', 'SKILL.md'),
+      `---
+name: shared
+description: First shared skill
+---
+
+Alpha body`
+    );
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'beta', 'SKILL.md'),
+      `---
+name: shared
+description: Second shared skill
+---
+
+Beta body`
+    );
+    writeFileSync(
+      join(tempProjectDir, '.agents', 'skills', 'vendor', 'alpha', 'nested', 'SKILL.md'),
+      `---
+description: Too deep
+---
+
+Nested body`
+    );
+
+    const { findCommand, executeSlashCommand, listAvailableCommandsWithOptions } = await loadExecutor();
+
+    expect(findCommand('vendor:nested')).toBeNull();
+    expect(findCommand('vendor:shared')?.metadata.description).toBe('First shared skill');
+    expect(listAvailableCommandsWithOptions({ includeAliases: true })
+      .filter((command) => command.name === 'vendor:shared')).toHaveLength(1);
+
+    const result = executeSlashCommand({
+      command: 'vendor:shared',
+      args: '',
+      raw: '/vendor:shared',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.replacementText).toContain('Alpha body');
+    expect(result.replacementText).not.toContain('Beta body');
   });
 
   it('renders deterministic autoresearch bridge guidance for deep-interview autoresearch mode', async () => {
