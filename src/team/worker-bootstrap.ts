@@ -191,6 +191,10 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
 - Complete task: \`${completeTaskCommand}\`
 - Fail task: \`${failTaskCommand}\`
 - Release claim (rollback): \`${releaseClaimCommand}\`
+- Delegation compliance evidence (required for broad delegated tasks):
+  - Include exactly one completion \`result\` line: \`Subagent spawn evidence: <count, child task names/thread ids, and integrated findings>\`
+  - Or include: \`Subagent skip reason: <why serial execution was safer/sufficient>\`
+  - Completion is rejected with \`missing_delegation_compliance_evidence\` when required evidence is absent.
 
 ## Canonical Team State Root
 - Resolve the team state root in this order: \`OMC_TEAM_STATE_ROOT\` env -> worker identity \`team_state_root\` -> config/manifest \`team_state_root\` -> ${params.cwd}/.omc/state/team/${teamName}.

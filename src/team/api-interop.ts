@@ -742,6 +742,8 @@ export async function executeTeamApiOperation(
         const from = String(args.from || '').trim();
         const to = String(args.to || '').trim();
         const claimToken = String(args.claim_token || '').trim();
+        const transitionResult = args.result;
+        const transitionError = args.error;
         if (!teamName || !taskId || !from || !to || !claimToken) {
           return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, from, to, claim_token are required' } };
         }
@@ -749,7 +751,24 @@ export async function executeTeamApiOperation(
         if (!allowed.has(from) || !allowed.has(to)) {
           return { ok: false, operation, error: { code: 'invalid_input', message: 'from and to must be valid task statuses' } };
         }
-        const result = await teamTransitionTaskStatus(teamName, taskId, from as TeamTaskStatus, to as TeamTaskStatus, claimToken, cwd);
+        if (transitionResult !== undefined && typeof transitionResult !== 'string') {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'result must be a string when provided' } };
+        }
+        if (transitionError !== undefined && typeof transitionError !== 'string') {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'error must be a string when provided' } };
+        }
+        const result = await teamTransitionTaskStatus(
+          teamName,
+          taskId,
+          from as TeamTaskStatus,
+          to as TeamTaskStatus,
+          claimToken,
+          cwd,
+          {
+            result: typeof transitionResult === 'string' ? transitionResult : undefined,
+            error: typeof transitionError === 'string' ? transitionError : undefined,
+          },
+        );
         return { ok: true, operation, data: result as unknown as Record<string, unknown> };
       }
       case 'release-task-claim': {
