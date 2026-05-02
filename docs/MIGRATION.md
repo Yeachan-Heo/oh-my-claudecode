@@ -765,13 +765,13 @@ Once upgraded, you automatically gain access to:
 
 #### When to Use Each Mode
 
-| Scenario                | Recommended Mode | Why                                            |
-| ----------------------- | ---------------- | ---------------------------------------------- |
+| Scenario                | Recommended Mode  | Why                                            |
+| ----------------------- | ----------------- | ---------------------------------------------- |
 | Multi-component systems | `team N:executor` | Parallel workers handle independent components |
 | Many small fixes        | `team N:executor` | Atomic task claiming prevents duplicate work   |
 | Sequential dependencies | `pipeline`        | Data passes between stages                     |
-| Single complex task     | `autopilot`      | Full autonomous execution                      |
-| Must complete           | `ralph`          | Persistence guarantee                          |
+| Single complex task     | `autopilot`       | Full autonomous execution                      |
+| Must complete           | `ralph`           | Persistence guarantee                          |
 
 #### Keyword Usage
 

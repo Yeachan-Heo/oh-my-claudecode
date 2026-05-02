@@ -21,31 +21,31 @@ _Don't learn Claude Code. Just use OMC._
 
 ## Core Maintainers
 
-| Role | Name | GitHub |
-| --- | --- | --- |
+| Role           | Name        | GitHub                                         |
+| -------------- | ----------- | ---------------------------------------------- |
 | Creator & Lead | Yeachan Heo | [@Yeachan-Heo](https://github.com/Yeachan-Heo) |
 
 ## Ambassadors
 
-| Name | GitHub |
-| --- | --- |
+| Name       | GitHub                                           |
+| ---------- | ------------------------------------------------ |
 | Sigrid Jin | [@sigridjineth](https://github.com/sigridjineth) |
 
 ## Document Specialists
 
-| Name | GitHub |
-| --- | --- |
+| Name    | GitHub                                 |
+| ------- | -------------------------------------- |
 | devswha | [@devswha](https://github.com/devswha) |
 
 ## Top Collaborators
 
-| Name | GitHub | Commits |
-| --- | --- | --- |
-| JunghwanNA | [@shaun0927](https://github.com/shaun0927) | 65 |
-| riftzen-bit | [@riftzen-bit](https://github.com/riftzen-bit) | 52 |
-| Seunggwan Song | [@Nathan-Song](https://github.com/Nathan-Song) | 20 |
-| BLUE | [@blue-int](https://github.com/blue-int) | 20 |
-| Junho Yeo | [@junhoyeo](https://github.com/junhoyeo) | 15 |
+| Name           | GitHub                                         | Commits |
+| -------------- | ---------------------------------------------- | ------- |
+| JunghwanNA     | [@shaun0927](https://github.com/shaun0927)     | 65      |
+| riftzen-bit    | [@riftzen-bit](https://github.com/riftzen-bit) | 52      |
+| Seunggwan Song | [@Nathan-Song](https://github.com/Nathan-Song) | 20      |
+| BLUE           | [@blue-int](https://github.com/blue-int)       | 20      |
+| Junho Yeo      | [@junhoyeo](https://github.com/junhoyeo)       | 15      |
 
 ## Quick Start
 
@@ -102,13 +102,13 @@ OMC exposes two different surfaces:
 - **Terminal CLI commands**: run `omc ...` from your shell after installing the npm/runtime path (`npm i -g oh-my-claude-sisyphus@latest`) or from a local checkout.
 - **In-session skills**: run `/...` inside a Claude Code session after installing the plugin/setup flow.
 
-| Feature | Terminal CLI | In-session skill | Notes |
-| --- | --- | --- | --- |
-| Setup | `omc setup` | `/setup` or `/omc-setup` | Both are real entrypoints. `/setup` is the easiest plugin-first path. |
-| Ask providers | `omc ask codex "review this patch"` | `/ask codex "review this patch"` | Both route through the same advisor flow. |
-| Team orchestration | `omc team 2:codex "review auth flow"` | `/team 3:executor "fix all TypeScript errors"` | Both exist, but they are different runtimes: `omc team` launches tmux CLI workers; `/team` runs the in-session native team workflow. |
-| Autopilot / Ralph / Ultrawork / Deep Interview | — | `/autopilot ...`, `/ralph ...`, `/ultrawork ...`, `/deep-interview ...` | These are in-session skills. There is no `omc autopilot` / `omc ralph` / `omc ultrawork` CLI subcommand in this repo. |
-| Autoresearch | `omc autoresearch` (**hard-deprecated shim**) | `/deep-interview --autoresearch ...` + `/oh-my-claudecode:autoresearch` | Setup stays in deep-interview; execution now belongs to the stateful skill. |
+| Feature                                        | Terminal CLI                                  | In-session skill                                                        | Notes                                                                                                                                |
+| ---------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Setup                                          | `omc setup`                                   | `/setup` or `/omc-setup`                                                | Both are real entrypoints. `/setup` is the easiest plugin-first path.                                                                |
+| Ask providers                                  | `omc ask codex "review this patch"`           | `/ask codex "review this patch"`                                        | Both route through the same advisor flow.                                                                                            |
+| Team orchestration                             | `omc team 2:codex "review auth flow"`         | `/team 3:executor "fix all TypeScript errors"`                          | Both exist, but they are different runtimes: `omc team` launches tmux CLI workers; `/team` runs the in-session native team workflow. |
+| Autopilot / Ralph / Ultrawork / Deep Interview | —                                             | `/autopilot ...`, `/ralph ...`, `/ultrawork ...`, `/deep-interview ...` | These are in-session skills. There is no `omc autopilot` / `omc ralph` / `omc ultrawork` CLI subcommand in this repo.                |
+| Autoresearch                                   | `omc autoresearch` (**hard-deprecated shim**) | `/deep-interview --autoresearch ...` + `/oh-my-claudecode:autoresearch` | Setup stays in deep-interview; execution now belongs to the stateful skill.                                                          |
 
 ### Not Sure Where to Start?
 
@@ -166,12 +166,12 @@ For mixed Codex + Gemini work in one command, use the **`/ccg`** skill (routes v
 /ccg Review this PR — architecture (Codex) and UI components (Gemini)
 ```
 
-| Surface                   | Workers            | Best For                                     |
-| ------------------------- | ------------------ | -------------------------------------------- |
-| `omc team N:codex "..."`  | N Codex CLI panes  | Code review, security analysis, architecture |
-| `omc team N:gemini "..."` | N Gemini CLI panes | UI/UX design, docs, large-context tasks      |
-| `omc team N:claude "..."` | N Claude CLI panes | General tasks via Claude CLI in tmux         |
-| `/ccg`                    | /ask codex + /ask gemini | Tri-model advisor synthesis           |
+| Surface                   | Workers                  | Best For                                     |
+| ------------------------- | ------------------------ | -------------------------------------------- |
+| `omc team N:codex "..."`  | N Codex CLI panes        | Code review, security analysis, architecture |
+| `omc team N:gemini "..."` | N Gemini CLI panes       | UI/UX design, docs, large-context tasks      |
+| `omc team N:claude "..."` | N Claude CLI panes       | General tasks via Claude CLI in tmux         |
+| `/ccg`                    | /ask codex + /ask gemini | Tri-model advisor synthesis                  |
 
 Workers spawn on-demand and die when their task completes — no idle resource usage. Requires `codex` / `gemini` CLIs installed and an active tmux session.
 
@@ -240,7 +240,7 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 | ----------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | **Team (recommended)**  | Canonical staged pipeline (`team-plan → team-prd → team-exec → team-verify → team-fix`) | Coordinated Claude agents on a shared task list        |
 | **omc team (CLI)**      | tmux CLI workers — real `claude`/`codex`/`gemini` processes in split-panes              | Codex/Gemini CLI tasks; on-demand spawn, die when done |
-| **ccg**                 | Tri-model advisors via `/ask codex` + `/ask gemini`, Claude synthesizes                   | Mixed backend+UI work needing both Codex and Gemini    |
+| **ccg**                 | Tri-model advisors via `/ask codex` + `/ask gemini`, Claude synthesizes                 | Mixed backend+UI work needing both Codex and Gemini    |
 | **Autopilot**           | Autonomous execution (single lead agent)                                                | End-to-end feature work with minimal ceremony          |
 | **Ultrawork**           | Maximum parallelism (non-team)                                                          | Burst parallel fixes/refactors where Team isn't needed |
 | **Ralph**               | Persistent mode with verify/fix loops                                                   | Tasks that must complete fully (no silent partials)    |
@@ -269,11 +269,11 @@ Want to contribute to OMC? See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full
 
 Learn once, reuse forever. OMC extracts hard-won debugging knowledge into portable skill files that auto-inject when relevant.
 
-| | Project Scope | User Scope |
-|---|---|---|
-| **Path** | `.omc/skills/` | `~/.omc/skills/` |
+|                 | Project Scope                                            | User Scope        |
+| --------------- | -------------------------------------------------------- | ----------------- |
+| **Path**        | `.omc/skills/`                                           | `~/.omc/skills/`  |
 | **Shared with** | Team (commit the skill file to keep it across worktrees) | All your projects |
-| **Priority** | Higher (overrides user) | Lower (fallback) |
+| **Priority**    | Higher (overrides user)                                  | Lower (fallback)  |
 
 ```yaml
 # .omc/skills/fix-proxy-crash.md
@@ -300,18 +300,18 @@ Project-scoped skills are stored in `.omc/skills/` and are intended to be commit
 
 These shortcuts run **inside a Claude Code / OMC session**, not as terminal CLI commands. For shell commands, use the `omc ...` forms shown above. Team mode is explicit: use `/team ...` in-session or `omc team ...` from your shell rather than expecting a bare `team` keyword trigger.
 
-| In-session form        | Kind                  | Effect                              | Example                                        |
-| ---------------------- | --------------------- | ----------------------------------- | ---------------------------------------------- |
-| `/team`                | Slash skill           | Canonical Team orchestration        | `/team 3:executor "fix all TypeScript errors"` |
-| `/ccg`                 | Slash skill           | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                       |
-| `/autopilot` / `autopilot` | Skill / prompt trigger | Full autonomous execution       | `/autopilot "build a todo app"`                |
-| `/ralph` / `ralph`     | Skill / prompt trigger | Persistence mode                   | `/ralph "refactor auth"`                       |
-| `/ultrawork` / `ulw`   | Skill / prompt trigger | Maximum parallelism                | `/ultrawork "fix all errors"`                  |
-| `/ralplan` / `ralplan` | Skill / prompt trigger | Iterative planning consensus       | `/ralplan "plan this feature"`                 |
-| `/deep-interview`      | Slash skill           | Socratic requirements clarification | `/deep-interview "vague idea"`                 |
-| `deepsearch`           | Prompt trigger        | Codebase-focused search routing     | `deepsearch for auth middleware`               |
-| `ultrathink`           | Prompt trigger        | Deep reasoning mode                 | `ultrathink about this architecture`           |
-| `cancelomc`, `stopomc` | Prompt trigger        | Stop active OMC modes               | `stopomc`                                      |
+| In-session form            | Kind                   | Effect                                 | Example                                        |
+| -------------------------- | ---------------------- | -------------------------------------- | ---------------------------------------------- |
+| `/team`                    | Slash skill            | Canonical Team orchestration           | `/team 3:executor "fix all TypeScript errors"` |
+| `/ccg`                     | Slash skill            | `/ask codex` + `/ask gemini` synthesis | `/ccg review this PR`                          |
+| `/autopilot` / `autopilot` | Skill / prompt trigger | Full autonomous execution              | `/autopilot "build a todo app"`                |
+| `/ralph` / `ralph`         | Skill / prompt trigger | Persistence mode                       | `/ralph "refactor auth"`                       |
+| `/ultrawork` / `ulw`       | Skill / prompt trigger | Maximum parallelism                    | `/ultrawork "fix all errors"`                  |
+| `/ralplan` / `ralplan`     | Skill / prompt trigger | Iterative planning consensus           | `/ralplan "plan this feature"`                 |
+| `/deep-interview`          | Slash skill            | Socratic requirements clarification    | `/deep-interview "vague idea"`                 |
+| `deepsearch`               | Prompt trigger         | Codebase-focused search routing        | `deepsearch for auth middleware`               |
+| `ultrathink`               | Prompt trigger         | Deep reasoning mode                    | `ultrathink about this architecture`           |
+| `cancelomc`, `stopomc`     | Prompt trigger         | Stop active OMC modes                  | `stopomc`                                      |
 
 **Notes:**
 
@@ -428,38 +428,46 @@ Forward Claude Code session events to an [OpenClaw](https://openclaw.ai/) gatewa
     }
   },
   "hooks": {
-    "session-start": { "gateway": "my-gateway", "instruction": "Session started for {{projectName}}", "enabled": true },
-    "stop":          { "gateway": "my-gateway", "instruction": "Session stopping for {{projectName}}", "enabled": true }
+    "session-start": {
+      "gateway": "my-gateway",
+      "instruction": "Session started for {{projectName}}",
+      "enabled": true
+    },
+    "stop": {
+      "gateway": "my-gateway",
+      "instruction": "Session stopping for {{projectName}}",
+      "enabled": true
+    }
   }
 }
 ```
 
 **Environment variables:**
 
-| Variable | Description |
-|----------|-------------|
-| `OMC_OPENCLAW=1` | Enable OpenClaw |
-| `OMC_OPENCLAW_DEBUG=1` | Enable debug logging |
+| Variable                                   | Description               |
+| ------------------------------------------ | ------------------------- |
+| `OMC_OPENCLAW=1`                           | Enable OpenClaw           |
+| `OMC_OPENCLAW_DEBUG=1`                     | Enable debug logging      |
 | `OMC_OPENCLAW_CONFIG=/path/to/config.json` | Override config file path |
 
 **Supported hook events (6 active in bridge.ts):**
 
-| Event | Trigger | Key template variables |
-|-------|---------|----------------------|
-| `session-start` | Session begins | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
-| `stop` | Claude response completes | `{{sessionId}}`, `{{projectName}}` |
-| `keyword-detector` | Every prompt submission | `{{prompt}}`, `{{sessionId}}` |
-| `ask-user-question` | Claude requests user input | `{{question}}`, `{{sessionId}}` |
-| `pre-tool-use` | Before tool invocation (high frequency) | `{{toolName}}`, `{{sessionId}}` |
-| `post-tool-use` | After tool invocation (high frequency) | `{{toolName}}`, `{{sessionId}}` |
+| Event               | Trigger                                 | Key template variables                                |
+| ------------------- | --------------------------------------- | ----------------------------------------------------- |
+| `session-start`     | Session begins                          | `{{sessionId}}`, `{{projectName}}`, `{{projectPath}}` |
+| `stop`              | Claude response completes               | `{{sessionId}}`, `{{projectName}}`                    |
+| `keyword-detector`  | Every prompt submission                 | `{{prompt}}`, `{{sessionId}}`                         |
+| `ask-user-question` | Claude requests user input              | `{{question}}`, `{{sessionId}}`                       |
+| `pre-tool-use`      | Before tool invocation (high frequency) | `{{toolName}}`, `{{sessionId}}`                       |
+| `post-tool-use`     | After tool invocation (high frequency)  | `{{toolName}}`, `{{sessionId}}`                       |
 
 **Reply channel environment variables:**
 
-| Variable | Description |
-|----------|-------------|
+| Variable                 | Description                    |
+| ------------------------ | ------------------------------ |
 | `OPENCLAW_REPLY_CHANNEL` | Reply channel (e.g. `discord`) |
-| `OPENCLAW_REPLY_TARGET` | Channel ID |
-| `OPENCLAW_REPLY_THREAD` | Thread ID |
+| `OPENCLAW_REPLY_TARGET`  | Channel ID                     |
+| `OPENCLAW_REPLY_THREAD`  | Thread ID                      |
 
 See `scripts/openclaw-gateway-demo.mjs` for a reference gateway that relays OpenClaw payloads to Discord via ClawdBot.
 
@@ -489,14 +497,14 @@ See `scripts/openclaw-gateway-demo.mjs` for a reference gateway that relays Open
 
 OMC features like `omc team` and rate-limit detection require **tmux**:
 
-| Platform       | tmux provider                                            | Install                |
-| -------------- | -------------------------------------------------------- | ---------------------- |
-| macOS          | [tmux](https://github.com/tmux/tmux)                    | `brew install tmux`    |
-| Ubuntu/Debian  | tmux                                                     | `sudo apt install tmux`|
-| Fedora         | tmux                                                     | `sudo dnf install tmux`|
-| Arch           | tmux                                                     | `sudo pacman -S tmux`  |
-| Windows        | [psmux](https://github.com/marlocarlo/psmux) (native)   | `winget install psmux` |
-| Windows (WSL2) | tmux (inside WSL)                                        | `sudo apt install tmux`|
+| Platform       | tmux provider                                         | Install                 |
+| -------------- | ----------------------------------------------------- | ----------------------- |
+| macOS          | [tmux](https://github.com/tmux/tmux)                  | `brew install tmux`     |
+| Ubuntu/Debian  | tmux                                                  | `sudo apt install tmux` |
+| Fedora         | tmux                                                  | `sudo dnf install tmux` |
+| Arch           | tmux                                                  | `sudo pacman -S tmux`   |
+| Windows        | [psmux](https://github.com/marlocarlo/psmux) (native) | `winget install psmux`  |
+| Windows (WSL2) | tmux (inside WSL)                                     | `sudo apt install tmux` |
 
 > **Windows users:** [psmux](https://github.com/marlocarlo/psmux) provides a native `tmux` binary for Windows with 76 tmux-compatible commands. No WSL required.
 
@@ -528,6 +536,7 @@ MIT
 </div>
 
 <!-- OMC:FEATURED-CONTRIBUTORS:START -->
+
 ## Featured by OmC Contributors
 
 Top personal non-fork, non-archived repos from all-time OMC contributors (100+ GitHub stars).
