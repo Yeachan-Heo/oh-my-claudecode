@@ -42,6 +42,8 @@ const modelContractMocks = vi.hoisted(() => ({
   getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'dispatch-team/worker-1' })),
   isPromptModeAgent: vi.fn(() => false),
   getPromptModeArgs: vi.fn((_agentType: string, instruction: string) => [instruction]),
+  resolveAgentReasoningEffort: vi.fn(() => undefined),
+  resolveWorkerLaunchExtraFlags: vi.fn(() => []),
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -67,7 +69,9 @@ vi.mock('../model-contract.js', () => ({
   getWorkerEnv: modelContractMocks.getWorkerEnv,
   isPromptModeAgent: modelContractMocks.isPromptModeAgent,
   getPromptModeArgs: modelContractMocks.getPromptModeArgs,
+  resolveAgentReasoningEffort: modelContractMocks.resolveAgentReasoningEffort,
   resolveClaudeWorkerModel: vi.fn(() => undefined),
+  resolveWorkerLaunchExtraFlags: modelContractMocks.resolveWorkerLaunchExtraFlags,
 }));
 
 vi.mock('../tmux-session.js', async (importOriginal) => {
@@ -123,6 +127,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     modelContractMocks.getWorkerEnv.mockReset();
     modelContractMocks.isPromptModeAgent.mockReset();
     modelContractMocks.getPromptModeArgs.mockReset();
+    modelContractMocks.resolveAgentReasoningEffort.mockReset();
+    modelContractMocks.resolveWorkerLaunchExtraFlags.mockReset();
     mergeMocks.startMergeOrchestrator.mockReset();
     mergeMocks.recoverFromRestart.mockReset();
     mergeMocks.registerWorker.mockReset();
