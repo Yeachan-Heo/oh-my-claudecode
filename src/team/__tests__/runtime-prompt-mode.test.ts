@@ -308,6 +308,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     delete process.env.OMC_MODEL_HIGH;
     delete process.env.OMC_MODEL_MEDIUM;
     delete process.env.OMC_MODEL_LOW;
+    delete process.env.OMC_TEAM_WORKER_LAUNCH_ARGS;
     cwd = mkdtempSync(join(tmpdir(), 'runtime-model-passthrough-'));
     setupTaskDir(cwd);
   });
@@ -512,6 +513,25 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     expect(launchCmd).toContain('us.anthropic.claude-sonnet-4-6-v1:0');
   });
 
+
+  it('codex worker launch args honor OMC_TEAM_WORKER_LAUNCH_ARGS model and reasoning overrides', async () => {
+    process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL = 'fallback-codex-model';
+    process.env.OMC_TEAM_WORKER_LAUNCH_ARGS = '--model env-codex-model -c model_reasoning_effort="high" --no-alt-screen';
+    const runtime = makeRuntime(cwd, 'codex');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--model' 'env-codex-model'");
+    expect(launchCmd).not.toContain('fallback-codex-model');
+    expect(launchCmd).toContain("'-c' 'model_reasoning_effort=\"high\"'");
+    expect(launchCmd).toContain("'--no-alt-screen'");
+  });
 
   it('codex worker does not pass model flag when no env var is set', async () => {
     const runtime = makeRuntime(cwd, 'codex');

@@ -15,6 +15,11 @@ import {
   validateCliBinaryPath,
   resolveClaudeWorkerModel,
   shouldUseClaudeBareMode,
+  collectInheritableTeamWorkerArgs,
+  isLowComplexityAgentType,
+  resolveAgentDefaultModel,
+  resolveAgentReasoningEffort,
+  resolveTeamWorkerLaunchArgs,
   _testInternals,
 } from '../model-contract.js';
 
@@ -323,6 +328,111 @@ describe('model-contract', () => {
 
     it('rejects invalid team names', () => {
       expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
+    });
+  });
+
+  describe('team worker launch arg normalization', () => {
+    it('collects inheritable bypass, model provider, reasoning, and model overrides', () => {
+      expect(collectInheritableTeamWorkerArgs([
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'sandbox_mode="danger-full-access"',
+        '-c',
+        'model_provider="localRouter"',
+        '-c',
+        'model_reasoning_effort="xhigh"',
+        '--model=gpt-5.5',
+      ])).toEqual([
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'model_provider="localRouter"',
+        '-c',
+        'model_reasoning_effort="xhigh"',
+        '--model',
+        'gpt-5.5',
+      ]);
+    });
+
+    it('keeps exactly one canonical model with env > inherited > fallback precedence', () => {
+      expect(resolveTeamWorkerLaunchArgs({
+        existingRaw: '--model env-a --model=env-b',
+        inheritedArgs: ['--model', 'inherited-model'],
+        fallbackModel: 'fallback-model',
+      })).toEqual(['--model', 'env-b']);
+
+      expect(resolveTeamWorkerLaunchArgs({
+        existingRaw: '--no-alt-screen --model',
+        inheritedArgs: ['--model', 'inherited-model'],
+        fallbackModel: 'fallback-model',
+      })).toEqual(['--no-alt-screen', '--model', 'inherited-model']);
+
+      expect(resolveTeamWorkerLaunchArgs({
+        existingRaw: '--model=',
+        fallbackModel: 'fallback-model',
+      })).toEqual(['--model', 'fallback-model']);
+    });
+
+    it('injects preferred reasoning only when explicit reasoning is absent', () => {
+      expect(resolveTeamWorkerLaunchArgs({
+        fallbackModel: 'gpt-spark',
+        preferredReasoning: 'low',
+      })).toEqual(['-c', 'model_reasoning_effort="low"', '--model', 'gpt-spark']);
+
+      const explicit = resolveTeamWorkerLaunchArgs({
+        existingRaw: '-c model_reasoning_effort="high"',
+        fallbackModel: 'gpt-spark',
+        preferredReasoning: 'low',
+      });
+      expect(explicit).toEqual(['-c', 'model_reasoning_effort="high"', '--model', 'gpt-spark']);
+      expect(explicit.join(' ').match(/model_reasoning_effort/g)?.length).toBe(1);
+    });
+
+    it('maps worker roles to OMC default model and reasoning lanes without model-name heuristics', () => {
+      vi.stubEnv('OMC_MODEL_LOW', 'omc-low-model');
+      vi.stubEnv('OMC_MODEL_MEDIUM', 'omc-medium-model');
+      vi.stubEnv('OMC_MODEL_HIGH', 'omc-high-model');
+
+      expect(isLowComplexityAgentType('explore')).toBe(true);
+      expect(isLowComplexityAgentType('style-reviewer')).toBe(true);
+      expect(isLowComplexityAgentType('executor')).toBe(false);
+      expect(isLowComplexityAgentType('executor-low')).toBe(true);
+
+      expect(resolveAgentReasoningEffort('explore')).toBe('low');
+      expect(resolveAgentReasoningEffort('executor')).toBe('medium');
+      expect(resolveAgentReasoningEffort('architect')).toBe('high');
+      expect(resolveAgentReasoningEffort('does-not-exist')).toBeUndefined();
+
+      expect(resolveAgentDefaultModel('explore')).toBe('omc-low-model');
+      expect(resolveAgentDefaultModel('executor')).toBe('omc-medium-model');
+      expect(resolveAgentDefaultModel('architect')).toBe('omc-high-model');
+      expect(resolveAgentDefaultModel('does-not-exist')).toBeUndefined();
+      vi.unstubAllEnvs();
+    });
+
+    it('buildLaunchArgs dedupes model flags and keeps codex reasoning config canonical', () => {
+      const args = buildLaunchArgs('codex', {
+        teamName: 't',
+        workerName: 'w',
+        cwd: '/tmp',
+        model: 'fallback-model',
+        extraFlags: [
+          '--model',
+          'explicit-model',
+          '-c',
+          'model_reasoning_effort="high"',
+          '--no-alt-screen',
+        ],
+      });
+
+      expect(args).toEqual([
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--model',
+        'explicit-model',
+        '--no-alt-screen',
+        '-c',
+        'model_reasoning_effort="high"',
+      ]);
+      expect(args.filter(arg => arg === '--model')).toHaveLength(1);
     });
   });
 
