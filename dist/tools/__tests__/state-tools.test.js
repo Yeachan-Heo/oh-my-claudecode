@@ -593,6 +593,28 @@ describe('state-tools', () => {
             expect(result.content[0].text).toContain('recovered session file');
             expect(existsSync(join(strandedDir, 'ralph-state.json'))).toBe(false);
         });
+        it('should clear ralph stop-hook runtime artifacts with session-scoped cancel cleanup', async () => {
+            const sessionId = 'ralph-stop-artifact-session';
+            const stateDir = join(TEST_DIR, '.omc', 'state');
+            const sessionDir = join(stateDir, 'sessions', sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, 'ralph-state.json'), JSON.stringify({ active: true, session_id: sessionId }));
+            writeFileSync(join(sessionDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 3 }));
+            writeFileSync(join(stateDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 3 }));
+            writeFileSync(join(stateDir, 'ralph-last-steer-at'), new Date().toISOString());
+            writeFileSync(join(stateDir, 'ralph-continue-steer.lock'), `${process.pid}`);
+            const result = await stateClearTool.handler({
+                mode: 'ralph',
+                session_id: sessionId,
+                workingDirectory: TEST_DIR,
+            });
+            expect(result.content[0].text).toContain('runtime artifact');
+            expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
+            expect(existsSync(join(sessionDir, 'ralph-stop-breaker.json'))).toBe(false);
+            expect(existsSync(join(stateDir, 'ralph-stop-breaker.json'))).toBe(false);
+            expect(existsSync(join(stateDir, 'ralph-last-steer-at'))).toBe(false);
+            expect(existsSync(join(stateDir, 'ralph-continue-steer.lock'))).toBe(false);
+        });
         it('should clear the owning session when the current session resumed ralph from a different conversation', async () => {
             const currentSessionId = 'resume-session-b';
             const ownerSessionId = 'resume-session-a';
@@ -613,6 +635,23 @@ describe('state-tools', () => {
             expect(existsSync(join(ownerDir, 'ralph-state.json'))).toBe(false);
             expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', currentSessionId, 'cancel-signal-state.json'))).toBe(true);
             expect(existsSync(join(ownerDir, 'cancel-signal-state.json'))).toBe(true);
+        });
+        it('should clear ralph runtime artifacts during broad cancel cleanup', async () => {
+            const sessionId = 'ralph-broad-runtime-cleanup';
+            const stateDir = join(TEST_DIR, '.omc', 'state');
+            const sessionDir = join(stateDir, 'sessions', sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(join(sessionDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 1 }));
+            writeFileSync(join(stateDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 1 }));
+            writeFileSync(join(stateDir, 'ralph-last-steer-at'), new Date().toISOString());
+            const result = await stateClearTool.handler({
+                mode: 'ralph',
+                workingDirectory: TEST_DIR,
+            });
+            expect(result.content[0].text).toContain('Locations cleared: 3');
+            expect(existsSync(join(sessionDir, 'ralph-stop-breaker.json'))).toBe(false);
+            expect(existsSync(join(stateDir, 'ralph-stop-breaker.json'))).toBe(false);
+            expect(existsSync(join(stateDir, 'ralph-last-steer-at'))).toBe(false);
         });
     });
     describe('session-scoped behavior', () => {

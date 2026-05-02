@@ -78,6 +78,27 @@ function getLegacyStateCandidates(mode: string, directory?: string): string[] {
   ];
 }
 
+function getRuntimeArtifactCandidates(mode: string, directory?: string, sessionId?: string): string[] {
+  const baseDir = resolveStateRoot(directory);
+  const stateRoot = join(getOmcRoot(baseDir), 'state');
+  const artifactNames = [
+    `${mode}-stop-breaker.json`,
+    `${mode}-last-steer-at`,
+    `${mode}-continue-steer.lock`,
+  ];
+  const candidateDirs = new Set<string>([stateRoot]);
+
+  if (sessionId) {
+    candidateDirs.add(join(stateRoot, 'sessions', sessionId));
+  } else {
+    for (const sid of listSessionIds(baseDir)) {
+      candidateDirs.add(join(stateRoot, 'sessions', sid));
+    }
+  }
+
+  return [...candidateDirs].flatMap((dir) => artifactNames.map((name) => join(dir, name)));
+}
+
 /**
  * Find session-scoped state files that belong to the requested session.
  *
@@ -221,6 +242,9 @@ export function clearModeStateFile(
 
   if (sessionId) {
     unlinkIfPresent(resolveFile(mode, directory, sessionId));
+    for (const artifactPath of getRuntimeArtifactCandidates(mode, baseDir, sessionId)) {
+      unlinkIfPresent(artifactPath);
+    }
   } else {
     for (const legacyPath of getLegacyStateCandidates(mode, baseDir)) {
       unlinkIfPresent(legacyPath);
@@ -228,6 +252,9 @@ export function clearModeStateFile(
 
     for (const sid of listSessionIds(baseDir)) {
       unlinkIfPresent(resolveSessionStatePath(mode, sid, baseDir));
+    }
+    for (const artifactPath of getRuntimeArtifactCandidates(mode, baseDir)) {
+      unlinkIfPresent(artifactPath);
     }
   }
 

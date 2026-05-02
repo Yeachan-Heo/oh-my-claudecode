@@ -213,6 +213,51 @@ function clearSessionOwnedStateCandidates(
   return { cleared, hadFailure, paths };
 }
 
+function getModeRuntimeArtifactNames(mode: StateToolMode): string[] {
+  return [
+    `${mode}-stop-breaker.json`,
+    `${mode}-last-steer-at`,
+    `${mode}-continue-steer.lock`,
+  ];
+}
+
+function clearModeRuntimeArtifacts(
+  mode: StateToolMode,
+  root: string,
+  sessionId?: string,
+): { cleared: number; hadFailure: boolean } {
+  let cleared = 0;
+  let hadFailure = false;
+  const stateRoot = join(getOmcRoot(root), 'state');
+  const candidateDirs = new Set<string>([stateRoot]);
+
+  if (sessionId) {
+    candidateDirs.add(join(stateRoot, 'sessions', sessionId));
+  } else {
+    for (const sid of listSessionIds(root)) {
+      candidateDirs.add(join(stateRoot, 'sessions', sid));
+    }
+  }
+
+  for (const dir of candidateDirs) {
+    for (const artifactName of getModeRuntimeArtifactNames(mode)) {
+      const artifactPath = join(dir, artifactName);
+      if (!existsSync(artifactPath)) {
+        continue;
+      }
+
+      try {
+        unlinkSync(artifactPath);
+        cleared++;
+      } catch {
+        hadFailure = true;
+      }
+    }
+  }
+
+  return { cleared, hadFailure };
+}
+
 function writeSessionCancelSignal(
   root: string,
   sessionId: string,
@@ -568,6 +613,7 @@ export const stateClearTool: ToolDefinition<{
         for (const teamStatePath of findSessionOwnedStateFiles('team', sessionId, root)) {
           collectTeamNamesForCleanup(teamStatePath);
         }
+        const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         writeSessionCancelSignal(root, sessionId, mode);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
@@ -587,6 +633,9 @@ export const stateClearTool: ToolDefinition<{
                 }
               }
               writeSessionCancelSignal(root, ownerSessionId, mode);
+              const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
+              runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
+              runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
               clearModeState(mode as ExecutionMode, root, ownerSessionId);
               ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
               ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
@@ -599,6 +648,9 @@ export const stateClearTool: ToolDefinition<{
           }
           if (sessionCleanup.cleared > 0) {
             ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? '' : 's'}`);
+          }
+          if (runtimeCleanup.cleared > 0) {
+            ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
           }
           if (ownerSessionId) {
             ghostNoteParts.push(`cleared owning session: ${ownerSessionId}`);
@@ -619,7 +671,8 @@ export const stateClearTool: ToolDefinition<{
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
             !ownerSessionCleanup.hadFailure &&
-            !ownerLegacyCleanup.hadFailure
+            !ownerLegacyCleanup.hadFailure &&
+            !runtimeCleanup.hadFailure
           ) {
             return {
               content: [{
@@ -653,6 +706,9 @@ export const stateClearTool: ToolDefinition<{
               }
             }
             writeSessionCancelSignal(root, ownerSessionId, mode);
+            const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
+            runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
+            runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
             ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
             ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
           }
@@ -664,6 +720,9 @@ export const stateClearTool: ToolDefinition<{
         }
         if (sessionCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? '' : 's'}`);
+        }
+        if (runtimeCleanup.cleared > 0) {
+          ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
         }
         if (ownerSessionId) {
           ghostNoteParts.push(`cleared owning session: ${ownerSessionId}`);
@@ -682,7 +741,7 @@ export const stateClearTool: ToolDefinition<{
         return {
           content: [{
             type: 'text' as const,
-            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
           }]
         };
       }
@@ -711,6 +770,7 @@ export const stateClearTool: ToolDefinition<{
           } catch { /* best-effort */ }
         }
       }
+      const runtimeCleanup = clearModeRuntimeArtifacts(mode, root);
       let clearedCount = 0;
       const errors: string[] = [];
       if (mode === 'team') {
@@ -733,6 +793,10 @@ export const stateClearTool: ToolDefinition<{
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push('legacy path');
+      }
+      clearedCount += runtimeCleanup.cleared;
+      if (runtimeCleanup.hadFailure) {
+        errors.push('runtime artifacts');
       }
 
       // Clear all session-scoped state files

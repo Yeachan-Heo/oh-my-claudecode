@@ -370,6 +370,26 @@ describe('mode-state-io', () => {
       expect(existsSync(sessionBPath)).toBe(false);
     });
 
+    it('should remove mode runtime artifacts during session-scoped clear', () => {
+      const stateDir = join(tempDir, '.omc', 'state');
+      const sessionDir = join(stateDir, 'sessions', 'session-runtime-cleanup');
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(join(sessionDir, 'ralph-state.json'), JSON.stringify({ active: true }));
+      writeFileSync(join(sessionDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 2 }));
+      writeFileSync(join(stateDir, 'ralph-stop-breaker.json'), JSON.stringify({ count: 2 }));
+      writeFileSync(join(stateDir, 'ralph-last-steer-at'), new Date().toISOString());
+      writeFileSync(join(stateDir, 'ralph-continue-steer.lock'), `${process.pid}`);
+
+      const result = clearModeStateFile('ralph', tempDir, 'session-runtime-cleanup');
+
+      expect(result).toBe(true);
+      expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
+      expect(existsSync(join(sessionDir, 'ralph-stop-breaker.json'))).toBe(false);
+      expect(existsSync(join(stateDir, 'ralph-stop-breaker.json'))).toBe(false);
+      expect(existsSync(join(stateDir, 'ralph-last-steer-at'))).toBe(false);
+      expect(existsSync(join(stateDir, 'ralph-continue-steer.lock'))).toBe(false);
+    });
+
     it('should return true when file does not exist (already absent)', () => {
       const result = clearModeStateFile('ralph', tempDir);
       expect(result).toBe(true);
