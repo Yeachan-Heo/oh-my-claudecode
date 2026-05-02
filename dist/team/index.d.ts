@@ -43,6 +43,8 @@ export { resolveCanonicalTeamStateRoot, resolveWorkerTeamStateRoot, resolveWorke
 export type { TeamWorkerIdentityRef, WorkerTeamStateRootResolution, WorkerTeamStateRootSource, } from './state-root.js';
 export { TEAM_REMINDER_INTENTS, isTeamReminderIntent, resolveLeaderNudgeIntent, } from './reminder-intents.js';
 export type { TeamReminderDirective, TeamReminderIntent } from './reminder-intents.js';
+export { parseTeamDagHandoff, readTeamDagHandoffForLatestPlan, } from './dag-schema.js';
+export type { TeamDagHandoff, TeamDagNode, TeamDagResolution, TeamDagWorkerCountSource, TeamDagWorkerPolicy, } from './dag-schema.js';
 export { checkSentinelReadiness, waitForSentinelReadiness, } from './sentinel-gate.js';
 export type { SentinelReadinessOptions, SentinelGateResult, SentinelWaitOptions, SentinelWaitResult, } from './sentinel-gate.js';
 export type { CliAgentType, CliAgentContract, WorkerLaunchConfig } from './model-contract.js';

@@ -194,6 +194,18 @@ export {
 export type { TeamReminderDirective, TeamReminderIntent } from './reminder-intents.js';
 
 export {
+  parseTeamDagHandoff,
+  readTeamDagHandoffForLatestPlan,
+} from './dag-schema.js';
+export type {
+  TeamDagHandoff,
+  TeamDagNode,
+  TeamDagResolution,
+  TeamDagWorkerCountSource,
+  TeamDagWorkerPolicy,
+} from './dag-schema.js';
+
+export {
   checkSentinelReadiness,
   waitForSentinelReadiness,
 } from './sentinel-gate.js';

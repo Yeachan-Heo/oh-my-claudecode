@@ -26,6 +26,7 @@ export { isPathAllowed, isCommandAllowed, formatPermissionInstructions, getDefau
 export { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 export { resolveCanonicalTeamStateRoot, resolveWorkerTeamStateRoot, resolveWorkerNotifyTeamStateRoot, resolveWorkerTeamStateRootPath, resolveWorkerNotifyTeamStateRootPath, } from './state-root.js';
 export { TEAM_REMINDER_INTENTS, isTeamReminderIntent, resolveLeaderNudgeIntent, } from './reminder-intents.js';
+export { parseTeamDagHandoff, readTeamDagHandoffForLatestPlan, } from './dag-schema.js';
 export { checkSentinelReadiness, waitForSentinelReadiness, } from './sentinel-gate.js';
 export { getContract, isCliAvailable as isCliAvailableForAgent, validateCliAvailable as validateCliAvailableForAgent, buildLaunchArgs, buildWorkerCommand, parseCliOutput, 
 // Deprecated backward-compat exports kept for downstream consumers.
