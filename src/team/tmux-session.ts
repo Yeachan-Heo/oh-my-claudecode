@@ -11,7 +11,14 @@ import { existsSync } from 'fs';
 import { join, basename, isAbsolute, win32 } from 'path';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
-import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
+import {
+  tmuxExec,
+  tmuxExecAsync,
+  tmuxShell,
+  tmuxCmdAsync,
+  PANE_ID_VALIDATOR,
+  TMUX_CONTEXT_PATTERN,
+} from '../cli/tmux-utils.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -485,7 +492,7 @@ export async function createTeamSession(
   // Prefer the invoking pane from environment to avoid focus races when users
   // switch tmux windows during startup (issue #966).
   const envPaneIdRaw = (process.env.TMUX_PANE ?? '').trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : '';
+  const envPaneId = PANE_ID_VALIDATOR.test(envPaneIdRaw) ? envPaneIdRaw : '';
   let sessionAndWindow = '';
   let leaderPaneId = envPaneId;
   let sessionMode: TeamSessionMode = inTmux ? 'split-pane' : 'detached-session';
@@ -502,7 +509,7 @@ export async function createTeamSession(
       '-c', cwd,
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
-    const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
+    const detachedMatch = detachedLine.match(TMUX_CONTEXT_PATTERN);
     if (!detachedMatch) {
       throw new Error(`Failed to create detached tmux session: "${detachedLine}"`);
     }
@@ -528,7 +535,7 @@ export async function createTeamSession(
       'display-message', '-p', '#S:#I #{pane_id}',
     ]);
     const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+    const contextMatch = contextLine.match(TMUX_CONTEXT_PATTERN);
     if (!contextMatch) {
       throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
     }
@@ -546,7 +553,7 @@ export async function createTeamSession(
       '-c', cwd,
     ]);
     const newWindowLine = newWindowResult.stdout.trim();
-    const newWindowMatch = newWindowLine.match(/^(\S+)\s+(%\d+)$/);
+    const newWindowMatch = newWindowLine.match(TMUX_CONTEXT_PATTERN);
     if (!newWindowMatch) {
       throw new Error(`Failed to create team tmux window: "${newWindowLine}"`);
     }
@@ -969,7 +976,7 @@ export async function killWorkerPanes(opts: {
 }
 
 function isPaneId(value: string | undefined): value is string {
-  return typeof value === 'string' && /^%\d+$/.test(value.trim());
+  return typeof value === 'string' && PANE_ID_VALIDATOR.test(value.trim());
 }
 
 function dedupeWorkerPaneIds(paneIds: Array<string | undefined>, leaderPaneId?: string): string[] {

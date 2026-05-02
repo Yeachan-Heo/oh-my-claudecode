@@ -33,6 +33,8 @@ import {
   wrapWithLoginShell,
   quoteShellArg,
   sanitizeTmuxToken,
+  PANE_ID_VALIDATOR,
+  TMUX_CONTEXT_PATTERN,
 } from '../tmux-utils.js';
 
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -470,5 +472,61 @@ describe('HUD pane tmux server targeting', () => {
     const lastCall = mockedExecFileSync.mock.calls.at(-1);
     expect(lastCall?.[1]).toEqual(['kill-pane', '-t', '%9']);
     expect(lastCall?.[2]?.env?.TMUX).toBe('/tmp/tmux-100/default,123,0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pane id format
+//
+// Real tmux uses %<integer>. cmux's `__tmux-compat` shim (running OMC inside a
+// cmux workspace) returns %<UUID>. Both must validate as pane ids and parse
+// out of `display-message -p '#S:#I #{pane_id}'` output, otherwise OMC's team
+// bootstrap fails with `Failed to resolve tmux context: "..."`.
+// ---------------------------------------------------------------------------
+
+describe('PANE_ID_VALIDATOR', () => {
+  it('accepts numeric tmux pane ids', () => {
+    expect(PANE_ID_VALIDATOR.test('%0')).toBe(true);
+    expect(PANE_ID_VALIDATOR.test('%3')).toBe(true);
+    expect(PANE_ID_VALIDATOR.test('%9999')).toBe(true);
+  });
+
+  it('accepts cmux UUID-style pane ids', () => {
+    expect(PANE_ID_VALIDATOR.test('%7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A')).toBe(true);
+    expect(PANE_ID_VALIDATOR.test('%abcdef01-2345-6789-abcd-ef0123456789')).toBe(true);
+  });
+
+  it('rejects values that do not start with %', () => {
+    expect(PANE_ID_VALIDATOR.test('3')).toBe(false);
+    expect(PANE_ID_VALIDATOR.test('@2')).toBe(false);
+    expect(PANE_ID_VALIDATOR.test('')).toBe(false);
+  });
+
+  it('rejects values containing whitespace or shell metacharacters', () => {
+    expect(PANE_ID_VALIDATOR.test('%3 ')).toBe(false);
+    expect(PANE_ID_VALIDATOR.test('%3;rm')).toBe(false);
+    expect(PANE_ID_VALIDATOR.test('%3 #4')).toBe(false);
+  });
+});
+
+describe('TMUX_CONTEXT_PATTERN', () => {
+  it('parses numeric "<session>:<window> <pane_id>" output', () => {
+    const match = 'omx:4 %42'.match(TMUX_CONTEXT_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toBe('omx:4');
+    expect(match?.[2]).toBe('%42');
+  });
+
+  it('parses cmux UUID "<session>:<window> <pane_id>" output', () => {
+    const match = 'cmux:0 %7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A'.match(TMUX_CONTEXT_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toBe('cmux:0');
+    expect(match?.[2]).toBe('%7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A');
+  });
+
+  it('rejects malformed lines', () => {
+    expect('omx:4'.match(TMUX_CONTEXT_PATTERN)).toBeNull();
+    expect('omx:4 42'.match(TMUX_CONTEXT_PATTERN)).toBeNull();
+    expect('omx:4 %42 extra'.match(TMUX_CONTEXT_PATTERN)).toBeNull();
   });
 });

@@ -9,16 +9,16 @@
  * - Text inputs are sanitized to prevent command injection
  */
 
-import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
+import { tmuxExec, tmuxSpawn, PANE_ID_VALIDATOR } from '../../cli/tmux-utils.js';
 import { getNewPaneTail } from './pane-fresh-capture.js';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
 
 /**
- * Validate tmux pane ID format to prevent command injection
- * Valid formats: %0, %1, %123, etc.
+ * Validate tmux pane id format to prevent command injection.
+ * Accepts real-tmux %<integer> and cmux's %<UUID> from `__tmux-compat`.
  */
 function isValidPaneId(paneId: string): boolean {
-  return /^%\d+$/.test(paneId);
+  return PANE_ID_VALIDATOR.test(paneId);
 }
 
 /**
