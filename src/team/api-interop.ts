@@ -42,7 +42,6 @@ import {
   teamWriteTaskApproval,
   type TeamMonitorSnapshotState,
 } from './team-ops.js';
-import { readTeamEvents } from './events.js';
 import { queueBroadcastMailboxMessage, queueDirectMailboxMessage, type DispatchOutcome } from './mcp-comm.js';
 import { injectToLeaderPane, sendToWorker } from './tmux-session.js';
 import { listDispatchRequests, markDispatchRequestDelivered, markDispatchRequestNotified } from './dispatch-queue.js';
@@ -207,7 +206,7 @@ function findLatestWorkerIdleEvent(events: ApiTeamEvent[], workerName: string): 
 
 function summarizeEvent(event: ApiTeamEvent | null): Record<string, unknown> | null {
   if (!event) return null;
-  const record = event as Record<string, unknown>;
+  const record = event as unknown as Record<string, unknown>;
   return {
     event_id: event.event_id,
     type: event.type,
@@ -258,6 +257,7 @@ function buildStallState(
   summary: Awaited<ReturnType<typeof teamGetSummary>>,
   snapshot: TeamMonitorSnapshotState | null,
   recentEvents: ApiTeamEvent[],
+  pendingLeaderDispatchCount: number,
 ): Record<string, unknown> {
   const idleState = buildIdleState(teamName, summary, snapshot, recentEvents);
   const workerNames = listTeamWorkerNames(summary, snapshot);
@@ -267,23 +267,25 @@ function buildStallState(
   const liveWorkers = workerNames.filter(
     (workerName) => summary?.workers.find((worker) => worker.name === workerName)?.alive !== false,
   );
-  const teamStalled = stalledWorkers.length > 0 || (deadWorkers.length > 0 && pendingTaskCount > 0);
+  const leaderAttentionPending = pendingLeaderDispatchCount > 0;
+  const teamStalled = stalledWorkers.length > 0 || leaderAttentionPending || (deadWorkers.length > 0 && pendingTaskCount > 0);
   const reasons: string[] = [];
   if (stalledWorkers.length > 0) reasons.push(`workers_non_reporting:${stalledWorkers.join(',')}`);
   if (deadWorkers.length > 0 && pendingTaskCount > 0) reasons.push(`dead_workers_with_pending_work:${deadWorkers.join(',')}`);
+  if (pendingLeaderDispatchCount > 0) reasons.push('leader_attention_pending:leader_dispatch_pending');
 
   return {
     team_name: teamName,
     team_stalled: teamStalled,
     leader_stale: false,
-    leader_attention_pending: false,
+    leader_attention_pending: leaderAttentionPending,
     leader_decision_state: 'still_actionable',
     stalled_workers: stalledWorkers,
     dead_workers: deadWorkers,
     live_workers: liveWorkers,
     pending_task_count: pendingTaskCount,
     unread_leader_message_count: 0,
-    pending_leader_dispatch_count: 0,
+    pending_leader_dispatch_count: pendingLeaderDispatchCount,
     all_workers_idle: idleState.all_workers_idle,
     idle_workers: idleState.idle_workers,
     reasons,
@@ -1171,14 +1173,15 @@ export async function executeTeamApiOperation(
       case 'read-stall-state': {
         const teamName = String(args.team_name || '').trim();
         if (!teamName) return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name is required' } };
-        const [summary, snapshot, events] = await Promise.all([
+        const [summary, snapshot, events, pendingLeaderDispatch] = await Promise.all([
           teamGetSummary(teamName, cwd),
           teamReadMonitorSnapshot(teamName, cwd),
           readTeamEvents(teamName, cwd),
+          listDispatchRequests(teamName, cwd, { status: 'pending', to_worker: 'leader-fixed' }),
         ]);
         if (!summary) return { ok: false, operation, error: { code: 'team_not_found', message: 'team_not_found' } };
         const recentEvents = selectRecentEvents(events);
-        return { ok: true, operation, data: buildStallState(teamName, summary, snapshot, recentEvents) };
+        return { ok: true, operation, data: buildStallState(teamName, summary, snapshot, recentEvents, pendingLeaderDispatch.length) };
       }
       case 'get-summary': {
         const teamName = String(args.team_name || '').trim();
