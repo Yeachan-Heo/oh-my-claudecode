@@ -6,6 +6,7 @@ import {
   readPlanningArtifacts,
   isPlanningComplete,
   readApprovedExecutionLaunchHint,
+  readApprovedExecutionLaunchHintOutcome,
 } from "../artifacts.js";
 import {
   planningArtifactTimestamp,
@@ -424,6 +425,46 @@ describe("planning/artifacts", () => {
       expect(result!.agentType).toBe("claude");
       expect(result!.linkedRalph).toBe(false);
       expect(result!.sourcePath).toContain("prd-feature.md");
+    });
+
+    it("marks launch hints incomplete when planning-complete validation is required", () => {
+      writeFileSync(
+        join(plansDir, "prd-feature.md"),
+        [
+          "# PRD",
+          "",
+          "## Acceptance criteria",
+          "- done",
+          "",
+          "## Requirement coverage map",
+          "- req -> impl",
+          "",
+          'omc team 3:claude "implement auth"',
+          "",
+        ].join("\n"),
+      );
+
+      expect(readApprovedExecutionLaunchHint(testDir, "team")!.task).toBe(
+        "implement auth",
+      );
+      expect(
+        readApprovedExecutionLaunchHintOutcome(testDir, "team", {
+          requirePlanningComplete: true,
+        }),
+      ).toEqual({ status: "incomplete" });
+    });
+
+    it("resolves launch hints when required planning artifacts are complete", () => {
+      writeValidArtifacts();
+
+      const outcome = readApprovedExecutionLaunchHintOutcome(testDir, "team", {
+        requirePlanningComplete: true,
+      });
+
+      expect(outcome.status).toBe("resolved");
+      expect(outcome.status === "resolved" ? outcome.hint.task : null).toBe(
+        "implement auth",
+      );
     });
 
     it("extracts team launch hint without worker spec", () => {

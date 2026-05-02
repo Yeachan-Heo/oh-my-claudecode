@@ -34,11 +34,13 @@ interface ApprovedExecutionLaunchHintReadOptions {
   prdPath?: string;
   task?: string;
   command?: string;
+  requirePlanningComplete?: boolean;
 }
 
 export type ApprovedExecutionLaunchHintOutcome =
   | { status: "absent" }
   | { status: "ambiguous" }
+  | { status: "incomplete" }
   | { status: "resolved"; hint: ApprovedExecutionLaunchHint };
 
 function readFileSafe(path: string): string | null {
@@ -80,6 +82,32 @@ function getPlansDirCandidates(cwd: string): string[] {
 
 function sortArtifactPathsDescending(paths: string[]): string[] {
   return [...paths].sort((a, b) => comparePlanningArtifactPaths(b, a));
+}
+
+function hasCompletePlanningPair(
+  prdPath: string,
+  matchingTestSpecPaths: string[],
+): boolean {
+  if (matchingTestSpecPaths.length === 0) {
+    return false;
+  }
+
+  const prd = readFileSafe(prdPath);
+  const testSpec = readFileSafe(matchingTestSpecPaths[0]);
+  if (!prd || !testSpec) {
+    return false;
+  }
+
+  return (
+    hasRequiredSections(prd, [
+      "Acceptance criteria",
+      "Requirement coverage map",
+    ]) &&
+    hasRequiredSections(testSpec, [
+      "Unit coverage",
+      "Verification mapping",
+    ])
+  );
 }
 
 /**
@@ -132,22 +160,7 @@ export function isPlanningComplete(artifacts: PlanningArtifacts): boolean {
     return false;
   }
 
-  const latestPrd = readFileSafe(latestPrdPath);
-  const latestTestSpec = readFileSafe(matchingTestSpecPaths[0]);
-  if (!latestPrd || !latestTestSpec) {
-    return false;
-  }
-
-  return (
-    hasRequiredSections(latestPrd, [
-      "Acceptance criteria",
-      "Requirement coverage map",
-    ]) &&
-    hasRequiredSections(latestTestSpec, [
-      "Unit coverage",
-      "Verification mapping",
-    ])
-  );
+  return hasCompletePlanningPair(latestPrdPath, matchingTestSpecPaths);
 }
 
 type LaunchHintSelection =
@@ -275,6 +288,12 @@ export function readApprovedExecutionLaunchHintOutcome(
   );
   if (selected.status === "ambiguous") return { status: "ambiguous" };
   if (selected.status !== "unique") return { status: "absent" };
+  if (
+    options.requirePlanningComplete &&
+    !hasCompletePlanningPair(prdPath, matchingTestSpecs)
+  ) {
+    return { status: "incomplete" };
+  }
 
   if (mode === "team") {
     return {

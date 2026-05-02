@@ -296,6 +296,34 @@ describe('team cli', () => {
     logSpy.mockRestore();
   });
 
+  it('legacy team alias fails closed for incomplete approved short follow-up hints', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-approved-incomplete-'));
+    const plansDir = join(cwd, '.omc', 'plans');
+    mkdirSync(plansDir, { recursive: true });
+    writeFileSync(
+      join(plansDir, 'prd-feature.md'),
+      [
+        '# PRD',
+        '',
+        '## Acceptance criteria',
+        '- done',
+        '',
+        '## Requirement coverage map',
+        '- req -> impl',
+        '',
+        'omc team 4:codex "execute draft plan"',
+        '',
+      ].join('\n'),
+    );
+
+    const { teamCommand } = await import('../team.js');
+    await expect(teamCommand(['3:claude', 'team', '--cwd', cwd, '--json']))
+      .rejects.toThrow('approved_execution_hint_incomplete:team');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
   it('legacy team alias fails closed for ambiguous approved short follow-up hints', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-approved-ambiguous-'));
     const plansDir = join(cwd, '.omc', 'plans');

@@ -1271,9 +1271,14 @@ function parseLegacyStartAlias(args: string[]): TeamLegacyStartArgs | null {
 
   const shortFollowup = ['team', '/team', 'team please', 'run team', 'start team'].includes(task.toLowerCase());
   if (shortFollowup) {
-    const approvedHintOutcome = readApprovedExecutionLaunchHintOutcome(cwd, 'team');
+    const approvedHintOutcome = readApprovedExecutionLaunchHintOutcome(cwd, 'team', {
+      requirePlanningComplete: true,
+    });
     if (approvedHintOutcome.status === 'ambiguous') {
       throw new Error('approved_execution_hint_ambiguous:team');
+    }
+    if (approvedHintOutcome.status === 'incomplete') {
+      throw new Error('approved_execution_hint_incomplete:team');
     }
     if (approvedHintOutcome.status === 'resolved') {
       task = approvedHintOutcome.hint.task;
