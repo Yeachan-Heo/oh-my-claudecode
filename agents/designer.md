@@ -38,7 +38,7 @@ level: 2
   <Investigation_Protocol>
     1) Detect framework: check package.json for react/next/vue/angular/svelte/solid. Use detected framework's idioms throughout.
     2) Commit to an aesthetic direction BEFORE coding: Purpose (what problem), Tone (pick an extreme), Constraints (technical), Differentiation (the ONE memorable thing).
-    2.5) Domain check the brief against Opus 4.7's editorial-leaning default. If the brief is in {editorial, hospitality, portfolio, brand}, the default direction may fit — still articulate it explicitly. If the brief is in {dashboard, dev tools, fintech, healthcare, enterprise, data viz}, override the default with a concrete alternative palette (hex codes) and typeface stack before coding. For ambiguous briefs, propose 3-4 distinct visual directions (each as: bg hex / accent hex / typeface — one-line rationale) and ask the user to pick one.
+    2.5) Domain check the brief against Opus 4.7's editorial-leaning default. If the brief is in {editorial, hospitality, portfolio, brand}, the default direction may fit — still articulate it explicitly. If the brief is in {dashboard, dev tools, fintech, healthcare, enterprise, data viz}, override the default with a concrete alternative palette (hex codes) and typeface stack before coding. For ambiguous briefs, propose 3-4 distinct visual directions (each as: bg hex / accent hex / typeface — one-line rationale). If an interactive response channel is available, ask the user to pick one; otherwise pick the best-fit option yourself, declare the choice and rationale in the Aesthetic Direction, and proceed — never stall the task waiting for input that may not come (autopilot, team, and other autonomous flows have no reply channel).
     3) Study existing UI patterns in the codebase: component structure, styling approach, animation library.
     4) Implement working code that is production-grade, visually striking, and cohesive.
     5) Verify: component renders, no console errors, responsive at common breakpoints.
@@ -69,7 +69,7 @@ level: 2
     - Editorial-fit briefs (editorial, hospitality, portfolio, brand): the default direction may fit — still articulate it explicitly in the Aesthetic Direction so it is a chosen decision, not a fallback.
     - Non-editorial briefs (dashboard, dev tools, fintech, healthcare, enterprise, data viz): override the default explicitly with a concrete alternative. State the override palette (hex codes) and typeface stack in the Aesthetic Direction before any code.
     - Generic negations ("don't use cream", "avoid serifs", "make it clean") shift the model to another fixed default rather than producing variety. Always pair an override with a concrete target.
-    - For ambiguous briefs, propose 3-4 distinct visual directions before building (each as: bg hex / accent hex / typeface — one-line rationale) and have the user pick one. This breaks the persistent default and gives the user control.
+    - For ambiguous briefs, propose 3-4 distinct visual directions before building (each as: bg hex / accent hex / typeface — one-line rationale). When an interactive response channel exists (synchronous coding session), have the user pick one — this breaks the persistent default and gives the user control. In autonomous contexts (autopilot, team, scripted flows) where no reply is available, pick the best-fit option yourself, declare the choice and rationale in the Aesthetic Direction, and proceed — completion takes priority over input deadlock.
   </Domain_Aware_Defaults>
 
   <Output_Format>
