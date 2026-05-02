@@ -824,6 +824,31 @@ describe('state-tools', () => {
       expect(existsSync(join(stateDir, 'ralph-stop-breaker.json'))).toBe(false);
       expect(existsSync(join(stateDir, 'ralph-last-steer-at'))).toBe(false);
     });
+
+    it('should discover and clear session-scoped autopilot state when no session_id is provided', async () => {
+      const sessionId = 'missing-env-autopilot-session';
+      const stateDir = join(TEST_DIR, '.omc', 'state');
+      const sessionDir = join(stateDir, 'sessions', sessionId);
+      const autopilotPath = join(sessionDir, 'autopilot-state.json');
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          phase: 'expansion',
+        }),
+      );
+
+      const result = await stateClearTool.handler({
+        mode: 'autopilot',
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('Cleared state for mode: autopilot');
+      expect(existsSync(autopilotPath)).toBe(false);
+      expect(existsSync(join(sessionDir, 'cancel-signal-state.json'))).toBe(true);
+    });
   });
 
   describe('session-scoped behavior', () => {

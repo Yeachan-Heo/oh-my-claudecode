@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
@@ -988,6 +988,29 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.decision).toBeUndefined();
     });
 
+    it("cleans orphaned unspecified autopilot routing echo state instead of reinforcing in mjs script", () => {
+      const sessionId = "autopilot-routing-echo-orphan-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          originalIdea: "[MAGIC KEYWORD: AUTOPILOT]",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
+    });
+
 
     it("returns decision: block when autopilot awaiting_confirmation is stale", () => {
       const sessionId = "autopilot-stale-awaiting-confirmation-mjs";
@@ -1314,6 +1337,29 @@ describe("Stop Hook Blocking Contract", () => {
 
       expect(output.decision).toBe("block");
       expect(output.reason).toContain("ULTRAWORK");
+    });
+
+    it("cleans orphaned unspecified autopilot routing echo state instead of reinforcing in cjs script", () => {
+      const sessionId = "autopilot-routing-echo-orphan-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          originalIdea: "[MAGIC KEYWORD: AUTOPILOT]",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
     });
 
     it("ignores legacy local state when OMC_STATE_DIR is set", () => {

@@ -390,6 +390,36 @@ function isAwaitingConfirmation(state) {
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
+function isOrphanedAutopilotRoutingEchoState(state) {
+  if (!state || typeof state !== "object") return false;
+
+  const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+  if (phase && phase !== "unspecified") return false;
+
+  const promptText = [
+    state.originalIdea,
+    state.original_idea,
+    state.prompt,
+    state.task_description,
+  ]
+    .filter((value) => typeof value === "string")
+    .join("\n")
+    .trim();
+
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+}
+
+function clearLoadedStateFile(loaded) {
+  const statePath = loaded?.path;
+  if (!statePath || !existsSync(statePath)) return;
+
+  try {
+    unlinkSync(statePath);
+  } catch {
+    // Best effort: failing to clean an orphan should not re-arm stop blocking.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Stop Breaker helpers (shared by team pipeline and ralplan)
 // ---------------------------------------------------------------------------
@@ -958,6 +988,12 @@ async function main() {
     }
 
     // Priority 2: Autopilot (high-level orchestration)
+    if (isOrphanedAutopilotRoutingEchoState(autopilot.state)) {
+      clearLoadedStateFile(autopilot);
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
     if (autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) && !isStaleState(autopilot.state) && isSessionMatch(autopilot.state, sessionId)) {
       const phase = autopilot.state.phase || "unknown";
       if (phase !== "complete") {

@@ -114,6 +114,22 @@ function isAwaitingConfirmation(state) {
     }
     return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
+function isOrphanedRoutingEchoState(state) {
+    const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+    if (phase && phase !== "unspecified")
+        return false;
+    const stateRecord = state;
+    const promptText = [
+        stateRecord.originalIdea,
+        stateRecord.original_idea,
+        stateRecord.prompt,
+        stateRecord.task_description,
+    ]
+        .filter((value) => typeof value === "string")
+        .join("\n")
+        .trim();
+    return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+}
 /**
  * Get the next phase after current phase
  */
@@ -148,6 +164,9 @@ export async function checkAutopilot(sessionId, directory) {
         return null;
     }
     if (isAwaitingConfirmation(state)) {
+        return null;
+    }
+    if (isOrphanedRoutingEchoState(state)) {
         return null;
     }
     // Check hard max iterations (global security limit)

@@ -180,6 +180,24 @@ function isAwaitingConfirmation(state: unknown): boolean {
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
+function isOrphanedRoutingEchoState(state: AutopilotState): boolean {
+  const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+  if (phase && phase !== "unspecified") return false;
+
+  const stateRecord = state as unknown as Record<string, unknown>;
+  const promptText = [
+    stateRecord.originalIdea,
+    stateRecord.original_idea,
+    stateRecord.prompt,
+    stateRecord.task_description,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n")
+    .trim();
+
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+}
+
 /**
  * Get the next phase after current phase
  */
@@ -221,6 +239,10 @@ export async function checkAutopilot(
   }
 
   if (isAwaitingConfirmation(state)) {
+    return null;
+  }
+
+  if (isOrphanedRoutingEchoState(state)) {
     return null;
   }
 
