@@ -17,6 +17,28 @@ import {
 import { basename, isAbsolute, win32 as win32Path } from 'path';
 import { promisify } from 'util';
 
+// ── tmux pane id format ──────────────────────────────────────────────────────
+
+/**
+ * Regex source matching a single tmux pane id.
+ *
+ * Real tmux uses `%<integer>` (e.g. `%3`). cmux's `__tmux-compat` shim returns
+ * `%<UUID>` (e.g. `%7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A`) so OMC can run as a
+ * teams leader inside cmux workspaces. Accept either: `%` followed by word
+ * characters and dashes.
+ */
+export const PANE_ID_SOURCE = '%[\\w-]+';
+
+/** Strict full-string validator for a single pane id token. */
+export const PANE_ID_VALIDATOR = new RegExp(`^${PANE_ID_SOURCE}$`);
+
+/**
+ * Parser for output of `display-message -p '#S:#I #{pane_id}'` (and
+ * shape-equivalent commands like `new-session -P -F '#S:0 #{pane_id}'`).
+ * Captures `<session>:<window>` in group 1 and `<pane_id>` in group 2.
+ */
+export const TMUX_CONTEXT_PATTERN = new RegExp(`^(\\S+)\\s+(${PANE_ID_SOURCE})$`);
+
 // ── tmux environment & execution wrappers ────────────────────────────────────
 
 export interface TmuxExecOptions {

@@ -10,16 +10,16 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { tmuxExec } from '../../cli/tmux-utils.js';
+import { tmuxExec, PANE_ID_VALIDATOR } from '../../cli/tmux-utils.js';
 
 const STATE_FILE = 'pane-tail-positions.json';
 
 /** Default maximum new lines to surface per capture. */
 const DEFAULT_MAX_LINES = 15;
 
-/** Valid tmux pane ID format: %0, %1, %123, etc. */
+/** Valid tmux pane id format: %<integer> from real tmux, or %<UUID> from cmux. */
 function isValidPaneId(paneId: string): boolean {
-  return /^%\d+$/.test(paneId);
+  return PANE_ID_VALIDATOR.test(paneId);
 }
 
 type PaneTailState = Record<string, number>;
