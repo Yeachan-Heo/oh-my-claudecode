@@ -8,7 +8,12 @@
  */
 
 import { readdirSync, readFileSync, existsSync } from "fs";
-import { basename, join } from "path";
+import { join } from "path";
+import {
+  comparePlanningArtifactPaths,
+  selectLatestPlanningArtifactPath,
+  selectMatchingTestSpecsForPrd,
+} from "./artifact-names.js";
 
 export interface PlanningArtifacts {
   prdPaths: string[];
@@ -24,6 +29,17 @@ export interface ApprovedExecutionLaunchHint {
   linkedRalph?: boolean;
   sourcePath: string;
 }
+
+interface ApprovedExecutionLaunchHintReadOptions {
+  prdPath?: string;
+  task?: string;
+  command?: string;
+}
+
+export type ApprovedExecutionLaunchHintOutcome =
+  | { status: "absent" }
+  | { status: "ambiguous" }
+  | { status: "resolved"; hint: ApprovedExecutionLaunchHint };
 
 function readFileSafe(path: string): string | null {
   try {
@@ -63,14 +79,7 @@ function getPlansDirCandidates(cwd: string): string[] {
 }
 
 function sortArtifactPathsDescending(paths: string[]): string[] {
-  return [...paths].sort((a, b) => {
-    const fileCompare = basename(b).localeCompare(basename(a));
-    if (fileCompare !== 0) {
-      return fileCompare;
-    }
-
-    return b.localeCompare(a);
-  });
+  return [...paths].sort((a, b) => comparePlanningArtifactPaths(b, a));
 }
 
 /**
@@ -113,12 +122,18 @@ export function readPlanningArtifacts(cwd: string): PlanningArtifacts {
  * the required non-empty quality-gate sections.
  */
 export function isPlanningComplete(artifacts: PlanningArtifacts): boolean {
-  if (artifacts.prdPaths.length === 0 || artifacts.testSpecPaths.length === 0) {
+  const latestPrdPath = selectLatestPlanningArtifactPath(artifacts.prdPaths);
+  const matchingTestSpecPaths = selectMatchingTestSpecsForPrd(
+    latestPrdPath,
+    artifacts.testSpecPaths,
+  );
+
+  if (!latestPrdPath || matchingTestSpecPaths.length === 0) {
     return false;
   }
 
-  const latestPrd = readFileSafe(artifacts.prdPaths[0]);
-  const latestTestSpec = readFileSafe(artifacts.testSpecPaths[0]);
+  const latestPrd = readFileSafe(latestPrdPath);
+  const latestTestSpec = readFileSafe(matchingTestSpecPaths[0]);
   if (!latestPrd || !latestTestSpec) {
     return false;
   }
@@ -135,18 +150,80 @@ export function isPlanningComplete(artifacts: PlanningArtifacts): boolean {
   );
 }
 
-/**
- * Regex patterns for extracting omc/omx team/ralph launch commands from PRD markdown.
- *
- * Matches lines like:
- *   omc team 3:claude "implement the feature"
- *   omx team ".omx/plans/ralplan-feature.md"
- *   omc team 2:codex "fix the bug" --linked-ralph
- *   omx ralph ".omx/plans/ralplan-feature.md"
- */
-const TEAM_LAUNCH_RE =
-  /\bom[cx]\s+team\s+(?:(\d+):(\w+)\s+)?"([^"]+)"((?:\s+--[\w-]+)*)/;
-const RALPH_LAUNCH_RE = /\bom[cx]\s+ralph\s+"([^"]+)"((?:\s+--[\w-]+)*)/;
+type LaunchHintSelection =
+  | { status: "no-match" }
+  | { status: "ambiguous" }
+  | {
+      status: "unique";
+      command: string;
+      task: string;
+      workerCount?: number;
+      agentType?: string;
+      linkedRalph: boolean;
+    };
+
+function decodeQuotedValue(raw: string): string | null {
+  const normalized = raw.trim();
+  if (!normalized) return null;
+  try {
+    return JSON.parse(normalized) as string;
+  } catch {
+    if (
+      (normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+      return normalized.slice(1, -1);
+    }
+    return null;
+  }
+}
+
+function launchHintPattern(mode: "team" | "ralph"): RegExp {
+  return mode === "team"
+    ? /(?<command>(?:om[cx]\s+team|\$team)(?:\s+ralph)?(?:\s+(?<count>\d+)(?::(?<role>[a-z][a-z0-9-]*))?)?\s+(?<task>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')(?<flags>(?:\s+--[\w-]+)*))/gi
+    : /(?<command>(?:om[cx]\s+ralph|\$ralph)\s+(?<task>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')(?<flags>(?:\s+--[\w-]+)*))/gi;
+}
+
+function collectLaunchHintMatches(
+  content: string,
+  mode: "team" | "ralph",
+): RegExpMatchArray[] {
+  return [...content.matchAll(launchHintPattern(mode))];
+}
+
+function selectLaunchHintMatch(
+  matches: RegExpMatchArray[],
+  normalizedTask?: string,
+  normalizedCommand?: string,
+): LaunchHintSelection {
+  const decodedMatches = matches.flatMap((match) => {
+    const command = match[0]?.trim();
+    const task = match.groups?.task ? decodeQuotedValue(match.groups.task) : null;
+    if (!command || task == null) return [];
+    const flags = match.groups?.flags ?? "";
+    const workerCount = match.groups?.count
+      ? Number.parseInt(match.groups.count, 10)
+      : undefined;
+
+    return [{
+      command,
+      task,
+      ...(workerCount == null ? {} : { workerCount }),
+      agentType: match.groups?.role || undefined,
+      linkedRalph: /\sralph(?:\s|$)/.test(command) || parseFlags(flags).linkedRalph,
+    }];
+  });
+
+  const matchesToConsider = normalizedCommand
+    ? decodedMatches.filter((match) => match.command === normalizedCommand)
+    : normalizedTask
+      ? decodedMatches.filter((match) => match.task.trim() === normalizedTask)
+      : decodedMatches;
+
+  if (matchesToConsider.length === 0) return { status: "no-match" };
+  if (matchesToConsider.length > 1) return { status: "ambiguous" };
+  return { status: "unique", ...matchesToConsider[0]! };
+}
 
 function parseFlags(flagStr: string): { linkedRalph: boolean } {
   return {
@@ -161,43 +238,67 @@ function parseFlags(flagStr: string): { linkedRalph: boolean } {
 export function readApprovedExecutionLaunchHint(
   cwd: string,
   mode: "team" | "ralph",
+  options: ApprovedExecutionLaunchHintReadOptions = {},
 ): ApprovedExecutionLaunchHint | null {
-  const artifacts = readPlanningArtifacts(cwd);
-  if (artifacts.prdPaths.length === 0) return null;
+  const outcome = readApprovedExecutionLaunchHintOutcome(cwd, mode, options);
+  return outcome.status === "resolved" ? outcome.hint : null;
+}
 
-  const prdPath = artifacts.prdPaths[0];
+export function readApprovedExecutionLaunchHintOutcome(
+  cwd: string,
+  mode: "team" | "ralph",
+  options: ApprovedExecutionLaunchHintReadOptions = {},
+): ApprovedExecutionLaunchHintOutcome {
+  const artifacts = readPlanningArtifacts(cwd);
+  if (artifacts.prdPaths.length === 0) return { status: "absent" };
+
+  const prdPath = options.prdPath
+    ? artifacts.prdPaths.includes(options.prdPath)
+      ? options.prdPath
+      : null
+    : selectLatestPlanningArtifactPath(artifacts.prdPaths);
+  const matchingTestSpecs = selectMatchingTestSpecsForPrd(
+    prdPath,
+    artifacts.testSpecPaths,
+  );
+  if (!prdPath) return { status: "absent" };
+  if (artifacts.testSpecPaths.length > 0 && matchingTestSpecs.length === 0) {
+    return { status: "absent" };
+  }
   const content = readFileSafe(prdPath);
-  if (!content) return null;
+  if (!content) return { status: "absent" };
+
+  const selected = selectLaunchHintMatch(
+    collectLaunchHintMatches(content, mode),
+    options.task?.trim(),
+    options.command?.trim(),
+  );
+  if (selected.status === "ambiguous") return { status: "ambiguous" };
+  if (selected.status !== "unique") return { status: "absent" };
 
   if (mode === "team") {
-    const match = TEAM_LAUNCH_RE.exec(content);
-    if (!match) return null;
-
-    const [fullMatch, workerCountStr, agentType, task, flagStr] = match;
-    const { linkedRalph } = parseFlags(flagStr ?? "");
-
     return {
-      mode: "team",
-      command: fullMatch.trim(),
-      task,
-      workerCount: workerCountStr ? parseInt(workerCountStr, 10) : undefined,
-      agentType: agentType || undefined,
-      linkedRalph,
-      sourcePath: prdPath,
+      status: "resolved",
+      hint: {
+        mode: "team",
+        command: selected.command,
+        task: selected.task,
+        workerCount: selected.workerCount,
+        agentType: selected.agentType,
+        linkedRalph: selected.linkedRalph,
+        sourcePath: prdPath,
+      },
     };
   }
 
-  const match = RALPH_LAUNCH_RE.exec(content);
-  if (!match) return null;
-
-  const [fullMatch, task, flagStr] = match;
-  const { linkedRalph } = parseFlags(flagStr ?? "");
-
   return {
-    mode: "ralph",
-    command: fullMatch.trim(),
-    task,
-    linkedRalph,
-    sourcePath: prdPath,
+    status: "resolved",
+    hint: {
+      mode: "ralph",
+      command: selected.command,
+      task: selected.task,
+      linkedRalph: selected.linkedRalph,
+      sourcePath: prdPath,
+    },
   };
 }
