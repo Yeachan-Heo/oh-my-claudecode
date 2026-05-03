@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { mkdir, readFile, symlink, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import {
@@ -100,7 +100,11 @@ export interface AutoresearchRunManifest {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  current_worker_started_at?: string | null;
+  consecutive_noop_iterations?: number;
 }
+
+export const AUTORESEARCH_NOOP_CAP_DEFAULT = 3;
 
 interface AutoresearchActiveRunState {
   schema_version: 1;
@@ -1275,6 +1279,85 @@ function validateAutoresearchCandidate(
   };
 }
 
+export function isCandidateArtifactFresh(
+  candidatePath: string,
+  workerStartedAt: string | null | undefined,
+): boolean {
+  if (!workerStartedAt) return true;
+  const startedMs = new Date(workerStartedAt).getTime();
+  if (!Number.isFinite(startedMs)) return true;
+  try {
+    return statSync(candidatePath).mtimeMs >= startedMs;
+  } catch {
+    return false;
+  }
+}
+
+async function failIterationAsNoop(
+  manifest: AutoresearchRunManifest,
+  projectRoot: string,
+  reason: string,
+  candidate?: AutoresearchCandidateArtifact,
+): Promise<AutoresearchDecisionStatus> {
+  const nextNoopCount = (manifest.consecutive_noop_iterations ?? 0) + 1;
+  manifest.consecutive_noop_iterations = nextNoopCount;
+
+  if (nextNoopCount > AUTORESEARCH_NOOP_CAP_DEFAULT) {
+    return failAutoresearchIteration(
+      manifest,
+      projectRoot,
+      `consecutive supervisor-noop cap exceeded (${nextNoopCount} > ${AUTORESEARCH_NOOP_CAP_DEFAULT}); last reason: ${reason}`,
+      candidate,
+    );
+  }
+
+  try {
+    resetToLastKeptCommit(manifest);
+  } catch {
+    // Reset failure must not escalate — soft-fail's intent is to keep the loop alive.
+  }
+
+  const artifactLayout = getAutoresearchMissionArtifactLayout(projectRoot, manifest.mission_slug, manifest.run_id);
+  const headCommit = (() => {
+    try {
+      return readGitShortHead(manifest.worktree_path);
+    } catch {
+      return manifest.last_kept_commit;
+    }
+  })();
+
+  await appendAutoresearchResultsRow(manifest.results_file, {
+    iteration: manifest.iteration,
+    commit: headCommit,
+    status: 'noop',
+    description: candidate?.description || `supervisor noop: ${reason}`,
+  });
+  await appendAutoresearchLedgerEntry(manifest.ledger_file, {
+    iteration: manifest.iteration,
+    kind: 'iteration',
+    decision: 'noop',
+    decision_reason: reason,
+    candidate_status: candidate?.status ?? 'candidate',
+    base_commit: candidate?.base_commit ?? manifest.last_kept_commit,
+    candidate_commit: candidate?.candidate_commit ?? null,
+    kept_commit: manifest.last_kept_commit,
+    keep_policy: manifest.keep_policy,
+    evaluator: null,
+    created_at: nowIso(),
+    notes: [...(candidate?.notes ?? []), `supervisor_noop:${reason}`],
+    description: candidate?.description || `supervisor noop: ${reason}`,
+  });
+  await appendDecisionLog(artifactLayout.decisionLogFile, {
+    iteration: manifest.iteration,
+    decision: 'noop',
+    description: candidate?.description || `supervisor noop: ${reason}`,
+    reason,
+    notes: [...(candidate?.notes ?? []), `supervisor_noop:${reason}`],
+  });
+  await writeRunManifest(manifest);
+  return 'noop';
+}
+
 async function failAutoresearchIteration(
   manifest: AutoresearchRunManifest,
   projectRoot: string,
@@ -1340,8 +1423,25 @@ export async function processAutoresearchCandidate(
     );
   }
 
+  if (!isCandidateArtifactFresh(manifest.candidate_file, manifest.current_worker_started_at)) {
+    return failIterationAsNoop(
+      manifest,
+      projectRoot,
+      '[stale-artifact] candidate.json mtime predates worker start; treating as noop iter',
+      candidate,
+    );
+  }
+
   const validation = validateAutoresearchCandidate(manifest, candidate);
   if ('reason' in validation) {
+    if (validation.reason.includes('does not match worktree HEAD')) {
+      return failIterationAsNoop(
+        manifest,
+        projectRoot,
+        `[desync-soft] ${validation.reason}`,
+        candidate,
+      );
+    }
     return failAutoresearchIteration(manifest, projectRoot, validation.reason, candidate);
   }
   candidate = validation.candidate;
@@ -1464,6 +1564,7 @@ export async function processAutoresearchCandidate(
   if (decision.keep) {
     manifest.last_kept_commit = readGitFullHead(manifest.worktree_path);
     manifest.last_kept_score = typeof evaluation.score === 'number' ? evaluation.score : manifest.last_kept_score;
+    manifest.consecutive_noop_iterations = 0;
   } else {
     resetToLastKeptCommit(manifest);
   }
