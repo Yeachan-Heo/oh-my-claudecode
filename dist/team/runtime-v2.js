@@ -727,14 +727,18 @@ export async function startTeamV2(config) {
         const taskId = String(i + 1);
         const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
         await mkdir(join(taskFilePath, '..'), { recursive: true });
+        const startupTask = config.tasks[i];
         await writeFile(taskFilePath, JSON.stringify({
             id: taskId,
-            subject: config.tasks[i].subject,
-            description: config.tasks[i].description,
+            subject: startupTask.subject,
+            description: startupTask.description,
             status: 'pending',
-            owner: null,
+            owner: startupTask.owner ?? null,
             result: null,
-            ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
+            ...(startupTask.blocked_by ? { blocked_by: startupTask.blocked_by, depends_on: startupTask.blocked_by } : {}),
+            ...(startupTask.role ? { role: startupTask.role } : {}),
+            ...(startupTask.delegation ? { delegation: startupTask.delegation } : {}),
+            version: 1,
             created_at: new Date().toISOString(),
         }, null, 2), 'utf-8');
     }
@@ -1179,6 +1183,7 @@ export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
     const tasks = await listTasksFromFiles(sanitized, cwd);
     const requeued = [];
     const deadSet = new Set(deadWorkerNames);
+    const config = await readTeamConfig(sanitized, cwd);
     for (const task of tasks) {
         if (task.status !== 'in_progress')
             continue;
@@ -1222,6 +1227,22 @@ export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
             task_id: task.id,
             reason: `requeue_dead_worker:${task.owner}`,
         }, cwd).catch(logEventFailure);
+    }
+    if (config && requeued.length > 0) {
+        let scopeChanged = false;
+        for (const worker of config.workers) {
+            if (deadSet.has(worker.name) || !Array.isArray(worker.task_scope))
+                continue;
+            for (const taskId of requeued) {
+                if (!worker.task_scope.includes(taskId)) {
+                    worker.task_scope.push(taskId);
+                    scopeChanged = true;
+                }
+            }
+        }
+        if (scopeChanged) {
+            await saveTeamConfig(config, cwd);
+        }
     }
     return requeued;
 }

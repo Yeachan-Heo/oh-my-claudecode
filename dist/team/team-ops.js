@@ -61,6 +61,31 @@ async function readJsonSafe(path) {
         return null;
     }
 }
+function includeTaskId(values, taskId) {
+    const next = [...(values ?? [])];
+    if (!next.includes(taskId))
+        next.push(taskId);
+    return next;
+}
+function assignCreatedTaskToWorkerScopes(cfg, taskId, owner) {
+    let changed = false;
+    for (const worker of cfg.workers) {
+        const isOwner = owner ? worker.name === owner : true;
+        if (!isOwner)
+            continue;
+        if (Array.isArray(worker.task_scope)) {
+            if (!worker.task_scope.includes(taskId)) {
+                worker.task_scope = includeTaskId(worker.task_scope, taskId);
+                changed = true;
+            }
+            if (owner && worker.name === owner && !worker.assigned_tasks.includes(taskId)) {
+                worker.assigned_tasks = includeTaskId(worker.assigned_tasks, taskId);
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
 function normalizeTask(task) {
     return { ...task, version: task.version ?? 1 };
 }
@@ -267,8 +292,9 @@ export async function teamCreateTask(teamName, task, cwd) {
             const taskPath = absPath(cwd, TeamPaths.tasks(teamName));
             await mkdir(taskPath, { recursive: true });
             await writeAtomic(join(taskPath, `task-${nextId}.json`), JSON.stringify(created, null, 2));
-            // Advance counter
+            // Advance counter and keep explicit worker task scopes in sync with dynamic work.
             cfg.next_task_id = Number(nextId) + 1;
+            assignCreatedTaskToWorkerScopes(cfg, nextId, task.owner);
             await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
             return created;
         });

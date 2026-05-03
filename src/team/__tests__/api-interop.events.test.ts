@@ -86,6 +86,56 @@ describe('team api event/idle/stall parity operations', () => {
     expect(data.events[0]).toMatchObject({ event_id: secondEventId, type: 'task_completed' });
   });
 
+  it('bridges legacy hook events into read/await operations', async () => {
+    const legacyEventsDir = join(cwd, '.omc', 'state', 'team', teamName, 'events');
+    await mkdir(legacyEventsDir, { recursive: true });
+    await writeFile(join(legacyEventsDir, 'events.ndjson'), [
+      JSON.stringify({
+        event_id: 'legacy-worker-idle-1',
+        team: teamName,
+        type: 'worker_idle',
+        worker: 'worker-1',
+        task_id: '1',
+        reason: 'state_transition:working->idle',
+        created_at: '2026-05-03T00:00:00.000Z',
+      }),
+      JSON.stringify({
+        event_id: 'legacy-leader-deferred-1',
+        team: teamName,
+        type: 'leader_notification_deferred',
+        worker: 'leader-fixed',
+        to_worker: 'leader-fixed',
+        reason: 'leader_pane_missing_deferred',
+        created_at: '2026-05-03T00:00:01.000Z',
+      }),
+    ].join('\n') + '\n');
+
+    const read = await executeTeamApiOperation('read-events', {
+      team_name: teamName,
+      wakeable_only: true,
+    }, cwd);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect((read.data as { events: Array<{ event_id: string; type: string }> }).events).toEqual([
+      expect.objectContaining({ event_id: 'legacy-worker-idle-1', type: 'worker_idle' }),
+      expect.objectContaining({ event_id: 'legacy-leader-deferred-1', type: 'leader_notification_deferred' }),
+    ]);
+
+    const awaited = await executeTeamApiOperation('await-event', {
+      team_name: teamName,
+      timeout_ms: 0,
+      poll_ms: 0,
+      type: 'leader_notification_deferred',
+      wakeable_only: true,
+    }, cwd);
+    expect(awaited.ok).toBe(true);
+    if (!awaited.ok) return;
+    expect(awaited.data).toMatchObject({
+      status: 'event',
+      event: { event_id: 'legacy-leader-deferred-1', type: 'leader_notification_deferred' },
+    });
+  });
+
   it('awaits matching events and returns timeout with cursor when none arrive', async () => {
     const timeout = await executeTeamApiOperation('await-event', {
       team_name: teamName,
