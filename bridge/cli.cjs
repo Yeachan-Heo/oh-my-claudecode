@@ -27328,7 +27328,10 @@ function isTerminalTeamTaskStatus(status) {
 function canTransitionTeamTaskStatus(from, to) {
   return TEAM_TASK_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
 }
-var TEAM_NAME_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN, TASK_ID_SAFE_PATTERN, TEAM_TASK_STATUSES, TEAM_TERMINAL_TASK_STATUSES, TEAM_TASK_STATUS_TRANSITIONS, TEAM_EVENT_TYPES, TEAM_TASK_APPROVAL_STATUSES;
+function isWakeableTeamEventType(type) {
+  return TEAM_WAKEABLE_EVENT_TYPES.has(type);
+}
+var TEAM_NAME_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN, TASK_ID_SAFE_PATTERN, TEAM_TASK_STATUSES, TEAM_TERMINAL_TASK_STATUSES, TEAM_TASK_STATUS_TRANSITIONS, TEAM_EVENT_TYPES, TEAM_WAKEABLE_EVENT_TYPES, TEAM_TASK_APPROVAL_STATUSES;
 var init_contracts = __esm({
   "src/team/contracts.ts"() {
     "use strict";
@@ -27379,6 +27382,25 @@ var init_contracts = __esm({
       "worker_stale_heartbeat",
       "worker_stale_stdout"
     ];
+    TEAM_WAKEABLE_EVENT_TYPES = /* @__PURE__ */ new Set([
+      "worker_state_changed",
+      "task_completed",
+      "task_failed",
+      "worker_stopped",
+      "message_received",
+      "leader_notification_deferred",
+      "all_workers_idle",
+      "team_leader_nudge",
+      "worker_integration_failed",
+      "worker_integration_attempt_requested",
+      "worker_merge_conflict",
+      "worker_cherry_pick_conflict",
+      "worker_rebase_conflict",
+      "worker_cross_rebase_conflict",
+      "worker_stale_diff",
+      "worker_stale_heartbeat",
+      "worker_stale_stdout"
+    ]);
     TEAM_TASK_APPROVAL_STATUSES = ["pending", "approved", "rejected"];
   }
 });
@@ -27708,6 +27730,29 @@ async function readJsonSafe3(path22) {
     return null;
   }
 }
+function includeTaskId(values, taskId) {
+  const next = [...values ?? []];
+  if (!next.includes(taskId)) next.push(taskId);
+  return next;
+}
+function assignCreatedTaskToWorkerScopes(cfg, taskId, owner) {
+  let changed = false;
+  for (const worker of cfg.workers) {
+    const isOwner = owner ? worker.name === owner : true;
+    if (!isOwner) continue;
+    if (Array.isArray(worker.task_scope)) {
+      if (!worker.task_scope.includes(taskId)) {
+        worker.task_scope = includeTaskId(worker.task_scope, taskId);
+        changed = true;
+      }
+      if (owner && worker.name === owner && !worker.assigned_tasks.includes(taskId)) {
+        worker.assigned_tasks = includeTaskId(worker.assigned_tasks, taskId);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
 function normalizeTask(task) {
   return { ...task, version: task.version ?? 1 };
 }
@@ -27892,6 +27937,7 @@ async function teamCreateTask(teamName, task, cwd2) {
       await (0, import_promises7.mkdir)(taskPath2, { recursive: true });
       await writeAtomic((0, import_node_path6.join)(taskPath2, `task-${nextId}.json`), JSON.stringify(created, null, 2));
       cfg.next_task_id = Number(nextId) + 1;
+      assignCreatedTaskToWorkerScopes(cfg, nextId, task.owner);
       await writeAtomic(absPath(cwd2, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
       return created;
     });
@@ -28899,17 +28945,44 @@ __export(events_exports, {
   readTeamEventsByType: () => readTeamEventsByType,
   waitForTeamEvent: () => waitForTeamEvent
 });
+function isWakeableTeamEvent(event) {
+  return event.type === "worker_idle" || isWakeableTeamEventType(event.type);
+}
 function filterTeamEvents(events, options = {}) {
   let afterIndex = -1;
   if (options.afterEventId) {
     afterIndex = events.findIndex((event) => event.event_id === options.afterEventId);
   }
   return events.slice(afterIndex >= 0 ? afterIndex + 1 : 0).filter((event) => {
-    if (options.wakeableOnly && !WAKEABLE_TEAM_EVENT_TYPES.has(event.type)) return false;
+    if (options.wakeableOnly && !isWakeableTeamEvent(event)) return false;
     if (options.type && event.type !== options.type) return false;
     if (options.worker && event.worker !== options.worker) return false;
     if (options.taskId && event.task_id !== options.taskId) return false;
     return true;
+  });
+}
+async function readJsonlEvents(path22) {
+  if (!(0, import_fs67.existsSync)(path22)) return [];
+  try {
+    const raw = await (0, import_promises9.readFile)(path22, "utf8");
+    return raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
+function mergeTeamEvents(...eventGroups) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const event of eventGroups.flat()) {
+    if (!event?.event_id) continue;
+    if (!byId.has(event.event_id)) byId.set(event.event_id, event);
+  }
+  return [...byId.values()].sort((left, right) => {
+    const leftTime = Date.parse(left.created_at || "");
+    const rightTime = Date.parse(right.created_at || "");
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    return String(left.event_id).localeCompare(String(right.event_id));
   });
 }
 async function appendTeamEvent(teamName, event, cwd2) {
@@ -28926,15 +28999,13 @@ async function appendTeamEvent(teamName, event, cwd2) {
   return full;
 }
 async function readTeamEvents(teamName, cwd2, options = {}) {
-  const p = absPath(cwd2, TeamPaths.events(teamName));
-  if (!(0, import_fs67.existsSync)(p)) return [];
-  try {
-    const raw = await (0, import_promises9.readFile)(p, "utf8");
-    const events = raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    return filterTeamEvents(events, options);
-  } catch {
-    return [];
-  }
+  const canonicalPath = absPath(cwd2, TeamPaths.events(teamName));
+  const legacyPath = absPath(cwd2, (0, import_path83.join)(TeamPaths.root(teamName), "events", "events.ndjson"));
+  const events = mergeTeamEvents(
+    await readJsonlEvents(canonicalPath),
+    await readJsonlEvents(legacyPath)
+  );
+  return filterTeamEvents(events, options);
 }
 async function waitForTeamEvent(teamName, cwd2, options = {}) {
   const timeoutMs = Math.max(0, options.timeoutMs ?? 3e4);
@@ -29005,7 +29076,7 @@ async function emitMonitorDerivedEvents(teamName, tasks, workers, previousSnapsh
     }
   }
 }
-var import_crypto14, import_path83, import_promises9, import_fs67, WAKEABLE_TEAM_EVENT_TYPES;
+var import_crypto14, import_path83, import_promises9, import_fs67;
 var init_events = __esm({
   "src/team/events.ts"() {
     "use strict";
@@ -29014,19 +29085,8 @@ var init_events = __esm({
     import_promises9 = require("fs/promises");
     import_fs67 = require("fs");
     init_state_paths();
+    init_contracts();
     init_swallowed_error();
-    WAKEABLE_TEAM_EVENT_TYPES = /* @__PURE__ */ new Set([
-      "task_completed",
-      "task_failed",
-      "worker_idle",
-      "worker_stopped",
-      "message_received",
-      "shutdown_ack",
-      "shutdown_gate",
-      "shutdown_gate_forced",
-      "approval_decision",
-      "team_leader_nudge"
-    ]);
   }
 });
 
@@ -33774,14 +33834,18 @@ async function startTeamV2(config2) {
     const taskId = String(i + 1);
     const taskFilePath2 = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
     await (0, import_promises17.mkdir)((0, import_path92.join)(taskFilePath2, ".."), { recursive: true });
+    const startupTask = config2.tasks[i];
     await (0, import_promises17.writeFile)(taskFilePath2, JSON.stringify({
       id: taskId,
-      subject: config2.tasks[i].subject,
-      description: config2.tasks[i].description,
+      subject: startupTask.subject,
+      description: startupTask.description,
       status: "pending",
-      owner: null,
+      owner: startupTask.owner ?? null,
       result: null,
-      ...config2.tasks[i].delegation ? { delegation: config2.tasks[i].delegation } : {},
+      ...startupTask.blocked_by ? { blocked_by: startupTask.blocked_by, depends_on: startupTask.blocked_by } : {},
+      ...startupTask.role ? { role: startupTask.role } : {},
+      ...startupTask.delegation ? { delegation: startupTask.delegation } : {},
+      version: 1,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2), "utf-8");
   }
@@ -34167,6 +34231,7 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
   const tasks = await listTasksFromFiles(sanitized, cwd2);
   const requeued = [];
   const deadSet = new Set(deadWorkerNames);
+  const config2 = await readTeamConfig(sanitized, cwd2);
   for (const task of tasks) {
     if (task.status !== "in_progress") continue;
     if (!task.owner || !deadSet.has(task.owner)) continue;
@@ -34203,6 +34268,21 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
       task_id: task.id,
       reason: `requeue_dead_worker:${task.owner}`
     }, cwd2).catch(logEventFailure);
+  }
+  if (config2 && requeued.length > 0) {
+    let scopeChanged = false;
+    for (const worker of config2.workers) {
+      if (deadSet.has(worker.name) || !Array.isArray(worker.task_scope)) continue;
+      for (const taskId of requeued) {
+        if (!worker.task_scope.includes(taskId)) {
+          worker.task_scope.push(taskId);
+          scopeChanged = true;
+        }
+      }
+    }
+    if (scopeChanged) {
+      await saveTeamConfig(config2, cwd2);
+    }
   }
   return requeued;
 }

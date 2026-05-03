@@ -167,10 +167,11 @@ describe('team state', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omc-team-state-empty-scope-'));
     try {
       const cfg = teamConfig('team-empty-scope', cwd);
-      cfg.workers[0]!.task_scope = [];
       await initTeamState(cfg, cwd);
       const task = await createTask('team-empty-scope', { subject: 'denied', description: 'd', status: 'pending', owner: 'worker-1' }, cwd);
 
+      cfg.workers[0]!.task_scope = [];
+      await saveTeamConfig(cfg, cwd);
       expect(await claimTask('team-empty-scope', task.id, 'worker-1', task.version ?? 1, cwd))
         .toEqual({ ok: false, error: 'task_scope_violation' });
 
