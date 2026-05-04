@@ -8738,18 +8738,14 @@ async function startTeamV2(config) {
     const taskId = String(i + 1);
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
     await (0, import_promises13.mkdir)((0, import_path23.join)(taskFilePath, ".."), { recursive: true });
-    const startupTask = config.tasks[i];
     await (0, import_promises13.writeFile)(taskFilePath, JSON.stringify({
       id: taskId,
-      subject: startupTask.subject,
-      description: startupTask.description,
+      subject: config.tasks[i].subject,
+      description: config.tasks[i].description,
       status: "pending",
-      owner: startupTask.owner ?? null,
+      owner: null,
       result: null,
-      ...startupTask.blocked_by ? { blocked_by: startupTask.blocked_by, depends_on: startupTask.blocked_by } : {},
-      ...startupTask.role ? { role: startupTask.role } : {},
-      ...startupTask.delegation ? { delegation: startupTask.delegation } : {},
-      version: 1,
+      ...config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {},
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2), "utf-8");
   }

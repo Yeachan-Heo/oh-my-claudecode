@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -111,53 +111,6 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     expect(snapshot?.recommendations).toContain(
       'Investigate worker-1: assigned work but no work-start evidence; pane is idle at prompt',
     );
-  });
-
-  it('expands surviving worker task scopes when requeueing dead-worker tasks', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-requeue-scope-'));
-    const teamRoot = join(cwd, '.omc', 'state', 'team', 'demo-team');
-    await mkdir(join(teamRoot, 'tasks'), { recursive: true });
-    await writeFile(join(teamRoot, 'config.json'), JSON.stringify({
-      name: 'demo-team',
-      task: 'demo',
-      agent_type: 'claude',
-      worker_launch_mode: 'interactive',
-      worker_count: 2,
-      max_workers: 20,
-      workers: [
-        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: ['1'], task_scope: ['1'], pane_id: '%2', working_dir: cwd },
-        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], task_scope: [], pane_id: '%3', working_dir: cwd },
-      ],
-      created_at: new Date().toISOString(),
-      tmux_session: 'demo-session:0',
-      leader_pane_id: '%1',
-      hud_pane_id: null,
-      resize_hook_name: null,
-      resize_hook_target: null,
-      next_task_id: 2,
-      team_state_root: join(cwd, '.omc', 'state', 'team', 'demo-team'),
-      workspace_mode: 'single',
-    }, null, 2), 'utf-8');
-    await writeFile(join(teamRoot, 'tasks', 'task-1.json'), JSON.stringify({
-      id: '1',
-      subject: 'Recoverable task',
-      description: 'Task owned by dead worker',
-      status: 'in_progress',
-      owner: 'worker-1',
-      claim: { owner: 'worker-1', token: 'tok', leased_until: new Date(Date.now() + 60_000).toISOString() },
-      version: 1,
-      created_at: new Date().toISOString(),
-    }, null, 2), 'utf-8');
-
-    const { requeueDeadWorkerTasks } = await import('../runtime-v2.js');
-    await expect(requeueDeadWorkerTasks('demo-team', ['worker-1'], cwd)).resolves.toEqual(['1']);
-
-    const task = JSON.parse(await readFile(join(teamRoot, 'tasks', 'task-1.json'), 'utf-8')) as { status?: string; owner?: string; claim?: unknown };
-    expect(task.status).toBe('pending');
-    expect(task.owner).toBeUndefined();
-    expect(task.claim).toBeUndefined();
-    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8')) as { workers: Array<{ name: string; task_scope?: string[] }> };
-    expect(config.workers.find((worker) => worker.name === 'worker-2')?.task_scope).toContain('1');
   });
 
   it('surfaces missing blocker task ids in monitor recommendations', async () => {

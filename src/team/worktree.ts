@@ -241,7 +241,7 @@ function resolveWorktreePath(input: WorktreePlanInput, repoRoot: string): string
 
   const teamName = sanitizePathToken(input.teamName || 'team');
   const workerName = sanitizePathToken(input.workerName || 'worker');
-  return join(repoRoot, '.omc', 'team', teamName, 'worktrees', workerName);
+  return join(repoRoot, '.omx', 'team', teamName, 'worktrees', workerName);
 }
 
 function findWorktreeByPath(entries: GitWorktreeEntry[], worktreePath: string): GitWorktreeEntry | null {

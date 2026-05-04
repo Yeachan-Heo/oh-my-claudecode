@@ -23,7 +23,7 @@ describe('team api compatibility (task + mailbox legacy formats)', () => {
             agent_type: 'executor',
             worker_count: 1,
             max_workers: 20,
-            workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], task_scope: ['1'] }],
+            workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] }],
             created_at: new Date().toISOString(),
             tmux_session: 'test:0',
             next_task_id: 2,
@@ -145,9 +145,6 @@ describe('team api compatibility (task + mailbox legacy formats)', () => {
             mode: 'auto',
             required_parallel_probe: true,
         });
-        const configAfterCreate = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', teamName, 'config.json'), 'utf-8'));
-        expect(configAfterCreate.workers[0]?.assigned_tasks).toContain('2');
-        expect(configAfterCreate.workers[0]?.task_scope).toContain('2');
         const claimResult = await executeTeamApiOperation('claim-task', {
             team_name: teamName,
             task_id: '2',

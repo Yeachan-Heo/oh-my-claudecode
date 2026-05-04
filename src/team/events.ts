@@ -9,11 +9,11 @@
  */
 
 import { randomUUID } from 'crypto';
-import { dirname, join } from 'path';
+import { dirname } from 'path';
 import { mkdir, readFile, appendFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { TeamPaths, absPath } from './state-paths.js';
-import { isWakeableTeamEventType, type TeamEventType } from './contracts.js';
+import type { TeamEventType } from './contracts.js';
 import type { TeamEvent } from './types.js';
 import type { WorkerPaneLiveness } from './tmux-session.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
@@ -37,9 +37,18 @@ export interface TeamEventWaitResult {
   event?: TeamEvent;
 }
 
-function isWakeableTeamEvent(event: TeamEvent): boolean {
-  return event.type === 'worker_idle' || isWakeableTeamEventType(event.type as TeamEventType);
-}
+const WAKEABLE_TEAM_EVENT_TYPES = new Set<TeamEvent['type']>([
+  'task_completed',
+  'task_failed',
+  'worker_idle',
+  'worker_stopped',
+  'message_received',
+  'shutdown_ack',
+  'shutdown_gate',
+  'shutdown_gate_forced',
+  'approval_decision',
+  'team_leader_nudge',
+]);
 
 function filterTeamEvents(events: TeamEvent[], options: TeamEventReadOptions = {}): TeamEvent[] {
   let afterIndex = -1;
@@ -50,42 +59,12 @@ function filterTeamEvents(events: TeamEvent[], options: TeamEventReadOptions = {
   return events
     .slice(afterIndex >= 0 ? afterIndex + 1 : 0)
     .filter((event) => {
-      if (options.wakeableOnly && !isWakeableTeamEvent(event)) return false;
+      if (options.wakeableOnly && !WAKEABLE_TEAM_EVENT_TYPES.has(event.type)) return false;
       if (options.type && event.type !== options.type) return false;
       if (options.worker && event.worker !== options.worker) return false;
       if (options.taskId && event.task_id !== options.taskId) return false;
       return true;
     });
-}
-
-async function readJsonlEvents(path: string): Promise<TeamEvent[]> {
-  if (!existsSync(path)) return [];
-  try {
-    const raw = await readFile(path, 'utf8');
-    return raw
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as TeamEvent);
-  } catch {
-    return [];
-  }
-}
-
-function mergeTeamEvents(...eventGroups: TeamEvent[][]): TeamEvent[] {
-  const byId = new Map<string, TeamEvent>();
-  for (const event of eventGroups.flat()) {
-    if (!event?.event_id) continue;
-    if (!byId.has(event.event_id)) byId.set(event.event_id, event);
-  }
-  return [...byId.values()].sort((left, right) => {
-    const leftTime = Date.parse(left.created_at || '');
-    const rightTime = Date.parse(right.created_at || '');
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-      return leftTime - rightTime;
-    }
-    return String(left.event_id).localeCompare(String(right.event_id));
-  });
 }
 
 /**
@@ -118,13 +97,19 @@ export async function readTeamEvents(
   cwd: string,
   options: TeamEventReadOptions = {},
 ): Promise<TeamEvent[]> {
-  const canonicalPath = absPath(cwd, TeamPaths.events(teamName));
-  const legacyPath = absPath(cwd, join(TeamPaths.root(teamName), 'events', 'events.ndjson'));
-  const events = mergeTeamEvents(
-    await readJsonlEvents(canonicalPath),
-    await readJsonlEvents(legacyPath),
-  );
-  return filterTeamEvents(events, options);
+  const p = absPath(cwd, TeamPaths.events(teamName));
+  if (!existsSync(p)) return [];
+  try {
+    const raw = await readFile(p, 'utf8');
+    const events = raw
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as TeamEvent);
+    return filterTeamEvents(events, options);
+  } catch {
+    return [];
+  }
 }
 
 export async function waitForTeamEvent(

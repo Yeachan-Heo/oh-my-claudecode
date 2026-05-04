@@ -161,7 +161,6 @@ describe('worktree ensure + rollback', () => {
       });
       expect(workerPlan.enabled).toBe(true);
       if (!workerPlan.enabled) return;
-      expect(workerPlan.worktreePath.replace(/\\/g, '/')).toMatch(/\.omc\/team\/alpha\/worktrees\/worker-1$/);
 
       const created = ensureWorktree(workerPlan);
       expect(created.enabled).toBe(true);

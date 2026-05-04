@@ -773,30 +773,6 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
-  it('persists startup task dependency and role metadata before spawning workers', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-startup-metadata-'));
-    const { startTeamV2 } = await import('../runtime-v2.js');
-
-    await startTeamV2({
-      teamName: 'dispatch-team',
-      workerCount: 1,
-      agentTypes: ['claude'],
-      tasks: [
-        { subject: 'Plan', description: 'Plan work' },
-        { subject: 'Verify', description: 'Verify implementation', blocked_by: ['1'], role: 'test-engineer' },
-      ],
-      cwd,
-    });
-
-    const task = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-2.json'), 'utf-8')) as { blocked_by?: string[]; depends_on?: string[]; role?: string; version?: number };
-    expect(task).toMatchObject({
-      blocked_by: ['1'],
-      depends_on: ['1'],
-      role: 'test-engineer',
-      version: 1,
-    });
-  });
-
   it('persists startup task scope before notifying workers', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-startup-scope-'));
 

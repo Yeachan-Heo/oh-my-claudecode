@@ -8,15 +8,23 @@
  * Events are appended to: .omc/state/team/{teamName}/events.jsonl
  */
 import { randomUUID } from 'crypto';
-import { dirname, join } from 'path';
+import { dirname } from 'path';
 import { mkdir, readFile, appendFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { TeamPaths, absPath } from './state-paths.js';
-import { isWakeableTeamEventType } from './contracts.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
-function isWakeableTeamEvent(event) {
-    return event.type === 'worker_idle' || isWakeableTeamEventType(event.type);
-}
+const WAKEABLE_TEAM_EVENT_TYPES = new Set([
+    'task_completed',
+    'task_failed',
+    'worker_idle',
+    'worker_stopped',
+    'message_received',
+    'shutdown_ack',
+    'shutdown_gate',
+    'shutdown_gate_forced',
+    'approval_decision',
+    'team_leader_nudge',
+]);
 function filterTeamEvents(events, options = {}) {
     let afterIndex = -1;
     if (options.afterEventId) {
@@ -25,7 +33,7 @@ function filterTeamEvents(events, options = {}) {
     return events
         .slice(afterIndex >= 0 ? afterIndex + 1 : 0)
         .filter((event) => {
-        if (options.wakeableOnly && !isWakeableTeamEvent(event))
+        if (options.wakeableOnly && !WAKEABLE_TEAM_EVENT_TYPES.has(event.type))
             return false;
         if (options.type && event.type !== options.type)
             return false;
@@ -34,38 +42,6 @@ function filterTeamEvents(events, options = {}) {
         if (options.taskId && event.task_id !== options.taskId)
             return false;
         return true;
-    });
-}
-async function readJsonlEvents(path) {
-    if (!existsSync(path))
-        return [];
-    try {
-        const raw = await readFile(path, 'utf8');
-        return raw
-            .trim()
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
-    }
-    catch {
-        return [];
-    }
-}
-function mergeTeamEvents(...eventGroups) {
-    const byId = new Map();
-    for (const event of eventGroups.flat()) {
-        if (!event?.event_id)
-            continue;
-        if (!byId.has(event.event_id))
-            byId.set(event.event_id, event);
-    }
-    return [...byId.values()].sort((left, right) => {
-        const leftTime = Date.parse(left.created_at || '');
-        const rightTime = Date.parse(right.created_at || '');
-        if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-            return leftTime - rightTime;
-        }
-        return String(left.event_id).localeCompare(String(right.event_id));
     });
 }
 /**
@@ -89,10 +65,21 @@ export async function appendTeamEvent(teamName, event, cwd) {
  * Returns empty array if no events exist.
  */
 export async function readTeamEvents(teamName, cwd, options = {}) {
-    const canonicalPath = absPath(cwd, TeamPaths.events(teamName));
-    const legacyPath = absPath(cwd, join(TeamPaths.root(teamName), 'events', 'events.ndjson'));
-    const events = mergeTeamEvents(await readJsonlEvents(canonicalPath), await readJsonlEvents(legacyPath));
-    return filterTeamEvents(events, options);
+    const p = absPath(cwd, TeamPaths.events(teamName));
+    if (!existsSync(p))
+        return [];
+    try {
+        const raw = await readFile(p, 'utf8');
+        const events = raw
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+        return filterTeamEvents(events, options);
+    }
+    catch {
+        return [];
+    }
 }
 export async function waitForTeamEvent(teamName, cwd, options = {}) {
     const timeoutMs = Math.max(0, options.timeoutMs ?? 30_000);

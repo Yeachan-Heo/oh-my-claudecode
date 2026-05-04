@@ -7,7 +7,7 @@
  *
  * Events are appended to: .omc/state/team/{teamName}/events.jsonl
  */
-import { type TeamEventType } from './contracts.js';
+import type { TeamEventType } from './contracts.js';
 import type { TeamEvent } from './types.js';
 import type { WorkerPaneLiveness } from './tmux-session.js';
 export interface TeamEventReadOptions {

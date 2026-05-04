@@ -23,7 +23,7 @@
  * 14. analyze: Analysis mode (restricted patterns)
  */
 
-import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync, readdirSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -155,85 +155,6 @@ function isExplicitRalplanSlashInvocation(prompt) {
 
 function isExplicitAskSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini)\b/i.test(prompt);
-}
-
-function isShortApprovedTeamFollowupRequest(text) {
-  return [
-    /^\s*\/?\s*team\s*$/i,
-    /^\s*team\s+please\s*$/i,
-    /^\s*run\s+team\s*$/i,
-    /^\s*start\s+team\s*$/i,
-    /^\s*team으로\s+해줘\s*$/i,
-    /^\s*launch\s+team\s*$/i,
-    /^\s*go\s+team\s*$/i,
-  ].some(re => re.test(text));
-}
-
-function isShortApprovedRalphFollowupRequest(text) {
-  return [
-    /^\s*\/?\s*ralph\s*$/i,
-    /^\s*ralph\s+please\s*$/i,
-    /^\s*run\s+ralph\s*$/i,
-    /^\s*start\s+ralph\s*$/i,
-    /^\s*launch\s+ralph\s*$/i,
-    /^\s*go\s+ralph\s*$/i,
-  ].some(re => re.test(text));
-}
-
-function readFileSafe(path) {
-  try { return readFileSync(path, 'utf-8'); } catch { return null; }
-}
-
-function getMarkdownSectionContent(markdown, heading) {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const headingRe = new RegExp(`^##\\s+${escaped}[ \\t]*$`, 'im');
-  const match = headingRe.exec(markdown);
-  if (!match || match.index === undefined) return null;
-  const bodyStart = match.index + match[0].length;
-  const rest = markdown.slice(bodyStart).replace(/^\r?\n/, '');
-  const nextHeading = /\r?\n##\s+/.exec(rest);
-  const body = (nextHeading ? rest.slice(0, nextHeading.index) : rest).trim();
-  return body.length > 0 ? body : null;
-}
-
-function planningMarkdownHasSections(markdown, headings) {
-  return headings.every(heading => getMarkdownSectionContent(markdown, heading) !== null);
-}
-
-function fallbackReadPlanningArtifacts(directory) {
-  const prdPaths = [];
-  const testSpecPaths = [];
-  for (const plansDir of [join(directory, '.omc', 'plans'), join(directory, '.omx', 'plans')]) {
-    if (!existsSync(plansDir)) continue;
-    let entries = [];
-    try { entries = readdirSync(plansDir); } catch { continue; }
-    for (const entry of entries) {
-      if (entry.startsWith('prd-') && entry.endsWith('.md')) prdPaths.push(join(plansDir, entry));
-      if (entry.startsWith('test-spec-') && entry.endsWith('.md')) testSpecPaths.push(join(plansDir, entry));
-    }
-  }
-  return { prdPaths: prdPaths.sort().reverse(), testSpecPaths: testSpecPaths.sort().reverse() };
-}
-
-function fallbackMatchingTestSpecsForPrd(prdPath, testSpecPaths) {
-  if (!prdPath) return [];
-  const fileName = prdPath.split(/[\\/]/).pop() || '';
-  const slug = fileName.replace(/^prd-/, '').replace(/\.md$/, '');
-  const exactName = `test-spec-${slug}.md`;
-  const exact = testSpecPaths.filter(path => (path.split(/[\\/]/).pop() || '') === exactName);
-  return exact.length > 0 ? exact : testSpecPaths;
-}
-
-function fallbackIsPlanningComplete(directory) {
-  const artifacts = fallbackReadPlanningArtifacts(directory);
-  const latestPrd = artifacts.prdPaths[0];
-  const matchingSpecs = fallbackMatchingTestSpecsForPrd(latestPrd, artifacts.testSpecPaths);
-  if (!latestPrd || matchingSpecs.length === 0) return false;
-  const prd = readFileSafe(latestPrd);
-  const testSpec = readFileSafe(matchingSpecs[0]);
-  if (!prd || !testSpec) return false;
-  return planningMarkdownHasSections(prd, ['Acceptance criteria', 'Requirement coverage map']) &&
-    planningMarkdownHasSections(testSpec, ['Unit coverage', 'Verification mapping']);
 }
 
 // Sanitize text to prevent false positives from code blocks, XML tags, URLs, and file paths
@@ -1214,7 +1135,7 @@ async function main() {
 
     // Check for approved follow-up shortcut: bypass ralplan gate when a prior ralplan
     // cycle completed and left an approved plan with a launch hint.
-    if (followupPlanner || fallbackIsPlanningComplete(directory)) {
+    if (followupPlanner && planningArtifacts) {
       // Detect if ralplan state exists (was recently active) — serves as "prior skill = ralplan" signal
       const ralplanStatePaths = sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)
         ? [
@@ -1228,24 +1149,12 @@ async function main() {
       const ralplanWasActive = ralplanStatePaths.some(statePath => existsSync(statePath));
 
       if (ralplanWasActive) {
-        let planningComplete = false;
-        try {
-          const artifacts = planningArtifacts.readPlanningArtifacts(directory);
-          planningComplete = planningArtifacts.isPlanningComplete(artifacts);
-        } catch {
-          planningComplete = false;
-        }
-        if (!planningComplete) {
-          planningComplete = fallbackIsPlanningComplete(directory);
-        }
+        const artifacts = planningArtifacts.readPlanningArtifacts(directory);
+        const planningComplete = planningArtifacts.isPlanningComplete(artifacts);
         const context = { planningComplete, priorSkill: 'ralplan' };
 
-        const isTeamFollowup = followupPlanner.isApprovedExecutionFollowupShortcut
-          ? followupPlanner.isApprovedExecutionFollowupShortcut('team', prompt, context)
-          : (planningComplete && isShortApprovedTeamFollowupRequest(prompt));
-        const isRalphFollowup = followupPlanner.isApprovedExecutionFollowupShortcut
-          ? followupPlanner.isApprovedExecutionFollowupShortcut('ralph', prompt, context)
-          : (planningComplete && isShortApprovedRalphFollowupRequest(prompt));
+        const isTeamFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('team', prompt, context);
+        const isRalphFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('ralph', prompt, context);
 
         if (isTeamFollowup) {
           console.log(JSON.stringify(createHookOutput(createSkillInvocation('team', prompt))));
