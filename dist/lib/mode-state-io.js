@@ -75,6 +75,9 @@ function getRuntimeArtifactCandidates(mode, directory, sessionId) {
     }
     return [...candidateDirs].flatMap((dir) => artifactNames.map((name) => join(dir, name)));
 }
+function hasSessionEndSummary(baseDir, sessionId) {
+    return existsSync(join(getOmcRoot(baseDir), 'sessions', `${sessionId}.json`));
+}
 /**
  * Find session-scoped state files that belong to the requested session.
  *
@@ -99,6 +102,42 @@ export function findSessionOwnedStateFiles(mode, sessionId, directory) {
         try {
             const raw = JSON.parse(readFileSync(candidatePath, 'utf-8'));
             if (getStateSessionOwner(raw) === sessionId) {
+                matches.add(candidatePath);
+            }
+        }
+        catch {
+            // Ignore unreadable files and keep scanning.
+        }
+    }
+    return [...matches];
+}
+/**
+ * Find active session-scoped state files that are safe to treat as orphaned.
+ *
+ * A fresh `/cancel` invocation may run in a new Claude session id while the
+ * state files that keep the Stop hook alive still live under the completed
+ * session's directory.  We intentionally require durable completion evidence
+ * (`.omc/sessions/{sessionId}.json`) before returning a sibling session's file
+ * so active parallel sessions are not cleared just because their ids differ
+ * from the caller's fresh cancel session.
+ */
+export function findCompletedSessionStateFiles(mode, directory, requesterSessionId) {
+    const matches = new Set();
+    const baseDir = resolveStateRoot(directory);
+    for (const sid of listSessionIds(baseDir)) {
+        if (requesterSessionId && sid === requesterSessionId) {
+            continue;
+        }
+        if (!hasSessionEndSummary(baseDir, sid)) {
+            continue;
+        }
+        const candidatePath = resolveSessionStatePath(mode, sid, baseDir);
+        if (!existsSync(candidatePath)) {
+            continue;
+        }
+        try {
+            const raw = JSON.parse(readFileSync(candidatePath, 'utf-8'));
+            if (raw.active === true) {
                 matches.add(candidatePath);
             }
         }

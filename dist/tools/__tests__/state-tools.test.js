@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { stateReadTool, stateWriteTool, stateClearTool, stateListActiveTool, stateGetStatusTool, } from '../state-tools.js';
 const TEST_DIR = '/tmp/state-tools-test';
@@ -242,6 +243,78 @@ describe('state-tools', () => {
             });
             // stateReadTool returning "No state found" is authoritative proof the file is gone
             expect(readResult.content[0].text).toContain('No state found');
+        });
+        it('clears completed-session orphan state when cancel runs from a fresh session id', async () => {
+            const freshSessionId = 'fresh-cancel-session';
+            const liveSessionId = 'live-sibling-session';
+            const orphanSessionIds = ['ended-session-one', 'ended-session-two'];
+            const modes = ['ralph', 'ultrawork', 'team'];
+            mkdirSync(join(TEST_DIR, '.omc', 'sessions'), { recursive: true });
+            for (const orphanSessionId of orphanSessionIds) {
+                mkdirSync(join(TEST_DIR, '.omc', 'state', 'sessions', orphanSessionId), { recursive: true });
+                writeFileSync(join(TEST_DIR, '.omc', 'sessions', `${orphanSessionId}.json`), JSON.stringify({ session_id: orphanSessionId, ended_at: '2026-05-04T00:00:00.000Z' }));
+            }
+            mkdirSync(join(TEST_DIR, '.omc', 'state', 'sessions', liveSessionId), { recursive: true });
+            for (const mode of modes) {
+                for (const orphanSessionId of orphanSessionIds) {
+                    writeFileSync(join(TEST_DIR, '.omc', 'state', 'sessions', orphanSessionId, `${mode}-state.json`), JSON.stringify({
+                        active: true,
+                        session_id: orphanSessionId,
+                        ...(mode === 'team' ? { team_name: `team-${orphanSessionId}` } : {}),
+                    }));
+                }
+                writeFileSync(join(TEST_DIR, '.omc', 'state', 'sessions', liveSessionId, `${mode}-state.json`), JSON.stringify({ active: true, session_id: liveSessionId }));
+                const result = await stateClearTool.handler({
+                    mode,
+                    session_id: freshSessionId,
+                    workingDirectory: TEST_DIR,
+                });
+                expect(result.content[0].text).toContain('completed-session orphan');
+                for (const orphanSessionId of orphanSessionIds) {
+                    expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', orphanSessionId, `${mode}-state.json`))).toBe(false);
+                }
+                expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', liveSessionId, `${mode}-state.json`))).toBe(true);
+            }
+        });
+        it('reports completed-session orphan state on session-scoped read misses', async () => {
+            const freshSessionId = 'fresh-read-session';
+            const orphanSessionId = 'ended-read-session';
+            mkdirSync(join(TEST_DIR, '.omc', 'sessions'), { recursive: true });
+            mkdirSync(join(TEST_DIR, '.omc', 'state', 'sessions', orphanSessionId), { recursive: true });
+            writeFileSync(join(TEST_DIR, '.omc', 'sessions', `${orphanSessionId}.json`), JSON.stringify({ session_id: orphanSessionId, ended_at: '2026-05-04T00:00:00.000Z' }));
+            writeFileSync(join(TEST_DIR, '.omc', 'state', 'sessions', orphanSessionId, 'ralph-state.json'), JSON.stringify({ active: true, session_id: orphanSessionId }));
+            const result = await stateReadTool.handler({
+                mode: 'ralph',
+                session_id: freshSessionId,
+                workingDirectory: TEST_DIR,
+            });
+            expect(result.content[0].text).toContain('completed-session orphan');
+            expect(result.content[0].text).toContain(orphanSessionId);
+        });
+        it('clears completed-session orphan state through a symlinked .omc directory', async () => {
+            const symlinkTestDir = mkdtempSync(join(tmpdir(), 'state-tools-symlink-'));
+            const realOmcDir = mkdtempSync(join(tmpdir(), 'state-tools-real-omc-'));
+            try {
+                rmSync(join(symlinkTestDir, '.omc'), { recursive: true, force: true });
+                symlinkSync(realOmcDir, join(symlinkTestDir, '.omc'), 'dir');
+                const orphanSessionId = 'ended-symlink-session';
+                const freshSessionId = 'fresh-symlink-session';
+                mkdirSync(join(realOmcDir, 'sessions'), { recursive: true });
+                mkdirSync(join(realOmcDir, 'state', 'sessions', orphanSessionId), { recursive: true });
+                writeFileSync(join(realOmcDir, 'sessions', `${orphanSessionId}.json`), JSON.stringify({ session_id: orphanSessionId, ended_at: '2026-05-04T00:00:00.000Z' }));
+                writeFileSync(join(realOmcDir, 'state', 'sessions', orphanSessionId, 'ultrawork-state.json'), JSON.stringify({ active: true, session_id: orphanSessionId }));
+                const result = await stateClearTool.handler({
+                    mode: 'ultrawork',
+                    session_id: freshSessionId,
+                    workingDirectory: symlinkTestDir,
+                });
+                expect(result.content[0].text).toContain('completed-session orphan');
+                expect(existsSync(join(realOmcDir, 'state', 'sessions', orphanSessionId, 'ultrawork-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(symlinkTestDir, { recursive: true, force: true });
+                rmSync(realOmcDir, { recursive: true, force: true });
+            }
         });
         it('should list skill-active as active when state file is present', async () => {
             const sessionId = 'skill-active-list-test';

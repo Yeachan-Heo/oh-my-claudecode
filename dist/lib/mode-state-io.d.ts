@@ -18,6 +18,17 @@ export declare function canClearStateForSession(state: Record<string, unknown> |
  */
 export declare function findSessionOwnedStateFiles(mode: string, sessionId: string, directory?: string): string[];
 /**
+ * Find active session-scoped state files that are safe to treat as orphaned.
+ *
+ * A fresh `/cancel` invocation may run in a new Claude session id while the
+ * state files that keep the Stop hook alive still live under the completed
+ * session's directory.  We intentionally require durable completion evidence
+ * (`.omc/sessions/{sessionId}.json`) before returning a sibling session's file
+ * so active parallel sessions are not cleared just because their ids differ
+ * from the caller's fresh cancel session.
+ */
+export declare function findCompletedSessionStateFiles(mode: string, directory?: string, requesterSessionId?: string): string[];
+/**
  * Write mode state to disk.
  *
  * - Ensures parent directories exist.
