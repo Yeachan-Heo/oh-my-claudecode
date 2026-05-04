@@ -16,6 +16,7 @@ import {
 import { renderTodosWithCurrent } from "./elements/todos.js";
 import { renderSkills, renderLastSkill } from "./elements/skills.js";
 import { renderContext, renderContextWithBar } from "./elements/context.js";
+import { readStdinCache } from "./stdin.js";
 import { renderBackground } from "./elements/background.js";
 import { renderPrd } from "./elements/prd.js";
 import {
@@ -422,18 +423,28 @@ export async function render(
   }
 
   if (enabledElements.contextBar) {
+    // Resolve ETA: prefer the explicitly-passed render-context value, then
+    // fall back to whatever `writeStdinCache` stamped onto the cache during
+    // the current render cycle (single best-effort read; render must stay
+    // pure of cache-write side effects).
+    const etaMinutes =
+      context.contextEtaMinutes
+      ?? readStdinCache()?.contextEtaMinutes
+      ?? null;
     const ctx = enabledElements.useBars
       ? renderContextWithBar(
           context.contextPercent,
           config.thresholds,
           10,
           context.contextDisplayScope,
+          etaMinutes,
           hudLabels,
         )
       : renderContext(
           context.contextPercent,
           config.thresholds,
           context.contextDisplayScope,
+          etaMinutes,
           hudLabels,
         );
     if (ctx) rendered.set("contextBar", ctx);

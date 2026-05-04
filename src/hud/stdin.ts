@@ -13,6 +13,7 @@ import {
   listSessionIds,
   resolveOmcPath,
 } from '../lib/worktree-paths.js';
+import { updateContextEta, type ContextEtaSample } from './eta.js';
 import type { RateLimits, StatuslineStdin } from './types.js';
 
 const TRANSIENT_CONTEXT_PERCENT_TOLERANCE = 3;
@@ -73,10 +74,27 @@ function getStdinCachePath(): string {
 
 /**
  * Persist the last successful stdin read to disk.
- * Used by --watch mode to recover data when stdin is a TTY.
+ *
+ * Used by --watch mode to recover data when stdin is a TTY. As a side
+ * effect this also evolves the rolling Context-ETA window: it reads the
+ * previous cache, computes the new ETA via `updateContextEta`, stamps
+ * `contextEtaSamples` and `contextEtaMinutes` onto `stdin` so they survive
+ * to disk *and* are observable to the in-process render via a follow-up
+ * `readStdinCache` call.
  */
 export function writeStdinCache(stdin: StatuslineStdin): void {
   try {
+    // Pre-write side effect: roll the ETA sample window forward.
+    // Done here (before writeFileSync) so the persisted JSON contains the
+    // fresh window for the next render cycle.
+    try {
+      const previous = readStdinCache();
+      const currentPercent = getContextPercent(stdin);
+      applyContextEta(stdin, previous, currentPercent, Date.now());
+    } catch {
+      // ETA is best-effort; never block the cache write on it.
+    }
+
     const cachePath = getStdinCachePath();
     const cacheDir = dirname(cachePath);
     if (!existsSync(cacheDir)) {
@@ -305,6 +323,32 @@ function isSameContextStream(current: StatuslineStdin, previous: StatuslineStdin
   return current.cwd === previous.cwd
     && current.transcript_path === previous.transcript_path
     && current.context_window?.context_window_size === previous.context_window?.context_window_size;
+}
+
+/**
+ * Compute the Context-ETA for the current render and update the rolling
+ * sample history in-place on `stdin`, so the next call to `writeStdinCache`
+ * persists the new window. Returns the predicted minutes (or null when
+ * suppressed).
+ *
+ * Stream identity is gated by `isSameContextStream`: when the previous cache
+ * came from a different cwd / transcript / context-window-size, history is
+ * dropped so samples never bleed across sessions.
+ */
+export function applyContextEta(
+  stdin: StatuslineStdin,
+  previousStdin: StatuslineStdin | null | undefined,
+  currentPercent: number,
+  nowMs: number,
+): number | null {
+  const previousSamples: ContextEtaSample[] =
+    previousStdin && isSameContextStream(stdin, previousStdin)
+      ? (previousStdin.contextEtaSamples ?? [])
+      : [];
+  const result = updateContextEta(currentPercent, previousSamples, nowMs);
+  stdin.contextEtaSamples = result.samples;
+  stdin.contextEtaMinutes = result.etaMinutes;
+  return result.etaMinutes;
 }
 
 /**

@@ -121,32 +121,54 @@ export function getStableContextDisplayPercent(
 }
 
 /**
+ * Format an ETA suffix string. Uses `~Nm` under an hour and `~Nh` at and
+ * above an hour. Returns empty when ETA is null/zero/invalid.
+ *
+ * The leading space is intentional: callers append this directly after the
+ * existing ANSI RESET so the dim styling does not inherit warning/critical
+ * color from the percent block.
+ */
+function formatEtaSuffix(etaMinutes: number | null | undefined): string {
+  if (etaMinutes === null || etaMinutes === undefined) return '';
+  if (!Number.isFinite(etaMinutes) || etaMinutes <= 0) return '';
+  const body = etaMinutes < 60
+    ? `~${etaMinutes}m`
+    : `~${Math.floor(etaMinutes / 60)}h`;
+  return ` ${DIM}${body}${RESET}`;
+}
+
+/**
  * Render context window percentage.
  *
- * Format: ctx:67%
+ * Format: ctx:67%       (no ETA)
+ *         ctx:67% ~15m  (with ETA, dim-styled, after RESET)
  */
 export function renderContext(
   percent: number,
   thresholds: HudThresholds,
   displayScope?: string | null,
+  etaMinutes?: number | null,
   labels: Pick<HudLabels, 'context'> = DEFAULT_HUD_LABELS,
 ): string | null {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
+  const eta = formatEtaSuffix(etaMinutes);
 
-  return `${labels.context}:${color}${safePercent}%${suffix}${RESET}`;
+  return `${labels.context}:${color}${safePercent}%${suffix}${RESET}${eta}`;
 }
 
 /**
  * Render context window with visual bar.
  *
- * Format: ctx:[████░░░░░░]67%
+ * Format: ctx:[████░░░░░░]67%       (no ETA)
+ *         ctx:[████░░░░░░]67% ~15m  (with ETA, dim-styled, after RESET)
  */
 export function renderContextWithBar(
   percent: number,
   thresholds: HudThresholds,
   barWidth: number = 10,
   displayScope?: string | null,
+  etaMinutes?: number | null,
   labels: Pick<HudLabels, 'context'> = DEFAULT_HUD_LABELS,
 ): string | null {
   const safePercent = getStableContextDisplayPercent(percent, thresholds, displayScope);
@@ -155,5 +177,6 @@ export function renderContextWithBar(
 
   const { color, suffix } = getContextDisplayStyle(safePercent, thresholds);
   const bar = `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
-  return `${labels.context}:[${bar}]${color}${safePercent}%${suffix}${RESET}`;
+  const eta = formatEtaSuffix(etaMinutes);
+  return `${labels.context}:[${bar}]${color}${safePercent}%${suffix}${RESET}${eta}`;
 }

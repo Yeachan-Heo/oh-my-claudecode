@@ -7,6 +7,7 @@
 import type { AutopilotStateForHud } from './elements/autopilot.js';
 import type { ApiKeySource } from './elements/api-key-source.js';
 import type { SessionSummaryState } from './elements/session-summary.js';
+import type { ContextEtaSample } from './eta.js';
 import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
 import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
 
@@ -79,6 +80,23 @@ export interface StatuslineStdin {
       resets_at?: number | string;
     };
   };
+
+  /**
+   * Rolling Context-ETA samples persisted in the stdin cache between HUD
+   * renders. Not part of Claude Code's actual stdin payload — the field is
+   * appended by `writeStdinCache` so the next render can extend the slope
+   * regression. Cleared on stream identity change (cwd / transcript_path /
+   * context_window_size) by the writer to prevent cross-session collision.
+   */
+  contextEtaSamples?: ContextEtaSample[];
+
+  /**
+   * Most recently computed Context-ETA in minutes. Persisted alongside
+   * `contextEtaSamples` so an in-process `readStdinCache` after
+   * `writeStdinCache` can surface the freshly-computed ETA to the renderer
+   * without re-running the algorithm.
+   */
+  contextEtaMinutes?: number | null;
 }
 
 // ============================================================================
@@ -316,6 +334,13 @@ export interface HudRenderContext {
 
   /** Stable display scope for context smoothing (e.g. session/worktree key) */
   contextDisplayScope?: string | null;
+
+  /**
+   * Predicted minutes until context window fills, computed from a rolling
+   * sample window. null when there isn't enough history, slope is too flat,
+   * or the prediction exceeds the display cap.
+   */
+  contextEtaMinutes?: number | null;
 
   /** Model display name */
   modelName: string;
