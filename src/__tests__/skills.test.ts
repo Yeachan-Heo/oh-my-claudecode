@@ -295,6 +295,12 @@ describe('Builtin Skills', () => {
       // Verify pipeline handoff is fully wired (B1 fix)
       expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
       expect(skill?.template).toContain('consensus plan as Phase 0+1 output');
+      // Verify Phase 5 workflow pre-flight guards issue/worktree-driven project guidance (#2926)
+      expect(skill?.template).toContain('Workflow Pre-Flight');
+      expect(skill?.template).toContain('issue-driven, worktree-driven, branch-first');
+      expect(skill?.template).toContain('git worktree list --porcelain');
+      expect(skill?.template).toContain('Set up issue/branch/worktree first (Recommended)');
+      expect(skill?.template).toContain('before showing execution options');
       // Verify untrusted data guard (NB1 fix)
       expect(skill?.template).toContain('trace-context');
       expect(skill?.template).toContain('untrusted data');
