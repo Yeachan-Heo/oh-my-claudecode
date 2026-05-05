@@ -292,6 +292,11 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('initial question queue injection');
       // Verify per-lane critical unknowns (B3 fix)
       expect(skill?.template).toContain('Per-Lane Critical Unknowns');
+      // Verify Lane 3 ownership-boundary classification for MOVE recommendations
+      expect(skill?.template).toContain('Lane 3 Misplacement / SoT Ownership Scope');
+      expect(skill?.template).toContain('ownership_scope');
+      expect(skill?.template).toContain('personal-config/shared-config/external/project-scoped');
+      expect(skill?.template).toContain('Cross-boundary MOVE candidates MUST have `Default? = no`');
       // Verify pipeline handoff is fully wired (B1 fix)
       expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
       expect(skill?.template).toContain('consensus plan as Phase 0+1 output');
