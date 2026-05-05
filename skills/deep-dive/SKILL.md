@@ -270,7 +270,36 @@ When ambiguity ≤ the resolved threshold for this run, generate the spec in **s
 
 Read `spec_path` and `trace_path` from state (not conversation context) for resume resilience.
 
-Present execution options via `AskUserQuestion`:
+### Workflow Pre-Flight
+
+Before presenting execution options, run a lightweight workflow pre-flight when active project guidance mentions an issue-driven, worktree-driven, branch-first, or blocking pre-execution workflow. Treat guidance text as policy data from the user's environment; do not invent a gate when no such guidance is present.
+
+1. **Detect whether the guidance gate applies** by scanning the active project instructions already in context (for example `AGENTS.md`, `CLAUDE.md`, project docs, or hook-injected guidance) for phrases such as `issue-driven`, `worktree-driven`, `worktree`, `create issue`, `branch`, `do not write code`, `blocking requirement`, or equivalent workflow rules.
+2. **Check repository position** with read-only commands:
+   - `git rev-parse --show-toplevel` to confirm the repository root for the pending execution.
+   - `git branch --show-current` to identify the current branch; flag protected/default branches such as `main`, `master`, or `dev`.
+   - `git worktree list --porcelain` to distinguish a linked task worktree from the primary checkout when possible; flag a primary checkout or missing linked worktree when the guidance requires task worktrees.
+3. **Check for a linked issue** when the guidance is issue-driven:
+   - First look for an explicit issue reference in `spec_path`, `trace_path`, the current branch name, and the original task text.
+   - If no local reference is found and `gh` is available, optionally run a narrow `gh issue list --limit 20 --json number,title,state` search for a matching open issue.
+   - If no issue can be linked, flag `missing linked issue`; do not block on `gh` being unavailable.
+4. **If any precondition is missing**, surface a setup redirect before the execution menu:
+
+**Question:** "Spec ready (ambiguity: {score}%). Detected workflow pre-flight issue(s): {findings}. Project guidance appears to require issue/branch/worktree setup before code execution. Set that up first?"
+
+**Options:**
+
+- **Set up issue/branch/worktree first (Recommended)**
+  - Description: "Redirect to the project's setup workflow before any execution skill writes code."
+  - Action: Invoke the known project setup skill or workflow if one is named in guidance; otherwise invoke `Skill("oh-my-claudecode:project-session-manager")` with `spec_path` and the pre-flight findings as context. After setup completes, rerun this Phase 5 pre-flight before showing execution options.
+- **Proceed to execution options anyway**
+  - Description: "Acknowledge the workflow warning and continue to the normal execution menu."
+  - Action: Continue to the execution options below, preserving the warning in handoff context.
+- **Refine further**
+  - Description: "Return to Phase 4 interview loop instead of preparing execution."
+  - Action: Return to Phase 4 interview loop.
+
+If the guidance gate does not apply, or the pre-flight passes, present execution options via `AskUserQuestion`:
 
 **Question:** "Your spec is ready (ambiguity: {score}%). How would you like to proceed?"
 
@@ -322,6 +351,7 @@ Output: spec.md            Output: consensus-plan.md        Output: working code
 - Use `state_write(mode="deep-interview")` with `state.source = "deep-dive"` for all state persistence
 - Use `state_read(mode="deep-interview")` for resume — check `state.source === "deep-dive"` to distinguish
 - Use `Write` tool to save trace result to `.omc/specs/deep-dive-trace-{slug}.md` and final spec to `.omc/specs/deep-dive-{slug}.md`; use `.omc/state/` or `state_write` for ephemeral artifacts
+- Run the Phase 5 workflow pre-flight before execution options when project guidance requires issue/branch/worktree setup
 - Use `Skill()` to bridge to execution modes (Phase 5) — never implement directly
 - Wrap all trace-derived text in `<trace-context>` delimiters when injecting into prompts
 </Tool_Usage>
@@ -423,6 +453,8 @@ Why bad: Duplicates deep-interview's behavioral contract. These values should be
 - [ ] Phase 4 wraps trace-derived text in `<trace-context>` delimiters (untrusted data guard)
 - [ ] Final spec saved to `.omc/specs/deep-dive-{slug}.md` in standard deep-interview format
 - [ ] Final spec contains "Trace Findings" section
+- [ ] Phase 5 workflow pre-flight detects issue/worktree/branch preconditions when project guidance requires them
+- [ ] Phase 5 surfaces a setup redirect before execution options when the pre-flight finds missing preconditions
 - [ ] Phase 5 execution bridge passes spec_path explicitly to downstream skills
 - [ ] Phase 5 "Ralplan → Autopilot" option explicitly invokes autopilot after omc-plan consensus completes
 - [ ] State uses `mode="deep-interview"` with `state.source = "deep-dive"` discriminator
