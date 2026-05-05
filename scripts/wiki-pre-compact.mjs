@@ -10,10 +10,7 @@ async function main() {
     if (result.additionalContext) {
       console.log(JSON.stringify({
         continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'PreCompact',
-          additionalContext: result.additionalContext,
-        },
+        systemMessage: result.additionalContext,
       }));
     } else {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
