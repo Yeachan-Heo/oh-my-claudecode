@@ -138,6 +138,12 @@ Use **Claude built-in team mode** to run 3 parallel tracer lanes:
    - Rank evidence strength (from controlled reproductions → speculation)
    - Name the **critical unknown** for the lane
    - Recommend the best **discriminating probe**
+   - For **Lane 3: Misplacement / SoT Violation** findings, classify every candidate MOVE destination with `ownership_scope` before ranking recommendations:
+     - `personal-config`: user-level dotfiles, `~/.claude/`, personal repositories, or user-only agent rules
+     - `shared-config`: company/org repositories, team-maintained config, or multi-tenant shared rules
+     - `external`: third-party, vendor, or OSS upstream repositories outside the user's ownership
+     - `project-scoped`: per-project storage owned by the current project boundary
+   - For Lane 3, compare source and destination `ownership_scope`; any cross-boundary MOVE (for example `personal-config` → `shared-config`) MUST be flagged with an explicit warning and MUST NOT be surfaced as the default recommendation. Prefer COMPRESS, KEEP, or a same-scope MOVE as the default when available.
 4. **Run a rebuttal round** between the leading hypothesis and the strongest alternative
 5. **Detect convergence**: if two "different" hypotheses reduce to the same mechanism, merge them explicitly
 6. **Leader synthesis**: produce the ranked output below
@@ -175,6 +181,15 @@ Save to `.omc/specs/deep-dive-trace-{slug}.md`:
 - **Lane 1 ({hypothesis_1})**: {critical_unknown_1}
 - **Lane 2 ({hypothesis_2})**: {critical_unknown_2}
 - **Lane 3 ({hypothesis_3})**: {critical_unknown_3}
+
+## Lane 3 Misplacement / SoT Ownership Scope
+For each MOVE candidate discovered by Lane 3, include:
+
+| Source | Candidate destination | ownership_scope | Boundary relationship | Default? | Warning |
+|--------|-----------------------|-----------------|-----------------------|----------|---------|
+| ... | ... | personal-config/shared-config/external/project-scoped | same-scope/cross-boundary | yes/no | ... |
+
+Cross-boundary MOVE candidates MUST have `Default? = no` and an explicit warning explaining the source/destination ownership mismatch. They may be listed as flagged alternatives, but the ranked synthesis MUST NOT present them as the default recommendation.
 
 ## Rebuttal Round
 - Best rebuttal to leader: ...
@@ -417,6 +432,7 @@ Why bad: Duplicates deep-interview's behavioral contract. These values should be
 - [ ] Phase 2 confirms hypotheses via AskUserQuestion (1 round)
 - [ ] Phase 3 runs trace with 3 parallel lanes (team mode, sequential fallback)
 - [ ] Phase 3 saves trace result to `.omc/specs/deep-dive-trace-{slug}.md` with per-lane critical unknowns
+- [ ] Lane 3 MOVE candidates include `ownership_scope` and cross-boundary MOVE candidates are warned/flagged, not default recommendations
 - [ ] Phase 4 starts with 3-point injection (initial_idea, codebase_context, question_queue from per-lane unknowns)
 - [ ] Phase 4 references deep-interview SKILL.md Phases 2-4 (not duplicated inline)
 - [ ] Phase 4 handles low-confidence trace gracefully
