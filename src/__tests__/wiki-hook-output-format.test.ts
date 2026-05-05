@@ -53,6 +53,7 @@ describe('wiki hook wrapper output', () => {
       continue?: boolean;
       suppressOutput?: boolean;
       additionalContext?: string;
+      systemMessage?: string;
       hookSpecificOutput?: {
         hookEventName?: string;
         additionalContext?: string;
@@ -71,14 +72,13 @@ describe('wiki hook wrapper output', () => {
     });
   });
 
-  it('wraps PreCompact wiki context under hookSpecificOutput', () => {
+  it('emits PreCompact wiki context as top-level systemMessage', () => {
     const output = runHook(PRE_COMPACT_SCRIPT);
 
     expect(output.continue).toBe(true);
-    expect(output.additionalContext).toBeUndefined();
-    expect(output.hookSpecificOutput).toEqual({
-      hookEventName: 'PreCompact',
-      additionalContext: '[Wiki: 1 pages | categories: reference | last updated: 2026-04-13T00:00:00.000Z]',
-    });
+    expect(output.hookSpecificOutput).toBeUndefined();
+    expect(output.systemMessage).toBe(
+      '[Wiki: 1 pages | categories: reference | last updated: 2026-04-13T00:00:00.000Z]',
+    );
   });
 });
