@@ -105,7 +105,16 @@ ensure_local_omc_git_exclude() {
   local block_start="# BEGIN OMC local artifacts"
 
   if [ -f "$exclude_path" ] && grep -Fq "$block_start" "$exclude_path"; then
-    echo "OMC git exclude already configured"
+    if grep -Fxq ".omx/" "$exclude_path"; then
+      echo "OMC git exclude already configured"
+      return 0
+    fi
+
+    if [ -s "$exclude_path" ]; then
+      printf '\n' >> "$exclude_path"
+    fi
+    printf '.omx/\n' >> "$exclude_path"
+    echo "Updated OMC git exclude for local OMX artifacts"
     return 0
   fi
 
@@ -119,10 +128,11 @@ ensure_local_omc_git_exclude() {
 .omc/*
 !.omc/skills/
 !.omc/skills/**
+.omx/
 # END OMC local artifacts
 EOF
 
-  echo "Configured git exclude for local .omc artifacts (preserving .omc/skills/)"
+  echo "Configured git exclude for local OMC/OMX artifacts (preserving .omc/skills/)"
 }
 
 # Determine target path
