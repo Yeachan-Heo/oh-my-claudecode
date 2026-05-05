@@ -139,7 +139,7 @@ Use **Claude built-in team mode** to run 3 parallel tracer lanes:
    - Name the **critical unknown** for the lane
    - Recommend the best **discriminating probe**
    - For **Lane 3: Misplacement / SoT Violation** findings, classify every candidate MOVE destination with `ownership_scope` before ranking recommendations:
-     - `personal-config`: user-level dotfiles, `~/.claude/`, personal repositories, or user-only agent rules
+     - `personal-config`: user-level dotfiles, `[$CLAUDE_CONFIG_DIR|~/.claude]/`, personal repositories, or user-only agent rules
      - `shared-config`: company/org repositories, team-maintained config, or multi-tenant shared rules
      - `external`: third-party, vendor, or OSS upstream repositories outside the user's ownership
      - `project-scoped`: per-project storage owned by the current project boundary
