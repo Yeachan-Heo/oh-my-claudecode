@@ -330,6 +330,40 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('Skill("oh-my-claudecode:autoresearch")');
     });
 
+    it('documents deep-interview Round 0 topology locking and multi-component scoring (issue #2919)', () => {
+      const skill = getBuiltinSkill('deep-interview');
+      expect(skill).toBeDefined();
+      const t = skill!.template;
+      const fourComponentFixture = [
+        'Ingestion',
+        'Normalization',
+        'Review UI',
+        'Export',
+      ];
+
+      expect(t).toContain('Round 0: Topology Enumeration Gate');
+      expect(t).toContain('before any Phase 2 ambiguity scoring');
+      expect(t).toContain('"topology": {');
+      expect(t).toContain('"confirmed_at": null');
+      expect(t).toContain('"components": []');
+      expect(t).toContain('"last_targeted_component_id": null');
+      expect(t).toContain('"status": "legacy_missing"');
+      expect(t).toContain('score every active component independently');
+      expect(t).toContain('rotate targeting across active components');
+      expect(t).toContain('topology.last_targeted_component_id');
+      expect(t).toContain('## Topology');
+      expect(t).toContain('user-confirmed deferral reason');
+      expect(t).toContain('Phase 4 must cover each confirmed component in `## Topology` or explicitly list a user-confirmed deferral');
+      expect(t).toContain('Review UI` is the one detailed component');
+      expect(t).toContain('must not collapse or stand in for the less-detailed sibling components');
+      expect(t).toContain('until every active component has sufficient goal/constraint/criteria clarity');
+      expect(t).toContain('cover each confirmed component in `## Topology`');
+
+      for (const component of fourComponentFixture) {
+        expect(t).toContain(component);
+      }
+    });
+
     it('loads deep-interview ambiguityThreshold from settings before state init and updates the announcement copy', () => {
       const profileDir = mkdtempSync(join(tmpdir(), 'omc-skill-profile-'));
       const projectDir = mkdtempSync(join(tmpdir(), 'omc-skill-project-'));
@@ -444,6 +478,23 @@ describe('Builtin Skills', () => {
       expect(raw).toContain('`.omc/specs/deep-interview-{slug}.md` exactly');
       expect(raw).toContain('Ephemeral interview artifacts');
       expect(raw).toContain('`.omc/state/` or in-memory state via `state_write`');
+      expect(raw).toContain('Round 0: Topology Enumeration Gate');
+      expect(raw).toContain('before any Phase 2 ambiguity scoring');
+      expect(raw).toContain('"topology": {');
+      expect(raw).toContain('"confirmed_at": null');
+      expect(raw).toContain('"components": []');
+      expect(raw).toContain('"last_targeted_component_id": null');
+      expect(raw).toContain('"status": "legacy_missing"');
+      expect(raw).toContain('rotate targeting across active components');
+      expect(raw).toContain('## Topology');
+      expect(raw).toContain('Ingestion');
+      expect(raw).toContain('Normalization');
+      expect(raw).toContain('Review UI');
+      expect(raw).toContain('Export');
+      expect(raw).toContain('Review UI` is the one detailed component');
+      expect(raw).toContain('must not collapse or stand in for the less-detailed sibling components');
+      expect(raw).toContain('until every active component has sufficient goal/constraint/criteria clarity');
+      expect(raw).toContain('cover each confirmed component in `## Topology`');
 
       expect(raw).not.toContain('omx question');
       expect(raw).not.toContain('(default: 20%)');
