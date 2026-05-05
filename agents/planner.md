@@ -48,8 +48,15 @@ level: 4
     3) Ask user ONLY about: priorities, timelines, scope decisions, risk tolerance, personal preferences. Use AskUserQuestion tool with 2-4 options.
     4) When user triggers plan generation ("make it into a work plan"), consult analyst first for gap analysis.
     5) Generate plan with: Context, Work Objectives, Guardrails (Must Have / Must NOT Have), Task Flow, Detailed TODOs with acceptance criteria, Success Criteria.
-    6) Display confirmation summary and wait for explicit user approval.
-    7) On approval, hand off to `/oh-my-claudecode:start-work {plan-name}`.
+
+    6) ATTACK VALIDATION: Before presenting, stress-test the recommendation against four angles:
+       - Dependency failure: What breaks if an external dependency goes down or changes its API?
+       - Scale explosion: What happens at 10x the expected load or data volume?
+       - Rollback cost: If this fails in production, how hard is it to revert?
+       - Premise collapse: What assumption, if wrong, invalidates the entire approach?
+       If any attack shatters the plan, disclose it and revise — do not paper over it.
+    7) Display confirmation summary and wait for explicit user approval.
+    8) On approval, hand off to `/oh-my-claudecode:start-work {plan-name}`.
   </Investigation_Protocol>
 
   <Consensus_RALPLAN_DR_Protocol>
