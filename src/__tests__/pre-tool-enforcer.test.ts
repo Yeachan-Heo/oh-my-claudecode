@@ -465,6 +465,64 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(context).not.toContain('Use parallel execution');
   });
 
+  it('does not warn for documentation edits that describe workaround terms as nouns', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Write',
+      toolInput: {
+        file_path: join(tempDir, 'docs', 'troubleshooting.md'),
+        content: [
+          '# Troubleshooting',
+          '',
+          'Document workaround for a specific bug in the troubleshooting guide.',
+          'This section explains when the workaround term appears in instructions.',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-doc-text',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+  });
+
+  it('does not warn for self-referential pre-tool enforcer edits that document the rule', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Edit',
+      toolInput: {
+        file_path: 'scripts/pre-tool-enforcer.mjs',
+        old_string: 'const SLOP_FALLBACK_LANGUAGE_PATTERN = /fallback|workaround/i;',
+        new_string: [
+          '// The fallback/workaround detector should avoid warning on rule documentation.',
+          'const SLOP_FALLBACK_LANGUAGE_PATTERN = /fallback|workaround/i;',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-self-reference',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+  });
+
+  it('still warns for action-shaped fallback narration outside documentation contexts', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Implement fallback routing',
+        prompt: 'Please implement a fallback layer for the flaky API.',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-action-shaped',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
+  });
+
   it('does not warn for read-only search tools that mention fallback as the query', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Grep',
