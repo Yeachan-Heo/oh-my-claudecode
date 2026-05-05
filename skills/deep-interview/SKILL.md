@@ -39,10 +39,12 @@ Inspired by the [Ouroboros project](https://github.com/Q00/ouroboros) which demo
 <Execution_Policy>
 - Ask ONE question at a time -- never batch multiple questions
 - Target the WEAKEST clarity dimension with each question
+- Before Round 1 ambiguity scoring, run a one-time Round 0 topology enumeration gate that confirms the top-level component list and locks it into state
 - Make weakest-dimension targeting explicit every round: name the weakest dimension, state its score/gap, and explain why the next question is aimed there
 - Gather codebase facts via `explore` agent BEFORE asking the user about them
 - For brownfield confirmation questions, cite the repo evidence that triggered the question (file path, symbol, or pattern) instead of asking the user to rediscover it
 - Score ambiguity after every answer -- display the score transparently
+- When the locked topology has multiple active components, score and target each component explicitly so depth-first clarity on one component cannot hide ambiguity in siblings
 - Keep prompt payloads budgeted: summarize or trim oversized initial context/history before composing question, scoring, spec, or handoff prompts
 - If the user's initial context is oversized, create a concise prompt-safe summary first and wait for that summary before ambiguity scoring, question generation, or downstream execution handoff
 - Do not proceed to execution until ambiguity ≤ the resolved threshold for this run
@@ -103,6 +105,13 @@ When arguments include `--autoresearch`, Deep Interview becomes the zero-learnin
     "current_ambiguity": 1.0,
     "threshold": <resolvedThreshold>,
     "codebase_context": null,
+    "topology": {
+      "status": "pending|confirmed|legacy_missing",
+      "confirmed_at": null,
+      "components": [],
+      "deferrals": [],
+      "last_targeted_component_id": null
+    },
     "challenge_modes_used": [],
     "ontology_snapshots": []
   }
@@ -117,6 +126,69 @@ When arguments include `--autoresearch`, Deep Interview becomes the zero-learnin
 > **Project type:** {greenfield|brownfield}
 > **Current ambiguity:** 100% (we haven't started yet)
 
+## Round 0: Topology Enumeration Gate
+
+Run this gate exactly once after Phase 1 initialization and before any Phase 2 ambiguity scoring. The goal is to lock the **shape** of the user's scope before depth-first Socratic questioning can overfit to the most-described component.
+
+1. **Enumerate candidate top-level components** from the prompt-safe initial idea and brownfield context:
+   - Extract top-level verbs/nouns, workstreams, surfaces, integrations, or deliverables that can succeed or fail independently.
+   - Prefer 1-6 components. If more than 6 candidates appear, group siblings at the highest useful level and note the grouping rationale.
+   - Do not treat implementation tasks, fields, or sub-features as top-level components unless the user framed them as independent outcomes.
+2. **Ask one confirmation question** before Round 1:
+
+```
+Round 0 | Topology confirmation | Ambiguity: not scored yet
+
+I'm reading this as {N} top-level component(s):
+1. {component_name}: {one_sentence_description}
+2. ...
+
+Is that topology right? Should any component be added, removed, merged, split, or explicitly deferred?
+```
+
+Options should include contextually relevant choices such as **Looks right**, **Add/remove/merge components**, **Defer one or more components**, plus free-text. This is the only pre-scoring question and preserves the one-question-per-round rule.
+
+3. **Lock topology into state** after the answer. Store a normalized component list and confirmation timestamp:
+
+```json
+{
+  "topology": {
+    "status": "confirmed",
+    "confirmed_at": "<ISO-8601 timestamp>",
+    "components": [
+      {
+        "id": "component-slug",
+        "name": "Component Name",
+        "description": "Confirmed top-level outcome",
+        "status": "active|deferred",
+        "evidence": ["initial prompt phrase or brownfield citation"],
+        "clarity_scores": {
+          "goal": null,
+          "constraints": null,
+          "criteria": null,
+          "context": null
+        },
+        "weakest_dimension": null
+      }
+    ],
+    "deferrals": [
+      {
+        "component_id": "component-slug",
+        "reason": "User-confirmed deferral reason",
+        "confirmed_at": "<ISO-8601 timestamp>"
+      }
+    ],
+    "last_targeted_component_id": null
+  }
+}
+```
+
+4. **Legacy state migration:** When resuming an existing `deep-interview` state file that lacks `topology`, treat it as `"status": "legacy_missing"`. If no final `spec_path` exists yet, run Round 0 before the next ambiguity scoring pass and then continue with the existing transcript. If a final spec already exists, do not rewrite history; note in any handoff that topology was not captured for that legacy interview.
+
+5. **Single-component pass-through:** If the user confirms one active component, Phase 2 proceeds with the existing flow while still carrying `topology.components[0]` into scoring and spec output.
+
+6. **Four-component fixture shape:** For an initial idea such as "Build an intake pipeline that ingests CSVs, normalizes records, provides a detailed reviewer UI with inline comments and approvals, and exports audit-ready reports," Round 0 should surface all four top-level components — `Ingestion`, `Normalization`, `Review UI`, and `Export` — even though `Review UI` is the one detailed component. The detailed `Review UI` component must not collapse or stand in for the less-detailed sibling components. Phase 2 must ask follow-up questions until every active component has sufficient goal/constraint/criteria clarity. Phase 4 must cover each confirmed component in `## Topology` or explicitly list a user-confirmed deferral for that component.
+
 ## Phase 2: Interview Loop
 
 Repeat until `ambiguity ≤ threshold` OR user exits early:
@@ -129,13 +201,15 @@ Build the question generation prompt with:
 - Current clarity scores per dimension (which is weakest?)
 - Challenge agent mode (if activated -- see Phase 3)
 - Brownfield codebase context (if applicable), summarized to cited paths/symbols/patterns instead of raw dumps
+- Locked topology from Round 0, including active components, deferred components, prior per-component scores, and `last_targeted_component_id`
 
 If any prompt input is too large, summarize it first and then continue from the summary. Do not ask the next `AskUserQuestion`, score ambiguity, or hand off to execution from an over-budget raw transcript.
 
 **Question targeting strategy:**
-- Identify the dimension with the LOWEST clarity score
-- Generate a question that specifically improves that dimension
-- State, in one sentence before the question, why this dimension is now the bottleneck to reducing ambiguity
+- Identify the active component + dimension pair with the LOWEST clarity score across the locked topology
+- When N > 1 active components are tied or similarly weak, rotate targeting across active components rather than asking repeatedly about the last targeted component; update `topology.last_targeted_component_id` after each question
+- Generate a question that specifically improves that component's weakest dimension
+- State, in one sentence before the question, why this component/dimension pair is now the bottleneck to reducing ambiguity
 - Questions should expose ASSUMPTIONS, not gather feature lists
 - If the scope is still conceptually fuzzy (entities keep shifting, the user is naming symptoms, or the core noun is unstable), switch to an ontology-style question that asks what the thing fundamentally IS before returning to feature/detail questions
 
@@ -153,7 +227,7 @@ If any prompt input is too large, summarize it first and then continue from the 
 Use `AskUserQuestion` with the generated question. Present it clearly with the current ambiguity context:
 
 ```
-Round {n} | Targeting: {weakest_dimension} | Why now: {one_sentence_targeting_rationale} | Ambiguity: {score}%
+Round {n} | Component: {target_component_name} | Targeting: {weakest_dimension} | Why now: {one_sentence_targeting_rationale} | Ambiguity: {score}%
 
 {question}
 ```
@@ -167,12 +241,17 @@ After receiving the user's answer, score clarity across all dimensions.
 **Scoring prompt** (use opus model, temperature 0.1 for consistency):
 
 ```
-Given the following interview transcript for a {greenfield|brownfield} project, score clarity on each dimension from 0.0 to 1.0. If the initial context or transcript was summarized for prompt safety, score from that summary plus the preserved round decisions/gaps; do not re-expand raw oversized context.
+Given the following interview transcript for a {greenfield|brownfield} project, score clarity on each dimension from 0.0 to 1.0. If the initial context or transcript was summarized for prompt safety, score from that summary plus the preserved round decisions/gaps; do not re-expand raw oversized context. Honor the locked Round 0 topology: score every active component independently and never drop confirmed sibling components just because one component is already clear.
 
 Original idea or prompt-safe initial-context summary: {idea_or_initial_context_summary}
 
 Transcript or prompt-safe transcript summary:
 {all rounds Q&A or summarized transcript}
+
+Locked topology:
+{state.topology.components and state.topology.deferrals}
+
+Score each active component on each dimension, then provide the overall dimension scores as the minimum or coverage-weighted weakest score across active components. Deferred components are excluded from ambiguity math but must remain listed in topology and the final spec.
 
 Score each dimension:
 1. Goal Clarity (0.0-1.0): Is the primary objective unambiguous? Can you state it in one sentence without qualifiers? Can you name the key entities (nouns) and their relationships (verbs) without ambiguity?
@@ -186,8 +265,10 @@ For each dimension provide:
 - gap: what's still unclear (if score < 0.9)
 
 Also identify:
-- weakest_dimension: the single lowest-confidence dimension this round
-- weakest_dimension_rationale: one sentence explaining why it is the highest-leverage target for the next question
+- weakest_component_id: the active component with the lowest clarity after applying rotation across components when N > 1
+- weakest_dimension: the single lowest-confidence dimension for that component this round
+- weakest_dimension_rationale: one sentence explaining why this component/dimension pair is the highest-leverage target for the next question
+- component_scores: object keyed by component id, with per-dimension scores and gaps
 
 5. Ontology Extraction: Identify all key entities (nouns) discussed in the transcript.
 
@@ -239,16 +320,18 @@ Round {n} complete.
 | Context (brownfield) | {s} | {w} | {s*w} | {gap or "Clear"} |
 | **Ambiguity** | | | **{score}%** | |
 
+**Topology:** Targeted {target_component_name} | Active: {active_component_count} | Deferred: {deferred_component_count} | Next rotation after: {last_targeted_component_id}
+
 **Ontology:** {entity_count} entities | Stability: {stability_ratio} | New: {new} | Changed: {changed} | Stable: {stable}
 
-**Next target:** {weakest_dimension} — {weakest_dimension_rationale}
+**Next target:** {target_component_name} / {weakest_dimension} — {weakest_dimension_rationale}
 
 {score <= threshold ? "Clarity threshold met! Ready to proceed." : "Focusing next question on: {weakest_dimension}"}
 ```
 
 ### Step 2e: Update State
 
-Update interview state with the new round and scores via `state_write`.
+Update interview state with the new round, global scores, per-component `topology.components[].clarity_scores`, `topology.components[].weakest_dimension`, ontology snapshot, and `topology.last_targeted_component_id` via `state_write`.
 
 ### Step 2f: Check Soft Limits
 
@@ -310,8 +393,15 @@ Spec structure:
 | **Total Clarity** | | | **{total}** |
 | **Ambiguity** | | | **{1-total}** |
 
+## Topology
+{List every Round 0 confirmed top-level component. Active components must have coverage notes; deferred components must include the user-confirmed deferral reason and timestamp.}
+
+| Component | Status | Description | Coverage / Deferral Note |
+|-----------|--------|-------------|--------------------------|
+| {component.name} | {active|deferred} | {component.description} | {covered acceptance criteria or deferral reason} |
+
 ## Goal
-{crystal-clear goal statement derived from interview}
+{crystal-clear goal statement derived from interview, covering every active topology component}
 
 ## Constraints
 - {constraint 1}
@@ -431,6 +521,7 @@ Skipping any stage is possible but reduces quality assurance:
 - Preserve the AskUserQuestion path for OMC-native interaction; do not introduce OMX-only structured-question transport into this skill
 - Use `Task(subagent_type="oh-my-claudecode:explore", model="haiku")` for brownfield codebase exploration (run BEFORE asking user about codebase)
 - Use opus model (temperature 0.1) for ambiguity scoring — consistency is critical
+- Round 0 topology confirmation happens before ambiguity scoring; Phase 2 scoring must honor locked topology and rotate targeting across active components when more than one is present
 - Use `state_write` / `state_read` for interview state persistence
 - Use `Write` tool to save the final spec to `.omc/specs/deep-interview-{slug}.md` exactly; use `.omc/state/` or `state_write` for ephemeral artifacts
 - Use `Skill()` to bridge to execution modes — never implement directly
@@ -555,14 +646,17 @@ Why bad: 45% ambiguity means nearly half the requirements are unclear. The mathe
 - [ ] Every round explicitly names the weakest dimension and why it is the next target
 - [ ] Challenge agents activated at correct thresholds (round 4, 6, 8)
 - [ ] Spec file written to `.omc/specs/deep-interview-{slug}.md` exactly; ephemeral artifacts stayed under `.omc/state/` or `state_write`
-- [ ] Spec includes: goal, constraints, acceptance criteria, clarity breakdown, transcript
+- [ ] Spec includes: topology, goal, constraints, acceptance criteria, clarity breakdown, transcript
 - [ ] Execution bridge presented via AskUserQuestion
 - [ ] Selected execution mode invoked via Skill() (never direct implementation)
 - [ ] If 3-stage pipeline selected: omc-plan --consensus --direct invoked, then autopilot with consensus plan
 - [ ] State cleaned up after execution handoff
 - [ ] Brownfield confirmation questions cite repo evidence (file/path/pattern) before asking the user to decide
 - [ ] Scope-fuzzy tasks can trigger ontology-style questioning to stabilize the core entity before feature elaboration
-- [ ] Per-round ambiguity report includes Ontology row with entity count and stability ratio
+- [ ] Round 0 topology gate completed before ambiguity scoring and persisted `topology.confirmed_at`
+- [ ] Per-round ambiguity report includes Topology target/coverage and Ontology row with entity count and stability ratio
+- [ ] Multi-component interviews rotate targeting across active components when N > 1
+- [ ] Spec includes Topology section with confirmed active components and user-confirmed deferrals
 - [ ] Spec includes Ontology (Key Entities) table and Ontology Convergence section
 </Final_Checklist>
 

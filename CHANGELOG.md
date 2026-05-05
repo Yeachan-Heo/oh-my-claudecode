@@ -1,3 +1,15 @@
+# Unreleased
+
+### New Features
+
+- **Deep Interview: Round 0 topology enumeration** (#2919) — confirms and locks top-level components before ambiguity scoring, rotates multi-component targeting, and includes confirmed components plus deferrals in generated specs.
+
+### Migration Notes
+
+- Existing `deep-interview` state files without `state.topology` are treated as legacy state. On resume, unfinished interviews run the new Round 0 topology gate before the next scoring pass; already-finalized specs are left unchanged and should be treated as topology-not-captured legacy artifacts.
+
+---
+
 # oh-my-claudecode v4.13.6: Reliability & macOS Hardening
 
 ## Release Notes
