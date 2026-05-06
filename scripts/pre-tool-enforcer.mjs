@@ -173,14 +173,13 @@ const SLOP_FALLBACK_LANGUAGE_PATTERN = /\b(?:fallback|fall\s+back|workaround|wor
 const SLOP_FALLBACK_ACTION_PATTERNS = [
   /\b(?:add|build|create|implement|introduce|make|patch|use|using|write)\s+(?:an?\s+|the\s+)?(?:fallback|workaround)\b/i,
   /\b(?:fallback|workaround)\s+(?:layer|path|handler|shim|patch|implementation|mechanism|mode)\b/i,
-  /\bfall\s+back\s+to\b/i,
+  /\b(?:fall\s+back|fallback)\s+(?:to|on|onto)\b/i,
   /\bwork\s+around\s+(?:it|this|that|the|a|an)\b/i,
   /\bwork\s+around\s+(?!(?:it|this|that|the|a|an)\b)(?:[a-z0-9][\w-]*\s+){0,5}[a-z0-9][\w-]*\b/i,
   /(?:^|[\s"'`=:/\\])[\w.-]*(?:fallback|workaround)[\w.-]*\.(?:cjs|js|mjs|py|sh|ts|tsx)\b/i,
 ];
 const SLOP_DOC_CONTEXT_PATTERN = /(?:^|[/\\])(?:docs?|documentation|guides?|instructions?|prompts?|\.om[ctx])(?:[/\\]|$)|\.(?:md|mdx|txt|rst)$/i;
 const SLOP_SELF_REFERENCE_PATH_PATTERN = /(?:^|[/\\])(?:pre-tool-enforcer(?:\.mjs)?|pre-tool-enforcer\.test\.ts)(?:$|[/\\])/i;
-const SLOP_DOCUMENTATION_PHRASE_PATTERN = /\b(?:document|documents|documenting|describe|describes|describing|explain|explains|explaining|mention|mentions|quote|quotes|instruction|instructions|rule|rules|detector|warning)\b/i;
 
 function collectStringValues(value, output = [], depth = 0) {
   if (depth > 5 || output.length > 100) return output;
@@ -226,10 +225,9 @@ function isSelfReferentialSlopContext(toolInput) {
   return collectLikelyPathValues(toolInput).some(value => SLOP_SELF_REFERENCE_PATH_PATTERN.test(value));
 }
 
-function isDocumentationSlopContext(toolInput, inspectedText) {
+function isDocumentationSlopContext(toolInput) {
   const pathLikeValues = collectLikelyPathValues(toolInput);
-  return pathLikeValues.some(value => SLOP_DOC_CONTEXT_PATTERN.test(value))
-    || (/^#{1,6}\s+\S/m.test(inspectedText) && SLOP_DOCUMENTATION_PHRASE_PATTERN.test(inspectedText));
+  return pathLikeValues.some(value => SLOP_DOC_CONTEXT_PATTERN.test(value));
 }
 
 function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
@@ -238,7 +236,7 @@ function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
 
   const toolInput = data.toolInput || data.tool_input || {};
   if (isSelfReferentialSlopContext(toolInput)) return false;
-  if (isDocumentationSlopContext(toolInput, inspectedText)) {
+  if (isDocumentationSlopContext(toolInput)) {
     return false;
   }
 

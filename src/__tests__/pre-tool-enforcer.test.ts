@@ -540,6 +540,61 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
   });
 
+  it('warns for fall back on cached responses phrasing', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Add API fallback',
+        prompt: 'If the API fails, fall back on cached responses.',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-fall-back-on',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
+  });
+
+  it('warns for single-word fallback to cached responses phrasing', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Add API fallback',
+        prompt: 'If the API fails, fallback to cached responses.',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-fallback-to',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
+  });
+
+  it('does not treat markdown headings alone as documentation context for Task prompts', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Implement fallback routing',
+        prompt: [
+          '## Implementation',
+          '',
+          'Please implement a fallback layer and explain why.',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-markdown-task',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
+  });
+
   it('does not warn for documentation edits that quote action-shaped work-around wording', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Write',
