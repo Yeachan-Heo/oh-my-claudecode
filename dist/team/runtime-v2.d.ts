@@ -105,6 +105,7 @@ export interface StartTeamV2Config {
      * branch. See merge-orchestrator.ts.
      */
     autoMerge?: boolean;
+    awaitInbox?: boolean;
 }
 /**
  * Start a team with the v2 event-driven runtime.

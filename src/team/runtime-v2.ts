@@ -421,6 +421,7 @@ export interface StartTeamV2Config {
    * branch. See merge-orchestrator.ts.
    */
   autoMerge?: boolean;
+  awaitInbox?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +524,7 @@ interface SpawnV2WorkerOptions {
   workerCwd?: string;
   worktreePath?: string;
   autoMerge?: boolean;
+  awaitInbox?: boolean;
   resolvedBinaryPaths: Partial<Record<CliAgentType, string>>;
   /**
    * Pre-resolved model ID from the team's routing snapshot. When set, overrides
@@ -636,12 +638,21 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? renderCliWorkerOutputContract(opts.role, outputFile)
     : undefined;
 
-  // Build v2 task instruction (CLI API, NO done.json)
-  const instruction = buildV2TaskInstruction(
-    opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract,
-  );
   const instructionStateRoot = opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : undefined;
-  const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
+  const instruction = opts.awaitInbox
+    ? [
+      `Worker: ${opts.workerName}`,
+      `Team: ${opts.teamName}`,
+      `Wait for leader instructions in ${opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : `.omc/state/team/${opts.teamName}`}/mailbox/${opts.workerName}.json.`,
+      'Do not claim tasks or run repo commands until a leader-fixed message assigns your role and task_id.',
+      'When assigned, follow that message exactly and report back to leader-fixed.',
+    ].join('\n')
+    : buildV2TaskInstruction(
+      opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract,
+    );
+  const inboxTriggerMessage = opts.awaitInbox
+    ? `Read ${opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : `.omc/state/team/${opts.teamName}`}/workers/${opts.workerName}/inbox.md, then wait for leader-fixed mailbox instructions.`
+    : generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
   const promptModeStartupPrompt = generatePromptModeStartupPrompt(
     opts.teamName, opts.workerName, instructionStateRoot, cliOutputContract,
   );
@@ -771,6 +782,14 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       paneId,
       startupAssigned: false,
       startupFailureReason: dispatchOutcome.reason,
+    };
+  }
+
+  if (opts.awaitInbox) {
+    return {
+      paneId,
+      startupAssigned: false,
+      ...(outputFile ? { outputFile } : {}),
     };
   }
 
@@ -914,6 +933,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
 
   const workspaceMode = worktreeMode === 'disabled' ? 'single' as const : 'worktree' as const;
+  const awaitInbox = config.awaitInbox === true || process.env.OMC_TEAM_AWAIT_INBOX === '1';
 
   // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
   // AC-8: missing/untrusted binaries fall back to the snapshot's Claude tuple at
@@ -1054,6 +1074,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
           id: String(idx + 1), subject: t.subject, description: t.description,
         })),
         cwd: leaderCwd,
+        ...(awaitInbox ? { awaitInbox: true } : {}),
         ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
         ...(workerWorktrees.has(wName) ? { instructionStateRoot: '$OMC_TEAM_STATE_ROOT' } : {}),
       });
@@ -1193,19 +1214,31 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // Spawn workers for initial tasks (at most one startup task per worker)
   const initialStartupAllocations: typeof startupAllocations = [];
   const seenStartupWorkers = new Set<string>();
-  for (const decision of startupAllocations) {
-    if (seenStartupWorkers.has(decision.workerName)) continue;
-    initialStartupAllocations.push(decision);
-    seenStartupWorkers.add(decision.workerName);
-    if (initialStartupAllocations.length >= config.workerCount) break;
+  if (!awaitInbox) {
+    for (const decision of startupAllocations) {
+      if (seenStartupWorkers.has(decision.workerName)) continue;
+      initialStartupAllocations.push(decision);
+      seenStartupWorkers.add(decision.workerName);
+      if (initialStartupAllocations.length >= config.workerCount) break;
+    }
+  } else {
+    for (let i = 0; i < config.workerCount; i++) {
+      initialStartupAllocations.push({ workerName: `worker-${i + 1}`, taskIndex: i });
+    }
   }
+  const awaitInboxStartupTask = {
+    subject: 'Await leader inbox assignment',
+    description: 'Wait for leader-fixed mailbox instructions before claiming tasks or running repo commands.',
+  };
 
   try {
     for (const decision of initialStartupAllocations) {
     const wName = decision.workerName;
     const workerIndex = Number.parseInt(wName.replace('worker-', ''), 10) - 1;
     const taskId = String(decision.taskIndex + 1);
-    const task = config.tasks[decision.taskIndex];
+    const task = awaitInbox
+      ? config.tasks[decision.taskIndex] ?? awaitInboxStartupTask
+      : config.tasks[decision.taskIndex];
     if (!task || workerIndex < 0) continue;
 
     // Route the task through the team's immutable snapshot (Option E).
@@ -1234,6 +1267,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
       worktreePath: workersInfo[workerIndex]?.worktree_path,
       autoMerge: Boolean(config.autoMerge),
+      awaitInbox,
       resolvedBinaryPaths,
       ...(assignment.model ? { model: assignment.model } : {}),
       ...(assignment.role ? { role: assignment.role } : {}),
@@ -1244,7 +1278,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       const workerInfo = workersInfo[workerIndex];
       if (workerInfo) {
         workerInfo.pane_id = workerLaunch.paneId;
-        workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
+        workerInfo.assigned_tasks = awaitInbox ? [] : workerLaunch.startupAssigned ? [taskId] : [];
         workerInfo.worker_cli = assignment.agentType;
         if (workerLaunch.outputFile) {
           workerInfo.output_file = workerLaunch.outputFile;

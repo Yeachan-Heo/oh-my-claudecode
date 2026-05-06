@@ -29863,7 +29863,7 @@ function agentTypeGuidance(agentType) {
   }
 }
 function generateWorkerOverlay(params) {
-  const { teamName, workerName: workerName2, agentType, tasks, bootstrapInstructions } = params;
+  const { teamName, workerName: workerName2, agentType, tasks, bootstrapInstructions, awaitInbox } = params;
   const instructionStateRoot = params.instructionStateRoot ?? DEFAULT_INSTRUCTION_STATE_ROOT;
   const sanitizedTasks = tasks.map((t) => ({
     id: t.id,
@@ -29888,6 +29888,45 @@ function generateWorkerOverlay(params) {
   const taskList = sanitizedTasks.length > 0 ? sanitizedTasks.map((t) => `- **Task ${t.id}**: ${t.subject}
   Description: ${t.description}
   Status: pending`).join("\n") : "- No tasks assigned yet. Check your inbox for assignments.";
+  if (awaitInbox) {
+    return `# Team Worker Protocol
+
+You are a **team worker**, not the team leader. Operate strictly within worker protocol.
+
+## FIRST ACTION REQUIRED
+Before doing anything else, write your ready sentinel file and send startup ACK:
+\`\`\`bash
+mkdir -p $(dirname ${sentinelPath}) && touch ${sentinelPath}
+${sendAckCommand}
+\`\`\`
+
+## Await-Inbox Mode
+- Do not claim tasks at startup.
+- Do not run repo commands at startup.
+- Do not run lifecycle commands until leader-fixed explicitly provides a task_id.
+- Check mailbox: \`${mailboxListCommand}\`.
+- Wait for a leader-fixed mailbox message that assigns your role, task_id, allowed commands, model/thinking budget, and completion/report rules.
+- If Codex /goal returns null or no active goal exists, treat the latest leader-fixed mailbox assignment as your active inbox-goal.
+- After assignment, follow that message exactly. If it requires task lifecycle, use \`${claimTaskCommand}\` and \`${completeTaskCommand}\` or \`${failTaskCommand}\`.
+
+## Identity
+- **Team**: ${teamName}
+- **Worker**: ${workerName2}
+- **Agent Type**: ${agentType}
+- **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName2}
+
+## Communication Protocol
+- **Inbox**: Read ${inboxPath} for startup instructions
+- **Mailbox**: Check ${mailboxListCommand}
+- **Status**: Write to ${statusPath}
+- **Heartbeat**: Update ${heartbeatPath}
+
+${agentTypeGuidance(agentType)}
+
+${bootstrapInstructions ? `## Role Context
+${bootstrapInstructions}
+` : ""}`;
+  }
   return `# Team Worker Protocol
 
 You are a **team worker**, not the team leader. Operate strictly within worker protocol.
@@ -32635,15 +32674,21 @@ async function spawnV2Worker(opts) {
   const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
   const outputFile = injectContract && opts.role ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName) : void 0;
   const cliOutputContract = injectContract && opts.role && outputFile ? renderCliWorkerOutputContract(opts.role, outputFile) : void 0;
-  const instruction = buildV2TaskInstruction(
+  const instructionStateRoot = opts.worktreePath ? "$OMC_TEAM_STATE_ROOT" : void 0;
+  const instruction = opts.awaitInbox ? [
+    `Worker: ${opts.workerName}`,
+    `Team: ${opts.teamName}`,
+    `Wait for leader instructions in ${opts.worktreePath ? "$OMC_TEAM_STATE_ROOT" : `.omc/state/team/${opts.teamName}`}/mailbox/${opts.workerName}.json.`,
+    "Do not claim tasks or run repo commands until a leader-fixed message assigns your role and task_id.",
+    "When assigned, follow that message exactly and report back to leader-fixed."
+  ].join("\n") : buildV2TaskInstruction(
     opts.teamName,
     opts.workerName,
     opts.task,
     opts.taskId,
     cliOutputContract
   );
-  const instructionStateRoot = opts.worktreePath ? "$OMC_TEAM_STATE_ROOT" : void 0;
-  const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
+  const inboxTriggerMessage = opts.awaitInbox ? `Read ${opts.worktreePath ? "$OMC_TEAM_STATE_ROOT" : `.omc/state/team/${opts.teamName}`}/workers/${opts.workerName}/inbox.md, then wait for leader-fixed mailbox instructions.` : generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
   const promptModeStartupPrompt = generatePromptModeStartupPrompt(
     opts.teamName,
     opts.workerName,
@@ -32753,6 +32798,13 @@ async function spawnV2Worker(opts) {
       startupFailureReason: dispatchOutcome.reason
     };
   }
+  if (opts.awaitInbox) {
+    return {
+      paneId,
+      startupAssigned: false,
+      ...outputFile ? { outputFile } : {}
+    };
+  }
   if (opts.agentType === "claude") {
     const settled = await waitForWorkerStartupEvidence(
       opts.teamName,
@@ -32858,6 +32910,7 @@ async function startTeamV2(config2) {
     }
   }
   const workspaceMode = worktreeMode === "disabled" ? "single" : "worktree";
+  const awaitInbox = config2.awaitInbox === true || process.env.OMC_TEAM_AWAIT_INBOX === "1";
   const agentTypes = config2.agentTypes;
   const resolvedBinaryPaths = {};
   const missingBinaryReasons = [];
@@ -32975,6 +33028,7 @@ async function startTeamV2(config2) {
           description: t.description
         })),
         cwd: leaderCwd,
+        ...awaitInbox ? { awaitInbox: true } : {},
         ...config2.rolePrompt ? { bootstrapInstructions: config2.rolePrompt } : {},
         ...workerWorktrees.has(wName) ? { instructionStateRoot: "$OMC_TEAM_STATE_ROOT" } : {}
       });
@@ -33105,18 +33159,28 @@ async function startTeamV2(config2) {
   }
   const initialStartupAllocations = [];
   const seenStartupWorkers = /* @__PURE__ */ new Set();
-  for (const decision of startupAllocations) {
-    if (seenStartupWorkers.has(decision.workerName)) continue;
-    initialStartupAllocations.push(decision);
-    seenStartupWorkers.add(decision.workerName);
-    if (initialStartupAllocations.length >= config2.workerCount) break;
+  if (!awaitInbox) {
+    for (const decision of startupAllocations) {
+      if (seenStartupWorkers.has(decision.workerName)) continue;
+      initialStartupAllocations.push(decision);
+      seenStartupWorkers.add(decision.workerName);
+      if (initialStartupAllocations.length >= config2.workerCount) break;
+    }
+  } else {
+    for (let i = 0; i < config2.workerCount; i++) {
+      initialStartupAllocations.push({ workerName: `worker-${i + 1}`, taskIndex: i });
+    }
   }
+  const awaitInboxStartupTask = {
+    subject: "Await leader inbox assignment",
+    description: "Wait for leader-fixed mailbox instructions before claiming tasks or running repo commands."
+  };
   try {
     for (const decision of initialStartupAllocations) {
       const wName = decision.workerName;
       const workerIndex = Number.parseInt(wName.replace("worker-", ""), 10) - 1;
       const taskId = String(decision.taskIndex + 1);
-      const task = config2.tasks[decision.taskIndex];
+      const task = awaitInbox ? config2.tasks[decision.taskIndex] ?? awaitInboxStartupTask : config2.tasks[decision.taskIndex];
       if (!task || workerIndex < 0) continue;
       const fallbackAgent = agentTypes[workerIndex % agentTypes.length] ?? agentTypes[0] ?? "claude";
       const assignment = resolveTaskAssignment(
@@ -33140,6 +33204,7 @@ async function startTeamV2(config2) {
         workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
         worktreePath: workersInfo[workerIndex]?.worktree_path,
         autoMerge: Boolean(config2.autoMerge),
+        awaitInbox,
         resolvedBinaryPaths,
         ...assignment.model ? { model: assignment.model } : {},
         ...assignment.role ? { role: assignment.role } : {}
@@ -33149,7 +33214,7 @@ async function startTeamV2(config2) {
         const workerInfo = workersInfo[workerIndex];
         if (workerInfo) {
           workerInfo.pane_id = workerLaunch.paneId;
-          workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
+          workerInfo.assigned_tasks = awaitInbox ? [] : workerLaunch.startupAssigned ? [taskId] : [];
           workerInfo.worker_cli = assignment.agentType;
           if (workerLaunch.outputFile) {
             workerInfo.output_file = workerLaunch.outputFile;

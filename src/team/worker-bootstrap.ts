@@ -20,6 +20,7 @@ export interface WorkerBootstrapParams {
    * `OMC_TEAM_STATE_ROOT` and `teamStateRoot()` semantics.
    */
   instructionStateRoot?: string;
+  awaitInbox?: boolean;
 }
 
 const DEFAULT_INSTRUCTION_STATE_ROOT = '.omc/state';
@@ -119,7 +120,7 @@ function agentTypeGuidance(agentType: CliAgentType): string {
  * Does NOT mutate the project AGENTS.md.
  */
 export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
-  const { teamName, workerName, agentType, tasks, bootstrapInstructions } = params;
+  const { teamName, workerName, agentType, tasks, bootstrapInstructions, awaitInbox } = params;
   const instructionStateRoot = params.instructionStateRoot ?? DEFAULT_INSTRUCTION_STATE_ROOT;
 
   // Sanitize all task content before embedding
@@ -148,6 +149,44 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
   const taskList = sanitizedTasks.length > 0
     ? sanitizedTasks.map(t => `- **Task ${t.id}**: ${t.subject}\n  Description: ${t.description}\n  Status: pending`).join('\n')
     : '- No tasks assigned yet. Check your inbox for assignments.';
+
+  if (awaitInbox) {
+    return `# Team Worker Protocol
+
+You are a **team worker**, not the team leader. Operate strictly within worker protocol.
+
+## FIRST ACTION REQUIRED
+Before doing anything else, write your ready sentinel file and send startup ACK:
+\`\`\`bash
+mkdir -p $(dirname ${sentinelPath}) && touch ${sentinelPath}
+${sendAckCommand}
+\`\`\`
+
+## Await-Inbox Mode
+- Do not claim tasks at startup.
+- Do not run repo commands at startup.
+- Do not run lifecycle commands until leader-fixed explicitly provides a task_id.
+- Check mailbox: \`${mailboxListCommand}\`.
+- Wait for a leader-fixed mailbox message that assigns your role, task_id, allowed commands, model/thinking budget, and completion/report rules.
+- If Codex /goal returns null or no active goal exists, treat the latest leader-fixed mailbox assignment as your active inbox-goal.
+- After assignment, follow that message exactly. If it requires task lifecycle, use \`${claimTaskCommand}\` and \`${completeTaskCommand}\` or \`${failTaskCommand}\`.
+
+## Identity
+- **Team**: ${teamName}
+- **Worker**: ${workerName}
+- **Agent Type**: ${agentType}
+- **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName}
+
+## Communication Protocol
+- **Inbox**: Read ${inboxPath} for startup instructions
+- **Mailbox**: Check ${mailboxListCommand}
+- **Status**: Write to ${statusPath}
+- **Heartbeat**: Update ${heartbeatPath}
+
+${agentTypeGuidance(agentType)}
+
+${bootstrapInstructions ? `## Role Context\n${bootstrapInstructions}\n` : ''}`;
+  }
 
   return `# Team Worker Protocol
 

@@ -17,6 +17,7 @@ export interface WorkerBootstrapParams {
      * `OMC_TEAM_STATE_ROOT` and `teamStateRoot()` semantics.
      */
     instructionStateRoot?: string;
+    awaitInbox?: boolean;
 }
 export declare function generateTriggerMessage(teamName: string, workerName: string, teamStateRoot?: string): string;
 export declare function generatePromptModeStartupPrompt(teamName: string, workerName: string, teamStateRoot?: string, cliOutputContract?: string): string;
