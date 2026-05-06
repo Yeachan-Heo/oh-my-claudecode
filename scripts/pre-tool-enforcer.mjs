@@ -175,6 +175,7 @@ const SLOP_FALLBACK_ACTION_PATTERNS = [
   /\b(?:fallback|workaround)\s+(?:layer|path|handler|shim|patch|implementation|mechanism|mode)\b/i,
   /\bfall\s+back\s+to\b/i,
   /\bwork\s+around\s+(?:it|this|that|the|a|an)\b/i,
+  /\bwork\s+around\s+(?!(?:it|this|that|the|a|an)\b)(?:[a-z0-9][\w-]*\s+){0,5}[a-z0-9][\w-]*\b/i,
   /(?:^|[\s"'`=:/\\])[\w.-]*(?:fallback|workaround)[\w.-]*\.(?:cjs|js|mjs|py|sh|ts|tsx)\b/i,
 ];
 const SLOP_DOC_CONTEXT_PATTERN = /(?:^|[/\\])(?:docs?|documentation|guides?|instructions?|prompts?|\.om[ctx])(?:[/\\]|$)|\.(?:md|mdx|txt|rst)$/i;
@@ -237,7 +238,7 @@ function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
 
   const toolInput = data.toolInput || data.tool_input || {};
   if (isSelfReferentialSlopContext(toolInput)) return false;
-  if (isDocumentationSlopContext(toolInput, inspectedText) && !hasSlopFallbackActionShape(inspectedText)) {
+  if (isDocumentationSlopContext(toolInput, inspectedText)) {
     return false;
   }
 

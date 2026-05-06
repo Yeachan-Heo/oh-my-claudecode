@@ -523,6 +523,43 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
   });
 
+  it('warns for natural work-around phrasing with direct noun objects', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Skip architecture for flaky API failures',
+        prompt: 'Please work around flaky API failures by skipping the normal architecture.',
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-work-around-noun-object',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).toContain('[SLOP WARNING]');
+  });
+
+  it('does not warn for documentation edits that quote action-shaped work-around wording', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Write',
+      toolInput: {
+        file_path: join(tempDir, 'docs', 'architecture-notes.md'),
+        content: [
+          '# Architecture notes',
+          '',
+          'Explain why the phrase "Please work around flaky API failures" should be reviewed carefully.',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-doc-action-shaped',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+  });
+
   it('does not warn for read-only search tools that mention fallback as the query', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Grep',
