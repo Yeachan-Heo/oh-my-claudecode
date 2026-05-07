@@ -274,6 +274,9 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('Ranked Hypotheses');
       expect(skill?.template).toContain('trace_timeline');
       expect(skill?.template).toContain('trace_summary');
+      expect(skill?.template).toContain('multi-entity premise/key-assumption mismatches');
+      expect(skill?.template).toContain('single dimensional key across distinct entities, tenants, streams, or groups');
+      expect(skill?.template).toContain('verification-methodology defect');
     });
     it('should retrieve the deep-dive skill with pipeline metadata and 3-point injection', () => {
       const skill = getBuiltinSkill('deep-dive');
@@ -292,6 +295,10 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('initial question queue injection');
       // Verify per-lane critical unknowns (B3 fix)
       expect(skill?.template).toContain('Per-Lane Critical Unknowns');
+      // Verify Lane 3 multi-entity premise audit guard (#2949)
+      expect(skill?.template).toContain('multi-entity premise/key-assumption mismatches');
+      expect(skill?.template).toContain('single dimensional key across distinct entities, tenants, streams, or groups');
+      expect(skill?.template).toContain('verification-methodology defect');
       // Verify Lane 3 ownership-boundary classification for MOVE recommendations
       expect(skill?.template).toContain('Lane 3 Misplacement / SoT Ownership Scope');
       expect(skill?.template).toContain('ownership_scope');

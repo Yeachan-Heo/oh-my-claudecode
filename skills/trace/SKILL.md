@@ -106,7 +106,9 @@ Unless the prompt strongly suggests a better partition, use these 3 default lane
 
 1. **Code-path / implementation cause**
 2. **Config / environment / orchestration cause**
-3. **Measurement / artifact / assumption mismatch cause**
+3. **Measurement / artifact / assumption mismatch cause** — covers verification-method defects, not just system defects. Examples: the verification query reuses a single dimensional key across distinct entities, tenants, streams, or groups; the comparison filter shape does not match the schema grain; or the catalog or column name was assumed portable across runtimes without enumeration. This includes multi-entity premise/key-assumption mismatches.
+
+For lane 3, cross-entity discrepancies need a premise audit before escalation: enumerate entity dimensions and check whether a zero-row or mismatch result came from applying one key across multiple entities rather than from a system defect; the result may be a verification-methodology defect.
 
 These defaults are intentionally broad so the first slice works across bug, performance, architecture, and experiment tracing.
 
