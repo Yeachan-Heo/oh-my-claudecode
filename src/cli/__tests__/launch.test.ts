@@ -972,17 +972,21 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect(runtimeSettings.mcpServers?.exa).toBeDefined();
   });
 
-  it('mirrors keybindings.json and rules/ into the runtime config dir', () => {
+  it('mirrors keybindings.json, rules/, and themes/ into the runtime config dir', () => {
     const configDir = join(tempRoot!, '.claude');
     mkdirSync(join(configDir, 'rules'), { recursive: true });
+    mkdirSync(join(configDir, 'themes'), { recursive: true });
     writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
     writeFileSync(join(configDir, 'keybindings.json'), '{"bindings":[]}');
     writeFileSync(join(configDir, 'rules', 'my-rule.md'), '# Rule');
+    writeFileSync(join(configDir, 'themes', 'custom-theme.json'), '{"name":"custom"}');
 
     const runtimeDir = prepareOmcLaunchConfigDir(configDir);
     expect(runtimeDir).not.toBe(configDir);
     expect(existsSync(join(runtimeDir, 'keybindings.json'))).toBe(true);
     expect(existsSync(join(runtimeDir, 'rules'))).toBe(true);
+    expect(existsSync(join(runtimeDir, 'themes'))).toBe(true);
+    expect(readFileSync(join(runtimeDir, 'themes', 'custom-theme.json'), 'utf-8')).toBe('{"name":"custom"}');
   });
 
   it('preserves runtime .claude.json across runtime config dir rebuilds', () => {

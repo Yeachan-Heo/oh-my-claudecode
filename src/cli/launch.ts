@@ -111,6 +111,7 @@ export function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()):
     'projects',
     'rules',
     'skills',
+    'themes',
     OMC_CONFIG_FILE_REL,
     '.omc-version.json',
     '.omc-silent-update.json',
