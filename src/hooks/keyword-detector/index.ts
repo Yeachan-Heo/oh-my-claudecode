@@ -63,6 +63,28 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
 };
 
 /**
+ * Matches the upstream Ouroboros CLI invocation form at the start of the
+ * prompt: `ouroboros <sub>`, `ooo <sub>`, or `/ouroboros:<sub>`. Used as a
+ * skip predicate for the deep-interview trigger so direct CLI calls are
+ * not rerouted into the OMC skill.
+ */
+const OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
+
+/**
+ * Optional per-keyword skip predicate. When the predicate returns true for
+ * a given prompt, the corresponding keyword regex match is suppressed even
+ * if it would otherwise fire. Used for narrow false-positive guards.
+ *
+ * `deep-interview` matches the bare brand name `ouroboros`, which fires on
+ * upstream CLI invocations like `ouroboros auto "X"`, `ooo auto`, and
+ * `/ouroboros:auto`. The predicate defers to the upstream CLI in those
+ * cases without changing what the trigger recognizes elsewhere.
+ */
+const KEYWORD_SKIP_PREDICATES: Partial<Record<KeywordType, (text: string) => boolean>> = {
+  'deep-interview': (text) => OUROBOROS_BRAND_AT_START.test(text),
+};
+
+/**
  * Priority order for keyword detection
  */
 const KEYWORD_PRIORITY: KeywordType[] = [
@@ -639,6 +661,10 @@ export function detectKeywordsWithType(
     }
 
     const pattern = KEYWORD_PATTERNS[type];
+    const skipPredicate = KEYWORD_SKIP_PREDICATES[type];
+    if (skipPredicate && skipPredicate(cleanedText)) {
+      continue;
+    }
     const match =
       type === 'ralplan'
         ? findActionableRalplanMatch(cleanedText, pattern)

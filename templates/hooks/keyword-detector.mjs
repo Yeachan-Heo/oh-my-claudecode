@@ -950,8 +950,15 @@ async function main() {
     }
 
     // Deep interview keywords
+    // Skip when the prompt is an upstream Ouroboros CLI invocation —
+    // `ouroboros <sub>`, `ooo <sub>`, or `/ouroboros:<sub>`. The bare
+    // brand name as the first token is a deterministic command, not a
+    // routing request. Natural-language mentions ("please use ouroboros
+    // to clarify…") still match because the brand is mid-sentence.
     if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)/i)) {
-      matches.push({ name: 'deep-interview', args: '' });
+      if (!/^\s*\/?(?:ouroboros|ooo)\b/i.test(cleanPrompt)) {
+        matches.push({ name: 'deep-interview', args: '' });
+      }
     }
 
     // AI slop cleanup keywords
