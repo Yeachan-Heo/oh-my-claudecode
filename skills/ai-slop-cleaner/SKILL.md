@@ -93,6 +93,18 @@ In review mode:
    - **Needless abstraction** — pass-through wrappers, speculative indirection, single-use helper layers
    - **Boundary violations** — hidden coupling, misplaced responsibilities, wrong-layer imports or side effects
    - **Missing tests** — behavior not locked, weak regression coverage, edge-case gaps
+   - **UI/design defaults** — generic visual patterns that make an AI-built interface feel unreviewed
+
+### UI/Design Reviewer Checklist
+
+Use these as review prompts, not absolute bans. Keep intentional brand, accessibility, product-density, or design-system choices when they have a clear rationale.
+
+- **Korean readability:** flag body text set around 11-12px; Korean body copy generally needs at least 14px unless a validated dense-data exception applies.
+- **Shadow restraint:** question box shadows on every surface, logo, background, card, or icon; keep shadows only where they clarify elevation or interaction.
+- **Content hierarchy:** remove repetitive eyebrow/title/description/extra `<p>` stuffing when the title already carries the message; avoid generic emoji badges unless they are part of the product voice.
+- **Palette rationale:** challenge default AI blue/purple palettes, especially Tailwind-like `#3B82F6`, when no brand or system rationale exists.
+- **Layout rhythm:** avoid overly perfect 3- or 4-column uniform grids when the product context benefits from rhythm, emphasis, asymmetry, carousel/bento treatment, or varied card weights.
+- **Gradient restraint:** tone down extreme gradients unless the brand deliberately owns that visual language.
 
 4. **Run one smell-focused pass at a time**
    - **Pass 1: Dead code deletion**

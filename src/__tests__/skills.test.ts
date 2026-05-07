@@ -677,6 +677,19 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('Reviewer pass');
     });
 
+    it('should expose UI/design AI-slop review signals', () => {
+      const skill = getBuiltinSkill('ai-slop-cleaner');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('UI/Design Reviewer Checklist');
+      expect(skill?.template).toContain('Korean body copy generally needs at least 14px');
+      expect(skill?.template).toContain('box shadows on every surface');
+      expect(skill?.template).toContain('eyebrow/title/description');
+      expect(skill?.template).toContain('#3B82F6');
+      expect(skill?.template).toContain('3- or 4-column uniform grids');
+      expect(skill?.template).toContain('extreme gradients');
+      expect(skill?.template).toContain('intentional brand');
+    });
+
     it('should require explicit tmux prerequisite checks for omc-teams', () => {
       const skill = getBuiltinSkill('omc-teams');
       expect(skill).toBeDefined();
