@@ -615,6 +615,45 @@ function countIncompleteTodos(sessionId, projectDir) {
   return count;
 }
 
+
+const ULTRAWORK_OBJECTIVE_MAX_CHARS = 140;
+
+function firstStringValue(source, keys) {
+  if (!source || typeof source !== "object") return "";
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function formatConciseObjective(value, maxChars = ULTRAWORK_OBJECTIVE_MAX_CHARS) {
+  if (typeof value !== "string") return "";
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  const chars = [...compact];
+  if (chars.length <= maxChars) return compact;
+  return `${chars.slice(0, maxChars).join("").trimEnd()}…`;
+}
+
+function getLiveUltraworkObjective(state) {
+  const objective = firstStringValue(state, [
+    "current_objective",
+    "currentObjective",
+    "objective_summary",
+    "objectiveSummary",
+    "task_summary",
+    "taskSummary",
+    "current_task",
+    "currentTask",
+    "active_task",
+    "activeTask",
+  ]);
+  return formatConciseObjective(objective);
+}
+
 /**
  * Detect if stop was triggered by context-limit related reasons.
  * When context is exhausted, Claude Code needs to stop so it can compact.
@@ -1257,17 +1296,18 @@ async function main() {
 
       if (totalIncomplete > 0) {
         const itemType = taskCount > 0 ? "Tasks" : "todos";
-        reason += ` ${totalIncomplete} incomplete ${itemType} remain. Continue working.`;
+        reason += ` ${totalIncomplete} incomplete ${itemType} remain. Continue working. When all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files.`;
       } else if (newCount >= 3) {
-        // Only suggest cancel after minimum iterations (guard against no-tasks-created scenario)
+        // Reinforce clean-exit guidance once no tracked work remains.
         reason += ` If all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force. Otherwise, continue working.`;
       } else {
-        // Early iterations with no tasks yet - just tell LLM to continue
-        reason += ` Continue working - create Tasks to track your progress.`;
+        // Early iterations with no tasks yet still need an immediately visible exit path.
+        reason += ` No incomplete tasks detected. If all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files. Otherwise, continue working - create Tasks to track your progress.`;
       }
 
-      if (ultrawork.state.original_prompt) {
-        reason += `\nTask: ${ultrawork.state.original_prompt}`;
+      const currentObjective = getLiveUltraworkObjective(ultrawork.state);
+      if (currentObjective) {
+        reason += `\nCurrent objective: ${currentObjective}`;
       }
 
       if (errorGuidance) {

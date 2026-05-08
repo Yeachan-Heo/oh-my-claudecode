@@ -968,6 +968,56 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.decision).toBe("block");
     });
 
+    it("does not echo the cached original prompt as a Task in ultrawork reinforcement", () => {
+      const sessionId = "ultrawork-mjs-no-original-task-echo";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const longOriginalPrompt = "Original prompt should not be echoed. ".repeat(20);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: longOriginalPrompt,
+          current_objective: "Fix issue #2971 Stop-hook reinforcement",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      const reason = String(output.reason || "");
+      expect(output.decision).toBe("block");
+      expect(reason).not.toContain("\nTask:");
+      expect(reason).not.toContain(longOriginalPrompt);
+      expect(reason).toContain("Current objective: Fix issue #2971 Stop-hook reinforcement");
+    });
+
+    it("surfaces cancel guidance on the first ultrawork reinforcement", () => {
+      const sessionId = "ultrawork-mjs-first-cancel-guidance";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: "Do some ultrawork",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      const reason = String(output.reason || "");
+      expect(output.decision).toBe("block");
+      expect(reason).toContain("[ULTRAWORK #1/");
+      expect(reason).toContain("/oh-my-claudecode:cancel");
+      expect(reason).not.toContain("\nTask:");
+    });
+
     it("returns continue: true for tombstoned stale ultrawork state", () => {
       const sessionId = "ultrawork-mjs-tombstoned";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -1407,6 +1457,60 @@ describe("Stop Hook Blocking Contract", () => {
 
       expect(output.decision).toBe("block");
       expect(output.reason).toContain("ULTRAWORK");
+    });
+
+    it("does not echo the cached original prompt as a Task in cjs ultrawork reinforcement", () => {
+      const sessionId = "ultrawork-cjs-no-original-task-echo";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const longOriginalPrompt = "Cached original prompt should stay out of stop output. ".repeat(20);
+      writePendingTodo(tempDir, "keep cjs ultrawork active");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: longOriginalPrompt,
+          task_summary: "Finish the Stop-hook prompt echo fix",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          project_path: tempDir,
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      const reason = String(output.reason || "");
+      expect(output.decision).toBe("block");
+      expect(reason).not.toContain("\nTask:");
+      expect(reason).not.toContain(longOriginalPrompt);
+      expect(reason).toContain("Current objective: Finish the Stop-hook prompt echo fix");
+    });
+
+    it("surfaces cancel guidance on the first cjs ultrawork reinforcement", () => {
+      const sessionId = "ultrawork-cjs-first-cancel-guidance";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writePendingTodo(tempDir, "keep cjs ultrawork active");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultrawork-state.json"),
+        JSON.stringify({
+          active: true,
+          started_at: new Date().toISOString(),
+          original_prompt: "Do some cjs ultrawork",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          project_path: tempDir,
+        })
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      const reason = String(output.reason || "");
+      expect(output.decision).toBe("block");
+      expect(reason).toContain("[ULTRAWORK #1/");
+      expect(reason).toContain("/oh-my-claudecode:cancel");
+      expect(reason).not.toContain("\nTask:");
     });
 
     it("cleans orphaned unspecified autopilot routing echo state instead of reinforcing in cjs script", () => {
