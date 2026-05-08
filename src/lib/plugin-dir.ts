@@ -5,15 +5,19 @@
  * and `src/cli/index.ts` (Commander option value passed as a string).
  */
 
-import { resolve } from 'path';
+import { posix, resolve, win32 } from 'path';
 
 /**
  * Resolve a raw `--plugin-dir` value (relative or absolute string) to an
  * absolute path.  Throws with a clear message if the value is empty.
  */
+function isCrossPlatformAbsolutePath(rawPath: string): boolean {
+  return posix.isAbsolute(rawPath) || win32.isAbsolute(rawPath);
+}
+
 export function resolvePluginDirArg(rawPath: string): string {
   if (!rawPath || rawPath.trim().length === 0) {
     throw new Error('--plugin-dir requires a non-empty path argument');
   }
-  return resolve(rawPath);
+  return isCrossPlatformAbsolutePath(rawPath) ? rawPath : resolve(rawPath);
 }

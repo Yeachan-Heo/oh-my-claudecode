@@ -25,6 +25,16 @@ describe('parsePluginDirArg', () => {
     expect(out).toBe(resolve('/foo/bar'));
   });
 
+  it('preserves Windows drive-letter absolute paths on non-Windows hosts', () => {
+    const out = parsePluginDirArg(['--plugin-dir', 'C:\\Users\\me\\omc']);
+    expect(out).toBe('C:\\Users\\me\\omc');
+  });
+
+  it('preserves Windows UNC absolute paths on non-Windows hosts', () => {
+    const out = parsePluginDirArg(['--plugin-dir=\\\\server\\share\\omc']);
+    expect(out).toBe('\\\\server\\share\\omc');
+  });
+
   it('returns null when --plugin-dir is absent', () => {
     expect(parsePluginDirArg(['--madmax', '--notify', 'false'])).toBeNull();
   });
