@@ -557,3 +557,17 @@ describe('Contract 10: installer manages stale OMC-created agents and skills', (
     }
   });
 });
+
+
+describe('OMC setup Ralph Ruby dependency guidance (issue #2969)', () => {
+  it('checks Ruby during setup with product-facing Ralph remediation', () => {
+    const phasePath = join(REPO_ROOT, 'skills', 'omc-setup', 'phases', '02-configure.md');
+    const content = readFileSync(phasePath, 'utf-8');
+
+    expect(content).toContain('Step 2.0: Check Ralph Ruby Dependency');
+    expect(content).toContain('command -v ruby');
+    expect(content).toContain('Ralph workflows require Ruby');
+    expect(content).toContain('sudo apt update && sudo apt install ruby-full');
+    expect(content).toContain('restart Claude Code');
+  });
+});

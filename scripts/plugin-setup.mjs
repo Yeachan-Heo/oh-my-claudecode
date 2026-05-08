@@ -27,6 +27,20 @@ const nodeBin = process.execPath || 'node';
 
 console.log('[OMC] Running post-install setup...');
 
+function checkRalphRubyDependency() {
+  try {
+    execFileSync('ruby', ['--version'], { stdio: 'ignore', timeout: 5000 });
+    console.log('[OMC] Ruby detected for Ralph workflows');
+  } catch {
+    console.log('[OMC] Warning: Ruby was not found on PATH. Ralph workflows require Ruby and may fail until it is installed.');
+    console.log('[OMC] Ubuntu/Debian: sudo apt update && sudo apt install ruby-full');
+    console.log('[OMC] macOS: brew install ruby');
+    console.log('[OMC] After installing Ruby, restart Claude Code and rerun /oh-my-claudecode:omc-setup if needed.');
+  }
+}
+
+checkRalphRubyDependency();
+
 // 1. Create HUD directory
 if (!existsSync(HUD_DIR)) {
   mkdirSync(HUD_DIR, { recursive: true });
