@@ -7,6 +7,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync } from 'fs';
+import { spawn } from 'child_process';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
@@ -251,6 +252,38 @@ async function loadProjectMemoryModules() {
     };
   } catch {
     return null;
+  }
+}
+
+
+function dispatchSessionStartNotificationInBackground(pluginRoot, payload) {
+  if (!pluginRoot || process.env.OMC_NOTIFY === '0') return;
+
+  let serializedPayload;
+  try {
+    serializedPayload = JSON.stringify(payload);
+  } catch {
+    return;
+  }
+
+  const notificationsModuleUrl = pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href;
+  const childSource = `import(${JSON.stringify(notificationsModuleUrl)})\n`
+    + `  .then(({ notify }) => notify('session-start', ${serializedPayload}))\n`
+    + `  .catch(() => {});`;
+
+  try {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childSource], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    child.unref();
+  } catch {
+    // Notification dispatch is best-effort and must never affect hook output.
   }
 }
 
@@ -979,17 +1012,17 @@ ${cleanContent}
       }
     } catch {}
 
-    // Send session-start notification (non-blocking, fire-and-forget)
+    // Send session-start notification from an isolated detached process.
+    // Notification transports/custom integrations must never write into this
+    // foreground hook's stdout JSON protocol or stderr CI checks.
     try {
       const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
       if (pluginRoot) {
-        const { notify } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href);
-        // Fire and forget - don't await, don't block session start
-        notify('session-start', {
+        dispatchSessionStartNotificationInBackground(pluginRoot, {
           sessionId,
           projectPath: directory,
           timestamp: new Date().toISOString(),
-        }).catch(() => {}); // swallow errors silently
+        });
 
         // Start reply listener daemon if notification reply config is available
         try {
