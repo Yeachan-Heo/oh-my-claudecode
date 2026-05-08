@@ -194,6 +194,12 @@ describe('team start validation wiring', () => {
     expect(source).toContain('validateTeamName(input.teamName);');
   });
 
+  it('starts runtime-cli with process.execPath rather than bare PATH node', () => {
+    const source = readFileSync(join(__dirname, '..', 'team-server.ts'), 'utf-8');
+    expect(source).toContain('spawn(process.execPath, [runtimeCliPath]');
+    expect(source).not.toContain("spawn('node', [runtimeCliPath]");
+  });
+
   it('contains timeoutSeconds deprecation guard in omc_run_team_start', () => {
     const source = readFileSync(join(__dirname, '..', 'team-server.ts'), 'utf-8');
     expect(source).toContain("hasOwnProperty.call(args, 'timeoutSeconds')");

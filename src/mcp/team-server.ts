@@ -290,7 +290,7 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
   const job: OmcTeamJob = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
 
-  const child = spawn('node', [runtimeCliPath], {
+  const child = spawn(process.execPath, [runtimeCliPath], {
     env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
