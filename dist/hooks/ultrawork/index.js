@@ -8,7 +8,6 @@
 import { readFileSync, unlinkSync } from "fs";
 import { writeModeState, readModeState } from "../../lib/mode-state-io.js";
 import { resolveStatePath, resolveSessionStatePath, } from "../../lib/worktree-paths.js";
-import { truncatePromptForEcho } from "../../lib/truncate-prompt.js";
 const _DEFAULT_STATE = {
     active: false,
     started_at: "",
@@ -16,6 +15,21 @@ const _DEFAULT_STATE = {
     reinforcement_count: 0,
     last_checked_at: "",
 };
+const ULTRAWORK_OBJECTIVE_MAX_CHARS = 140;
+function formatConciseObjective(value) {
+    if (typeof value !== "string")
+        return "";
+    const compact = value.replace(/\s+/g, " ").trim();
+    if (!compact)
+        return "";
+    const chars = [...compact];
+    if (chars.length <= ULTRAWORK_OBJECTIVE_MAX_CHARS)
+        return compact;
+    return `${chars.slice(0, ULTRAWORK_OBJECTIVE_MAX_CHARS).join("").trimEnd()}…`;
+}
+function getLiveUltraworkObjective(state) {
+    return formatConciseObjective(state.current_objective ?? state.task_summary);
+}
 /**
  * Get the state file path for Ultrawork (used only by deactivateUltrawork for ghost-legacy cleanup)
  */
@@ -146,6 +160,10 @@ export function shouldReinforceUltrawork(sessionId, directory) {
  * Get ultrawork persistence message for injection
  */
 export function getUltraworkPersistenceMessage(state) {
+    const currentObjective = getLiveUltraworkObjective(state);
+    const objectiveLine = currentObjective
+        ? `\nCurrent objective: ${currentObjective}\n`
+        : "";
     return `<ultrawork-persistence>
 
 [ULTRAWORK MODE STILL ACTIVE - Reinforcement #${state.reinforcement_count + 1}]
@@ -160,8 +178,7 @@ REMEMBER THE ULTRAWORK RULES:
 - **NO Premature Stopping**: ALL TODOs must be complete
 
 Continue working on the next pending task. DO NOT STOP until all tasks are marked complete.
-
-Original task: ${truncatePromptForEcho(state.original_prompt)}
+When all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files.${objectiveLine}
 
 </ultrawork-persistence>
 

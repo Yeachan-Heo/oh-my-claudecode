@@ -12,6 +12,10 @@ export interface UltraworkState {
     started_at: string;
     /** The original prompt that triggered ultrawork */
     original_prompt: string;
+    /** Optional live objective summary for concise stop-hook reinforcement */
+    current_objective?: string;
+    /** Optional live task summary for concise stop-hook reinforcement */
+    task_summary?: string;
     /** Session ID the mode is bound to */
     session_id?: string;
     /** Project path for isolation */

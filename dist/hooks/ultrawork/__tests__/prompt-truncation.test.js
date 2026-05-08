@@ -1,45 +1,61 @@
 /**
- * Regression tests for issue #2542
+ * Regression tests for issue #2971
  *
- * Stop-hook feedback for ultrawork was reinjecting the full original_prompt on
- * every stop event, burning context tokens.  The fix caps the echoed text via
- * truncatePromptForEcho.
+ * Stop-hook feedback for ultrawork must not reinject the cached original_prompt
+ * on every stop event. A live objective may be echoed, but only as a concise
+ * current objective.
  */
 import { describe, it, expect } from 'vitest';
 import { getUltraworkPersistenceMessage, } from '../index.js';
-import { DEFAULT_PROMPT_ECHO_MAX_CHARS } from '../../../lib/truncate-prompt.js';
-function makeState(originalPrompt) {
+function makeState(originalPrompt, overrides = {}) {
     return {
         active: true,
         started_at: new Date().toISOString(),
         original_prompt: originalPrompt,
         reinforcement_count: 0,
         last_checked_at: new Date().toISOString(),
+        ...overrides,
     };
 }
-describe('getUltraworkPersistenceMessage — prompt truncation (issue #2542)', () => {
-    it('includes the full prompt when it is short', () => {
+describe('getUltraworkPersistenceMessage — safe objective echo (issue #2971)', () => {
+    it('does not echo the cached original prompt, even when it is short', () => {
         const state = makeState('Fix the login bug');
         const msg = getUltraworkPersistenceMessage(state);
-        expect(msg).toContain('Fix the login bug');
+        expect(msg).not.toContain('Fix the login bug');
+        expect(msg).not.toContain('Original task:');
     });
-    it('truncates a long prompt and appends ellipsis', () => {
-        const long = 'Implement '.repeat(40); // well over 150 chars
-        const state = makeState(long);
-        const msg = getUltraworkPersistenceMessage(state);
-        // The echoed portion should be capped
-        const match = msg.match(/Original task: (.+)/);
-        expect(match).not.toBeNull();
-        const echoed = match[1];
-        // length ≤ maxChars + 1 (the ellipsis character)
-        expect([...echoed].length).toBeLessThanOrEqual(DEFAULT_PROMPT_ECHO_MAX_CHARS + 1);
-        expect(echoed.endsWith('…')).toBe(true);
-    });
-    it('does NOT embed the full long prompt anywhere in the message', () => {
-        const long = 'x'.repeat(DEFAULT_PROMPT_ECHO_MAX_CHARS + 100);
+    it('does NOT embed the full long original prompt anywhere in the message', () => {
+        const long = 'x'.repeat(500);
         const state = makeState(long);
         const msg = getUltraworkPersistenceMessage(state);
         expect(msg).not.toContain(long);
+        expect(msg).not.toContain('Original task:');
+    });
+    it('echoes a live current objective with a distinct label', () => {
+        const state = makeState('Original activation prompt', {
+            current_objective: 'Fix issue #2971 Stop-hook reinforcement',
+        });
+        const msg = getUltraworkPersistenceMessage(state);
+        expect(msg).toContain('Current objective: Fix issue #2971 Stop-hook reinforcement');
+        expect(msg).not.toContain('Original activation prompt');
+    });
+    it('truncates a long live objective and appends ellipsis', () => {
+        const liveObjective = 'Implement '.repeat(40);
+        const state = makeState('Original activation prompt', {
+            task_summary: liveObjective,
+        });
+        const msg = getUltraworkPersistenceMessage(state);
+        const match = msg.match(/Current objective: (.+)/);
+        expect(match).not.toBeNull();
+        const echoed = match[1];
+        expect([...echoed].length).toBeLessThanOrEqual(141);
+        expect(echoed.endsWith('…')).toBe(true);
+        expect(msg).not.toContain(liveObjective);
+    });
+    it('surfaces cancel guidance in the persistence message', () => {
+        const state = makeState('Original activation prompt');
+        const msg = getUltraworkPersistenceMessage(state);
+        expect(msg).toContain('/oh-my-claudecode:cancel');
     });
 });
 //# sourceMappingURL=prompt-truncation.test.js.map

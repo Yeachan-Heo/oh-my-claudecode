@@ -11106,12 +11106,56 @@ function updateLastCheckTime() {
     saveVersionMetadata(current);
   }
 }
+function getGitHubUpdateToken() {
+  const token = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
+  return token || null;
+}
+function getGitHubReleaseHeaders() {
+  const headers = {
+    "Accept": "application/vnd.github.v3+json",
+    "User-Agent": "oh-my-claudecode-updater"
+  };
+  const token = getGitHubUpdateToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+function getHeader(response, name) {
+  return response.headers?.get(name) ?? response.headers?.get(name.toLowerCase()) ?? null;
+}
+function formatRateLimitReset(resetHeader) {
+  if (!resetHeader) {
+    return null;
+  }
+  const resetSeconds = Number.parseInt(resetHeader, 10);
+  if (!Number.isFinite(resetSeconds) || resetSeconds <= 0) {
+    return null;
+  }
+  return new Date(resetSeconds * 1e3).toISOString();
+}
+async function formatGitHubReleaseFetchError(response, usedToken) {
+  let body = "";
+  try {
+    body = await response.text();
+  } catch {
+    body = "";
+  }
+  const remaining = getHeader(response, "x-ratelimit-remaining");
+  const resetAt = formatRateLimitReset(getHeader(response, "x-ratelimit-reset"));
+  const bodyLooksRateLimited = /rate limit|api rate limit|secondary rate/i.test(body);
+  const isRateLimited = response.status === 429 || response.status === 403 && (remaining === "0" || bodyLooksRateLimited);
+  if (!isRateLimited) {
+    return `Failed to fetch release info: ${response.status} ${response.statusText}`;
+  }
+  const retrySuffix = resetAt ? ` Try again after ${resetAt}.` : "";
+  const authHint = usedToken ? "The configured GitHub token appears to be rate limited; verify the token or try again later." : "Set GH_TOKEN or GITHUB_TOKEN to use authenticated GitHub API requests and increase rate limits.";
+  return `Failed to fetch release info: GitHub API rate limit exceeded (${response.status} ${response.statusText}). ${authHint}${retrySuffix}`;
+}
 async function fetchLatestRelease() {
+  const usedToken = getGitHubUpdateToken() !== null;
   const response = await fetch(`${GITHUB_API_URL}/releases/latest`, {
-    headers: {
-      "Accept": "application/vnd.github.v3+json",
-      "User-Agent": "oh-my-claudecode-updater"
-    }
+    headers: getGitHubReleaseHeaders()
   });
   if (response.status === 404) {
     const pkgResponse = await fetch(`${GITHUB_RAW_URL}/main/package.json`, {
@@ -11134,7 +11178,7 @@ async function fetchLatestRelease() {
     throw new Error("No releases found and could not fetch package.json");
   }
   if (!response.ok) {
-    throw new Error(`Failed to fetch release info: ${response.status} ${response.statusText}`);
+    throw new Error(await formatGitHubReleaseFetchError(response, usedToken));
   }
   return await response.json();
 }
@@ -12284,22 +12328,6 @@ var init_progress = __esm({
   }
 });
 
-// src/lib/truncate-prompt.ts
-function truncatePromptForEcho(prompt, maxChars = DEFAULT_PROMPT_ECHO_MAX_CHARS) {
-  const trimmed = prompt.trim();
-  if (trimmed.length <= maxChars) {
-    return trimmed;
-  }
-  return trimmed.slice(0, maxChars) + "\u2026";
-}
-var DEFAULT_PROMPT_ECHO_MAX_CHARS;
-var init_truncate_prompt = __esm({
-  "src/lib/truncate-prompt.ts"() {
-    "use strict";
-    DEFAULT_PROMPT_ECHO_MAX_CHARS = 150;
-  }
-});
-
 // src/hooks/ultrawork/index.ts
 var ultrawork_exports = {};
 __export(ultrawork_exports, {
@@ -12312,6 +12340,19 @@ __export(ultrawork_exports, {
   shouldReinforceUltrawork: () => shouldReinforceUltrawork,
   writeUltraworkState: () => writeUltraworkState
 });
+function formatConciseObjective(value) {
+  if (typeof value !== "string") return "";
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  const chars = [...compact];
+  if (chars.length <= ULTRAWORK_OBJECTIVE_MAX_CHARS) return compact;
+  return `${chars.slice(0, ULTRAWORK_OBJECTIVE_MAX_CHARS).join("").trimEnd()}\u2026`;
+}
+function getLiveUltraworkObjective(state) {
+  return formatConciseObjective(
+    state.current_objective ?? state.task_summary
+  );
+}
 function getStateFilePath2(directory, sessionId) {
   const baseDir = directory || process.cwd();
   if (sessionId) {
@@ -12403,6 +12444,10 @@ function shouldReinforceUltrawork(sessionId, directory) {
   return true;
 }
 function getUltraworkPersistenceMessage(state) {
+  const currentObjective = getLiveUltraworkObjective(state);
+  const objectiveLine = currentObjective ? `
+Current objective: ${currentObjective}
+` : "";
   return `<ultrawork-persistence>
 
 [ULTRAWORK MODE STILL ACTIVE - Reinforcement #${state.reinforcement_count + 1}]
@@ -12417,8 +12462,7 @@ REMEMBER THE ULTRAWORK RULES:
 - **NO Premature Stopping**: ALL TODOs must be complete
 
 Continue working on the next pending task. DO NOT STOP until all tasks are marked complete.
-
-Original task: ${truncatePromptForEcho(state.original_prompt)}
+When all work is complete, run /oh-my-claudecode:cancel to cleanly exit ultrawork mode and clean up state files.${objectiveLine}
 
 </ultrawork-persistence>
 
@@ -12435,14 +12479,14 @@ function createUltraworkStateHook(directory) {
     incrementReinforcement: (sessionId) => incrementReinforcement(directory, sessionId)
   };
 }
-var import_fs41;
+var import_fs41, ULTRAWORK_OBJECTIVE_MAX_CHARS;
 var init_ultrawork2 = __esm({
   "src/hooks/ultrawork/index.ts"() {
     "use strict";
     import_fs41 = require("fs");
     init_mode_state_io();
     init_worktree_paths();
-    init_truncate_prompt();
+    ULTRAWORK_OBJECTIVE_MAX_CHARS = 140;
   }
 });
 
@@ -18317,6 +18361,22 @@ var init_cancel = __esm({
   }
 });
 
+// src/lib/truncate-prompt.ts
+function truncatePromptForEcho(prompt, maxChars = DEFAULT_PROMPT_ECHO_MAX_CHARS) {
+  const trimmed = prompt.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return trimmed.slice(0, maxChars) + "\u2026";
+}
+var DEFAULT_PROMPT_ECHO_MAX_CHARS;
+var init_truncate_prompt = __esm({
+  "src/lib/truncate-prompt.ts"() {
+    "use strict";
+    DEFAULT_PROMPT_ECHO_MAX_CHARS = 150;
+  }
+});
+
 // src/hooks/persistent-mode/index.ts
 var persistent_mode_exports = {};
 __export(persistent_mode_exports, {
@@ -18325,6 +18385,7 @@ __export(persistent_mode_exports, {
   createHookOutput: () => createHookOutput,
   getIdleNotificationCooldownSeconds: () => getIdleNotificationCooldownSeconds,
   getToolErrorRetryGuidance: () => getToolErrorRetryGuidance,
+  hasPendingOwnedAsyncWork: () => hasPendingOwnedAsyncWork,
   readLastToolError: () => readLastToolError,
   recordIdleNotificationSent: () => recordIdleNotificationSent,
   resetTodoContinuationAttempts: () => resetTodoContinuationAttempts,
@@ -18379,6 +18440,117 @@ function isStaleState(state) {
     return true;
   }
   return Date.now() - mostRecent > STALE_STATE_THRESHOLD_MS;
+}
+function parseTimestamp(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function isFreshTimestamp(value, ttlMs = PENDING_ASYNC_STATE_STALE_MS) {
+  const parsed = parseTimestamp(value);
+  return parsed !== null && Date.now() - parsed <= ttlMs;
+}
+function hasPendingBackgroundTask(directory, sessionId) {
+  try {
+    const stateRoot2 = (0, import_path64.join)(getOmcRoot(directory), "state");
+    const hudPath = sessionId ? (0, import_path64.join)(stateRoot2, "sessions", sessionId, "hud-state.json") : (0, import_path64.join)(stateRoot2, "hud-state.json");
+    if (!(0, import_fs55.existsSync)(hudPath)) return false;
+    const hudState = JSON.parse((0, import_fs55.readFileSync)(hudPath, "utf-8"));
+    return Boolean(hudState?.backgroundTasks?.some((task) => {
+      if (task.status !== "running") return false;
+      return isFreshTimestamp(task.startedAt ?? task.startTime);
+    }));
+  } catch {
+    return false;
+  }
+}
+function readPendingWakeupState(directory, sessionId) {
+  const stateRoot2 = (0, import_path64.join)(getOmcRoot(directory), "state");
+  const dirs = sessionId ? [(0, import_path64.join)(stateRoot2, "sessions", sessionId), stateRoot2] : [stateRoot2];
+  const fileNames = [
+    "scheduled-wakeup-state.json",
+    "schedule-wakeup-state.json",
+    "wakeup-state.json"
+  ];
+  const states = [];
+  for (const dir of dirs) {
+    for (const fileName of fileNames) {
+      const filePath = (0, import_path64.join)(dir, fileName);
+      try {
+        if (!(0, import_fs55.existsSync)(filePath)) continue;
+        const parsed = JSON.parse((0, import_fs55.readFileSync)(filePath, "utf-8"));
+        if (parsed && typeof parsed === "object") {
+          states.push(parsed);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return states;
+}
+function hasPendingScheduledWakeup(directory, sessionId) {
+  const now = Date.now();
+  return readPendingWakeupState(directory, sessionId).some((state) => {
+    const status = typeof state.status === "string" ? state.status.toLowerCase() : "";
+    if (["completed", "complete", "cancelled", "canceled", "failed", "expired"].includes(status)) {
+      return false;
+    }
+    const dueAt = parseTimestamp(
+      state.due_at ?? state.wakeup_at ?? state.scheduled_for ?? state.deadline_at ?? state.expires_at
+    );
+    if (dueAt !== null) {
+      return dueAt > now;
+    }
+    if (state.active === true || state.pending === true) {
+      return isFreshTimestamp(state.created_at ?? state.updated_at ?? state.started_at);
+    }
+    return false;
+  });
+}
+function normalizeWorkflowTerminalPhase(state) {
+  const raw = state.current_phase ?? state.phase ?? state.status;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim().toLowerCase() : null;
+}
+function isTerminalWorkflowModeState(state) {
+  if (!state) return false;
+  if (state.active === false) return true;
+  if (typeof state.completed_at === "string" && state.completed_at.length > 0) return true;
+  const phase = normalizeWorkflowTerminalPhase(state);
+  return Boolean(phase && TERMINAL_WORKFLOW_PHASES.has(phase));
+}
+async function reconcileTerminalWorkflowSlots(workingDir, sessionId) {
+  try {
+    const {
+      readSkillActiveStateNormalized: readSkillActiveStateNormalized2,
+      pruneExpiredWorkflowSkillTombstones: pruneExpiredWorkflowSkillTombstones2,
+      markWorkflowSkillCompleted: markWorkflowSkillCompleted2,
+      writeSkillActiveStateCopies: writeSkillActiveStateCopies2
+    } = await Promise.resolve().then(() => (init_skill_state(), skill_state_exports));
+    const original = readSkillActiveStateNormalized2(workingDir, sessionId);
+    let current = pruneExpiredWorkflowSkillTombstones2(original);
+    let changed = current !== original;
+    for (const [slotName, slot] of Object.entries(current.active_skills)) {
+      if (slot.completed_at || !TERMINAL_WORKFLOW_SLOT_MODES.has(slotName)) {
+        continue;
+      }
+      const modeState = readModeState(slotName, workingDir, sessionId);
+      if (!isTerminalWorkflowModeState(modeState)) {
+        continue;
+      }
+      current = markWorkflowSkillCompleted2(current, slotName);
+      changed = true;
+    }
+    if (changed) {
+      writeSkillActiveStateCopies2(workingDir, current, sessionId);
+    }
+  } catch {
+  }
+}
+function hasPendingOwnedAsyncWork(directory, sessionId) {
+  return hasPendingBackgroundTask(directory, sessionId) || hasPendingScheduledWakeup(directory, sessionId);
 }
 function readLastToolError(directory) {
   const stateDir = (0, import_path64.join)(getOmcRoot(directory), "state");
@@ -19345,15 +19517,7 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
   if (skipHooks.includes("persistent-mode") || skipHooks.includes("stop-continuation")) {
     return { shouldBlock: false, message: "", mode: "none" };
   }
-  try {
-    const { readSkillActiveStateNormalized: readSkillActiveStateNormalized2, pruneExpiredWorkflowSkillTombstones: pruneExpiredWorkflowSkillTombstones2, writeSkillActiveStateCopies: writeSkillActiveStateCopies2 } = await Promise.resolve().then(() => (init_skill_state(), skill_state_exports));
-    const current = readSkillActiveStateNormalized2(workingDir, sessionId);
-    const pruned = pruneExpiredWorkflowSkillTombstones2(current);
-    if (pruned !== current) {
-      writeSkillActiveStateCopies2(workingDir, pruned, sessionId);
-    }
-  } catch {
-  }
+  await reconcileTerminalWorkflowSlots(workingDir, sessionId);
   if (isCriticalContextStop(stopContext)) {
     return {
       shouldBlock: false,
@@ -19398,6 +19562,13 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
     };
   }
   if (isScheduledWakeupStop(stopContext)) {
+    return {
+      shouldBlock: false,
+      message: "",
+      mode: "none"
+    };
+  }
+  if (hasPendingOwnedAsyncWork(workingDir, sessionId)) {
     return {
       shouldBlock: false,
       message: "",
@@ -19504,7 +19675,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -19528,6 +19699,18 @@ var init_persistent_mode = __esm({
     init_mode_registry();
     CANCEL_SIGNAL_TTL_MS2 = 3e4;
     STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
+    PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1e3;
+    TERMINAL_WORKFLOW_SLOT_MODES = /* @__PURE__ */ new Set(["autopilot", "ralph", "ralplan"]);
+    TERMINAL_WORKFLOW_PHASES = /* @__PURE__ */ new Set([
+      "complete",
+      "completed",
+      "failed",
+      "cancelled",
+      "canceled",
+      "cancel",
+      "done",
+      "stopped"
+    ]);
     todoContinuationAttempts = /* @__PURE__ */ new Map();
     TRANSCRIPT_TAIL_BYTES = 32 * 1024;
     CRITICAL_CONTEXT_STOP_PERCENT = 95;
@@ -21414,16 +21597,1194 @@ var init_idle_repo_state = __esm({
   }
 });
 
+// src/hooks/codebase-map.ts
+function shouldSkipEntry(name, isDir, ignorePatterns) {
+  if (name.startsWith(".") && isDir && !IMPORTANT_FILES.has(name)) {
+    return true;
+  }
+  if (isDir && SKIP_DIRS.has(name)) {
+    return true;
+  }
+  if (!isDir) {
+    if (SKIP_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
+      return true;
+    }
+    const ext = (0, import_node_path5.extname)(name);
+    if (!SOURCE_EXTENSIONS.has(ext) && !IMPORTANT_FILES.has(name)) {
+      return true;
+    }
+  }
+  for (const pattern of ignorePatterns) {
+    if (name.includes(pattern)) return true;
+  }
+  return false;
+}
+function buildTree(dir, depth, maxDepth, fileCount, maxFiles, ignorePatterns) {
+  if (depth > maxDepth || fileCount.value >= maxFiles) return [];
+  let entries;
+  try {
+    entries = (0, import_node_fs4.readdirSync)(dir);
+  } catch {
+    return [];
+  }
+  const withMeta = entries.map((name) => {
+    let isDir = false;
+    try {
+      isDir = (0, import_node_fs4.statSync)((0, import_node_path5.join)(dir, name)).isDirectory();
+    } catch {
+    }
+    return { name, isDir };
+  });
+  withMeta.sort((a, b) => {
+    if (a.isDir && !b.isDir) return -1;
+    if (!a.isDir && b.isDir) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  const nodes = [];
+  for (const { name, isDir } of withMeta) {
+    if (fileCount.value >= maxFiles) break;
+    if (shouldSkipEntry(name, isDir, ignorePatterns)) continue;
+    if (isDir) {
+      const children = buildTree(
+        (0, import_node_path5.join)(dir, name),
+        depth + 1,
+        maxDepth,
+        fileCount,
+        maxFiles,
+        ignorePatterns
+      );
+      nodes.push({ name, isDir: true, children });
+    } else {
+      fileCount.value++;
+      nodes.push({ name, isDir: false });
+    }
+  }
+  return nodes;
+}
+function renderTree(nodes, prefix, lines) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const isLast = i === nodes.length - 1;
+    const connector = isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
+    const childPrefix = isLast ? "    " : "\u2502   ";
+    lines.push(`${prefix}${connector}${node.name}${node.isDir ? "/" : ""}`);
+    if (node.isDir && node.children && node.children.length > 0) {
+      renderTree(node.children, prefix + childPrefix, lines);
+    }
+  }
+}
+function extractPackageMetadata(directory) {
+  const pkgPath = (0, import_node_path5.join)(directory, "package.json");
+  if (!(0, import_node_fs4.existsSync)(pkgPath)) return "";
+  try {
+    const pkg = JSON.parse((0, import_node_fs4.readFileSync)(pkgPath, "utf-8"));
+    const lines = [];
+    if (pkg.name) lines.push(`Package: ${pkg.name}`);
+    if (pkg.description) lines.push(`Description: ${pkg.description}`);
+    if (pkg.scripts) {
+      const scriptNames = Object.keys(pkg.scripts).slice(0, 8).join(", ");
+      if (scriptNames) lines.push(`Scripts: ${scriptNames}`);
+    }
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+function generateCodebaseMap(directory, options = {}) {
+  const {
+    maxFiles = 200,
+    maxDepth = 4,
+    ignorePatterns = [],
+    includeMetadata = true
+  } = options;
+  if (!(0, import_node_fs4.existsSync)(directory)) {
+    return { map: "", totalFiles: 0, truncated: false };
+  }
+  const fileCount = { value: 0 };
+  const tree = buildTree(directory, 0, maxDepth, fileCount, maxFiles, ignorePatterns);
+  const treeLines = [];
+  renderTree(tree, "", treeLines);
+  const treeStr = treeLines.join("\n");
+  const parts = [];
+  if (includeMetadata) {
+    const meta = extractPackageMetadata(directory);
+    if (meta) parts.push(meta);
+  }
+  parts.push(treeStr);
+  const truncated = fileCount.value >= maxFiles;
+  if (truncated) {
+    parts.push(`[Map truncated at ${maxFiles} files \u2014 use Glob/Grep for full search]`);
+  }
+  return {
+    map: parts.join("\n\n"),
+    totalFiles: fileCount.value,
+    truncated
+  };
+}
+var import_node_fs4, import_node_path5, SKIP_DIRS, SOURCE_EXTENSIONS, SKIP_FILE_SUFFIXES, IMPORTANT_FILES;
+var init_codebase_map = __esm({
+  "src/hooks/codebase-map.ts"() {
+    "use strict";
+    import_node_fs4 = require("node:fs");
+    import_node_path5 = require("node:path");
+    SKIP_DIRS = /* @__PURE__ */ new Set([
+      "node_modules",
+      ".git",
+      "dist",
+      "build",
+      "out",
+      "coverage",
+      ".next",
+      ".nuxt",
+      ".svelte-kit",
+      ".cache",
+      ".turbo",
+      ".parcel-cache",
+      "__pycache__",
+      ".mypy_cache",
+      ".pytest_cache",
+      ".ruff_cache",
+      "target",
+      ".gradle",
+      "vendor",
+      ".venv",
+      "venv",
+      "env",
+      ".omc",
+      ".claude",
+      "tmp",
+      "temp"
+    ]);
+    SOURCE_EXTENSIONS = /* @__PURE__ */ new Set([
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+      ".py",
+      ".rb",
+      ".go",
+      ".rs",
+      ".java",
+      ".kt",
+      ".swift",
+      ".c",
+      ".cpp",
+      ".h",
+      ".hpp",
+      ".cs",
+      ".fs",
+      ".vue",
+      ".svelte",
+      ".sh",
+      ".bash",
+      ".zsh",
+      ".json",
+      ".jsonc",
+      ".yaml",
+      ".yml",
+      ".toml",
+      ".md",
+      ".mdx",
+      ".css",
+      ".scss",
+      ".sass",
+      ".less",
+      ".html",
+      ".htm"
+    ]);
+    SKIP_FILE_SUFFIXES = ["-lock.json", ".lock", "-lock.yaml", "-lock.toml"];
+    IMPORTANT_FILES = /* @__PURE__ */ new Set([
+      "package.json",
+      "tsconfig.json",
+      "tsconfig.base.json",
+      "pyproject.toml",
+      "Cargo.toml",
+      "go.mod",
+      "go.sum",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "README.md",
+      "CONTRIBUTING.md",
+      ".eslintrc.json",
+      "vitest.config.ts",
+      "jest.config.ts",
+      "jest.config.js",
+      "Makefile",
+      "Dockerfile",
+      ".gitignore"
+    ]);
+  }
+});
+
+// src/hooks/agents-overlay.ts
+var agents_overlay_exports = {};
+__export(agents_overlay_exports, {
+  buildAgentsOverlay: () => buildAgentsOverlay
+});
+function buildAgentsOverlay(directory, options) {
+  const config2 = loadConfig();
+  const mapConfig = config2.startupCodebaseMap ?? {};
+  if (mapConfig.enabled === false) {
+    return { message: "", hasCodebaseMap: false };
+  }
+  const mergedOptions = {
+    maxFiles: mapConfig.maxFiles ?? options?.maxFiles ?? 200,
+    maxDepth: mapConfig.maxDepth ?? options?.maxDepth ?? 4,
+    ignorePatterns: options?.ignorePatterns ?? [],
+    includeMetadata: options?.includeMetadata ?? true
+  };
+  const result = generateCodebaseMap(directory, mergedOptions);
+  if (!result.map) {
+    return { message: "", hasCodebaseMap: false };
+  }
+  const message = `<session-restore>
+
+[CODEBASE MAP]
+
+Project structure for: ${directory}
+Use this map to navigate efficiently. Prefer Glob/Grep over blind file exploration.
+
+${result.map}
+
+</session-restore>
+
+---
+
+`;
+  return { message, hasCodebaseMap: true };
+}
+var init_agents_overlay = __esm({
+  "src/hooks/agents-overlay.ts"() {
+    "use strict";
+    init_codebase_map();
+    init_loader();
+  }
+});
+
+// src/utils/daemon-module-path.ts
+function resolveDaemonModulePath(currentFilename, distSegments) {
+  const isWindowsStylePath = /^[a-zA-Z]:\\/.test(currentFilename) || currentFilename.includes("\\");
+  const pathApi = isWindowsStylePath ? import_path66.win32 : { basename: import_path66.basename, dirname: import_path66.dirname, join: import_path66.join };
+  const tsCompiledPath = currentFilename.replace(/\.ts$/, ".js");
+  if (tsCompiledPath !== currentFilename) {
+    return tsCompiledPath;
+  }
+  const currentDir = pathApi.dirname(currentFilename);
+  const inBundledCli = pathApi.basename(currentFilename) === "cli.cjs" && pathApi.basename(currentDir) === "bridge";
+  if (inBundledCli) {
+    return pathApi.join(currentDir, "..", "dist", ...distSegments);
+  }
+  return currentFilename;
+}
+var import_path66;
+var init_daemon_module_path = __esm({
+  "src/utils/daemon-module-path.ts"() {
+    "use strict";
+    import_path66 = require("path");
+  }
+});
+
+// src/cli/tmux-utils.ts
+function tmuxEnv() {
+  const { TMUX: _, ...env2 } = process.env;
+  return env2;
+}
+function resolveEnv(opts) {
+  return opts?.stripTmux ? tmuxEnv() : process.env;
+}
+function isUnixLikeOnWindows() {
+  return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
+}
+function isNativeWindowsShell() {
+  return process.platform === "win32" && !isUnixLikeOnWindows();
+}
+function quoteForCmd(arg) {
+  if (arg.length === 0) return '""';
+  if (!/[\s"%^&|<>()]/.test(arg)) return arg;
+  return `"${arg.replace(/(["%])/g, "$1$1")}"`;
+}
+function escapeForCmdSet(value) {
+  return value.replace(/"/g, '""');
+}
+function resolveTmuxInvocation(args) {
+  const resolvedBinary = resolveTmuxBinaryPath();
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+    const comspec = process.env.COMSPEC || "cmd.exe";
+    const commandLine = [quoteForCmd(resolvedBinary), ...args.map(quoteForCmd)].join(" ");
+    return {
+      command: comspec,
+      args: ["/d", "/s", "/c", commandLine]
+    };
+  }
+  return {
+    command: resolvedBinary,
+    args
+  };
+}
+function tmuxExec(args, opts) {
+  const { stripTmux: _, ...execOpts } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args);
+  return (0, import_child_process19.execFileSync)(invocation.command, invocation.args, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
+}
+async function tmuxExecAsync(args, opts) {
+  const { stripTmux: _, timeout, ...rest } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args);
+  return (0, import_util7.promisify)(import_child_process19.execFile)(invocation.command, invocation.args, {
+    encoding: "utf-8",
+    env: resolveEnv(opts),
+    ...timeout !== void 0 ? { timeout } : {},
+    ...rest
+  });
+}
+function tmuxShell(command, opts) {
+  const { stripTmux: _, ...execOpts } = opts ?? {};
+  return (0, import_child_process19.execSync)(`tmux ${command}`, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
+}
+async function tmuxShellAsync(command, opts) {
+  const { stripTmux: _, timeout, ...rest } = opts ?? {};
+  return (0, import_util7.promisify)(import_child_process19.exec)(`tmux ${command}`, {
+    encoding: "utf-8",
+    env: resolveEnv(opts),
+    ...timeout !== void 0 ? { timeout } : {},
+    ...rest
+  });
+}
+function tmuxSpawn(args, opts) {
+  const { stripTmux: _, ...spawnOpts } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args);
+  return (0, import_child_process19.spawnSync)(invocation.command, invocation.args, { encoding: "utf-8", ...spawnOpts, env: resolveEnv(opts) });
+}
+async function tmuxCmdAsync(args, opts) {
+  if (args.some((a) => a.includes("#{"))) {
+    const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ");
+    return tmuxShellAsync(escaped, opts);
+  }
+  return tmuxExecAsync(args, opts);
+}
+function resolveTmuxBinaryPath() {
+  if (process.platform !== "win32") {
+    return "tmux";
+  }
+  try {
+    const result = (0, import_child_process19.spawnSync)("where", ["tmux"], {
+      timeout: 5e3,
+      encoding: "utf8"
+    });
+    if (result.status !== 0) return "tmux";
+    const candidates = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
+    const first = candidates[0];
+    if (first && ((0, import_path67.isAbsolute)(first) || import_path67.win32.isAbsolute(first))) {
+      return first;
+    }
+  } catch {
+  }
+  return "tmux";
+}
+function isTmuxAvailable() {
+  try {
+    const resolvedBinary = resolveTmuxBinaryPath();
+    if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
+      const comspec = process.env.COMSPEC || "cmd.exe";
+      const result = (0, import_child_process19.spawnSync)(comspec, ["/d", "/s", "/c", `"${resolvedBinary}" -V`], { timeout: 5e3 });
+      return result.status === 0;
+    }
+    if (process.platform === "win32") {
+      const result = (0, import_child_process19.spawnSync)(resolvedBinary, ["-V"], { timeout: 5e3, shell: true });
+      return result.status === 0;
+    }
+    tmuxExec(["-V"], { stripTmux: true, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isClaudeAvailable() {
+  try {
+    (0, import_child_process19.execFileSync)("claude", ["--version"], {
+      stdio: "ignore",
+      shell: process.platform === "win32"
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function resolveLaunchPolicy(env2 = process.env, args = [], options = {}) {
+  if (args.some((arg) => arg === "--print" || arg === "-p")) {
+    return "direct";
+  }
+  if (env2.TMUX) return "inside-tmux";
+  if (env2.CMUX_SURFACE_ID && !options.requireTmux) return "direct";
+  if (!isTmuxAvailable()) {
+    return "direct";
+  }
+  return "outside-tmux";
+}
+function buildTmuxSessionName(cwd2) {
+  const dirToken = sanitizeTmuxToken((0, import_path67.basename)(cwd2));
+  let branchToken = "detached";
+  try {
+    const branch = (0, import_child_process19.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: cwd2,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    if (branch) {
+      branchToken = sanitizeTmuxToken(branch);
+    }
+  } catch {
+  }
+  const now = /* @__PURE__ */ new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const utcTimestamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
+  const name = `omc-${dirToken}-${branchToken}-${utcTimestamp}`;
+  return name.length > 120 ? name.slice(0, 120) : name;
+}
+function sanitizeTmuxToken(value) {
+  const cleaned = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "unknown";
+}
+function buildTmuxShellCommand(command, args) {
+  if (isNativeWindowsShell()) {
+    return [command, ...args].map(quoteForCmd).join(" ");
+  }
+  return [quoteShellArg2(command), ...args.map(quoteShellArg2)].join(" ");
+}
+function buildTmuxShellCommandWithEnv(command, args, envVars) {
+  const envEntries = Object.entries(envVars);
+  if (envEntries.length === 0) {
+    return buildTmuxShellCommand(command, args);
+  }
+  if (isNativeWindowsShell()) {
+    const envPrefix = envEntries.map(([key, value]) => `set "${key}=${escapeForCmdSet(value)}"`).join(" && ");
+    return `${envPrefix} && ${buildTmuxShellCommand(command, args)}`;
+  }
+  return buildTmuxShellCommand(
+    "env",
+    [...envEntries.map(([key, value]) => `${key}=${value}`), command, ...args]
+  );
+}
+function wrapWithLoginShell(command) {
+  if (isNativeWindowsShell()) {
+    const comspec = process.env.COMSPEC || "cmd.exe";
+    return `${quoteForCmd(comspec)} /d /s /c ${quoteForCmd(command)}`;
+  }
+  const shell = process.env.SHELL || "/bin/sh";
+  const shellName = (0, import_path67.basename)(shell).replace(/\.(exe|cmd|bat)$/i, "");
+  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : "";
+  const sourcePrefix = rcFile ? `[ -f ${quoteShellArg2(rcFile)} ] && . ${quoteShellArg2(rcFile)}; ` : "";
+  return `exec ${quoteShellArg2(shell)} -lc ${quoteShellArg2(`${sourcePrefix}${command}`)}`;
+}
+function quoteShellArg2(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+var import_child_process19, import_path67, import_util7;
+var init_tmux_utils = __esm({
+  "src/cli/tmux-utils.ts"() {
+    "use strict";
+    import_child_process19 = require("child_process");
+    import_path67 = require("path");
+    import_util7 = require("util");
+  }
+});
+
+// src/features/rate-limit-wait/pane-fresh-capture.ts
+var pane_fresh_capture_exports = {};
+__export(pane_fresh_capture_exports, {
+  getNewPaneTail: () => getNewPaneTail,
+  getPaneHistorySize: () => getPaneHistorySize
+});
+function isValidPaneId(paneId) {
+  return /^%\d+$/.test(paneId);
+}
+function readPaneTailState(stateDir) {
+  const path22 = (0, import_path68.join)(stateDir, STATE_FILE2);
+  try {
+    if ((0, import_fs57.existsSync)(path22)) {
+      const parsed = JSON.parse((0, import_fs57.readFileSync)(path22, "utf-8"));
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+  }
+  return {};
+}
+function writePaneTailState(stateDir, state) {
+  try {
+    (0, import_fs57.mkdirSync)(stateDir, { recursive: true });
+    (0, import_fs57.writeFileSync)((0, import_path68.join)(stateDir, STATE_FILE2), JSON.stringify(state), { mode: 384 });
+  } catch {
+  }
+}
+function getPaneHistorySize(paneId) {
+  try {
+    const raw = tmuxExec(
+      ["display-message", "-t", paneId, "-p", "#{pane_dead} #{history_size}"],
+      { stripTmux: true, timeout: 3e3 }
+    ).trim();
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      const [paneDeadRaw, historySizeRaw] = parts;
+      if (paneDeadRaw === "1") {
+        return null;
+      }
+      const n2 = parseInt(historySizeRaw ?? "", 10);
+      return Number.isFinite(n2) && n2 >= 0 ? n2 : null;
+    }
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+function capturePaneLines(paneId, lines) {
+  try {
+    const safeLines = Math.max(1, Math.min(500, Math.floor(lines)));
+    return tmuxExec(
+      ["capture-pane", "-t", paneId, "-p", "-S", `-${safeLines}`],
+      { stripTmux: true, timeout: 5e3 }
+    );
+  } catch {
+    return "";
+  }
+}
+function getNewPaneTail(paneId, stateDir, maxLines = DEFAULT_MAX_LINES) {
+  if (!isValidPaneId(paneId)) {
+    return "";
+  }
+  const currentSize = getPaneHistorySize(paneId);
+  if (currentSize === null) {
+    return "";
+  }
+  const state = readPaneTailState(stateDir);
+  const lastSize = state[paneId] ?? -1;
+  state[paneId] = currentSize;
+  writePaneTailState(stateDir, state);
+  if (lastSize < 0) {
+    return capturePaneLines(paneId, maxLines);
+  }
+  const newLines = currentSize - lastSize;
+  if (newLines <= 0) {
+    return "";
+  }
+  return capturePaneLines(paneId, Math.min(newLines, maxLines));
+}
+var import_fs57, import_path68, STATE_FILE2, DEFAULT_MAX_LINES;
+var init_pane_fresh_capture = __esm({
+  "src/features/rate-limit-wait/pane-fresh-capture.ts"() {
+    "use strict";
+    import_fs57 = require("fs");
+    import_path68 = require("path");
+    init_tmux_utils();
+    STATE_FILE2 = "pane-tail-positions.json";
+    DEFAULT_MAX_LINES = 15;
+  }
+});
+
+// src/features/rate-limit-wait/tmux-detector.ts
+var tmux_detector_exports = {};
+__export(tmux_detector_exports, {
+  analyzePaneContent: () => analyzePaneContent,
+  capturePaneContent: () => capturePaneContent,
+  formatBlockedPanesSummary: () => formatBlockedPanesSummary,
+  isInsideTmux: () => isInsideTmux,
+  isPaneAlive: () => isPaneAlive,
+  isTmuxAvailable: () => isTmuxAvailable2,
+  listTmuxPanes: () => listTmuxPanes,
+  scanForBlockedPanes: () => scanForBlockedPanes,
+  sendResumeSequence: () => sendResumeSequence,
+  sendToPane: () => sendToPane
+});
+function isValidPaneId2(paneId) {
+  return /^%\d+$/.test(paneId);
+}
+function sanitizeForTmux(text) {
+  return text.replace(/'/g, "'\\''");
+}
+function stripGitOutputLines(content) {
+  return content.split("\n").filter((line) => !GIT_OUTPUT_LINE_PATTERNS.some((p) => p.test(line.trimStart()))).join("\n");
+}
+function isTmuxAvailable2() {
+  try {
+    const result = tmuxSpawn(["-V"], { stripTmux: true, stdio: "pipe", timeout: 3e3 });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+function isInsideTmux() {
+  return !!process.env.TMUX;
+}
+function listTmuxPanes() {
+  if (!isTmuxAvailable2()) {
+    return [];
+  }
+  try {
+    const format = "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}";
+    const result = tmuxExec(["list-panes", "-a", "-F", format], {
+      stripTmux: true,
+      timeout: 5e3
+    });
+    const panes = [];
+    for (const line of result.trim().split("\n")) {
+      if (!line.trim()) continue;
+      const parts = line.split(" ");
+      if (parts.length < 4) continue;
+      const [location, paneId, activeStr, windowName, ...titleParts] = parts;
+      const [sessionWindow, paneIndexStr] = location.split(".");
+      const [session, windowIndexStr] = sessionWindow.split(":");
+      panes.push({
+        id: paneId,
+        session,
+        windowIndex: parseInt(windowIndexStr, 10),
+        windowName,
+        paneIndex: parseInt(paneIndexStr, 10),
+        title: titleParts.join(" ") || void 0,
+        isActive: activeStr === "1"
+      });
+    }
+    return panes;
+  } catch (error2) {
+    console.error("[TmuxDetector] Error listing panes:", error2);
+    return [];
+  }
+}
+function isPaneAlive(paneId) {
+  if (!isTmuxAvailable2()) {
+    return false;
+  }
+  if (!isValidPaneId2(paneId)) {
+    return false;
+  }
+  try {
+    const result = tmuxExec(
+      ["display-message", "-t", paneId, "-p", "#{pane_dead}"],
+      { stripTmux: true, stdio: "pipe", timeout: 3e3 }
+    );
+    return result.trim() === "0";
+  } catch {
+    return false;
+  }
+}
+function capturePaneContent(paneId, lines = 15) {
+  if (!isTmuxAvailable2()) {
+    return "";
+  }
+  if (!isValidPaneId2(paneId)) {
+    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
+    return "";
+  }
+  const safeLines = Math.max(1, Math.min(100, Math.floor(lines)));
+  try {
+    const result = tmuxExec(["capture-pane", "-t", paneId, "-p", "-S", `-${safeLines}`], {
+      stripTmux: true,
+      timeout: 5e3
+    });
+    return result;
+  } catch (error2) {
+    console.error(`[TmuxDetector] Error capturing pane ${paneId}:`, error2);
+    return "";
+  }
+}
+function analyzePaneContent(content) {
+  if (!content.trim()) {
+    return {
+      hasClaudeCode: false,
+      hasRateLimitMessage: false,
+      isBlocked: false,
+      confidence: 0
+    };
+  }
+  const cleanedContent = stripGitOutputLines(content);
+  const hasClaudeCode = CLAUDE_CODE_PATTERNS.some(
+    (pattern) => pattern.test(cleanedContent)
+  );
+  const rateLimitMatches = RATE_LIMIT_PATTERNS.filter(
+    (pattern) => pattern.test(cleanedContent)
+  );
+  const hasRateLimitMessage = rateLimitMatches.length > 0;
+  const isWaiting = WAITING_PATTERNS.some((pattern) => pattern.test(cleanedContent));
+  let rateLimitType;
+  if (hasRateLimitMessage) {
+    if (/5[- ]?hour/i.test(cleanedContent)) {
+      rateLimitType = "five_hour";
+    } else if (WEEKLY_RATE_LIMIT_PATTERN.test(cleanedContent)) {
+      rateLimitType = "weekly";
+    } else {
+      rateLimitType = "unknown";
+    }
+  }
+  let confidence = 0;
+  if (hasClaudeCode) confidence += 0.4;
+  if (hasRateLimitMessage) confidence += 0.4;
+  if (isWaiting) confidence += 0.2;
+  if (rateLimitMatches.length > 1) confidence += 0.1;
+  const isBlocked = hasClaudeCode && hasRateLimitMessage && confidence >= 0.6;
+  return {
+    hasClaudeCode,
+    hasRateLimitMessage,
+    isBlocked,
+    rateLimitType,
+    confidence: Math.min(1, confidence)
+  };
+}
+function scanForBlockedPanes(lines = 15, stateDir) {
+  const panes = listTmuxPanes();
+  const blocked = [];
+  for (const pane of panes) {
+    let content;
+    if (stateDir) {
+      content = getNewPaneTail(pane.id, stateDir, lines);
+      if (!content) continue;
+    } else {
+      content = capturePaneContent(pane.id, lines);
+    }
+    const analysis = analyzePaneContent(content);
+    if (analysis.isBlocked) {
+      blocked.push({
+        ...pane,
+        analysis,
+        firstDetectedAt: /* @__PURE__ */ new Date(),
+        resumeAttempted: false
+      });
+    }
+  }
+  return blocked;
+}
+function sendResumeSequence(paneId) {
+  if (!isTmuxAvailable2()) {
+    return false;
+  }
+  if (!isValidPaneId2(paneId)) {
+    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
+    return false;
+  }
+  try {
+    tmuxExec(["send-keys", "-t", paneId, "1", "Enter"], {
+      stripTmux: true,
+      timeout: 2e3
+    });
+    return true;
+  } catch (error2) {
+    console.error(`[TmuxDetector] Error sending resume to pane ${paneId}:`, error2);
+    return false;
+  }
+}
+function sendToPane(paneId, text, pressEnter = true) {
+  if (!isTmuxAvailable2()) {
+    return false;
+  }
+  if (!isValidPaneId2(paneId)) {
+    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
+    return false;
+  }
+  try {
+    const sanitizedText = sanitizeForTmux(text);
+    tmuxExec(["send-keys", "-t", paneId, "-l", sanitizedText], {
+      stripTmux: true,
+      timeout: 2e3
+    });
+    if (pressEnter) {
+      tmuxExec(["send-keys", "-t", paneId, "Enter"], {
+        stripTmux: true,
+        timeout: 2e3
+      });
+    }
+    return true;
+  } catch (error2) {
+    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error2);
+    return false;
+  }
+}
+function formatBlockedPanesSummary(blockedPanes) {
+  if (blockedPanes.length === 0) {
+    return "No blocked Claude Code sessions detected.";
+  }
+  const lines = [
+    `Found ${blockedPanes.length} blocked Claude Code session(s):`,
+    ""
+  ];
+  for (const pane of blockedPanes) {
+    const location = `${pane.session}:${pane.windowIndex}.${pane.paneIndex}`;
+    const confidence = Math.round(pane.analysis.confidence * 100);
+    const limitType = pane.analysis.rateLimitType || "unknown";
+    const status = pane.resumeAttempted ? pane.resumeSuccessful ? " [RESUMED]" : " [RESUME FAILED]" : "";
+    lines.push(`  \u2022 ${location} (${pane.id}) - ${limitType} limit, ${confidence}% confidence${status}`);
+  }
+  return lines.join("\n");
+}
+var RATE_LIMIT_PATTERNS, CLAUDE_CODE_PATTERNS, WEEKLY_RATE_LIMIT_PATTERN, GIT_OUTPUT_LINE_PATTERNS, WAITING_PATTERNS;
+var init_tmux_detector = __esm({
+  "src/features/rate-limit-wait/tmux-detector.ts"() {
+    "use strict";
+    init_tmux_utils();
+    init_pane_fresh_capture();
+    RATE_LIMIT_PATTERNS = [
+      /rate limit/i,
+      /usage limit/i,
+      /quota exceeded/i,
+      /too many requests/i,
+      /please wait/i,
+      /try again later/i,
+      /limit reached/i,
+      /hit your limit/i,
+      /hit .+ limit/i,
+      /resets? .+ at/i,
+      /5[- ]?hour/i,
+      // Require adjacent rate-limit vocabulary to avoid false-positives from git commit
+      // messages or documentation that contain the bare word "weekly" (e.g. "fix weekly
+      // report generation", "update weekly standup notes").
+      /\bweekly\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i
+    ];
+    CLAUDE_CODE_PATTERNS = [
+      /claude/i,
+      /anthropic/i,
+      /\$ claude/,
+      /claude code/i,
+      /conversation/i,
+      /assistant/i
+    ];
+    WEEKLY_RATE_LIMIT_PATTERN = /\bweekly\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i;
+    GIT_OUTPUT_LINE_PATTERNS = [
+      /^commit\s+[0-9a-f]{6,40}\b/,
+      // git log commit hash
+      /^Author:\s+\S/,
+      // git log author
+      /^Date:\s+\S/,
+      // git log date
+      /^Merge:\s+[0-9a-f]{6,}/,
+      // git log merge line
+      /^diff\s+--git\s+a\//,
+      // git diff header
+      /^(?:---|\+\+\+)\s+[ab]\//,
+      // git diff file paths
+      /^@@\s+-\d+/
+      // git diff hunk header
+    ];
+    WAITING_PATTERNS = [
+      /\[\d+\]/,
+      // Menu selection prompt like [1], [2], [3]
+      /^\s*❯?\s*\d+\.\s/m,
+      // Menu selection prompt like "❯ 1. ..." or "  2. ..."
+      /continue\?/i,
+      // Continue prompt
+      /press enter/i,
+      /waiting for/i,
+      /select an option/i,
+      /choice:/i,
+      /enter to confirm/i
+    ];
+  }
+});
+
+// src/notifications/session-registry.ts
+var session_registry_exports = {};
+__export(session_registry_exports, {
+  loadAllMappings: () => loadAllMappings,
+  lookupByMessageId: () => lookupByMessageId,
+  pruneStale: () => pruneStale,
+  registerMessage: () => registerMessage,
+  removeMessagesByPane: () => removeMessagesByPane,
+  removeSession: () => removeSession
+});
+function getRegistryStateDir() {
+  return process.env["OMC_TEST_REGISTRY_DIR"] ?? getGlobalOmcStateRoot();
+}
+function getRegistryPath() {
+  return (0, import_path69.join)(getRegistryStateDir(), "reply-session-registry.jsonl");
+}
+function getRegistryReadPaths() {
+  if (process.env["OMC_TEST_REGISTRY_DIR"]) {
+    return [getRegistryPath()];
+  }
+  return getGlobalOmcStateCandidates("reply-session-registry.jsonl");
+}
+function getLockPath() {
+  return (0, import_path69.join)(getRegistryStateDir(), "reply-session-registry.lock");
+}
+function ensureRegistryDir() {
+  const registryDir = (0, import_path69.dirname)(getRegistryPath());
+  if (!(0, import_fs58.existsSync)(registryDir)) {
+    (0, import_fs58.mkdirSync)(registryDir, { recursive: true, mode: 448 });
+  }
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(SLEEP_ARRAY, 0, 0, ms);
+  } catch {
+    const waitUntil = Date.now() + ms;
+    while (Date.now() < waitUntil) {
+    }
+  }
+}
+function readLockSnapshot() {
+  try {
+    const raw = (0, import_fs58.readFileSync)(getLockPath(), "utf-8");
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { raw, pid: null, token: null };
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      const pid = typeof parsed.pid === "number" && Number.isFinite(parsed.pid) ? parsed.pid : null;
+      const token = typeof parsed.token === "string" && parsed.token.length > 0 ? parsed.token : null;
+      return { raw, pid, token };
+    } catch {
+      const [pidStr] = trimmed.split(":");
+      const parsedPid = Number.parseInt(pidStr ?? "", 10);
+      return {
+        raw,
+        pid: Number.isFinite(parsedPid) && parsedPid > 0 ? parsedPid : null,
+        token: null
+      };
+    }
+  } catch {
+    return null;
+  }
+}
+function removeLockIfUnchanged(snapshot) {
+  try {
+    const currentRaw = (0, import_fs58.readFileSync)(getLockPath(), "utf-8");
+    if (currentRaw !== snapshot.raw) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  try {
+    (0, import_fs58.unlinkSync)(getLockPath());
+    return true;
+  } catch {
+    return false;
+  }
+}
+function acquireRegistryLock() {
+  ensureRegistryDir();
+  const started = Date.now();
+  while (Date.now() - started < LOCK_TIMEOUT_MS) {
+    try {
+      const token = (0, import_crypto10.randomUUID)();
+      const fd = (0, import_fs58.openSync)(
+        getLockPath(),
+        import_fs58.constants.O_CREAT | import_fs58.constants.O_EXCL | import_fs58.constants.O_WRONLY,
+        SECURE_FILE_MODE
+      );
+      const lockPayload = JSON.stringify({
+        pid: process.pid,
+        acquiredAt: Date.now(),
+        token
+      });
+      (0, import_fs58.writeSync)(fd, lockPayload, null, "utf-8");
+      return { fd, token };
+    } catch (error2) {
+      const err = error2;
+      if (err.code !== "EEXIST") {
+        throw error2;
+      }
+      try {
+        const lockAgeMs = Date.now() - (0, import_fs58.statSync)(getLockPath()).mtimeMs;
+        if (lockAgeMs > LOCK_STALE_MS2) {
+          const snapshot = readLockSnapshot();
+          if (!snapshot) {
+            sleepMs(LOCK_RETRY_MS2);
+            continue;
+          }
+          if (snapshot.pid !== null && isProcessAlive(snapshot.pid)) {
+            sleepMs(LOCK_RETRY_MS2);
+            continue;
+          }
+          if (removeLockIfUnchanged(snapshot)) {
+            continue;
+          }
+        }
+      } catch {
+      }
+      sleepMs(LOCK_RETRY_MS2);
+    }
+  }
+  return null;
+}
+function acquireRegistryLockOrWait(maxWaitMs = LOCK_MAX_WAIT_MS) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const lock = acquireRegistryLock();
+    if (lock !== null) {
+      return lock;
+    }
+    sleepMs(LOCK_RETRY_MS2);
+  }
+  return null;
+}
+function releaseRegistryLock(lock) {
+  try {
+    (0, import_fs58.closeSync)(lock.fd);
+  } catch {
+  }
+  const snapshot = readLockSnapshot();
+  if (!snapshot || snapshot.token !== lock.token) {
+    return;
+  }
+  removeLockIfUnchanged(snapshot);
+}
+function withRegistryLockOrWait(onLocked) {
+  const lock = acquireRegistryLockOrWait();
+  if (lock === null) {
+    return onLocked();
+  }
+  try {
+    return onLocked();
+  } finally {
+    releaseRegistryLock(lock);
+  }
+}
+function withRegistryLock(onLocked, onLockUnavailable) {
+  const lock = acquireRegistryLock();
+  if (lock === null) {
+    return onLockUnavailable();
+  }
+  try {
+    return onLocked();
+  } finally {
+    releaseRegistryLock(lock);
+  }
+}
+function registerMessage(mapping) {
+  withRegistryLockOrWait(
+    () => {
+      ensureRegistryDir();
+      const line = JSON.stringify(mapping) + "\n";
+      const fd = (0, import_fs58.openSync)(
+        getRegistryPath(),
+        import_fs58.constants.O_WRONLY | import_fs58.constants.O_APPEND | import_fs58.constants.O_CREAT,
+        SECURE_FILE_MODE
+      );
+      try {
+        const buf = Buffer.from(line, "utf-8");
+        (0, import_fs58.writeSync)(fd, buf);
+      } finally {
+        (0, import_fs58.closeSync)(fd);
+      }
+    }
+  );
+}
+function loadAllMappings() {
+  return withRegistryLockOrWait(() => readAllMappingsUnsafe());
+}
+function readAllMappingsUnsafe() {
+  for (const registryPath of getRegistryReadPaths()) {
+    if (!(0, import_fs58.existsSync)(registryPath)) {
+      continue;
+    }
+    try {
+      const content = (0, import_fs58.readFileSync)(registryPath, "utf-8");
+      return content.split("\n").filter((line) => line.trim()).map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter((m) => m !== null);
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+function lookupByMessageId(platform, messageId) {
+  const mappings = loadAllMappings();
+  return mappings.findLast((m) => m.platform === platform && m.messageId === messageId) ?? null;
+}
+function removeSession(sessionId) {
+  withRegistryLock(
+    () => {
+      const mappings = readAllMappingsUnsafe();
+      const filtered = mappings.filter((m) => m.sessionId !== sessionId);
+      if (filtered.length === mappings.length) {
+        return;
+      }
+      rewriteRegistryUnsafe(filtered);
+    },
+    () => {
+    }
+  );
+}
+function removeMessagesByPane(paneId) {
+  withRegistryLock(
+    () => {
+      const mappings = readAllMappingsUnsafe();
+      const filtered = mappings.filter((m) => m.tmuxPaneId !== paneId);
+      if (filtered.length === mappings.length) {
+        return;
+      }
+      rewriteRegistryUnsafe(filtered);
+    },
+    () => {
+    }
+  );
+}
+function pruneStale() {
+  withRegistryLock(
+    () => {
+      const now = Date.now();
+      const mappings = readAllMappingsUnsafe();
+      const filtered = mappings.filter((m) => {
+        try {
+          const age = now - new Date(m.createdAt).getTime();
+          return age < MAX_AGE_MS;
+        } catch {
+          return false;
+        }
+      });
+      if (filtered.length === mappings.length) {
+        return;
+      }
+      rewriteRegistryUnsafe(filtered);
+    },
+    () => {
+    }
+  );
+}
+function rewriteRegistryUnsafe(mappings) {
+  ensureRegistryDir();
+  if (mappings.length === 0) {
+    (0, import_fs58.writeFileSync)(getRegistryPath(), "", { mode: SECURE_FILE_MODE });
+    return;
+  }
+  const content = mappings.map((m) => JSON.stringify(m)).join("\n") + "\n";
+  (0, import_fs58.writeFileSync)(getRegistryPath(), content, { mode: SECURE_FILE_MODE });
+}
+var import_fs58, import_path69, import_crypto10, SECURE_FILE_MODE, MAX_AGE_MS, LOCK_TIMEOUT_MS, LOCK_RETRY_MS2, LOCK_STALE_MS2, LOCK_MAX_WAIT_MS, SLEEP_ARRAY;
+var init_session_registry = __esm({
+  "src/notifications/session-registry.ts"() {
+    "use strict";
+    import_fs58 = require("fs");
+    import_path69 = require("path");
+    import_crypto10 = require("crypto");
+    init_platform();
+    init_paths();
+    SECURE_FILE_MODE = 384;
+    MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+    LOCK_TIMEOUT_MS = 2e3;
+    LOCK_RETRY_MS2 = 20;
+    LOCK_STALE_MS2 = 1e4;
+    LOCK_MAX_WAIT_MS = 1e4;
+    SLEEP_ARRAY = new Int32Array(new SharedArrayBuffer(4));
+  }
+});
+
 // src/notifications/hook-config.ts
 function getHookConfig() {
   if (cachedConfig2 !== void 0) return cachedConfig2;
   const configPath = process.env.OMC_HOOK_CONFIG || DEFAULT_CONFIG_PATH;
-  if (!(0, import_fs57.existsSync)(configPath)) {
+  if (!(0, import_fs59.existsSync)(configPath)) {
     cachedConfig2 = null;
     return null;
   }
   try {
-    const raw = JSON.parse((0, import_fs57.readFileSync)(configPath, "utf-8"));
+    const raw = JSON.parse((0, import_fs59.readFileSync)(configPath, "utf-8"));
     if (!raw || raw.enabled === false) {
       cachedConfig2 = null;
       return null;
@@ -21434,9 +22795,6 @@ function getHookConfig() {
     cachedConfig2 = null;
     return null;
   }
-}
-function resetHookConfigCache() {
-  cachedConfig2 = void 0;
 }
 function resolveEventTemplate(hookConfig, event, platform) {
   if (!hookConfig) return null;
@@ -21464,14 +22822,14 @@ function mergeHookConfigIntoNotificationConfig(hookConfig, notifConfig) {
   merged.events = events;
   return merged;
 }
-var import_fs57, import_path66, DEFAULT_CONFIG_PATH, cachedConfig2;
+var import_fs59, import_path70, DEFAULT_CONFIG_PATH, cachedConfig2;
 var init_hook_config = __esm({
   "src/notifications/hook-config.ts"() {
     "use strict";
-    import_fs57 = require("fs");
-    import_path66 = require("path");
+    import_fs59 = require("fs");
+    import_path70 = require("path");
     init_config_dir();
-    DEFAULT_CONFIG_PATH = (0, import_path66.join)(getClaudeConfigDir(), "omc_config.hook.json");
+    DEFAULT_CONFIG_PATH = (0, import_path70.join)(getClaudeConfigDir(), "omc_config.hook.json");
   }
 });
 
@@ -21583,11 +22941,6 @@ function checkDuplicateIds(integrations) {
   }
   return duplicates;
 }
-function sanitizeArgument(arg) {
-  let sanitized = arg.replace(/\0/g, "");
-  sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  return sanitized;
-}
 var VALID_HTTP_METHODS, MIN_TIMEOUT, MAX_TIMEOUT, VALID_ID_PATTERN;
 var init_validation2 = __esm({
   "src/notifications/validation.ts"() {
@@ -21624,9 +22977,9 @@ __export(config_exports, {
   validateSlackUsername: () => validateSlackUsername
 });
 function readRawConfig() {
-  if (!(0, import_fs58.existsSync)(CONFIG_FILE2)) return null;
+  if (!(0, import_fs60.existsSync)(CONFIG_FILE2)) return null;
   try {
-    return JSON.parse((0, import_fs58.readFileSync)(CONFIG_FILE2, "utf-8"));
+    return JSON.parse((0, import_fs60.readFileSync)(CONFIG_FILE2, "utf-8"));
   } catch {
     return null;
   }
@@ -22084,12 +23437,12 @@ function getReplyConfig() {
   };
 }
 function detectLegacyOpenClawConfig() {
-  return (0, import_fs58.existsSync)(LEGACY_OPENCLAW_CONFIG);
+  return (0, import_fs60.existsSync)(LEGACY_OPENCLAW_CONFIG);
 }
 function migrateLegacyOpenClawConfig() {
-  if (!(0, import_fs58.existsSync)(LEGACY_OPENCLAW_CONFIG)) return null;
+  if (!(0, import_fs60.existsSync)(LEGACY_OPENCLAW_CONFIG)) return null;
   try {
-    const legacy = JSON.parse((0, import_fs58.readFileSync)(LEGACY_OPENCLAW_CONFIG, "utf-8"));
+    const legacy = JSON.parse((0, import_fs60.readFileSync)(LEGACY_OPENCLAW_CONFIG, "utf-8"));
     const gateways = legacy.gateways;
     if (!gateways || Object.keys(gateways).length === 0) return null;
     const gateway = Object.values(gateways)[0];
@@ -22174,16 +23527,16 @@ function hasCustomIntegrationsEnabled(event) {
     (i) => i.enabled && i.events.includes(event)
   );
 }
-var import_fs58, import_path67, CONFIG_FILE2, DEFAULT_TMUX_TAIL_LINES, VALID_VERBOSITY_LEVELS, SESSION_EVENTS, REPLY_PLATFORM_EVENTS, LEGACY_OPENCLAW_CONFIG;
+var import_fs60, import_path71, CONFIG_FILE2, DEFAULT_TMUX_TAIL_LINES, VALID_VERBOSITY_LEVELS, SESSION_EVENTS, REPLY_PLATFORM_EVENTS, LEGACY_OPENCLAW_CONFIG;
 var init_config = __esm({
   "src/notifications/config.ts"() {
     "use strict";
-    import_fs58 = require("fs");
-    import_path67 = require("path");
+    import_fs60 = require("fs");
+    import_path71 = require("path");
     init_config_dir();
     init_hook_config();
     init_validation2();
-    CONFIG_FILE2 = (0, import_path67.join)(getClaudeConfigDir(), ".omc-config.json");
+    CONFIG_FILE2 = (0, import_path71.join)(getClaudeConfigDir(), ".omc-config.json");
     DEFAULT_TMUX_TAIL_LINES = 15;
     VALID_VERBOSITY_LEVELS = /* @__PURE__ */ new Set([
       "verbose",
@@ -22204,1334 +23557,7 @@ var init_config = __esm({
       "session-idle",
       "session-end"
     ];
-    LEGACY_OPENCLAW_CONFIG = (0, import_path67.join)(getClaudeConfigDir(), "omc_config.openclaw.json");
-  }
-});
-
-// src/notifications/formatter.ts
-function formatDuration2(ms) {
-  if (!ms) return "unknown";
-  const seconds = Math.floor(ms / 1e3);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
-function projectDisplay(payload) {
-  if (payload.projectName) return payload.projectName;
-  if (payload.projectPath) return (0, import_path68.basename)(payload.projectPath);
-  return "unknown";
-}
-function buildFooter(payload, markdown) {
-  const parts = [];
-  if (payload.tmuxSession) {
-    parts.push(
-      markdown ? `**tmux:** \`${payload.tmuxSession}\`` : `tmux: ${payload.tmuxSession}`
-    );
-  }
-  parts.push(
-    markdown ? `**project:** \`${projectDisplay(payload)}\`` : `project: ${projectDisplay(payload)}`
-  );
-  return parts.join(markdown ? " | " : " | ");
-}
-function formatSessionStart(payload) {
-  const time3 = new Date(payload.timestamp).toLocaleTimeString();
-  const project = projectDisplay(payload);
-  const lines = [
-    `# Session Started`,
-    "",
-    `**Session:** \`${payload.sessionId}\``,
-    `**Project:** \`${project}\``,
-    `**Time:** ${time3}`
-  ];
-  if (payload.tmuxSession) {
-    lines.push(`**tmux:** \`${payload.tmuxSession}\``);
-  }
-  return lines.join("\n");
-}
-function formatSessionStop(payload) {
-  const lines = [`# Session Continuing`, ""];
-  if (payload.activeMode) {
-    lines.push(`**Mode:** ${payload.activeMode}`);
-  }
-  if (payload.iteration != null && payload.maxIterations != null) {
-    lines.push(`**Iteration:** ${payload.iteration}/${payload.maxIterations}`);
-  }
-  if (payload.incompleteTasks != null && payload.incompleteTasks > 0) {
-    lines.push(`**Incomplete tasks:** ${payload.incompleteTasks}`);
-  }
-  lines.push("");
-  lines.push(buildFooter(payload, true));
-  return lines.join("\n");
-}
-function formatSessionEnd(payload) {
-  const duration3 = formatDuration2(payload.durationMs);
-  const lines = [
-    `# Session Ended`,
-    "",
-    `**Session:** \`${payload.sessionId}\``,
-    `**Duration:** ${duration3}`,
-    `**Reason:** ${payload.reason || "unknown"}`
-  ];
-  if (payload.agentsSpawned != null) {
-    lines.push(
-      `**Agents:** ${payload.agentsCompleted ?? 0}/${payload.agentsSpawned} completed`
-    );
-  }
-  if (payload.modesUsed && payload.modesUsed.length > 0) {
-    lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
-  }
-  if (payload.contextSummary) {
-    lines.push("", `**Summary:** ${payload.contextSummary}`);
-  }
-  appendTmuxTail(lines, payload);
-  lines.push("");
-  lines.push(buildFooter(payload, true));
-  return lines.join("\n");
-}
-function formatSessionIdle(payload) {
-  const lines = [`# Session Idle`, ""];
-  lines.push(`Claude has finished and is waiting for input.`);
-  lines.push("");
-  if (payload.reason) {
-    lines.push(`**Reason:** ${payload.reason}`);
-  }
-  if (payload.modesUsed && payload.modesUsed.length > 0) {
-    lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
-  }
-  appendTmuxTail(lines, payload);
-  lines.push("");
-  lines.push(buildFooter(payload, true));
-  return lines.join("\n");
-}
-function extractReviewSeedOutcomeKeys(line) {
-  return REVIEW_SEED_OUTCOME_PATTERNS.filter(({ pattern }) => pattern.test(line)).map(({ key }) => key);
-}
-function trimReviewSeedPrefix(lines) {
-  if (lines.length === 0) return lines;
-  const prefix = lines.slice(0, 10);
-  const distinctOutcomes = /* @__PURE__ */ new Set();
-  let hasCue = false;
-  let hasListMarker = false;
-  let candidateEnd = -1;
-  for (let index = 0; index < prefix.length; index += 1) {
-    const line = prefix[index];
-    const outcomeKeys = extractReviewSeedOutcomeKeys(line);
-    const isCueLine = REVIEW_SEED_CUE_RE.test(line);
-    const isSeedLine = outcomeKeys.length > 0 || isCueLine || candidateEnd >= 0 && REVIEW_SEED_LIST_RE.test(line);
-    outcomeKeys.forEach((key) => distinctOutcomes.add(key));
-    if (isCueLine) hasCue = true;
-    if (REVIEW_SEED_LIST_RE.test(line)) hasListMarker = true;
-    if (isSeedLine) {
-      candidateEnd = index;
-      continue;
-    }
-    if (candidateEnd >= 0) break;
-  }
-  const qualifies = candidateEnd >= 0 && hasCue && (distinctOutcomes.size >= 2 || hasListMarker);
-  if (!qualifies) return lines;
-  return lines.slice(candidateEnd + 1);
-}
-function looksLikeStructuredAlertLiteral(line) {
-  const trimmed = line.trim();
-  if (!STRUCTURED_ALERT_KEYWORD_RE.test(trimmed)) return false;
-  if (/^(?:\{.*\}|\[.*\])$/.test(trimmed) && /["'{\[\]}:,]/.test(trimmed)) return true;
-  if (JSONISH_LINE_RE.test(trimmed)) return true;
-  if (CODE_LITERAL_PREFIX_RE.test(trimmed) && /["'`{}[\]()=>]/.test(trimmed)) return true;
-  return false;
-}
-function looksLikeAlertSearchCommand(line) {
-  const trimmed = line.trim();
-  return SEARCH_COMMAND_RE.test(trimmed) && STRUCTURED_ALERT_KEYWORD_RE.test(trimmed) && (QUOTED_OR_REGEX_QUERY_RE.test(trimmed) || trimmed.includes("|"));
-}
-function looksLikeAlertRegexLiteral(line) {
-  const trimmed = line.trim();
-  return STRUCTURED_ALERT_KEYWORD_RE.test(trimmed) && ALERT_REGEX_LITERAL_RE.test(trimmed);
-}
-function isCommandBoilerplateLine(line) {
-  return /^(?:command failed with exit code \d+:|exit code \d+)$/i.test(line.trim());
-}
-function stripLeadingNoisePrefix(lines) {
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index].trim();
-    if (PERMISSION_DENIED_SCAN_LINE_RE.test(line) || CLEAN_DIAGNOSTIC_QUERY_RE.test(line) || GENERIC_HOOK_FAILURE_PROSE_RE.test(line) || ISSUE_PROMPT_NOISE_RE.test(line) || ZERO_ALERT_SUMMARY_RE.test(line) || isCommandBoilerplateLine(line)) {
-      index += 1;
-      continue;
-    }
-    break;
-  }
-  return index > 0 ? lines.slice(index) : lines;
-}
-function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
-  const meaningful = [];
-  for (const line of raw.split("\n")) {
-    const stripped = line.replace(ANSI_ESCAPE_RE, "");
-    const trimmed2 = stripped.trim();
-    if (!trimmed2) continue;
-    if (UI_CHROME_RE.test(trimmed2)) continue;
-    if (CTRL_O_RE.test(trimmed2)) continue;
-    if (BOX_DRAWING_RE.test(trimmed2)) continue;
-    if (OMC_HUD_RE.test(trimmed2)) continue;
-    if (BYPASS_PERM_RE.test(trimmed2)) continue;
-    if (BARE_PROMPT_RE.test(trimmed2)) continue;
-    if (DIFF_HEADER_LINE_RE.test(trimmed2)) continue;
-    if (looksLikeAlertSearchCommand(trimmed2)) continue;
-    if (REQUEST_RESPONSE_LITERAL_RE.test(trimmed2)) continue;
-    if (HELP_USAGE_LINE_RE.test(trimmed2)) continue;
-    if (STATIC_HELP_CODE_RE.test(trimmed2)) continue;
-    if (ZERO_ALERT_SUMMARY_RE.test(trimmed2)) continue;
-    if (GENERIC_HOOK_FAILURE_PROSE_RE.test(trimmed2)) continue;
-    if (ISSUE_PROMPT_NOISE_RE.test(trimmed2)) continue;
-    if (PERMISSION_DENIED_SCAN_LINE_RE.test(trimmed2)) continue;
-    if (CLEAN_DIAGNOSTIC_QUERY_RE.test(trimmed2)) continue;
-    if (SOURCE_PATH_LINE_RE.test(trimmed2) && STATIC_CODE_ALERT_RE.test(trimmed2)) continue;
-    if (SOURCE_PATH_LINE_RE.test(trimmed2)) {
-      const sourceContent = trimmed2.replace(SOURCE_PATH_LINE_RE, "").trim();
-      if (looksLikeStructuredAlertLiteral(sourceContent) || looksLikeAlertRegexLiteral(sourceContent)) continue;
-    }
-    if (looksLikeAlertRegexLiteral(trimmed2)) continue;
-    if (looksLikeStructuredAlertLiteral(trimmed2)) continue;
-    const alnumCount = (trimmed2.match(/[a-zA-Z0-9]/g) || []).length;
-    if (trimmed2.length >= 8 && alnumCount / trimmed2.length < MIN_ALNUM_RATIO) continue;
-    meaningful.push(stripped.trimEnd());
-  }
-  const trimmed = trimReviewSeedPrefix(meaningful);
-  return stripLeadingNoisePrefix(trimmed).slice(-maxLines).join("\n");
-}
-function appendTmuxTail(lines, payload) {
-  if (payload.tmuxTail) {
-    const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
-    if (parsed) {
-      lines.push("");
-      lines.push("**Recent output:**");
-      lines.push("```");
-      lines.push(parsed);
-      lines.push("```");
-    }
-  }
-}
-function formatAgentCall(payload) {
-  const lines = [`# Agent Spawned`, ""];
-  if (payload.agentName) {
-    lines.push(`**Agent:** \`${payload.agentName}\``);
-  }
-  if (payload.agentType) {
-    lines.push(`**Type:** \`${payload.agentType}\``);
-  }
-  lines.push("");
-  lines.push(buildFooter(payload, true));
-  return lines.join("\n");
-}
-function formatAskUserQuestion(payload) {
-  const lines = [`# Input Needed`, ""];
-  if (payload.question) {
-    lines.push(`**Question:** ${payload.question}`);
-    lines.push("");
-  }
-  lines.push(`Claude is waiting for your response.`);
-  lines.push("");
-  lines.push(buildFooter(payload, true));
-  return lines.join("\n");
-}
-function formatNotification(payload) {
-  switch (payload.event) {
-    case "session-start":
-      return formatSessionStart(payload);
-    case "session-stop":
-      return formatSessionStop(payload);
-    case "session-end":
-      return formatSessionEnd(payload);
-    case "session-idle":
-      return formatSessionIdle(payload);
-    case "ask-user-question":
-      return formatAskUserQuestion(payload);
-    case "agent-call":
-      return formatAgentCall(payload);
-    default:
-      return payload.message || `Event: ${payload.event}`;
-  }
-}
-var import_path68, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, REVIEW_SEED_OUTCOME_PATTERNS, REVIEW_SEED_CUE_RE, REVIEW_SEED_LIST_RE, SOURCE_PATH_LINE_RE, STATIC_CODE_ALERT_RE, HELP_USAGE_LINE_RE, STATIC_HELP_CODE_RE, DIFF_HEADER_LINE_RE, STRUCTURED_ALERT_KEYWORD_RE, SEARCH_COMMAND_RE, QUOTED_OR_REGEX_QUERY_RE, ZERO_ALERT_SUMMARY_RE, ALERT_REGEX_LITERAL_RE, GENERIC_HOOK_FAILURE_PROSE_RE, ISSUE_PROMPT_NOISE_RE, PERMISSION_DENIED_SCAN_LINE_RE, CLEAN_DIAGNOSTIC_QUERY_RE, JSONISH_LINE_RE, REQUEST_RESPONSE_LITERAL_RE, CODE_LITERAL_PREFIX_RE, DEFAULT_MAX_TAIL_LINES;
-var init_formatter = __esm({
-  "src/notifications/formatter.ts"() {
-    "use strict";
-    import_path68 = require("path");
-    ANSI_ESCAPE_RE = /\x1b(?:[@-Z\\-_]|\[[0-9;]*[a-zA-Z])/g;
-    UI_CHROME_RE = /^[●⎿✻·◼]/;
-    CTRL_O_RE = /ctrl\+o to expand/i;
-    BOX_DRAWING_RE = /^[\s─═│║┌┐└┘┬┴├┤╔╗╚╝╠╣╦╩╬╟╢╤╧╪━┃┏┓┗┛┣┫┳┻╋┠┨┯┷┿╂]+$/;
-    OMC_HUD_RE = /\[OMC[#\]]/;
-    BYPASS_PERM_RE = /^⏵/;
-    BARE_PROMPT_RE = /^[❯>$%#]+$/;
-    MIN_ALNUM_RATIO = 0.15;
-    REVIEW_SEED_OUTCOME_PATTERNS = [
-      { key: "approve", pattern: /\bapprove\b/i },
-      { key: "request-changes", pattern: /\brequest[- ]changes\b/i },
-      { key: "follow-up-fix", pattern: /\bfollow[- ]up[- ]fix\b/i },
-      { key: "blocked", pattern: /\bblocked\b/i },
-      { key: "error", pattern: /\berrors?\b/i },
-      { key: "failure", pattern: /\bfail(?:ed|ure|ures)?\b/i },
-      { key: "conflict", pattern: /\bconflicts?\b/i }
-    ];
-    REVIEW_SEED_CUE_RE = /\b(review|verdict|respond|reply|return|output|classification|classify|decision|choose|label)\b/i;
-    REVIEW_SEED_LIST_RE = /^(?:[-*•]|\d+[.)]|[A-Z][A-Z_-]+:|\([a-z0-9]+\))/;
-    SOURCE_PATH_LINE_RE = /^(?:\.\/)?[A-Za-z0-9_./-]+:\d+:/;
-    STATIC_CODE_ALERT_RE = /(?:\blog_error\b|\becho\b).*?(?:"error\||"Usage:)|==\s*"error"/;
-    HELP_USAGE_LINE_RE = /^(?:Usage|Examples?|Commands?|Options?|Flags?):/i;
-    STATIC_HELP_CODE_RE = /^(?:log_error\s+"Usage:|if\s+\[\[.*==\s*"error".*\]\];?\s*then$)/;
-    DIFF_HEADER_LINE_RE = /^(?:diff --git\b|index\s+[0-9a-f]{6,}\.\.[0-9a-f]{6,}\b|@@\s+[-+]\d|---\s+\S|\+\+\+\s+\S)/i;
-    STRUCTURED_ALERT_KEYWORD_RE = /\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts|operation_failed|claim_conflict|invalid_transition|blocked_dependency|worker_notify_failed)\b/i;
-    SEARCH_COMMAND_RE = /^(?:[$❯>#]\s*)?(?:rg|ripgrep|grep|egrep|fgrep)\b/i;
-    QUOTED_OR_REGEX_QUERY_RE = /(?:"[^"\n]+"|'[^'\n]+'|`[^`\n]+`|\/[^/\n]+\/[a-z]*)/i;
-    ZERO_ALERT_SUMMARY_RE = /\b(?:0|zero)\s+(?:errors?|fail(?:ed|ures?)?|conflicts?)\b|\b(?:errors?|fail(?:ed|ures?)?|conflicts?)\s*[:=]\s*0\b|\btotalErrors\s*[:=]\s*0\b|\b(?:TypeScript|LSP)\s+check\s+passed:\s*0 errors,\s*0 warnings\b/i;
-    ALERT_REGEX_LITERAL_RE = /(?:^|[=(:,]\s*)(?:new\s+RegExp\(|\/)(?=[^)\n;]*\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts|operation_failed|claim_conflict|invalid_transition|blocked_dependency|worker_notify_failed)\b)/i;
-    GENERIC_HOOK_FAILURE_PROSE_RE = /^The Bash output indicates (?:a )?(?:command\/setup|command|setup) failure\b/i;
-    ISSUE_PROMPT_NOISE_RE = /^(?:fix|review|investigate|analyze|search|find|look\s+for|debug|harden)\b.*\b(?:issue|pr)\s*#\d+\b.*\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts)\b/i;
-    PERMISSION_DENIED_SCAN_LINE_RE = /^(?:find|grep|rg): .*permission denied$/i;
-    CLEAN_DIAGNOSTIC_QUERY_RE = /^(?:[$❯>#]\s*)?(?:rg|ripgrep|grep)\b.*\b(?:severity\s*[:=]\s*["']?error["']?|diagnostic(?:s)?|lsp_diagnostics(?:_directory)?)\b/i;
-    JSONISH_LINE_RE = /^(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:)/;
-    REQUEST_RESPONSE_LITERAL_RE = /^(?:payload|request|response|input|output|args|params|body|mcp)\s*[:=]\s*[{[]/i;
-    CODE_LITERAL_PREFIX_RE = /^(?:[+-]\s*(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:|(?:const|let|var|return|throw|if|await|expect|mock|vi\.)\b|[A-Za-z_$][\w$-]*\s*:)|(?:const|let|var|return|throw|if|await|expect|mock|vi\.)\b)/;
-    DEFAULT_MAX_TAIL_LINES = 15;
-  }
-});
-
-// src/notifications/template-engine.ts
-function formatDuration3(ms) {
-  if (!ms) return "unknown";
-  const seconds = Math.floor(ms / 1e3);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
-function getProjectDisplay(payload) {
-  if (payload.projectName) return payload.projectName;
-  if (payload.projectPath) return (0, import_path69.basename)(payload.projectPath);
-  return "unknown";
-}
-function buildFooterText(payload) {
-  const parts = [];
-  if (payload.tmuxSession) {
-    parts.push(`**tmux:** \`${payload.tmuxSession}\``);
-  }
-  parts.push(`**project:** \`${getProjectDisplay(payload)}\``);
-  return parts.join(" | ");
-}
-function buildTmuxTailBlock(payload) {
-  if (!payload.tmuxTail) return "";
-  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
-  if (!parsed) return "";
-  return `
-
-**Recent output:**
-\`\`\`
-${parsed}
-\`\`\``;
-}
-function computeTemplateVariables(payload) {
-  const vars = {};
-  vars.event = payload.event || "";
-  vars.sessionId = payload.sessionId || "";
-  vars.message = payload.message || "";
-  vars.timestamp = payload.timestamp || "";
-  vars.tmuxSession = payload.tmuxSession || "";
-  vars.projectPath = payload.projectPath || "";
-  vars.projectName = payload.projectName || "";
-  vars.modesUsed = payload.modesUsed?.join(", ") || "";
-  vars.contextSummary = payload.contextSummary || "";
-  vars.durationMs = payload.durationMs != null ? String(payload.durationMs) : "";
-  vars.agentsSpawned = payload.agentsSpawned != null ? String(payload.agentsSpawned) : "";
-  vars.agentsCompleted = payload.agentsCompleted != null ? String(payload.agentsCompleted) : "";
-  vars.reason = payload.reason || "";
-  vars.activeMode = payload.activeMode || "";
-  vars.iteration = payload.iteration != null ? String(payload.iteration) : "";
-  vars.maxIterations = payload.maxIterations != null ? String(payload.maxIterations) : "";
-  vars.question = payload.question || "";
-  vars.incompleteTasks = payload.incompleteTasks != null ? String(payload.incompleteTasks) : "";
-  vars.agentName = payload.agentName || "";
-  vars.agentType = payload.agentType || "";
-  vars.tmuxTail = payload.tmuxTail || "";
-  vars.tmuxPaneId = payload.tmuxPaneId || "";
-  vars.replyChannel = payload.replyChannel || "";
-  vars.replyTarget = payload.replyTarget || "";
-  vars.replyThread = payload.replyThread || "";
-  vars.duration = formatDuration3(payload.durationMs);
-  vars.time = payload.timestamp ? new Date(payload.timestamp).toLocaleTimeString() : "";
-  vars.modesDisplay = payload.modesUsed && payload.modesUsed.length > 0 ? payload.modesUsed.join(", ") : "";
-  vars.iterationDisplay = payload.iteration != null && payload.maxIterations != null ? `${payload.iteration}/${payload.maxIterations}` : "";
-  vars.agentDisplay = payload.agentsSpawned != null ? `${payload.agentsCompleted ?? 0}/${payload.agentsSpawned} completed` : "";
-  vars.projectDisplay = getProjectDisplay(payload);
-  vars.footer = buildFooterText(payload);
-  vars.tmuxTailBlock = buildTmuxTailBlock(payload);
-  vars.reasonDisplay = payload.reason || "unknown";
-  return vars;
-}
-function processConditionals(template, vars) {
-  return template.replace(
-    /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
-    (_match, varName, content) => {
-      const value = vars[varName] || "";
-      return value ? content : "";
-    }
-  );
-}
-function replaceVariables(template, vars) {
-  return template.replace(
-    /\{\{(\w+)\}\}/g,
-    (_match, varName) => vars[varName] ?? ""
-  );
-}
-function postProcess(text) {
-  return text.trimEnd();
-}
-function interpolateTemplate(template, payload) {
-  const vars = computeTemplateVariables(payload);
-  let result = processConditionals(template, vars);
-  result = replaceVariables(result, vars);
-  result = postProcess(result);
-  return result;
-}
-function validateTemplate(template) {
-  const unknownVars = [];
-  for (const m of template.matchAll(/\{\{#if\s+(\w+)\}\}/g)) {
-    if (!KNOWN_VARIABLES.has(m[1]) && !unknownVars.includes(m[1])) {
-      unknownVars.push(m[1]);
-    }
-  }
-  for (const m of template.matchAll(/\{\{(?!#if\s|\/if)(\w+)\}\}/g)) {
-    if (!KNOWN_VARIABLES.has(m[1]) && !unknownVars.includes(m[1])) {
-      unknownVars.push(m[1]);
-    }
-  }
-  return { valid: unknownVars.length === 0, unknownVars };
-}
-function getDefaultTemplate(event) {
-  return DEFAULT_TEMPLATES[event] || `Event: {{event}}`;
-}
-var import_path69, KNOWN_VARIABLES, DEFAULT_TEMPLATES;
-var init_template_engine = __esm({
-  "src/notifications/template-engine.ts"() {
-    "use strict";
-    init_formatter();
-    import_path69 = require("path");
-    KNOWN_VARIABLES = /* @__PURE__ */ new Set([
-      // Raw payload fields
-      "event",
-      "sessionId",
-      "message",
-      "timestamp",
-      "tmuxSession",
-      "projectPath",
-      "projectName",
-      "modesUsed",
-      "contextSummary",
-      "durationMs",
-      "agentsSpawned",
-      "agentsCompleted",
-      "reason",
-      "activeMode",
-      "iteration",
-      "maxIterations",
-      "question",
-      "incompleteTasks",
-      "agentName",
-      "agentType",
-      "tmuxTail",
-      "tmuxPaneId",
-      "replyChannel",
-      "replyTarget",
-      "replyThread",
-      // Computed variables
-      "duration",
-      "time",
-      "modesDisplay",
-      "iterationDisplay",
-      "agentDisplay",
-      "projectDisplay",
-      "footer",
-      "tmuxTailBlock",
-      "reasonDisplay"
-    ]);
-    DEFAULT_TEMPLATES = {
-      "session-start": "# Session Started\n\n**Session:** `{{sessionId}}`\n**Project:** `{{projectDisplay}}`\n**Time:** {{time}}{{#if tmuxSession}}\n**tmux:** `{{tmuxSession}}`{{/if}}",
-      "session-stop": "# Session Continuing\n{{#if activeMode}}\n**Mode:** {{activeMode}}{{/if}}{{#if iterationDisplay}}\n**Iteration:** {{iterationDisplay}}{{/if}}{{#if incompleteTasks}}\n**Incomplete tasks:** {{incompleteTasks}}{{/if}}\n\n{{footer}}",
-      "session-end": "# Session Ended\n\n**Session:** `{{sessionId}}`\n**Duration:** {{duration}}\n**Reason:** {{reasonDisplay}}{{#if agentDisplay}}\n**Agents:** {{agentDisplay}}{{/if}}{{#if modesDisplay}}\n**Modes:** {{modesDisplay}}{{/if}}{{#if contextSummary}}\n\n**Summary:** {{contextSummary}}{{/if}}{{tmuxTailBlock}}\n\n{{footer}}",
-      "session-idle": "# Session Idle\n\nClaude has finished and is waiting for input.\n{{#if reason}}\n**Reason:** {{reason}}{{/if}}{{#if modesDisplay}}\n**Modes:** {{modesDisplay}}{{/if}}{{tmuxTailBlock}}\n\n{{footer}}",
-      "ask-user-question": "# Input Needed\n{{#if question}}\n**Question:** {{question}}\n{{/if}}\nClaude is waiting for your response.\n\n{{footer}}",
-      "agent-call": "# Agent Spawned\n{{#if agentName}}\n**Agent:** `{{agentName}}`{{/if}}{{#if agentType}}\n**Type:** `{{agentType}}`{{/if}}\n\n{{footer}}"
-    };
-  }
-});
-
-// src/notifications/dispatcher.ts
-function composeDiscordContent(message, mention) {
-  const mentionParsed = parseMentionAllowedMentions(mention);
-  const allowed_mentions = {
-    parse: [],
-    // disable implicit @everyone/@here
-    users: mentionParsed.users,
-    roles: mentionParsed.roles
-  };
-  let content;
-  if (mention) {
-    const prefix = `${mention}
-`;
-    const maxBody = DISCORD_MAX_CONTENT_LENGTH - prefix.length;
-    const body = message.length > maxBody ? message.slice(0, maxBody - 1) + "\u2026" : message;
-    content = `${prefix}${body}`;
-  } else {
-    content = message.length > DISCORD_MAX_CONTENT_LENGTH ? message.slice(0, DISCORD_MAX_CONTENT_LENGTH - 1) + "\u2026" : message;
-  }
-  return { content, allowed_mentions };
-}
-function validateDiscordUrl(webhookUrl) {
-  try {
-    const url = new URL(webhookUrl);
-    const allowedHosts = ["discord.com", "discordapp.com"];
-    if (!allowedHosts.some(
-      (host) => url.hostname === host || url.hostname.endsWith(`.${host}`)
-    )) {
-      return false;
-    }
-    return url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-function validateTelegramToken(token) {
-  return /^[0-9]+:[A-Za-z0-9_-]+$/.test(token);
-}
-function validateSlackUrl(webhookUrl) {
-  try {
-    const url = new URL(webhookUrl);
-    return url.protocol === "https:" && (url.hostname === "hooks.slack.com" || url.hostname.endsWith(".hooks.slack.com"));
-  } catch {
-    return false;
-  }
-}
-function validateWebhookUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-async function sendDiscord(config2, payload) {
-  if (!config2.enabled || !config2.webhookUrl) {
-    return { platform: "discord", success: false, error: "Not configured" };
-  }
-  if (!validateDiscordUrl(config2.webhookUrl)) {
-    return {
-      platform: "discord",
-      success: false,
-      error: "Invalid webhook URL"
-    };
-  }
-  try {
-    const { content, allowed_mentions } = composeDiscordContent(
-      payload.message,
-      config2.mention
-    );
-    const body = { content, allowed_mentions };
-    if (config2.username) {
-      body.username = config2.username;
-    }
-    const response = await fetch(config2.webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
-    });
-    if (!response.ok) {
-      return {
-        platform: "discord",
-        success: false,
-        error: `HTTP ${response.status}`
-      };
-    }
-    return { platform: "discord", success: true };
-  } catch (error2) {
-    return {
-      platform: "discord",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-async function sendDiscordBot(config2, payload) {
-  if (!config2.enabled) {
-    return { platform: "discord-bot", success: false, error: "Not enabled" };
-  }
-  const botToken = config2.botToken;
-  const channelId = config2.channelId;
-  if (!botToken || !channelId) {
-    return {
-      platform: "discord-bot",
-      success: false,
-      error: "Missing botToken or channelId"
-    };
-  }
-  try {
-    const { content, allowed_mentions } = composeDiscordContent(
-      payload.message,
-      config2.mention
-    );
-    const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bot ${botToken}`
-      },
-      body: JSON.stringify({ content, allowed_mentions }),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
-    });
-    if (!response.ok) {
-      return {
-        platform: "discord-bot",
-        success: false,
-        error: `HTTP ${response.status}`
-      };
-    }
-    let messageId;
-    try {
-      const data = await response.json();
-      messageId = data?.id;
-    } catch {
-    }
-    return { platform: "discord-bot", success: true, messageId };
-  } catch (error2) {
-    return {
-      platform: "discord-bot",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-async function sendTelegram(config2, payload) {
-  if (!config2.enabled || !config2.botToken || !config2.chatId) {
-    return { platform: "telegram", success: false, error: "Not configured" };
-  }
-  if (!validateTelegramToken(config2.botToken)) {
-    return {
-      platform: "telegram",
-      success: false,
-      error: "Invalid bot token format"
-    };
-  }
-  try {
-    const body = JSON.stringify({
-      chat_id: config2.chatId,
-      text: payload.message,
-      parse_mode: config2.parseMode || "Markdown"
-    });
-    const result = await new Promise((resolve19) => {
-      const req = (0, import_https.request)(
-        {
-          hostname: "api.telegram.org",
-          path: `/bot${config2.botToken}/sendMessage`,
-          method: "POST",
-          family: 4,
-          // Force IPv4 - fetch/undici has IPv6 issues on some systems
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(body)
-          },
-          timeout: SEND_TIMEOUT_MS
-        },
-        (res) => {
-          const chunks = [];
-          res.on("data", (chunk) => chunks.push(chunk));
-          res.on("end", () => {
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-              let messageId;
-              try {
-                const body2 = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-                if (body2?.result?.message_id !== void 0) {
-                  messageId = String(body2.result.message_id);
-                }
-              } catch {
-              }
-              resolve19({ platform: "telegram", success: true, messageId });
-            } else {
-              resolve19({
-                platform: "telegram",
-                success: false,
-                error: `HTTP ${res.statusCode}`
-              });
-            }
-          });
-        }
-      );
-      req.on("error", (e) => {
-        resolve19({ platform: "telegram", success: false, error: e.message });
-      });
-      req.on("timeout", () => {
-        req.destroy();
-        resolve19({
-          platform: "telegram",
-          success: false,
-          error: "Request timeout"
-        });
-      });
-      req.write(body);
-      req.end();
-    });
-    return result;
-  } catch (error2) {
-    return {
-      platform: "telegram",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-function composeSlackText(message, mention) {
-  const validatedMention = validateSlackMention(mention);
-  if (validatedMention) {
-    return `${validatedMention}
-${message}`;
-  }
-  return message;
-}
-async function sendSlack(config2, payload) {
-  if (!config2.enabled || !config2.webhookUrl) {
-    return { platform: "slack", success: false, error: "Not configured" };
-  }
-  if (!validateSlackUrl(config2.webhookUrl)) {
-    return { platform: "slack", success: false, error: "Invalid webhook URL" };
-  }
-  try {
-    const text = composeSlackText(payload.message, config2.mention);
-    const body = { text };
-    const validatedChannel = validateSlackChannel(config2.channel);
-    if (validatedChannel) {
-      body.channel = validatedChannel;
-    }
-    const validatedUsername = validateSlackUsername(config2.username);
-    if (validatedUsername) {
-      body.username = validatedUsername;
-    }
-    const response = await fetch(config2.webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
-    });
-    if (!response.ok) {
-      return {
-        platform: "slack",
-        success: false,
-        error: `HTTP ${response.status}`
-      };
-    }
-    return { platform: "slack", success: true };
-  } catch (error2) {
-    return {
-      platform: "slack",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-async function sendSlackBot(config2, payload) {
-  if (!config2.enabled) {
-    return { platform: "slack-bot", success: false, error: "Not enabled" };
-  }
-  const botToken = config2.botToken;
-  const channelId = config2.channelId;
-  if (!botToken || !channelId) {
-    return {
-      platform: "slack-bot",
-      success: false,
-      error: "Missing botToken or channelId"
-    };
-  }
-  try {
-    const text = composeSlackText(payload.message, config2.mention);
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${botToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ channel: channelId, text }),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
-    });
-    if (!response.ok) {
-      return {
-        platform: "slack-bot",
-        success: false,
-        error: `HTTP ${response.status}`
-      };
-    }
-    const data = await response.json();
-    if (!data.ok) {
-      return {
-        platform: "slack-bot",
-        success: false,
-        error: data.error || "Slack API error"
-      };
-    }
-    return { platform: "slack-bot", success: true, messageId: data.ts };
-  } catch (error2) {
-    return {
-      platform: "slack-bot",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-async function sendWebhook(config2, payload) {
-  if (!config2.enabled || !config2.url) {
-    return { platform: "webhook", success: false, error: "Not configured" };
-  }
-  if (!validateWebhookUrl(config2.url)) {
-    return {
-      platform: "webhook",
-      success: false,
-      error: "Invalid URL (HTTPS required)"
-    };
-  }
-  try {
-    const headers = {
-      "Content-Type": "application/json",
-      ...config2.headers
-    };
-    const response = await fetch(config2.url, {
-      method: config2.method || "POST",
-      headers,
-      body: JSON.stringify({
-        event: payload.event,
-        session_id: payload.sessionId,
-        message: payload.message,
-        timestamp: payload.timestamp,
-        tmux_session: payload.tmuxSession,
-        project_name: payload.projectName,
-        project_path: payload.projectPath,
-        modes_used: payload.modesUsed,
-        duration_ms: payload.durationMs,
-        reason: payload.reason,
-        active_mode: payload.activeMode,
-        question: payload.question,
-        ...payload.replyChannel && { channel: payload.replyChannel },
-        ...payload.replyTarget && { to: payload.replyTarget },
-        ...payload.replyThread && { thread_id: payload.replyThread }
-      }),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
-    });
-    if (!response.ok) {
-      return {
-        platform: "webhook",
-        success: false,
-        error: `HTTP ${response.status}`
-      };
-    }
-    return { platform: "webhook", success: true };
-  } catch (error2) {
-    return {
-      platform: "webhook",
-      success: false,
-      error: error2 instanceof Error ? error2.message : "Unknown error"
-    };
-  }
-}
-function getEffectivePlatformConfig(platform, config2, event) {
-  const topLevel = config2[platform];
-  const eventConfig = config2.events?.[event];
-  const eventPlatform = eventConfig?.[platform];
-  if (eventPlatform && typeof eventPlatform === "object" && "enabled" in eventPlatform) {
-    if (topLevel && typeof topLevel === "object") {
-      return { ...topLevel, ...eventPlatform };
-    }
-    return eventPlatform;
-  }
-  return topLevel;
-}
-async function dispatchNotifications(config2, event, payload, platformMessages) {
-  const promises = [];
-  const payloadFor = (platform) => platformMessages?.has(platform) ? { ...payload, message: platformMessages.get(platform) } : payload;
-  const discordConfig = getEffectivePlatformConfig(
-    "discord",
-    config2,
-    event
-  );
-  if (discordConfig?.enabled) {
-    promises.push(sendDiscord(discordConfig, payloadFor("discord")));
-  }
-  const telegramConfig = getEffectivePlatformConfig(
-    "telegram",
-    config2,
-    event
-  );
-  if (telegramConfig?.enabled) {
-    promises.push(sendTelegram(telegramConfig, payloadFor("telegram")));
-  }
-  const slackConfig = getEffectivePlatformConfig(
-    "slack",
-    config2,
-    event
-  );
-  if (slackConfig?.enabled) {
-    promises.push(sendSlack(slackConfig, payloadFor("slack")));
-  }
-  const webhookConfig = getEffectivePlatformConfig(
-    "webhook",
-    config2,
-    event
-  );
-  if (webhookConfig?.enabled) {
-    promises.push(sendWebhook(webhookConfig, payloadFor("webhook")));
-  }
-  const discordBotConfig = getEffectivePlatformConfig(
-    "discord-bot",
-    config2,
-    event
-  );
-  if (discordBotConfig?.enabled) {
-    promises.push(sendDiscordBot(discordBotConfig, payloadFor("discord-bot")));
-  }
-  const slackBotConfig = getEffectivePlatformConfig(
-    "slack-bot",
-    config2,
-    event
-  );
-  if (slackBotConfig?.enabled) {
-    promises.push(sendSlackBot(slackBotConfig, payloadFor("slack-bot")));
-  }
-  if (promises.length === 0) {
-    return { event, results: [], anySuccess: false };
-  }
-  let timer;
-  try {
-    const results = await Promise.race([
-      Promise.allSettled(promises).then(
-        (settled) => settled.map(
-          (s) => s.status === "fulfilled" ? s.value : {
-            platform: "unknown",
-            success: false,
-            error: String(s.reason)
-          }
-        )
-      ),
-      new Promise((resolve19) => {
-        timer = setTimeout(
-          () => resolve19([
-            {
-              platform: "unknown",
-              success: false,
-              error: "Dispatch timeout"
-            }
-          ]),
-          DISPATCH_TIMEOUT_MS
-        );
-      })
-    ]);
-    return {
-      event,
-      results,
-      anySuccess: results.some((r) => r.success)
-    };
-  } catch (error2) {
-    return {
-      event,
-      results: [
-        {
-          platform: "unknown",
-          success: false,
-          error: String(error2)
-        }
-      ],
-      anySuccess: false
-    };
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-async function sendCustomWebhook(integration, payload) {
-  const config2 = integration.config;
-  try {
-    const url = interpolateTemplate(config2.url, payload);
-    const body = interpolateTemplate(config2.bodyTemplate, payload);
-    const headers = {};
-    for (const [key, value] of Object.entries(config2.headers)) {
-      headers[key] = interpolateTemplate(value, payload);
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config2.timeout);
-    try {
-      const response = await fetch(url, {
-        method: config2.method,
-        headers,
-        body: config2.method !== "GET" ? body : void 0,
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        return {
-          platform: "webhook",
-          success: false,
-          error: `HTTP ${response.status}: ${response.statusText}`
-        };
-      }
-      return {
-        platform: "webhook",
-        success: true
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (error2) {
-    return {
-      platform: "webhook",
-      success: false,
-      error: error2 instanceof Error ? error2.message : String(error2)
-    };
-  }
-}
-async function sendCustomCli(integration, payload) {
-  const config2 = integration.config;
-  try {
-    const args = config2.args.map((arg) => interpolateTemplate(arg, payload));
-    await execFileAsync4(config2.command, args, {
-      timeout: config2.timeout,
-      killSignal: "SIGTERM"
-    });
-    return {
-      platform: "webhook",
-      // Group with webhooks in results
-      success: true
-    };
-  } catch (error2) {
-    return {
-      platform: "webhook",
-      success: false,
-      error: error2 instanceof Error ? error2.message : String(error2)
-    };
-  }
-}
-async function dispatchCustomIntegrations(event, payload) {
-  const integrations = getCustomIntegrationsForEvent(event);
-  if (integrations.length === 0) return [];
-  const results = [];
-  for (const integration of integrations) {
-    let result;
-    if (integration.type === "webhook") {
-      result = await sendCustomWebhook(integration, payload);
-    } else if (integration.type === "cli") {
-      result = await sendCustomCli(integration, payload);
-    } else {
-      result = {
-        platform: "webhook",
-        success: false,
-        error: `Unknown integration type: ${integration.type}`
-      };
-    }
-    results.push(result);
-  }
-  return results;
-}
-var import_https, import_child_process18, import_util7, SEND_TIMEOUT_MS, DISPATCH_TIMEOUT_MS, DISCORD_MAX_CONTENT_LENGTH, execFileAsync4;
-var init_dispatcher = __esm({
-  "src/notifications/dispatcher.ts"() {
-    "use strict";
-    import_https = require("https");
-    init_config();
-    import_child_process18 = require("child_process");
-    import_util7 = require("util");
-    init_template_engine();
-    init_config();
-    SEND_TIMEOUT_MS = 1e4;
-    DISPATCH_TIMEOUT_MS = 15e3;
-    DISCORD_MAX_CONTENT_LENGTH = 2e3;
-    execFileAsync4 = (0, import_util7.promisify)(import_child_process18.execFile);
-  }
-});
-
-// src/cli/tmux-utils.ts
-function tmuxEnv() {
-  const { TMUX: _, ...env2 } = process.env;
-  return env2;
-}
-function resolveEnv(opts) {
-  return opts?.stripTmux ? tmuxEnv() : process.env;
-}
-function isUnixLikeOnWindows() {
-  return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
-}
-function isNativeWindowsShell() {
-  return process.platform === "win32" && !isUnixLikeOnWindows();
-}
-function quoteForCmd(arg) {
-  if (arg.length === 0) return '""';
-  if (!/[\s"%^&|<>()]/.test(arg)) return arg;
-  return `"${arg.replace(/(["%])/g, "$1$1")}"`;
-}
-function escapeForCmdSet(value) {
-  return value.replace(/"/g, '""');
-}
-function resolveTmuxInvocation(args) {
-  const resolvedBinary = resolveTmuxBinaryPath();
-  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
-    const comspec = process.env.COMSPEC || "cmd.exe";
-    const commandLine = [quoteForCmd(resolvedBinary), ...args.map(quoteForCmd)].join(" ");
-    return {
-      command: comspec,
-      args: ["/d", "/s", "/c", commandLine]
-    };
-  }
-  return {
-    command: resolvedBinary,
-    args
-  };
-}
-function tmuxExec(args, opts) {
-  const { stripTmux: _, ...execOpts } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
-  return (0, import_child_process19.execFileSync)(invocation.command, invocation.args, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
-}
-async function tmuxExecAsync(args, opts) {
-  const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
-  return (0, import_util8.promisify)(import_child_process19.execFile)(invocation.command, invocation.args, {
-    encoding: "utf-8",
-    env: resolveEnv(opts),
-    ...timeout !== void 0 ? { timeout } : {},
-    ...rest
-  });
-}
-function tmuxShell(command, opts) {
-  const { stripTmux: _, ...execOpts } = opts ?? {};
-  return (0, import_child_process19.execSync)(`tmux ${command}`, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
-}
-async function tmuxShellAsync(command, opts) {
-  const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  return (0, import_util8.promisify)(import_child_process19.exec)(`tmux ${command}`, {
-    encoding: "utf-8",
-    env: resolveEnv(opts),
-    ...timeout !== void 0 ? { timeout } : {},
-    ...rest
-  });
-}
-function tmuxSpawn(args, opts) {
-  const { stripTmux: _, ...spawnOpts } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
-  return (0, import_child_process19.spawnSync)(invocation.command, invocation.args, { encoding: "utf-8", ...spawnOpts, env: resolveEnv(opts) });
-}
-async function tmuxCmdAsync(args, opts) {
-  if (args.some((a) => a.includes("#{"))) {
-    const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ");
-    return tmuxShellAsync(escaped, opts);
-  }
-  return tmuxExecAsync(args, opts);
-}
-function resolveTmuxBinaryPath() {
-  if (process.platform !== "win32") {
-    return "tmux";
-  }
-  try {
-    const result = (0, import_child_process19.spawnSync)("where", ["tmux"], {
-      timeout: 5e3,
-      encoding: "utf8"
-    });
-    if (result.status !== 0) return "tmux";
-    const candidates = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
-    const first = candidates[0];
-    if (first && ((0, import_path70.isAbsolute)(first) || import_path70.win32.isAbsolute(first))) {
-      return first;
-    }
-  } catch {
-  }
-  return "tmux";
-}
-function isTmuxAvailable() {
-  try {
-    const resolvedBinary = resolveTmuxBinaryPath();
-    if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
-      const comspec = process.env.COMSPEC || "cmd.exe";
-      const result = (0, import_child_process19.spawnSync)(comspec, ["/d", "/s", "/c", `"${resolvedBinary}" -V`], { timeout: 5e3 });
-      return result.status === 0;
-    }
-    if (process.platform === "win32") {
-      const result = (0, import_child_process19.spawnSync)(resolvedBinary, ["-V"], { timeout: 5e3, shell: true });
-      return result.status === 0;
-    }
-    tmuxExec(["-V"], { stripTmux: true, stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function isClaudeAvailable() {
-  try {
-    (0, import_child_process19.execFileSync)("claude", ["--version"], {
-      stdio: "ignore",
-      shell: process.platform === "win32"
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function resolveLaunchPolicy(env2 = process.env, args = [], options = {}) {
-  if (args.some((arg) => arg === "--print" || arg === "-p")) {
-    return "direct";
-  }
-  if (env2.TMUX) return "inside-tmux";
-  if (env2.CMUX_SURFACE_ID && !options.requireTmux) return "direct";
-  if (!isTmuxAvailable()) {
-    return "direct";
-  }
-  return "outside-tmux";
-}
-function buildTmuxSessionName(cwd2) {
-  const dirToken = sanitizeTmuxToken((0, import_path70.basename)(cwd2));
-  let branchToken = "detached";
-  try {
-    const branch = (0, import_child_process19.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: cwd2,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-    if (branch) {
-      branchToken = sanitizeTmuxToken(branch);
-    }
-  } catch {
-  }
-  const now = /* @__PURE__ */ new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  const utcTimestamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
-  const name = `omc-${dirToken}-${branchToken}-${utcTimestamp}`;
-  return name.length > 120 ? name.slice(0, 120) : name;
-}
-function sanitizeTmuxToken(value) {
-  const cleaned = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "unknown";
-}
-function buildTmuxShellCommand(command, args) {
-  if (isNativeWindowsShell()) {
-    return [command, ...args].map(quoteForCmd).join(" ");
-  }
-  return [quoteShellArg2(command), ...args.map(quoteShellArg2)].join(" ");
-}
-function buildTmuxShellCommandWithEnv(command, args, envVars) {
-  const envEntries = Object.entries(envVars);
-  if (envEntries.length === 0) {
-    return buildTmuxShellCommand(command, args);
-  }
-  if (isNativeWindowsShell()) {
-    const envPrefix = envEntries.map(([key, value]) => `set "${key}=${escapeForCmdSet(value)}"`).join(" && ");
-    return `${envPrefix} && ${buildTmuxShellCommand(command, args)}`;
-  }
-  return buildTmuxShellCommand(
-    "env",
-    [...envEntries.map(([key, value]) => `${key}=${value}`), command, ...args]
-  );
-}
-function wrapWithLoginShell(command) {
-  if (isNativeWindowsShell()) {
-    const comspec = process.env.COMSPEC || "cmd.exe";
-    return `${quoteForCmd(comspec)} /d /s /c ${quoteForCmd(command)}`;
-  }
-  const shell = process.env.SHELL || "/bin/sh";
-  const shellName = (0, import_path70.basename)(shell).replace(/\.(exe|cmd|bat)$/i, "");
-  const rcFile = process.env.HOME ? `${process.env.HOME}/.${shellName}rc` : "";
-  const sourcePrefix = rcFile ? `[ -f ${quoteShellArg2(rcFile)} ] && . ${quoteShellArg2(rcFile)}; ` : "";
-  return `exec ${quoteShellArg2(shell)} -lc ${quoteShellArg2(`${sourcePrefix}${command}`)}`;
-}
-function quoteShellArg2(value) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-var import_child_process19, import_path70, import_util8;
-var init_tmux_utils = __esm({
-  "src/cli/tmux-utils.ts"() {
-    "use strict";
-    import_child_process19 = require("child_process");
-    import_path70 = require("path");
-    import_util8 = require("util");
-  }
-});
-
-// src/notifications/tmux.ts
-var tmux_exports = {};
-__export(tmux_exports, {
-  formatTmuxInfo: () => formatTmuxInfo,
-  getCurrentTmuxPaneId: () => getCurrentTmuxPaneId,
-  getCurrentTmuxSession: () => getCurrentTmuxSession,
-  getTeamTmuxSessions: () => getTeamTmuxSessions
-});
-function getCurrentTmuxSession() {
-  if (!process.env.TMUX) {
-    return null;
-  }
-  try {
-    const paneId = process.env.TMUX_PANE;
-    if (paneId) {
-      const lines = tmuxShell("list-panes -a -F '#{pane_id} #{session_name}'", {
-        timeout: 3e3,
-        stdio: ["pipe", "pipe", "pipe"]
-      }).split("\n");
-      const match = lines.find((l) => l.startsWith(paneId + " "));
-      if (match) return match.split(" ")[1] ?? null;
-    }
-    const sessionName2 = tmuxShell("display-message -p '#S'", {
-      timeout: 3e3,
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    return sessionName2 || null;
-  } catch {
-    return null;
-  }
-}
-function getTeamTmuxSessions(teamName) {
-  const sanitized = teamName.replace(/[^a-zA-Z0-9-]/g, "");
-  if (!sanitized) return [];
-  const prefix = `omc-team-${sanitized}-`;
-  try {
-    const output = tmuxShell("list-sessions -F '#{session_name}'", {
-      timeout: 3e3,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    return output.trim().split("\n").filter((s) => s.startsWith(prefix)).map((s) => s.slice(prefix.length));
-  } catch {
-    return [];
-  }
-}
-function formatTmuxInfo() {
-  const session = getCurrentTmuxSession();
-  if (!session) return null;
-  return `tmux: ${session}`;
-}
-function getCurrentTmuxPaneId() {
-  if (!process.env.TMUX) return null;
-  const envPane = process.env.TMUX_PANE;
-  if (envPane && /^%\d+$/.test(envPane)) return envPane;
-  try {
-    const paneId = tmuxShell("display-message -p '#{pane_id}'", {
-      timeout: 3e3,
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
-    return paneId && /^%\d+$/.test(paneId) ? paneId : null;
-  } catch {
-    return null;
-  }
-}
-var init_tmux = __esm({
-  "src/notifications/tmux.ts"() {
-    "use strict";
-    init_tmux_utils();
+    LEGACY_OPENCLAW_CONFIG = (0, import_path71.join)(getClaudeConfigDir(), "omc_config.openclaw.json");
   }
 });
 
@@ -23566,9 +23592,9 @@ function verifySlackSignature(signingSecret, signature, timestamp, body) {
     return false;
   }
   const sigBasestring = `v0:${timestamp}:${body}`;
-  const expectedSignature = "v0=" + (0, import_crypto10.createHmac)("sha256", signingSecret).update(sigBasestring).digest("hex");
+  const expectedSignature = "v0=" + (0, import_crypto11.createHmac)("sha256", signingSecret).update(sigBasestring).digest("hex");
   try {
-    return (0, import_crypto10.timingSafeEqual)(
+    return (0, import_crypto11.timingSafeEqual)(
       Buffer.from(expectedSignature),
       Buffer.from(signature)
     );
@@ -23674,11 +23700,11 @@ async function replySlackThread(botToken, channel, threadTs, text) {
     signal: AbortSignal.timeout(REACTION_TIMEOUT_MS)
   });
 }
-var import_crypto10, MAX_TIMESTAMP_AGE_SECONDS, VALID_ENVELOPE_TYPES, SlackConnectionStateTracker, API_TIMEOUT_MS, REACTION_TIMEOUT_MS, SlackSocketClient;
+var import_crypto11, MAX_TIMESTAMP_AGE_SECONDS, VALID_ENVELOPE_TYPES, SlackConnectionStateTracker, API_TIMEOUT_MS, REACTION_TIMEOUT_MS, SlackSocketClient;
 var init_slack_socket = __esm({
   "src/notifications/slack-socket.ts"() {
     "use strict";
-    import_crypto10 = require("crypto");
+    import_crypto11 = require("crypto");
     init_redact();
     MAX_TIMESTAMP_AGE_SECONDS = 300;
     VALID_ENVELOPE_TYPES = /* @__PURE__ */ new Set([
@@ -24006,1428 +24032,6 @@ var init_slack_socket = __esm({
   }
 });
 
-// src/notifications/presets.ts
-function getPresetList() {
-  return Object.entries(CUSTOM_INTEGRATION_PRESETS).map(([id, preset]) => ({
-    id,
-    name: preset.name,
-    description: preset.description,
-    type: preset.type
-  }));
-}
-function getPreset(id) {
-  return CUSTOM_INTEGRATION_PRESETS[id];
-}
-function isValidPreset(id) {
-  return id in CUSTOM_INTEGRATION_PRESETS;
-}
-var CUSTOM_INTEGRATION_PRESETS;
-var init_presets = __esm({
-  "src/notifications/presets.ts"() {
-    "use strict";
-    CUSTOM_INTEGRATION_PRESETS = {
-      openclaw: {
-        name: "OpenClaw Gateway",
-        description: "Wake external automations and AI agents on hook events",
-        type: "webhook",
-        defaultConfig: {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          bodyTemplate: JSON.stringify({
-            event: "{{event}}",
-            instruction: "Session {{sessionId}} {{event}} for project {{projectName}}",
-            timestamp: "{{timestamp}}",
-            context: {
-              projectPath: "{{projectPath}}",
-              projectName: "{{projectName}}",
-              sessionId: "{{sessionId}}"
-            }
-          }, null, 2),
-          timeout: 1e4
-        },
-        suggestedEvents: ["session-start", "session-end", "stop"],
-        documentationUrl: "https://github.com/your-org/openclaw"
-      },
-      n8n: {
-        name: "n8n Webhook",
-        description: "Trigger n8n workflows on OMC events",
-        type: "webhook",
-        defaultConfig: {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          bodyTemplate: JSON.stringify({
-            event: "{{event}}",
-            sessionId: "{{sessionId}}",
-            projectName: "{{projectName}}",
-            projectPath: "{{projectPath}}",
-            timestamp: "{{timestamp}}",
-            tmuxSession: "{{tmuxSession}}"
-          }, null, 2),
-          timeout: 1e4
-        },
-        suggestedEvents: ["session-end", "ask-user-question"],
-        documentationUrl: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/"
-      },
-      clawdbot: {
-        name: "ClawdBot",
-        description: "Send notifications to ClawdBot webhook",
-        type: "webhook",
-        defaultConfig: {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          bodyTemplate: JSON.stringify({
-            type: "{{event}}",
-            session: "{{sessionId}}",
-            project: "{{projectName}}",
-            timestamp: "{{timestamp}}"
-          }, null, 2),
-          timeout: 5e3
-        },
-        suggestedEvents: ["session-end", "session-start"],
-        documentationUrl: "https://github.com/your-org/clawdbot"
-      },
-      "generic-webhook": {
-        name: "Generic Webhook",
-        description: "Custom webhook integration",
-        type: "webhook",
-        defaultConfig: {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          bodyTemplate: JSON.stringify({
-            event: "{{event}}",
-            sessionId: "{{sessionId}}",
-            projectName: "{{projectName}}",
-            timestamp: "{{timestamp}}"
-          }, null, 2),
-          timeout: 1e4
-        },
-        suggestedEvents: ["session-end"]
-      },
-      "generic-cli": {
-        name: "Generic CLI Command",
-        description: "Execute custom command on events",
-        type: "cli",
-        defaultConfig: {
-          command: "curl",
-          args: ["-X", "POST", "-d", "event={{event}}&session={{sessionId}}", "https://example.com/webhook"],
-          timeout: 5e3
-        },
-        suggestedEvents: ["session-end"]
-      }
-    };
-  }
-});
-
-// src/notifications/template-variables.ts
-function getVariablesForEvent(event) {
-  return Object.entries(TEMPLATE_VARIABLES).filter(
-    ([_, variable]) => variable.availableIn.includes("*") || variable.availableIn.includes(event)
-  ).map(([name, _]) => name);
-}
-function getVariableDocumentation() {
-  const lines = ["Available Template Variables:", ""];
-  for (const [name, variable] of Object.entries(TEMPLATE_VARIABLES)) {
-    const events = variable.availableIn.includes("*") ? "all events" : variable.availableIn.join(", ");
-    lines.push(`  {{${name}}}`);
-    lines.push(`    ${variable.description}`);
-    lines.push(`    Example: ${variable.example}`);
-    lines.push(`    Available in: ${events}`);
-    lines.push("");
-  }
-  return lines.join("\n");
-}
-var TEMPLATE_VARIABLES;
-var init_template_variables = __esm({
-  "src/notifications/template-variables.ts"() {
-    "use strict";
-    TEMPLATE_VARIABLES = {
-      // Core session info
-      sessionId: {
-        description: "Unique session identifier",
-        example: "sess_abc123def456",
-        availableIn: ["session-start", "session-end", "session-stop", "session-idle", "ask-user-question"]
-      },
-      projectPath: {
-        description: "Full path to project directory",
-        example: "/home/user/projects/my-app",
-        availableIn: ["*"]
-      },
-      projectName: {
-        description: "Project directory name (basename)",
-        example: "my-app",
-        availableIn: ["*"]
-      },
-      timestamp: {
-        description: "ISO 8601 timestamp",
-        example: "2026-03-05T14:30:00Z",
-        availableIn: ["*"]
-      },
-      event: {
-        description: "Hook event name",
-        example: "session-end",
-        availableIn: ["*"]
-      },
-      // Session metrics (session-end only)
-      durationMs: {
-        description: "Session duration in milliseconds",
-        example: "45000",
-        availableIn: ["session-end"]
-      },
-      duration: {
-        description: "Human-readable duration",
-        example: "45s",
-        availableIn: ["session-end"]
-      },
-      agentsSpawned: {
-        description: "Number of agents spawned",
-        example: "5",
-        availableIn: ["session-end"]
-      },
-      agentsCompleted: {
-        description: "Number of agents completed",
-        example: "4",
-        availableIn: ["session-end"]
-      },
-      reason: {
-        description: "Session end reason",
-        example: "completed",
-        availableIn: ["session-end", "session-stop"]
-      },
-      // Context info
-      contextSummary: {
-        description: "Summary of session context",
-        example: "Task completed successfully",
-        availableIn: ["session-end"]
-      },
-      tmuxSession: {
-        description: "tmux session name",
-        example: "claude:my-project",
-        availableIn: ["*"]
-      },
-      tmuxPaneId: {
-        description: "tmux pane identifier",
-        example: "%42",
-        availableIn: ["*"]
-      },
-      // Ask user question
-      question: {
-        description: "Question text when input is needed",
-        example: "Which file should I edit?",
-        availableIn: ["ask-user-question"]
-      },
-      // Mode info
-      activeMode: {
-        description: "Currently active OMC mode",
-        example: "ralph",
-        availableIn: ["*"]
-      },
-      modesUsed: {
-        description: "Comma-separated list of modes used",
-        example: "autopilot,ultrawork",
-        availableIn: ["session-end"]
-      },
-      // Computed/display helpers
-      time: {
-        description: "Locale time string",
-        example: "2:30 PM",
-        availableIn: ["*"]
-      },
-      footer: {
-        description: "tmux + project info line",
-        example: "tmux:my-session | project:my-app",
-        availableIn: ["*"]
-      },
-      projectDisplay: {
-        description: "Project name with fallbacks",
-        example: "my-app (~/projects)",
-        availableIn: ["*"]
-      }
-    };
-  }
-});
-
-// src/features/rate-limit-wait/pane-fresh-capture.ts
-var pane_fresh_capture_exports = {};
-__export(pane_fresh_capture_exports, {
-  getNewPaneTail: () => getNewPaneTail,
-  getPaneHistorySize: () => getPaneHistorySize
-});
-function isValidPaneId(paneId) {
-  return /^%\d+$/.test(paneId);
-}
-function readPaneTailState(stateDir) {
-  const path22 = (0, import_path71.join)(stateDir, STATE_FILE2);
-  try {
-    if ((0, import_fs59.existsSync)(path22)) {
-      const parsed = JSON.parse((0, import_fs59.readFileSync)(path22, "utf-8"));
-      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-  } catch {
-  }
-  return {};
-}
-function writePaneTailState(stateDir, state) {
-  try {
-    (0, import_fs59.mkdirSync)(stateDir, { recursive: true });
-    (0, import_fs59.writeFileSync)((0, import_path71.join)(stateDir, STATE_FILE2), JSON.stringify(state), { mode: 384 });
-  } catch {
-  }
-}
-function getPaneHistorySize(paneId) {
-  try {
-    const raw = tmuxExec(
-      ["display-message", "-t", paneId, "-p", "#{pane_dead} #{history_size}"],
-      { stripTmux: true, timeout: 3e3 }
-    ).trim();
-    const parts = raw.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2) {
-      const [paneDeadRaw, historySizeRaw] = parts;
-      if (paneDeadRaw === "1") {
-        return null;
-      }
-      const n2 = parseInt(historySizeRaw ?? "", 10);
-      return Number.isFinite(n2) && n2 >= 0 ? n2 : null;
-    }
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : null;
-  } catch {
-    return null;
-  }
-}
-function capturePaneLines(paneId, lines) {
-  try {
-    const safeLines = Math.max(1, Math.min(500, Math.floor(lines)));
-    return tmuxExec(
-      ["capture-pane", "-t", paneId, "-p", "-S", `-${safeLines}`],
-      { stripTmux: true, timeout: 5e3 }
-    );
-  } catch {
-    return "";
-  }
-}
-function getNewPaneTail(paneId, stateDir, maxLines = DEFAULT_MAX_LINES) {
-  if (!isValidPaneId(paneId)) {
-    return "";
-  }
-  const currentSize = getPaneHistorySize(paneId);
-  if (currentSize === null) {
-    return "";
-  }
-  const state = readPaneTailState(stateDir);
-  const lastSize = state[paneId] ?? -1;
-  state[paneId] = currentSize;
-  writePaneTailState(stateDir, state);
-  if (lastSize < 0) {
-    return capturePaneLines(paneId, maxLines);
-  }
-  const newLines = currentSize - lastSize;
-  if (newLines <= 0) {
-    return "";
-  }
-  return capturePaneLines(paneId, Math.min(newLines, maxLines));
-}
-var import_fs59, import_path71, STATE_FILE2, DEFAULT_MAX_LINES;
-var init_pane_fresh_capture = __esm({
-  "src/features/rate-limit-wait/pane-fresh-capture.ts"() {
-    "use strict";
-    import_fs59 = require("fs");
-    import_path71 = require("path");
-    init_tmux_utils();
-    STATE_FILE2 = "pane-tail-positions.json";
-    DEFAULT_MAX_LINES = 15;
-  }
-});
-
-// src/features/rate-limit-wait/tmux-detector.ts
-var tmux_detector_exports = {};
-__export(tmux_detector_exports, {
-  analyzePaneContent: () => analyzePaneContent,
-  capturePaneContent: () => capturePaneContent,
-  formatBlockedPanesSummary: () => formatBlockedPanesSummary,
-  isInsideTmux: () => isInsideTmux,
-  isPaneAlive: () => isPaneAlive,
-  isTmuxAvailable: () => isTmuxAvailable2,
-  listTmuxPanes: () => listTmuxPanes,
-  scanForBlockedPanes: () => scanForBlockedPanes,
-  sendResumeSequence: () => sendResumeSequence,
-  sendToPane: () => sendToPane
-});
-function isValidPaneId2(paneId) {
-  return /^%\d+$/.test(paneId);
-}
-function sanitizeForTmux(text) {
-  return text.replace(/'/g, "'\\''");
-}
-function stripGitOutputLines(content) {
-  return content.split("\n").filter((line) => !GIT_OUTPUT_LINE_PATTERNS.some((p) => p.test(line.trimStart()))).join("\n");
-}
-function isTmuxAvailable2() {
-  try {
-    const result = tmuxSpawn(["-V"], { stripTmux: true, stdio: "pipe", timeout: 3e3 });
-    return result.status === 0;
-  } catch {
-    return false;
-  }
-}
-function isInsideTmux() {
-  return !!process.env.TMUX;
-}
-function listTmuxPanes() {
-  if (!isTmuxAvailable2()) {
-    return [];
-  }
-  try {
-    const format = "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}";
-    const result = tmuxExec(["list-panes", "-a", "-F", format], {
-      stripTmux: true,
-      timeout: 5e3
-    });
-    const panes = [];
-    for (const line of result.trim().split("\n")) {
-      if (!line.trim()) continue;
-      const parts = line.split(" ");
-      if (parts.length < 4) continue;
-      const [location, paneId, activeStr, windowName, ...titleParts] = parts;
-      const [sessionWindow, paneIndexStr] = location.split(".");
-      const [session, windowIndexStr] = sessionWindow.split(":");
-      panes.push({
-        id: paneId,
-        session,
-        windowIndex: parseInt(windowIndexStr, 10),
-        windowName,
-        paneIndex: parseInt(paneIndexStr, 10),
-        title: titleParts.join(" ") || void 0,
-        isActive: activeStr === "1"
-      });
-    }
-    return panes;
-  } catch (error2) {
-    console.error("[TmuxDetector] Error listing panes:", error2);
-    return [];
-  }
-}
-function isPaneAlive(paneId) {
-  if (!isTmuxAvailable2()) {
-    return false;
-  }
-  if (!isValidPaneId2(paneId)) {
-    return false;
-  }
-  try {
-    const result = tmuxExec(
-      ["display-message", "-t", paneId, "-p", "#{pane_dead}"],
-      { stripTmux: true, stdio: "pipe", timeout: 3e3 }
-    );
-    return result.trim() === "0";
-  } catch {
-    return false;
-  }
-}
-function capturePaneContent(paneId, lines = 15) {
-  if (!isTmuxAvailable2()) {
-    return "";
-  }
-  if (!isValidPaneId2(paneId)) {
-    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
-    return "";
-  }
-  const safeLines = Math.max(1, Math.min(100, Math.floor(lines)));
-  try {
-    const result = tmuxExec(["capture-pane", "-t", paneId, "-p", "-S", `-${safeLines}`], {
-      stripTmux: true,
-      timeout: 5e3
-    });
-    return result;
-  } catch (error2) {
-    console.error(`[TmuxDetector] Error capturing pane ${paneId}:`, error2);
-    return "";
-  }
-}
-function analyzePaneContent(content) {
-  if (!content.trim()) {
-    return {
-      hasClaudeCode: false,
-      hasRateLimitMessage: false,
-      isBlocked: false,
-      confidence: 0
-    };
-  }
-  const cleanedContent = stripGitOutputLines(content);
-  const hasClaudeCode = CLAUDE_CODE_PATTERNS.some(
-    (pattern) => pattern.test(cleanedContent)
-  );
-  const rateLimitMatches = RATE_LIMIT_PATTERNS.filter(
-    (pattern) => pattern.test(cleanedContent)
-  );
-  const hasRateLimitMessage = rateLimitMatches.length > 0;
-  const isWaiting = WAITING_PATTERNS.some((pattern) => pattern.test(cleanedContent));
-  let rateLimitType;
-  if (hasRateLimitMessage) {
-    if (/5[- ]?hour/i.test(cleanedContent)) {
-      rateLimitType = "five_hour";
-    } else if (WEEKLY_RATE_LIMIT_PATTERN.test(cleanedContent)) {
-      rateLimitType = "weekly";
-    } else {
-      rateLimitType = "unknown";
-    }
-  }
-  let confidence = 0;
-  if (hasClaudeCode) confidence += 0.4;
-  if (hasRateLimitMessage) confidence += 0.4;
-  if (isWaiting) confidence += 0.2;
-  if (rateLimitMatches.length > 1) confidence += 0.1;
-  const isBlocked = hasClaudeCode && hasRateLimitMessage && confidence >= 0.6;
-  return {
-    hasClaudeCode,
-    hasRateLimitMessage,
-    isBlocked,
-    rateLimitType,
-    confidence: Math.min(1, confidence)
-  };
-}
-function scanForBlockedPanes(lines = 15, stateDir) {
-  const panes = listTmuxPanes();
-  const blocked = [];
-  for (const pane of panes) {
-    let content;
-    if (stateDir) {
-      content = getNewPaneTail(pane.id, stateDir, lines);
-      if (!content) continue;
-    } else {
-      content = capturePaneContent(pane.id, lines);
-    }
-    const analysis = analyzePaneContent(content);
-    if (analysis.isBlocked) {
-      blocked.push({
-        ...pane,
-        analysis,
-        firstDetectedAt: /* @__PURE__ */ new Date(),
-        resumeAttempted: false
-      });
-    }
-  }
-  return blocked;
-}
-function sendResumeSequence(paneId) {
-  if (!isTmuxAvailable2()) {
-    return false;
-  }
-  if (!isValidPaneId2(paneId)) {
-    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
-    return false;
-  }
-  try {
-    tmuxExec(["send-keys", "-t", paneId, "1", "Enter"], {
-      stripTmux: true,
-      timeout: 2e3
-    });
-    return true;
-  } catch (error2) {
-    console.error(`[TmuxDetector] Error sending resume to pane ${paneId}:`, error2);
-    return false;
-  }
-}
-function sendToPane(paneId, text, pressEnter = true) {
-  if (!isTmuxAvailable2()) {
-    return false;
-  }
-  if (!isValidPaneId2(paneId)) {
-    console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
-    return false;
-  }
-  try {
-    const sanitizedText = sanitizeForTmux(text);
-    tmuxExec(["send-keys", "-t", paneId, "-l", sanitizedText], {
-      stripTmux: true,
-      timeout: 2e3
-    });
-    if (pressEnter) {
-      tmuxExec(["send-keys", "-t", paneId, "Enter"], {
-        stripTmux: true,
-        timeout: 2e3
-      });
-    }
-    return true;
-  } catch (error2) {
-    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error2);
-    return false;
-  }
-}
-function formatBlockedPanesSummary(blockedPanes) {
-  if (blockedPanes.length === 0) {
-    return "No blocked Claude Code sessions detected.";
-  }
-  const lines = [
-    `Found ${blockedPanes.length} blocked Claude Code session(s):`,
-    ""
-  ];
-  for (const pane of blockedPanes) {
-    const location = `${pane.session}:${pane.windowIndex}.${pane.paneIndex}`;
-    const confidence = Math.round(pane.analysis.confidence * 100);
-    const limitType = pane.analysis.rateLimitType || "unknown";
-    const status = pane.resumeAttempted ? pane.resumeSuccessful ? " [RESUMED]" : " [RESUME FAILED]" : "";
-    lines.push(`  \u2022 ${location} (${pane.id}) - ${limitType} limit, ${confidence}% confidence${status}`);
-  }
-  return lines.join("\n");
-}
-var RATE_LIMIT_PATTERNS, CLAUDE_CODE_PATTERNS, WEEKLY_RATE_LIMIT_PATTERN, GIT_OUTPUT_LINE_PATTERNS, WAITING_PATTERNS;
-var init_tmux_detector = __esm({
-  "src/features/rate-limit-wait/tmux-detector.ts"() {
-    "use strict";
-    init_tmux_utils();
-    init_pane_fresh_capture();
-    RATE_LIMIT_PATTERNS = [
-      /rate limit/i,
-      /usage limit/i,
-      /quota exceeded/i,
-      /too many requests/i,
-      /please wait/i,
-      /try again later/i,
-      /limit reached/i,
-      /hit your limit/i,
-      /hit .+ limit/i,
-      /resets? .+ at/i,
-      /5[- ]?hour/i,
-      // Require adjacent rate-limit vocabulary to avoid false-positives from git commit
-      // messages or documentation that contain the bare word "weekly" (e.g. "fix weekly
-      // report generation", "update weekly standup notes").
-      /\bweekly\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i
-    ];
-    CLAUDE_CODE_PATTERNS = [
-      /claude/i,
-      /anthropic/i,
-      /\$ claude/,
-      /claude code/i,
-      /conversation/i,
-      /assistant/i
-    ];
-    WEEKLY_RATE_LIMIT_PATTERN = /\bweekly\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i;
-    GIT_OUTPUT_LINE_PATTERNS = [
-      /^commit\s+[0-9a-f]{6,40}\b/,
-      // git log commit hash
-      /^Author:\s+\S/,
-      // git log author
-      /^Date:\s+\S/,
-      // git log date
-      /^Merge:\s+[0-9a-f]{6,}/,
-      // git log merge line
-      /^diff\s+--git\s+a\//,
-      // git diff header
-      /^(?:---|\+\+\+)\s+[ab]\//,
-      // git diff file paths
-      /^@@\s+-\d+/
-      // git diff hunk header
-    ];
-    WAITING_PATTERNS = [
-      /\[\d+\]/,
-      // Menu selection prompt like [1], [2], [3]
-      /^\s*❯?\s*\d+\.\s/m,
-      // Menu selection prompt like "❯ 1. ..." or "  2. ..."
-      /continue\?/i,
-      // Continue prompt
-      /press enter/i,
-      /waiting for/i,
-      /select an option/i,
-      /choice:/i,
-      /enter to confirm/i
-    ];
-  }
-});
-
-// src/notifications/session-registry.ts
-var session_registry_exports = {};
-__export(session_registry_exports, {
-  loadAllMappings: () => loadAllMappings,
-  lookupByMessageId: () => lookupByMessageId,
-  pruneStale: () => pruneStale,
-  registerMessage: () => registerMessage,
-  removeMessagesByPane: () => removeMessagesByPane,
-  removeSession: () => removeSession
-});
-function getRegistryStateDir() {
-  return process.env["OMC_TEST_REGISTRY_DIR"] ?? getGlobalOmcStateRoot();
-}
-function getRegistryPath() {
-  return (0, import_path72.join)(getRegistryStateDir(), "reply-session-registry.jsonl");
-}
-function getRegistryReadPaths() {
-  if (process.env["OMC_TEST_REGISTRY_DIR"]) {
-    return [getRegistryPath()];
-  }
-  return getGlobalOmcStateCandidates("reply-session-registry.jsonl");
-}
-function getLockPath() {
-  return (0, import_path72.join)(getRegistryStateDir(), "reply-session-registry.lock");
-}
-function ensureRegistryDir() {
-  const registryDir = (0, import_path72.dirname)(getRegistryPath());
-  if (!(0, import_fs60.existsSync)(registryDir)) {
-    (0, import_fs60.mkdirSync)(registryDir, { recursive: true, mode: 448 });
-  }
-}
-function sleepMs(ms) {
-  try {
-    Atomics.wait(SLEEP_ARRAY, 0, 0, ms);
-  } catch {
-    const waitUntil = Date.now() + ms;
-    while (Date.now() < waitUntil) {
-    }
-  }
-}
-function readLockSnapshot() {
-  try {
-    const raw = (0, import_fs60.readFileSync)(getLockPath(), "utf-8");
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return { raw, pid: null, token: null };
-    }
-    try {
-      const parsed = JSON.parse(trimmed);
-      const pid = typeof parsed.pid === "number" && Number.isFinite(parsed.pid) ? parsed.pid : null;
-      const token = typeof parsed.token === "string" && parsed.token.length > 0 ? parsed.token : null;
-      return { raw, pid, token };
-    } catch {
-      const [pidStr] = trimmed.split(":");
-      const parsedPid = Number.parseInt(pidStr ?? "", 10);
-      return {
-        raw,
-        pid: Number.isFinite(parsedPid) && parsedPid > 0 ? parsedPid : null,
-        token: null
-      };
-    }
-  } catch {
-    return null;
-  }
-}
-function removeLockIfUnchanged(snapshot) {
-  try {
-    const currentRaw = (0, import_fs60.readFileSync)(getLockPath(), "utf-8");
-    if (currentRaw !== snapshot.raw) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  try {
-    (0, import_fs60.unlinkSync)(getLockPath());
-    return true;
-  } catch {
-    return false;
-  }
-}
-function acquireRegistryLock() {
-  ensureRegistryDir();
-  const started = Date.now();
-  while (Date.now() - started < LOCK_TIMEOUT_MS) {
-    try {
-      const token = (0, import_crypto11.randomUUID)();
-      const fd = (0, import_fs60.openSync)(
-        getLockPath(),
-        import_fs60.constants.O_CREAT | import_fs60.constants.O_EXCL | import_fs60.constants.O_WRONLY,
-        SECURE_FILE_MODE
-      );
-      const lockPayload = JSON.stringify({
-        pid: process.pid,
-        acquiredAt: Date.now(),
-        token
-      });
-      (0, import_fs60.writeSync)(fd, lockPayload, null, "utf-8");
-      return { fd, token };
-    } catch (error2) {
-      const err = error2;
-      if (err.code !== "EEXIST") {
-        throw error2;
-      }
-      try {
-        const lockAgeMs = Date.now() - (0, import_fs60.statSync)(getLockPath()).mtimeMs;
-        if (lockAgeMs > LOCK_STALE_MS2) {
-          const snapshot = readLockSnapshot();
-          if (!snapshot) {
-            sleepMs(LOCK_RETRY_MS2);
-            continue;
-          }
-          if (snapshot.pid !== null && isProcessAlive(snapshot.pid)) {
-            sleepMs(LOCK_RETRY_MS2);
-            continue;
-          }
-          if (removeLockIfUnchanged(snapshot)) {
-            continue;
-          }
-        }
-      } catch {
-      }
-      sleepMs(LOCK_RETRY_MS2);
-    }
-  }
-  return null;
-}
-function acquireRegistryLockOrWait(maxWaitMs = LOCK_MAX_WAIT_MS) {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const lock = acquireRegistryLock();
-    if (lock !== null) {
-      return lock;
-    }
-    sleepMs(LOCK_RETRY_MS2);
-  }
-  return null;
-}
-function releaseRegistryLock(lock) {
-  try {
-    (0, import_fs60.closeSync)(lock.fd);
-  } catch {
-  }
-  const snapshot = readLockSnapshot();
-  if (!snapshot || snapshot.token !== lock.token) {
-    return;
-  }
-  removeLockIfUnchanged(snapshot);
-}
-function withRegistryLockOrWait(onLocked) {
-  const lock = acquireRegistryLockOrWait();
-  if (lock === null) {
-    return onLocked();
-  }
-  try {
-    return onLocked();
-  } finally {
-    releaseRegistryLock(lock);
-  }
-}
-function withRegistryLock(onLocked, onLockUnavailable) {
-  const lock = acquireRegistryLock();
-  if (lock === null) {
-    return onLockUnavailable();
-  }
-  try {
-    return onLocked();
-  } finally {
-    releaseRegistryLock(lock);
-  }
-}
-function registerMessage(mapping) {
-  withRegistryLockOrWait(
-    () => {
-      ensureRegistryDir();
-      const line = JSON.stringify(mapping) + "\n";
-      const fd = (0, import_fs60.openSync)(
-        getRegistryPath(),
-        import_fs60.constants.O_WRONLY | import_fs60.constants.O_APPEND | import_fs60.constants.O_CREAT,
-        SECURE_FILE_MODE
-      );
-      try {
-        const buf = Buffer.from(line, "utf-8");
-        (0, import_fs60.writeSync)(fd, buf);
-      } finally {
-        (0, import_fs60.closeSync)(fd);
-      }
-    }
-  );
-}
-function loadAllMappings() {
-  return withRegistryLockOrWait(() => readAllMappingsUnsafe());
-}
-function readAllMappingsUnsafe() {
-  for (const registryPath of getRegistryReadPaths()) {
-    if (!(0, import_fs60.existsSync)(registryPath)) {
-      continue;
-    }
-    try {
-      const content = (0, import_fs60.readFileSync)(registryPath, "utf-8");
-      return content.split("\n").filter((line) => line.trim()).map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      }).filter((m) => m !== null);
-    } catch {
-      continue;
-    }
-  }
-  return [];
-}
-function lookupByMessageId(platform, messageId) {
-  const mappings = loadAllMappings();
-  return mappings.findLast((m) => m.platform === platform && m.messageId === messageId) ?? null;
-}
-function removeSession(sessionId) {
-  withRegistryLock(
-    () => {
-      const mappings = readAllMappingsUnsafe();
-      const filtered = mappings.filter((m) => m.sessionId !== sessionId);
-      if (filtered.length === mappings.length) {
-        return;
-      }
-      rewriteRegistryUnsafe(filtered);
-    },
-    () => {
-    }
-  );
-}
-function removeMessagesByPane(paneId) {
-  withRegistryLock(
-    () => {
-      const mappings = readAllMappingsUnsafe();
-      const filtered = mappings.filter((m) => m.tmuxPaneId !== paneId);
-      if (filtered.length === mappings.length) {
-        return;
-      }
-      rewriteRegistryUnsafe(filtered);
-    },
-    () => {
-    }
-  );
-}
-function pruneStale() {
-  withRegistryLock(
-    () => {
-      const now = Date.now();
-      const mappings = readAllMappingsUnsafe();
-      const filtered = mappings.filter((m) => {
-        try {
-          const age = now - new Date(m.createdAt).getTime();
-          return age < MAX_AGE_MS;
-        } catch {
-          return false;
-        }
-      });
-      if (filtered.length === mappings.length) {
-        return;
-      }
-      rewriteRegistryUnsafe(filtered);
-    },
-    () => {
-    }
-  );
-}
-function rewriteRegistryUnsafe(mappings) {
-  ensureRegistryDir();
-  if (mappings.length === 0) {
-    (0, import_fs60.writeFileSync)(getRegistryPath(), "", { mode: SECURE_FILE_MODE });
-    return;
-  }
-  const content = mappings.map((m) => JSON.stringify(m)).join("\n") + "\n";
-  (0, import_fs60.writeFileSync)(getRegistryPath(), content, { mode: SECURE_FILE_MODE });
-}
-var import_fs60, import_path72, import_crypto11, SECURE_FILE_MODE, MAX_AGE_MS, LOCK_TIMEOUT_MS, LOCK_RETRY_MS2, LOCK_STALE_MS2, LOCK_MAX_WAIT_MS, SLEEP_ARRAY;
-var init_session_registry = __esm({
-  "src/notifications/session-registry.ts"() {
-    "use strict";
-    import_fs60 = require("fs");
-    import_path72 = require("path");
-    import_crypto11 = require("crypto");
-    init_platform();
-    init_paths();
-    SECURE_FILE_MODE = 384;
-    MAX_AGE_MS = 24 * 60 * 60 * 1e3;
-    LOCK_TIMEOUT_MS = 2e3;
-    LOCK_RETRY_MS2 = 20;
-    LOCK_STALE_MS2 = 1e4;
-    LOCK_MAX_WAIT_MS = 1e4;
-    SLEEP_ARRAY = new Int32Array(new SharedArrayBuffer(4));
-  }
-});
-
-// src/notifications/index.ts
-var notifications_exports = {};
-__export(notifications_exports, {
-  CUSTOM_INTEGRATION_PRESETS: () => CUSTOM_INTEGRATION_PRESETS,
-  SlackConnectionStateTracker: () => SlackConnectionStateTracker,
-  TEMPLATE_VARIABLES: () => TEMPLATE_VARIABLES,
-  checkDuplicateIds: () => checkDuplicateIds,
-  computeTemplateVariables: () => computeTemplateVariables,
-  detectLegacyOpenClawConfig: () => detectLegacyOpenClawConfig,
-  dispatchCustomIntegrations: () => dispatchCustomIntegrations,
-  dispatchNotifications: () => dispatchNotifications,
-  formatAgentCall: () => formatAgentCall,
-  formatAskUserQuestion: () => formatAskUserQuestion,
-  formatNotification: () => formatNotification,
-  formatSessionEnd: () => formatSessionEnd,
-  formatSessionIdle: () => formatSessionIdle,
-  formatSessionStart: () => formatSessionStart,
-  formatSessionStop: () => formatSessionStop,
-  formatTmuxInfo: () => formatTmuxInfo,
-  getCurrentTmuxPaneId: () => getCurrentTmuxPaneId,
-  getCurrentTmuxSession: () => getCurrentTmuxSession,
-  getCustomIntegrationsConfig: () => getCustomIntegrationsConfig,
-  getCustomIntegrationsForEvent: () => getCustomIntegrationsForEvent,
-  getDefaultTemplate: () => getDefaultTemplate,
-  getEnabledPlatforms: () => getEnabledPlatforms,
-  getHookConfig: () => getHookConfig,
-  getNotificationConfig: () => getNotificationConfig,
-  getPreset: () => getPreset,
-  getPresetList: () => getPresetList,
-  getTeamTmuxSessions: () => getTeamTmuxSessions,
-  getTmuxTailLines: () => getTmuxTailLines,
-  getVariableDocumentation: () => getVariableDocumentation,
-  getVariablesForEvent: () => getVariablesForEvent,
-  getVerbosity: () => getVerbosity,
-  hasCustomIntegrationsEnabled: () => hasCustomIntegrationsEnabled,
-  interpolateTemplate: () => interpolateTemplate,
-  isEventAllowedByVerbosity: () => isEventAllowedByVerbosity,
-  isEventEnabled: () => isEventEnabled,
-  isTimestampValid: () => isTimestampValid,
-  isValidPreset: () => isValidPreset,
-  mergeHookConfigIntoNotificationConfig: () => mergeHookConfigIntoNotificationConfig,
-  migrateLegacyOpenClawConfig: () => migrateLegacyOpenClawConfig,
-  notify: () => notify,
-  parseTmuxTail: () => parseTmuxTail,
-  redactTokens: () => redactTokens,
-  resetHookConfigCache: () => resetHookConfigCache,
-  resolveEventTemplate: () => resolveEventTemplate,
-  sanitizeArgument: () => sanitizeArgument,
-  sendCustomCli: () => sendCustomCli,
-  sendCustomWebhook: () => sendCustomWebhook,
-  sendDiscord: () => sendDiscord,
-  sendDiscordBot: () => sendDiscordBot,
-  sendSlack: () => sendSlack,
-  sendSlackBot: () => sendSlackBot,
-  sendTelegram: () => sendTelegram,
-  sendWebhook: () => sendWebhook,
-  shouldIncludeTmuxTail: () => shouldIncludeTmuxTail,
-  validateCustomIntegration: () => validateCustomIntegration,
-  validateSlackEnvelope: () => validateSlackEnvelope,
-  validateSlackMessage: () => validateSlackMessage,
-  validateTemplate: () => validateTemplate,
-  verifySlackSignature: () => verifySlackSignature
-});
-async function notify(event, data) {
-  if (process.env.OMC_NOTIFY === "0") {
-    return null;
-  }
-  try {
-    const config2 = getNotificationConfig(data.profileName);
-    if (!config2 || !isEventEnabled(config2, event)) {
-      return null;
-    }
-    const verbosity = getVerbosity(config2);
-    if (!isEventAllowedByVerbosity(verbosity, event)) {
-      return null;
-    }
-    const { getCurrentTmuxPaneId: getCurrentTmuxPaneId2 } = await Promise.resolve().then(() => (init_tmux(), tmux_exports));
-    const payload = {
-      event,
-      sessionId: data.sessionId,
-      message: "",
-      // Will be formatted below
-      timestamp: data.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
-      tmuxSession: data.tmuxSession ?? getCurrentTmuxSession() ?? void 0,
-      tmuxPaneId: data.tmuxPaneId ?? getCurrentTmuxPaneId2() ?? void 0,
-      projectPath: data.projectPath,
-      projectName: data.projectName || (data.projectPath ? (0, import_path73.basename)(data.projectPath) : void 0),
-      modesUsed: data.modesUsed,
-      contextSummary: data.contextSummary,
-      durationMs: data.durationMs,
-      agentsSpawned: data.agentsSpawned,
-      agentsCompleted: data.agentsCompleted,
-      reason: data.reason,
-      activeMode: data.activeMode,
-      iteration: data.iteration,
-      maxIterations: data.maxIterations,
-      question: data.question,
-      incompleteTasks: data.incompleteTasks,
-      agentName: data.agentName,
-      agentType: data.agentType,
-      replyChannel: data.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? void 0,
-      replyTarget: data.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? void 0,
-      replyThread: data.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? void 0
-    };
-    if (shouldIncludeTmuxTail(verbosity) && payload.tmuxPaneId && (event === "session-idle" || event === "session-end" || event === "session-stop")) {
-      try {
-        const { capturePaneContent: capturePaneContent3 } = await Promise.resolve().then(() => (init_tmux_detector(), tmux_detector_exports));
-        const { getNewPaneTail: getNewPaneTail2 } = await Promise.resolve().then(() => (init_pane_fresh_capture(), pane_fresh_capture_exports));
-        const tailLines = getTmuxTailLines(config2);
-        const rawTail = payload.projectPath ? getNewPaneTail2(payload.tmuxPaneId, (0, import_path73.join)(payload.projectPath, ".omc", "state"), tailLines) : capturePaneContent3(payload.tmuxPaneId, tailLines);
-        if (rawTail) {
-          payload.tmuxTail = rawTail;
-          payload.maxTailLines = tailLines;
-        }
-      } catch {
-      }
-    }
-    const defaultMessage = data.message || formatNotification(payload);
-    payload.message = defaultMessage;
-    let platformMessages;
-    if (!data.message) {
-      const hookConfig = getHookConfig();
-      if (hookConfig?.enabled) {
-        const platforms = [
-          "discord",
-          "discord-bot",
-          "telegram",
-          "slack",
-          "slack-bot",
-          "webhook"
-        ];
-        const map = /* @__PURE__ */ new Map();
-        for (const platform of platforms) {
-          const template = resolveEventTemplate(hookConfig, event, platform);
-          if (template) {
-            const resolved = interpolateTemplate(template, payload);
-            if (resolved !== defaultMessage) {
-              map.set(platform, resolved);
-            }
-          }
-        }
-        if (map.size > 0) {
-          platformMessages = map;
-        }
-      }
-    }
-    const result = await dispatchNotifications(
-      config2,
-      event,
-      payload,
-      platformMessages
-    );
-    if (result.anySuccess && payload.tmuxPaneId) {
-      try {
-        const { registerMessage: registerMessage2 } = await Promise.resolve().then(() => (init_session_registry(), session_registry_exports));
-        for (const r of result.results) {
-          if (r.success && r.messageId && (r.platform === "discord-bot" || r.platform === "telegram" || r.platform === "slack-bot")) {
-            registerMessage2({
-              platform: r.platform,
-              messageId: r.messageId,
-              sessionId: payload.sessionId,
-              tmuxPaneId: payload.tmuxPaneId,
-              tmuxSessionName: payload.tmuxSession || "",
-              event: payload.event,
-              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              projectPath: payload.projectPath
-            });
-          }
-        }
-      } catch {
-      }
-    }
-    return result;
-  } catch (error2) {
-    console.error(
-      "[notifications] Error:",
-      error2 instanceof Error ? error2.message : error2
-    );
-    return null;
-  }
-}
-var import_path73;
-var init_notifications = __esm({
-  "src/notifications/index.ts"() {
-    "use strict";
-    init_dispatcher();
-    init_formatter();
-    init_tmux();
-    init_config();
-    init_hook_config();
-    init_template_engine();
-    init_slack_socket();
-    init_redact();
-    init_config();
-    init_formatter();
-    init_dispatcher();
-    init_tmux();
-    init_hook_config();
-    init_template_engine();
-    import_path73 = require("path");
-    init_dispatcher();
-    init_config();
-    init_presets();
-    init_template_variables();
-    init_validation2();
-  }
-});
-
-// src/hooks/codebase-map.ts
-function shouldSkipEntry(name, isDir, ignorePatterns) {
-  if (name.startsWith(".") && isDir && !IMPORTANT_FILES.has(name)) {
-    return true;
-  }
-  if (isDir && SKIP_DIRS.has(name)) {
-    return true;
-  }
-  if (!isDir) {
-    if (SKIP_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
-      return true;
-    }
-    const ext = (0, import_node_path5.extname)(name);
-    if (!SOURCE_EXTENSIONS.has(ext) && !IMPORTANT_FILES.has(name)) {
-      return true;
-    }
-  }
-  for (const pattern of ignorePatterns) {
-    if (name.includes(pattern)) return true;
-  }
-  return false;
-}
-function buildTree(dir, depth, maxDepth, fileCount, maxFiles, ignorePatterns) {
-  if (depth > maxDepth || fileCount.value >= maxFiles) return [];
-  let entries;
-  try {
-    entries = (0, import_node_fs4.readdirSync)(dir);
-  } catch {
-    return [];
-  }
-  const withMeta = entries.map((name) => {
-    let isDir = false;
-    try {
-      isDir = (0, import_node_fs4.statSync)((0, import_node_path5.join)(dir, name)).isDirectory();
-    } catch {
-    }
-    return { name, isDir };
-  });
-  withMeta.sort((a, b) => {
-    if (a.isDir && !b.isDir) return -1;
-    if (!a.isDir && b.isDir) return 1;
-    return a.name.localeCompare(b.name);
-  });
-  const nodes = [];
-  for (const { name, isDir } of withMeta) {
-    if (fileCount.value >= maxFiles) break;
-    if (shouldSkipEntry(name, isDir, ignorePatterns)) continue;
-    if (isDir) {
-      const children = buildTree(
-        (0, import_node_path5.join)(dir, name),
-        depth + 1,
-        maxDepth,
-        fileCount,
-        maxFiles,
-        ignorePatterns
-      );
-      nodes.push({ name, isDir: true, children });
-    } else {
-      fileCount.value++;
-      nodes.push({ name, isDir: false });
-    }
-  }
-  return nodes;
-}
-function renderTree(nodes, prefix, lines) {
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    const isLast = i === nodes.length - 1;
-    const connector = isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
-    const childPrefix = isLast ? "    " : "\u2502   ";
-    lines.push(`${prefix}${connector}${node.name}${node.isDir ? "/" : ""}`);
-    if (node.isDir && node.children && node.children.length > 0) {
-      renderTree(node.children, prefix + childPrefix, lines);
-    }
-  }
-}
-function extractPackageMetadata(directory) {
-  const pkgPath = (0, import_node_path5.join)(directory, "package.json");
-  if (!(0, import_node_fs4.existsSync)(pkgPath)) return "";
-  try {
-    const pkg = JSON.parse((0, import_node_fs4.readFileSync)(pkgPath, "utf-8"));
-    const lines = [];
-    if (pkg.name) lines.push(`Package: ${pkg.name}`);
-    if (pkg.description) lines.push(`Description: ${pkg.description}`);
-    if (pkg.scripts) {
-      const scriptNames = Object.keys(pkg.scripts).slice(0, 8).join(", ");
-      if (scriptNames) lines.push(`Scripts: ${scriptNames}`);
-    }
-    return lines.join("\n");
-  } catch {
-    return "";
-  }
-}
-function generateCodebaseMap(directory, options = {}) {
-  const {
-    maxFiles = 200,
-    maxDepth = 4,
-    ignorePatterns = [],
-    includeMetadata = true
-  } = options;
-  if (!(0, import_node_fs4.existsSync)(directory)) {
-    return { map: "", totalFiles: 0, truncated: false };
-  }
-  const fileCount = { value: 0 };
-  const tree = buildTree(directory, 0, maxDepth, fileCount, maxFiles, ignorePatterns);
-  const treeLines = [];
-  renderTree(tree, "", treeLines);
-  const treeStr = treeLines.join("\n");
-  const parts = [];
-  if (includeMetadata) {
-    const meta = extractPackageMetadata(directory);
-    if (meta) parts.push(meta);
-  }
-  parts.push(treeStr);
-  const truncated = fileCount.value >= maxFiles;
-  if (truncated) {
-    parts.push(`[Map truncated at ${maxFiles} files \u2014 use Glob/Grep for full search]`);
-  }
-  return {
-    map: parts.join("\n\n"),
-    totalFiles: fileCount.value,
-    truncated
-  };
-}
-var import_node_fs4, import_node_path5, SKIP_DIRS, SOURCE_EXTENSIONS, SKIP_FILE_SUFFIXES, IMPORTANT_FILES;
-var init_codebase_map = __esm({
-  "src/hooks/codebase-map.ts"() {
-    "use strict";
-    import_node_fs4 = require("node:fs");
-    import_node_path5 = require("node:path");
-    SKIP_DIRS = /* @__PURE__ */ new Set([
-      "node_modules",
-      ".git",
-      "dist",
-      "build",
-      "out",
-      "coverage",
-      ".next",
-      ".nuxt",
-      ".svelte-kit",
-      ".cache",
-      ".turbo",
-      ".parcel-cache",
-      "__pycache__",
-      ".mypy_cache",
-      ".pytest_cache",
-      ".ruff_cache",
-      "target",
-      ".gradle",
-      "vendor",
-      ".venv",
-      "venv",
-      "env",
-      ".omc",
-      ".claude",
-      "tmp",
-      "temp"
-    ]);
-    SOURCE_EXTENSIONS = /* @__PURE__ */ new Set([
-      ".ts",
-      ".tsx",
-      ".js",
-      ".jsx",
-      ".mjs",
-      ".cjs",
-      ".py",
-      ".rb",
-      ".go",
-      ".rs",
-      ".java",
-      ".kt",
-      ".swift",
-      ".c",
-      ".cpp",
-      ".h",
-      ".hpp",
-      ".cs",
-      ".fs",
-      ".vue",
-      ".svelte",
-      ".sh",
-      ".bash",
-      ".zsh",
-      ".json",
-      ".jsonc",
-      ".yaml",
-      ".yml",
-      ".toml",
-      ".md",
-      ".mdx",
-      ".css",
-      ".scss",
-      ".sass",
-      ".less",
-      ".html",
-      ".htm"
-    ]);
-    SKIP_FILE_SUFFIXES = ["-lock.json", ".lock", "-lock.yaml", "-lock.toml"];
-    IMPORTANT_FILES = /* @__PURE__ */ new Set([
-      "package.json",
-      "tsconfig.json",
-      "tsconfig.base.json",
-      "pyproject.toml",
-      "Cargo.toml",
-      "go.mod",
-      "go.sum",
-      "CLAUDE.md",
-      "AGENTS.md",
-      "README.md",
-      "CONTRIBUTING.md",
-      ".eslintrc.json",
-      "vitest.config.ts",
-      "jest.config.ts",
-      "jest.config.js",
-      "Makefile",
-      "Dockerfile",
-      ".gitignore"
-    ]);
-  }
-});
-
-// src/hooks/agents-overlay.ts
-var agents_overlay_exports = {};
-__export(agents_overlay_exports, {
-  buildAgentsOverlay: () => buildAgentsOverlay
-});
-function buildAgentsOverlay(directory, options) {
-  const config2 = loadConfig();
-  const mapConfig = config2.startupCodebaseMap ?? {};
-  if (mapConfig.enabled === false) {
-    return { message: "", hasCodebaseMap: false };
-  }
-  const mergedOptions = {
-    maxFiles: mapConfig.maxFiles ?? options?.maxFiles ?? 200,
-    maxDepth: mapConfig.maxDepth ?? options?.maxDepth ?? 4,
-    ignorePatterns: options?.ignorePatterns ?? [],
-    includeMetadata: options?.includeMetadata ?? true
-  };
-  const result = generateCodebaseMap(directory, mergedOptions);
-  if (!result.map) {
-    return { message: "", hasCodebaseMap: false };
-  }
-  const message = `<session-restore>
-
-[CODEBASE MAP]
-
-Project structure for: ${directory}
-Use this map to navigate efficiently. Prefer Glob/Grep over blind file exploration.
-
-${result.map}
-
-</session-restore>
-
----
-
-`;
-  return { message, hasCodebaseMap: true };
-}
-var init_agents_overlay = __esm({
-  "src/hooks/agents-overlay.ts"() {
-    "use strict";
-    init_codebase_map();
-    init_loader();
-  }
-});
-
-// src/utils/daemon-module-path.ts
-function resolveDaemonModulePath(currentFilename, distSegments) {
-  const isWindowsStylePath = /^[a-zA-Z]:\\/.test(currentFilename) || currentFilename.includes("\\");
-  const pathApi = isWindowsStylePath ? import_path74.win32 : { basename: import_path74.basename, dirname: import_path74.dirname, join: import_path74.join };
-  const tsCompiledPath = currentFilename.replace(/\.ts$/, ".js");
-  if (tsCompiledPath !== currentFilename) {
-    return tsCompiledPath;
-  }
-  const currentDir = pathApi.dirname(currentFilename);
-  const inBundledCli = pathApi.basename(currentFilename) === "cli.cjs" && pathApi.basename(currentDir) === "bridge";
-  if (inBundledCli) {
-    return pathApi.join(currentDir, "..", "dist", ...distSegments);
-  }
-  return currentFilename;
-}
-var import_path74;
-var init_daemon_module_path = __esm({
-  "src/utils/daemon-module-path.ts"() {
-    "use strict";
-    import_path74 = require("path");
-  }
-});
-
 // src/notifications/reply-listener.ts
 var reply_listener_exports = {};
 __export(reply_listener_exports, {
@@ -25687,7 +24291,7 @@ async function pollTelegram(config2, state, rateLimiter) {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
     const path22 = `/bot${config2.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
     const updates = await new Promise((resolve19, reject) => {
-      const req = (0, import_https2.request)(
+      const req = (0, import_https.request)(
         {
           hostname: "api.telegram.org",
           path: path22,
@@ -25768,7 +24372,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             reply_to_message_id: msg.message_id
           });
           await new Promise((resolve19) => {
-            const replyReq = (0, import_https2.request)(
+            const replyReq = (0, import_https.request)(
               {
                 hostname: "api.telegram.org",
                 path: `/bot${config2.telegramBotToken}/sendMessage`,
@@ -26116,15 +24720,15 @@ function processSlackSocketMessage(rawMessage, connectionState, paneId, config2,
   }
   return { injected: success, validation };
 }
-var import_fs61, import_path75, import_url11, import_child_process20, import_https2, __filename2, SECURE_FILE_MODE2, MAX_LOG_SIZE_BYTES, DAEMON_ENV_ALLOWLIST, DEFAULT_STATE_DIR, PID_FILE_PATH, STATE_FILE_PATH, LOG_FILE_PATH, RateLimiter, discordBackoffUntil, PRUNE_INTERVAL_MS;
+var import_fs61, import_path72, import_url11, import_child_process20, import_https, __filename2, SECURE_FILE_MODE2, MAX_LOG_SIZE_BYTES, DAEMON_ENV_ALLOWLIST, DEFAULT_STATE_DIR, PID_FILE_PATH, STATE_FILE_PATH, LOG_FILE_PATH, RateLimiter, discordBackoffUntil, PRUNE_INTERVAL_MS;
 var init_reply_listener = __esm({
   "src/notifications/reply-listener.ts"() {
     "use strict";
     import_fs61 = require("fs");
-    import_path75 = require("path");
+    import_path72 = require("path");
     import_url11 = require("url");
     import_child_process20 = require("child_process");
-    import_https2 = require("https");
+    import_https = require("https");
     init_daemon_module_path();
     init_paths();
     init_tmux_detector();
@@ -26171,9 +24775,9 @@ var init_reply_listener = __esm({
       "COMSPEC"
     ];
     DEFAULT_STATE_DIR = getGlobalOmcStateRoot();
-    PID_FILE_PATH = (0, import_path75.join)(DEFAULT_STATE_DIR, "reply-listener.pid");
-    STATE_FILE_PATH = (0, import_path75.join)(DEFAULT_STATE_DIR, "reply-listener-state.json");
-    LOG_FILE_PATH = (0, import_path75.join)(DEFAULT_STATE_DIR, "reply-listener.log");
+    PID_FILE_PATH = (0, import_path72.join)(DEFAULT_STATE_DIR, "reply-listener.pid");
+    STATE_FILE_PATH = (0, import_path72.join)(DEFAULT_STATE_DIR, "reply-listener-state.json");
+    LOG_FILE_PATH = (0, import_path72.join)(DEFAULT_STATE_DIR, "reply-listener.log");
     RateLimiter = class {
       // 1 minute
       constructor(maxPerMinute) {
@@ -26243,14 +24847,14 @@ function resolveGateway(config2, event) {
 function resetOpenClawConfigCache() {
   _cachedConfig = null;
 }
-var import_fs62, import_path76, CONFIG_FILE3, _cachedConfig;
+var import_fs62, import_path73, CONFIG_FILE3, _cachedConfig;
 var init_config2 = __esm({
   "src/openclaw/config.ts"() {
     "use strict";
     import_fs62 = require("fs");
-    import_path76 = require("path");
+    import_path73 = require("path");
     init_config_dir();
-    CONFIG_FILE3 = process.env.OMC_OPENCLAW_CONFIG || (0, import_path76.join)(getClaudeConfigDir(), "omc_config.openclaw.json");
+    CONFIG_FILE3 = process.env.OMC_OPENCLAW_CONFIG || (0, import_path73.join)(getClaudeConfigDir(), "omc_config.openclaw.json");
     _cachedConfig = null;
   }
 });
@@ -26351,7 +24955,7 @@ async function wakeCommandGateway(gatewayName, gatewayConfig, variables, payload
   }
 }
 var DEFAULT_TIMEOUT_MS;
-var init_dispatcher2 = __esm({
+var init_dispatcher = __esm({
   "src/openclaw/dispatcher.ts"() {
     "use strict";
     DEFAULT_TIMEOUT_MS = 1e4;
@@ -26577,13 +25181,13 @@ function sleepMs2(ms) {
   }
 }
 function getStateDir3(projectPath) {
-  return (0, import_path77.join)(projectPath, ...STATE_DIR);
+  return (0, import_path74.join)(projectPath, ...STATE_DIR);
 }
 function getStatePath2(projectPath) {
-  return (0, import_path77.join)(getStateDir3(projectPath), STATE_FILE3);
+  return (0, import_path74.join)(getStateDir3(projectPath), STATE_FILE3);
 }
 function getLockPath2(projectPath) {
-  return (0, import_path77.join)(getStateDir3(projectPath), LOCK_FILE);
+  return (0, import_path74.join)(getStateDir3(projectPath), LOCK_FILE);
 }
 function ensureStateDir3(projectPath) {
   (0, import_fs63.mkdirSync)(getStateDir3(projectPath), { recursive: true, mode: 448 });
@@ -26797,13 +25401,13 @@ function shouldCollapseOpenClawBurst(event, signal, context, tmuxSession) {
     return shouldCollapse;
   });
 }
-var import_fs63, import_crypto12, import_path77, STATE_DIR, STATE_FILE3, LOCK_FILE, START_WINDOW_MS, PROMPT_WINDOW_MS, STOP_WINDOW_MS, STATE_TTL_MS, LOCK_TIMEOUT_MS2, LOCK_RETRY_MS3, LOCK_STALE_MS3, TERMINAL_STATE_SUPPRESSION_WINDOW_MS, SLEEP_ARRAY2, TERMINAL_KEYS;
+var import_fs63, import_crypto12, import_path74, STATE_DIR, STATE_FILE3, LOCK_FILE, START_WINDOW_MS, PROMPT_WINDOW_MS, STOP_WINDOW_MS, STATE_TTL_MS, LOCK_TIMEOUT_MS2, LOCK_RETRY_MS3, LOCK_STALE_MS3, TERMINAL_STATE_SUPPRESSION_WINDOW_MS, SLEEP_ARRAY2, TERMINAL_KEYS;
 var init_dedupe = __esm({
   "src/openclaw/dedupe.ts"() {
     "use strict";
     import_fs63 = require("fs");
     import_crypto12 = require("crypto");
-    import_path77 = require("path");
+    import_path74 = require("path");
     init_atomic_write();
     init_platform();
     STATE_DIR = [".omc", "state"];
@@ -26819,6 +25423,371 @@ var init_dedupe = __esm({
     TERMINAL_STATE_SUPPRESSION_WINDOW_MS = 6e4;
     SLEEP_ARRAY2 = new Int32Array(new SharedArrayBuffer(4));
     TERMINAL_KEYS = ["session.stopped", "session.finished"];
+  }
+});
+
+// src/notifications/tmux.ts
+var tmux_exports = {};
+__export(tmux_exports, {
+  formatTmuxInfo: () => formatTmuxInfo,
+  getCurrentTmuxPaneId: () => getCurrentTmuxPaneId,
+  getCurrentTmuxSession: () => getCurrentTmuxSession,
+  getTeamTmuxSessions: () => getTeamTmuxSessions
+});
+function getCurrentTmuxSession() {
+  if (!process.env.TMUX) {
+    return null;
+  }
+  try {
+    const paneId = process.env.TMUX_PANE;
+    if (paneId) {
+      const lines = tmuxShell("list-panes -a -F '#{pane_id} #{session_name}'", {
+        timeout: 3e3,
+        stdio: ["pipe", "pipe", "pipe"]
+      }).split("\n");
+      const match = lines.find((l) => l.startsWith(paneId + " "));
+      if (match) return match.split(" ")[1] ?? null;
+    }
+    const sessionName2 = tmuxShell("display-message -p '#S'", {
+      timeout: 3e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    return sessionName2 || null;
+  } catch {
+    return null;
+  }
+}
+function getTeamTmuxSessions(teamName) {
+  const sanitized = teamName.replace(/[^a-zA-Z0-9-]/g, "");
+  if (!sanitized) return [];
+  const prefix = `omc-team-${sanitized}-`;
+  try {
+    const output = tmuxShell("list-sessions -F '#{session_name}'", {
+      timeout: 3e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    return output.trim().split("\n").filter((s) => s.startsWith(prefix)).map((s) => s.slice(prefix.length));
+  } catch {
+    return [];
+  }
+}
+function formatTmuxInfo() {
+  const session = getCurrentTmuxSession();
+  if (!session) return null;
+  return `tmux: ${session}`;
+}
+function getCurrentTmuxPaneId() {
+  if (!process.env.TMUX) return null;
+  const envPane = process.env.TMUX_PANE;
+  if (envPane && /^%\d+$/.test(envPane)) return envPane;
+  try {
+    const paneId = tmuxShell("display-message -p '#{pane_id}'", {
+      timeout: 3e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    return paneId && /^%\d+$/.test(paneId) ? paneId : null;
+  } catch {
+    return null;
+  }
+}
+var init_tmux = __esm({
+  "src/notifications/tmux.ts"() {
+    "use strict";
+    init_tmux_utils();
+  }
+});
+
+// src/notifications/formatter.ts
+function formatDuration2(ms) {
+  if (!ms) return "unknown";
+  const seconds = Math.floor(ms / 1e3);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+}
+function projectDisplay(payload) {
+  if (payload.projectName) return payload.projectName;
+  if (payload.projectPath) return (0, import_path75.basename)(payload.projectPath);
+  return "unknown";
+}
+function buildFooter(payload, markdown) {
+  const parts = [];
+  if (payload.tmuxSession) {
+    parts.push(
+      markdown ? `**tmux:** \`${payload.tmuxSession}\`` : `tmux: ${payload.tmuxSession}`
+    );
+  }
+  parts.push(
+    markdown ? `**project:** \`${projectDisplay(payload)}\`` : `project: ${projectDisplay(payload)}`
+  );
+  return parts.join(markdown ? " | " : " | ");
+}
+function formatSessionStart(payload) {
+  const time3 = new Date(payload.timestamp).toLocaleTimeString();
+  const project = projectDisplay(payload);
+  const lines = [
+    `# Session Started`,
+    "",
+    `**Session:** \`${payload.sessionId}\``,
+    `**Project:** \`${project}\``,
+    `**Time:** ${time3}`
+  ];
+  if (payload.tmuxSession) {
+    lines.push(`**tmux:** \`${payload.tmuxSession}\``);
+  }
+  return lines.join("\n");
+}
+function formatSessionStop(payload) {
+  const lines = [`# Session Continuing`, ""];
+  if (payload.activeMode) {
+    lines.push(`**Mode:** ${payload.activeMode}`);
+  }
+  if (payload.iteration != null && payload.maxIterations != null) {
+    lines.push(`**Iteration:** ${payload.iteration}/${payload.maxIterations}`);
+  }
+  if (payload.incompleteTasks != null && payload.incompleteTasks > 0) {
+    lines.push(`**Incomplete tasks:** ${payload.incompleteTasks}`);
+  }
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+  return lines.join("\n");
+}
+function formatSessionEnd(payload) {
+  const duration3 = formatDuration2(payload.durationMs);
+  const lines = [
+    `# Session Ended`,
+    "",
+    `**Session:** \`${payload.sessionId}\``,
+    `**Duration:** ${duration3}`,
+    `**Reason:** ${payload.reason || "unknown"}`
+  ];
+  if (payload.agentsSpawned != null) {
+    lines.push(
+      `**Agents:** ${payload.agentsCompleted ?? 0}/${payload.agentsSpawned} completed`
+    );
+  }
+  if (payload.modesUsed && payload.modesUsed.length > 0) {
+    lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
+  }
+  if (payload.contextSummary) {
+    lines.push("", `**Summary:** ${payload.contextSummary}`);
+  }
+  appendTmuxTail(lines, payload);
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+  return lines.join("\n");
+}
+function formatSessionIdle(payload) {
+  const lines = [`# Session Idle`, ""];
+  lines.push(`Claude has finished and is waiting for input.`);
+  lines.push("");
+  if (payload.reason) {
+    lines.push(`**Reason:** ${payload.reason}`);
+  }
+  if (payload.modesUsed && payload.modesUsed.length > 0) {
+    lines.push(`**Modes:** ${payload.modesUsed.join(", ")}`);
+  }
+  appendTmuxTail(lines, payload);
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+  return lines.join("\n");
+}
+function extractReviewSeedOutcomeKeys(line) {
+  return REVIEW_SEED_OUTCOME_PATTERNS.filter(({ pattern }) => pattern.test(line)).map(({ key }) => key);
+}
+function trimReviewSeedPrefix(lines) {
+  if (lines.length === 0) return lines;
+  const prefix = lines.slice(0, 10);
+  const distinctOutcomes = /* @__PURE__ */ new Set();
+  let hasCue = false;
+  let hasListMarker = false;
+  let candidateEnd = -1;
+  for (let index = 0; index < prefix.length; index += 1) {
+    const line = prefix[index];
+    const outcomeKeys = extractReviewSeedOutcomeKeys(line);
+    const isCueLine = REVIEW_SEED_CUE_RE.test(line);
+    const isSeedLine = outcomeKeys.length > 0 || isCueLine || candidateEnd >= 0 && REVIEW_SEED_LIST_RE.test(line);
+    outcomeKeys.forEach((key) => distinctOutcomes.add(key));
+    if (isCueLine) hasCue = true;
+    if (REVIEW_SEED_LIST_RE.test(line)) hasListMarker = true;
+    if (isSeedLine) {
+      candidateEnd = index;
+      continue;
+    }
+    if (candidateEnd >= 0) break;
+  }
+  const qualifies = candidateEnd >= 0 && hasCue && (distinctOutcomes.size >= 2 || hasListMarker);
+  if (!qualifies) return lines;
+  return lines.slice(candidateEnd + 1);
+}
+function looksLikeStructuredAlertLiteral(line) {
+  const trimmed = line.trim();
+  if (!STRUCTURED_ALERT_KEYWORD_RE.test(trimmed)) return false;
+  if (/^(?:\{.*\}|\[.*\])$/.test(trimmed) && /["'{\[\]}:,]/.test(trimmed)) return true;
+  if (JSONISH_LINE_RE.test(trimmed)) return true;
+  if (CODE_LITERAL_PREFIX_RE.test(trimmed) && /["'`{}[\]()=>]/.test(trimmed)) return true;
+  return false;
+}
+function looksLikeAlertSearchCommand(line) {
+  const trimmed = line.trim();
+  return SEARCH_COMMAND_RE.test(trimmed) && STRUCTURED_ALERT_KEYWORD_RE.test(trimmed) && (QUOTED_OR_REGEX_QUERY_RE.test(trimmed) || trimmed.includes("|"));
+}
+function looksLikeAlertRegexLiteral(line) {
+  const trimmed = line.trim();
+  return STRUCTURED_ALERT_KEYWORD_RE.test(trimmed) && ALERT_REGEX_LITERAL_RE.test(trimmed);
+}
+function isCommandBoilerplateLine(line) {
+  return /^(?:command failed with exit code \d+:|exit code \d+)$/i.test(line.trim());
+}
+function stripLeadingNoisePrefix(lines) {
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (PERMISSION_DENIED_SCAN_LINE_RE.test(line) || CLEAN_DIAGNOSTIC_QUERY_RE.test(line) || GENERIC_HOOK_FAILURE_PROSE_RE.test(line) || ISSUE_PROMPT_NOISE_RE.test(line) || ZERO_ALERT_SUMMARY_RE.test(line) || isCommandBoilerplateLine(line)) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  return index > 0 ? lines.slice(index) : lines;
+}
+function parseTmuxTail(raw, maxLines = DEFAULT_MAX_TAIL_LINES) {
+  const meaningful = [];
+  for (const line of raw.split("\n")) {
+    const stripped = line.replace(ANSI_ESCAPE_RE, "");
+    const trimmed2 = stripped.trim();
+    if (!trimmed2) continue;
+    if (UI_CHROME_RE.test(trimmed2)) continue;
+    if (CTRL_O_RE.test(trimmed2)) continue;
+    if (BOX_DRAWING_RE.test(trimmed2)) continue;
+    if (OMC_HUD_RE.test(trimmed2)) continue;
+    if (BYPASS_PERM_RE.test(trimmed2)) continue;
+    if (BARE_PROMPT_RE.test(trimmed2)) continue;
+    if (DIFF_HEADER_LINE_RE.test(trimmed2)) continue;
+    if (looksLikeAlertSearchCommand(trimmed2)) continue;
+    if (REQUEST_RESPONSE_LITERAL_RE.test(trimmed2)) continue;
+    if (HELP_USAGE_LINE_RE.test(trimmed2)) continue;
+    if (STATIC_HELP_CODE_RE.test(trimmed2)) continue;
+    if (ZERO_ALERT_SUMMARY_RE.test(trimmed2)) continue;
+    if (GENERIC_HOOK_FAILURE_PROSE_RE.test(trimmed2)) continue;
+    if (ISSUE_PROMPT_NOISE_RE.test(trimmed2)) continue;
+    if (PERMISSION_DENIED_SCAN_LINE_RE.test(trimmed2)) continue;
+    if (CLEAN_DIAGNOSTIC_QUERY_RE.test(trimmed2)) continue;
+    if (SOURCE_PATH_LINE_RE.test(trimmed2) && STATIC_CODE_ALERT_RE.test(trimmed2)) continue;
+    if (SOURCE_PATH_LINE_RE.test(trimmed2)) {
+      const sourceContent = trimmed2.replace(SOURCE_PATH_LINE_RE, "").trim();
+      if (looksLikeStructuredAlertLiteral(sourceContent) || looksLikeAlertRegexLiteral(sourceContent)) continue;
+    }
+    if (looksLikeAlertRegexLiteral(trimmed2)) continue;
+    if (looksLikeStructuredAlertLiteral(trimmed2)) continue;
+    const alnumCount = (trimmed2.match(/[a-zA-Z0-9]/g) || []).length;
+    if (trimmed2.length >= 8 && alnumCount / trimmed2.length < MIN_ALNUM_RATIO) continue;
+    meaningful.push(stripped.trimEnd());
+  }
+  const trimmed = trimReviewSeedPrefix(meaningful);
+  return stripLeadingNoisePrefix(trimmed).slice(-maxLines).join("\n");
+}
+function appendTmuxTail(lines, payload) {
+  if (payload.tmuxTail) {
+    const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
+    if (parsed) {
+      lines.push("");
+      lines.push("**Recent output:**");
+      lines.push("```");
+      lines.push(parsed);
+      lines.push("```");
+    }
+  }
+}
+function formatAgentCall(payload) {
+  const lines = [`# Agent Spawned`, ""];
+  if (payload.agentName) {
+    lines.push(`**Agent:** \`${payload.agentName}\``);
+  }
+  if (payload.agentType) {
+    lines.push(`**Type:** \`${payload.agentType}\``);
+  }
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+  return lines.join("\n");
+}
+function formatAskUserQuestion(payload) {
+  const lines = [`# Input Needed`, ""];
+  if (payload.question) {
+    lines.push(`**Question:** ${payload.question}`);
+    lines.push("");
+  }
+  lines.push(`Claude is waiting for your response.`);
+  lines.push("");
+  lines.push(buildFooter(payload, true));
+  return lines.join("\n");
+}
+function formatNotification(payload) {
+  switch (payload.event) {
+    case "session-start":
+      return formatSessionStart(payload);
+    case "session-stop":
+      return formatSessionStop(payload);
+    case "session-end":
+      return formatSessionEnd(payload);
+    case "session-idle":
+      return formatSessionIdle(payload);
+    case "ask-user-question":
+      return formatAskUserQuestion(payload);
+    case "agent-call":
+      return formatAgentCall(payload);
+    default:
+      return payload.message || `Event: ${payload.event}`;
+  }
+}
+var import_path75, ANSI_ESCAPE_RE, UI_CHROME_RE, CTRL_O_RE, BOX_DRAWING_RE, OMC_HUD_RE, BYPASS_PERM_RE, BARE_PROMPT_RE, MIN_ALNUM_RATIO, REVIEW_SEED_OUTCOME_PATTERNS, REVIEW_SEED_CUE_RE, REVIEW_SEED_LIST_RE, SOURCE_PATH_LINE_RE, STATIC_CODE_ALERT_RE, HELP_USAGE_LINE_RE, STATIC_HELP_CODE_RE, DIFF_HEADER_LINE_RE, STRUCTURED_ALERT_KEYWORD_RE, SEARCH_COMMAND_RE, QUOTED_OR_REGEX_QUERY_RE, ZERO_ALERT_SUMMARY_RE, ALERT_REGEX_LITERAL_RE, GENERIC_HOOK_FAILURE_PROSE_RE, ISSUE_PROMPT_NOISE_RE, PERMISSION_DENIED_SCAN_LINE_RE, CLEAN_DIAGNOSTIC_QUERY_RE, JSONISH_LINE_RE, REQUEST_RESPONSE_LITERAL_RE, CODE_LITERAL_PREFIX_RE, DEFAULT_MAX_TAIL_LINES;
+var init_formatter = __esm({
+  "src/notifications/formatter.ts"() {
+    "use strict";
+    import_path75 = require("path");
+    ANSI_ESCAPE_RE = /\x1b(?:[@-Z\\-_]|\[[0-9;]*[a-zA-Z])/g;
+    UI_CHROME_RE = /^[●⎿✻·◼]/;
+    CTRL_O_RE = /ctrl\+o to expand/i;
+    BOX_DRAWING_RE = /^[\s─═│║┌┐└┘┬┴├┤╔╗╚╝╠╣╦╩╬╟╢╤╧╪━┃┏┓┗┛┣┫┳┻╋┠┨┯┷┿╂]+$/;
+    OMC_HUD_RE = /\[OMC[#\]]/;
+    BYPASS_PERM_RE = /^⏵/;
+    BARE_PROMPT_RE = /^[❯>$%#]+$/;
+    MIN_ALNUM_RATIO = 0.15;
+    REVIEW_SEED_OUTCOME_PATTERNS = [
+      { key: "approve", pattern: /\bapprove\b/i },
+      { key: "request-changes", pattern: /\brequest[- ]changes\b/i },
+      { key: "follow-up-fix", pattern: /\bfollow[- ]up[- ]fix\b/i },
+      { key: "blocked", pattern: /\bblocked\b/i },
+      { key: "error", pattern: /\berrors?\b/i },
+      { key: "failure", pattern: /\bfail(?:ed|ure|ures)?\b/i },
+      { key: "conflict", pattern: /\bconflicts?\b/i }
+    ];
+    REVIEW_SEED_CUE_RE = /\b(review|verdict|respond|reply|return|output|classification|classify|decision|choose|label)\b/i;
+    REVIEW_SEED_LIST_RE = /^(?:[-*•]|\d+[.)]|[A-Z][A-Z_-]+:|\([a-z0-9]+\))/;
+    SOURCE_PATH_LINE_RE = /^(?:\.\/)?[A-Za-z0-9_./-]+:\d+:/;
+    STATIC_CODE_ALERT_RE = /(?:\blog_error\b|\becho\b).*?(?:"error\||"Usage:)|==\s*"error"/;
+    HELP_USAGE_LINE_RE = /^(?:Usage|Examples?|Commands?|Options?|Flags?):/i;
+    STATIC_HELP_CODE_RE = /^(?:log_error\s+"Usage:|if\s+\[\[.*==\s*"error".*\]\];?\s*then$)/;
+    DIFF_HEADER_LINE_RE = /^(?:diff --git\b|index\s+[0-9a-f]{6,}\.\.[0-9a-f]{6,}\b|@@\s+[-+]\d|---\s+\S|\+\+\+\s+\S)/i;
+    STRUCTURED_ALERT_KEYWORD_RE = /\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts|operation_failed|claim_conflict|invalid_transition|blocked_dependency|worker_notify_failed)\b/i;
+    SEARCH_COMMAND_RE = /^(?:[$❯>#]\s*)?(?:rg|ripgrep|grep|egrep|fgrep)\b/i;
+    QUOTED_OR_REGEX_QUERY_RE = /(?:"[^"\n]+"|'[^'\n]+'|`[^`\n]+`|\/[^/\n]+\/[a-z]*)/i;
+    ZERO_ALERT_SUMMARY_RE = /\b(?:0|zero)\s+(?:errors?|fail(?:ed|ures?)?|conflicts?)\b|\b(?:errors?|fail(?:ed|ures?)?|conflicts?)\s*[:=]\s*0\b|\btotalErrors\s*[:=]\s*0\b|\b(?:TypeScript|LSP)\s+check\s+passed:\s*0 errors,\s*0 warnings\b/i;
+    ALERT_REGEX_LITERAL_RE = /(?:^|[=(:,]\s*)(?:new\s+RegExp\(|\/)(?=[^)\n;]*\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts|operation_failed|claim_conflict|invalid_transition|blocked_dependency|worker_notify_failed)\b)/i;
+    GENERIC_HOOK_FAILURE_PROSE_RE = /^The Bash output indicates (?:a )?(?:command\/setup|command|setup) failure\b/i;
+    ISSUE_PROMPT_NOISE_RE = /^(?:fix|review|investigate|analyze|search|find|look\s+for|debug|harden)\b.*\b(?:issue|pr)\s*#\d+\b.*\b(?:error|errors?|fail(?:ed|ure|ures)?|conflict|conflicts)\b/i;
+    PERMISSION_DENIED_SCAN_LINE_RE = /^(?:find|grep|rg): .*permission denied$/i;
+    CLEAN_DIAGNOSTIC_QUERY_RE = /^(?:[$❯>#]\s*)?(?:rg|ripgrep|grep)\b.*\b(?:severity\s*[:=]\s*["']?error["']?|diagnostic(?:s)?|lsp_diagnostics(?:_directory)?)\b/i;
+    JSONISH_LINE_RE = /^(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:)/;
+    REQUEST_RESPONSE_LITERAL_RE = /^(?:payload|request|response|input|output|args|params|body|mcp)\s*[:=]\s*[{[]/i;
+    CODE_LITERAL_PREFIX_RE = /^(?:[+-]\s*(?:[{[]|"(?:[^"\\]|\\.)+"\s*:|'(?:[^'\\]|\\.)+'\s*:|(?:const|let|var|return|throw|if|await|expect|mock|vi\.)\b|[A-Za-z_$][\w$-]*\s*:)|(?:const|let|var|return|throw|if|await|expect|mock|vi\.)\b)/;
+    DEFAULT_MAX_TAIL_LINES = 15;
   }
 });
 
@@ -26884,7 +25853,7 @@ async function wakeOpenClaw(event, context) {
         const paneId = process.env.TMUX_PANE;
         const projectPath = context.projectPath;
         if (paneId && projectPath) {
-          const stateDir = (0, import_path78.join)(projectPath, ".omc", "state");
+          const stateDir = (0, import_path76.join)(projectPath, ".omc", "state");
           const fresh = getNewPaneTail2(paneId, stateDir, 15);
           tmuxTail = fresh || void 0;
         }
@@ -26898,7 +25867,7 @@ async function wakeOpenClaw(event, context) {
     const variables = {
       sessionId: context.sessionId,
       projectPath: context.projectPath,
-      projectName: context.projectPath ? (0, import_path78.basename)(context.projectPath) : void 0,
+      projectName: context.projectPath ? (0, import_path76.basename)(context.projectPath) : void 0,
       tmuxSession,
       toolName: context.toolName,
       prompt: context.prompt,
@@ -26928,7 +25897,7 @@ async function wakeOpenClaw(event, context) {
       timestamp: now,
       sessionId: context.sessionId,
       projectPath: context.projectPath,
-      projectName: context.projectPath ? (0, import_path78.basename)(context.projectPath) : void 0,
+      projectName: context.projectPath ? (0, import_path76.basename)(context.projectPath) : void 0,
       tmuxSession,
       tmuxTail,
       ...replyChannel && { channel: replyChannel },
@@ -26956,18 +25925,18 @@ async function wakeOpenClaw(event, context) {
     return null;
   }
 }
-var import_path78, DEBUG;
+var import_path76, DEBUG;
 var init_openclaw = __esm({
   "src/openclaw/index.ts"() {
     "use strict";
     init_config2();
-    init_dispatcher2();
+    init_dispatcher();
     init_signal();
     init_config2();
-    init_dispatcher2();
+    init_dispatcher();
     init_signal();
     init_dedupe();
-    import_path78 = require("path");
+    import_path76 = require("path");
     init_tmux();
     init_formatter();
     DEBUG = process.env.OMC_OPENCLAW_DEBUG === "1";
@@ -27028,12 +25997,12 @@ function interpolatePath(pathTemplate, sessionId) {
   const date3 = now.toISOString().split("T")[0];
   const time3 = now.toISOString().split("T")[1].split(".")[0].replace(/:/g, "-");
   const safeSessionId = sessionId.replace(/[/\\..]/g, "_");
-  return (0, import_path79.normalize)(pathTemplate.replace(/~/g, (0, import_os12.homedir)()).replace(/\{session_id\}/g, safeSessionId).replace(/\{date\}/g, date3).replace(/\{time\}/g, time3));
+  return (0, import_path77.normalize)(pathTemplate.replace(/~/g, (0, import_os12.homedir)()).replace(/\{session_id\}/g, safeSessionId).replace(/\{date\}/g, date3).replace(/\{time\}/g, time3));
 }
 async function writeToFile(config2, content, sessionId) {
   try {
     const resolvedPath = interpolatePath(config2.path, sessionId);
-    const dir = (0, import_path79.dirname)(resolvedPath);
+    const dir = (0, import_path77.dirname)(resolvedPath);
     (0, import_fs64.mkdirSync)(dir, { recursive: true });
     (0, import_fs64.writeFileSync)(resolvedPath, content, { encoding: "utf-8", mode: 384 });
     console.log(`[stop-callback] Session summary written to ${resolvedPath}`);
@@ -27041,7 +26010,7 @@ async function writeToFile(config2, content, sessionId) {
     console.error("[stop-callback] File write failed:", error2);
   }
 }
-async function sendTelegram2(config2, message) {
+async function sendTelegram(config2, message) {
   if (!config2.botToken || !config2.chatId) {
     console.error("[stop-callback] Telegram: missing botToken or chatId");
     return;
@@ -27070,7 +26039,7 @@ async function sendTelegram2(config2, message) {
     console.error("[stop-callback] Telegram send failed:", error2 instanceof Error ? error2.message : "Unknown error");
   }
 }
-async function sendDiscord2(config2, message) {
+async function sendDiscord(config2, message) {
   if (!config2.webhookUrl) {
     console.error("[stop-callback] Discord: missing webhookUrl");
     return;
@@ -27124,13 +26093,13 @@ async function triggerStopCallbacks(metrics, _input, options = {}) {
     const summary = formatSessionSummary(metrics, "markdown");
     const tags = normalizeTelegramTagList(callbacks.telegram.tagList);
     const message = prefixMessageWithTags(summary, tags);
-    promises.push(sendTelegram2(callbacks.telegram, message));
+    promises.push(sendTelegram(callbacks.telegram, message));
   }
   if (!skipPlatforms.has("discord") && callbacks.discord?.enabled) {
     const summary = formatSessionSummary(metrics, "markdown");
     const tags = normalizeDiscordTagList(callbacks.discord.tagList);
     const message = prefixMessageWithTags(summary, tags);
-    promises.push(sendDiscord2(callbacks.discord, message));
+    promises.push(sendDiscord(callbacks.discord, message));
   }
   if (promises.length === 0) {
     return;
@@ -27144,14 +26113,878 @@ async function triggerStopCallbacks(metrics, _input, options = {}) {
     console.error("[stop-callback] Callback execution error:", error2);
   }
 }
-var import_fs64, import_path79, import_os12;
+var import_fs64, import_path77, import_os12;
 var init_callbacks = __esm({
   "src/hooks/session-end/callbacks.ts"() {
     "use strict";
     import_fs64 = require("fs");
-    import_path79 = require("path");
+    import_path77 = require("path");
     import_os12 = require("os");
     init_auto_update();
+  }
+});
+
+// src/notifications/template-engine.ts
+function formatDuration3(ms) {
+  if (!ms) return "unknown";
+  const seconds = Math.floor(ms / 1e3);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+}
+function getProjectDisplay(payload) {
+  if (payload.projectName) return payload.projectName;
+  if (payload.projectPath) return (0, import_path78.basename)(payload.projectPath);
+  return "unknown";
+}
+function buildFooterText(payload) {
+  const parts = [];
+  if (payload.tmuxSession) {
+    parts.push(`**tmux:** \`${payload.tmuxSession}\``);
+  }
+  parts.push(`**project:** \`${getProjectDisplay(payload)}\``);
+  return parts.join(" | ");
+}
+function buildTmuxTailBlock(payload) {
+  if (!payload.tmuxTail) return "";
+  const parsed = parseTmuxTail(payload.tmuxTail, payload.maxTailLines);
+  if (!parsed) return "";
+  return `
+
+**Recent output:**
+\`\`\`
+${parsed}
+\`\`\``;
+}
+function computeTemplateVariables(payload) {
+  const vars = {};
+  vars.event = payload.event || "";
+  vars.sessionId = payload.sessionId || "";
+  vars.message = payload.message || "";
+  vars.timestamp = payload.timestamp || "";
+  vars.tmuxSession = payload.tmuxSession || "";
+  vars.projectPath = payload.projectPath || "";
+  vars.projectName = payload.projectName || "";
+  vars.modesUsed = payload.modesUsed?.join(", ") || "";
+  vars.contextSummary = payload.contextSummary || "";
+  vars.durationMs = payload.durationMs != null ? String(payload.durationMs) : "";
+  vars.agentsSpawned = payload.agentsSpawned != null ? String(payload.agentsSpawned) : "";
+  vars.agentsCompleted = payload.agentsCompleted != null ? String(payload.agentsCompleted) : "";
+  vars.reason = payload.reason || "";
+  vars.activeMode = payload.activeMode || "";
+  vars.iteration = payload.iteration != null ? String(payload.iteration) : "";
+  vars.maxIterations = payload.maxIterations != null ? String(payload.maxIterations) : "";
+  vars.question = payload.question || "";
+  vars.incompleteTasks = payload.incompleteTasks != null ? String(payload.incompleteTasks) : "";
+  vars.agentName = payload.agentName || "";
+  vars.agentType = payload.agentType || "";
+  vars.tmuxTail = payload.tmuxTail || "";
+  vars.tmuxPaneId = payload.tmuxPaneId || "";
+  vars.replyChannel = payload.replyChannel || "";
+  vars.replyTarget = payload.replyTarget || "";
+  vars.replyThread = payload.replyThread || "";
+  vars.duration = formatDuration3(payload.durationMs);
+  vars.time = payload.timestamp ? new Date(payload.timestamp).toLocaleTimeString() : "";
+  vars.modesDisplay = payload.modesUsed && payload.modesUsed.length > 0 ? payload.modesUsed.join(", ") : "";
+  vars.iterationDisplay = payload.iteration != null && payload.maxIterations != null ? `${payload.iteration}/${payload.maxIterations}` : "";
+  vars.agentDisplay = payload.agentsSpawned != null ? `${payload.agentsCompleted ?? 0}/${payload.agentsSpawned} completed` : "";
+  vars.projectDisplay = getProjectDisplay(payload);
+  vars.footer = buildFooterText(payload);
+  vars.tmuxTailBlock = buildTmuxTailBlock(payload);
+  vars.reasonDisplay = payload.reason || "unknown";
+  return vars;
+}
+function processConditionals(template, vars) {
+  return template.replace(
+    /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
+    (_match, varName, content) => {
+      const value = vars[varName] || "";
+      return value ? content : "";
+    }
+  );
+}
+function replaceVariables(template, vars) {
+  return template.replace(
+    /\{\{(\w+)\}\}/g,
+    (_match, varName) => vars[varName] ?? ""
+  );
+}
+function postProcess(text) {
+  return text.trimEnd();
+}
+function interpolateTemplate(template, payload) {
+  const vars = computeTemplateVariables(payload);
+  let result = processConditionals(template, vars);
+  result = replaceVariables(result, vars);
+  result = postProcess(result);
+  return result;
+}
+var import_path78;
+var init_template_engine = __esm({
+  "src/notifications/template-engine.ts"() {
+    "use strict";
+    init_formatter();
+    import_path78 = require("path");
+  }
+});
+
+// src/notifications/dispatcher.ts
+function composeDiscordContent(message, mention) {
+  const mentionParsed = parseMentionAllowedMentions(mention);
+  const allowed_mentions = {
+    parse: [],
+    // disable implicit @everyone/@here
+    users: mentionParsed.users,
+    roles: mentionParsed.roles
+  };
+  let content;
+  if (mention) {
+    const prefix = `${mention}
+`;
+    const maxBody = DISCORD_MAX_CONTENT_LENGTH - prefix.length;
+    const body = message.length > maxBody ? message.slice(0, maxBody - 1) + "\u2026" : message;
+    content = `${prefix}${body}`;
+  } else {
+    content = message.length > DISCORD_MAX_CONTENT_LENGTH ? message.slice(0, DISCORD_MAX_CONTENT_LENGTH - 1) + "\u2026" : message;
+  }
+  return { content, allowed_mentions };
+}
+function validateDiscordUrl(webhookUrl) {
+  try {
+    const url = new URL(webhookUrl);
+    const allowedHosts = ["discord.com", "discordapp.com"];
+    if (!allowedHosts.some(
+      (host) => url.hostname === host || url.hostname.endsWith(`.${host}`)
+    )) {
+      return false;
+    }
+    return url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+function validateTelegramToken(token) {
+  return /^[0-9]+:[A-Za-z0-9_-]+$/.test(token);
+}
+function validateSlackUrl(webhookUrl) {
+  try {
+    const url = new URL(webhookUrl);
+    return url.protocol === "https:" && (url.hostname === "hooks.slack.com" || url.hostname.endsWith(".hooks.slack.com"));
+  } catch {
+    return false;
+  }
+}
+function validateWebhookUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+async function sendDiscord2(config2, payload) {
+  if (!config2.enabled || !config2.webhookUrl) {
+    return { platform: "discord", success: false, error: "Not configured" };
+  }
+  if (!validateDiscordUrl(config2.webhookUrl)) {
+    return {
+      platform: "discord",
+      success: false,
+      error: "Invalid webhook URL"
+    };
+  }
+  try {
+    const { content, allowed_mentions } = composeDiscordContent(
+      payload.message,
+      config2.mention
+    );
+    const body = { content, allowed_mentions };
+    if (config2.username) {
+      body.username = config2.username;
+    }
+    const response = await fetch(config2.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      return {
+        platform: "discord",
+        success: false,
+        error: `HTTP ${response.status}`
+      };
+    }
+    return { platform: "discord", success: true };
+  } catch (error2) {
+    return {
+      platform: "discord",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+async function sendDiscordBot(config2, payload) {
+  if (!config2.enabled) {
+    return { platform: "discord-bot", success: false, error: "Not enabled" };
+  }
+  const botToken = config2.botToken;
+  const channelId = config2.channelId;
+  if (!botToken || !channelId) {
+    return {
+      platform: "discord-bot",
+      success: false,
+      error: "Missing botToken or channelId"
+    };
+  }
+  try {
+    const { content, allowed_mentions } = composeDiscordContent(
+      payload.message,
+      config2.mention
+    );
+    const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bot ${botToken}`
+      },
+      body: JSON.stringify({ content, allowed_mentions }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      return {
+        platform: "discord-bot",
+        success: false,
+        error: `HTTP ${response.status}`
+      };
+    }
+    let messageId;
+    try {
+      const data = await response.json();
+      messageId = data?.id;
+    } catch {
+    }
+    return { platform: "discord-bot", success: true, messageId };
+  } catch (error2) {
+    return {
+      platform: "discord-bot",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+async function sendTelegram2(config2, payload) {
+  if (!config2.enabled || !config2.botToken || !config2.chatId) {
+    return { platform: "telegram", success: false, error: "Not configured" };
+  }
+  if (!validateTelegramToken(config2.botToken)) {
+    return {
+      platform: "telegram",
+      success: false,
+      error: "Invalid bot token format"
+    };
+  }
+  try {
+    const body = JSON.stringify({
+      chat_id: config2.chatId,
+      text: payload.message,
+      parse_mode: config2.parseMode || "Markdown"
+    });
+    const result = await new Promise((resolve19) => {
+      const req = (0, import_https2.request)(
+        {
+          hostname: "api.telegram.org",
+          path: `/bot${config2.botToken}/sendMessage`,
+          method: "POST",
+          family: 4,
+          // Force IPv4 - fetch/undici has IPv6 issues on some systems
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body)
+          },
+          timeout: SEND_TIMEOUT_MS
+        },
+        (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => {
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              let messageId;
+              try {
+                const body2 = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+                if (body2?.result?.message_id !== void 0) {
+                  messageId = String(body2.result.message_id);
+                }
+              } catch {
+              }
+              resolve19({ platform: "telegram", success: true, messageId });
+            } else {
+              resolve19({
+                platform: "telegram",
+                success: false,
+                error: `HTTP ${res.statusCode}`
+              });
+            }
+          });
+        }
+      );
+      req.on("error", (e) => {
+        resolve19({ platform: "telegram", success: false, error: e.message });
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve19({
+          platform: "telegram",
+          success: false,
+          error: "Request timeout"
+        });
+      });
+      req.write(body);
+      req.end();
+    });
+    return result;
+  } catch (error2) {
+    return {
+      platform: "telegram",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+function composeSlackText(message, mention) {
+  const validatedMention = validateSlackMention(mention);
+  if (validatedMention) {
+    return `${validatedMention}
+${message}`;
+  }
+  return message;
+}
+async function sendSlack(config2, payload) {
+  if (!config2.enabled || !config2.webhookUrl) {
+    return { platform: "slack", success: false, error: "Not configured" };
+  }
+  if (!validateSlackUrl(config2.webhookUrl)) {
+    return { platform: "slack", success: false, error: "Invalid webhook URL" };
+  }
+  try {
+    const text = composeSlackText(payload.message, config2.mention);
+    const body = { text };
+    const validatedChannel = validateSlackChannel(config2.channel);
+    if (validatedChannel) {
+      body.channel = validatedChannel;
+    }
+    const validatedUsername = validateSlackUsername(config2.username);
+    if (validatedUsername) {
+      body.username = validatedUsername;
+    }
+    const response = await fetch(config2.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      return {
+        platform: "slack",
+        success: false,
+        error: `HTTP ${response.status}`
+      };
+    }
+    return { platform: "slack", success: true };
+  } catch (error2) {
+    return {
+      platform: "slack",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+async function sendSlackBot(config2, payload) {
+  if (!config2.enabled) {
+    return { platform: "slack-bot", success: false, error: "Not enabled" };
+  }
+  const botToken = config2.botToken;
+  const channelId = config2.channelId;
+  if (!botToken || !channelId) {
+    return {
+      platform: "slack-bot",
+      success: false,
+      error: "Missing botToken or channelId"
+    };
+  }
+  try {
+    const text = composeSlackText(payload.message, config2.mention);
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${botToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ channel: channelId, text }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      return {
+        platform: "slack-bot",
+        success: false,
+        error: `HTTP ${response.status}`
+      };
+    }
+    const data = await response.json();
+    if (!data.ok) {
+      return {
+        platform: "slack-bot",
+        success: false,
+        error: data.error || "Slack API error"
+      };
+    }
+    return { platform: "slack-bot", success: true, messageId: data.ts };
+  } catch (error2) {
+    return {
+      platform: "slack-bot",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+async function sendWebhook(config2, payload) {
+  if (!config2.enabled || !config2.url) {
+    return { platform: "webhook", success: false, error: "Not configured" };
+  }
+  if (!validateWebhookUrl(config2.url)) {
+    return {
+      platform: "webhook",
+      success: false,
+      error: "Invalid URL (HTTPS required)"
+    };
+  }
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      ...config2.headers
+    };
+    const response = await fetch(config2.url, {
+      method: config2.method || "POST",
+      headers,
+      body: JSON.stringify({
+        event: payload.event,
+        session_id: payload.sessionId,
+        message: payload.message,
+        timestamp: payload.timestamp,
+        tmux_session: payload.tmuxSession,
+        project_name: payload.projectName,
+        project_path: payload.projectPath,
+        modes_used: payload.modesUsed,
+        duration_ms: payload.durationMs,
+        reason: payload.reason,
+        active_mode: payload.activeMode,
+        question: payload.question,
+        ...payload.replyChannel && { channel: payload.replyChannel },
+        ...payload.replyTarget && { to: payload.replyTarget },
+        ...payload.replyThread && { thread_id: payload.replyThread }
+      }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      return {
+        platform: "webhook",
+        success: false,
+        error: `HTTP ${response.status}`
+      };
+    }
+    return { platform: "webhook", success: true };
+  } catch (error2) {
+    return {
+      platform: "webhook",
+      success: false,
+      error: error2 instanceof Error ? error2.message : "Unknown error"
+    };
+  }
+}
+function getEffectivePlatformConfig(platform, config2, event) {
+  const topLevel = config2[platform];
+  const eventConfig = config2.events?.[event];
+  const eventPlatform = eventConfig?.[platform];
+  if (eventPlatform && typeof eventPlatform === "object" && "enabled" in eventPlatform) {
+    if (topLevel && typeof topLevel === "object") {
+      return { ...topLevel, ...eventPlatform };
+    }
+    return eventPlatform;
+  }
+  return topLevel;
+}
+async function dispatchNotifications(config2, event, payload, platformMessages) {
+  const promises = [];
+  const payloadFor = (platform) => platformMessages?.has(platform) ? { ...payload, message: platformMessages.get(platform) } : payload;
+  const discordConfig = getEffectivePlatformConfig(
+    "discord",
+    config2,
+    event
+  );
+  if (discordConfig?.enabled) {
+    promises.push(sendDiscord2(discordConfig, payloadFor("discord")));
+  }
+  const telegramConfig = getEffectivePlatformConfig(
+    "telegram",
+    config2,
+    event
+  );
+  if (telegramConfig?.enabled) {
+    promises.push(sendTelegram2(telegramConfig, payloadFor("telegram")));
+  }
+  const slackConfig = getEffectivePlatformConfig(
+    "slack",
+    config2,
+    event
+  );
+  if (slackConfig?.enabled) {
+    promises.push(sendSlack(slackConfig, payloadFor("slack")));
+  }
+  const webhookConfig = getEffectivePlatformConfig(
+    "webhook",
+    config2,
+    event
+  );
+  if (webhookConfig?.enabled) {
+    promises.push(sendWebhook(webhookConfig, payloadFor("webhook")));
+  }
+  const discordBotConfig = getEffectivePlatformConfig(
+    "discord-bot",
+    config2,
+    event
+  );
+  if (discordBotConfig?.enabled) {
+    promises.push(sendDiscordBot(discordBotConfig, payloadFor("discord-bot")));
+  }
+  const slackBotConfig = getEffectivePlatformConfig(
+    "slack-bot",
+    config2,
+    event
+  );
+  if (slackBotConfig?.enabled) {
+    promises.push(sendSlackBot(slackBotConfig, payloadFor("slack-bot")));
+  }
+  if (promises.length === 0) {
+    return { event, results: [], anySuccess: false };
+  }
+  let timer;
+  try {
+    const results = await Promise.race([
+      Promise.allSettled(promises).then(
+        (settled) => settled.map(
+          (s) => s.status === "fulfilled" ? s.value : {
+            platform: "unknown",
+            success: false,
+            error: String(s.reason)
+          }
+        )
+      ),
+      new Promise((resolve19) => {
+        timer = setTimeout(
+          () => resolve19([
+            {
+              platform: "unknown",
+              success: false,
+              error: "Dispatch timeout"
+            }
+          ]),
+          DISPATCH_TIMEOUT_MS
+        );
+      })
+    ]);
+    return {
+      event,
+      results,
+      anySuccess: results.some((r) => r.success)
+    };
+  } catch (error2) {
+    return {
+      event,
+      results: [
+        {
+          platform: "unknown",
+          success: false,
+          error: String(error2)
+        }
+      ],
+      anySuccess: false
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+var import_https2, import_child_process21, import_util8, SEND_TIMEOUT_MS, DISPATCH_TIMEOUT_MS, DISCORD_MAX_CONTENT_LENGTH, execFileAsync4;
+var init_dispatcher2 = __esm({
+  "src/notifications/dispatcher.ts"() {
+    "use strict";
+    import_https2 = require("https");
+    init_config();
+    import_child_process21 = require("child_process");
+    import_util8 = require("util");
+    init_template_engine();
+    init_config();
+    SEND_TIMEOUT_MS = 1e4;
+    DISPATCH_TIMEOUT_MS = 15e3;
+    DISCORD_MAX_CONTENT_LENGTH = 2e3;
+    execFileAsync4 = (0, import_util8.promisify)(import_child_process21.execFile);
+  }
+});
+
+// src/notifications/presets.ts
+var CUSTOM_INTEGRATION_PRESETS;
+var init_presets = __esm({
+  "src/notifications/presets.ts"() {
+    "use strict";
+    CUSTOM_INTEGRATION_PRESETS = {
+      openclaw: {
+        name: "OpenClaw Gateway",
+        description: "Wake external automations and AI agents on hook events",
+        type: "webhook",
+        defaultConfig: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          bodyTemplate: JSON.stringify({
+            event: "{{event}}",
+            instruction: "Session {{sessionId}} {{event}} for project {{projectName}}",
+            timestamp: "{{timestamp}}",
+            context: {
+              projectPath: "{{projectPath}}",
+              projectName: "{{projectName}}",
+              sessionId: "{{sessionId}}"
+            }
+          }, null, 2),
+          timeout: 1e4
+        },
+        suggestedEvents: ["session-start", "session-end", "stop"],
+        documentationUrl: "https://github.com/your-org/openclaw"
+      },
+      n8n: {
+        name: "n8n Webhook",
+        description: "Trigger n8n workflows on OMC events",
+        type: "webhook",
+        defaultConfig: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          bodyTemplate: JSON.stringify({
+            event: "{{event}}",
+            sessionId: "{{sessionId}}",
+            projectName: "{{projectName}}",
+            projectPath: "{{projectPath}}",
+            timestamp: "{{timestamp}}",
+            tmuxSession: "{{tmuxSession}}"
+          }, null, 2),
+          timeout: 1e4
+        },
+        suggestedEvents: ["session-end", "ask-user-question"],
+        documentationUrl: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/"
+      },
+      clawdbot: {
+        name: "ClawdBot",
+        description: "Send notifications to ClawdBot webhook",
+        type: "webhook",
+        defaultConfig: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          bodyTemplate: JSON.stringify({
+            type: "{{event}}",
+            session: "{{sessionId}}",
+            project: "{{projectName}}",
+            timestamp: "{{timestamp}}"
+          }, null, 2),
+          timeout: 5e3
+        },
+        suggestedEvents: ["session-end", "session-start"],
+        documentationUrl: "https://github.com/your-org/clawdbot"
+      },
+      "generic-webhook": {
+        name: "Generic Webhook",
+        description: "Custom webhook integration",
+        type: "webhook",
+        defaultConfig: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          bodyTemplate: JSON.stringify({
+            event: "{{event}}",
+            sessionId: "{{sessionId}}",
+            projectName: "{{projectName}}",
+            timestamp: "{{timestamp}}"
+          }, null, 2),
+          timeout: 1e4
+        },
+        suggestedEvents: ["session-end"]
+      },
+      "generic-cli": {
+        name: "Generic CLI Command",
+        description: "Execute custom command on events",
+        type: "cli",
+        defaultConfig: {
+          command: "curl",
+          args: ["-X", "POST", "-d", "event={{event}}&session={{sessionId}}", "https://example.com/webhook"],
+          timeout: 5e3
+        },
+        suggestedEvents: ["session-end"]
+      }
+    };
+  }
+});
+
+// src/notifications/template-variables.ts
+var init_template_variables = __esm({
+  "src/notifications/template-variables.ts"() {
+    "use strict";
+  }
+});
+
+// src/notifications/index.ts
+async function notify(event, data) {
+  if (process.env.OMC_NOTIFY === "0") {
+    return null;
+  }
+  try {
+    const config2 = getNotificationConfig(data.profileName);
+    if (!config2 || !isEventEnabled(config2, event)) {
+      return null;
+    }
+    const verbosity = getVerbosity(config2);
+    if (!isEventAllowedByVerbosity(verbosity, event)) {
+      return null;
+    }
+    const { getCurrentTmuxPaneId: getCurrentTmuxPaneId2 } = await Promise.resolve().then(() => (init_tmux(), tmux_exports));
+    const payload = {
+      event,
+      sessionId: data.sessionId,
+      message: "",
+      // Will be formatted below
+      timestamp: data.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
+      tmuxSession: data.tmuxSession ?? getCurrentTmuxSession() ?? void 0,
+      tmuxPaneId: data.tmuxPaneId ?? getCurrentTmuxPaneId2() ?? void 0,
+      projectPath: data.projectPath,
+      projectName: data.projectName || (data.projectPath ? (0, import_path79.basename)(data.projectPath) : void 0),
+      modesUsed: data.modesUsed,
+      contextSummary: data.contextSummary,
+      durationMs: data.durationMs,
+      agentsSpawned: data.agentsSpawned,
+      agentsCompleted: data.agentsCompleted,
+      reason: data.reason,
+      activeMode: data.activeMode,
+      iteration: data.iteration,
+      maxIterations: data.maxIterations,
+      question: data.question,
+      incompleteTasks: data.incompleteTasks,
+      agentName: data.agentName,
+      agentType: data.agentType,
+      replyChannel: data.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? void 0,
+      replyTarget: data.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? void 0,
+      replyThread: data.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? void 0
+    };
+    if (shouldIncludeTmuxTail(verbosity) && payload.tmuxPaneId && (event === "session-idle" || event === "session-end" || event === "session-stop")) {
+      try {
+        const { capturePaneContent: capturePaneContent3 } = await Promise.resolve().then(() => (init_tmux_detector(), tmux_detector_exports));
+        const { getNewPaneTail: getNewPaneTail2 } = await Promise.resolve().then(() => (init_pane_fresh_capture(), pane_fresh_capture_exports));
+        const tailLines = getTmuxTailLines(config2);
+        const rawTail = payload.projectPath ? getNewPaneTail2(payload.tmuxPaneId, (0, import_path79.join)(payload.projectPath, ".omc", "state"), tailLines) : capturePaneContent3(payload.tmuxPaneId, tailLines);
+        if (rawTail) {
+          payload.tmuxTail = rawTail;
+          payload.maxTailLines = tailLines;
+        }
+      } catch {
+      }
+    }
+    const defaultMessage = data.message || formatNotification(payload);
+    payload.message = defaultMessage;
+    let platformMessages;
+    if (!data.message) {
+      const hookConfig = getHookConfig();
+      if (hookConfig?.enabled) {
+        const platforms = [
+          "discord",
+          "discord-bot",
+          "telegram",
+          "slack",
+          "slack-bot",
+          "webhook"
+        ];
+        const map = /* @__PURE__ */ new Map();
+        for (const platform of platforms) {
+          const template = resolveEventTemplate(hookConfig, event, platform);
+          if (template) {
+            const resolved = interpolateTemplate(template, payload);
+            if (resolved !== defaultMessage) {
+              map.set(platform, resolved);
+            }
+          }
+        }
+        if (map.size > 0) {
+          platformMessages = map;
+        }
+      }
+    }
+    const result = await dispatchNotifications(
+      config2,
+      event,
+      payload,
+      platformMessages
+    );
+    if (result.anySuccess && payload.tmuxPaneId) {
+      try {
+        const { registerMessage: registerMessage2 } = await Promise.resolve().then(() => (init_session_registry(), session_registry_exports));
+        for (const r of result.results) {
+          if (r.success && r.messageId && (r.platform === "discord-bot" || r.platform === "telegram" || r.platform === "slack-bot")) {
+            registerMessage2({
+              platform: r.platform,
+              messageId: r.messageId,
+              sessionId: payload.sessionId,
+              tmuxPaneId: payload.tmuxPaneId,
+              tmuxSessionName: payload.tmuxSession || "",
+              event: payload.event,
+              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+              projectPath: payload.projectPath
+            });
+          }
+        }
+      } catch {
+      }
+    }
+    return result;
+  } catch (error2) {
+    console.error(
+      "[notifications] Error:",
+      error2 instanceof Error ? error2.message : error2
+    );
+    return null;
+  }
+}
+var import_path79;
+var init_notifications = __esm({
+  "src/notifications/index.ts"() {
+    "use strict";
+    init_dispatcher2();
+    init_formatter();
+    init_tmux();
+    init_config();
+    init_hook_config();
+    init_template_engine();
+    init_slack_socket();
+    init_redact();
+    init_config();
+    init_formatter();
+    init_dispatcher2();
+    init_tmux();
+    init_hook_config();
+    init_template_engine();
+    import_path79 = require("path");
+    init_dispatcher2();
+    init_config();
+    init_presets();
+    init_template_variables();
+    init_validation2();
   }
 });
 
@@ -28733,7 +28566,7 @@ function resolveCliBinaryPath(binary) {
   const cached2 = resolvedPathCache.get(binary);
   if (cached2) return cached2;
   const finder = process.platform === "win32" ? "where" : "which";
-  const result = (0, import_child_process21.spawnSync)(finder, [binary], {
+  const result = (0, import_child_process22.spawnSync)(finder, [binary], {
     timeout: 5e3,
     env: process.env
   });
@@ -28783,7 +28616,7 @@ function resolveBinaryPath(binary) {
   if ((0, import_path84.isAbsolute)(binary)) return binary;
   try {
     const resolver = process.platform === "win32" ? "where" : "which";
-    const result = (0, import_child_process21.spawnSync)(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
+    const result = (0, import_child_process22.spawnSync)(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
     if (result.status !== 0) return binary;
     const lines = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
     const firstPath = lines[0];
@@ -28799,10 +28632,10 @@ function isCliAvailable(agentType) {
     const resolvedBinary = resolveBinaryPath(contract.binary);
     if (process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary)) {
       const comspec = process.env.COMSPEC || "cmd.exe";
-      const result2 = (0, import_child_process21.spawnSync)(comspec, ["/d", "/s", "/c", `"${resolvedBinary}" --version`], { timeout: 5e3 });
+      const result2 = (0, import_child_process22.spawnSync)(comspec, ["/d", "/s", "/c", `"${resolvedBinary}" --version`], { timeout: 5e3 });
       return result2.status === 0;
     }
-    const result = (0, import_child_process21.spawnSync)(resolvedBinary, ["--version"], {
+    const result = (0, import_child_process22.spawnSync)(resolvedBinary, ["--version"], {
       timeout: 5e3,
       shell: process.platform === "win32"
     });
@@ -28878,11 +28711,11 @@ function getPromptModeArgs(agentType, instruction) {
   }
   return [instruction];
 }
-var import_child_process21, import_path84, resolvedPathCache, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST;
+var import_child_process22, import_path84, resolvedPathCache, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST;
 var init_model_contract = __esm({
   "src/team/model-contract.ts"() {
     "use strict";
-    import_child_process21 = require("child_process");
+    import_child_process22 = require("child_process");
     import_path84 = require("path");
     init_team_name();
     init_delegation_enforcer();
@@ -29465,7 +29298,16 @@ function paneHasTrustPrompt(captured) {
   const hasChoices = tail.some((l) => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
   return hasQuestion && hasChoices;
 }
+function paneHasClaudeStartupBanner(captured) {
+  const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trim()).filter((line) => line.length > 0).slice(-20);
+  const lastPromptIndex = lines.findLastIndex((line) => /^\s*[›>❯]\s*/u.test(line));
+  const lastStartupBannerIndex = lines.findLastIndex(
+    (line) => /bypass\s+permissions\s+on/i.test(line) || /shift\+tab\s+to\s+cycle/i.test(line) || /^⏵⏵\s+/.test(line)
+  );
+  return lastStartupBannerIndex >= 0 && lastStartupBannerIndex > lastPromptIndex;
+}
 function paneIsBootstrapping(captured) {
+  if (paneHasClaudeStartupBanner(captured)) return true;
   const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trim()).filter((line) => line.length > 0);
   return lines.some(
     (line) => /\b(loading|initializing|starting up)\b/i.test(line) || /\bmodel:\s*loading\b/i.test(line) || /\bconnecting\s+to\b/i.test(line)
@@ -29544,6 +29386,9 @@ async function sendToWorker(_sessionName, paneId, message) {
       return false;
     }
     const initialCapture = await capturePaneAsync(paneId);
+    if (paneHasClaudeStartupBanner(initialCapture)) {
+      return false;
+    }
     const paneBusy = paneHasActiveTask(initialCapture);
     if (paneHasTrustPrompt(initialCapture)) {
       await sendKey("C-m");
@@ -31711,7 +31556,7 @@ function startFallbackPoller(worktreePath, workerName2, opts) {
     if (stopped) return;
     if (isHookPaused(worktreePath)) return;
     const cmd = buildHookCommand2(workerName2);
-    (0, import_child_process22.exec)(cmd, { cwd: worktreePath }, (_err) => {
+    (0, import_child_process23.exec)(cmd, { cwd: worktreePath }, (_err) => {
     });
   };
   const scheduleDebounce = () => {
@@ -31770,14 +31615,14 @@ async function uninstallCommitCadence(ctx) {
   } catch {
   }
 }
-var import_fs72, import_promises14, import_path90, import_child_process22, SENTINEL_FILENAME, HOOK_MATCHER, DEFAULT_POLL_DEBOUNCE_MS, WORKER_NAME_RE;
+var import_fs72, import_promises14, import_path90, import_child_process23, SENTINEL_FILENAME, HOOK_MATCHER, DEFAULT_POLL_DEBOUNCE_MS, WORKER_NAME_RE;
 var init_worker_commit_cadence = __esm({
   "src/team/worker-commit-cadence.ts"() {
     "use strict";
     import_fs72 = require("fs");
     import_promises14 = require("fs/promises");
     import_path90 = require("path");
-    import_child_process22 = require("child_process");
+    import_child_process23 = require("child_process");
     SENTINEL_FILENAME = ".hook-paused";
     HOOK_MATCHER = "Write|Edit|MultiEdit";
     DEFAULT_POLL_DEBOUNCE_MS = 3e3;
@@ -32508,7 +32353,7 @@ async function captureWorkerPane(paneId) {
     return "";
   }
 }
-function isFreshTimestamp(value, maxAgeMs = MONITOR_SIGNAL_STALE_MS) {
+function isFreshTimestamp2(value, maxAgeMs = MONITOR_SIGNAL_STALE_MS) {
   if (!value) return false;
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return false;
@@ -32570,7 +32415,7 @@ function buildV2TaskInstruction(teamName, workerName2, task, taskId, cliOutputCo
   ].join("\n");
 }
 async function notifyStartupInbox(sessionName2, paneId, message) {
-  const notified = await notifyPaneWithRetry(sessionName2, paneId, message);
+  const notified = await notifyPaneWithRetry(sessionName2, paneId, message, 1);
   return notified ? { ok: true, transport: "tmux_send_keys", reason: "worker_pane_notified" } : { ok: false, transport: "tmux_send_keys", reason: "worker_notify_failed" };
 }
 async function notifyPaneWithRetry(sessionName2, paneId, message, maxAttempts = 6, retryDelayMs = 350) {
@@ -32730,7 +32575,7 @@ async function spawnV2Worker(opts) {
     triggerMessage: inboxTriggerMessage,
     cwd: opts.cwd,
     transportPreference: usePromptMode ? "prompt_stdin" : "transport_direct",
-    fallbackAllowed: false,
+    fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === "hook_preferred_with_fallback",
     inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}`,
     notify: async (_target, triggerMessage) => {
       if (usePromptMode) {
@@ -33517,8 +33362,8 @@ async function monitorTeamV2(teamName, cwd2) {
       }
     }
     const paneSuggestsIdle = alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
-    const statusFresh = isFreshTimestamp(status.updated_at);
-    const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
+    const statusFresh = isFreshTimestamp2(status.updated_at);
+    const heartbeatFresh = isFreshTimestamp2(heartbeat?.last_turn_at);
     const hasWorkStartEvidence = expectedTaskId !== "" && hasWorkerStatusProgress(status, expectedTaskId);
     const missingDependencyIds = outstandingTask ? getMissingDependencyIds(outstandingTask, taskById) : [];
     let stallReason = null;
@@ -34606,7 +34451,8 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     const notified = await notifyPaneWithRetry2(
       runtime.sessionName,
       paneId,
-      generateTriggerMessage(runtime.teamName, workerNameValue)
+      generateTriggerMessage(runtime.teamName, workerNameValue),
+      1
     );
     if (!notified) {
       await killWorkerPane(runtime, workerNameValue, paneId);
@@ -36344,7 +36190,7 @@ function isCodeSimplifierEnabled() {
 }
 function getModifiedFiles(cwd2, extensions = DEFAULT_EXTENSIONS, maxFiles = DEFAULT_MAX_FILES) {
   try {
-    const output = (0, import_child_process23.execSync)("git diff HEAD --name-only", {
+    const output = (0, import_child_process24.execSync)("git diff HEAD --name-only", {
       cwd: cwd2,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -36406,13 +36252,13 @@ function processCodeSimplifier(cwd2, stateDir) {
     message: buildSimplifierMessage(files)
   };
 }
-var import_fs80, import_path97, import_child_process23, DEFAULT_EXTENSIONS, DEFAULT_MAX_FILES, TRIGGER_MARKER_FILENAME;
+var import_fs80, import_path97, import_child_process24, DEFAULT_EXTENSIONS, DEFAULT_MAX_FILES, TRIGGER_MARKER_FILENAME;
 var init_code_simplifier = __esm({
   "src/hooks/code-simplifier/index.ts"() {
     "use strict";
     import_fs80 = require("fs");
     import_path97 = require("path");
-    import_child_process23 = require("child_process");
+    import_child_process24 = require("child_process");
     init_paths();
     DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"];
     DEFAULT_MAX_FILES = 10;
@@ -42331,7 +42177,7 @@ function isCredentialExpired(creds) {
 function readKeychainCredential(serviceName, account) {
   try {
     const args = account ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"] : ["find-generic-password", "-s", serviceName, "-w"];
-    const result = (0, import_child_process27.execFileSync)("/usr/bin/security", args, {
+    const result = (0, import_child_process28.execFileSync)("/usr/bin/security", args, {
       encoding: "utf-8",
       timeout: 2e3,
       stdio: ["pipe", "pipe", "pipe"]
@@ -42967,14 +42813,14 @@ async function getUsage() {
     return { rateLimits: null, error: "network" };
   }
 }
-var import_fs96, import_path115, import_child_process27, import_crypto18, import_os18, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK;
+var import_fs96, import_path115, import_child_process28, import_crypto18, import_os18, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
     import_fs96 = require("fs");
     init_config_dir();
     import_path115 = require("path");
-    import_child_process27 = require("child_process");
+    import_child_process28 = require("child_process");
     import_crypto18 = require("crypto");
     import_os18 = require("os");
     import_https3 = __toESM(require("https"), 1);
@@ -43941,7 +43787,7 @@ function isCacheValid2(cache) {
 function spawnWithTimeout(cmd, timeoutMs) {
   return new Promise((resolve19, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
-    const child = (0, import_child_process34.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = (0, import_child_process35.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -44029,11 +43875,11 @@ async function executeCustomProvider(config2) {
     return { buckets: [], stale: false, error: "command failed" };
   }
 }
-var import_child_process34, import_fs107, import_path126, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
+var import_child_process35, import_fs107, import_path126, CACHE_TTL_MS2, DEFAULT_TIMEOUT_MS2;
 var init_custom_rate_provider = __esm({
   "src/hud/custom-rate-provider.ts"() {
     "use strict";
-    import_child_process34 = require("child_process");
+    import_child_process35 = require("child_process");
     import_fs107 = require("fs");
     import_path126 = require("path");
     init_config_dir();
@@ -46053,7 +45899,7 @@ function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
     return;
   }
   try {
-    const child = (0, import_child_process35.spawn)(
+    const child = (0, import_child_process36.spawn)(
       "node",
       [scriptPath, transcriptPath, stateDir, sessionId],
       {
@@ -46323,7 +46169,7 @@ async function main2(watchMode = false, skipInit = false) {
     }
   }
 }
-var import_fs109, import_promises19, import_path128, import_os22, import_child_process35, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs109, import_promises19, import_path128, import_os22, import_child_process36, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -46344,7 +46190,7 @@ var init_hud = __esm({
     import_promises19 = require("fs/promises");
     import_path128 = require("path");
     import_os22 = require("os");
-    import_child_process35 = require("child_process");
+    import_child_process36 = require("child_process");
     import_url16 = require("url");
     init_worktree_paths();
     init_config_dir();
@@ -80446,6 +80292,10 @@ var KEYWORD_PATTERNS = {
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
 };
+var OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
+var KEYWORD_SKIP_PREDICATES = {
+  "deep-interview": (text) => OUROBOROS_BRAND_AT_START.test(text)
+};
 var KEYWORD_PRIORITY = [
   "cancel",
   "ralph",
@@ -80834,6 +80684,10 @@ function detectKeywordsWithType(text, _agentName) {
       continue;
     }
     const pattern = KEYWORD_PATTERNS[type];
+    const skipPredicate = KEYWORD_SKIP_PREDICATES[type];
+    if (skipPredicate && skipPredicate(cleanedText)) {
+      continue;
+    }
     const match = type === "ralplan" ? findActionableRalplanMatch(cleanedText, pattern) : findActionableKeywordMatch(cleanedText, pattern);
     if (match) {
       detected.push({
@@ -80973,11 +80827,47 @@ init_mode_state_io();
 init_mode_names();
 init_omc_cli_rendering();
 init_swallowed_error();
+
+// src/hooks/background-notifications.ts
+var import_child_process17 = require("child_process");
+function dispatchNotificationInBackground(event, data) {
+  if (process.env.OMC_NOTIFY === "0") return;
+  let serializedEvent;
+  let serializedData;
+  try {
+    serializedEvent = JSON.stringify(event);
+    serializedData = JSON.stringify(data);
+  } catch {
+    return;
+  }
+  const notificationsModuleUrl = new URL(
+    "../notifications/index.js",
+    importMetaUrl
+  ).href;
+  const childSource = `import(${JSON.stringify(notificationsModuleUrl)})
+  .then(({ notify }) => notify(${serializedEvent}, ${serializedData}))
+  .catch(() => {});`;
+  try {
+    const child = (0, import_child_process17.spawn)(process.execPath, ["--input-type=module", "-e", childSource], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        OMC_HOOK_BACKGROUND_CHILD: "1"
+      }
+    });
+    child.unref();
+  } catch {
+  }
+}
+
+// src/hooks/bridge.ts
 init_team_canonical_state();
 
 // src/hooks/omc-orchestrator/index.ts
 var path14 = __toESM(require("path"), 1);
-var import_child_process17 = require("child_process");
+var import_child_process18 = require("child_process");
 init_worktree_paths();
 init_config_dir();
 init_paths();
@@ -81262,13 +81152,13 @@ function isDelegationToolName(toolName) {
 }
 function getGitDiffStats(directory) {
   try {
-    const output = (0, import_child_process17.execSync)("git diff --numstat HEAD", {
+    const output = (0, import_child_process18.execSync)("git diff --numstat HEAD", {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5e3
     }).trim();
     if (!output) return [];
-    const statusOutput = (0, import_child_process17.execSync)("git status --porcelain", {
+    const statusOutput = (0, import_child_process18.execSync)("git status --porcelain", {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5e3
@@ -82110,6 +82000,7 @@ var TEAM_STAGE_ALIASES = {
   fixing: "team-fix"
 };
 var BACKGROUND_AGENT_ID_PATTERN = /agentId:\s*([a-zA-Z0-9_-]+)/;
+var BACKGROUND_BASH_ID_PATTERN = /(?:background (?:bash )?(?:command|process|task).*?(?:id|ID)|bash_id|task_id)[:=]\s*([a-zA-Z0-9_-]+)/i;
 var TASK_OUTPUT_ID_PATTERN = /<task_id>([^<]+)<\/task_id>/i;
 var TASK_OUTPUT_STATUS_PATTERN = /<status>([^<]+)<\/status>/i;
 var SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
@@ -82314,6 +82205,19 @@ function extractAsyncAgentId(toolOutput) {
   }
   return toolOutput.match(BACKGROUND_AGENT_ID_PATTERN)?.[1];
 }
+function extractBackgroundBashId(toolOutput) {
+  if (typeof toolOutput !== "string") {
+    return void 0;
+  }
+  return toolOutput.match(BACKGROUND_BASH_ID_PATTERN)?.[1];
+}
+function bashLaunchIsBackgroundPending(toolOutput) {
+  if (typeof toolOutput !== "string") {
+    return false;
+  }
+  const normalized = toolOutput.toLowerCase();
+  return normalized.includes("running in the background") || normalized.includes("started in the background") || normalized.includes("background command") || normalized.includes("background process") || Boolean(extractBackgroundBashId(toolOutput));
+}
 function parseTaskOutputLifecycle(toolOutput) {
   if (typeof toolOutput !== "string") {
     return null;
@@ -82334,6 +82238,62 @@ function taskLaunchDidFail(toolOutput) {
   }
   const normalized = toolOutput.toLowerCase();
   return normalized.includes("error") || normalized.includes("failed");
+}
+function getSessionStateDir2(directory, sessionId) {
+  const stateDir = (0, import_path98.join)(getOmcRoot(directory), "state");
+  if (sessionId && SAFE_SESSION_ID_PATTERN.test(sessionId)) {
+    return (0, import_path98.join)(stateDir, "sessions", sessionId);
+  }
+  return stateDir;
+}
+function getScheduledWakeupStatePath(directory, sessionId) {
+  return (0, import_path98.join)(getSessionStateDir2(directory, sessionId), "scheduled-wakeup-state.json");
+}
+function parseWakeupDueAt(toolInput) {
+  if (!toolInput || typeof toolInput !== "object") {
+    return void 0;
+  }
+  const input = toolInput;
+  const absolute = input.due_at ?? input.wakeup_at ?? input.scheduled_for ?? input.deadline_at ?? input.at;
+  if (typeof absolute === "string") {
+    const parsed = new Date(absolute).getTime();
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  const delaySeconds = input.seconds ?? input.delay_seconds ?? input.delaySeconds;
+  if (typeof delaySeconds === "number" && Number.isFinite(delaySeconds)) {
+    return new Date(Date.now() + Math.max(0, delaySeconds) * 1e3).toISOString();
+  }
+  const delayMs = input.milliseconds ?? input.delay_ms ?? input.delayMs;
+  if (typeof delayMs === "number" && Number.isFinite(delayMs)) {
+    return new Date(Date.now() + Math.max(0, delayMs)).toISOString();
+  }
+  const delayMinutes = input.minutes ?? input.delay_minutes ?? input.delayMinutes;
+  if (typeof delayMinutes === "number" && Number.isFinite(delayMinutes)) {
+    return new Date(Date.now() + Math.max(0, delayMinutes) * 6e4).toISOString();
+  }
+  return void 0;
+}
+function recordScheduledWakeup(directory, sessionId, toolInput) {
+  try {
+    const statePath = getScheduledWakeupStatePath(directory, sessionId);
+    (0, import_fs81.mkdirSync)((0, import_path98.dirname)(statePath), { recursive: true });
+    (0, import_fs81.writeFileSync)(
+      statePath,
+      JSON.stringify(
+        {
+          active: true,
+          pending: true,
+          status: "pending",
+          session_id: sessionId,
+          created_at: (/* @__PURE__ */ new Date()).toISOString(),
+          due_at: parseWakeupDueAt(toolInput)
+        },
+        null,
+        2
+      )
+    );
+  } catch {
+  }
 }
 function getModeStatePaths(directory, modeName, sessionId) {
   const stateDir = (0, import_path98.join)(getOmcRoot(directory), "state");
@@ -83132,16 +83092,11 @@ async function processPersistentMode(input) {
         }
         if (shouldSendIdleNotification2(stateDir, sessionId, idleRepoState)) {
           recordIdleNotificationSent2(stateDir, sessionId, idleRepoState);
-          const logSessionIdleNotifyFailure = createSwallowedErrorLogger(
-            "hooks.bridge session-idle notification failed"
-          );
-          Promise.resolve().then(() => (init_notifications(), notifications_exports)).then(
-            ({ notify: notify2 }) => notify2("session-idle", {
-              sessionId,
-              projectPath: directory,
-              profileName: process.env.OMC_NOTIFY_PROFILE
-            }).catch(logSessionIdleNotifyFailure)
-          ).catch(logSessionIdleNotifyFailure);
+          dispatchNotificationInBackground("session-idle", {
+            sessionId,
+            projectPath: directory,
+            profileName: process.env.OMC_NOTIFY_PROFILE
+          });
         }
       }
     }
@@ -83202,16 +83157,11 @@ async function processSessionStart(input) {
   const { buildAgentsOverlay: buildAgentsOverlay2 } = await Promise.resolve().then(() => (init_agents_overlay(), agents_overlay_exports));
   initSilentAutoUpdate2();
   if (sessionId) {
-    const logSessionStartNotifyFailure = createSwallowedErrorLogger(
-      "hooks.bridge session-start notification failed"
-    );
-    Promise.resolve().then(() => (init_notifications(), notifications_exports)).then(
-      ({ notify: notify2 }) => notify2("session-start", {
-        sessionId,
-        projectPath: directory,
-        profileName: process.env.OMC_NOTIFY_PROFILE
-      }).catch(logSessionStartNotifyFailure)
-    ).catch(logSessionStartNotifyFailure);
+    dispatchNotificationInBackground("session-start", {
+      sessionId,
+      projectPath: directory,
+      profileName: process.env.OMC_NOTIFY_PROFILE
+    });
     _openclaw.wake("session-start", { sessionId, projectPath: directory });
   }
   if (sessionId) {
@@ -83420,17 +83370,12 @@ function dispatchAskUserQuestionNotification(sessionId, directory, toolInput) {
   const input = toolInput;
   const questions = input?.questions || [];
   const questionText = questions.map((q) => q.question || "").filter(Boolean).join("; ") || "User input requested";
-  const logAskUserQuestionNotifyFailure = createSwallowedErrorLogger(
-    "hooks.bridge ask-user-question notification failed"
-  );
-  Promise.resolve().then(() => (init_notifications(), notifications_exports)).then(
-    ({ notify: notify2 }) => notify2("ask-user-question", {
-      sessionId,
-      projectPath: directory,
-      question: questionText,
-      profileName: process.env.OMC_NOTIFY_PROFILE
-    }).catch(logAskUserQuestionNotifyFailure)
-  ).catch(logAskUserQuestionNotifyFailure);
+  dispatchNotificationInBackground("ask-user-question", {
+    sessionId,
+    projectPath: directory,
+    question: questionText,
+    profileName: process.env.OMC_NOTIFY_PROFILE
+  });
 }
 var _notify = {
   askUserQuestion: dispatchAskUserQuestionNotification
@@ -83607,18 +83552,13 @@ Command blocked: ${command}`
     const taskInput = input.toolInput;
     const agentType = taskInput?.subagent_type;
     const agentName = agentType?.includes(":") ? agentType.split(":").pop() : agentType;
-    const logAgentCallNotifyFailure = createSwallowedErrorLogger(
-      "hooks.bridge agent-call notification failed"
-    );
-    Promise.resolve().then(() => (init_notifications(), notifications_exports)).then(
-      ({ notify: notify2 }) => notify2("agent-call", {
-        sessionId: input.sessionId,
-        projectPath: directory,
-        agentName,
-        agentType,
-        profileName: process.env.OMC_NOTIFY_PROFILE
-      }).catch(logAgentCallNotifyFailure)
-    ).catch(logAgentCallNotifyFailure);
+    dispatchNotificationInBackground("agent-call", {
+      sessionId: input.sessionId,
+      projectPath: directory,
+      agentName,
+      agentType,
+      profileName: process.env.OMC_NOTIFY_PROFILE
+    });
   }
   if (input.toolName === "Bash") {
     const effectiveBashInput = modifiedToolInput ?? input.toolInput;
@@ -83663,6 +83603,22 @@ Command blocked: ${command}`
         input.sessionId
       );
     }
+  }
+  if (input.toolName === "Bash") {
+    const toolInput = modifiedToolInput ?? input.toolInput;
+    if (toolInput?.run_in_background === true && toolInput.command) {
+      const taskId = getHookToolUseId(input) ?? `bash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      addBackgroundTask(
+        taskId,
+        toolInput.command,
+        "bash",
+        directory,
+        input.sessionId
+      );
+    }
+  }
+  if ((input.toolName || "").toLowerCase() === "schedulewakeup") {
+    recordScheduledWakeup(directory, input.sessionId, input.toolInput);
   }
   if (input.toolName === "Edit" || input.toolName === "Write") {
     const toolInput = input.toolInput;
@@ -83801,6 +83757,40 @@ async function processPostToolUse(input) {
           agentType,
           input.sessionId
         );
+      }
+    }
+  }
+  if (input.toolName === "Bash") {
+    const toolInput = input.toolInput;
+    if (toolInput?.run_in_background === true) {
+      const toolUseId = getHookToolUseId(input);
+      const backgroundBashId = extractBackgroundBashId(input.toolOutput);
+      const command = toolInput.command;
+      if (backgroundBashId) {
+        if (toolUseId) {
+          remapBackgroundTaskId(toolUseId, backgroundBashId, directory, input.sessionId);
+        } else if (command) {
+          remapMostRecentMatchingBackgroundTaskId(
+            command,
+            backgroundBashId,
+            directory,
+            "bash",
+            input.sessionId
+          );
+        }
+      } else if (!bashLaunchIsBackgroundPending(input.toolOutput)) {
+        const failed = taskLaunchDidFail(input.toolOutput);
+        if (toolUseId) {
+          completeBackgroundTask(toolUseId, directory, failed, input.sessionId);
+        } else if (command) {
+          completeMostRecentMatchingBackgroundTask(
+            command,
+            directory,
+            failed,
+            "bash",
+            input.sessionId
+          );
+        }
       }
     }
   }
@@ -84249,7 +84239,7 @@ var import_path105 = require("path");
 init_config_dir();
 
 // src/hooks/auto-slash-command/live-data.ts
-var import_child_process24 = require("child_process");
+var import_child_process25 = require("child_process");
 var import_fs84 = require("fs");
 var import_path102 = require("path");
 var import_safe_regex = __toESM(require_safe_regex(), 1);
@@ -84288,14 +84278,17 @@ function parseSkillPipelineMetadata(frontmatter) {
   const nextSkill = normalizeSkillReference(frontmatter["next-skill"]);
   const nextSkillArgs = stripOptionalQuotes(frontmatter["next-skill-args"] ?? "").trim() || void 0;
   const handoff = stripOptionalQuotes(frontmatter.handoff ?? "").trim() || void 0;
-  if (steps.length === 0 && !nextSkill && !nextSkillArgs && !handoff) {
+  const handoffPolicy = stripOptionalQuotes(frontmatter["handoff-policy"] ?? "").trim().toLowerCase();
+  const handoffRequiresApproval = handoffPolicy === "approval-required" || handoffPolicy === "requires-approval";
+  if (steps.length === 0 && !nextSkill && !nextSkillArgs && !handoff && !handoffRequiresApproval) {
     return void 0;
   }
   return {
     steps,
     nextSkill,
     nextSkillArgs,
-    handoff
+    handoff,
+    handoffRequiresApproval: handoffRequiresApproval || void 0
   };
 }
 function renderSkillPipelineGuidance(skillName, pipeline) {
@@ -84331,16 +84324,28 @@ function renderSkillPipelineGuidance(skillName, pipeline) {
   }
   lines.push("");
   if (pipeline.nextSkill) {
-    lines.push("When this stage completes:");
+    if (pipeline.handoffRequiresApproval) {
+      lines.push("When this stage completes: stop with the handoff artifact marked `pending approval`. Do not invoke the next skill until the user gives explicit approval in the current turn or structured approval UI.");
+    } else {
+      lines.push("When this stage completes:");
+    }
     if (pipeline.handoff) {
       lines.push(`1. Write or update the handoff artifact at \`${pipeline.handoff}\`.`);
     } else {
       lines.push("1. Write a concise handoff note before moving to the next skill.");
     }
     lines.push("2. Carry forward the concrete output, decisions made, and remaining risks or assumptions.");
-    lines.push(`3. Invoke ${nextInvocation}.`);
+    if (pipeline.handoffRequiresApproval) {
+      lines.push(`3. After explicit approval only, invoke ${nextInvocation}.`);
+    } else {
+      lines.push(`3. Invoke ${nextInvocation}.`);
+    }
   } else {
-    lines.push("This is the terminal stage in the declared skill pipeline. Do not hand off to another skill unless the user explicitly asks.");
+    if (pipeline.handoffRequiresApproval) {
+      lines.push("This stage is approval-gated. Stop after producing the handoff artifact and do not hand off to another skill unless the user explicitly approves that next step.");
+    } else {
+      lines.push("This is the terminal stage in the declared skill pipeline. Do not hand off to another skill unless the user explicitly asks.");
+    }
   }
   return lines.join("\n");
 }
@@ -84802,7 +84807,7 @@ init_persistent_mode();
 // src/hooks/plugin-patterns/index.ts
 var import_fs90 = require("fs");
 var import_path109 = require("path");
-var import_child_process25 = require("child_process");
+var import_child_process26 = require("child_process");
 
 // src/hooks/index.ts
 init_ultraqa();
@@ -84889,9 +84894,9 @@ var GLOBAL_STATE_DIR = getGlobalOmcStateRoot();
 var MAX_STATE_AGE_MS = 4 * 60 * 60 * 1e3;
 
 // src/features/verification/index.ts
-var import_child_process26 = require("child_process");
+var import_child_process27 = require("child_process");
 var import_util9 = require("util");
-var execAsync = (0, import_util9.promisify)(import_child_process26.exec);
+var execAsync = (0, import_util9.promisify)(import_child_process27.exec);
 
 // src/agents/index.ts
 init_utils();
@@ -85148,7 +85153,7 @@ init_tmux_detector();
 var import_fs97 = require("fs");
 var import_path116 = require("path");
 var import_url14 = require("url");
-var import_child_process28 = require("child_process");
+var import_child_process29 = require("child_process");
 init_daemon_module_path();
 init_paths();
 init_tmux_detector();
@@ -85483,7 +85488,7 @@ function startDaemon(config2) {
       ...createMinimalDaemonEnv2(),
       OMC_DAEMON_CONFIG_FILE: configPath
     };
-    const child = (0, import_child_process28.spawn)("node", ["-e", daemonScript], {
+    const child = (0, import_child_process29.spawn)("node", ["-e", daemonScript], {
       detached: true,
       stdio: "ignore",
       cwd: process.cwd(),
@@ -86178,7 +86183,7 @@ async function doctorConflictsCommand(options) {
 }
 
 // src/cli/commands/doctor-team-routing.ts
-var import_child_process29 = require("child_process");
+var import_child_process30 = require("child_process");
 init_formatting();
 init_loader();
 var PROVIDER_BINARY = {
@@ -86190,12 +86195,12 @@ function probeProvider(provider) {
   const binary = PROVIDER_BINARY[provider];
   const probe = { provider, binary, found: false };
   try {
-    const resolved = (0, import_child_process29.execSync)(`command -v ${binary}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const resolved = (0, import_child_process30.execSync)(`command -v ${binary}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (resolved) {
       probe.found = true;
       probe.path = resolved;
       try {
-        const version3 = (0, import_child_process29.execSync)(`${binary} --version`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 3e3 }).trim().split("\n")[0];
+        const version3 = (0, import_child_process30.execSync)(`${binary} --version`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 3e3 }).trim().split("\n")[0];
         if (version3) probe.version = version3;
       } catch {
       }
@@ -88767,7 +88772,7 @@ function sleep5(ms) {
 }
 
 // src/cli/commands/teleport.ts
-var import_child_process30 = require("child_process");
+var import_child_process31 = require("child_process");
 var import_fs101 = require("fs");
 var import_os19 = require("os");
 var import_path119 = require("path");
@@ -88822,7 +88827,7 @@ function installDependencies(worktreePath, packageManager) {
     pnpm: ["install"],
     yarn: ["install"]
   };
-  (0, import_child_process30.execFileSync)(packageManager, argsByManager[packageManager], {
+  (0, import_child_process31.execFileSync)(packageManager, argsByManager[packageManager], {
     cwd: worktreePath,
     stdio: "inherit"
   });
@@ -89000,8 +89005,8 @@ function sanitize(str, maxLen = 30) {
 }
 function getCurrentRepo() {
   try {
-    const root2 = (0, import_child_process30.execSync)("git rev-parse --show-toplevel", { encoding: "utf-8", timeout: 5e3 }).trim();
-    const remoteUrl = (0, import_child_process30.execSync)("git remote get-url origin", { encoding: "utf-8", timeout: 5e3 }).trim();
+    const root2 = (0, import_child_process31.execSync)("git rev-parse --show-toplevel", { encoding: "utf-8", timeout: 5e3 }).trim();
+    const remoteUrl = (0, import_child_process31.execSync)("git remote get-url origin", { encoding: "utf-8", timeout: 5e3 }).trim();
     const parsed = parseRemoteUrl(remoteUrl);
     if (parsed) {
       return { owner: parsed.owner, repo: parsed.repo, root: root2, provider: parsed.provider };
@@ -89027,18 +89032,18 @@ function createWorktree(repoRoot, worktreePath, branchName, baseBranch) {
     if ((0, import_fs101.existsSync)(worktreePath)) {
       return { success: false, error: `Worktree already exists at ${worktreePath}` };
     }
-    (0, import_child_process30.execFileSync)("git", ["fetch", "origin", baseBranch], {
+    (0, import_child_process31.execFileSync)("git", ["fetch", "origin", baseBranch], {
       cwd: repoRoot,
       stdio: "pipe"
     });
     try {
-      (0, import_child_process30.execFileSync)("git", ["branch", branchName, `origin/${baseBranch}`], {
+      (0, import_child_process31.execFileSync)("git", ["branch", branchName, `origin/${baseBranch}`], {
         cwd: repoRoot,
         stdio: "pipe"
       });
     } catch {
     }
-    (0, import_child_process30.execFileSync)("git", ["worktree", "add", worktreePath, branchName], {
+    (0, import_child_process31.execFileSync)("git", ["worktree", "add", worktreePath, branchName], {
       cwd: repoRoot,
       stdio: "pipe"
     });
@@ -89117,7 +89122,7 @@ async function teleportCommand(ref, options) {
       if (provider.prRefspec) {
         try {
           const refspec = provider.prRefspec.replace("{number}", String(parsed.number)).replace("{branch}", branchName);
-          (0, import_child_process30.execFileSync)(
+          (0, import_child_process31.execFileSync)(
             "git",
             ["fetch", "origin", refspec],
             { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4 }
@@ -89126,7 +89131,7 @@ async function teleportCommand(ref, options) {
         }
       } else if (info.branch) {
         try {
-          (0, import_child_process30.execFileSync)(
+          (0, import_child_process31.execFileSync)(
             "git",
             ["fetch", "origin", `${info.branch}:${branchName}`],
             { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4 }
@@ -89229,7 +89234,7 @@ async function teleportListCommand(options) {
     const relativePath = (0, import_path119.relative)(worktreeRoot, worktreePath);
     let branch = "unknown";
     try {
-      branch = (0, import_child_process30.execSync)("git branch --show-current", {
+      branch = (0, import_child_process31.execSync)("git branch --show-current", {
         cwd: worktreePath,
         encoding: "utf-8"
       }).trim();
@@ -89281,7 +89286,7 @@ async function teleportRemoveCommand(pathOrName, options) {
   }
   try {
     if (!options.force) {
-      const status = (0, import_child_process30.execSync)("git status --porcelain", {
+      const status = (0, import_child_process31.execSync)("git status --porcelain", {
         cwd: worktreePath,
         encoding: "utf-8"
       });
@@ -89295,7 +89300,7 @@ async function teleportRemoveCommand(pathOrName, options) {
         return 1;
       }
     }
-    const gitDir = (0, import_child_process30.execSync)("git rev-parse --git-dir", {
+    const gitDir = (0, import_child_process31.execSync)("git rev-parse --git-dir", {
       cwd: worktreePath,
       encoding: "utf-8"
     }).trim();
@@ -89303,7 +89308,7 @@ async function teleportRemoveCommand(pathOrName, options) {
     const mainRepo = mainRepoMatch ? mainRepoMatch[1] : null;
     if (mainRepo) {
       const args = options.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
-      (0, import_child_process30.execFileSync)("git", args, {
+      (0, import_child_process31.execFileSync)("git", args, {
         cwd: mainRepo,
         stdio: "pipe"
       });
@@ -89332,15 +89337,18 @@ init_version();
 
 // src/lib/plugin-dir.ts
 var import_path120 = require("path");
+function isCrossPlatformAbsolutePath(rawPath) {
+  return import_path120.posix.isAbsolute(rawPath) || import_path120.win32.isAbsolute(rawPath);
+}
 function resolvePluginDirArg(rawPath) {
   if (!rawPath || rawPath.trim().length === 0) {
     throw new Error("--plugin-dir requires a non-empty path argument");
   }
-  return (0, import_path120.resolve)(rawPath);
+  return isCrossPlatformAbsolutePath(rawPath) ? rawPath : (0, import_path120.resolve)(rawPath);
 }
 
 // src/cli/launch.ts
-var import_child_process31 = require("child_process");
+var import_child_process32 = require("child_process");
 var import_fs102 = require("fs");
 var import_os20 = require("os");
 var import_path121 = require("path");
@@ -89638,7 +89646,7 @@ function runClaudeInsideTmux(cwd2, args) {
   } catch {
   }
   try {
-    (0, import_child_process31.execFileSync)("claude", args, {
+    (0, import_child_process32.execFileSync)("claude", args, {
       cwd: cwd2,
       stdio: "inherit",
       shell: process.platform === "win32"
@@ -89710,7 +89718,7 @@ function runClaudeOutsideTmux(cwd2, args, _sessionId, options = {}) {
 }
 function runClaudeDirect(cwd2, args) {
   try {
-    (0, import_child_process31.execFileSync)("claude", args, {
+    (0, import_child_process32.execFileSync)("claude", args, {
       cwd: cwd2,
       stdio: "inherit",
       shell: process.platform === "win32"
@@ -89813,7 +89821,7 @@ async function launchCommand(args) {
 }
 
 // src/cli/interop.ts
-var import_child_process32 = require("child_process");
+var import_child_process33 = require("child_process");
 var import_crypto19 = require("crypto");
 init_tmux_utils();
 function readInteropRuntimeFlags(env2 = process.env) {
@@ -89837,7 +89845,7 @@ function validateInteropRuntimeFlags(flags) {
 }
 function isCodexAvailable() {
   try {
-    (0, import_child_process32.execFileSync)("codex", ["--version"], { stdio: "ignore" });
+    (0, import_child_process33.execFileSync)("codex", ["--version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -89927,7 +89935,7 @@ function interopCommand(options = {}) {
 }
 
 // src/cli/ask.ts
-var import_child_process33 = require("child_process");
+var import_child_process34 = require("child_process");
 var import_fs103 = require("fs");
 var import_promises18 = require("fs/promises");
 var import_os21 = require("os");
@@ -90105,7 +90113,7 @@ async function askCommand(args) {
 
 ${parsed.prompt}`;
   }
-  const child = (0, import_child_process33.spawnSync)(
+  const child = (0, import_child_process34.spawnSync)(
     process.execPath,
     [advisorScriptPath, parsed.provider, finalPrompt],
     {
