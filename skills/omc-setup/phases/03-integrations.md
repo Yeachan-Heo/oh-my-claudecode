@@ -61,9 +61,22 @@ Use jq to safely merge without overwriting existing settings:
 ```bash
 SETTINGS_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required to update $SETTINGS_FILE safely."
+  echo "Install jq and rerun setup. Existing settings were not modified."
+  exit 1
+fi
+
 if [ -f "$SETTINGS_FILE" ]; then
-  TEMP_FILE=$(mktemp)
-  jq '.env = (.env // {} | . + {"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"})' "$SETTINGS_FILE" > "$TEMP_FILE" && mv "$TEMP_FILE" "$SETTINGS_FILE"
+  TEMP_FILE=$(mktemp "${SETTINGS_FILE}.tmp.XXXXXX")
+  trap 'rm -f "$TEMP_FILE"' EXIT
+  if jq '.env = (.env // {} | . + {"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"})' "$SETTINGS_FILE" > "$TEMP_FILE"; then
+    mv "$TEMP_FILE" "$SETTINGS_FILE"
+  else
+    echo "ERROR: Failed to update $SETTINGS_FILE. Existing settings were not modified."
+    exit 1
+  fi
+  trap - EXIT
   echo "Added CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS to existing settings.json"
 else
   mkdir -p "$(dirname "$SETTINGS_FILE")"
@@ -96,9 +109,23 @@ If user chooses anything other than "Auto", add `teammateMode` to settings.json:
 ```bash
 SETTINGS_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required to update $SETTINGS_FILE safely."
+  echo "Install jq and rerun setup. Existing settings were not modified."
+  exit 1
+fi
+
 # TEAMMATE_MODE is "in-process" or "tmux" based on user choice
 # Skip this if user chose "Auto" (that's the default)
-jq --arg mode "TEAMMATE_MODE" '. + {teammateMode: $mode}' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+TEMP_FILE=$(mktemp "${SETTINGS_FILE}.tmp.XXXXXX")
+trap 'rm -f "$TEMP_FILE"' EXIT
+if jq --arg mode "TEAMMATE_MODE" '. + {teammateMode: $mode}' "$SETTINGS_FILE" > "$TEMP_FILE"; then
+  mv "$TEMP_FILE" "$SETTINGS_FILE"
+else
+  echo "ERROR: Failed to update $SETTINGS_FILE. Existing settings were not modified."
+  exit 1
+fi
+trap - EXIT
 echo "Teammate display mode set to: TEAMMATE_MODE"
 ```
 
@@ -126,6 +153,12 @@ Store the team configuration in `~/.claude/.omc-config.json`:
 CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
 mkdir -p "$(dirname "$CONFIG_FILE")"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required to update $CONFIG_FILE safely."
+  echo "Install jq and rerun setup. Existing config was not modified."
+  exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
   EXISTING=$(cat "$CONFIG_FILE")
 else
@@ -133,10 +166,18 @@ else
 fi
 
 # Replace MAX_AGENTS, AGENT_TYPE with user choices
-echo "$EXISTING" | jq \
+TEMP_FILE=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")
+trap 'rm -f "$TEMP_FILE"' EXIT
+if printf '%s\n' "$EXISTING" | jq \
   --argjson maxAgents MAX_AGENTS \
   --arg agentType "AGENT_TYPE" \
-  '. + {team: {ops: {maxAgents: $maxAgents, defaultAgentType: $agentType, monitorIntervalMs: 30000, shutdownTimeoutMs: 15000}}}' > "$CONFIG_FILE"
+  '. + {team: {ops: {maxAgents: $maxAgents, defaultAgentType: $agentType, monitorIntervalMs: 30000, shutdownTimeoutMs: 15000}}}' > "$TEMP_FILE"; then
+  mv "$TEMP_FILE" "$CONFIG_FILE"
+else
+  echo "ERROR: Failed to update $CONFIG_FILE. Existing config was not modified."
+  exit 1
+fi
+trap - EXIT
 
 echo "Team configuration saved:"
 echo "  Max agents: MAX_AGENTS"

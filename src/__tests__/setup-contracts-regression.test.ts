@@ -12,7 +12,7 @@
 
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { dirname, join, relative } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -194,6 +194,63 @@ describe('Contract 2: no unguarded $HOME/.claude in shell/script files', () => {
       expect.fail(
         `Found $HOME/.claude without CLAUDE_CONFIG_DIR guard:\n${details}\n\n` +
         `Replace with: \${CLAUDE_CONFIG_DIR:-$HOME/.claude}`
+      );
+    }
+  });
+});
+
+// ── Contract 2b: setup jq writes must not truncate user config ────────────────
+// Issue #2957 — `jq ... > "$CONFIG_FILE"` opens/truncates the config before
+// command-not-found can fail when jq is missing. Setup docs/scripts must fail
+// before destination redirection and write through temp files.
+
+describe('Contract 2b: setup jq writes are guarded against truncation', () => {
+  const SETUP_MUTATION_FILES = [
+    join(REPO_ROOT, 'skills', 'omc-setup', 'phases', '02-configure.md'),
+    join(REPO_ROOT, 'skills', 'omc-setup', 'phases', '03-integrations.md'),
+    join(REPO_ROOT, 'scripts', 'setup-progress.sh'),
+  ];
+
+  const directJqRedirectViolations: { file: string; command: string }[] = [];
+  const missingPreflightViolations: string[] = [];
+
+  for (const file of SETUP_MUTATION_FILES) {
+    const content = readFileSync(file, 'utf-8');
+    const rel = relPath(file);
+
+    if (content.includes('jq') && !/command -v jq/.test(content)) {
+      missingPreflightViolations.push(rel);
+    }
+
+    const logicalCommands = content.replace(/\\\r?\n/g, ' ');
+    const directRedirectPattern =
+      /(?:echo|printf|cat|jq)\b[^;\n]*\bjq\b[^;\n]*>\s*(?:"\$(?:\{)?(?:CONFIG_FILE|SETTINGS_FILE)(?:\})?"|\$\{(?:CONFIG_FILE|SETTINGS_FILE)\})/g;
+
+    for (const match of logicalCommands.matchAll(directRedirectPattern)) {
+      directJqRedirectViolations.push({
+        file: rel,
+        command: match[0].trim(),
+      });
+    }
+  }
+
+  it('preflights jq before setup files use it for JSON mutation', () => {
+    if (missingPreflightViolations.length > 0) {
+      expect.fail(
+        `Setup files use jq without a command -v jq preflight:\n` +
+          missingPreflightViolations.map(file => `  ${file}`).join('\n')
+      );
+    }
+  });
+
+  it('does not redirect jq output directly to live setup config/settings files', () => {
+    if (directJqRedirectViolations.length > 0) {
+      expect.fail(
+        `Found destructive jq redirects that can truncate live setup files:\n` +
+          directJqRedirectViolations
+            .map(v => `  ${v.file}: ${v.command}`)
+            .join('\n') +
+          `\n\nWrite jq output to a temp file and mv it into place only after jq succeeds.`
       );
     }
   });

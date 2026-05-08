@@ -83,6 +83,12 @@ Store the preference in `~/.claude/.omc-config.json`:
 CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
 mkdir -p "$(dirname "$CONFIG_FILE")"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required to update $CONFIG_FILE safely."
+  echo "Install jq and rerun setup. Existing config was not modified."
+  exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
   EXISTING=$(cat "$CONFIG_FILE")
 else
@@ -90,7 +96,15 @@ else
 fi
 
 # Set defaultExecutionMode (replace USER_CHOICE with "ultrawork" or "")
-echo "$EXISTING" | jq --arg mode "USER_CHOICE" '. + {defaultExecutionMode: $mode, configuredAt: (now | todate)}' > "$CONFIG_FILE"
+TEMP_FILE=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")
+trap 'rm -f "$TEMP_FILE"' EXIT
+if printf '%s\n' "$EXISTING" | jq --arg mode "USER_CHOICE" '. + {defaultExecutionMode: $mode, configuredAt: (now | todate)}' > "$TEMP_FILE"; then
+  mv "$TEMP_FILE" "$CONFIG_FILE"
+else
+  echo "ERROR: Failed to update $CONFIG_FILE. Existing config was not modified."
+  exit 1
+fi
+trap - EXIT
 echo "Default execution mode set to: USER_CHOICE"
 ```
 
@@ -192,6 +206,12 @@ Store the preference:
 CONFIG_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-config.json"
 mkdir -p "$(dirname "$CONFIG_FILE")"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required to update $CONFIG_FILE safely."
+  echo "Install jq and rerun setup. Existing config was not modified."
+  exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
   EXISTING=$(cat "$CONFIG_FILE")
 else
@@ -199,7 +219,15 @@ else
 fi
 
 # USER_CHOICE is "builtin", "beads", or "beads-rust" based on user selection
-echo "$EXISTING" | jq --arg tool "USER_CHOICE" '. + {taskTool: $tool, taskToolConfig: {injectInstructions: true, useMcp: false}}' > "$CONFIG_FILE"
+TEMP_FILE=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")
+trap 'rm -f "$TEMP_FILE"' EXIT
+if printf '%s\n' "$EXISTING" | jq --arg tool "USER_CHOICE" '. + {taskTool: $tool, taskToolConfig: {injectInstructions: true, useMcp: false}}' > "$TEMP_FILE"; then
+  mv "$TEMP_FILE" "$CONFIG_FILE"
+else
+  echo "ERROR: Failed to update $CONFIG_FILE. Existing config was not modified."
+  exit 1
+fi
+trap - EXIT
 echo "Task tool set to: USER_CHOICE"
 ```
 

@@ -88,6 +88,12 @@ cmd_resume() {
 cmd_complete() {
   local version="${1:-unknown}"
 
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq is required to update $CONFIG_FILE safely." >&2
+    echo "Install jq and rerun setup. Existing config was not modified." >&2
+    return 1
+  fi
+
   # Clear temporary state
   rm -f "$STATE_FILE"
 
@@ -113,8 +119,14 @@ cmd_complete() {
     existing=$(cat "$CONFIG_FILE")
   fi
 
-  echo "$existing" | jq --arg ts "$(date -Iseconds)" --arg ver "$version" \
-    '. + {setupCompleted: $ts, setupVersion: $ver}' > "$CONFIG_FILE"
+  local tmp_file
+  tmp_file=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")
+  trap 'rm -f "$tmp_file"' RETURN
+
+  printf '%s\n' "$existing" | jq --arg ts "$(date -Iseconds)" --arg ver "$version" \
+    '. + {setupCompleted: $ts, setupVersion: $ver}' > "$tmp_file"
+  mv "$tmp_file" "$CONFIG_FILE"
+  trap - RETURN
 
   echo "Setup completed successfully!"
   echo "Note: Future updates will only refresh CLAUDE.md, not the full setup wizard."
