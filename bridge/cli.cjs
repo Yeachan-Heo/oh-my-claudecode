@@ -89371,7 +89371,7 @@ function hasOmcMarkers(path22) {
   const content = (0, import_fs102.readFileSync)(path22, "utf-8");
   return content.includes("<!-- OMC:START -->") && content.includes("<!-- OMC:END -->");
 }
-function ensureMirroredPath(sourcePath, targetPath) {
+function ensureMirroredPath(sourcePath, targetPath, options = {}) {
   if (!(0, import_fs102.existsSync)(sourcePath)) return;
   try {
     const sourceStat = (0, import_fs102.lstatSync)(sourcePath);
@@ -89389,6 +89389,9 @@ function ensureMirroredPath(sourcePath, targetPath) {
     }
     (0, import_fs102.symlinkSync)(sourcePath, targetPath, "file");
   } catch {
+    if (options.allowCopyFallback === false) {
+      return;
+    }
     const sourceStat = (0, import_fs102.lstatSync)(sourcePath);
     if (sourceStat.isDirectory()) {
       (0, import_fs102.cpSync)(sourcePath, targetPath, { recursive: true });
@@ -89426,9 +89429,14 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
     ".omc-silent-update.json",
     "keybindings.json",
     "settings.json",
-    "settings.local.json"
+    "settings.local.json",
+    ".credentials.json"
   ]) {
-    ensureMirroredPath((0, import_path121.join)(baseConfigDir, entry), (0, import_path121.join)(runtimeConfigDir, (0, import_path121.basename)(entry)));
+    ensureMirroredPath(
+      (0, import_path121.join)(baseConfigDir, entry),
+      (0, import_path121.join)(runtimeConfigDir, (0, import_path121.basename)(entry)),
+      { allowCopyFallback: entry !== ".credentials.json" }
+    );
   }
   const runtimeSettingsPath = (0, import_path121.join)(runtimeConfigDir, "settings.json");
   if ((0, import_fs102.existsSync)(runtimeSettingsPath)) {

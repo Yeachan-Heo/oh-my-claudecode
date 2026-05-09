@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -987,6 +987,64 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect(existsSync(join(runtimeDir, 'rules'))).toBe(true);
     expect(existsSync(join(runtimeDir, 'themes'))).toBe(true);
     expect(readFileSync(join(runtimeDir, 'themes', 'custom-theme.json'), 'utf-8')).toBe('{"name":"custom"}');
+  });
+
+  it('mirrors Linux credential file as a symlink without copying credential content', () => {
+    const configDir = join(tempRoot!, '.claude');
+    mkdirSync(configDir, { recursive: true });
+    const credentialsPath = join(configDir, '.credentials.json');
+    const credentialContent = '{"accessToken":"test-only-token"}';
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+    writeFileSync(credentialsPath, credentialContent);
+
+    try {
+      const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+      const runtimeCredentialsPath = join(runtimeDir, '.credentials.json');
+
+      expect(existsSync(runtimeCredentialsPath)).toBe(true);
+      expect(lstatSync(runtimeCredentialsPath).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(runtimeCredentialsPath)).toBe(credentialsPath);
+      const consoleOutput = [...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls].flat().join('\n');
+      expect(consoleOutput).not.toContain(credentialContent);
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('does not copy credential content when credential symlink creation fails', async () => {
+    vi.resetModules();
+    const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const copyFileSyncSpy = vi.fn(actualFs.copyFileSync);
+    vi.doMock('fs', () => ({
+      ...actualFs,
+      copyFileSync: copyFileSyncSpy,
+      symlinkSync: vi.fn(() => {
+        throw new Error('symlink unavailable');
+      }),
+    }));
+
+    try {
+      const { prepareOmcLaunchConfigDir: prepareWithFailedSymlink } = await import('../launch.js');
+      const configDir = join(tempRoot!, '.claude');
+      mkdirSync(configDir, { recursive: true });
+      const credentialsPath = join(configDir, '.credentials.json');
+      writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+      writeFileSync(credentialsPath, '{"accessToken":"test-only-token"}');
+
+      const runtimeDir = prepareWithFailedSymlink(configDir);
+      const runtimeCredentialsPath = join(runtimeDir, '.credentials.json');
+
+      expect(existsSync(runtimeCredentialsPath)).toBe(false);
+      expect(copyFileSyncSpy).not.toHaveBeenCalledWith(credentialsPath, runtimeCredentialsPath);
+    } finally {
+      vi.doUnmock('fs');
+      vi.resetModules();
+    }
   });
 
   it('preserves runtime .claude.json across runtime config dir rebuilds', () => {
