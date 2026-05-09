@@ -1,6 +1,7 @@
 ---
 name: skill
 description: Manage local skills - list, add, remove, search, edit, setup wizard
+tags: [meta, skills, discovery, management]
 argument-hint: "<command> [args]"
 level: 2
 ---

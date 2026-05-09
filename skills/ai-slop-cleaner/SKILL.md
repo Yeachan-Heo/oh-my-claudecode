@@ -1,6 +1,7 @@
 ---
 name: ai-slop-cleaner
-description: Clean AI-generated code slop with a regression-safe, deletion-first workflow and optional reviewer-only mode
+description:
+tags: [quality, refactoring, cleanup] Clean AI-generated code slop with a regression-safe, deletion-first workflow and optional reviewer-only mode
 level: 3
 ---
 

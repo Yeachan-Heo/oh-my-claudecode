@@ -1,6 +1,7 @@
 ---
 name: verify
 description: Verify that a change really works before you claim completion
+tags: [verification, testing, validation, quality]
 ---
 
 # Verify

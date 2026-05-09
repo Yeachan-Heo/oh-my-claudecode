@@ -1,6 +1,7 @@
 ---
 name: cancel
 description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
+tags: [meta, control, modes]
 argument-hint: "[--force|--all]"
 level: 2
 ---

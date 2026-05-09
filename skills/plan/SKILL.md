@@ -1,6 +1,7 @@
 ---
 name: omc-plan
 description: Strategic planning with optional interview workflow
+tags: [planning, workflow, strategy]
 argument-hint: "[--direct|--consensus|--review] [--interactive] [--deliberate] <task description>"
 pipeline: [deep-interview]
 handoff-policy: approval-required

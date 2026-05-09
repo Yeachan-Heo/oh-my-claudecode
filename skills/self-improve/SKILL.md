@@ -1,6 +1,7 @@
 ---
 name: self-improve
-description: Autonomous evolutionary code improvement engine with tournament selection
+description:
+tags: [meta, self-improvement, iteration] Autonomous evolutionary code improvement engine with tournament selection
 level: 4
 ---
 
