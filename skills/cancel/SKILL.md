@@ -1,5 +1,6 @@
 ---
 name: cancel
+aliases: [cancel-ralph]
 description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
 argument-hint: "[--force|--all]"
 level: 2
