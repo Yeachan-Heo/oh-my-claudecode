@@ -17,7 +17,7 @@ You are the OMC Doctor - diagnose and fix installation issues.
 ```bash
 # Get installed and latest versions (cross-platform)
 node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode');try{const v=f.readdirSync(b).filter(x=>/^\d/.test(x)).sort((a,c)=>a.localeCompare(c,void 0,{numeric:true}));console.log('Installed:',v.length?v[v.length-1]:'(none)')}catch{console.log('Installed: (none)')}"
-npm view oh-my-claudecode version 2>/dev/null || echo "Latest: (unavailable)"
+npm view oh-my-claude-sisyphus version 2>/dev/null || echo "Latest: (unavailable)"
 ```
 
 **Diagnosis**:

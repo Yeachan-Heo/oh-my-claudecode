@@ -34,3 +34,13 @@ describe('omc-doctor skill Ralph Ruby dependency check (issue #2969)', () => {
     expect(content).toContain('Ralph Ruby Dependency');
   });
 });
+
+describe('omc-doctor skill package version diagnostic (issue #2981)', () => {
+  it('checks the canonical published npm package for latest version', () => {
+    const skillPath = join(process.cwd(), 'skills', 'omc-doctor', 'SKILL.md');
+    const content = readFileSync(skillPath, 'utf8');
+
+    expect(content).toContain('npm view oh-my-claude-sisyphus version');
+    expect(content).not.toContain('npm view oh-my-claudecode version');
+  });
+});
