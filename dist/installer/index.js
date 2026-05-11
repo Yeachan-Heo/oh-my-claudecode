@@ -32,6 +32,8 @@ export const HUD_DIR = join(CLAUDE_CONFIG_DIR, 'hud');
 export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 const OMC_MANAGED_SKILL_MARKER = '.omc-managed';
+const PLUGIN_FULL_SKILL_BODIES_DIR = 'skill-bodies';
+const PLUGIN_COMPACT_SKILL_SHIM_MARKER = '<!-- OMC:COMPACT-PLUGIN-SKILL -->';
 /**
  * Core commands - DISABLED for v3.0+
  * All commands are now plugin-scoped skills managed by Claude Code.
@@ -933,6 +935,82 @@ function resolveBestPluginSyncSource(targetRoots) {
     }
     return bestRoot;
 }
+function extractFrontmatterBlock(content) {
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    return match?.[1] ?? null;
+}
+function getFrontmatterStringValue(metadata, key) {
+    const value = metadata[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+function normalizeCompactSkillDescription(description) {
+    const normalized = description.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= 240) {
+        return normalized;
+    }
+    return `${normalized.slice(0, 237).trimEnd()}...`;
+}
+function upsertYamlStringField(frontmatter, key, value) {
+    const escaped = JSON.stringify(value);
+    const line = `${key}: ${escaped}`;
+    const pattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:.*$`, 'm');
+    if (pattern.test(frontmatter)) {
+        return frontmatter.replace(pattern, line);
+    }
+    return `${frontmatter.trimEnd()}\n${line}`;
+}
+function renderCompactPluginSkillShim(skillDirName, content) {
+    const parsed = parseFrontmatter(content);
+    let frontmatter = extractFrontmatterBlock(content) ?? `name: ${skillDirName}`;
+    const rawDescription = getFrontmatterStringValue(parsed.metadata, 'short_description')
+        ?? getFrontmatterStringValue(parsed.metadata, 'description')
+        ?? `Invoke the ${skillDirName} OMC skill.`;
+    const description = normalizeCompactSkillDescription(rawDescription);
+    const fullBodyRelPath = `../../${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md`;
+    frontmatter = upsertYamlStringField(frontmatter, 'description', description);
+    frontmatter = upsertYamlStringField(frontmatter, 'omc-full-body', fullBodyRelPath);
+    return `---\n${frontmatter.trim()}\n---\n\n${PLUGIN_COMPACT_SKILL_SHIM_MARKER}\n\n# ${skillDirName}\n\nThis is a compact Claude Code plugin registry shim. It keeps startup skill descriptions small while preserving the full OMC skill body for on-demand invocation.\n\nWhen this skill is invoked, read and follow the full bundled instructions from:\n\n\`${fullBodyRelPath}\`\n\nResolve that path relative to this SKILL.md file. If needed, locate the active plugin root via \`CLAUDE_PLUGIN_ROOT\` or \`OMC_PLUGIN_ROOT\` and open \`${PLUGIN_FULL_SKILL_BODIES_DIR}/${skillDirName}/SKILL.md\`.\n`;
+}
+export function compactPluginSkillPayload(targetRoot) {
+    const skillsDir = join(targetRoot, 'skills');
+    const fullBodiesDir = join(targetRoot, PLUGIN_FULL_SKILL_BODIES_DIR);
+    const errors = [];
+    let compacted = 0;
+    let totalBytes = 0;
+    if (!existsSync(skillsDir)) {
+        return { compacted, totalBytes, errors };
+    }
+    try {
+        mkdirSync(fullBodiesDir, { recursive: true });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { compacted, totalBytes, errors: [`Failed to create ${fullBodiesDir}: ${message}`] };
+    }
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+        if (!entry.isDirectory())
+            continue;
+        const skillDir = join(skillsDir, entry.name);
+        const skillPath = join(skillDir, 'SKILL.md');
+        if (!existsSync(skillPath))
+            continue;
+        try {
+            const content = readFileSync(skillPath, 'utf-8');
+            const archivedSkillDir = join(fullBodiesDir, entry.name);
+            rmSync(archivedSkillDir, { recursive: true, force: true });
+            cpSync(skillDir, archivedSkillDir, { recursive: true, force: true });
+            const shim = renderCompactPluginSkillShim(entry.name, content);
+            writeFileSync(skillPath, shim);
+            totalBytes += Buffer.byteLength(shim, 'utf-8');
+            compacted += 1;
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Failed to compact plugin skill ${entry.name}: ${message}`);
+        }
+    }
+    return { compacted, totalBytes, errors };
+}
 export function copyPluginSyncPayload(sourceRoot, targetRoots) {
     if (targetRoots.length === 0) {
         return { synced: false, errors: [] };
@@ -957,6 +1035,10 @@ export function copyPluginSyncPayload(sourceRoot, targetRoots) {
                 const message = error instanceof Error ? error.message : String(error);
                 errors.push(`Failed to sync ${entry} to ${targetRoot}: ${message}`);
             }
+        }
+        if (copiedToTarget) {
+            const compactResult = compactPluginSkillPayload(targetRoot);
+            errors.push(...compactResult.errors);
         }
         synced = synced || copiedToTarget;
     }

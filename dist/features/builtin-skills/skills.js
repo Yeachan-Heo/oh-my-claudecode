@@ -9,7 +9,7 @@
  * Adapted from oh-my-opencode's builtin-skills feature.
  */
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, resolve, relative, isAbsolute, win32 } from 'path';
 import { fileURLToPath } from 'url';
 import { parseFrontmatter, parseFrontmatterAliases } from '../../utils/frontmatter.js';
 import { rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
@@ -108,6 +108,38 @@ function getDeepInterviewAmbiguityThreshold() {
 function formatThresholdPercent(threshold) {
     return `${(threshold * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 }
+function pathLooksWindows(value) {
+    return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
+}
+export function isPathInsideOrEqual(parentPath, candidatePath) {
+    const pathApi = pathLooksWindows(parentPath) || pathLooksWindows(candidatePath) ? win32 : { relative, isAbsolute };
+    const rel = pathApi.relative(parentPath, candidatePath);
+    return rel === '' || (!rel.startsWith('..') && !pathApi.isAbsolute(rel));
+}
+function getFrontmatterString(metadata, key) {
+    const value = metadata[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+function readSkillBodyOverride(skillPath, metadata, fallbackBody) {
+    const bodyPath = getFrontmatterString(metadata, 'omc-full-body');
+    if (!bodyPath) {
+        return fallbackBody;
+    }
+    const skillDir = dirname(skillPath);
+    const resolvedBodyPath = resolve(skillDir, bodyPath);
+    const packageRoot = resolve(getPackageDir());
+    if (!isPathInsideOrEqual(packageRoot, resolvedBodyPath)) {
+        return fallbackBody;
+    }
+    try {
+        const fullContent = readFileSync(resolvedBodyPath, 'utf-8');
+        const { body } = parseFrontmatter(fullContent);
+        return body;
+    }
+    catch {
+        return fallbackBody;
+    }
+}
 function applyDeepInterviewRuntimeSettings(template) {
     const threshold = getDeepInterviewAmbiguityThreshold();
     const percent = formatThresholdPercent(threshold);
@@ -147,7 +179,8 @@ function loadSkillFromFile(skillPath, skillName) {
         const resolvedName = metadata.name || skillName;
         const safePrimaryName = toSafeSkillName(resolvedName);
         const pipeline = parseSkillPipelineMetadata(metadata);
-        const renderedBody = renderBundledSkillBody(safePrimaryName, body);
+        const fullBody = readSkillBodyOverride(skillPath, metadata, body);
+        const renderedBody = renderBundledSkillBody(safePrimaryName, fullBody);
         const template = [
             renderedBody,
             renderSkillRuntimeGuidance(safePrimaryName),

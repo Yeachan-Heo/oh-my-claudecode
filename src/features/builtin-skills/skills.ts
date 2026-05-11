@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, resolve, relative, isAbsolute, win32 } from 'path';
 import { fileURLToPath } from 'url';
 import type { BuiltinSkill } from './types.js';
 import { parseFrontmatter, parseFrontmatterAliases } from '../../utils/frontmatter.js';
@@ -127,6 +127,44 @@ function formatThresholdPercent(threshold: number): string {
   return `${(threshold * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
+function pathLooksWindows(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
+}
+
+export function isPathInsideOrEqual(parentPath: string, candidatePath: string): boolean {
+  const pathApi = pathLooksWindows(parentPath) || pathLooksWindows(candidatePath) ? win32 : { relative, isAbsolute };
+  const rel = pathApi.relative(parentPath, candidatePath);
+  return rel === '' || (!rel.startsWith('..') && !pathApi.isAbsolute(rel));
+}
+
+function getFrontmatterString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readSkillBodyOverride(skillPath: string, metadata: Record<string, unknown>, fallbackBody: string): string {
+  const bodyPath = getFrontmatterString(metadata, 'omc-full-body');
+  if (!bodyPath) {
+    return fallbackBody;
+  }
+
+  const skillDir = dirname(skillPath);
+  const resolvedBodyPath = resolve(skillDir, bodyPath);
+  const packageRoot = resolve(getPackageDir());
+
+  if (!isPathInsideOrEqual(packageRoot, resolvedBodyPath)) {
+    return fallbackBody;
+  }
+
+  try {
+    const fullContent = readFileSync(resolvedBodyPath, 'utf-8');
+    const { body } = parseFrontmatter(fullContent);
+    return body;
+  } catch {
+    return fallbackBody;
+  }
+}
+
 function applyDeepInterviewRuntimeSettings(template: string): string {
   const threshold = getDeepInterviewAmbiguityThreshold();
   const percent = formatThresholdPercent(threshold);
@@ -177,7 +215,8 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
     const resolvedName = metadata.name || skillName;
     const safePrimaryName = toSafeSkillName(resolvedName);
     const pipeline = parseSkillPipelineMetadata(metadata);
-    const renderedBody = renderBundledSkillBody(safePrimaryName, body);
+    const fullBody = readSkillBodyOverride(skillPath, metadata, body);
+    const renderedBody = renderBundledSkillBody(safePrimaryName, fullBody);
     const template = [
       renderedBody,
       renderSkillRuntimeGuidance(safePrimaryName),
