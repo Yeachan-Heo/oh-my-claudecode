@@ -26,7 +26,7 @@ const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini']);
 const DEFAULT_TEAM_CLI_AGENT_TYPE: CliAgentType = 'claude';
 
 const TEAM_HELP = `
-Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] "<task description>"
+Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--extra-flags "<flags>"] "<task description>"
        omc team status <team-name>
        omc team shutdown <team-name> [--force]
        omc team api <operation> [--input <json>] [--json]
@@ -38,6 +38,8 @@ Examples:
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
   omc team 2:codex "review auth flow" --new-window
+  omc team 2:claude "implement frontend" --extra-flags "--settings /path/to/settings.json"
+  omc team 1:codex "review code" --extra-flags "--omx --madmax --high"
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
@@ -433,7 +435,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   }
 
   const teamName = slugifyTask(task);
-  return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge, ...(extraFlags ? { extraFlags } : {}) };
+  return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge, extraFlags };
 }
 
 export function buildStartupTasks(parsed: ParsedTeamArgs): Array<{ subject: string; description: string; owner?: string; delegation?: TeamTaskDelegationPlan }> {

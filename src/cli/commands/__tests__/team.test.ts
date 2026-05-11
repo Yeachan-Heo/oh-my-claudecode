@@ -354,7 +354,6 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
   });
 });
 
-
 describe('parseTeamArgs --extra-flags', () => {
   it('parses --extra-flags as a string and populates extraFlags array', () => {
     const parsed = parseTeamArgs(['2:claude', '--extra-flags', '--settings /tmp/s.json', 'do the work']);
@@ -380,7 +379,6 @@ describe('parseTeamArgs --extra-flags', () => {
     expect(parsed.extraFlags).toEqual(['--verbose']);
   });
 });
-
 
 describe('buildStartupTasks', () => {
   it('adds owner-aware fanout for explicit per-worker roles', () => {
