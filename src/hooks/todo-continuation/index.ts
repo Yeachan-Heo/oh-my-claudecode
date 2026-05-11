@@ -25,7 +25,7 @@ function debugLog(message: string, ...args: unknown[]): void {
   }
 }
 
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
@@ -130,6 +130,12 @@ export interface StopContext {
   transcript_path?: string;
   /** Transcript path from hook payload (camelCase) */
   transcriptPath?: string;
+  /** Optional raw text/message fields observed in some hook payloads */
+  message?: string;
+  output?: string;
+  response?: string;
+  text?: string;
+  content?: unknown;
 }
 
 function getStopReasonFields(context?: StopContext): string[] {
@@ -144,6 +150,116 @@ function getStopReasonFields(context?: StopContext): string[] {
   ]
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .map((value) => value.toLowerCase().replace(/[\s-]+/g, '_'));
+}
+
+const STOP_CONTEXT_TAIL_BYTES = 32 * 1024;
+const STOP_CONTEXT_VALUE_MAX_CHARS = 8 * 1024;
+const TOOL_RESULT_FILE_POINTER_PATTERN = /(?:^|[\s"'`(\[{<])(?:\.{0,2}\/)?tool-results\/[A-Za-z0-9._-]+\.txt(?:$|[\s"'`)\]}>:,.])/i;
+const TOOL_RESULT_REDIRECT_MARKER_PATTERNS = [
+  /\btool[_ -]?result\b.{0,160}\b(?:too large|oversi[sz]e[dt]?|exceeds?|exceeded|truncated|redirect(?:ed)?|saved|written)\b/i,
+  /\b(?:too large|oversi[sz]e[dt]?|exceeds?|exceeded|truncated|redirect(?:ed)?|saved|written)\b.{0,160}\btool[_ -]?result\b/i,
+  /\b(?:output|response|result)\b.{0,160}\b(?:redirect(?:ed)?|saved|written)\b.{0,160}\btool-results\/[A-Za-z0-9._-]+\.txt\b/i,
+  /\bfull (?:tool )?(?:output|result|response)\b.{0,160}\btool-results\/[A-Za-z0-9._-]+\.txt\b/i,
+];
+
+function stringifyContextValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value == null) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function appendBoundedText(parts: string[], value: unknown): void {
+  const text = stringifyContextValue(value);
+  if (!text) return;
+  parts.push(text.length > STOP_CONTEXT_VALUE_MAX_CHARS
+    ? text.slice(-STOP_CONTEXT_VALUE_MAX_CHARS)
+    : text);
+}
+
+function readStopTranscriptTail(transcriptPath: string): string {
+  const size = statSync(transcriptPath).size;
+  if (size <= STOP_CONTEXT_TAIL_BYTES) {
+    return readFileSync(transcriptPath, 'utf-8');
+  }
+
+  const fd = openSync(transcriptPath, 'r');
+  try {
+    const offset = size - STOP_CONTEXT_TAIL_BYTES;
+    const buf = Buffer.allocUnsafe(STOP_CONTEXT_TAIL_BYTES);
+    const bytesRead = readSync(fd, buf, 0, STOP_CONTEXT_TAIL_BYTES, offset);
+    return buf.subarray(0, bytesRead).toString('utf-8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function extractLatestTranscriptEventText(transcriptTail: string): string {
+  const lines = transcriptTail
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      const text = stringifyContextValue(parsed);
+      if (text) return text;
+    } catch {
+      if (line) return line;
+    }
+  }
+
+  return '';
+}
+
+function getOversizeStopEvidence(context?: StopContext): string {
+  if (!context) return '';
+
+  const parts: string[] = [];
+  appendBoundedText(parts, context.message);
+  appendBoundedText(parts, context.output);
+  appendBoundedText(parts, context.response);
+  appendBoundedText(parts, context.text);
+  appendBoundedText(parts, context.content);
+  appendBoundedText(parts, context.tool_input ?? context.toolInput);
+
+  const transcriptPath = context.transcript_path ?? context.transcriptPath;
+  if (transcriptPath && existsSync(transcriptPath)) {
+    try {
+      appendBoundedText(parts, extractLatestTranscriptEventText(readStopTranscriptTail(transcriptPath)));
+    } catch {
+      // Best-effort classifier only; unreadable transcript should not affect
+      // the existing stop behavior.
+    }
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * Detect Stop events that are not actual user/task stalls, but the synthetic
+ * turn boundary Claude Code emits after an oversized tool result is redirected
+ * to a `tool-results/*.txt` file pointer.
+ */
+export function isOversizeToolResultRedirectStop(context?: StopContext): boolean {
+  const evidence = getOversizeStopEvidence(context);
+  if (!evidence) return false;
+
+  const hasToolResultPointer = TOOL_RESULT_FILE_POINTER_PATTERN.test(evidence);
+  if (!hasToolResultPointer) return false;
+
+  return TOOL_RESULT_REDIRECT_MARKER_PATTERNS.some((pattern) => pattern.test(evidence));
 }
 
 export interface TodoContinuationHook {

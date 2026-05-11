@@ -92,7 +92,19 @@ export interface StopContext {
     transcript_path?: string;
     /** Transcript path from hook payload (camelCase) */
     transcriptPath?: string;
+    /** Optional raw text/message fields observed in some hook payloads */
+    message?: string;
+    output?: string;
+    response?: string;
+    text?: string;
+    content?: unknown;
 }
+/**
+ * Detect Stop events that are not actual user/task stalls, but the synthetic
+ * turn boundary Claude Code emits after an oversized tool result is redirected
+ * to a `tool-results/*.txt` file pointer.
+ */
+export declare function isOversizeToolResultRedirectStop(context?: StopContext): boolean;
 export interface TodoContinuationHook {
     checkIncomplete: (sessionId?: string) => Promise<IncompleteTodosResult>;
 }

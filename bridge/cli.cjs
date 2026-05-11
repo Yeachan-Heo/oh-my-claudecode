@@ -13388,6 +13388,7 @@ __export(todo_continuation_exports, {
   isAuthenticationError: () => isAuthenticationError,
   isContextLimitStop: () => isContextLimitStop,
   isExplicitCancelCommand: () => isExplicitCancelCommand,
+  isOversizeToolResultRedirectStop: () => isOversizeToolResultRedirectStop,
   isRateLimitStop: () => isRateLimitStop,
   isScheduledWakeupStop: () => isScheduledWakeupStop,
   isTaskIncomplete: () => isTaskIncomplete,
@@ -13418,6 +13419,78 @@ function getStopReasonFields(context) {
     context.endTurnReason,
     context.reason
   ].filter((value) => typeof value === "string" && value.trim().length > 0).map((value) => value.toLowerCase().replace(/[\s-]+/g, "_"));
+}
+function stringifyContextValue(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return "";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+function appendBoundedText(parts, value) {
+  const text = stringifyContextValue(value);
+  if (!text) return;
+  parts.push(text.length > STOP_CONTEXT_VALUE_MAX_CHARS ? text.slice(-STOP_CONTEXT_VALUE_MAX_CHARS) : text);
+}
+function readStopTranscriptTail(transcriptPath) {
+  const size = (0, import_fs46.statSync)(transcriptPath).size;
+  if (size <= STOP_CONTEXT_TAIL_BYTES) {
+    return (0, import_fs46.readFileSync)(transcriptPath, "utf-8");
+  }
+  const fd = (0, import_fs46.openSync)(transcriptPath, "r");
+  try {
+    const offset = size - STOP_CONTEXT_TAIL_BYTES;
+    const buf = Buffer.allocUnsafe(STOP_CONTEXT_TAIL_BYTES);
+    const bytesRead = (0, import_fs46.readSync)(fd, buf, 0, STOP_CONTEXT_TAIL_BYTES, offset);
+    return buf.subarray(0, bytesRead).toString("utf-8");
+  } finally {
+    (0, import_fs46.closeSync)(fd);
+  }
+}
+function extractLatestTranscriptEventText(transcriptTail) {
+  const lines = transcriptTail.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    try {
+      const parsed = JSON.parse(line);
+      const text = stringifyContextValue(parsed);
+      if (text) return text;
+    } catch {
+      if (line) return line;
+    }
+  }
+  return "";
+}
+function getOversizeStopEvidence(context) {
+  if (!context) return "";
+  const parts = [];
+  appendBoundedText(parts, context.message);
+  appendBoundedText(parts, context.output);
+  appendBoundedText(parts, context.response);
+  appendBoundedText(parts, context.text);
+  appendBoundedText(parts, context.content);
+  appendBoundedText(parts, context.tool_input ?? context.toolInput);
+  const transcriptPath = context.transcript_path ?? context.transcriptPath;
+  if (transcriptPath && (0, import_fs46.existsSync)(transcriptPath)) {
+    try {
+      appendBoundedText(parts, extractLatestTranscriptEventText(readStopTranscriptTail(transcriptPath)));
+    } catch {
+    }
+  }
+  return parts.join("\n");
+}
+function isOversizeToolResultRedirectStop(context) {
+  const evidence = getOversizeStopEvidence(context);
+  if (!evidence) return false;
+  const hasToolResultPointer = TOOL_RESULT_FILE_POINTER_PATTERN.test(evidence);
+  if (!hasToolResultPointer) return false;
+  return TOOL_RESULT_REDIRECT_MARKER_PATTERNS.some((pattern) => pattern.test(evidence));
 }
 function isUserAbort(context) {
   if (!context) return false;
@@ -13680,7 +13753,7 @@ function getNextPendingTodo(result) {
   }
   return result.todos.find((t) => t.status === "pending") ?? null;
 }
-var import_fs46, import_path56, AUTHENTICATION_ERROR_PATTERNS;
+var import_fs46, import_path56, STOP_CONTEXT_TAIL_BYTES, STOP_CONTEXT_VALUE_MAX_CHARS, TOOL_RESULT_FILE_POINTER_PATTERN, TOOL_RESULT_REDIRECT_MARKER_PATTERNS, AUTHENTICATION_ERROR_PATTERNS;
 var init_todo_continuation = __esm({
   "src/hooks/todo-continuation/index.ts"() {
     "use strict";
@@ -13688,6 +13761,15 @@ var init_todo_continuation = __esm({
     import_path56 = require("path");
     init_worktree_paths();
     init_config_dir();
+    STOP_CONTEXT_TAIL_BYTES = 32 * 1024;
+    STOP_CONTEXT_VALUE_MAX_CHARS = 8 * 1024;
+    TOOL_RESULT_FILE_POINTER_PATTERN = /(?:^|[\s"'`(\[{<])(?:\.{0,2}\/)?tool-results\/[A-Za-z0-9._-]+\.txt(?:$|[\s"'`)\]}>:,.])/i;
+    TOOL_RESULT_REDIRECT_MARKER_PATTERNS = [
+      /\btool[_ -]?result\b.{0,160}\b(?:too large|oversi[sz]e[dt]?|exceeds?|exceeded|truncated|redirect(?:ed)?|saved|written)\b/i,
+      /\b(?:too large|oversi[sz]e[dt]?|exceeds?|exceeded|truncated|redirect(?:ed)?|saved|written)\b.{0,160}\btool[_ -]?result\b/i,
+      /\b(?:output|response|result)\b.{0,160}\b(?:redirect(?:ed)?|saved|written)\b.{0,160}\btool-results\/[A-Za-z0-9._-]+\.txt\b/i,
+      /\bfull (?:tool )?(?:output|result|response)\b.{0,160}\btool-results\/[A-Za-z0-9._-]+\.txt\b/i
+    ];
     AUTHENTICATION_ERROR_PATTERNS = [
       "authentication_error",
       "authentication_failed",
@@ -19568,6 +19650,24 @@ async function checkPersistentModes(sessionId, directory, stopContext) {
       mode: "none"
     };
   }
+  if (isOversizeToolResultRedirectStop(stopContext)) {
+    const redirectStopCount = readStopBreaker(
+      workingDir,
+      "oversize-tool-result-redirect",
+      sessionId,
+      OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS
+    ) + 1;
+    writeStopBreaker(workingDir, "oversize-tool-result-redirect", redirectStopCount, sessionId);
+    if (redirectStopCount <= OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX) {
+      return {
+        shouldBlock: false,
+        message: "",
+        mode: "none"
+      };
+    }
+  } else {
+    writeStopBreaker(workingDir, "oversize-tool-result-redirect", 0, sessionId);
+  }
   if (hasPendingOwnedAsyncWork(workingDir, sessionId)) {
     return {
       shouldBlock: false,
@@ -19675,7 +19775,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -19700,6 +19800,8 @@ var init_persistent_mode = __esm({
     CANCEL_SIGNAL_TTL_MS2 = 3e4;
     STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
     PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1e3;
+    OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
+    OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1e3;
     TERMINAL_WORKFLOW_SLOT_MODES = /* @__PURE__ */ new Set(["autopilot", "ralph", "ralplan"]);
     TERMINAL_WORKFLOW_PHASES = /* @__PURE__ */ new Set([
       "complete",

@@ -47,7 +47,7 @@ import {
   clearVerificationState,
   type VerificationState,
 } from '../ralph/index.js';
-import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop } from '../todo-continuation/index.js';
+import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
   isAutopilotActive
@@ -94,6 +94,8 @@ const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
+const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
+const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
 const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
   'complete',
@@ -1971,6 +1973,33 @@ export async function checkPersistentModes(
       message: '',
       mode: 'none'
     };
+  }
+
+  // Oversized tool outputs can cause Claude Code to end the current turn after
+  // redirecting the payload to a `tool-results/*.txt` file pointer. That stop is
+  // not a real idle/stall signal: injecting a visible Ralph/Ultrawork/todo
+  // continuation banner immediately after the redirect spams the transcript
+  // while the agent is still mid-task. Suppress only a small consecutive window
+  // of such redirects; if redirects keep repeating, fall through to the normal
+  // persistence checks so genuine stalls still get re-enforced.
+  if (isOversizeToolResultRedirectStop(stopContext)) {
+    const redirectStopCount = readStopBreaker(
+      workingDir,
+      'oversize-tool-result-redirect',
+      sessionId,
+      OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS,
+    ) + 1;
+    writeStopBreaker(workingDir, 'oversize-tool-result-redirect', redirectStopCount, sessionId);
+
+    if (redirectStopCount <= OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX) {
+      return {
+        shouldBlock: false,
+        message: '',
+        mode: 'none'
+      };
+    }
+  } else {
+    writeStopBreaker(workingDir, 'oversize-tool-result-redirect', 0, sessionId);
   }
 
   // If this session owns pending async work, quiescence is intentional: Claude
