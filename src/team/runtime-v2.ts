@@ -421,6 +421,8 @@ export interface StartTeamV2Config {
    * branch. See merge-orchestrator.ts.
    */
   autoMerge?: boolean;
+  /** Custom CLI flags to append to every worker's launch command. */
+  extraFlags?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +542,8 @@ interface SpawnV2WorkerOptions {
    * is populated for the completion handler.
    */
   role?: CanonicalTeamRole;
+  /** Custom CLI flags forwarded to this worker's launch command. */
+  extraFlags?: string[];
 }
 
 interface SpawnV2WorkerResult {
@@ -691,6 +695,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     cwd: opts.workerCwd ?? opts.cwd,
     resolvedBinaryPath,
     model: modelForAgent,
+    extraFlags: opts.extraFlags,
   });
 
   // For prompt-mode agents (currently gemini), keep the full instruction in
@@ -1240,6 +1245,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       resolvedBinaryPaths,
       ...(assignment.model ? { model: assignment.model } : {}),
       ...(assignment.role ? { role: assignment.role } : {}),
+      ...(config.extraFlags ? { extraFlags: config.extraFlags } : {}),
     });
 
     if (workerLaunch.paneId) {

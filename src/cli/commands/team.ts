@@ -642,6 +642,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
       ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
       ...(parsed.autoMerge ? { autoMerge: true } : {}),
+      ...(parsed.extraFlags ? { extraFlags: parsed.extraFlags } : {}),
     });
 
     const uniqueTypes = [...new Set(parsed.agentTypes)].join(',');

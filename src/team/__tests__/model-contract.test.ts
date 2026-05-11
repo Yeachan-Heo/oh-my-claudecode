@@ -273,6 +273,38 @@ describe('model-contract', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4o' });
       expect(args).toContain('gpt-4o');
     });
+
+    it('claude passes extraFlags to the end of launch args', () => {
+      const args = buildLaunchArgs('claude', {
+        teamName: 't', workerName: 'w', cwd: '/tmp',
+        extraFlags: ['--settings', '/tmp/s.json'],
+      });
+      expect(args).toContain('--dangerously-skip-permissions');
+      expect(args).toContain('--settings');
+      expect(args).toContain('/tmp/s.json');
+      expect(args[args.length - 1]).toBe('/tmp/s.json');
+    });
+
+    it('codex passes extraFlags to the end of launch args', () => {
+      const args = buildLaunchArgs('codex', {
+        teamName: 't', workerName: 'w', cwd: '/tmp',
+        extraFlags: ['--omx', '--madmax'],
+      });
+      expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(args).toContain('--omx');
+      expect(args).toContain('--madmax');
+      expect(args[args.length - 1]).toBe('--madmax');
+    });
+
+    it('gemini passes extraFlags to the end of launch args', () => {
+      const args = buildLaunchArgs('gemini', {
+        teamName: 't', workerName: 'w', cwd: '/tmp',
+        extraFlags: ['--experimental'],
+      });
+      expect(args).toContain('--approval-mode');
+      expect(args).toContain('yolo');
+      expect(args).toContain('--experimental');
+    });
   });
 
   describe('getWorkerEnv', () => {
@@ -364,6 +396,19 @@ describe('model-contract', () => {
       mockSpawnSync.mockReturnValueOnce({ status: 0, stdout: '/usr/local/bin/codex\n', stderr: '', pid: 0, output: [], signal: null } as any);
 
       expect(buildWorkerArgv('codex', { teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp' })[0]).toBe('/usr/local/bin/codex');
+      mockSpawnSync.mockRestore();
+    });
+
+    it('buildWorkerArgv forwards extraFlags into the spawned argv', () => {
+      const mockSpawnSync = vi.mocked(spawnSync);
+      mockSpawnSync.mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any);
+      const argv = buildWorkerArgv('claude', {
+        teamName: 'my-team', workerName: 'worker-1', cwd: '/tmp',
+        extraFlags: ['--settings', '/tmp/s.json'],
+      });
+      expect(argv).toContain('claude');
+      expect(argv).toContain('--settings');
+      expect(argv).toContain('/tmp/s.json');
       mockSpawnSync.mockRestore();
     });
   });
