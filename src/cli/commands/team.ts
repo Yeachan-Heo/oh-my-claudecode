@@ -680,6 +680,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
     tasks,
     cwd,
     newWindow: parsed.newWindow,
+    ...(parsed.extraFlags ? { extraFlags: parsed.extraFlags } : {}),
   });
 
   const uniqueTypesV1 = [...new Set(parsed.agentTypes)].join(',');

@@ -30,6 +30,8 @@ export interface TeamConfig {
   tmuxSession?: string;
   leaderPaneId?: string;
   tmuxOwnsWindow?: boolean;
+  /** Custom CLI flags forwarded to every worker's launch command. */
+  extraFlags?: string[];
 }
 
 export interface ActiveWorkerState {
@@ -745,6 +747,7 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
     resolvedBinaryPath,
     model: modelForAgent,
+    extraFlags: runtime.extraFlags,
   });
 
   // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
