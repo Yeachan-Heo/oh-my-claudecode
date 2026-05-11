@@ -12,7 +12,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (29 Total)](#agents-29-total)
-- [Skills (36 Total)](#skills-36-total)
+- [Skills (38 Total)](#skills-38-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -522,7 +522,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (38 bundled)
+## Skills (38 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 

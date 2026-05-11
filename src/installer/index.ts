@@ -1170,7 +1170,21 @@ export function compactPluginSkillPayload(targetRoot: string): { compacted: numb
     return { compacted, totalBytes, errors: [`Failed to create ${fullBodiesDir}: ${message}`] };
   }
 
-  for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+  const skillEntries = (() => {
+    try {
+      return readdirSync(skillsDir, { withFileTypes: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to read plugin skills from ${skillsDir}: ${message}`);
+      return null;
+    }
+  })();
+
+  if (!skillEntries) {
+    return { compacted, totalBytes, errors };
+  }
+
+  for (const entry of skillEntries) {
     if (!entry.isDirectory()) continue;
 
     const skillDir = join(skillsDir, entry.name);
@@ -1206,6 +1220,7 @@ export function copyPluginSyncPayload(sourceRoot: string, targetRoots: string[])
 
   for (const targetRoot of targetRoots) {
     let copiedToTarget = false;
+    let copiedSkills = false;
 
     for (const entry of PLUGIN_SYNC_PAYLOAD) {
       const sourcePath = join(sourceRoot, entry);
@@ -1219,13 +1234,14 @@ export function copyPluginSyncPayload(sourceRoot: string, targetRoots: string[])
           force: true,
         });
         copiedToTarget = true;
+        copiedSkills = copiedSkills || entry === 'skills';
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push(`Failed to sync ${entry} to ${targetRoot}: ${message}`);
       }
     }
 
-    if (copiedToTarget) {
+    if (copiedSkills) {
       const compactResult = compactPluginSkillPayload(targetRoot);
       errors.push(...compactResult.errors);
     }
