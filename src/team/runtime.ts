@@ -747,7 +747,7 @@ export async function spawnWorkerForTask(
     cwd: runtime.cwd,
     resolvedBinaryPath,
     model: modelForAgent,
-    extraFlags: runtime.extraFlags,
+    extraFlags: runtime.config.extraFlags,
   });
 
   // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
