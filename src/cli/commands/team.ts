@@ -252,6 +252,7 @@ export interface ParsedTeamArgs {
   json: boolean;
   newWindow: boolean;
   autoMerge: boolean;
+  extraFlags?: string[];
 }
 
 interface NormalizedWorkerSpecSegment {
@@ -343,13 +344,24 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
 
   // Extract supported flags before parsing positional args
   const filteredArgs: string[] = [];
-  for (const arg of args) {
+  let extraFlags: string[] | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === '--json') {
       json = true;
     } else if (arg === '--new-window') {
       newWindow = true;
     } else if (arg === '--auto-merge') {
       autoMerge = true;
+    } else if (arg === '--extra-flags') {
+      const flagsStr = args[++i];
+      if (!flagsStr) {
+        throw new Error('--extra-flags requires a value (e.g. --extra-flags "--settings /path/to/settings.json")');
+      }
+      extraFlags = flagsStr.trim().split(/\s+/).filter(Boolean);
+    } else if (arg.startsWith('--extra-flags=')) {
+      const flagsStr = arg.slice('--extra-flags='.length);
+      extraFlags = flagsStr.trim().split(/\s+/).filter(Boolean);
     } else {
       filteredArgs.push(arg);
     }
@@ -421,7 +433,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   }
 
   const teamName = slugifyTask(task);
-  return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge };
+  return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge, ...(extraFlags ? { extraFlags } : {}) };
 }
 
 export function buildStartupTasks(parsed: ParsedTeamArgs): Array<{ subject: string; description: string; owner?: string; delegation?: TeamTaskDelegationPlan }> {

@@ -355,6 +355,33 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
 });
 
 
+describe('parseTeamArgs --extra-flags', () => {
+  it('parses --extra-flags as a string and populates extraFlags array', () => {
+    const parsed = parseTeamArgs(['2:claude', '--extra-flags', '--settings /tmp/s.json', 'do the work']);
+    expect(parsed.workerCount).toBe(2);
+    expect(parsed.agentTypes).toEqual(['claude', 'claude']);
+    expect(parsed.extraFlags).toEqual(['--settings', '/tmp/s.json']);
+    expect(parsed.task).toBe('do the work');
+  });
+
+  it('supports --extra-flags with multiple flags space-separated', () => {
+    const parsed = parseTeamArgs(['1:codex', '--extra-flags', '--omx --madmax --high', 'review code']);
+    expect(parsed.extraFlags).toEqual(['--omx', '--madmax', '--high']);
+  });
+
+  it('extraFlags is undefined when --extra-flags is not provided', () => {
+    const parsed = parseTeamArgs(['2:claude', 'simple task']);
+    expect(parsed.extraFlags).toBeUndefined();
+  });
+
+  it('works with comma-separated multi-type specs', () => {
+    const parsed = parseTeamArgs(['1:claude,1:codex', '--extra-flags', '--verbose', 'hybrid task']);
+    expect(parsed.agentTypes).toEqual(['claude', 'codex']);
+    expect(parsed.extraFlags).toEqual(['--verbose']);
+  });
+});
+
+
 describe('buildStartupTasks', () => {
   it('adds owner-aware fanout for explicit per-worker roles', () => {
     const parsed = parseTeamArgs(['1:codex:architect,1:gemini:writer', 'draft launch plan']);
