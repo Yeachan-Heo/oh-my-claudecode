@@ -10,7 +10,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 // vi.hoisted runs before vi.mock hoisting — safe to reference in mock factories
 const { TEST_DIRS } = vi.hoisted(() => {
-    const TEST_DIRS = { claudeDir: '', projectDir: '', projectClaudeDir: '' };
+    const TEST_DIRS = { claudeDir: '', projectDir: '', projectClaudeDir: '', builtinSkillsDir: '' };
     return { TEST_DIRS };
 });
 let TEST_CLAUDE_DIR = '';
@@ -21,6 +21,13 @@ function resetTestDirs() {
     TEST_PROJECT_DIR = mkdtempSync(join(tmpdir(), 'omc-doctor-conflicts-project-'));
     TEST_PROJECT_CLAUDE_DIR = join(TEST_PROJECT_DIR, '.claude');
     TEST_DIRS.claudeDir = TEST_CLAUDE_DIR;
+    TEST_DIRS.builtinSkillsDir = join(TEST_PROJECT_DIR, 'builtin-skills');
+}
+function writeCanonicalOmcReferenceSkill(content = '# Canonical omc-reference skill\n') {
+    const skillPath = join(TEST_DIRS.builtinSkillsDir, 'omc-reference', 'SKILL.md');
+    mkdirSync(join(TEST_DIRS.builtinSkillsDir, 'omc-reference'), { recursive: true });
+    writeFileSync(skillPath, content);
+    return content;
 }
 // Mock getClaudeConfigDir before importing the module under test
 vi.mock('../utils/config-dir.js', () => ({
@@ -28,8 +35,9 @@ vi.mock('../utils/config-dir.js', () => ({
 }));
 // Mock builtin skills to return a known list for testing
 vi.mock('../features/builtin-skills/skills.js', () => ({
+    getSkillsDir: () => TEST_DIRS.builtinSkillsDir,
     listBuiltinSkillNames: ({ includeAliases } = {}) => {
-        const names = ['autopilot', 'ralph', 'ultrawork', 'plan', 'team', 'cancel', 'note'];
+        const names = ['autopilot', 'ralph', 'ultrawork', 'plan', 'team', 'cancel', 'note', 'omc-reference'];
         if (includeAliases) {
             return [...names, 'psm'];
         }
@@ -435,6 +443,42 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
         const collisions = checkLegacySkills();
         expect(collisions).toHaveLength(1);
         expect(collisions[0].name).toBe('team');
+    });
+    it('does NOT flag setup-installed omc-reference fallback when it matches the bundled skill (issue #2992)', () => {
+        const canonicalContent = writeCanonicalOmcReferenceSkill();
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
+        writeFileSync(join(skillsDir, 'omc-reference', 'SKILL.md'), canonicalContent);
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(0);
+    });
+    it('flags user-modified omc-reference fallback content as a real collision (issue #2992)', () => {
+        writeCanonicalOmcReferenceSkill('# Canonical omc-reference skill\n');
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
+        writeFileSync(join(skillsDir, 'omc-reference', 'SKILL.md'), '# Modified omc-reference skill\n');
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(1);
+        expect(collisions[0].name).toBe('omc-reference');
+    });
+    it('still flags non-contract omc-reference.md legacy files (issue #2992)', () => {
+        writeCanonicalOmcReferenceSkill();
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'omc-reference.md'), '# Legacy omc-reference markdown file\n');
+        const collisions = checkLegacySkills();
+        expect(collisions).toHaveLength(1);
+        expect(collisions[0].name).toBe('omc-reference');
+    });
+    it('reports no conflicts for the setup-installed omc-reference fallback (issue #2992)', () => {
+        const canonicalContent = writeCanonicalOmcReferenceSkill();
+        const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
+        mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
+        writeFileSync(join(skillsDir, 'omc-reference', 'SKILL.md'), canonicalContent);
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        const report = runConflictCheck();
+        expect(report.legacySkills).toHaveLength(0);
+        expect(report.hasConflicts).toBe(false);
     });
     it('reports hasConflicts when legacy skills collide (issue #1101)', () => {
         const skillsDir = join(TEST_CLAUDE_DIR, 'skills');

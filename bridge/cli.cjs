@@ -84908,6 +84908,9 @@ function listBuiltinSkillNames(options) {
   }
   return skills.filter((s) => !s.aliasOf).map((s) => s.name);
 }
+function getSkillsDir() {
+  return SKILLS_DIR2;
+}
 
 // src/hooks/auto-slash-command/executor.ts
 var CLAUDE_CONFIG_DIR3 = getClaudeConfigDir();
@@ -86203,6 +86206,25 @@ function checkEnvFlags() {
   }
   return { disableOmc, skipHooks };
 }
+var SETUP_FALLBACK_SKILL_NAMES = /* @__PURE__ */ new Set(["omc-reference"]);
+function isSupportedSetupFallbackSkill(legacySkillsDir, entry, baseName) {
+  if (!SETUP_FALLBACK_SKILL_NAMES.has(baseName)) {
+    return false;
+  }
+  if (entry.toLowerCase() !== baseName) {
+    return false;
+  }
+  const installedSkillPath = (0, import_path117.join)(legacySkillsDir, entry, "SKILL.md");
+  const canonicalSkillPath = (0, import_path117.join)(getSkillsDir(), baseName, "SKILL.md");
+  if (!(0, import_fs98.existsSync)(installedSkillPath) || !(0, import_fs98.existsSync)(canonicalSkillPath)) {
+    return false;
+  }
+  try {
+    return (0, import_fs98.readFileSync)(installedSkillPath, "utf-8") === (0, import_fs98.readFileSync)(canonicalSkillPath, "utf-8");
+  } catch {
+    return false;
+  }
+}
 function checkLegacySkills() {
   const legacySkillsDir = (0, import_path117.join)(getClaudeConfigDir(), "skills");
   if (!(0, import_fs98.existsSync)(legacySkillsDir)) return [];
@@ -86215,6 +86237,9 @@ function checkLegacySkills() {
     for (const entry of entries) {
       const baseName = entry.replace(/\.md$/i, "").toLowerCase();
       if (pluginSkillNames.has(baseName)) {
+        if (isSupportedSetupFallbackSkill(legacySkillsDir, entry, baseName)) {
+          continue;
+        }
         collisions.push({ name: baseName, path: (0, import_path117.join)(legacySkillsDir, entry) });
       }
     }

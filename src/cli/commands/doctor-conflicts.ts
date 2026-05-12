@@ -8,7 +8,7 @@ import { join } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { isOmcHook } from '../../installer/index.js';
 import { colors } from '../utils/formatting.js';
-import { listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
+import { getSkillsDir, listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
 import { inspectUnifiedMcpRegistrySync } from '../../installer/mcp-registry.js';
 
 export interface ConflictReport {
@@ -215,6 +215,34 @@ export function checkEnvFlags(): ConflictReport['envFlags'] {
   return { disableOmc, skipHooks };
 }
 
+const SETUP_FALLBACK_SKILL_NAMES = new Set(['omc-reference']);
+
+function isSupportedSetupFallbackSkill(legacySkillsDir: string, entry: string, baseName: string): boolean {
+  if (!SETUP_FALLBACK_SKILL_NAMES.has(baseName)) {
+    return false;
+  }
+
+  // scripts/setup-claude-md.sh intentionally syncs the raw bundled
+  // skills/omc-reference/SKILL.md file into ~/.claude/skills/omc-reference/SKILL.md
+  // as a Claude CLI fallback. Suppress only that exact, unmodified sync so real
+  // legacy collisions and user-edited omc-reference copies still surface.
+  if (entry.toLowerCase() !== baseName) {
+    return false;
+  }
+
+  const installedSkillPath = join(legacySkillsDir, entry, 'SKILL.md');
+  const canonicalSkillPath = join(getSkillsDir(), baseName, 'SKILL.md');
+  if (!existsSync(installedSkillPath) || !existsSync(canonicalSkillPath)) {
+    return false;
+  }
+
+  try {
+    return readFileSync(installedSkillPath, 'utf-8') === readFileSync(canonicalSkillPath, 'utf-8');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Check for legacy curl-installed skills that collide with plugin skill names.
  * Only flags skills whose names match actual installed plugin skills, avoiding
@@ -234,6 +262,9 @@ export function checkLegacySkills(): ConflictReport['legacySkills'] {
       // Match .md files or directories whose name collides with a plugin skill
       const baseName = entry.replace(/\.md$/i, '').toLowerCase();
       if (pluginSkillNames.has(baseName)) {
+        if (isSupportedSetupFallbackSkill(legacySkillsDir, entry, baseName)) {
+          continue;
+        }
         collisions.push({ name: baseName, path: join(legacySkillsDir, entry) });
       }
     }
