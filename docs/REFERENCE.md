@@ -8,6 +8,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Runtime storage and goal artifacts](#runtime-storage-and-goal-artifacts)
 - [Plugin directory flags](#plugin-directory-flags)
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
@@ -246,6 +247,47 @@ Tag behavior:
 - Telegram: `alice` is normalized to `@alice`
 - Discord: supports `@here`, `@everyone`, numeric user IDs (`<@id>`), and role tags (`role:<id>` -> `<@&id>`)
 - `file` callbacks ignore tag options
+
+---
+
+## Runtime storage and goal artifacts
+
+OMC documentation should describe goal and workflow artifacts by their logical role first, then map that role to the runtime-specific storage root. Do not treat `.omx/` as a universal path: it is the legacy OMX runtime root, while OMC uses `.omc/` for local project state.
+
+### Runtime root mapping
+
+| Runtime                      | Project-local root     | User/global root            | Notes                                                                                                                                                   |
+| ---------------------------- | ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OMC                          | `.omc/`                | `~/.omc/`                   | Canonical OMC storage for project-local state, plans, notepads, logs, research, and ask artifacts.                                                      |
+| OMX compatibility/runtime-v1 | `.omx/`                | `~/.omx/`                   | Compatibility root for older OMX sessions and cross-runtime handoffs. Mention only when documenting OMX-specific behavior.                              |
+| OMO native                   | runtime-owned OMO path | runtime-owned OMO user path | OMO-native storage is owned by that runtime. OMC docs should name the logical artifact role unless an OMO command explicitly documents a concrete path. |
+
+### Logical goal artifact roles
+
+Use these names when writing docs or handoffs so the same concept remains portable across OMC, OMX compatibility, and OMO-native runtimes:
+
+| Logical role            | OMC path                                                                   | OMX compatibility path                                                     | Purpose                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal/spec artifact      | `.omc/specs/<slug>.md` or `.omc/plans/<slug>.md`                           | `.omx/specs/<slug>.md` or `.omx/plans/<slug>.md`                           | Durable statement of the user goal, constraints, acceptance criteria, and execution handoff.                                                                                       |
+| Approved execution plan | `.omc/plans/<slug>.md`                                                     | `.omx/plans/<slug>.md`                                                     | Reviewed implementation plan consumed by execution workflows such as team or ralph.                                                                                                |
+| Task/runtime state      | `.omc/state/<mode>.json` or `.omc/state/sessions/<session-id>/<mode>.json` | `.omx/state/<mode>.json` or `.omx/state/sessions/<session-id>/<mode>.json` | Machine-readable workflow state. Session-scoped state wins over legacy flat files when present.                                                                                    |
+| Team coordination state | `.omc/state/team/<team-name>/...`                                          | `.omx/state/team/<team-name>/...`                                          | Worker task files, mailbox, status, events, and dispatch metadata. Worktree-backed workers should use `OMC_TEAM_STATE_ROOT`/compat env to find the leader-owned coordination root. |
+| Ask/advisor artifacts   | `.omc/artifacts/ask/<provider>-<slug>-<timestamp>.md`                      | `.omx/artifacts/ask/<provider>-<slug>-<timestamp>.md`                      | Persisted advisor output from `omc ask` or compatibility wrappers.                                                                                                                 |
+| Plan-scoped notepad     | `.omc/notepads/<plan-name>/`                                               | `.omx/notepads/<plan-name>/`                                               | Durable notes gathered while planning or executing a named goal.                                                                                                                   |
+| Project memory          | `.omc/project-memory.json` and `.omc/notepad.md`                           | `.omx/project-memory.json` and `.omx/notepad.md`                           | Reusable project facts and session notes.                                                                                                                                          |
+
+When an environment variable such as `OMC_STATE_DIR` centralizes storage, resolve the OMC project-local root through that setting before expanding the paths above. In docs, phrase this as "the OMC state root" or "the team coordination root" when the exact filesystem path may vary.
+
+### `/goal` interoperability notes
+
+Claude Code's `/goal` feature owns its hidden goal state. OMC integrations should not mutate hidden Claude Code goal storage directly. When OMC needs a goal-related artifact, create or update an explicit OMC artifact such as `.omc/specs/<slug>.md`, `.omc/plans/<slug>.md`, or `.omc/state/<mode>.json` and record any `/goal` relationship as metadata or prose in that artifact.
+
+For cross-runtime handoffs:
+
+- Prefer logical names such as "approved execution plan" or "team coordination root" over hardcoded `.omx/...` paths.
+- Use `.omc/...` examples for OMC-facing docs and commands.
+- Use `.omx/...` examples only for OMX compatibility behavior.
+- For OMO-native behavior, link to or quote the OMO command's documented path instead of inventing an OMC/OMX path.
 
 ---
 
