@@ -50,6 +50,7 @@
     "./skills/trace/",
     "./skills/ultraqa/",
     "./skills/ultrawork/",
+    "./skills/ultragoal/",
     "./skills/verify/",
     "./skills/visual-verdict/",
     "./skills/wiki/",
