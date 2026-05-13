@@ -883,6 +883,34 @@ describe('state-tools', () => {
       expect(existsSync(join(stateDir, 'ralph-continue-steer.lock'))).toBe(false);
     });
 
+    it('does not clear a singleton live autopilot owned by another active session', async () => {
+      const currentSessionId = 'fresh-autopilot-cancel-session';
+      const ownerSessionId = 'live-autopilot-owner-session';
+      const ownerDir = join(TEST_DIR, '.omc', 'state', 'sessions', ownerSessionId);
+      mkdirSync(ownerDir, { recursive: true });
+      writeFileSync(
+        join(ownerDir, 'autopilot-state.json'),
+        JSON.stringify({
+          active: true,
+          session_id: ownerSessionId,
+          phase: 'execution',
+          current_phase: 'execution',
+        }),
+      );
+
+      const result = await stateClearTool.handler({
+        mode: 'autopilot',
+        session_id: currentSessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('No state found to clear for mode: autopilot');
+      expect(result.content[0].text).toContain('Checked paths');
+      expect(existsSync(join(ownerDir, 'autopilot-state.json'))).toBe(true);
+      expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', currentSessionId, 'cancel-signal-state.json'))).toBe(true);
+      expect(existsSync(join(ownerDir, 'cancel-signal-state.json'))).toBe(false);
+    });
+
     it('should clear the owning session when the current session resumed ralph from a different conversation', async () => {
       const currentSessionId = 'resume-session-b';
       const ownerSessionId = 'resume-session-a';
@@ -928,6 +956,54 @@ describe('state-tools', () => {
       expect(existsSync(join(sessionDir, 'ralph-stop-breaker.json'))).toBe(false);
       expect(existsSync(join(stateDir, 'ralph-stop-breaker.json'))).toBe(false);
       expect(existsSync(join(stateDir, 'ralph-last-steer-at'))).toBe(false);
+    });
+
+    it('reports no-op with checked paths when session clear finds no actual state file', async () => {
+      const sessionId = 'missing-autopilot-state-session';
+      const result = await stateClearTool.handler({
+        mode: 'autopilot',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('No state found to clear for mode: autopilot in session: missing-autopilot-state-session');
+      expect(result.content[0].text).toContain('Checked paths');
+      expect(result.content[0].text).toContain(join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'));
+    });
+
+    it('clears autopilot state from the centralized OMC_STATE_DIR root used by stop hooks', async () => {
+      const previous = process.env.OMC_STATE_DIR;
+      const sessionId = 'centralized-autopilot-clear-session';
+      const centralRoot = join(TEST_DIR, 'central-state-root');
+      process.env.OMC_STATE_DIR = centralRoot;
+      try {
+        const { getOmcRoot } = await import('../../lib/worktree-paths.js');
+        const autopilotPath = join(getOmcRoot(TEST_DIR), 'state', 'sessions', sessionId, 'autopilot-state.json');
+        mkdirSync(join(autopilotPath, '..'), { recursive: true });
+        writeFileSync(
+          autopilotPath,
+          JSON.stringify({
+            active: true,
+            session_id: sessionId,
+            current_phase: 'execution',
+          }),
+        );
+
+        const result = await stateClearTool.handler({
+          mode: 'autopilot',
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+
+        expect(result.content[0].text).toContain('Successfully cleared state for mode: autopilot in session: centralized-autopilot-clear-session');
+        expect(existsSync(autopilotPath)).toBe(false);
+      } finally {
+        if (previous === undefined) {
+          delete process.env.OMC_STATE_DIR;
+        } else {
+          process.env.OMC_STATE_DIR = previous;
+        }
+      }
     });
 
     it('should discover and clear session-scoped autopilot state when no session_id is provided', async () => {

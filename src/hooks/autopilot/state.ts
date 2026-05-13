@@ -62,11 +62,15 @@ export function readAutopilotState(
   directory: string,
   sessionId?: string,
 ): AutopilotState | null {
-  const state = readModeState<AutopilotState>(
+  const state = readModeState<AutopilotState & { current_phase?: AutopilotPhase }>(
     "autopilot",
     directory,
     sessionId,
   );
+
+  if (state && !state.phase && state.current_phase) {
+    state.phase = state.current_phase;
+  }
 
   // Validate session identity
   if (
@@ -89,9 +93,19 @@ export function writeAutopilotState(
   state: AutopilotState,
   sessionId?: string,
 ): boolean {
+  const stateRecord = state as unknown as Record<string, unknown>;
+  const phase = typeof stateRecord.phase === "string"
+    ? stateRecord.phase
+    : typeof stateRecord.current_phase === "string"
+      ? stateRecord.current_phase
+      : undefined;
+  const normalizedState = phase
+    ? { ...stateRecord, phase, current_phase: phase }
+    : stateRecord;
+
   return writeModeState(
     "autopilot",
-    state as unknown as Record<string, unknown>,
+    normalizedState,
     directory,
     sessionId,
   );
@@ -162,6 +176,7 @@ export function initAutopilot(
   const state: AutopilotState = {
     active: true,
     phase: "expansion",
+    current_phase: "expansion",
     iteration: 1,
     max_iterations: mergedConfig.maxIterations ?? 10,
     originalIdea: idea,
@@ -244,6 +259,7 @@ export function transitionPhase(
 
   // Transition to new phase and record start time
   state.phase = newPhase;
+  (state as AutopilotState & { current_phase?: AutopilotPhase }).current_phase = newPhase;
   state.phase_durations[`${newPhase}_start_ms`] = Date.now();
 
   if (newPhase === "complete" || newPhase === "failed") {
