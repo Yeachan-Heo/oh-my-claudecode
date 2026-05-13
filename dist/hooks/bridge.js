@@ -568,6 +568,7 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
     const wrote = writeAutopilotState(directory, {
         active: true,
         phase: "expansion",
+        current_phase: "expansion",
         iteration: 1,
         max_iterations: DEFAULT_CONFIG.maxIterations ?? 10,
         originalIdea: prompt,

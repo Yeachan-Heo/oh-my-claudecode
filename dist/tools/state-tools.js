@@ -27,6 +27,7 @@ const STATE_TOOL_MODES = [
 ];
 const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active'];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const OWNER_SESSION_FALLBACK_MODES = new Set(['ralph']);
 function readTeamNamesFromStateFile(statePath) {
     if (!existsSync(statePath))
         return [];
@@ -182,6 +183,35 @@ function clearCompletedSessionStateCandidates(mode, root, requesterSessionId) {
         }
     }
     return { cleared, hadFailure, paths };
+}
+function getStateClearCheckedPaths(mode, root, sessionId) {
+    const paths = new Set();
+    if (sessionId) {
+        paths.add(MODE_CONFIGS[mode]
+            ? getStateFilePath(root, mode, sessionId)
+            : resolveSessionStatePath(mode, sessionId, root));
+    }
+    else {
+        paths.add(getStatePath(mode, root));
+    }
+    for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
+        paths.add(legacyPath);
+    }
+    const sessionIds = sessionId ? [sessionId, ...listSessionIds(root)] : listSessionIds(root);
+    for (const sid of new Set(sessionIds)) {
+        paths.add(MODE_CONFIGS[mode]
+            ? getStateFilePath(root, mode, sid)
+            : resolveSessionStatePath(mode, sid, root));
+    }
+    return [...paths];
+}
+function formatStateClearNoopMessage(mode, root, sessionId) {
+    const scope = sessionId ? ` in session: ${sessionId}` : '';
+    const checkedPaths = getStateClearCheckedPaths(mode, root, sessionId);
+    const checked = checkedPaths.length > 0
+        ? `\n- Checked paths:\n${checkedPaths.map((statePath) => `  - ${statePath}`).join('\n')}`
+        : '';
+    return `No state found to clear for mode: ${mode}${scope}${checked}`;
 }
 function getModeRuntimeArtifactNames(mode) {
     return [
@@ -539,7 +569,8 @@ export const stateClearTool = {
                     let ownerSessionId;
                     let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
                     let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-                    if (requestedSessionOwnedPaths.length === 0 &&
+                    if (OWNER_SESSION_FALLBACK_MODES.has(mode) &&
+                        requestedSessionOwnedPaths.length === 0 &&
                         completedSessionCleanup.cleared === 0 &&
                         sessionCleanup.cleared === 0 &&
                         legacyCleanup.cleared === 0) {
@@ -589,6 +620,27 @@ export const stateClearTool = {
                             details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
                         return details.length > 0 ? ` (${details.join(', ')})` : '';
                     })();
+                    const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
+                        completedSessionCleanup.cleared +
+                        sessionCleanup.cleared +
+                        legacyCleanup.cleared +
+                        ownerSessionCleanup.cleared +
+                        ownerLegacyCleanup.cleared +
+                        runtimeCleanup.cleared;
+                    if (!ownerSessionId && clearedStateOrArtifacts === 0 && success &&
+                        !legacyCleanup.hadFailure &&
+                        !sessionCleanup.hadFailure &&
+                        !completedSessionCleanup.hadFailure &&
+                        !ownerSessionCleanup.hadFailure &&
+                        !ownerLegacyCleanup.hadFailure &&
+                        !runtimeCleanup.hadFailure) {
+                        return {
+                            content: [{
+                                    type: 'text',
+                                    text: formatStateClearNoopMessage(mode, root, sessionId)
+                                }]
+                        };
+                    }
                     if (success &&
                         !legacyCleanup.hadFailure &&
                         !sessionCleanup.hadFailure &&
@@ -618,7 +670,8 @@ export const stateClearTool = {
                 let ownerSessionId;
                 let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
                 let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-                if (requestedSessionOwnedPaths.length === 0 &&
+                if (OWNER_SESSION_FALLBACK_MODES.has(mode) &&
+                    requestedSessionOwnedPaths.length === 0 &&
                     completedSessionCleanup.cleared === 0 &&
                     sessionCleanup.cleared === 0 &&
                     legacyCleanup.cleared === 0) {
@@ -667,10 +720,28 @@ export const stateClearTool = {
                         details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
                     return details.length > 0 ? ` (${details.join(', ')})` : '';
                 })();
+                const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
+                    completedSessionCleanup.cleared +
+                    sessionCleanup.cleared +
+                    legacyCleanup.cleared +
+                    ownerSessionCleanup.cleared +
+                    ownerLegacyCleanup.cleared +
+                    runtimeCleanup.cleared;
+                const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
+                    completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
+                    ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure;
+                if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
+                    return {
+                        content: [{
+                                type: 'text',
+                                text: formatStateClearNoopMessage(mode, root, sessionId)
+                            }]
+                    };
+                }
                 return {
                     content: [{
                             type: 'text',
-                            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+                            text: `${hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
                         }]
                 };
             }
@@ -772,7 +843,7 @@ export const stateClearTool = {
                 return {
                     content: [{
                             type: 'text',
-                            text: `No state found to clear for mode: ${mode}`
+                            text: formatStateClearNoopMessage(mode, root)
                         }]
                 };
             }

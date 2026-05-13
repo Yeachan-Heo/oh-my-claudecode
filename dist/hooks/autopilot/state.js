@@ -33,6 +33,9 @@ export function ensureAutopilotDir(directory) {
  */
 export function readAutopilotState(directory, sessionId) {
     const state = readModeState("autopilot", directory, sessionId);
+    if (state && !state.phase && state.current_phase) {
+        state.phase = state.current_phase;
+    }
     // Validate session identity
     if (state &&
         sessionId &&
@@ -46,7 +49,16 @@ export function readAutopilotState(directory, sessionId) {
  * Write autopilot state to disk
  */
 export function writeAutopilotState(directory, state, sessionId) {
-    return writeModeState("autopilot", state, directory, sessionId);
+    const stateRecord = state;
+    const phase = typeof stateRecord.phase === "string"
+        ? stateRecord.phase
+        : typeof stateRecord.current_phase === "string"
+            ? stateRecord.current_phase
+            : undefined;
+    const normalizedState = phase
+        ? { ...stateRecord, phase, current_phase: phase }
+        : stateRecord;
+    return writeModeState("autopilot", normalizedState, directory, sessionId);
 }
 /**
  * Clear autopilot state
@@ -95,6 +107,7 @@ export function initAutopilot(directory, idea, sessionId, config) {
     const state = {
         active: true,
         phase: "expansion",
+        current_phase: "expansion",
         iteration: 1,
         max_iterations: mergedConfig.maxIterations ?? 10,
         originalIdea: idea,
@@ -160,6 +173,7 @@ export function transitionPhase(directory, newPhase, sessionId) {
     }
     // Transition to new phase and record start time
     state.phase = newPhase;
+    state.current_phase = newPhase;
     state.phase_durations[`${newPhase}_start_ms`] = Date.now();
     if (newPhase === "complete" || newPhase === "failed") {
         state.completed_at = now;

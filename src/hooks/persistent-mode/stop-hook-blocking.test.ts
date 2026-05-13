@@ -1108,6 +1108,51 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.decision).toBeUndefined();
     });
 
+    it("uses current_phase when autopilot phase is missing in mjs script", () => {
+      const sessionId = "autopilot-current-phase-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          current_phase: "execution",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason || "")).toContain("[AUTOPILOT - Phase: execution]");
+      expect(String(output.reason || "")).not.toContain("unspecified");
+    });
+
+    it("allows terminal current_phase-only autopilot state in mjs script", () => {
+      const sessionId = "autopilot-current-phase-complete-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          current_phase: "complete",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+    });
+
     it("cleans orphaned unspecified autopilot routing echo state instead of reinforcing in mjs script", () => {
       const sessionId = "autopilot-routing-echo-orphan-mjs";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -1131,6 +1176,53 @@ describe("Stop Hook Blocking Contract", () => {
       expect(existsSync(autopilotPath)).toBe(false);
     });
 
+
+    it("cleans slash autopilot execute routing echo state instead of reinforcing in mjs script", () => {
+      const sessionId = "autopilot-slash-routing-echo-orphan-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          original_prompt: "/oh-my-claudecode:autopilot execute",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
+    });
+
+    it("does not clear slash autopilot state once a real phase is present in mjs script", () => {
+      const sessionId = "autopilot-slash-active-phase-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          phase: "expansion",
+          original_prompt: "/oh-my-claudecode:autopilot execute",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.decision).toBe("block");
+      expect(existsSync(autopilotPath)).toBe(true);
+    });
 
     it("returns decision: block when autopilot awaiting_confirmation is stale", () => {
       const sessionId = "autopilot-stale-awaiting-confirmation-mjs";
@@ -1513,6 +1605,51 @@ describe("Stop Hook Blocking Contract", () => {
       expect(reason).not.toContain("\nTask:");
     });
 
+    it("uses current_phase when autopilot phase is missing in cjs script", () => {
+      const sessionId = "autopilot-current-phase-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          current_phase: "execution",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason || "")).toContain("[AUTOPILOT - Phase: execution]");
+      expect(String(output.reason || "")).not.toContain("unspecified");
+    });
+
+    it("allows terminal current_phase-only autopilot state in cjs script", () => {
+      const sessionId = "autopilot-current-phase-complete-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          current_phase: "complete",
+          session_id: sessionId,
+          reinforcement_count: 0,
+          last_checked_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+    });
+
     it("cleans orphaned unspecified autopilot routing echo state instead of reinforcing in cjs script", () => {
       const sessionId = "autopilot-routing-echo-orphan-cjs";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -1534,6 +1671,53 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.continue).toBe(true);
       expect(output.decision).toBeUndefined();
       expect(existsSync(autopilotPath)).toBe(false);
+    });
+
+    it("cleans slash autopilot execute routing echo state instead of reinforcing in cjs script", () => {
+      const sessionId = "autopilot-slash-routing-echo-orphan-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          original_prompt: "/oh-my-claudecode:autopilot execute",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
+    });
+
+    it("does not clear slash autopilot state once a real phase is present in cjs script", () => {
+      const sessionId = "autopilot-slash-active-phase-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          phase: "expansion",
+          original_prompt: "/oh-my-claudecode:autopilot execute",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+          project_path: tempDir,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.decision).toBe("block");
+      expect(existsSync(autopilotPath)).toBe(true);
     });
 
     it("ignores legacy local state when OMC_STATE_DIR is set", () => {

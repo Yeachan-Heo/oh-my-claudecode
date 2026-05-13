@@ -136,6 +136,8 @@ export interface AutopilotState {
   active: boolean;
   /** Current phase of execution */
   phase: AutopilotPhase;
+  /** Backward-compatible alias used by generic mode state tooling */
+  current_phase?: AutopilotPhase;
   /** Current iteration number */
   iteration: number;
   /** Maximum iterations before giving up */

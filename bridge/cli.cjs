@@ -10983,6 +10983,76 @@ __export(auto_update_exports, {
   syncPluginCache: () => syncPluginCache,
   updateLastCheckTime: () => updateLastCheckTime
 });
+function npmExecOptions(verbose = false) {
+  return {
+    encoding: "utf-8",
+    stdio: verbose ? "inherit" : "pipe",
+    timeout: 12e4,
+    ...process.platform === "win32" ? { windowsHide: true } : {}
+  };
+}
+function assertSafeNpmPackageSpec(packageSpec) {
+  if (!/^[A-Za-z0-9@._~+/-]+$/.test(packageSpec)) {
+    throw new Error(`Unsafe npm package spec: ${packageSpec}`);
+  }
+}
+function npmInstallGlobalPackage(packageSpec, verbose = false) {
+  assertSafeNpmPackageSpec(packageSpec);
+  if (process.platform === "win32") {
+    (0, import_child_process14.execSync)(`npm install -g ${packageSpec}`, npmExecOptions(verbose));
+    return;
+  }
+  (0, import_child_process14.execFileSync)("npm", ["install", "-g", packageSpec], npmExecOptions(verbose));
+}
+function detectGlobalClaudeCodeInstall() {
+  try {
+    const npmRoot = String((0, import_child_process14.execSync)("npm root -g", {
+      encoding: "utf-8",
+      stdio: "pipe",
+      timeout: 1e4,
+      ...process.platform === "win32" ? { windowsHide: true } : {}
+    }) ?? "").trim();
+    if (!npmRoot) {
+      return { status: "unknown", error: "npm root -g returned an empty path" };
+    }
+    const packageJsonPath = (0, import_path50.join)(npmRoot, "@anthropic-ai", "claude-code", "package.json");
+    if (!(0, import_fs38.existsSync)(packageJsonPath)) {
+      return { status: "absent" };
+    }
+    const packageJson = JSON.parse(String((0, import_fs38.readFileSync)(packageJsonPath, "utf-8") ?? ""));
+    return {
+      status: "present",
+      version: typeof packageJson.version === "string" && packageJson.version.trim() ? packageJson.version.trim() : void 0
+    };
+  } catch (error2) {
+    return {
+      status: "unknown",
+      error: error2 instanceof Error ? error2.message : String(error2)
+    };
+  }
+}
+function restoreGlobalClaudeCodeIfNeeded(beforeUpdate, verbose = false) {
+  if (beforeUpdate.status !== "present") {
+    return { restored: false };
+  }
+  if (detectGlobalClaudeCodeInstall().status === "present") {
+    return { restored: false };
+  }
+  const versionSuffix = beforeUpdate.version ? `@${beforeUpdate.version}` : "@latest";
+  const packageSpec = `${CLAUDE_CODE_NPM_PACKAGE}${versionSuffix}`;
+  if (verbose) {
+    console.log(`[omc update] Restoring global ${packageSpec} after npm update...`);
+  }
+  npmInstallGlobalPackage(packageSpec, verbose);
+  const afterRestore = detectGlobalClaudeCodeInstall();
+  if (afterRestore.status !== "present") {
+    throw new Error(`Global ${CLAUDE_CODE_NPM_PACKAGE} was present before update but is still missing after restore`);
+  }
+  if (verbose) {
+    console.log(`[omc update] Restored global ${CLAUDE_CODE_NPM_PACKAGE}`);
+  }
+  return { restored: true };
+}
 function syncMarketplaceClone(verbose = false) {
   const marketplacePath = (0, import_path50.join)(getClaudeConfigDir(), "plugins", "marketplaces", "omc");
   if (!(0, import_fs38.existsSync)(marketplacePath)) {
@@ -11419,14 +11489,20 @@ async function performUpdate(options) {
     }
     const release = await fetchLatestRelease();
     const newVersion = release.tag_name.replace(/^v/, "");
+    const claudeCodeBeforeUpdate = detectGlobalClaudeCodeInstall();
     try {
-      (0, import_child_process14.execSync)("npm install -g oh-my-claude-sisyphus@latest", {
-        encoding: "utf-8",
-        stdio: options?.verbose ? "inherit" : "pipe",
-        timeout: 12e4,
-        // 2 minute timeout for npm
-        ...process.platform === "win32" ? { windowsHide: true } : {}
-      });
+      (0, import_child_process14.execSync)("npm install -g oh-my-claude-sisyphus@latest", npmExecOptions(options?.verbose ?? false));
+      try {
+        restoreGlobalClaudeCodeIfNeeded(claudeCodeBeforeUpdate, options?.verbose ?? false);
+      } catch (restoreError) {
+        return {
+          success: false,
+          previousVersion,
+          newVersion,
+          message: `Updated to ${newVersion}, but failed to restore global ${CLAUDE_CODE_NPM_PACKAGE}`,
+          errors: [restoreError instanceof Error ? restoreError.message : String(restoreError)]
+        };
+      }
       const marketplaceSync = syncMarketplaceClone(options?.verbose ?? false);
       if (!marketplaceSync.ok && options?.verbose) {
         console.warn(`[omc update] ${marketplaceSync.message}`);
@@ -11703,7 +11779,7 @@ function initSilentAutoUpdate(config2 = {}) {
   silentAutoUpdate(config2).catch(() => {
   });
 }
-var import_fs38, import_path50, import_child_process14, REPO_OWNER, REPO_NAME, GITHUB_API_URL, GITHUB_RAW_URL, CLAUDE_CONFIG_DIR2, VERSION_FILE2, CONFIG_FILE, SILENT_UPDATE_STATE_FILE;
+var import_fs38, import_path50, import_child_process14, REPO_OWNER, REPO_NAME, GITHUB_API_URL, GITHUB_RAW_URL, CLAUDE_CODE_NPM_PACKAGE, CLAUDE_CONFIG_DIR2, VERSION_FILE2, CONFIG_FILE, SILENT_UPDATE_STATE_FILE;
 var init_auto_update = __esm({
   "src/features/auto-update.ts"() {
     "use strict";
@@ -11719,6 +11795,7 @@ var init_auto_update = __esm({
     REPO_NAME = "oh-my-claudecode";
     GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
     GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
+    CLAUDE_CODE_NPM_PACKAGE = "@anthropic-ai/claude-code";
     CLAUDE_CONFIG_DIR2 = getClaudeConfigDir();
     VERSION_FILE2 = (0, import_path50.join)(CLAUDE_CONFIG_DIR2, ".omc-version.json");
     CONFIG_FILE = (0, import_path50.join)(CLAUDE_CONFIG_DIR2, OMC_CONFIG_FILE_REL);
@@ -17352,15 +17429,21 @@ function readAutopilotState(directory, sessionId) {
     directory,
     sessionId
   );
+  if (state && !state.phase && state.current_phase) {
+    state.phase = state.current_phase;
+  }
   if (state && sessionId && state.session_id && state.session_id !== sessionId) {
     return null;
   }
   return state;
 }
 function writeAutopilotState(directory, state, sessionId) {
+  const stateRecord = state;
+  const phase = typeof stateRecord.phase === "string" ? stateRecord.phase : typeof stateRecord.current_phase === "string" ? stateRecord.current_phase : void 0;
+  const normalizedState = phase ? { ...stateRecord, phase, current_phase: phase } : stateRecord;
   return writeModeState(
     "autopilot",
-    state,
+    normalizedState,
     directory,
     sessionId
   );
@@ -17395,6 +17478,7 @@ function initAutopilot(directory, idea, sessionId, config2) {
   const state = {
     active: true,
     phase: "expansion",
+    current_phase: "expansion",
     iteration: 1,
     max_iterations: mergedConfig.maxIterations ?? 10,
     originalIdea: idea,
@@ -17455,6 +17539,7 @@ function transitionPhase(directory, newPhase, sessionId) {
     state.phase_durations[oldPhase] = duration3;
   }
   state.phase = newPhase;
+  state.current_phase = newPhase;
   state.phase_durations[`${newPhase}_start_ms`] = Date.now();
   if (newPhase === "complete" || newPhase === "failed") {
     state.completed_at = now;
@@ -74306,6 +74391,7 @@ var STATE_TOOL_MODES = [
 ];
 var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "skill-active"];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
+var OWNER_SESSION_FALLBACK_MODES = /* @__PURE__ */ new Set(["ralph"]);
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs20.existsSync)(statePath)) return [];
   try {
@@ -74429,6 +74515,30 @@ function clearCompletedSessionStateCandidates(mode, root2, requesterSessionId) {
     }
   }
   return { cleared, hadFailure, paths };
+}
+function getStateClearCheckedPaths(mode, root2, sessionId) {
+  const paths = /* @__PURE__ */ new Set();
+  if (sessionId) {
+    paths.add(MODE_CONFIGS[mode] ? getStateFilePath(root2, mode, sessionId) : resolveSessionStatePath(mode, sessionId, root2));
+  } else {
+    paths.add(getStatePath(mode, root2));
+  }
+  for (const legacyPath of getLegacyStateFileCandidates(mode, root2)) {
+    paths.add(legacyPath);
+  }
+  const sessionIds = sessionId ? [sessionId, ...listSessionIds(root2)] : listSessionIds(root2);
+  for (const sid of new Set(sessionIds)) {
+    paths.add(MODE_CONFIGS[mode] ? getStateFilePath(root2, mode, sid) : resolveSessionStatePath(mode, sid, root2));
+  }
+  return [...paths];
+}
+function formatStateClearNoopMessage(mode, root2, sessionId) {
+  const scope = sessionId ? ` in session: ${sessionId}` : "";
+  const checkedPaths = getStateClearCheckedPaths(mode, root2, sessionId);
+  const checked = checkedPaths.length > 0 ? `
+- Checked paths:
+${checkedPaths.map((statePath) => `  - ${statePath}`).join("\n")}` : "";
+  return `No state found to clear for mode: ${mode}${scope}${checked}`;
 }
 function getModeRuntimeArtifactNames(mode) {
   return [
@@ -74802,7 +74912,7 @@ var stateClearTool = {
           let ownerSessionId2;
           let ownerSessionCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
           let ownerLegacyCleanup2 = { cleared: 0, hadFailure: false };
-          if (requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0) {
+          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0) {
             ownerSessionId2 = findSingleOwningSessionForMode(mode, root2, sessionId);
             if (ownerSessionId2) {
               if (mode === "team") {
@@ -74846,6 +74956,15 @@ var stateClearTool = {
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
+          const clearedStateOrArtifacts2 = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
+          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+            return {
+              content: [{
+                type: "text",
+                text: formatStateClearNoopMessage(mode, root2, sessionId)
+              }]
+            };
+          }
           if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
               content: [{
@@ -74867,7 +74986,7 @@ var stateClearTool = {
         let ownerSessionId;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-        if (requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0) {
+        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0) {
           ownerSessionId = findSingleOwningSessionForMode(mode, root2, sessionId);
           if (ownerSessionId) {
             if (mode === "team") {
@@ -74910,10 +75029,20 @@ var stateClearTool = {
           if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(", ")})` : "";
         })();
+        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
+        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
+        if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
+          return {
+            content: [{
+              type: "text",
+              text: formatStateClearNoopMessage(mode, root2, sessionId)
+            }]
+          };
+        }
         return {
           content: [{
             type: "text",
-            text: `${legacyCleanup.hadFailure || sessionCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            text: `${hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
           }]
         };
       }
@@ -75002,7 +75131,7 @@ var stateClearTool = {
         return {
           content: [{
             type: "text",
-            text: `No state found to clear for mode: ${mode}`
+            text: formatStateClearNoopMessage(mode, root2)
           }]
         };
       }
@@ -82643,6 +82772,7 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
     {
       active: true,
       phase: "expansion",
+      current_phase: "expansion",
       iteration: 1,
       max_iterations: DEFAULT_CONFIG6.maxIterations ?? 10,
       originalIdea: prompt,

@@ -456,15 +456,28 @@ function isAwaitingConfirmation(state) {
   return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
+function getAutopilotPhase(state) {
+  const rawPhase = state?.phase ?? state?.current_phase ?? "unspecified";
+  return typeof rawPhase === "string" && rawPhase.trim()
+    ? rawPhase.trim().toLowerCase()
+    : "unspecified";
+}
+
+function isAutopilotRoutingEchoPrompt(promptText) {
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText) ||
+    /^\/(?:oh-my-claudecode:|omc:)?autopilot(?:\s+execute)?\s*$/i.test(promptText);
+}
+
 function isOrphanedAutopilotRoutingEchoState(state) {
   if (!state || typeof state !== "object") return false;
 
-  const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+  const phase = getAutopilotPhase(state);
   if (phase && phase !== "unspecified") return false;
 
   const promptText = [
     state.originalIdea,
     state.original_idea,
+    state.original_prompt,
     state.prompt,
     state.task_description,
   ]
@@ -472,7 +485,7 @@ function isOrphanedAutopilotRoutingEchoState(state) {
     .join("\n")
     .trim();
 
-  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+  return isAutopilotRoutingEchoPrompt(promptText);
 }
 
 function clearLoadedStateFile(loaded) {
@@ -1105,7 +1118,7 @@ async function main() {
     }
 
     if (autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) && !isStaleState(autopilot.state) && isSessionMatch(autopilot.state, sessionId)) {
-      const phase = autopilot.state.phase || "unknown";
+      const phase = getAutopilotPhase(autopilot.state);
       if (phase !== "complete") {
         const newCount = (autopilot.state.reinforcement_count || 0) + 1;
         if (newCount <= 20) {
