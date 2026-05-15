@@ -14605,6 +14605,7 @@ var init_types4 = __esm({
       ralph: "ralph",
       background: "bg",
       thinking: "thinking",
+      model: "Model",
       staged: "+",
       modified: "!",
       untracked: "?",
@@ -14622,6 +14623,7 @@ var init_types4 = __esm({
         ralph: "\u5FAA\u73AF",
         background: "\u540E\u53F0",
         thinking: "\u601D\u8003",
+        model: "\u6A21\u578B",
         staged: "\u5DF2\u6682\u5B58",
         modified: "\u5DF2\u4FEE\u6539",
         untracked: "\u672A\u8DDF\u8E2A",
@@ -43497,11 +43499,13 @@ function getRateLimitsFromStdin(stdin) {
     weeklyResetsAt: parseResetDate(stdin.rate_limits?.seven_day?.resets_at)
   };
 }
-function getModelName(stdin) {
-  const displayName = stdin.model?.display_name?.trim();
-  if (displayName) return displayName;
+function getModelId(stdin) {
   const modelId = stdin.model?.id?.trim();
   return modelId || null;
+}
+function getModelName(stdin) {
+  const displayName = stdin.model?.display_name?.trim();
+  return displayName || getModelId(stdin);
 }
 var import_fs104, import_path123, TRANSIENT_CONTEXT_PERCENT_TOLERANCE, SESSION_ID_ENV_VARS;
 var init_stdin = __esm({
@@ -45595,6 +45599,10 @@ var init_git = __esm({
 function extractVersion(modelId) {
   const idMatch = modelId.match(/(?:opus|sonnet|haiku)-(\d+)-(\d+)/i);
   if (idMatch) return `${idMatch[1]}.${idMatch[2]}`;
+  const legacyIdMatch = modelId.match(/claude-(\d+)(?:-(\d+))?-(?:opus|sonnet|haiku)/i);
+  if (legacyIdMatch) {
+    return legacyIdMatch[2] ? `${legacyIdMatch[1]}.${legacyIdMatch[2]}` : legacyIdMatch[1];
+  }
   const displayMatch = modelId.match(/(?:opus|sonnet|haiku)\s+(\d+(?:\.\d+)?)/i);
   if (displayMatch) return displayMatch[1];
   return null;
@@ -45618,16 +45626,17 @@ function formatModelName(modelId, format = "short") {
   }
   return shortName;
 }
-function renderModel(modelId, format = "versioned") {
+function renderModel(modelId, format = "versioned", labels = DEFAULT_HUD_LABELS) {
   const name = formatModelName(modelId, format);
   if (!name) return null;
-  return cyan(`Model: ${name}`);
+  return cyan(`${labels.model}: ${name}`);
 }
 var init_model = __esm({
   "src/hud/elements/model.ts"() {
     "use strict";
     init_colors();
     init_string_width();
+    init_types4();
   }
 });
 
@@ -45883,10 +45892,12 @@ async function render(context, config2) {
     const gitStatusElement = renderGitStatus(context.cwd, hudLabels);
     if (gitStatusElement) rendered.set("gitStatus", gitStatusElement);
   }
-  if (enabledElements.model && context.modelName) {
+  const modelSource = enabledElements.modelFormat === "full" ? context.modelId ?? context.modelName : context.modelName;
+  if (enabledElements.model && modelSource) {
     const modelElement = renderModel(
-      context.modelName,
-      enabledElements.modelFormat
+      modelSource,
+      enabledElements.modelFormat,
+      hudLabels
     );
     if (modelElement) rendered.set("model", modelElement);
   }
@@ -46453,6 +46464,7 @@ async function main2(watchMode = false, skipInit = false) {
       contextPercent,
       contextDisplayScope: currentSessionId ?? cwd2,
       modelName: getModelName(stdin),
+      modelId: getModelId(stdin),
       ralph,
       ultrawork,
       prd,

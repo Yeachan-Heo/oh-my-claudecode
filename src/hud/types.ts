@@ -320,6 +320,9 @@ export interface HudRenderContext {
   /** Model display name from Claude Code statusline stdin; null when unavailable */
   modelName: string | null;
 
+  /** Raw model id from Claude Code statusline stdin; used when full model format is requested */
+  modelId?: string | null;
+
   /** Ralph loop state */
   ralph: RalphStateForHud | null;
 
@@ -467,6 +470,7 @@ export interface HudLabels {
   ralph: string;
   background: string;
   thinking: string;
+  model: string;
   staged: string;
   modified: string;
   untracked: string;
@@ -483,6 +487,7 @@ export const DEFAULT_HUD_LABELS: HudLabels = {
   ralph: 'ralph',
   background: 'bg',
   thinking: 'thinking',
+  model: 'Model',
   staged: '+',
   modified: '!',
   untracked: '?',
@@ -501,6 +506,7 @@ export const HUD_LOCALE_LABELS: Record<HudLocale, HudLabels> = {
     ralph: '循环',
     background: '后台',
     thinking: '思考',
+    model: '模型',
     staged: '已暂存',
     modified: '已修改',
     untracked: '未跟踪',

@@ -718,9 +718,10 @@ describe('optional HUD line defaults', () => {
     });
 });
 describe('HUD model display', () => {
-    const createModelContext = (modelName) => ({
+    const createModelContext = (modelName, modelId = null) => ({
         contextPercent: 0,
         modelName,
+        modelId,
         ralph: null,
         ultrawork: null,
         prd: null,
@@ -781,6 +782,28 @@ describe('HUD model display', () => {
         expect(output.split('\n')).toHaveLength(1);
         expect(output).toContain('[OMC#4.14.0]');
         expect(output).toContain('Model: Sonnet 4.5');
+    });
+    it('renders full format from raw model id when display name is also available', async () => {
+        const output = await render(createModelContext('Claude Sonnet 4.5', 'claude-sonnet-4-5-20250929'), {
+            ...modelConfig,
+            elements: {
+                ...modelConfig.elements,
+                modelFormat: 'full',
+            },
+        });
+        expect(output).toContain('Model: claude-sonnet-4-5-20250929');
+        expect(output).not.toContain('Claude Sonnet 4.5');
+    });
+    it('renders configured model label through HUD labels', async () => {
+        const output = await render(createModelContext('Claude Sonnet 4.5'), {
+            ...modelConfig,
+            labels: {
+                ...DEFAULT_HUD_CONFIG.labels,
+                model: '模型',
+            },
+        });
+        expect(output).toContain('模型: Sonnet 4.5');
+        expect(output).not.toContain('Model: Sonnet 4.5');
     });
     it('omits the model segment when model metadata is unavailable', async () => {
         const output = await render(createModelContext(null), modelConfig);

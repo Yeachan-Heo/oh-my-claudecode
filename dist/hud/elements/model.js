@@ -5,17 +5,25 @@
  */
 import { cyan } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
+import { DEFAULT_HUD_LABELS } from '../types.js';
 /**
  * Extract version from a model ID string.
  * E.g., 'claude-opus-4-7-20260416' -> '4.7'
  *       'claude-sonnet-4-6-20260217' -> '4.6'
  *       'claude-haiku-4-5-20251001' -> '4.5'
+ *       'claude-3-5-sonnet-20241022' -> '3.5'
+ *       'claude-3-opus-20240229' -> '3'
  */
 function extractVersion(modelId) {
     // Match hyphenated ID patterns like opus-4-6, sonnet-4-5, haiku-4-5
     const idMatch = modelId.match(/(?:opus|sonnet|haiku)-(\d+)-(\d+)/i);
     if (idMatch)
         return `${idMatch[1]}.${idMatch[2]}`;
+    // Match legacy raw ID patterns like claude-3-5-sonnet-20241022 and claude-3-opus-20240229
+    const legacyIdMatch = modelId.match(/claude-(\d+)(?:-(\d+))?-(?:opus|sonnet|haiku)/i);
+    if (legacyIdMatch) {
+        return legacyIdMatch[2] ? `${legacyIdMatch[1]}.${legacyIdMatch[2]}` : legacyIdMatch[1];
+    }
     // Match display name patterns like "Sonnet 4.5", "Opus 4.7"
     const displayMatch = modelId.match(/(?:opus|sonnet|haiku)\s+(\d+(?:\.\d+)?)/i);
     if (displayMatch)
@@ -54,10 +62,10 @@ export function formatModelName(modelId, format = 'short') {
 /**
  * Render model element.
  */
-export function renderModel(modelId, format = 'versioned') {
+export function renderModel(modelId, format = 'versioned', labels = DEFAULT_HUD_LABELS) {
     const name = formatModelName(modelId, format);
     if (!name)
         return null;
-    return cyan(`Model: ${name}`);
+    return cyan(`${labels.model}: ${name}`);
 }
 //# sourceMappingURL=model.js.map

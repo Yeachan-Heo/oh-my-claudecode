@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import type { StatuslineStdin } from '../../hud/types.js';
 import {
   getContextPercent,
+  getModelId,
   getModelName,
   getRateLimitsFromStdin,
   readStdinCache,
@@ -258,12 +259,15 @@ describe('HUD stdin context percent', () => {
 
 describe('HUD stdin model display', () => {
   it('prefers the official display_name over the raw model id', () => {
-    expect(getModelName(makeStdin({
+    const stdin = makeStdin({
       model: {
         id: 'claude-sonnet-4-5-20250929',
         display_name: 'Claude Sonnet 4.5',
       },
-    }))).toBe('Claude Sonnet 4.5');
+    });
+
+    expect(getModelName(stdin)).toBe('Claude Sonnet 4.5');
+    expect(getModelId(stdin)).toBe('claude-sonnet-4-5-20250929');
   });
 
   it('falls back to the raw model id when display_name is unavailable', () => {
@@ -279,12 +283,15 @@ describe('HUD stdin model display', () => {
   });
 
   it('returns null for blank model fields instead of guessing', () => {
-    expect(getModelName(makeStdin({
+    const stdin = makeStdin({
       model: {
         id: '   ',
         display_name: '',
       },
-    }))).toBeNull();
+    });
+
+    expect(getModelName(stdin)).toBeNull();
+    expect(getModelId(stdin)).toBeNull();
   });
 });
 

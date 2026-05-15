@@ -342,11 +342,12 @@ export function getRateLimitsFromStdin(stdin) {
  * Returns null when Claude Code does not provide model metadata so the HUD
  * omits the model instead of guessing or showing a fake placeholder.
  */
-export function getModelName(stdin) {
-    const displayName = stdin.model?.display_name?.trim();
-    if (displayName)
-        return displayName;
+export function getModelId(stdin) {
     const modelId = stdin.model?.id?.trim();
     return modelId || null;
+}
+export function getModelName(stdin) {
+    const displayName = stdin.model?.display_name?.trim();
+    return displayName || getModelId(stdin);
 }
 //# sourceMappingURL=stdin.js.map

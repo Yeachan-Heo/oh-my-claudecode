@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execSync } from 'child_process';
-import { getContextPercent, getModelName, getRateLimitsFromStdin, readStdinCache, stabilizeContextPercent, writeStdinCache, } from '../../hud/stdin.js';
+import { getContextPercent, getModelId, getModelName, getRateLimitsFromStdin, readStdinCache, stabilizeContextPercent, writeStdinCache, } from '../../hud/stdin.js';
 function makeStdin(overrides = {}) {
     return {
         cwd: '/tmp/worktree',
@@ -227,12 +227,14 @@ describe('HUD stdin context percent', () => {
 });
 describe('HUD stdin model display', () => {
     it('prefers the official display_name over the raw model id', () => {
-        expect(getModelName(makeStdin({
+        const stdin = makeStdin({
             model: {
                 id: 'claude-sonnet-4-5-20250929',
                 display_name: 'Claude Sonnet 4.5',
             },
-        }))).toBe('Claude Sonnet 4.5');
+        });
+        expect(getModelName(stdin)).toBe('Claude Sonnet 4.5');
+        expect(getModelId(stdin)).toBe('claude-sonnet-4-5-20250929');
     });
     it('falls back to the raw model id when display_name is unavailable', () => {
         expect(getModelName(makeStdin({
@@ -245,12 +247,14 @@ describe('HUD stdin model display', () => {
         expect(getModelName(makeStdin({ model: undefined }))).toBeNull();
     });
     it('returns null for blank model fields instead of guessing', () => {
-        expect(getModelName(makeStdin({
+        const stdin = makeStdin({
             model: {
                 id: '   ',
                 display_name: '',
             },
-        }))).toBeNull();
+        });
+        expect(getModelName(stdin)).toBeNull();
+        expect(getModelId(stdin)).toBeNull();
     });
 });
 describe('HUD stdin rate limits', () => {

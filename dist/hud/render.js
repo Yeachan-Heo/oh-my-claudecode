@@ -215,8 +215,11 @@ export async function render(context, config) {
         if (gitStatusElement)
             rendered.set("gitStatus", gitStatusElement);
     }
-    if (enabledElements.model && context.modelName) {
-        const modelElement = renderModel(context.modelName, enabledElements.modelFormat);
+    const modelSource = enabledElements.modelFormat === 'full'
+        ? context.modelId ?? context.modelName
+        : context.modelName;
+    if (enabledElements.model && modelSource) {
+        const modelElement = renderModel(modelSource, enabledElements.modelFormat, hudLabels);
         if (modelElement)
             rendered.set("model", modelElement);
     }

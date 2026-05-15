@@ -27,8 +27,14 @@ describe('model element', () => {
             expect(formatModelName('Opus 4.7', 'versioned')).toBe('Opus 4.7');
             expect(formatModelName('Haiku 4.5', 'versioned')).toBe('Haiku 4.5');
         });
+        it('returns versioned name from legacy raw model IDs', () => {
+            expect(formatModelName('claude-3-5-sonnet-20241022', 'versioned')).toBe('Sonnet 3.5');
+            expect(formatModelName('claude-3-opus-20240229', 'versioned')).toBe('Opus 3');
+            expect(formatModelName('claude-3-sonnet-20240229', 'versioned')).toBe('Sonnet 3');
+            expect(formatModelName('claude-3-haiku-20240307', 'versioned')).toBe('Haiku 3');
+        });
         it('falls back to short name when no version found', () => {
-            expect(formatModelName('claude-3-opus-20240229', 'versioned')).toBe('Opus');
+            expect(formatModelName('claude-opus-latest', 'versioned')).toBe('Opus');
         });
         it('returns full model ID in full format', () => {
             expect(formatModelName('claude-opus-4-7-20260416', 'full')).toBe('claude-opus-4-7-20260416');
@@ -53,6 +59,11 @@ describe('model element', () => {
             const result = renderModel('claude-opus-4-7-20260416', 'full');
             expect(result).not.toBeNull();
             expect(result).toContain('Model: claude-opus-4-7');
+        });
+        it('renders configured model label', () => {
+            const result = renderModel('Claude Sonnet 4.5', 'versioned', { model: '模型' });
+            expect(result).not.toBeNull();
+            expect(result).toContain('模型: Sonnet 4.5');
         });
         it('returns null for null input', () => {
             expect(renderModel(null)).toBeNull();

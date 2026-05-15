@@ -389,10 +389,12 @@ export function getRateLimitsFromStdin(stdin: StatuslineStdin): RateLimits | nul
  * Returns null when Claude Code does not provide model metadata so the HUD
  * omits the model instead of guessing or showing a fake placeholder.
  */
-export function getModelName(stdin: StatuslineStdin): string | null {
-  const displayName = stdin.model?.display_name?.trim();
-  if (displayName) return displayName;
-
+export function getModelId(stdin: StatuslineStdin): string | null {
   const modelId = stdin.model?.id?.trim();
   return modelId || null;
+}
+
+export function getModelName(stdin: StatuslineStdin): string | null {
+  const displayName = stdin.model?.display_name?.trim();
+  return displayName || getModelId(stdin);
 }

@@ -87,7 +87,7 @@ function createConfig(labels = DEFAULT_HUD_LABELS) {
         contextLimitWarning: { ...DEFAULT_HUD_CONFIG.contextLimitWarning, threshold: 101 },
         layout: {
             line1: [],
-            main: ['thinking', 'tokens', 'ralph', 'contextBar', 'background', 'callCounts'],
+            main: ['thinking', 'model', 'tokens', 'ralph', 'contextBar', 'background', 'callCounts'],
             detail: [],
         },
     };
@@ -124,6 +124,7 @@ describe('HUD labels', () => {
         expect(labels.tool).toBe('工具自定义');
         expect(labels.agent).toBe('智能体');
         expect(labels.tokens).toBe('令牌');
+        expect(labels.model).toBe('模型');
         expect('unknown' in labels).toBe(false);
     });
     it('ignores invalid locale and unsupported label keys in settings.json', () => {
@@ -153,6 +154,7 @@ describe('HUD labels', () => {
         expect(output).toContain('上下文:67%');
         expect(output).toContain('后台:1/5');
         expect(output).toContain('工具:5 智能体:3 技能:2');
+        expect(output).toContain('模型: Sonnet 4.5');
     });
 });
 //# sourceMappingURL=labels.test.js.map

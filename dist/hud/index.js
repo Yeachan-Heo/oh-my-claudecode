@@ -5,7 +5,7 @@
  * Statusline command that visualizes oh-my-claudecode state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
-import { readStdin, writeStdinCache, readStdinCache, getContextPercent, getModelName, getRateLimitsFromStdin, stabilizeContextPercent, } from "./stdin.js";
+import { readStdin, writeStdinCache, readStdinCache, getContextPercent, getModelId, getModelName, getRateLimitsFromStdin, stabilizeContextPercent, } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
 import { readHudState, readHudConfig, getRunningTasks, writeHudState, initializeHUDState, } from "./state.js";
 import { readRalphStateForHud, readUltraworkStateForHud, readPrdStateForHud, readAutopilotStateForHud, } from "./omc-state.js";
@@ -353,6 +353,7 @@ async function main(watchMode = false, skipInit = false) {
             contextPercent,
             contextDisplayScope: currentSessionId ?? cwd,
             modelName: getModelName(stdin),
+            modelId: getModelId(stdin),
             ralph,
             ultrawork,
             prd,
