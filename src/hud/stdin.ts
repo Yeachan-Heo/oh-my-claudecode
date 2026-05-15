@@ -386,7 +386,13 @@ export function getRateLimitsFromStdin(stdin: StatuslineStdin): RateLimits | nul
 /**
  * Get model display name from stdin.
  * Prefer the official display name field, then fall back to the raw model id.
+ * Returns null when Claude Code does not provide model metadata so the HUD
+ * omits the model instead of guessing or showing a fake placeholder.
  */
-export function getModelName(stdin: StatuslineStdin): string {
-  return stdin.model?.display_name ?? stdin.model?.id ?? 'Unknown';
+export function getModelName(stdin: StatuslineStdin): string | null {
+  const displayName = stdin.model?.display_name?.trim();
+  if (displayName) return displayName;
+
+  const modelId = stdin.model?.id?.trim();
+  return modelId || null;
 }

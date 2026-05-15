@@ -711,9 +711,81 @@ describe('optional HUD line defaults', () => {
                 cwd: true,
                 gitRepo: false,
                 gitBranch: false,
+                model: false,
             },
         };
         await expect(render(context, config)).resolves.toBe('~/workspace/project');
+    });
+});
+describe('HUD model display', () => {
+    const createModelContext = (modelName) => ({
+        contextPercent: 0,
+        modelName,
+        ralph: null,
+        ultrawork: null,
+        prd: null,
+        autopilot: null,
+        activeAgents: [],
+        todos: [],
+        backgroundTasks: [],
+        cwd: '/home/user/project',
+        lastSkill: null,
+        rateLimitsResult: null,
+        customBuckets: null,
+        pendingPermission: null,
+        thinkingState: null,
+        sessionHealth: null,
+        omcVersion: '4.14.0',
+        updateAvailable: null,
+        toolCallCount: 0,
+        agentCallCount: 0,
+        skillCallCount: 0,
+        promptTime: null,
+        apiKeySource: null,
+        profileName: null,
+        sessionSummary: null,
+    });
+    const modelConfig = {
+        ...DEFAULT_HUD_CONFIG,
+        elements: {
+            ...DEFAULT_HUD_CONFIG.elements,
+            model: true,
+            omcLabel: true,
+            rateLimits: false,
+            permissionStatus: false,
+            thinking: false,
+            promptTime: false,
+            sessionHealth: false,
+            ralph: false,
+            autopilot: false,
+            prdStory: false,
+            activeSkills: false,
+            lastSkill: false,
+            contextBar: false,
+            agents: false,
+            backgroundTasks: false,
+            todos: false,
+            showCallCounts: false,
+            gitBranch: false,
+            gitStatus: false,
+            profile: false,
+        },
+        layout: {
+            line1: [],
+            main: ['omcLabel', 'model'],
+            detail: [],
+        },
+    };
+    it('renders the Claude model when statusline stdin provides reliable metadata', async () => {
+        const output = await render(createModelContext('Claude Sonnet 4.5'), modelConfig);
+        expect(output.split('\n')).toHaveLength(1);
+        expect(output).toContain('[OMC#4.14.0]');
+        expect(output).toContain('Model: Sonnet 4.5');
+    });
+    it('omits the model segment when model metadata is unavailable', async () => {
+        const output = await render(createModelContext(null), modelConfig);
+        expect(output).toBe('\u001b[1m[OMC#4.14.0]\u001b[0m');
+        expect(output).not.toContain('Unknown');
     });
 });
 //# sourceMappingURL=render.test.js.map

@@ -52,20 +52,19 @@ describe('model element', () => {
     it('renders formatted model name', () => {
       const result = renderModel('claude-opus-4-7-20260416');
       expect(result).not.toBeNull();
-      expect(result).toContain('Opus');
+      expect(result).toContain('Model: Opus 4.7');
     });
 
     it('renders versioned format', () => {
       const result = renderModel('claude-opus-4-7-20260416', 'versioned');
       expect(result).not.toBeNull();
-      expect(result).toContain('Opus');
-      expect(result).toContain('4.7');
+      expect(result).toContain('Model: Opus 4.7');
     });
 
     it('renders full format', () => {
       const result = renderModel('claude-opus-4-7-20260416', 'full');
       expect(result).not.toBeNull();
-      expect(result).toContain('claude-opus-4-7');
+      expect(result).toContain('Model: claude-opus-4-7');
     });
 
     it('returns null for null input', () => {

@@ -251,8 +251,8 @@ export interface HudRenderContext {
     contextPercent: number;
     /** Stable display scope for context smoothing (e.g. session/worktree key) */
     contextDisplayScope?: string | null;
-    /** Model display name */
-    modelName: string;
+    /** Model display name from Claude Code statusline stdin; null when unavailable */
+    modelName: string | null;
     /** Ralph loop state */
     ralph: RalphStateForHud | null;
     /** Ultrawork state */

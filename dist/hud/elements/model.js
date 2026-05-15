@@ -54,10 +54,10 @@ export function formatModelName(modelId, format = 'short') {
 /**
  * Render model element.
  */
-export function renderModel(modelId, format = 'short') {
+export function renderModel(modelId, format = 'versioned') {
     const name = formatModelName(modelId, format);
     if (!name)
         return null;
-    return cyan(name);
+    return cyan(`Model: ${name}`);
 }
 //# sourceMappingURL=model.js.map

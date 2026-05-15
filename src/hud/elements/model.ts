@@ -60,8 +60,8 @@ export function formatModelName(modelId: string | null | undefined, format: Mode
 /**
  * Render model element.
  */
-export function renderModel(modelId: string | null | undefined, format: ModelFormat = 'short'): string | null {
+export function renderModel(modelId: string | null | undefined, format: ModelFormat = 'versioned'): string | null {
   const name = formatModelName(modelId, format);
   if (!name) return null;
-  return cyan(name);
+  return cyan(`Model: ${name}`);
 }

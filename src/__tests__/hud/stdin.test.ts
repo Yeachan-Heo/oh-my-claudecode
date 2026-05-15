@@ -274,8 +274,17 @@ describe('HUD stdin model display', () => {
     }))).toBe('claude-sonnet-4-5-20250929');
   });
 
-  it('returns Unknown when stdin omits the model block', () => {
-    expect(getModelName(makeStdin({ model: undefined }))).toBe('Unknown');
+  it('returns null when stdin omits the model block', () => {
+    expect(getModelName(makeStdin({ model: undefined }))).toBeNull();
+  });
+
+  it('returns null for blank model fields instead of guessing', () => {
+    expect(getModelName(makeStdin({
+      model: {
+        id: '   ',
+        display_name: '',
+      },
+    }))).toBeNull();
   });
 });
 

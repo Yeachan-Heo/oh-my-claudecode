@@ -14633,9 +14633,10 @@ var init_types4 = __esm({
       Object.keys(DEFAULT_HUD_LABELS)
     );
     DEFAULT_ELEMENT_ORDER = {
-      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "model", "apiKeySource", "profile"],
+      line1: ["hostname", "cwd", "gitRepo", "gitBranch", "gitStatus", "apiKeySource", "profile"],
       main: [
         "omcLabel",
+        "model",
         "enterpriseCost",
         "rateLimits",
         "customBuckets",
@@ -14676,10 +14677,10 @@ var init_types4 = __esm({
         // Disabled by default for backward compatibility
         gitInfoPosition: "above",
         // Git info above main HUD line (backward compatible)
-        model: false,
-        // Disabled by default for backward compatibility
-        modelFormat: "short",
-        // Short names by default for backward compatibility
+        model: true,
+        // Show only when Claude Code statusline stdin provides a model
+        modelFormat: "versioned",
+        // Preserve model version by default
         omcLabel: true,
         rateLimits: true,
         // Show rate limits by default
@@ -14751,8 +14752,8 @@ var init_types4 = __esm({
         gitBranch: false,
         gitStatus: false,
         gitInfoPosition: "above",
-        model: false,
-        modelFormat: "short",
+        model: true,
+        modelFormat: "versioned",
         omcLabel: true,
         rateLimits: true,
         ralph: true,
@@ -14793,8 +14794,8 @@ var init_types4 = __esm({
         gitBranch: true,
         gitStatus: true,
         gitInfoPosition: "above",
-        model: false,
-        modelFormat: "short",
+        model: true,
+        modelFormat: "versioned",
         omcLabel: true,
         rateLimits: true,
         ralph: true,
@@ -14836,8 +14837,8 @@ var init_types4 = __esm({
         gitBranch: true,
         gitStatus: true,
         gitInfoPosition: "above",
-        model: false,
-        modelFormat: "short",
+        model: true,
+        modelFormat: "versioned",
         omcLabel: true,
         rateLimits: true,
         ralph: true,
@@ -14879,8 +14880,8 @@ var init_types4 = __esm({
         gitBranch: true,
         gitStatus: false,
         gitInfoPosition: "above",
-        model: false,
-        modelFormat: "short",
+        model: true,
+        modelFormat: "versioned",
         omcLabel: true,
         rateLimits: false,
         ralph: true,
@@ -14921,8 +14922,8 @@ var init_types4 = __esm({
         gitBranch: true,
         gitStatus: true,
         gitInfoPosition: "above",
-        model: false,
-        modelFormat: "short",
+        model: true,
+        modelFormat: "versioned",
         omcLabel: true,
         rateLimits: true,
         ralph: true,
@@ -43497,7 +43498,10 @@ function getRateLimitsFromStdin(stdin) {
   };
 }
 function getModelName(stdin) {
-  return stdin.model?.display_name ?? stdin.model?.id ?? "Unknown";
+  const displayName = stdin.model?.display_name?.trim();
+  if (displayName) return displayName;
+  const modelId = stdin.model?.id?.trim();
+  return modelId || null;
 }
 var import_fs104, import_path123, TRANSIENT_CONTEXT_PERCENT_TOLERANCE, SESSION_ID_ENV_VARS;
 var init_stdin = __esm({
@@ -45614,10 +45618,10 @@ function formatModelName(modelId, format = "short") {
   }
   return shortName;
 }
-function renderModel(modelId, format = "short") {
+function renderModel(modelId, format = "versioned") {
   const name = formatModelName(modelId, format);
   if (!name) return null;
-  return cyan(name);
+  return cyan(`Model: ${name}`);
 }
 var init_model = __esm({
   "src/hud/elements/model.ts"() {

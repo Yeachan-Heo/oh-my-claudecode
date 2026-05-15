@@ -11,8 +11,9 @@ describe('HUD Default Configuration', () => {
         it('should have gitBranch disabled by default for backward compatibility', () => {
             expect(DEFAULT_HUD_CONFIG.elements.gitBranch).toBe(false);
         });
-        it('should have model disabled by default for backward compatibility', () => {
-            expect(DEFAULT_HUD_CONFIG.elements.model).toBe(false);
+        it('should enable model display by default when Claude Code provides reliable metadata', () => {
+            expect(DEFAULT_HUD_CONFIG.elements.model).toBe(true);
+            expect(DEFAULT_HUD_CONFIG.elements.modelFormat).toBe('versioned');
         });
         it('should use text format for thinking indicator by default', () => {
             expect(DEFAULT_HUD_CONFIG.elements.thinkingFormat).toBe('text');
@@ -42,6 +43,12 @@ describe('HUD Default Configuration', () => {
             expect(PRESET_CONFIGS.full.gitRepo).toBe(true);
             expect(PRESET_CONFIGS.dense.gitRepo).toBe(true);
         });
+        it('should enable model display in all presets while render omits unavailable models', () => {
+            presets.forEach(preset => {
+                expect(PRESET_CONFIGS[preset].model).toBe(true);
+                expect(PRESET_CONFIGS[preset].modelFormat).toBe('versioned');
+            });
+        });
         it('should have gitRepo disabled in minimal, focused, and opencode presets', () => {
             expect(PRESET_CONFIGS.minimal.gitRepo).toBe(false);
             expect(PRESET_CONFIGS.focused.gitRepo).toBe(false);
@@ -55,11 +62,6 @@ describe('HUD Default Configuration', () => {
         });
         it('should have gitBranch disabled in minimal preset', () => {
             expect(PRESET_CONFIGS.minimal.gitBranch).toBe(false);
-        });
-        it('should have model disabled in all presets', () => {
-            presets.forEach(preset => {
-                expect(PRESET_CONFIGS[preset].model).toBe(false);
-            });
         });
         it('should keep token usage display disabled in all presets', () => {
             presets.forEach(preset => {
