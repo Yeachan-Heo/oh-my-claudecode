@@ -29607,6 +29607,12 @@ function paneHasTrustPrompt(captured) {
   const hasChoices = tail.some((l) => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
   return hasQuestion && hasChoices;
 }
+
+function paneHasClaudeIdlePrompt(captured) {
+  return /Claude Code[\s\S]*[❯›>]/u.test(captured) ||
+    /Welcome back[\s\S]*[❯›>]/u.test(captured);
+}
+
 function paneHasClaudeStartupBanner(captured) {
   const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trim()).filter((line) => line.length > 0).slice(-20);
   const lastPromptIndex = lines.findLastIndex((line) => /^\s*[›>❯]\s*/u.test(line));
@@ -29650,7 +29656,7 @@ async function waitForPaneReady(paneId, opts = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const captured = await capturePaneAsync(paneId);
-    if (paneLooksReady(captured) && !paneHasActiveTask(captured)) {
+    if ((paneLooksReady(captured) || paneHasClaudeIdlePrompt(captured)) && !paneHasActiveTask(captured)) {
       return true;
     }
     await sleep4(pollIntervalMs);
@@ -29695,7 +29701,11 @@ async function sendToWorker(_sessionName, paneId, message) {
       return false;
     }
     const initialCapture = await capturePaneAsync(paneId);
-    if (paneHasClaudeStartupBanner(initialCapture)) {
+    if (
+      paneHasClaudeStartupBanner(initialCapture) &&
+      !paneLooksReady(initialCapture) &&
+      !paneHasClaudeIdlePrompt(initialCapture)
+    ) {
       return false;
     }
     const paneBusy = paneHasActiveTask(initialCapture);

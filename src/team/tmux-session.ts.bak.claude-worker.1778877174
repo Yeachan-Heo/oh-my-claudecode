@@ -650,12 +650,6 @@ function paneHasTrustPrompt(captured: string): boolean {
   return hasQuestion && hasChoices;
 }
 
-
-function paneHasClaudeIdlePrompt(captured: string): boolean {
-  return /Claude Code[\s\S]*[❯›>]/u.test(captured) ||
-    /Welcome back[\s\S]*[❯›>]/u.test(captured);
-}
-
 function paneHasClaudeStartupBanner(captured: string): boolean {
   const lines = captured
     .split('\n')
@@ -731,7 +725,7 @@ export async function waitForPaneReady(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const captured = await capturePaneAsync(paneId);
-    if ((paneLooksReady(captured) || paneHasClaudeIdlePrompt(captured)) && !paneHasActiveTask(captured)) {
+    if (paneLooksReady(captured) && !paneHasActiveTask(captured)) {
       return true;
     }
     await sleep(pollIntervalMs);
@@ -805,11 +799,7 @@ export async function sendToWorker(
 
     // Check for trust prompt and auto-dismiss before sending our text
     const initialCapture = await capturePaneAsync(paneId);
-    if (
-      paneHasClaudeStartupBanner(initialCapture) &&
-      !paneLooksReady(initialCapture) &&
-      !paneHasClaudeIdlePrompt(initialCapture)
-    ) {
+    if (paneHasClaudeStartupBanner(initialCapture)) {
       return false;
     }
     const paneBusy = paneHasActiveTask(initialCapture);
