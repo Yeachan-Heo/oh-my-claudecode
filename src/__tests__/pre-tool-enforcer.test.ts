@@ -742,6 +742,55 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
   });
 
+  it('does not warn for primary-path extra/additional naming from issue #3012', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Edit',
+      toolInput: {
+        file_path: join(tempDir, 'token.go'),
+        old_string: 'type tokenRequest struct {}',
+        new_string: [
+          'type extraSecretFetch struct {',
+          '\tpath string',
+          '}',
+          '',
+          'type tokenRequest struct {',
+          '\textraSecrets []extraSecretFetch',
+          '}',
+          '',
+          '// Fetch additional SM paths as part of the primary dual-secret design.',
+          'func fetchTokenSecrets(extraSecrets []extraSecretFetch) {}',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-extra-additional-primary-path',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+  });
+
+  it('does not warn for Task prompts that describe extra/additional primary-path fields', () => {
+    const output = runPreToolEnforcer({
+      tool_name: 'Task',
+      toolInput: {
+        subagent_type: 'oh-my-claudecode:executor',
+        description: 'Implement primary dual-secret token fetch',
+        prompt: [
+          'Implement the primary dual-secret path using extraSecretFetch.',
+          'The request type should include extraSecrets []extraSecretFetch.',
+          'Comments may describe additional SM paths because both paths are intentional.',
+        ].join('\n'),
+      },
+      cwd: tempDir,
+      session_id: 'session-slop-task-extra-additional-primary-path',
+    });
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(output.continue).toBe(true);
+    expect(String(hookSpecificOutput.additionalContext)).not.toContain('[SLOP WARNING]');
+  });
+
   it('still warns for real SLOP intent from issue #2939', () => {
     const slopPrompts = [
       'If the preferred agent is unavailable, fallback to weaker model to keep going.',

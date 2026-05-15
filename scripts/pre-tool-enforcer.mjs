@@ -169,6 +169,9 @@ const SLOP_RISK_TOOL_NAMES = new Set([
   'Write',
   'NotebookEdit',
 ]);
+// Keep the SLOP trigger tied to actual fallback/workaround semantics.
+// Primary-path domain names and comments often use neutral qualifiers such as
+// "extra" or "additional"; those words alone must not enter this gate.
 const SLOP_FALLBACK_LANGUAGE_PATTERN = /\b(?:fallback|fall\s+back|workaround|work\s+around)\b/i;
 const SLOP_FALLBACK_ACTION_PATTERNS = [
   /\b(?:add|build|create|implement|introduce|make|patch|use|using|write)\s+(?:an?\s+|the\s+)?(?:fallback|workaround)\b/i,
