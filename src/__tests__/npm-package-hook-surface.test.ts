@@ -5,6 +5,7 @@ import { dirname, join, normalize, relative } from 'node:path';
 
 const PACKAGE_ROOT = process.cwd();
 const HOOKS_JSON_PATH = join(PACKAGE_ROOT, 'hooks', 'hooks.json');
+const PLUGIN_JSON_PATH = join(PACKAGE_ROOT, '.claude-plugin', 'plugin.json');
 const SCRIPTS_ROOT = join(PACKAGE_ROOT, 'scripts');
 
 type HookCommandConfig = {
@@ -25,8 +26,30 @@ type NpmPackDryRunResult = {
   files?: NpmPackDryRunEntry[];
 };
 
+type PluginJson = {
+  hooks?: unknown;
+};
+
+function referencesStandardHooksManifest(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\\/g, '/');
+    return normalized === './hooks/hooks.json' || normalized === 'hooks/hooks.json';
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(referencesStandardHooksManifest);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(referencesStandardHooksManifest);
+  }
+
+  return false;
+}
+
 const LOCAL_IMPORT_RE = /(?:import\s+(?:[^'"()]+?\s+from\s+)?|import\s*\(|export\s+\*\s+from\s+|export\s+\{[^}]*\}\s+from\s+|require\s*\()\s*['"](\.[^'"]+)['"]/g;
 const PLUGIN_SCRIPT_RE = /"\$CLAUDE_PLUGIN_ROOT"\/(scripts\/[^\s"]+)/g;
+let packedFilesCache: Set<string> | null = null;
 
 function listHookScriptEntries(): string[] {
   const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8')) as HooksJson;
@@ -92,16 +115,29 @@ function collectRequiredScriptFiles(entryRelPath: string, collected = new Set<st
 }
 
 function getPackedFiles(): Set<string> {
+  if (packedFilesCache) {
+    return packedFilesCache;
+  }
+
   const stdout = execFileSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: PACKAGE_ROOT,
     encoding: 'utf-8',
   });
 
   const results = JSON.parse(stdout) as NpmPackDryRunResult[];
-  return new Set((results[0]?.files ?? []).map(file => file.path));
+  packedFilesCache = new Set((results[0]?.files ?? []).map(file => file.path));
+  return packedFilesCache;
 }
 
 describe('npm package hook surface regression', () => {
+  it('does not explicitly reference the auto-loaded standard hooks manifest from plugin.json', () => {
+    const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
+    expect(referencesStandardHooksManifest(pluginJson.hooks)).toBe(false);
+
+    const packedFiles = getPackedFiles();
+    expect(packedFiles.has('.claude-plugin/plugin.json')).toBe(true);
+  });
+
   it('packs hooks.json, hook entry scripts, and their local script dependencies', () => {
     const requiredFiles = new Set<string>(['hooks/hooks.json']);
 
