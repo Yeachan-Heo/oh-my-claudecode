@@ -117,10 +117,26 @@ function readDeepInterviewThresholdFromSettings(path: string): number | null {
     : null;
 }
 
-function getDeepInterviewAmbiguityThreshold(): number {
-  const profileThreshold = readDeepInterviewThresholdFromSettings(join(getClaudeConfigDir(), 'settings.json'));
-  const projectThreshold = readDeepInterviewThresholdFromSettings(join(process.cwd(), '.claude', 'settings.json'));
-  return projectThreshold ?? profileThreshold ?? DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD;
+type DeepInterviewThresholdResolution = {
+  threshold: number;
+  source: string;
+};
+
+function getDeepInterviewAmbiguityThresholdResolution(): DeepInterviewThresholdResolution {
+  const profileSettingsPath = join(getClaudeConfigDir(), 'settings.json');
+  const projectSettingsPath = join(process.cwd(), '.claude', 'settings.json');
+  const profileThreshold = readDeepInterviewThresholdFromSettings(profileSettingsPath);
+  const projectThreshold = readDeepInterviewThresholdFromSettings(projectSettingsPath);
+
+  if (projectThreshold !== null) {
+    return { threshold: projectThreshold, source: './.claude/settings.json' };
+  }
+
+  if (profileThreshold !== null) {
+    return { threshold: profileThreshold, source: '[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json' };
+  }
+
+  return { threshold: DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD, source: 'default' };
 }
 
 function formatThresholdPercent(threshold: number): string {
@@ -166,14 +182,16 @@ function readSkillBodyOverride(skillPath: string, metadata: Record<string, unkno
 }
 
 function applyDeepInterviewRuntimeSettings(template: string): string {
-  const threshold = getDeepInterviewAmbiguityThreshold();
+  const { threshold, source } = getDeepInterviewAmbiguityThresholdResolution();
   const percent = formatThresholdPercent(threshold);
 
   const withResolvedPlaceholders = template
     .replaceAll('<resolvedThreshold>', `${threshold}`)
-    .replaceAll('<resolvedThresholdPercent>', percent);
+    .replaceAll('<resolvedThresholdPercent>', percent)
+    .replaceAll('<resolvedThresholdSource>', source);
 
   const withRuntimeSettings = withResolvedPlaceholders.includes('3.5. **Load runtime settings**:')
+    || withResolvedPlaceholders.includes('## Phase 0: Resolve Ambiguity Threshold')
     ? withResolvedPlaceholders
     : withResolvedPlaceholders.replace(
       '4. **Initialize state** via `state_write(mode="deep-interview")`:',
@@ -317,7 +335,7 @@ let cachedSkillsKey: string | null = null;
 
 function getBuiltinSkillsCacheKey(): string {
   return JSON.stringify({
-    deepInterviewAmbiguityThreshold: getDeepInterviewAmbiguityThreshold(),
+    deepInterviewAmbiguityThreshold: getDeepInterviewAmbiguityThresholdResolution(),
   });
 }
 
