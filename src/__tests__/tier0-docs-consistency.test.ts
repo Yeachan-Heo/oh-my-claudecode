@@ -31,6 +31,29 @@ describe('Tier-0 contract docs consistency', () => {
     }
   });
 
+  it('keeps ultragoal source-boundary language in docs and skill', () => {
+    const ultragoalDoc = readProjectFile('docs', 'ultragoal.md');
+    const ultragoalSkill = readProjectFile('skills', 'ultragoal', 'SKILL.md');
+
+    expect(ultragoalDoc).toContain('cannot directly invoke');
+    expect(ultragoalSkill).toContain('cannot invoke or mutate Claude Code `/goal` state');
+    expect(ultragoalDoc).toContain('handoff text');
+    expect(ultragoalSkill).toContain('handoff text');
+  });
+
+  it('keeps ultragoal evaluator-limit language in docs and skill', () => {
+    const ultragoalDoc = readProjectFile('docs', 'ultragoal.md');
+    const ultragoalSkill = readProjectFile('skills', 'ultragoal', 'SKILL.md');
+
+    expect(ultragoalDoc).toContain('cannot independently');
+    expect(ultragoalSkill).toContain('cannot independently observe Claude `/goal` state');
+  });
+
+  it('documents ultragoal in REFERENCE.md skills and slash commands', () => {
+    expect(referenceDoc).toContain('| `ultragoal`');
+    expect(referenceDoc).toContain('/oh-my-claudecode:ultragoal');
+  });
+
   it('documents all Tier-0 keywords in CLAUDE.md', () => {
     for (const keyword of ['autopilot', 'ultrawork', 'ralph', 'team', 'ralplan']) {
       expect(claudeDoc).toContain(`\`${keyword}\``);

@@ -104,3 +104,77 @@ story, and keeps the Claude `/goal` active.
 - If a future Claude tool name changes (`/goal` → something else), the
   handoff text and snapshot field names will need to be updated; the
   reconciliation logic itself is name-agnostic.
+
+## When to Use Ultragoal vs Other Workflows
+
+| Workflow | Scope | Persistence | Parallelism | Verification Gate | `/goal` Integration | Best For |
+|----------|-------|-------------|-------------|-------------------|---------------------|----------|
+| Claude `/goal` (bare) | Single session | None (session-scoped Stop hook) | No | No | Native | Quick single-session focus |
+| `ralph` | Single task | Yes (`prd.json` + `progress.txt`) | Via `ultrawork` | Mandatory architect review | No | Guaranteed completion with verification |
+| `team` | Multi-agent pipeline | Yes (staged state) | N coordinated agents | Per-stage verify/fix loop | No | Multi-component or many-task work |
+| `ultraqa` | QA cycling | State file only | Diagnosis + fix | Cycle until pass | No | "Make tests/build/lint pass" |
+| Stop hook (`code-simplifier`) | Per-turn trigger | None | No | Automatic | No | Background code hygiene |
+| `omc ultragoal` (artifact-only) | Multi-goal brief | Yes (ledger + `goals.json`) | No | Mandatory quality gate (slop + verify + review) | Handoff text only | Large initiatives spanning sessions |
+
+> The `/goal` evaluator is a session-scoped, model-facing directive. It
+> cannot independently inspect files, run commands, or observe external state.
+> `omc ultragoal` prints handoff text that the active Claude agent reads and
+> acts on; it does not, and cannot, invoke `/goal` from the shell.
+
+## Examples
+
+### Issue backlog
+
+```bash
+omc ultragoal create-goals --brief "Close issues #101-#105" \
+  --goal "Issue #101::Fix the reported regression and add evidence" \
+  --goal "Issue #102::Implement the requested docs update"
+omc ultragoal complete-goals
+```
+
+Use `ultragoal` instead of `ralph` when the issue set needs a durable ledger
+and final quality gate across multiple sessions.
+
+### Database migration
+
+```bash
+omc ultragoal create-goals --brief "Ship the migration" \
+  --goal "Schema::Add new columns" \
+  --goal "Backfill::Backfill rows in batches" \
+  --goal "Cutover::Drop old columns and switch reads"
+omc ultragoal status
+```
+
+Use `ultragoal` instead of `team` when the migration is ordered and stateful
+rather than parallel across independent files.
+
+### Test cleanup
+
+```bash
+omc ultragoal create-goals --brief "Fix flaky tests" \
+  --goal "Isolate::Identify the flaky test sources" \
+  --goal "Fix::Stabilize the tests and document evidence" \
+  --goal "CI::Rerun the narrow CI-equivalent command"
+omc ultragoal complete-goals --retry-failed
+```
+
+Use `ultragoal` instead of `ultraqa` when the cleanup spans several explicit
+stories and needs an auditable final review gate.
+
+### PRD implementation
+
+```bash
+omc ultragoal create-goals --brief-file prd.md --claude-goal-mode per-story
+omc ultragoal complete-goals
+```
+
+Use per-story `ultragoal` when a PRD should survive session restarts and each
+story should reconcile against its own Claude `/goal` handoff.
+
+## Related Documentation
+
+- [Artifact layout](./ultragoal.md#artifacts)
+- [Claude `/goal` snapshot reconciliation](./ultragoal.md#claude-goal-snapshots)
+- [Source boundary and evaluator limits](./ultragoal.md#limitations)
+- [Workflow selection](./shared/mode-selection-guide.md)
+- [Full skill instructions](../skills/ultragoal/SKILL.md)

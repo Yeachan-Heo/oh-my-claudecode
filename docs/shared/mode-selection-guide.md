@@ -7,6 +7,7 @@
 | Clarify vague requirements first | `deep-interview` | "deep interview", "ouroboros", "don't assume" |
 | Full autonomous build from idea | `autopilot` | "autopilot", "build me", "I want a" |
 | Parallel autonomous (3-5x faster) | `team` (replaces `ultrapilot`) | `/team N:executor "task"` |
+| Durable multi-goal with `/goal` handoff | `ultragoal` | `omc ultragoal create-goals` |
 | Persistence until verified done | `ralph` | "ralph", "don't stop" |
 | Parallel execution, manual oversight | `ultrawork` | "ulw", "ultrawork" |
 | Cost-efficient execution | `` (modifier) | "eco", "budget" |
@@ -25,6 +26,12 @@
 ```
 Uncertain about requirements or have a vague idea?
 ├── YES: Use deep-interview to clarify before execution
+└── NO: Continue below
+
+Work spans multiple sessions or needs a durable ledger?
+├── YES: Many ordered stories with a quality gate?
+│   ├── YES: omc ultragoal (durable ledger + /goal handoff)
+│   └── NO: ralph (persistence + verification)
 └── NO: Continue below
 
 Want autonomous execution?
@@ -50,6 +57,7 @@ Have many similar independent tasks (e.g., "fix 47 errors")?
 | "Build me a REST API" | autopilot | Single coherent deliverable |
 | "Build frontend, backend, and database" | team 3:executor | Clear component boundaries |
 | "Fix all 47 TypeScript errors" | team 5:executor | Many independent similar tasks |
+| "Track 5 stories across sessions with final review gate" | ultragoal | Durable ledger + `/goal` coordination |
 | "Refactor auth module thoroughly" | ralph | Need persistence + verification |
 | "Quick parallel execution" | ultrawork | Manual oversight preferred |
 | "Save tokens while fixing errors" |  + ultrawork | Cost-conscious parallel |
@@ -61,6 +69,7 @@ Have many similar independent tasks (e.g., "fix 47 errors")?
 These run independently:
 - **autopilot**: Autonomous end-to-end execution
 - **team**: Canonical orchestration with coordinated agents (replaces `ultrapilot` and `swarm`)
+- **ultragoal**: Durable multi-goal workflow with Claude `/goal` handoff and quality gate
 
 > **Deprecated:** `ultrapilot` and `swarm` now route to `team` mode.
 

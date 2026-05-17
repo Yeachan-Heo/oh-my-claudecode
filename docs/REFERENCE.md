@@ -12,7 +12,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (29 Total)](#agents-29-total)
-- [Skills (38 Total)](#skills-38-total)
+- [Skills (39 Total)](#skills-39-total)
 - [Slash Commands](#slash-commands)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
@@ -522,7 +522,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Skills (38 Total)
+## Skills (39 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -561,6 +561,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
 | `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
 | `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/oh-my-claudecode:trace`                   |
+| `ultragoal`               | Durable multi-goal workflow with Claude `/goal` handoff and quality gate | `/oh-my-claudecode:ultragoal`       |
 | `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |
 | `ultrawork`               | Maximum parallel throughput mode                                 | `/oh-my-claudecode:ultrawork`               |
 | `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons | `/oh-my-claudecode:visual-verdict`          |
@@ -597,6 +598,7 @@ Each installed skill is exposed as `/oh-my-claudecode:<skill-name>`. The skills 
 | `/oh-my-claudecode:sciomc <topic>`              | Parallel research orchestration                                                            |
 | `/oh-my-claudecode:team <N>:<agent> <task>`     | Coordinated native team workflow                                                           |
 | `/oh-my-claudecode:trace`                       | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode     |
+| `/oh-my-claudecode:ultragoal <brief>`           | Durable multi-goal workflow with Claude `/goal` handoff                                    |
 | `/oh-my-claudecode:ultraqa <goal>`              | Autonomous QA cycling workflow                                                             |
 | `/oh-my-claudecode:ultrawork <task>`            | Maximum performance mode with parallel agents                                              |
 | `/oh-my-claudecode:visual-verdict <task>`       | Structured visual QA verdict for screenshot/reference comparisons                          |
