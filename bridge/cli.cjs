@@ -85026,9 +85026,13 @@ function applyDeepInterviewRuntimeSettings(template) {
     `We'll proceed to execution once ambiguity drops below ${percent}.`
   ).replace("(default: 20%)", `(default: ${percent})`).replace("(default 0.2)", `(default ${threshold})`).replace('"ambiguityThreshold": 0.2,', `"ambiguityThreshold": ${threshold},`).replace("Gate: \u226420% ambiguity", `Gate: \u2264${percent} ambiguity`).replace("(threshold: 20%).", `(threshold: ${percent}).`).replace("ambiguity \u2264 20%", `ambiguity \u2264 ${percent}`);
 }
+function normalizeSkillNameForRuntimeRendering(skillName) {
+  return skillName.trim().toLowerCase().replace(/^oh-my-claudecode:/, "").replace(/^omc:/, "");
+}
 function renderBundledSkillBody(skillName, body) {
+  const normalizedSkillName = normalizeSkillNameForRuntimeRendering(skillName);
   const rewrittenBody = rewriteOmcCliInvocations(body.trim());
-  return skillName === "deep-interview" || skillName === "deep-dive" ? applyDeepInterviewRuntimeSettings(rewrittenBody) : rewrittenBody;
+  return normalizedSkillName === "deep-interview" || normalizedSkillName === "deep-dive" ? applyDeepInterviewRuntimeSettings(rewrittenBody) : rewrittenBody;
 }
 function loadSkillFromFile(skillPath, skillName) {
   try {

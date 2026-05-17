@@ -216,9 +216,14 @@ function applyDeepInterviewRuntimeSettings(template: string): string {
     .replace('ambiguity ≤ 20%', `ambiguity ≤ ${percent}`);
 }
 
+function normalizeSkillNameForRuntimeRendering(skillName: string): string {
+  return skillName.trim().toLowerCase().replace(/^oh-my-claudecode:/, '').replace(/^omc:/, '');
+}
+
 export function renderBundledSkillBody(skillName: string, body: string): string {
+  const normalizedSkillName = normalizeSkillNameForRuntimeRendering(skillName);
   const rewrittenBody = rewriteOmcCliInvocations(body.trim());
-  return skillName === 'deep-interview' || skillName === 'deep-dive'
+  return normalizedSkillName === 'deep-interview' || normalizedSkillName === 'deep-dive'
     ? applyDeepInterviewRuntimeSettings(rewrittenBody)
     : rewrittenBody;
 }

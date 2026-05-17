@@ -65,6 +65,10 @@ When arguments include `--autoresearch`, Deep Interview becomes the zero-learnin
 
 <Steps>
 
+## Native Plugin Invocation Guard (Issue #3030)
+
+If this raw bundled skill is loaded by Claude Code's native plugin skill loader through `/oh-my-claudecode:deep-interview` or `Skill("oh-my-claudecode:deep-interview")`, do not treat that path as permission to skip rendered OMC setup. The user-facing preferred invocation is `/deep-interview`; do not recommend or advertise `/oh-my-claudecode:deep-interview` as the deep-interview entrypoint. Regardless of invocation path, Phase 0 below remains blocking and must resolve `omc.deepInterview.ambiguityThreshold` from settings before any announcement, state write, question, or ambiguity score.
+
 ## Phase 0: Resolve Ambiguity Threshold (blocking prerequisite)
 
 Complete this phase before Phase 1, before brownfield exploration, before `state_write`, before Round 0, and before any ambiguity scoring. Do not continue if the resolved threshold and source are unknown.

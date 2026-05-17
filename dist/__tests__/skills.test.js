@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache } from '../features/builtin-skills/skills.js';
+import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache, renderBundledSkillBody } from '../features/builtin-skills/skills.js';
 describe('Builtin Skills', () => {
     const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     const originalPath = process.env.PATH;
@@ -445,8 +445,14 @@ describe('Builtin Skills', () => {
             expect(t).not.toContain('ambiguity ≤ 20%');
             expect(t).not.toContain('"ambiguityThreshold": 0.2,');
         });
-        it('ships a config-aware deep-interview SKILL.md for native skill-loader paths (issue #2723)', () => {
+        it('ships a config-aware deep-interview SKILL.md for native skill-loader paths (issues #2723, #3030)', () => {
             const raw = readFileSync(join(originalCwd, 'skills', 'deep-interview', 'SKILL.md'), 'utf-8');
+            expect(raw).toContain('Native Plugin Invocation Guard (Issue #3030)');
+            expect(raw).toContain('`/oh-my-claudecode:deep-interview` or `Skill("oh-my-claudecode:deep-interview")`');
+            expect(raw).toContain('The user-facing preferred invocation is `/deep-interview`');
+            expect(raw).toContain('do not recommend or advertise `/oh-my-claudecode:deep-interview`');
+            expect(raw).toContain('Phase 0 below remains blocking');
+            expect(raw).toContain('must resolve `omc.deepInterview.ambiguityThreshold` from settings');
             expect(raw).toContain('Phase 0: Resolve Ambiguity Threshold (blocking prerequisite)');
             expect(raw).toContain('User settings: `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json`');
             expect(raw).toContain('Project settings: `./.claude/settings.json`');
@@ -496,6 +502,31 @@ describe('Builtin Skills', () => {
             expect(raw).not.toContain('(threshold: 20%).');
             expect(raw).not.toContain('"ambiguityThreshold": 0.2,');
             expect(raw).not.toContain('ambiguity ≤ 20%');
+        });
+        it('applies deep-interview runtime settings for plugin-qualified rendered skill names (issue #3030)', () => {
+            const profileDir = mkdtempSync(join(tmpdir(), 'omc-skill-3030-'));
+            tempDirs.push(profileDir);
+            process.env.CLAUDE_CONFIG_DIR = profileDir;
+            writeFileSync(join(profileDir, 'settings.json'), JSON.stringify({ omc: { deepInterview: { ambiguityThreshold: 0.17 } } }));
+            clearSkillsCache();
+            const rendered = renderBundledSkillBody('oh-my-claudecode:deep-interview', [
+                'State:',
+                '"threshold": 0.2,',
+                'Announcement: We\'ll proceed to execution once ambiguity drops below 20%.',
+                'Diagram: Gate: ≤20% ambiguity',
+                'Advanced: ambiguity ≤ 20%',
+                '"ambiguityThreshold": 0.2,',
+            ].join('\n'));
+            expect(rendered).toContain('"threshold": 0.17,');
+            expect(rendered).toContain('drops below 17%.');
+            expect(rendered).toContain('Gate: ≤17% ambiguity');
+            expect(rendered).toContain('ambiguity ≤ 17%');
+            expect(rendered).toContain('"ambiguityThreshold": 0.17,');
+            expect(rendered).not.toContain('"threshold": 0.2,');
+            expect(rendered).not.toContain('drops below 20%.');
+            expect(rendered).not.toContain('Gate: ≤20% ambiguity');
+            expect(rendered).not.toContain('ambiguity ≤ 20%');
+            expect(rendered).not.toContain('"ambiguityThreshold": 0.2,');
         });
         it('loads deep-dive ambiguityThreshold from deep-interview settings before state init and updates threshold copy', () => {
             const profileDir = mkdtempSync(join(tmpdir(), 'omc-deep-dive-profile-'));

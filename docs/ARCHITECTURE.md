@@ -280,7 +280,7 @@ ralplan this feature
 | `trace` | Evidence-driven causal tracing | `/oh-my-claudecode:trace` |
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `deepinit` | Generate hierarchical AGENTS.md | `/oh-my-claudecode:deepinit` |
-| `deep-interview` | Socratic deep interview | `/oh-my-claudecode:deep-interview` |
+| `deep-interview` | Socratic deep interview | `/deep-interview` |
 | `sciomc` | Parallel scientist agent orchestration | `/oh-my-claudecode:sciomc` |
 | `external-context` | Parallel document-specialist research | `/oh-my-claudecode:external-context` |
 | `ai-slop-cleaner` | Clean AI expression patterns | `/oh-my-claudecode:ai-slop-cleaner` |
