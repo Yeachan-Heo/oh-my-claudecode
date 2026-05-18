@@ -166,6 +166,81 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
   return [...new Set(candidates)];
 }
 
+function getWorkingDirectoryLocalOmcRoot(root: string): string {
+  return join(root, '.omc');
+}
+
+function shouldCheckWorkingDirectoryLocalState(root: string): boolean {
+  return getWorkingDirectoryLocalOmcRoot(root) !== getOmcRoot(root);
+}
+
+function getWorkingDirectoryLocalSessionStatePath(mode: StateToolMode, root: string, sessionId: string): string {
+  const normalizedName = mode.endsWith('-state') ? mode : `${mode}-state`;
+  return join(getWorkingDirectoryLocalOmcRoot(root), 'state', 'sessions', sessionId, `${normalizedName}.json`);
+}
+
+function getWorkingDirectoryLocalLegacyStateFileCandidates(mode: StateToolMode, root: string): string[] {
+  const normalizedName = mode.endsWith('-state') ? mode : `${mode}-state`;
+  return [
+    join(getWorkingDirectoryLocalOmcRoot(root), 'state', `${normalizedName}.json`),
+    join(getWorkingDirectoryLocalOmcRoot(root), `${normalizedName}.json`),
+  ];
+}
+
+function getWorkingDirectoryLocalStateClearCandidates(
+  mode: StateToolMode,
+  root: string,
+  sessionId?: string,
+): string[] {
+  if (!shouldCheckWorkingDirectoryLocalState(root)) {
+    return [];
+  }
+
+  const paths = new Set<string>();
+  if (sessionId) {
+    paths.add(getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId));
+  }
+
+  for (const legacyPath of getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root)) {
+    paths.add(legacyPath);
+  }
+
+  return [...paths];
+}
+
+function clearWorkingDirectoryLocalStateCandidates(
+  mode: StateToolMode,
+  root: string,
+  sessionId?: string,
+): { cleared: number; hadFailure: boolean; paths: string[] } {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId);
+  const localLegacyPaths = new Set(getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root));
+
+  for (const statePath of paths) {
+    if (!existsSync(statePath)) {
+      continue;
+    }
+
+    try {
+      if (sessionId && localLegacyPaths.has(statePath)) {
+        const raw = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
+        if (!canClearStateForSession(raw, sessionId)) {
+          continue;
+        }
+      }
+
+      unlinkSync(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+
+  return { cleared, hadFailure, paths };
+}
+
 function clearLegacyStateCandidates(
   mode: StateToolMode,
   root: string,
@@ -257,6 +332,10 @@ function getStateClearCheckedPaths(
 
   for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
     paths.add(legacyPath);
+  }
+
+  for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)) {
+    paths.add(localPath);
   }
 
   const sessionIds = sessionId ? [sessionId, ...listSessionIds(root)] : listSessionIds(root);
@@ -716,6 +795,13 @@ export const stateClearTool: ToolDefinition<{
           const success = clearModeState(mode as ExecutionMode, root, sessionId);
           const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
           const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+          const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
+            completedSessionCleanup.cleared === 0 &&
+            sessionCleanup.cleared === 0 &&
+            legacyCleanup.cleared === 0;
+          const workingDirectoryLocalCleanup = shouldUseLocalFallback
+            ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+            : { cleared: 0, hadFailure: false, paths: [] as string[] };
           let ownerSessionId: string | undefined;
           let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
           let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -725,7 +811,8 @@ export const stateClearTool: ToolDefinition<{
             requestedSessionOwnedPaths.length === 0 &&
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
-            legacyCleanup.cleared === 0
+            legacyCleanup.cleared === 0 &&
+            workingDirectoryLocalCleanup.cleared === 0
           ) {
             ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
             if (ownerSessionId) {
@@ -754,6 +841,9 @@ export const stateClearTool: ToolDefinition<{
           if (sessionCleanup.cleared > 0) {
             ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? '' : 's'}`);
           }
+          if (workingDirectoryLocalCleanup.cleared > 0) {
+            ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? '' : 's'}`);
+          }
           if (runtimeCleanup.cleared > 0) {
             ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
           }
@@ -775,12 +865,14 @@ export const stateClearTool: ToolDefinition<{
             completedSessionCleanup.cleared +
             sessionCleanup.cleared +
             legacyCleanup.cleared +
+            workingDirectoryLocalCleanup.cleared +
             ownerSessionCleanup.cleared +
             ownerLegacyCleanup.cleared +
             runtimeCleanup.cleared;
           if (!ownerSessionId && clearedStateOrArtifacts === 0 && success &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
+            !workingDirectoryLocalCleanup.hadFailure &&
             !completedSessionCleanup.hadFailure &&
             !ownerSessionCleanup.hadFailure &&
             !ownerLegacyCleanup.hadFailure &&
@@ -797,6 +889,7 @@ export const stateClearTool: ToolDefinition<{
             success &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
+            !workingDirectoryLocalCleanup.hadFailure &&
             !completedSessionCleanup.hadFailure &&
             !ownerSessionCleanup.hadFailure &&
             !ownerLegacyCleanup.hadFailure &&
@@ -821,6 +914,13 @@ export const stateClearTool: ToolDefinition<{
         // Fallback for modes not in registry (e.g., ralplan)
         const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
         const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+        const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
+          completedSessionCleanup.cleared === 0 &&
+          sessionCleanup.cleared === 0 &&
+          legacyCleanup.cleared === 0;
+        const workingDirectoryLocalCleanup = shouldUseLocalFallback
+          ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+          : { cleared: 0, hadFailure: false, paths: [] as string[] };
         let ownerSessionId: string | undefined;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -830,7 +930,8 @@ export const stateClearTool: ToolDefinition<{
           requestedSessionOwnedPaths.length === 0 &&
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
-          legacyCleanup.cleared === 0
+          legacyCleanup.cleared === 0 &&
+          workingDirectoryLocalCleanup.cleared === 0
         ) {
           ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
           if (ownerSessionId) {
@@ -858,6 +959,9 @@ export const stateClearTool: ToolDefinition<{
         if (sessionCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? '' : 's'}`);
         }
+        if (workingDirectoryLocalCleanup.cleared > 0) {
+          ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? '' : 's'}`);
+        }
         if (runtimeCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
         }
@@ -879,11 +983,12 @@ export const stateClearTool: ToolDefinition<{
           completedSessionCleanup.cleared +
           sessionCleanup.cleared +
           legacyCleanup.cleared +
+          workingDirectoryLocalCleanup.cleared +
           ownerSessionCleanup.cleared +
           ownerLegacyCleanup.cleared +
           runtimeCleanup.cleared;
         const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
-          completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
+          workingDirectoryLocalCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
           ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure;
         if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
           return {
