@@ -74,7 +74,18 @@ grep -o "CLAUDE-[^ )]*\.md" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md" 2>/d
 - If `OMC:VERSION` marker is missing from deterministic CLAUDE source scan (base + referenced companion): WARN - cannot verify CLAUDE.md freshness
 - If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`)
 
-### Step 5: Check Ralph Ruby Dependency
+### Step 5: Check Plugin Enable Status
+
+```bash
+claude plugin list 2>&1
+```
+
+**Diagnosis**:
+- If all OMC plugin entries show `Status: ✔ enabled`: OK
+- If any OMC plugin entry shows `Status: ✘ disabled`: CRITICAL — plugin is disabled, skills and commands will not load
+- If `claude plugin list` command fails: WARN — cannot verify plugin status
+
+### Step 6: Check Ralph Ruby Dependency
 
 Ralph workflows require Ruby. Check for Ruby explicitly so fresh installations get actionable guidance instead of a later opaque Ralph failure.
 
@@ -92,7 +103,7 @@ fi
 - If Ruby is found: OK - Ralph dependency present
 - If Ruby is missing: WARN - Ralph workflows may fail until Ruby is installed
 
-### Step 6: Check for Stale Plugin Cache
+### Step 7: Check for Stale Plugin Cache
 
 ```bash
 # Count versions in cache (cross-platform)
@@ -102,7 +113,7 @@ node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=pro
 **Diagnosis**:
 - If > 1 version: WARN - multiple cached versions (cleanup recommended)
 
-### Step 7: Check for Legacy Curl-Installed Content
+### Step 8: Check for Legacy Curl-Installed Content
 
 Check for legacy agents, commands, and skills installed via curl (before plugin system).
 **Important**: Only flag files whose names match actual plugin-provided names. Do NOT flag user's custom agents/commands/skills that are unrelated to OMC.
@@ -150,6 +161,7 @@ After running all checks, output a report:
 | Check | Status | Details |
 |-------|--------|---------|
 | Plugin Version | OK/WARN/CRITICAL | ... |
+| Plugin Status | OK/CRITICAL | ... |
 | Legacy Hooks (settings.json) | OK/CRITICAL | ... |
 | Legacy Scripts (~/.claude/hooks/) | OK/WARN | ... |
 | CLAUDE.md | OK/WARN/CRITICAL | ... |
@@ -177,6 +189,11 @@ If yes, apply fixes:
 
 ### Fix: Legacy Hooks in settings.json
 Remove the `"hooks"` section from `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (keep other settings intact)
+
+### Fix: Disabled Plugin
+```bash
+claude plugin enable oh-my-claudecode@omc
+```
 
 ### Fix: Legacy Bash Scripts
 ```bash
