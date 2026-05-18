@@ -133,6 +133,18 @@ ls -la "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/ 2>/dev/null
 **Known plugin command names** (check commands/ for these):
 `ultrawork.md`, `deepsearch.md`
 
+### Step 8: Check Skill Access Restrictions
+
+OMC restricts certain skills (`remember`, `verify`, `debug`) to specific user types. If `USER_TYPE` is not set to `"ant"`, these skills will be silently excluded from the skill registry — they exist on disk but will never load.
+
+```bash
+echo "USER_TYPE=${USER_TYPE:-(not set)}"
+```
+
+**Diagnosis**:
+- If `USER_TYPE=ant`: OK — all skills are accessible
+- If `USER_TYPE` is set to any other value or not set: WARN — skills `remember`, `verify`, `debug` are restricted and will not be available. This is expected for standard users; these skills are gated behind a user-type check in the skill loader.
+
 ---
 
 ## Report Format
@@ -158,6 +170,7 @@ After running all checks, output a report:
 | Legacy Agents (~/.claude/agents/) | OK/WARN | ... |
 | Legacy Commands (~/.claude/commands/) | OK/WARN | ... |
 | Legacy Skills (~/.claude/skills/) | OK/WARN | ... |
+| Skill Access Restrictions | OK/WARN | ... |
 
 ### Issues Found
 1. [Issue description]
@@ -221,6 +234,18 @@ rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills
 ```
 
 **Note**: Only remove if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before removing.
+
+### Fix: Skill Access Restrictions
+
+If `USER_TYPE` is not set to `"ant"`, the skills `remember`, `verify`, and `debug` are restricted. This is by design for standard users. No action is needed unless you have been granted access to these skills.
+
+If you have been granted access, set the environment variable:
+
+```bash
+export USER_TYPE=ant
+```
+
+To make this permanent, add it to your shell profile (`~/.zshrc` or `~/.bashrc`).
 
 ---
 
