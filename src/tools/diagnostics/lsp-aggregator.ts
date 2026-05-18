@@ -7,7 +7,7 @@
 
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
-import { lspClientManager } from '../lsp/index.js';
+import { lspClientManager, getServerForFile } from '../lsp/index.js';
 import type { Diagnostic } from '../lsp/index.js';
 import { LSP_DIAGNOSTICS_WAIT_MS } from './index.js';
 
@@ -22,6 +22,8 @@ export interface LspAggregationResult {
   errorCount: number;
   warningCount: number;
   filesChecked: number;
+  skippedFiles: Array<{ file: string; reason: string }>;
+  installHints: string[]; // deduplicated, insertion order preserved
 }
 
 /**
@@ -82,8 +84,16 @@ export async function runLspAggregatedDiagnostics(
 
   const allDiagnostics: LspDiagnosticWithFile[] = [];
   let filesChecked = 0;
+  const skippedFiles: Array<{ file: string; reason: string }> = [];
+  const installHintSet = new Set<string>();
 
   for (const file of files) {
+    // Guards future callers passing custom extensions with no registered LSP; redundant under default extension list.
+    if (!getServerForFile(file)) {
+      skippedFiles.push({ file, reason: 'no language server registered for extension' });
+      continue;
+    }
+
     try {
       await lspClientManager.runWithClientLease(file, async (client) => {
         // Open document to trigger diagnostics
@@ -105,23 +115,35 @@ export async function runLspAggregatedDiagnostics(
           });
         }
 
+        // Must remain the last statement in the lease callback to preserve filesChecked + skippedFiles.length === files.length.
         filesChecked++;
       });
-    } catch (_error) {
-      // Skip files that fail (including "no server available")
-      continue;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Regex pinned to throw at src/tools/lsp/client.ts:186 — keep header literal in formatLspResult in sync.
+      const match = message.match(/^Language server '([^']+)' not found\.\nInstall with: (.+)$/s);
+      if (match) {
+        installHintSet.add(match[2].trim());
+        skippedFiles.push({ file, reason: `missing language server: ${match[1]}` });
+      } else {
+        skippedFiles.push({ file, reason: message });
+      }
     }
   }
 
   // Count errors and warnings
   const errorCount = allDiagnostics.filter(d => d.diagnostic.severity === 1).length;
   const warningCount = allDiagnostics.filter(d => d.diagnostic.severity === 2).length;
+  const installHints = Array.from(installHintSet);
+  const allFilesSkipped = filesChecked === 0 && files.length > 0;
 
   return {
-    success: errorCount === 0,
+    success: errorCount === 0 && !allFilesSkipped,
     diagnostics: allDiagnostics,
     errorCount,
     warningCount,
-    filesChecked
+    filesChecked,
+    skippedFiles,
+    installHints,
   };
 }

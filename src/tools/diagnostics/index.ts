@@ -101,32 +101,50 @@ function formatTscResult(result: TscResult): DirectoryDiagnosticResult {
 /**
  * Format LSP aggregation results into standard format
  */
-function formatLspResult(result: LspAggregationResult): DirectoryDiagnosticResult {
+export function formatLspResult(result: LspAggregationResult): DirectoryDiagnosticResult {
   let diagnostics = '';
   let summary = '';
 
-  if (result.diagnostics.length === 0) {
+  if (result.diagnostics.length === 0 && result.installHints.length === 0 && result.skippedFiles.length === 0) {
     diagnostics = `Checked ${result.filesChecked} files. No diagnostics found!`;
     summary = `LSP check passed: 0 errors, 0 warnings (${result.filesChecked} files)`;
   } else {
-    // Group diagnostics by file
-    const byFile = new Map<string, LspDiagnosticWithFile[]>();
-    for (const item of result.diagnostics) {
-      if (!byFile.has(item.file)) {
-        byFile.set(item.file, []);
+    const hasSkips = result.skippedFiles.length > 0;
+    const parts: string[] = [];
+
+    if (result.installHints.length > 0) {
+      const hintLines = result.installHints.map(h => `  - ${h}`).join('\n');
+      parts.push(
+        `⚠ Missing language servers detected:\n${hintLines}\nInstall the language server(s) above and re-run, or these files cannot be checked.`
+      );
+    }
+
+    if (result.diagnostics.length > 0) {
+      const byFile = new Map<string, LspDiagnosticWithFile[]>();
+      for (const item of result.diagnostics) {
+        if (!byFile.has(item.file)) {
+          byFile.set(item.file, []);
+        }
+        byFile.get(item.file)!.push(item);
       }
-      byFile.get(item.file)!.push(item);
+
+      const fileOutputs: string[] = [];
+      for (const [file, items] of byFile) {
+        const diags = items.map(i => i.diagnostic);
+        fileOutputs.push(`${file}:\n${formatDiagnostics(diags, file)}`);
+      }
+
+      parts.push(fileOutputs.join('\n\n'));
     }
 
-    // Format each file's diagnostics
-    const fileOutputs: string[] = [];
-    for (const [file, items] of byFile) {
-      const diags = items.map(i => i.diagnostic);
-      fileOutputs.push(`${file}:\n${formatDiagnostics(diags, file)}`);
+    if (hasSkips) {
+      parts.push(`Skipped ${result.skippedFiles.length} file(s) due to missing or unregistered language servers.`);
     }
 
-    diagnostics = fileOutputs.join('\n\n');
-    summary = `LSP check ${result.success ? 'passed' : 'failed'}: ${result.errorCount} errors, ${result.warningCount} warnings (${result.filesChecked} files)`;
+    diagnostics = parts.join('\n\n');
+    summary = hasSkips
+      ? `LSP check incomplete: ${result.errorCount} errors, ${result.warningCount} warnings (${result.filesChecked}/${result.filesChecked + result.skippedFiles.length} files checked)`
+      : `LSP check ${result.success ? 'passed' : 'failed'}: ${result.errorCount} errors, ${result.warningCount} warnings (${result.filesChecked} files)`;
   }
 
   return {
