@@ -20,7 +20,7 @@ This directory implements the LSP client that enables agents to:
 |------|-------------|
 | `index.ts` | Module exports - re-exports client, servers, utils |
 | `client.ts` | `LspClient` class - JSON-RPC 2.0 over stdio communication |
-| `servers.ts` | `LSP_SERVERS` config - 10 language server definitions |
+| `servers.ts` | `LSP_SERVERS` config - known language server definitions |
 | `utils.ts` | Formatting utilities for LSP responses |
 
 ## For AI Agents
@@ -115,6 +115,8 @@ npm test -- --grep "lsp"
 
 ## Supported Language Servers
 
+This table documents catalog/discovery support. Runtime semantic quality still depends on installing and correctly configuring the underlying language server.
+
 | Language | Server | Command | Extensions |
 |----------|--------|---------|------------|
 | TypeScript/JS | typescript-language-server | `typescript-language-server` | .ts, .tsx, .js, .jsx |
@@ -126,6 +128,7 @@ npm test -- --grep "lsp"
 | JSON | vscode-json-language-server | `vscode-json-language-server` | .json, .jsonc |
 | HTML | vscode-html-language-server | `vscode-html-language-server` | .html, .htm |
 | CSS | vscode-css-language-server | `vscode-css-language-server` | .css, .scss, .less |
+| Vue | vue-language-server | `vue-language-server --stdio` | .vue |
 | YAML | yaml-language-server | `yaml-language-server` | .yaml, .yml |
 
 <!-- MANUAL: -->

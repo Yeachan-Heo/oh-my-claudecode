@@ -74,6 +74,13 @@ export const LSP_SERVERS = {
         extensions: ['.css', '.scss', '.less'],
         installHint: 'npm install -g vscode-langservers-extracted'
     },
+    vue: {
+        name: 'Vue Language Server (Volar)',
+        command: 'vue-language-server',
+        args: ['--stdio'],
+        extensions: ['.vue'],
+        installHint: 'npm install -g @vue/language-server'
+    },
     yaml: {
         name: 'YAML Language Server',
         command: 'yaml-language-server',
@@ -200,6 +207,7 @@ export function getServerForLanguage(language) {
         'css': 'css',
         'scss': 'css',
         'less': 'css',
+        'vue': 'vue',
         'yaml': 'yaml',
         'php': 'php',
         'phtml': 'php',
