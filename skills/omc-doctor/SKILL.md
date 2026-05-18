@@ -133,6 +133,36 @@ ls -la "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/ 2>/dev/null
 **Known plugin command names** (check commands/ for these):
 `ultrawork.md`, `deepsearch.md`
 
+### Step 9: Check Command and Skill Files Integrity
+
+Verify that the plugin's command dispatch files and skill definition files exist on disk. Missing files will cause "No commands match" errors even when the plugin is enabled.
+
+```bash
+# Check plugin commands directory
+COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/omc/oh-my-claudecode/*/commands
+SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/omc/oh-my-claudecode/*/skills
+
+echo "=== Command dispatch files ==="
+ls $COMMANDS_DIR/*.md 2>/dev/null | xargs -I{} basename {} || echo "MISSING: no command files found"
+
+echo ""
+echo "=== Skill definition files ==="
+for dir in $SKILLS_DIR/*/; do
+  skill=$(basename "$dir")
+  if [ -f "$dir/SKILL.md" ]; then
+    echo "[OK] $skill/SKILL.md"
+  else
+    echo "[MISSING] $skill/SKILL.md"
+  fi
+done 2>/dev/null || echo "MISSING: no skill directories found"
+```
+
+**Diagnosis**:
+- If all command `.md` files and skill `SKILL.md` files are present: OK
+- If any command file is missing: CRITICAL — that slash command will not work
+- If any skill `SKILL.md` is missing: CRITICAL — that skill will not load
+- If the commands/skills directories themselves are missing: CRITICAL — plugin installation may be corrupted, try `claude plugin disable oh-my-claudecode@omc && claude plugin enable oh-my-claudecode@omc`
+
 ---
 
 ## Report Format
@@ -158,6 +188,7 @@ After running all checks, output a report:
 | Legacy Agents (~/.claude/agents/) | OK/WARN | ... |
 | Legacy Commands (~/.claude/commands/) | OK/WARN | ... |
 | Legacy Skills (~/.claude/skills/) | OK/WARN | ... |
+| Command & Skill Files | OK/CRITICAL | ... |
 
 ### Issues Found
 1. [Issue description]
@@ -221,6 +252,21 @@ rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills
 ```
 
 **Note**: Only remove if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before removing.
+
+### Fix: Missing Command/Skill Files (corrupted plugin install)
+
+If command dispatch files or skill definition files are missing from the plugin cache, the plugin installation may be corrupted. Reinstall it:
+
+```bash
+claude plugin disable oh-my-claudecode@omc
+claude plugin enable oh-my-claudecode@omc
+```
+
+If that does not resolve the issue, clear the plugin cache and reinstall:
+
+```bash
+node -e "const p=require('path'),f=require('fs'),d=process.env.CLAUDE_CONFIG_DIR||p.join(require('os').homedir(),'.claude'),b=p.join(d,'plugins','cache','omc','oh-my-claudecode');try{f.rmSync(b,{recursive:true,force:true});console.log('Plugin cache cleared. Restart Claude Code to reinstall.')}catch{console.log('No plugin cache found')}"
+```
 
 ---
 
