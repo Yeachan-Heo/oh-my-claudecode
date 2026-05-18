@@ -1736,9 +1736,13 @@ function resolveTmuxBinaryPath() {
   }
   return "tmux";
 }
+var PANE_ID_SOURCE, PANE_ID_VALIDATOR, TMUX_CONTEXT_PATTERN;
 var init_tmux_utils = __esm({
   "src/cli/tmux-utils.ts"() {
     "use strict";
+    PANE_ID_SOURCE = "%[\\w-]+";
+    PANE_ID_VALIDATOR = new RegExp(`^${PANE_ID_SOURCE}$`);
+    TMUX_CONTEXT_PATTERN = new RegExp(`^(\\S+)\\s+(${PANE_ID_SOURCE})$`);
   }
 });
 
@@ -2093,7 +2097,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
     validateTmux();
   }
   const envPaneIdRaw = (process.env.TMUX_PANE ?? "").trim();
-  const envPaneId = /^%\d+$/.test(envPaneIdRaw) ? envPaneIdRaw : "";
+  const envPaneId = PANE_ID_VALIDATOR.test(envPaneIdRaw) ? envPaneIdRaw : "";
   let sessionAndWindow = "";
   let leaderPaneId = envPaneId;
   let sessionMode = inTmux ? "split-pane" : "detached-session";
@@ -2111,7 +2115,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       cwd
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
-    const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
+    const detachedMatch = detachedLine.match(TMUX_CONTEXT_PATTERN);
     if (!detachedMatch) {
       throw new Error(`Failed to create detached tmux session: "${detachedLine}"`);
     }
@@ -2140,7 +2144,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       "#S:#I #{pane_id}"
     ]);
     const contextLine = contextResult.stdout.trim();
-    const contextMatch = contextLine.match(/^(\S+)\s+(%\d+)$/);
+    const contextMatch = contextLine.match(TMUX_CONTEXT_PATTERN);
     if (!contextMatch) {
       throw new Error(`Failed to resolve tmux context: "${contextLine}"`);
     }
@@ -2164,7 +2168,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       cwd
     ]);
     const newWindowLine = newWindowResult.stdout.trim();
-    const newWindowMatch = newWindowLine.match(/^(\S+)\s+(%\d+)$/);
+    const newWindowMatch = newWindowLine.match(TMUX_CONTEXT_PATTERN);
     if (!newWindowMatch) {
       throw new Error(`Failed to create team tmux window: "${newWindowLine}"`);
     }
@@ -2481,7 +2485,7 @@ async function killWorkerPanes(opts) {
   }
 }
 function isPaneId(value) {
-  return typeof value === "string" && /^%\d+$/.test(value.trim());
+  return typeof value === "string" && PANE_ID_VALIDATOR.test(value.trim());
 }
 function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
   const unique = /* @__PURE__ */ new Set();

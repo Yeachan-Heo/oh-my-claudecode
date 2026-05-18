@@ -3,6 +3,23 @@
  * Adapted from oh-my-codex patterns for omc
  */
 import { type ExecFileSyncOptionsWithStringEncoding, type ExecSyncOptionsWithStringEncoding, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'child_process';
+/**
+ * Regex source matching a single tmux pane id.
+ *
+ * Real tmux uses `%<integer>` (e.g. `%3`). cmux's `__tmux-compat` shim returns
+ * `%<UUID>` (e.g. `%7B41407B-1DE7-4A0F-9FD9-1E8DABEA2A2A`) so OMC can run as a
+ * teams leader inside cmux workspaces. Accept either: `%` followed by word
+ * characters and dashes.
+ */
+export declare const PANE_ID_SOURCE = "%[\\w-]+";
+/** Strict full-string validator for a single pane id token. */
+export declare const PANE_ID_VALIDATOR: RegExp;
+/**
+ * Parser for output of `display-message -p '#S:#I #{pane_id}'` (and
+ * shape-equivalent commands like `new-session -P -F '#S:0 #{pane_id}'`).
+ * Captures `<session>:<window>` in group 1 and `<pane_id>` in group 2.
+ */
+export declare const TMUX_CONTEXT_PATTERN: RegExp;
 export interface TmuxExecOptions {
     /** Strip TMUX env var so the command targets the default tmux server.
      *  Default: false — preserves TMUX (targets the current server).

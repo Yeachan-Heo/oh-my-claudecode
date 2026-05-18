@@ -144,6 +144,9 @@ var import_promises = __toESM(require("fs/promises"), 1);
 var import_child_process = require("child_process");
 var import_path3 = require("path");
 var import_util = require("util");
+var PANE_ID_SOURCE = "%[\\w-]+";
+var PANE_ID_VALIDATOR = new RegExp(`^${PANE_ID_SOURCE}$`);
+var TMUX_CONTEXT_PATTERN = new RegExp(`^(\\S+)\\s+(${PANE_ID_SOURCE})$`);
 function tmuxEnv() {
   const { TMUX: _, ...env } = process.env;
   return env;
