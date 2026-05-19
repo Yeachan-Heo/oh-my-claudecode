@@ -27149,7 +27149,8 @@ async function notify(event, data) {
       return null;
     }
     const verbosity = getVerbosity(config2);
-    if (!isEventAllowedByVerbosity(verbosity, event)) {
+    const isExplicitAskUserQuestionEvent = event === "ask-user-question" && config2.events?.["ask-user-question"]?.enabled === true;
+    if (!isExplicitAskUserQuestionEvent && !isEventAllowedByVerbosity(verbosity, event)) {
       return null;
     }
     const { getCurrentTmuxPaneId: getCurrentTmuxPaneId2 } = await Promise.resolve().then(() => (init_tmux(), tmux_exports));

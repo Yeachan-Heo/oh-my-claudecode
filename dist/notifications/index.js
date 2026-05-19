@@ -44,9 +44,14 @@ export async function notify(event, data) {
         if (!config || !isEventEnabled(config, event)) {
             return null;
         }
-        // Verbosity filter (second gate after isEventEnabled)
+        // Verbosity filter (second gate after isEventEnabled).  An explicitly
+        // enabled ask-user-question event is user intent to surface an interactive
+        // block, so do not let the default "session" verbosity silently drop it.
         const verbosity = getVerbosity(config);
-        if (!isEventAllowedByVerbosity(verbosity, event)) {
+        const isExplicitAskUserQuestionEvent = event === "ask-user-question" &&
+            config.events?.["ask-user-question"]?.enabled === true;
+        if (!isExplicitAskUserQuestionEvent &&
+            !isEventAllowedByVerbosity(verbosity, event)) {
             return null;
         }
         // Get tmux pane ID
