@@ -524,6 +524,7 @@ export async function sendWebhook(
         reason: payload.reason,
         active_mode: payload.activeMode,
         question: payload.question,
+        ask_user_question_prompts: payload.askUserQuestionPrompts,
         ...(payload.replyChannel && { channel: payload.replyChannel }),
         ...(payload.replyTarget && { to: payload.replyTarget }),
         ...(payload.replyThread && { thread_id: payload.replyThread }),

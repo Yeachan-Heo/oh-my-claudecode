@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeReplyInput } from "../reply-listener.js";
+import { buildReplyInjectionSteps, sanitizeReplyInput } from "../reply-listener.js";
 
 describe("reply-listener", () => {
   describe("sanitizeReplyInput", () => {
@@ -62,6 +62,39 @@ describe("reply-listener", () => {
       expect(result).toContain('\\$(sub)');
       expect(result).toContain('\\${var}');
       expect(result).not.toContain('\x00');
+    });
+  });
+
+  describe("AskUserQuestion reply injection", () => {
+    it("targets the Other/free-text field before submitting mobile reply text", () => {
+      const steps = buildReplyInjectionSteps(
+        "Use SQLite for tests",
+        "telegram",
+        { includePrefix: false, maxMessageLength: 500 },
+        { event: "ask-user-question", askUserQuestionOptionCount: 2, askUserQuestionAllowOther: true },
+      );
+
+      expect(steps).toEqual([
+        { kind: "key", value: "Down" },
+        { kind: "key", value: "Down" },
+        { kind: "key", value: "Enter" },
+        { kind: "literal", value: "Use SQLite for tests" },
+        { kind: "key", value: "Enter" },
+      ]);
+    });
+
+    it("keeps normal reply injection semantics for non AskUserQuestion messages", () => {
+      const steps = buildReplyInjectionSteps(
+        "continue",
+        "slack",
+        { includePrefix: true, maxMessageLength: 500 },
+        { event: "session-idle" },
+      );
+
+      expect(steps).toEqual([
+        { kind: "literal", value: "[reply:slack] continue" },
+        { kind: "key", value: "Enter" },
+      ]);
     });
   });
 

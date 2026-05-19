@@ -14,7 +14,7 @@ export type TemplateVariable =
   | "projectPath" | "projectName" | "modesUsed" | "contextSummary"
   | "durationMs" | "agentsSpawned" | "agentsCompleted"
   | "reason" | "activeMode" | "iteration" | "maxIterations"
-  | "question" | "incompleteTasks" | "agentName" | "agentType"
+  | "question" | "questionOptions" | "incompleteTasks" | "agentName" | "agentType"
   | "tmuxTail" | "tmuxPaneId"
   | "replyChannel" | "replyTarget" | "replyThread"
   // Computed variables (derived from payload, not direct fields)

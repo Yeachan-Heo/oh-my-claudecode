@@ -11,6 +11,7 @@ import {
   processHook,
   resetSkipHooksCache,
   dispatchAskUserQuestionNotification,
+  extractAskUserQuestionPrompts,
   _notify,
   type HookInput,
 } from "../bridge.js";
@@ -54,6 +55,24 @@ describe("AskUserQuestion notification lifecycle (issue #597)", () => {
     },
     directory: "/tmp/test-issue-597",
   };
+
+  it("extractAskUserQuestionPrompts preserves option labels/descriptions for notifications", () => {
+    const prompts = extractAskUserQuestionPrompts(askUserInput.toolInput);
+
+    expect(prompts).toEqual([
+      {
+        question: "Which database should we use?",
+        header: "Database",
+        options: [
+          { label: "PostgreSQL", description: "Relational DB" },
+          { label: "MongoDB", description: "Document DB" },
+        ],
+        allowOther: true,
+        otherLabel: "Other",
+        multiSelect: false,
+      },
+    ]);
+  });
 
   // ---- PreToolUse: notification MUST fire ----
 
