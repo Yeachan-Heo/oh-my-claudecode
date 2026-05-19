@@ -331,6 +331,12 @@ describe('sendToWorker implementation guards', () => {
     expect(source).toContain('30_000');
   });
 
+  it('bumps the default readiness timeout for codex agents', () => {
+    expect(source).toContain('DEFAULT_CODEX_PANE_READY_TIMEOUT_MS');
+    expect(source).toContain('90_000');
+    expect(source).toContain("agentType === 'codex'");
+  });
+
   it('checks and exits tmux copy-mode before injection', () => {
     expect(source).toContain('#{pane_in_mode}');
     expect(source).toContain('skip injection entirely');

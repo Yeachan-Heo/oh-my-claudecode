@@ -708,6 +708,21 @@ export function paneLooksReady(captured: string): boolean {
 export interface WaitForPaneReadyOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
+  // Lets the default timeout adapt to slower-booting CLIs. Codex CLI cold-boot
+  // inside an Intel/Rosetta tmux pane reproducibly exceeds 30s (observed on
+  // Apple Silicon hosts with Intel Homebrew tmux); 90s is the empirically
+  // sufficient floor. Claude and Gemini boot inside the historical 30s budget.
+  // Accepts the full CliAgentType union (without importing it) plus undefined.
+  agentType?: string;
+}
+
+const DEFAULT_PANE_READY_TIMEOUT_MS = 30_000;
+const DEFAULT_CODEX_PANE_READY_TIMEOUT_MS = 90_000;
+
+function defaultPaneReadyTimeoutMs(agentType: string | undefined): number {
+  return agentType === 'codex'
+    ? DEFAULT_CODEX_PANE_READY_TIMEOUT_MS
+    : DEFAULT_PANE_READY_TIMEOUT_MS;
 }
 
 export async function waitForPaneReady(
@@ -715,9 +730,10 @@ export async function waitForPaneReady(
   opts: WaitForPaneReadyOptions = {}
 ): Promise<boolean> {
   const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
+  const defaultTimeoutMs = defaultPaneReadyTimeoutMs(opts.agentType);
   const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
     ? Number(opts.timeoutMs)
-    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
+    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : defaultTimeoutMs);
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
     ? Number(opts.pollIntervalMs)
     : 250;

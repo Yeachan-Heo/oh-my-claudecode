@@ -781,7 +781,7 @@ export async function spawnWorkerForTask(
   if (!usePromptMode) {
     // Interactive mode: wait for pane readiness, handle trust-confirm, then
     // send instruction via tmux send-keys.
-    const paneReady = await waitForPaneReady(paneId);
+    const paneReady = await waitForPaneReady(paneId, { agentType });
     if (!paneReady) {
       await killWorkerPane(runtime, workerNameValue, paneId);
       await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);

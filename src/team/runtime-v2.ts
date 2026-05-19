@@ -731,7 +731,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
 
   // For interactive agents, wait for pane readiness before dispatching startup inbox.
   if (!usePromptMode) {
-    const paneReady = await waitForPaneReady(paneId);
+    const paneReady = await waitForPaneReady(paneId, { agentType: opts.agentType });
     if (!paneReady) {
       return {
         paneId,
