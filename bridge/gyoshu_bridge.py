@@ -31,6 +31,7 @@ import traceback
 import threading
 import gc
 import argparse
+import ast
 import socket as socket_module
 import stat
 from datetime import datetime, timezone
@@ -296,76 +297,224 @@ def clean_memory() -> Dict[str, float]:
 
 
 # =============================================================================
-# SANDBOX MODE
+# EXECUTION SANDBOX
 # =============================================================================
 
-# Modules blocked in sandbox mode (system access, process spawning, networking).
-# Note: sys, io, pathlib are intentionally blocked despite limiting some legitimate
-# REPL usage — this is an acceptable tradeoff for defense-in-depth. This blocklist
-# is not a security boundary on its own; OS-level isolation is recommended for
-# untrusted code. The blocklist prevents common bypass patterns within the sandbox.
-SANDBOX_BLOCKED_MODULES = frozenset(
+# The bridge executes JSON-RPC supplied Python in-process.  CPython's object
+# model is not a complete security sandbox, but the execution namespace must not
+# expose ambient process capabilities by default.  Keep this list intentionally
+# small: normal calculation/printing/stateful REPL code works, while imports,
+# file I/O, dynamic code execution, and object-model dunder escapes fail before
+# user code runs.
+SAFE_EXEC_BUILTINS = frozenset(
     {
-        "os",
-        "subprocess",
-        "shutil",
-        "socket",
-        "ctypes",
-        "multiprocessing",
-        "webbrowser",
-        "http.server",
-        "xmlrpc.server",
-        # Bypass prevention
-        "importlib",    # Prevents importlib.import_module('os') bypass
-        "sys",          # Prevents sys.modules direct access bypass
-        "io",           # Prevents file I/O bypass (complements open() block)
-        "pathlib",      # Prevents filesystem access via Path objects
-        "signal",       # Prevents signal handler manipulation
+        "ArithmeticError",
+        "AssertionError",
+        "AttributeError",
+        "BaseException",
+        "BufferError",
+        "BytesWarning",
+        "DeprecationWarning",
+        "EOFError",
+        "Exception",
+        "False",
+        "FloatingPointError",
+        "FutureWarning",
+        "GeneratorExit",
+        "ImportError",
+        "ImportWarning",
+        "IndentationError",
+        "IndexError",
+        "KeyError",
+        "KeyboardInterrupt",
+        "LookupError",
+        "MemoryError",
+        "NameError",
+        "None",
+        "NotImplemented",
+        "NotImplementedError",
+        "OverflowError",
+        "PendingDeprecationWarning",
+        "ReferenceError",
+        "ResourceWarning",
+        "RuntimeError",
+        "RuntimeWarning",
+        "StopAsyncIteration",
+        "StopIteration",
+        "SyntaxError",
+        "SyntaxWarning",
+        "SystemError",
+        "TabError",
+        "TimeoutError",
+        "True",
+        "TypeError",
+        "UnboundLocalError",
+        "UnicodeDecodeError",
+        "UnicodeEncodeError",
+        "UnicodeError",
+        "UnicodeTranslateError",
+        "UnicodeWarning",
+        "UserWarning",
+        "ValueError",
+        "Warning",
+        "ZeroDivisionError",
+        "__build_class__",
+        "abs",
+        "all",
+        "any",
+        "ascii",
+        "bin",
+        "bool",
+        "bytearray",
+        "bytes",
+        "callable",
+        "chr",
+        "classmethod",
+        "complex",
+        "dict",
+        "divmod",
+        "enumerate",
+        "filter",
+        "float",
+        "format",
+        "frozenset",
+        "hash",
+        "hex",
+        "int",
+        "isinstance",
+        "issubclass",
+        "iter",
+        "len",
+        "list",
+        "map",
+        "max",
+        "min",
+        "next",
+        "oct",
+        "ord",
+        "pow",
+        "print",
+        "property",
+        "range",
+        "repr",
+        "reversed",
+        "round",
+        "set",
+        "slice",
+        "sorted",
+        "staticmethod",
+        "str",
+        "sum",
+        "super",
+        "tuple",
+        "zip",
     }
 )
 
-# Builtins removed in sandbox mode
+# Names that should remain unavailable even if a future builtins allowlist change
+# accidentally includes them.
 SANDBOX_BLOCKED_BUILTINS = frozenset(
-    {"exec", "eval", "compile", "__import__", "open", "breakpoint"}
+    {
+        "__import__",
+        "breakpoint",
+        "compile",
+        "delattr",
+        "dir",
+        "eval",
+        "exec",
+        "getattr",
+        "globals",
+        "help",
+        "input",
+        "locals",
+        "open",
+        "setattr",
+        "type",
+        "vars",
+    }
 )
 
-_sandbox_enabled = os.environ.get("OMC_PYTHON_SANDBOX") == "1"
-_original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+class GyoshuSecurityError(Exception):
+    """Raised when submitted code uses blocked bridge execution features."""
+
+    pass
 
 
-def _sandbox_import(name, *args, **kwargs):
-    """Import hook that blocks dangerous modules in sandbox mode."""
-    top_level = name.split(".")[0]
-    if top_level in SANDBOX_BLOCKED_MODULES or name in SANDBOX_BLOCKED_MODULES:
-        raise ImportError(
-            f"Module '{name}' is blocked in sandbox mode. "
-            f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
-        )
-    # Check fromlist for dotted-module blocklist entries (e.g. "from http import server")
-    # __import__ signature: __import__(name, globals, locals, fromlist, level)
-    fromlist = (args[2] if len(args) > 2 else kwargs.get("fromlist")) or ()
-    for attr in fromlist:
-        qualified = f"{name}.{attr}"
-        if qualified in SANDBOX_BLOCKED_MODULES:
-            raise ImportError(
-                f"Module '{qualified}' is blocked in sandbox mode. "
-                f"Disable sandbox via security.pythonSandbox in .claude/omc.jsonc or unset OMC_SECURITY."
-            )
-    return _original_import(name, *args, **kwargs)
+class _SafeBridgeHelper:
+    """Callable wrapper that does not expose the wrapped function globals."""
+
+    __slots__ = ("_fn",)
+
+    def __init__(self, fn: Callable[[], Dict[str, float]]):
+        object.__setattr__(self, "_fn", fn)
+
+    def __call__(self) -> Dict[str, float]:
+        return object.__getattribute__(self, "_fn")()
+
+    def __getattribute__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return object.__getattribute__(self, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("bridge helpers are read-only")
 
 
-def get_sandbox_namespace() -> Dict[str, Any]:
-    """Build a restricted builtins dict for sandbox mode."""
+def _blocked_import(name, *args, **kwargs):
+    """Import hook for user code: imports are unavailable in bridge execution."""
+    raise ImportError(
+        f"Import '{name}' is not available in the Gyoshu bridge execution namespace. "
+        "Bridge code runs with a restricted builtins allowlist."
+    )
+
+
+# Backward-compatible alias for tests and any local imports of the old hook name.
+_sandbox_import = _blocked_import
+
+
+def get_safe_builtins() -> Dict[str, Any]:
+    """Build the restricted builtins mapping used for all bridge execution."""
     import builtins as _builtins_mod
 
     safe_builtins = {
-        k: v
-        for k, v in vars(_builtins_mod).items()
-        if k not in SANDBOX_BLOCKED_BUILTINS
+        name: getattr(_builtins_mod, name)
+        for name in SAFE_EXEC_BUILTINS
+        if hasattr(_builtins_mod, name) and name not in SANDBOX_BLOCKED_BUILTINS
     }
-    # Replace __import__ with the blocking version
-    safe_builtins["__import__"] = _sandbox_import
-    return {"__builtins__": safe_builtins}
+    # Keep import statements deterministic: they fail with ImportError instead
+    # of falling through to a confusing "__import__ not found" NameError.
+    safe_builtins["__import__"] = _blocked_import
+    return safe_builtins
+
+
+def get_sandbox_namespace() -> Dict[str, Any]:
+    """Build a restricted namespace for JSON-RPC supplied execution."""
+    return {"__builtins__": get_safe_builtins()}
+
+
+def validate_user_code_ast(tree: ast.AST) -> None:
+    """Reject syntax that can reach ambient process state or dynamic code exec."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise GyoshuSecurityError(
+                "Import statements are not available in the Gyoshu bridge execution namespace"
+            )
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise GyoshuSecurityError(
+                "Dunder attribute access is not available in the Gyoshu bridge execution namespace"
+            )
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"format", "format_map"}
+        ):
+            raise GyoshuSecurityError(
+                "String format field traversal is not available in the Gyoshu bridge execution namespace"
+            )
+        if isinstance(node, ast.Name) and node.id in SANDBOX_BLOCKED_BUILTINS:
+            raise GyoshuSecurityError(
+                f"Builtin '{node.id}' is not available in the Gyoshu bridge execution namespace"
+            )
 
 
 # =============================================================================
@@ -381,7 +530,7 @@ class ExecutionState:
         self._interrupt_flag = threading.Event()
         self._execution_lock = threading.Lock()
 
-        # Initialize with common imports available
+        # Initialize the restricted execution namespace.
         self._initialize_namespace()
 
     def _initialize_namespace(self):
@@ -389,13 +538,13 @@ class ExecutionState:
         self._namespace = {
             "__name__": "__gyoshu__",
             "__doc__": "Gyoshu execution namespace",
-            # Provide helper functions
-            "clean_memory": clean_memory,
-            "get_memory": get_memory_usage,
+            # Provide helper functions without exposing their function globals.
+            "clean_memory": _SafeBridgeHelper(clean_memory),
+            "get_memory": _SafeBridgeHelper(get_memory_usage),
         }
-        # Apply sandbox restrictions if enabled
-        if _sandbox_enabled:
-            self._namespace.update(get_sandbox_namespace())
+        # Always restrict JSON-RPC supplied execution; OMC_PYTHON_SANDBOX no
+        # longer gates builtin safety.
+        self._namespace.update(get_sandbox_namespace())
 
     def reset(self) -> Dict[str, Any]:
         """Clear namespace and reset state."""
@@ -501,8 +650,13 @@ def execute_code(
         with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(
             stderr_capture
         ):
+            # Parse and validate before compiling so blocked operations fail
+            # without running any user code.
+            tree = ast.parse(code, "<gyoshu>", "exec")
+            validate_user_code_ast(tree)
+
             # Compile code for better error messages
-            compiled = compile(code, "<gyoshu>", "exec")
+            compiled = compile(tree, "<gyoshu>", "exec")
 
             # Execute in provided namespace
             exec(compiled, namespace)
