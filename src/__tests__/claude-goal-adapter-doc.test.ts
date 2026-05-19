@@ -29,6 +29,18 @@ describe("Claude Code /goal adapter docs contract", () => {
     );
   });
 
+  it("documents the hidden-state non-mutation boundary", () => {
+    expect(adapterDoc).toContain(
+      "it does not mutate hidden Claude Code goal state",
+    );
+    expect(adapterDoc).toContain(
+      "instead of writing hidden Claude Code session state directly",
+    );
+    expect(referenceDoc).toContain(
+      "it must not mutate hidden Claude Code session state directly",
+    );
+  });
+
   it("locks deterministic loop conflict policy values and forbids warn-and-continue behavior", () => {
     for (const policy of ["`refuse`", "`adopt_existing`", "`artifact_only`"]) {
       expect(adapterDoc).toContain(policy);
