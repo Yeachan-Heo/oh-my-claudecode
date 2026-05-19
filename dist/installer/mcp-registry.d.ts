@@ -2,6 +2,7 @@ export interface UnifiedMcpRegistryEntry {
     command?: string;
     args?: string[];
     env?: Record<string, string>;
+    headers?: Record<string, string>;
     url?: string;
     type?: string;
     timeout?: number;

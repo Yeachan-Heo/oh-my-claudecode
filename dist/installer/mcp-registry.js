@@ -83,6 +83,7 @@ function normalizeRegistryEntry(value) {
         ? [...raw.args]
         : [];
     const env = isStringRecord(raw.env) ? { ...raw.env } : undefined;
+    const headers = isStringRecord(raw.headers) ? { ...raw.headers } : undefined;
     const timeout = typeof raw.timeout === 'number' && Number.isFinite(raw.timeout) && raw.timeout > 0
         ? raw.timeout
         : undefined;
@@ -91,6 +92,7 @@ function normalizeRegistryEntry(value) {
         ...(command ? { command } : {}),
         ...(args.length > 0 ? { args } : {}),
         ...(env && Object.keys(env).length > 0 ? { env } : {}),
+        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
         ...(url ? { url } : {}),
         ...(type ? { type } : {}),
         ...(effectiveTimeout ? { timeout: effectiveTimeout } : {}),
@@ -268,11 +270,25 @@ function parseTomlStringArray(value) {
         return undefined;
     }
 }
-function renderTomlEnvTable(env) {
-    const entries = Object.entries(env)
+function renderTomlBareKey(key) {
+    return /^[A-Za-z0-9_-]+$/.test(key) ? key : renderTomlString(key);
+}
+function parseTomlKey(value) {
+    const trimmed = value.trim();
+    if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+        return trimmed;
+    }
+    const parsed = parseTomlQuotedString(trimmed);
+    return parsed && parsed.trim().length > 0 ? parsed : undefined;
+}
+function renderTomlStringMapInline(values) {
+    const entries = Object.entries(values)
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, value]) => `${key} = ${renderTomlString(value)}`);
+        .map(([key, value]) => `${renderTomlBareKey(key)} = ${renderTomlString(value)}`);
     return `{ ${entries.join(', ')} }`;
+}
+function renderTomlEnvTable(env) {
+    return renderTomlStringMapInline(env);
 }
 function parseTomlEnvTable(value) {
     const trimmed = value.trim();
@@ -281,10 +297,13 @@ function parseTomlEnvTable(value) {
     }
     const env = {};
     const inner = trimmed.slice(1, -1);
-    const entryPattern = /([A-Za-z0-9_-]+)\s*=\s*"((?:\\.|[^"\\])*)"/g;
+    const entryPattern = /((?:[A-Za-z0-9_-]+)|(?:"(?:\\.|[^"\\])*"))\s*=\s*"((?:\\.|[^"\\])*)"/g;
     let match;
     while ((match = entryPattern.exec(inner)) !== null) {
-        env[match[1]] = unescapeTomlString(match[2]);
+        const key = parseTomlKey(match[1]);
+        if (key) {
+            env[key] = unescapeTomlString(match[2]);
+        }
     }
     return Object.keys(env).length > 0 ? env : undefined;
 }
@@ -307,6 +326,12 @@ function renderCodexServerBlock(name, entry) {
     }
     if (entry.timeout) {
         lines.push(`startup_timeout_sec = ${entry.timeout}`);
+    }
+    if (entry.headers && Object.keys(entry.headers).length > 0) {
+        lines.push('', `[mcp_servers.${name}.headers]`);
+        for (const [key, value] of Object.entries(entry.headers).sort(([left], [right]) => left.localeCompare(right))) {
+            lines.push(`${renderTomlBareKey(key)} = ${renderTomlString(value)}`);
+        }
     }
     return lines.join('\n');
 }
@@ -357,6 +382,7 @@ function parseCodexMcpRegistryEntries(content) {
     const lines = content.split(/\r?\n/);
     let currentName = null;
     let currentEntry = {};
+    let currentSection = null;
     const flushCurrent = () => {
         if (!currentName)
             return;
@@ -366,10 +392,22 @@ function parseCodexMcpRegistryEntries(content) {
         }
         currentName = null;
         currentEntry = {};
+        currentSection = null;
     };
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line || line.startsWith('#')) {
+            continue;
+        }
+        const headersSectionMatch = line.match(/^\[mcp_servers\.([^\]]+)\.headers\]$/);
+        if (headersSectionMatch) {
+            const name = headersSectionMatch[1].trim();
+            if (!currentName || currentName !== name) {
+                flushCurrent();
+                currentName = name;
+                currentEntry = {};
+            }
+            currentSection = 'headers';
             continue;
         }
         const sectionMatch = line.match(/^\[mcp_servers\.([^\]]+)\]$/);
@@ -377,18 +415,28 @@ function parseCodexMcpRegistryEntries(content) {
             flushCurrent();
             currentName = sectionMatch[1].trim();
             currentEntry = {};
+            currentSection = 'server';
             continue;
         }
-        if (!currentName) {
+        if (!currentName || !currentSection) {
             continue;
         }
         const [rawKey, ...rawValueParts] = line.split('=');
         if (!rawKey || rawValueParts.length === 0) {
             continue;
         }
-        const key = rawKey.trim();
+        const key = currentSection === 'headers' ? parseTomlKey(rawKey) : rawKey.trim();
+        if (!key) {
+            continue;
+        }
         const value = rawValueParts.join('=').trim();
-        if (key === 'command') {
+        if (currentSection === 'headers') {
+            const parsed = parseTomlQuotedString(value);
+            if (parsed !== undefined) {
+                currentEntry.headers = { ...(currentEntry.headers ?? {}), [key]: parsed };
+            }
+        }
+        else if (key === 'command') {
             const parsed = parseTomlQuotedString(value);
             if (parsed)
                 currentEntry.command = parsed;
@@ -412,6 +460,11 @@ function parseCodexMcpRegistryEntries(content) {
             const parsed = parseTomlEnvTable(value);
             if (parsed)
                 currentEntry.env = parsed;
+        }
+        else if (key === 'headers') {
+            const parsed = parseTomlEnvTable(value);
+            if (parsed)
+                currentEntry.headers = parsed;
         }
         else if (key === 'startup_timeout_sec') {
             const parsed = Number(value);
