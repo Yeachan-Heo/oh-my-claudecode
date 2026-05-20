@@ -23,6 +23,7 @@ import {
   findPrdPath,
   readPrd,
   getPrdStatus,
+  clearPrd,
   formatNextStoryPrompt,
   formatPrdStatus,
   type PRDStatus,
@@ -375,6 +376,12 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
     // Also clear linked ultrawork state if it was auto-activated
     if (state.linked_ultrawork) {
       clearLinkedUltraworkState(directory, sessionId);
+    }
+
+    // Clear completed PRD so it doesn't pollute the next ralph task
+    const prd = readPrd(directory, sessionId);
+    if (prd && getPrdStatus(prd).allComplete) {
+      clearPrd(directory, sessionId);
     }
 
     return clearRalphState(directory, sessionId);
