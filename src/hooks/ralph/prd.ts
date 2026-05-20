@@ -12,7 +12,7 @@
  * - notes: Optional notes from implementation
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { dirname, join } from 'path';
 import { ensureSessionStateDir, getOmcRoot, getSessionStateDir } from '../../lib/worktree-paths.js';
 
@@ -459,6 +459,26 @@ export function createSimplePrd(
 /**
  * Initialize a PRD in a directory
  */
+/**
+ * Clear (delete) the prd.json for a session or project.
+ * Used when a task completes to prevent stale PRD from polluting the next task.
+ */
+export function clearPrd(directory: string, sessionId?: string): boolean {
+  const prdPath = findPrdPath(directory, sessionId);
+  if (!prdPath) {
+    return true; // Already gone
+  }
+  try {
+    unlinkSync(prdPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return true;
+    }
+    return false;
+  }
+}
+
 export function initPrd(
   directory: string,
   project: string,
@@ -532,6 +552,31 @@ export function ensurePrdForStartup(
       path: existingPath,
       error: `${existingPath} must contain at least one user story for Ralph to start.`
     };
+  }
+
+  // If all stories are already complete and this PRD is not session-scoped,
+  // it's a leftover from a previous task. Ignore it and create a fresh scaffold.
+  if (sessionId) {
+    const sessionPath = getSessionPrdPath(directory, sessionId);
+    const isStaleCompletedPrd =
+      getPrdStatus(parsed.prd).allComplete && existingPath !== sessionPath;
+
+    if (isStaleCompletedPrd) {
+      const created = initPrd(directory, project, branchName, description, stories, sessionId);
+      const createdPath = findPrdPath(directory, sessionId);
+      const prd = created ? readPrd(directory, sessionId) : null;
+
+      if (!created || !createdPath || !prd) {
+        return {
+          ok: false,
+          created: false,
+          path: createdPath ?? null,
+          error: `Ralph requires a valid ${PRD_FILENAME} at startup, but scaffold creation failed.`
+        };
+      }
+
+      return { ok: true, created: true, path: createdPath, prd };
+    }
   }
 
   if (sessionId) {
