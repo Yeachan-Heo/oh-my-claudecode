@@ -156,8 +156,8 @@ describe('createTeamSession context resolution', () => {
 
     expect(mockedCalls.execFileArgs.some((args) => args[0] === 'new-window')).toBe(false);
     expect(mockedCalls.execFileArgs.some((args) => args[0] === 'new-session' && args.includes('-d'))).toBe(false);
-    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'right', '-t', 'cmux-leader', '--workspace', 'workspace-1']);
-    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'down', '-t', 'cmux-worker-1', '--workspace', 'workspace-1']);
+    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'right', '--surface', 'cmux-leader', '--workspace', 'workspace-1']);
+    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'down', '--surface', 'cmux-worker-1', '--workspace', 'workspace-1']);
     expect(session.leaderPaneId).toBe('cmux-leader');
     expect(session.sessionName).toBe('cmux:workspace-1');
     expect(session.workerPaneIds).toEqual(['cmux-worker-1', 'cmux-worker-2']);

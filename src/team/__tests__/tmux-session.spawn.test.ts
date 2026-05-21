@@ -39,7 +39,7 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
   };
 });
 
-import { spawnBridgeInSession, spawnWorkerInPane } from '../tmux-session.js';
+import { sendTeamPaneKey, spawnBridgeInSession, spawnWorkerInPane } from '../tmux-session.js';
 
 describe('spawnWorkerInPane', () => {
   beforeEach(() => {
@@ -72,7 +72,7 @@ describe('spawnWorkerInPane', () => {
     expect(launchLine).not.toContain('exec codex --full-auto');
   });
 
-  it('uses cmux send semantics for cmux surface worker panes', async () => {
+  it('sends cmux worker command text and submits with send-key', async () => {
     vi.stubEnv('TMUX', '');
     vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
 
@@ -89,8 +89,29 @@ describe('spawnWorkerInPane', () => {
     });
 
     expect(mockedCalls.tmuxArgs.some((args) => args[0] === 'send-keys')).toBe(false);
+    expect(mockedCalls.cmuxArgs).toHaveLength(2);
     expect(mockedCalls.cmuxArgs[0]).toEqual(expect.arrayContaining(['send', '--surface', 'cmux-worker-1']));
-    expect(mockedCalls.cmuxArgs[1]).toEqual(['send', '--surface', 'cmux-worker-1', 'Enter']);
+    expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send');
+    expect(mockedCalls.cmuxArgs[0]?.at(-1)).toContain('exec "$@"');
+    expect(mockedCalls.cmuxArgs[1]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'Enter']);
+  });
+
+  it('uses cmux send-key semantics for Enter and control keys', async () => {
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+
+    await sendTeamPaneKey('cmux-worker-1', 'Enter');
+    await sendTeamPaneKey('cmux-worker-1', 'Tab');
+    await sendTeamPaneKey('cmux-worker-1', 'C-m');
+    await sendTeamPaneKey('cmux-worker-1', 'C-u');
+
+    expect(mockedCalls.tmuxArgs.some((args) => args[0] === 'send-keys')).toBe(false);
+    expect(mockedCalls.cmuxArgs).toEqual([
+      ['send-key', '--surface', 'cmux-worker-1', 'Enter'],
+      ['send-key', '--surface', 'cmux-worker-1', 'Tab'],
+      ['send-key', '--surface', 'cmux-worker-1', 'C-m'],
+      ['send-key', '--surface', 'cmux-worker-1', 'C-u'],
+    ]);
   });
 
   it('uses current JS runtime when launching bridge-entry helpers', () => {

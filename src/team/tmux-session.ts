@@ -89,7 +89,7 @@ function parseCmuxSurfaceId(output: string): string {
 }
 
 async function cmuxSplitSurface(targetSurfaceId: string, direction: 'right' | 'down', _cwd: string): Promise<string> {
-  const args = ['new-split', direction, '-t', targetSurfaceId];
+  const args = ['new-split', direction, '--surface', targetSurfaceId];
   if (process.env.CMUX_WORKSPACE_ID) args.push('--workspace', process.env.CMUX_WORKSPACE_ID);
   const result = await cmuxExecAsync(args);
   return parseCmuxSurfaceId(result.stdout);
@@ -97,6 +97,10 @@ async function cmuxSplitSurface(targetSurfaceId: string, direction: 'right' | 'd
 
 async function cmuxSendSurface(surfaceId: string, text: string): Promise<void> {
   await cmuxExecAsync(['send', '--surface', surfaceId, text]);
+}
+
+async function cmuxSendSurfaceKey(surfaceId: string, key: string): Promise<void> {
+  await cmuxExecAsync(['send-key', '--surface', surfaceId, key]);
 }
 
 async function cmuxCaptureSurface(surfaceId: string): Promise<string> {
@@ -703,7 +707,7 @@ export async function spawnWorkerInPane(
 
   if (isCmuxSurfaceTarget(paneId)) {
     await cmuxSendSurface(paneId, startCmd);
-    await cmuxSendSurface(paneId, 'Enter');
+    await cmuxSendSurfaceKey(paneId, 'Enter');
     return;
   }
 
@@ -736,7 +740,7 @@ export async function captureTeamPane(paneId: string): Promise<string> {
 
 export async function sendTeamPaneKey(paneId: string, key: string): Promise<void> {
   if (isCmuxSurfaceTarget(paneId)) {
-    await cmuxSendSurface(paneId, key);
+    await cmuxSendSurfaceKey(paneId, key);
     return;
   }
   await tmuxExecAsync(['send-keys', '-t', paneId, key]);
