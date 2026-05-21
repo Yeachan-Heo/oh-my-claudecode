@@ -5,6 +5,7 @@ type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) =>
 const mockedCalls = vi.hoisted(() => ({
   execFileArgs: [] as string[][],
   splitCount: 0,
+  newSplitStdouts: [] as string[],
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -39,7 +40,10 @@ vi.mock('child_process', async (importOriginal) => {
 
     if (args[0] === 'new-split') {
       mockedCalls.splitCount += 1;
-      return { stdout: `cmux-worker-${mockedCalls.splitCount}\n`, stderr: '' };
+      return {
+        stdout: mockedCalls.newSplitStdouts.shift() ?? `cmux-worker-${mockedCalls.splitCount}\n`,
+        stderr: '',
+      };
     }
 
     return { stdout: '', stderr: '' };
@@ -120,6 +124,7 @@ describe('createTeamSession context resolution', () => {
   beforeEach(() => {
     mockedCalls.execFileArgs = [];
     mockedCalls.splitCount = 0;
+    mockedCalls.newSplitStdouts = [];
   });
 
   afterEach(() => {
@@ -162,6 +167,24 @@ describe('createTeamSession context resolution', () => {
     expect(session.sessionName).toBe('cmux:workspace-1');
     expect(session.workerPaneIds).toEqual(['cmux-worker-1', 'cmux-worker-2']);
     expect(session.sessionMode).toBe('split-pane');
+  });
+
+  it('parses documented cmux new-split OK output without using OK as a surface', async () => {
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('TMUX_PANE', '');
+    vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+    vi.stubEnv('CMUX_WORKSPACE_ID', 'workspace-1');
+    mockedCalls.newSplitStdouts = [
+      '  OK   cmux-worker-1   workspace-1\n',
+      '\nOK\tcmux-worker-2\tworkspace-1  \n',
+    ];
+
+    const session = await createTeamSession('race-team', 2, '/tmp', { newWindow: true });
+
+    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'right', '--surface', 'cmux-leader', '--workspace', 'workspace-1']);
+    expect(mockedCalls.execFileArgs).toContainEqual(['new-split', 'down', '--surface', 'cmux-worker-1', '--workspace', 'workspace-1']);
+    expect(mockedCalls.execFileArgs).not.toContainEqual(expect.arrayContaining(['--surface', 'OK']));
+    expect(session.workerPaneIds).toEqual(['cmux-worker-1', 'cmux-worker-2']);
   });
 
   it('anchors context to TMUX_PANE to avoid focus races', async () => {

@@ -83,7 +83,8 @@ function parseCmuxSurfaceId(output: string): string {
   const trimmed = output.trim();
   const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   if (uuidMatch) return uuidMatch[0];
-  const token = trimmed.split(/\s+/).find(Boolean);
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const token = tokens[0] === 'OK' ? tokens[1] : tokens[0];
   if (!token) throw new Error(`Failed to resolve cmux surface id: "${trimmed}"`);
   return token;
 }
