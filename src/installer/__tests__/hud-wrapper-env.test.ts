@@ -19,11 +19,11 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OMC_PLUGIN_ROOT_ENV } from '../../lib/env-vars.js';
 
-const CACHE_STUB_MARKER = 'FROM_CACHE_STUB_99_99_99';
+const CACHE_STUB_MARKER = 'FROM_CACHE_STUB_TEST';
 
 /**
  * Build an isolated CLAUDE_CONFIG_DIR with a stub HUD at
- * `<configDir>/plugins/cache/omc/oh-my-claudecode/99.99.99/dist/hud/index.js`.
+ * `<configDir>/plugins/cache/omc/oh-my-claudecode/0.0.0-test-stub/dist/hud/index.js`.
  * Used to pin the cache-fallback step (step 2 in the wrapper) so tests can
  * assert the wrapper actually executed that branch instead of accidentally
  * matching a globally-installed npm fallback (step 4).
@@ -32,7 +32,7 @@ function makeStubConfigDir(rootDir: string): string {
   const configDir = join(rootDir, 'isolated-config');
   const stubDir = join(
     configDir,
-    'plugins', 'cache', 'omc', 'oh-my-claudecode', '99.99.99', 'dist', 'hud',
+    'plugins', 'cache', 'omc', 'oh-my-claudecode', '0.0.0-test-stub', 'dist', 'hud',
   );
   mkdirSync(stubDir, { recursive: true });
   writeFileSync(
