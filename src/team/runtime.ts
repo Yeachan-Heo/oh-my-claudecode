@@ -7,7 +7,7 @@ import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWo
 import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout,
+  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
@@ -825,7 +825,7 @@ export async function killWorkerPane(
   paneId: string
 ): Promise<void> {
   try {
-    await tmuxExecAsync(['kill-pane', '-t', paneId]);
+    await killTeamPane(paneId);
   } catch {
     // idempotent: pane may already be gone
   }

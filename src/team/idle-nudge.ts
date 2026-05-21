@@ -11,8 +11,7 @@
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
 
-import { tmuxExecAsync } from '../cli/tmux-utils.js';
-import { paneLooksReady, paneHasActiveTask, sendToWorker } from './tmux-session.js';
+import { paneLooksReady, paneHasActiveTask, sendToWorker, captureTeamPane } from './tmux-session.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -37,14 +36,9 @@ export const DEFAULT_NUDGE_CONFIG: NudgeConfig = {
 // Pane capture + idle detection
 // ---------------------------------------------------------------------------
 
-/** Capture the last 80 lines of a tmux pane. Returns '' on error. */
+/** Capture the last 80 lines of a team pane. Returns '' on error. */
 export async function capturePane(paneId: string): Promise<string> {
-  try {
-    const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
-    return result.stdout ?? '';
-  } catch {
-    return '';
-  }
+  return captureTeamPane(paneId);
 }
 
 /**

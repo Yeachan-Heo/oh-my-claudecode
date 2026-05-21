@@ -63,7 +63,7 @@ import {
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, type WorkerPaneConfig, type WorkerPaneLiveness, type TeamSessionMode,
+  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, type WorkerPaneConfig, type WorkerPaneLiveness, type TeamSessionMode,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -349,12 +349,7 @@ async function getWorkerPaneLiveness(paneId: string | undefined): Promise<Worker
 
 async function captureWorkerPane(paneId: string | undefined): Promise<string> {
   if (!paneId) return '';
-  try {
-    const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
-    return result.stdout ?? '';
-  } catch {
-    return '';
-  }
+  return captureTeamPane(paneId);
 }
 
 function isFreshTimestamp(value: string | undefined, maxAgeMs: number = MONITOR_SIGNAL_STALE_MS): boolean {
@@ -794,7 +789,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     // retries so a truly hung worker still fails fast.
     for (let attempt = 1; !settled && attempt <= 4; attempt++) {
       try {
-        await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter']);
+        await sendTeamPaneKey(paneId, 'Enter');
       } catch {
         break;
       }

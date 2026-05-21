@@ -8,6 +8,8 @@
  */
 
 import { existsSync } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { join, basename, isAbsolute, win32 } from 'path';
 import fs from 'fs/promises';
 import { validateTeamName } from './team-name.js';
@@ -15,6 +17,7 @@ import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-ut
 import { configureTmuxClipboardForSession, configureTmuxClipboardForSessionAsync } from '../cli/tmux-clipboard.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const execFileAsync = promisify(execFile);
 
 const TMUX_SESSION_PREFIX = 'omc-team';
 
@@ -57,6 +60,52 @@ export async function applyMainVerticalLayout(teamTarget: string): Promise<void>
   } catch {
     /* ignore layout sizing errors */
   }
+}
+
+
+function isCmuxContext(): boolean {
+  return detectTeamMultiplexerContext() === 'cmux';
+}
+
+function isCmuxSurfaceTarget(value: string | undefined): value is string {
+  return isCmuxContext() && typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
+}
+
+async function cmuxExecAsync(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  const result = await execFileAsync('cmux', args, { encoding: 'utf-8' });
+  return {
+    stdout: typeof result.stdout === 'string' ? result.stdout : String(result.stdout ?? ''),
+    stderr: typeof result.stderr === 'string' ? result.stderr : String(result.stderr ?? ''),
+  };
+}
+
+function parseCmuxSurfaceId(output: string): string {
+  const trimmed = output.trim();
+  const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (uuidMatch) return uuidMatch[0];
+  const token = trimmed.split(/\s+/).find(Boolean);
+  if (!token) throw new Error(`Failed to resolve cmux surface id: "${trimmed}"`);
+  return token;
+}
+
+async function cmuxSplitSurface(targetSurfaceId: string, direction: 'right' | 'down', _cwd: string): Promise<string> {
+  const args = ['new-split', direction, '-t', targetSurfaceId];
+  if (process.env.CMUX_WORKSPACE_ID) args.push('--workspace', process.env.CMUX_WORKSPACE_ID);
+  const result = await cmuxExecAsync(args);
+  return parseCmuxSurfaceId(result.stdout);
+}
+
+async function cmuxSendSurface(surfaceId: string, text: string): Promise<void> {
+  await cmuxExecAsync(['send', '--surface', surfaceId, text]);
+}
+
+async function cmuxCaptureSurface(surfaceId: string): Promise<string> {
+  const result = await cmuxExecAsync(['capture-pane', '--surface', surfaceId, '--scrollback']);
+  return result.stdout;
+}
+
+async function cmuxCloseSurface(surfaceId: string): Promise<void> {
+  await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
 }
 
 export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
@@ -471,10 +520,10 @@ export function spawnBridgeInSession(
  * is true, creates a detached dedicated tmux window first and then splits worker
  * panes there.
  *
- * When running inside cmux (CMUX_SURFACE_ID without TMUX) or a plain terminal,
- * falls back to a detached tmux session because the current surface cannot be
- * targeted as a normal tmux pane/window. Returns sessionName in "session:window"
- * form.
+ * When running inside cmux (CMUX_SURFACE_ID without TMUX), creates native
+ * cmux splits from the current surface. When running in a plain terminal, falls
+ * back to a detached tmux session. Returns sessionName in "session:window" form
+ * for tmux and "cmux:<workspace>" form for cmux.
  *
  * Layout: leader pane on the left, worker panes stacked vertically on the right.
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
@@ -487,8 +536,9 @@ export async function createTeamSession(
 ): Promise<TeamSession> {
   const multiplexerContext = detectTeamMultiplexerContext();
   const inTmux = multiplexerContext === 'tmux';
+  const inCmux = multiplexerContext === 'cmux';
   const useDedicatedWindow = Boolean(options.newWindow && inTmux);
-  if (!inTmux) {
+  if (multiplexerContext === 'none') {
     validateTmux();
   }
 
@@ -500,11 +550,17 @@ export async function createTeamSession(
   let leaderPaneId = envPaneId;
   let sessionMode: TeamSessionMode = inTmux ? 'split-pane' : 'detached-session';
 
-  if (!inTmux) {
+  if (inCmux) {
+    const cmuxLeaderSurface = (process.env.CMUX_SURFACE_ID ?? '').trim();
+    if (!cmuxLeaderSurface) {
+      throw new Error('CMUX_SURFACE_ID is required to create a cmux team session');
+    }
+    sessionAndWindow = `cmux:${process.env.CMUX_WORKSPACE_ID || 'workspace'}`;
+    leaderPaneId = cmuxLeaderSurface;
+    sessionMode = 'split-pane';
+  } else if (!inTmux) {
     // Backward-compatible fallback: create an isolated detached tmux session
-    // so workflows can run when launched outside an attached tmux client. This
-    // also covers cmux, which exposes its own surface metadata without a tmux
-    // pane/window that OMC can split directly.
+    // so workflows can run when launched outside any multiplexer.
     const detachedSessionName = `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${Date.now().toString(36)}`;
     const detachedResult = await tmuxExecAsync([
       'new-session', '-d', '-P', '-F', '#S:0 #{pane_id}',
@@ -565,25 +621,29 @@ export async function createTeamSession(
     sessionMode = 'dedicated-window';
   }
 
-  const teamTarget = sessionAndWindow; // "session:window" form
+  const teamTarget = sessionAndWindow; // "session:window" or "cmux:workspace" form
   const resolvedSessionName = teamTarget.split(':')[0];
 
-  try {
-    await configureTmuxClipboardForSessionAsync(resolvedSessionName);
-  } catch {
-    // Clipboard setup is best-effort so older tmux builds do not block team launch.
+  if (!inCmux) {
+    try {
+      await configureTmuxClipboardForSessionAsync(resolvedSessionName);
+    } catch {
+      // Clipboard setup is best-effort so older tmux builds do not block team launch.
+    }
   }
 
   const workerPaneIds: string[] = [];
 
   if (workerCount <= 0) {
-    try {
-      await tmuxExecAsync(['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
-    } catch { /* ignore */ }
-    if (sessionMode !== 'dedicated-window') {
+    if (!inCmux) {
       try {
-        await tmuxExecAsync(['select-pane', '-t', leaderPaneId]);
+        await tmuxExecAsync(['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
       } catch { /* ignore */ }
+      if (sessionMode !== 'dedicated-window') {
+        try {
+          await tmuxExecAsync(['select-pane', '-t', leaderPaneId]);
+        } catch { /* ignore */ }
+      }
     }
     await new Promise(r => setTimeout(r, 300));
     return { sessionName: teamTarget, leaderPaneId, workerPaneIds, sessionMode };
@@ -592,6 +652,12 @@ export async function createTeamSession(
   // Create worker panes: first via horizontal split off leader, rest stacked vertically on right.
   for (let i = 0; i < workerCount; i++) {
     const splitTarget = i === 0 ? leaderPaneId : workerPaneIds[i - 1];
+    if (inCmux) {
+      const direction = i === 0 ? 'right' : 'down';
+      workerPaneIds.push(await cmuxSplitSurface(splitTarget, direction, cwd));
+      continue;
+    }
+
     const splitType = i === 0 ? '-h' : '-v';
     const splitResult = await tmuxCmdAsync([
       'split-window', splitType, '-t', splitTarget,
@@ -604,16 +670,18 @@ export async function createTeamSession(
     }
   }
 
-  await applyMainVerticalLayout(teamTarget);
+  if (!inCmux) {
+    await applyMainVerticalLayout(teamTarget);
 
-  try {
-    await tmuxExecAsync(['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
-  } catch { /* ignore */ }
-
-  if (sessionMode !== 'dedicated-window') {
     try {
-      await tmuxExecAsync(['select-pane', '-t', leaderPaneId]);
+      await tmuxExecAsync(['set-option', '-t', resolvedSessionName, 'mouse', 'on']);
     } catch { /* ignore */ }
+
+    if (sessionMode !== 'dedicated-window') {
+      try {
+        await tmuxExecAsync(['select-pane', '-t', leaderPaneId]);
+      } catch { /* ignore */ }
+    }
   }
   await new Promise(r => setTimeout(r, 300));
 
@@ -633,6 +701,12 @@ export async function spawnWorkerInPane(
   validateTeamName(config.teamName);
   const startCmd = buildWorkerStartCommand(config);
 
+  if (isCmuxSurfaceTarget(paneId)) {
+    await cmuxSendSurface(paneId, startCmd);
+    await cmuxSendSurface(paneId, 'Enter');
+    return;
+  }
+
   // Use -l (literal) flag to prevent tmux key-name parsing of the command string
   await tmuxExecAsync([
     'send-keys', '-t', paneId, '-l', startCmd
@@ -646,11 +720,34 @@ function normalizeTmuxCapture(value: string): string {
 
 async function capturePaneAsync(paneId: string): Promise<string> {
   try {
+    if (isCmuxSurfaceTarget(paneId)) {
+      return await cmuxCaptureSurface(paneId);
+    }
     const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
     return result.stdout;
   } catch {
     return '';
   }
+}
+
+export async function captureTeamPane(paneId: string): Promise<string> {
+  return capturePaneAsync(paneId);
+}
+
+export async function sendTeamPaneKey(paneId: string, key: string): Promise<void> {
+  if (isCmuxSurfaceTarget(paneId)) {
+    await cmuxSendSurface(paneId, key);
+    return;
+  }
+  await tmuxExecAsync(['send-keys', '-t', paneId, key]);
+}
+
+export async function killTeamPane(paneId: string): Promise<void> {
+  if (isCmuxSurfaceTarget(paneId)) {
+    await cmuxCloseSurface(paneId);
+    return;
+  }
+  await tmuxExecAsync(['kill-pane', '-t', paneId]);
 }
 
 function paneHasTrustPrompt(captured: string): boolean {
@@ -768,6 +865,7 @@ function paneTailContainsLiteralLine(captured: string, text: string): boolean {
 async function paneInCopyMode(
   paneId: string,
 ): Promise<boolean> {
+  if (isCmuxSurfaceTarget(paneId)) return false;
   try {
     const result = await tmuxCmdAsync(['display-message', '-t', paneId, '-p', '#{pane_in_mode}']);
     return result.stdout.trim() === '1';
@@ -812,7 +910,7 @@ export async function sendToWorker(
   }
   try {
     const sendKey = async (key: string) => {
-      await tmuxExecAsync(['send-keys', '-t', paneId, key]);
+      await sendTeamPaneKey(paneId, key);
     };
 
     // Guard: copy-mode captures keys; skip injection entirely.
@@ -835,7 +933,11 @@ export async function sendToWorker(
     }
 
     // Send text in literal mode with -- separator
-    await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', message]);
+    if (isCmuxSurfaceTarget(paneId)) {
+      await cmuxSendSurface(paneId, message);
+    } else {
+      await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', message]);
+    }
 
     // Allow input buffer to settle
     await sleep(150);
@@ -886,7 +988,11 @@ export async function sendToWorker(
       if (await paneInCopyMode(paneId)) {
         return false;
       }
-      await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', message]);
+      if (isCmuxSurfaceTarget(paneId)) {
+        await cmuxSendSurface(paneId, message);
+      } else {
+        await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', message]);
+      }
       await sleep(120);
       for (let round = 0; round < 4; round++) {
         await sendKey('C-m');
@@ -968,6 +1074,15 @@ function isTmuxPaneNotFoundError(error: unknown): boolean {
 }
 
 export async function getWorkerLiveness(paneId: string): Promise<WorkerPaneLiveness> {
+  if (isCmuxSurfaceTarget(paneId)) {
+    try {
+      await cmuxCaptureSurface(paneId);
+      return 'alive';
+    } catch {
+      return 'unknown';
+    }
+  }
+
   try {
     const result = await tmuxCmdAsync([
       'display-message', '-t', paneId, '-p', '#{pane_dead}'
@@ -1011,13 +1126,14 @@ export async function killWorkerPanes(opts: {
   // 2. Force-kill each worker pane, guarding leader
   for (const paneId of paneIds) {
     if (paneId === leaderPaneId) continue;   // GUARD — never kill leader
-    try { await tmuxExecAsync(['kill-pane', '-t', paneId]); }
-    catch { /* pane already gone — OK */ }
+    try {
+      await killTeamPane(paneId);
+    } catch { /* pane already gone — OK */ }
   }
 }
 
 function isPaneId(value: string | undefined): value is string {
-  return typeof value === 'string' && /^%\d+$/.test(value.trim());
+  return typeof value === 'string' && (/^%\d+$/.test(value.trim()) || isCmuxSurfaceTarget(value));
 }
 
 function dedupeWorkerPaneIds(paneIds: Array<string | undefined>, leaderPaneId?: string): string[] {
@@ -1071,8 +1187,9 @@ export async function killTeamSession(
     if (!workerPaneIds?.length) return;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
-      try { await tmuxExecAsync(['kill-pane', '-t', id]); }
-      catch { /* already gone */ }
+      try {
+        await killTeamPane(id);
+      } catch { /* already gone */ }
     }
     return;
   }

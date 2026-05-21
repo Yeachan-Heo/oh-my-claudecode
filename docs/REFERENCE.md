@@ -414,7 +414,7 @@ Native team worker worktrees are an opt-in/config-gated runtime-v2 rollout. See 
 Topology behavior:
 
 - inside classic tmux (`$TMUX` set): reuse the current tmux surface for split-pane or `--new-window` layouts
-- inside cmux (`CMUX_SURFACE_ID` without `$TMUX`): launch a detached tmux session for team workers
+- inside cmux (`CMUX_SURFACE_ID` without `$TMUX`): create native cmux splits for visible team workers
 - plain terminal: launch a detached tmux session for team workers
 
 ### `omc session search`

@@ -35,8 +35,8 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 
 ## Requirements
 
-- **tmux binary** must be installed and discoverable (`command -v tmux`)
-- **Classic tmux session optional** for in-place pane splitting (`$TMUX` set). Inside cmux or a plain terminal, `omc team` falls back to a detached tmux session instead of splitting the current surface.
+- **tmux binary** must be installed and discoverable (`command -v tmux`) when running from a plain terminal; classic tmux sessions reuse the current tmux surface.
+- **cmux surface optional** for in-place native splits (`CMUX_SURFACE_ID` set without `$TMUX`). Plain terminals still use the detached tmux fallback.
 - **claude** CLI: `npm install -g @anthropic-ai/claude-code`
 - **codex** CLI: `npm install -g @openai/codex`
 - **gemini** CLI: `npm install -g @google/gemini-cli`
@@ -45,15 +45,15 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 
 ### Phase 0: Verify prerequisites
 
-Check tmux explicitly before claiming it is missing:
+Check the active multiplexer before claiming tmux is missing. If `$TMUX` is empty and `CMUX_SURFACE_ID` is also empty, check tmux explicitly:
 
 ```bash
 command -v tmux >/dev/null 2>&1
 ```
 
-- If this fails, report that **tmux is not installed** and stop.
+- If the plain-terminal tmux check fails, report that **tmux is not installed** and stop.
 - If `$TMUX` is set, `omc team` can reuse the current tmux window/panes directly.
-- If `$TMUX` is empty but `CMUX_SURFACE_ID` is set, report that the user is running inside **cmux**. Do **not** say tmux is missing or that they are "not inside tmux"; `omc team` will launch a **detached tmux session** for workers instead of splitting the cmux surface.
+- If `$TMUX` is empty but `CMUX_SURFACE_ID` is set, report that the user is running inside **cmux**. Do **not** say tmux is missing or that they are "not inside tmux"; `omc team` will create **native cmux splits** for workers.
 - If neither `$TMUX` nor `CMUX_SURFACE_ID` is set, report that the user is in a **plain terminal**. `omc team` can still launch a **detached tmux session**, but if they specifically want in-place pane/window topology they should start from a classic tmux session first.
 - If you need to confirm the active tmux session, use:
 
@@ -174,7 +174,7 @@ If encountered, switch to `omc team ...` CLI commands.
 | Error                        | Cause                               | Fix                                                                                 |
 | ---------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
 | `not inside tmux`            | Requested in-place pane topology from a non-tmux surface | Start tmux and rerun, or let `omc team` use its detached-session fallback           |
-| `cmux surface detected`      | Running inside cmux without `$TMUX` | Use the normal `omc team ...` flow; OMC will launch a detached tmux session         |
+| `cmux surface detected`      | Running inside cmux without `$TMUX` | Use the normal `omc team ...` flow; OMC will create native cmux worker splits      |
 | `Unsupported agent type`     | Requested agent is not claude/codex/gemini | Use `claude`, `codex`, or `gemini`; for native Claude Code agents use `/oh-my-claudecode:team` |
 | `codex: command not found`   | Codex CLI not installed             | `npm install -g @openai/codex`                                                      |
 | `gemini: command not found`  | Gemini CLI not installed            | `npm install -g @google/gemini-cli`                                                 |
