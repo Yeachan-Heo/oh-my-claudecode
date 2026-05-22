@@ -4,7 +4,7 @@
  * Renders git repository name and branch information.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { dim, cyan, green, red } from '../colors.js';
@@ -64,12 +64,12 @@ export function getGitRepoName(cwd?: string): string | null {
 
   let result: string | null = null;
   try {
-    const url = execSync('git remote get-url origin', {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd,
       encoding: 'utf-8',
       timeout: 1000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+      windowsHide: true,
     }).trim();
 
     if (!url) {
@@ -103,12 +103,12 @@ export function getGitBranch(cwd?: string): string | null {
 
   let result: string | null = null;
   try {
-    const branch = execSync('git branch --show-current', {
+    const branch = execFileSync('git', ['branch', '--show-current'], {
       cwd,
       encoding: 'utf-8',
       timeout: 1000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+      windowsHide: true,
     }).trim();
 
     result = branch || null;
@@ -140,13 +140,13 @@ export function getWorktreeInfo(cwd?: string): WorktreeDetection {
     encoding: 'utf-8' as BufferEncoding,
     timeout: 1000,
     stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
-    shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+    windowsHide: true,
   };
 
   let result: WorktreeDetection = { isWorktree: false, worktreeName: null };
   try {
-    const gitDir = (execSync('git rev-parse --git-dir', execOpts) as string).trim();
-    const gitCommonDir = (execSync('git rev-parse --git-common-dir', execOpts) as string).trim();
+    const gitDir = (execFileSync('git', ['rev-parse', '--git-dir'], execOpts) as string).trim();
+    const gitCommonDir = (execFileSync('git', ['rev-parse', '--git-common-dir'], execOpts) as string).trim();
 
     // Canonicalize via realpathSync to handle symlinked repo paths
     let resolvedGitDir = resolve(key, gitDir);
@@ -215,12 +215,12 @@ export function getGitStatusCounts(cwd?: string): GitStatusCounts | null {
 
   let result: GitStatusCounts | null = null;
   try {
-    const output = execSync('git --no-optional-locks status --porcelain -b', {
+    const output = execFileSync('git', ['--no-optional-locks', 'status', '--porcelain', '-b'], {
       cwd,
       encoding: 'utf-8',
       timeout: 1000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+      windowsHide: true,
     }).trim();
 
     let staged = 0, modified = 0, untracked = 0, ahead = 0, behind = 0;
