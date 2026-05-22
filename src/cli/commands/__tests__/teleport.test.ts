@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, execSync } from 'child_process';
+import { homedir } from 'os';
+import { join } from 'path';
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -8,6 +10,7 @@ vi.mock('fs', async (importOriginal) => {
     existsSync: vi.fn(),
     mkdirSync: vi.fn(),
     readFileSync: vi.fn(),
+    rmSync: vi.fn(),
     symlinkSync: vi.fn(),
   };
 });
@@ -30,9 +33,9 @@ vi.mock('../../../providers/index.js', () => ({
   getProvider: vi.fn(),
 }));
 
-import { existsSync, readFileSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { loadConfig } from '../../../config/loader.js';
-import { teleportCommand } from '../teleport.js';
+import { teleportCommand, teleportRemoveCommand } from '../teleport.js';
 
 describe('teleportCommand', () => {
   beforeEach(async () => {
@@ -185,5 +188,78 @@ describe('teleportCommand', () => {
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not read package.json'));
     expect(execFileSync).toHaveBeenCalledWith('yarn', ['install'], expect.objectContaining({ cwd: '/root/issue/repo-1' }));
+  });
+});
+
+describe('teleportRemoveCommand', () => {
+  const worktreeRoot = join(homedir(), 'Workspace', 'omc-worktrees');
+  const targetPath = join(worktreeRoot, 'repo-3089');
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    (existsSync as ReturnType<typeof vi.fn>).mockImplementation((target: unknown) => target === targetPath);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+  });
+
+  it.each(['.git', '/repo/.git', 'C:\\repo\\.git'])(
+    'refuses a main repo git-dir shape %s and does not remove the directory',
+    async (gitDir) => {
+      (execSync as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
+        if (command === 'git status --porcelain') return '';
+        if (command === 'git rev-parse --git-dir') return `${gitDir}\n`;
+        return '';
+      });
+
+      const result = await teleportRemoveCommand(targetPath, {});
+
+      expect(result).toBe(1);
+      expect(rmSync).not.toHaveBeenCalled();
+      expect(execFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.anything(),
+      );
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('is not a registered worktree git-dir'));
+    },
+  );
+
+  it('refuses an unexpected non-worktree git-dir and does not remove the directory', async () => {
+    (execSync as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
+      if (command === 'git status --porcelain') return '';
+      if (command === 'git rev-parse --git-dir') return '/tmp/unexpected/gitdir\n';
+      return '';
+    });
+
+    const result = await teleportRemoveCommand(targetPath, { force: true });
+
+    expect(result).toBe(1);
+    expect(rmSync).not.toHaveBeenCalled();
+    expect(execFileSync).not.toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['worktree', 'remove']),
+      expect.anything(),
+    );
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('is not a registered worktree git-dir'));
+  });
+
+  it('removes a registered worktree through git worktree remove', async () => {
+    (execSync as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
+      if (command === 'git status --porcelain') return '';
+      if (command === 'git rev-parse --git-dir') return '/repo/.git/worktrees/repo-3089\n';
+      return '';
+    });
+
+    const result = await teleportRemoveCommand(targetPath, { force: true });
+
+    expect(result).toBe(0);
+    expect(rmSync).not.toHaveBeenCalled();
+    expect(execFileSync).toHaveBeenCalledWith(
+      'git',
+      ['worktree', 'remove', '--force', targetPath],
+      expect.objectContaining({ cwd: '/repo' }),
+    );
   });
 });
