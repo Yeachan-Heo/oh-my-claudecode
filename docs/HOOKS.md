@@ -1,12 +1,12 @@
 # Hooks System
 
-> OMC's 20 hooks intercept Claude Code lifecycle events to enable magic keywords, context injection, and quality enforcement.
+> OMC's 20 hooks intercept Claude Code lifecycle events to provide routing hints, context injection, and quality enforcement.
 
 ## What Are Hooks?
 
 Hooks are scripts that execute automatically in response to Claude Code lifecycle events. oh-my-claudecode extends Claude Code's default behavior with 20 hooks.
 
-When a user submits a prompt, a tool runs, or a session starts/ends, hooks fire automatically to inject additional context, activate modes, and manage state.
+When a user submits a prompt, a tool runs, or a session starts/ends, hooks fire automatically to inject additional context, maintain active modes, and manage state.
 
 ## How Hooks Work
 
@@ -42,11 +42,11 @@ OMC hooks fall into four categories:
 
 ### Core Hooks
 
-Handle orchestration, keyword detection, and mode persistence.
+Handle orchestration, routing phrase detection, and mode persistence.
 
 | Hook | Description |
 |------|-------------|
-| keyword-detector | Detects magic keywords and activates corresponding skills |
+| keyword-detector | Detects routing phrases and emits advisory skill or mode context |
 | persistent-mode | Enforces continuation when an execution mode (ralph, autopilot, ultrawork, etc.) is active — injects reinforcement messages on Stop to prevent premature halting |
 
 ### Context Management Hooks
@@ -97,10 +97,10 @@ Fires when the user submits a prompt.
 
 | Script | Role | Timeout |
 |--------|------|---------|
-| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 5s |
+| `keyword-detector.mjs` | Detects routing phrases and emits advisory skill or mode context | 5s |
 | `skill-injector.mjs` | Injects skill prompts | 3s |
 
-Runs on all user input (`matcher: "*"`). When the keyword detector finds keywords like "ultrawork", "ralph", or "autopilot", it injects the corresponding skill invocation instruction via `additionalContext`.
+Runs on all user input (`matcher: "*"`). When the keyword detector finds phrases like "ultrawork", "ralph", or "autopilot", it injects advisory routing context via `additionalContext`; the acting agent still checks task fit, runtime support, and user intent.
 
 ### SessionStart
 
@@ -214,14 +214,14 @@ Saves agent activity, token usage, and other session data to `.omc/sessions/`. I
 
 #### keyword-detector
 
-Detects magic keywords in user prompts and invokes the corresponding skill.
+Detects routing phrases in user prompts and emits advisory skill or mode context.
 
 - **Event**: UserPromptSubmit
 - **Behavior**: Sanitizes the prompt (removes code blocks, URLs, file paths) then matches keyword patterns
 - **Conflict resolution**: cancel has highest priority, then ralph > autopilot > ultrawork
 - **Safety**: Disabled inside team workers to prevent infinite spawning
 
-See the [Magic Keywords](#magic-keywords) section for the full keyword list.
+See the [Routing Phrase Examples](#routing-phrase-examples) section for example signals.
 
 #### persistent-mode
 
@@ -234,7 +234,7 @@ Enforces continuation when an execution mode is active. This is the hook that ke
 - **Notification**: Sends Discord/Telegram/Slack notification on first stop (if configured)
 - **Cancel**: Use `/oh-my-claudecode:cancel` to deactivate modes
 
-> **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (invoked via keyword-detector), not hooks. The persistent-mode hook is what enforces their continuation by blocking the Stop event.
+> **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills**. The keyword detector may suggest them; the persistent-mode hook is what enforces continuation after a mode is actually active.
 
 ### Mode State Management
 
@@ -337,9 +337,9 @@ Session Start
 
 ---
 
-## Magic Keywords
+## Routing Phrase Examples
 
-Magic keywords automatically activate OMC skills or execution modes when specific words or patterns are detected in the user's natural language prompt. No slash command is needed — include a keyword in your prompt and the feature activates automatically.
+Routing phrases may emit OMC skill or execution-mode suggestions when specific words or patterns are detected in the user's natural language prompt. These suggestions are advisory: the acting agent must still validate task shape, runtime support, and user intent before activation.
 
 ### How keyword-detector Works
 
@@ -348,7 +348,7 @@ Magic keywords automatically activate OMC skills or execution modes when specifi
 1. Receives the user prompt and sanitizes it
 2. Removes code blocks, XML tags, URLs, and file paths to prevent false positives
 3. Matches keyword patterns against the sanitized text
-4. Resolves conflicts, then injects the skill invocation instruction
+4. Resolves conflicts, then injects advisory routing context
 
 **Safety measures:**
 
@@ -356,9 +356,9 @@ Magic keywords automatically activate OMC skills or execution modes when specifi
 - **Team worker protection**: Disabled when the `OMC_TEAM_WORKER` environment variable is set (prevents infinite spawning)
 - **Disable**: Set `DISABLE_OMC=1` or `OMC_SKIP_HOOKS=keyword-detector`
 
-### Execution Mode Keywords
+### Execution Mode Signals
 
-These keywords invoke a skill and create a state file.
+These phrases are examples of signals that may suggest a skill or execution mode. They are not a user-facing command table and do not replace task-shape or runtime checks.
 
 | Keyword | Skill | Description |
 |---------|-------|-------------|
@@ -370,25 +370,25 @@ These keywords invoke a skill and create a state file.
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 
-### AI Slop Cleanup Keywords
+### AI Slop Cleanup Signals
 
 Supports two pattern types:
 
-**Explicit patterns** (activate on their own):
+**Explicit patterns** (strong advisory signals):
 
 - `ai-slop`, `anti-slop`, `deslop`, `de-slop`
 
-**Combination patterns** (activate when an action keyword is combined with a smell keyword):
+**Combination patterns** (advisory when an action phrase is combined with a smell phrase):
 
-| Action Keywords | Smell Keywords |
+| Action Signals | Smell Signals |
 |----------------|----------------|
 | `cleanup`, `refactor`, `simplify`, `dedupe`, `prune` | `slop`, `duplicate`, `dead code`, `unused code`, `over-abstraction`, `wrapper layers`, `needless abstractions`, `ai-generated`, `tech debt` |
 
-Example: "cleanup the duplicate code" → activates the ai-slop-cleaner skill.
+Example: "cleanup the duplicate code" may suggest the ai-slop-cleaner skill when the task fit and runtime support are present.
 
-### Agent Shortcut Keywords
+### Agent Shortcut Signals
 
-Activate agents with natural language instead of slash commands.
+These phrases may suggest agent modes with natural language instead of slash commands.
 
 | Keyword | Effect | Behavior |
 |---------|--------|----------|
@@ -396,15 +396,15 @@ Activate agents with natural language instead of slash commands.
 | `code review`, `review code` | Code review mode | Runs comprehensive code review |
 | `security review`, `review security` | Security review mode | Runs security-focused review |
 
-These keywords inject an inline mode message rather than invoking a skill.
+These signals inject advisory inline mode context rather than directly invoking a skill.
 
-### Reasoning Enhancement Keywords
+### Reasoning Enhancement Signals
 
 | Keyword | Effect |
 |---------|--------|
-| `ultrathink`, `think hard`, `think deeply` | Activates extended reasoning mode |
-| `deepsearch`, `search the codebase`, `find in codebase` | Activates codebase-focused search mode |
-| `deep-analyze`, `deepanalyze` | Activates deep analysis mode |
+| `ultrathink`, `think hard`, `think deeply` | Suggests extended reasoning mode |
+| `deepsearch`, `search the codebase`, `find in codebase` | Suggests codebase-focused search mode |
+| `deep-analyze`, `deepanalyze` | Suggests deep analysis mode |
 
 ### Priority and Conflict Resolution
 
@@ -427,7 +427,7 @@ cancel  (highest priority, exclusive)
                           → analyze
 ```
 
-`cancel` is exclusive — it ignores all other matches and only runs the cancel action. All other keywords can be matched together and are processed in priority order.
+`cancel` is exclusive because it is a lifecycle safety action. Other signals can be matched together and are processed in priority order before the acting agent validates fit.
 
 ### Usage Examples
 
@@ -453,9 +453,9 @@ code review the recent changes
 stopomc
 ```
 
-### Note on the `team` Keyword
+### Note on the `team` Signal
 
-`team` is not auto-detected. It must be invoked explicitly via the `/team` slash command to prevent infinite spawning.
+`team` is not treated as an implicit activation signal. It must be invoked explicitly via the `/team` slash command to prevent infinite spawning.
 
 ```
 /oh-my-claudecode:team 3:executor "build a fullstack todo app"

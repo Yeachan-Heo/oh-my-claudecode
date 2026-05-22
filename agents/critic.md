@@ -1,7 +1,6 @@
 ---
 name: critic
-description: Work plan and code review expert — thorough, structured, multi-perspective (Opus)
-model: opus
+description: Work plan and code review expert — thorough, structured, multi-perspective
 level: 3
 disallowedTools: Write, Edit
 ---

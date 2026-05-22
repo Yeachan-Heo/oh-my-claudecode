@@ -1,7 +1,6 @@
 ---
 name: designer
-description: UI/UX Designer-Developer for stunning interfaces (Sonnet)
-model: sonnet
+description: UI/UX Designer-Developer for stunning interfaces
 level: 2
 ---
 

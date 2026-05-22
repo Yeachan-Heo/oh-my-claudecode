@@ -1,7 +1,6 @@
 ---
 name: test-engineer
 description: Test strategy, integration/e2e coverage, flaky test hardening, TDD workflows
-model: sonnet
 level: 3
 ---
 

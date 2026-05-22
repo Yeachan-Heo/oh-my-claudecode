@@ -1,7 +1,6 @@
 ---
 name: code-reviewer
 description: Expert code review specialist with severity-rated feedback, logic defect detection, SOLID principle checks, style, performance, and quality strategy
-model: opus
 level: 3
 disallowedTools: Write, Edit
 ---
@@ -189,7 +188,7 @@ When reviewing APIs, additionally check:
 </API_Contract_Review>
 
   <Style_Review_Mode>
-    When invoked with model=haiku for lightweight style-only checks, code-reviewer also covers code style concerns:
+    When invoked for lightweight style-only checks, code-reviewer also covers code style concerns:
 
     **Scope**: formatting consistency, naming convention enforcement, language idiom verification, lint rule compliance, import organization.
 

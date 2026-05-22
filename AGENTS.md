@@ -15,8 +15,8 @@ Required schema sections and this template's mapping:
 - **Recovery & Lifecycle Overlays**: runtime/team overlays are appended by marker-bounded runtime hooks.
 
 Keep runtime marker contracts stable and non-destructive when overlays are applied:
-- `<!-- OMX:RUNTIME:START --> ... <!-- OMX:RUNTIME:END -->`
-- `<!-- OMX:TEAM:WORKER:START --> ... <!-- OMX:TEAM:WORKER:END -->`
+- `<!-- OMC:RUNTIME:START --> ... <!-- OMC:RUNTIME:END -->`
+- `<!-- OMC:TEAM:WORKER:START --> ... <!-- OMC:TEAM:WORKER:END -->`
 </guidance_schema_contract>
 
 <operating_principles>
@@ -61,11 +61,11 @@ For non-trivial SDK/API/framework usage, delegate to `dependency-expert` to chec
 
 <child_agent_protocol>
 Claude Code spawns child agents via the `spawn_agent` tool (requires `multi_agent = true`).
-To inject role-specific behavior, the parent MUST read the role prompt and pass it in the spawned agent message.
+To inject role-specific behavior, the parent reads the role prompt from the active OMC agent catalog (for example `agents/{role}.md` in the plugin/cache or project-local OMC surface) and passes it in the spawned agent message.
 
 Delegation steps:
 1. Decide which agent role to delegate to (e.g., `architect`, `executor`, `debugger`)
-2. Read the role prompt: `~/.codex/prompts/{role}.md`
+2. Read the role prompt from the active OMC agent catalog, such as `agents/{role}.md`
 3. Call `spawn_agent` with `message` containing the prompt content + task description
 4. The child agent receives full role context and executes the task independently
 
@@ -77,7 +77,7 @@ spawn_agent(message: "<test-engineer prompt>\n\nTask: Write tests for the auth c
 ```
 
 Each child agent:
-- Receives its role-specific prompt (from ~/.codex/prompts/)
+- Receives its role-specific prompt from the active OMC agent catalog
 - Inherits AGENTS.md context (via child_agents_md feature flag)
 - Runs in an isolated context with its own tool access
 - Returns results to the parent when complete
@@ -90,13 +90,13 @@ Key constraints:
 </child_agent_protocol>
 
 <invocation_conventions>
-Claude Code uses these prefixes for custom commands:
+Claude Code recognizes these explicit prefixes; treat them as agent-internal capability signals, not required user-facing commands:
 - `/prompts:name` — invoke a custom prompt (e.g., `/prompts:architect "review auth module"`)
 - `$name` — invoke a skill (e.g., `$ralph "fix all tests"`, `$autopilot "build REST API"`)
 - `/skills` — browse available skills interactively
 
-Agent prompts (in `~/.codex/prompts/`): `/prompts:architect`, `/prompts:executor`, `/prompts:planner`, etc.
-Workflow skills (in `~/.agents/skills/`): `$ralph`, `$autopilot`, `$plan`, `$ralplan`, `$team`, etc.
+Agent prompts in the active OMC agent catalog: `/prompts:architect`, `/prompts:executor`, `/prompts:planner`, etc.
+Workflow skills in the active OMC skill catalog: `$ralph`, `$autopilot`, `$plan`, `$ralplan`, `$team`, etc.
 </invocation_conventions>
 
 <model_routing>
@@ -105,9 +105,9 @@ Match agent role to task complexity:
 - **Standard** (implementation, debugging, reviews): `executor`, `debugger`, `test-engineer`
 - **High complexity** (architecture, deep analysis, complex refactors): `architect`, `executor`, `critic`
 
-For interactive use: `/prompts:name` (e.g., `/prompts:architect "review auth"`)
+For explicit prompt invocation when it fits the task: `/prompts:name` (e.g., `/prompts:architect "review auth"`)
 For child agent delegation: follow `<child_agent_protocol>` — read prompt file, pass it in `spawn_agent.message`
-For workflow skills: `$name` (e.g., `$ralph "fix all tests"`)
+For workflow skills: treat `$name` as an explicit capability signal (e.g., `$ralph "fix all tests"`)
 </model_routing>
 
 ---
@@ -156,27 +156,27 @@ Coordination:
 ---
 
 <keyword_detection>
-When the user's message contains a magic keyword, activate the corresponding skill IMMEDIATELY.
-Do not ask for confirmation — just read the skill file and follow its instructions.
+When the user's message resembles a workflow trigger, treat it as advisory routing evidence.
+Select the skill only when it fits the task shape, runtime support, and current user intent.
 
-| Keyword(s) | Skill | Action |
+| Signal example(s) | Candidate surface | Fit check |
 |-------------|-------|--------|
-| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Read `~/.agents/skills/ralph/SKILL.md`, execute persistence loop |
-| "autopilot", "build me", "I want a" | `$autopilot` | Read `~/.agents/skills/autopilot/SKILL.md`, execute autonomous pipeline |
-| "ultrawork", "ulw", "parallel" | `$ultrawork` | Read `~/.agents/skills/ultrawork/SKILL.md`, execute parallel agents |
-| "plan this", "plan the", "let's plan" | `$plan` | Read `~/.agents/skills/plan/SKILL.md`, start planning workflow |
-| "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Read `~/.agents/skills/deep-interview/SKILL.md`, run Ouroboros-inspired Socratic ambiguity-gated interview workflow |
-| "ralplan", "consensus plan" | `$ralplan` | Read `~/.agents/skills/ralplan/SKILL.md`, start consensus planning with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk) |
-| "ecomode", "eco", "budget" | `$ecomode` | Read `~/.agents/skills/ecomode/SKILL.md`, enable token-efficient mode |
-| "cancel", "stop", "abort" | `$cancel` | Read `~/.agents/skills/cancel/SKILL.md`, cancel active modes |
-| "tdd", "test first" | keyword mode | Inject TDD-mode guidance and favor test-first execution with `test-engineer` when appropriate |
-| "cleanup", "deslop", "anti-slop" | `$ai-slop-cleaner` | Read `~/.agents/skills/ai-slop-cleaner/SKILL.md`, plan and clean AI-generated slop with separate writer/reviewer passes |
-| "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `~/.agents/skills/web-clone/SKILL.md`, start website cloning pipeline |
+| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Use only for persistent single-owner verification loops |
+| "autopilot", "build me", "I want a" | `$autopilot` | Use only when autonomous pipeline scope is appropriate |
+| "ultrawork", "ulw", "parallel" | `$ultrawork` | Use only when parallel execution materially helps |
+| "plan this", "plan the", "let's plan" | `$plan` | Use for planning requests, not direct implementation |
+| "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Use for ambiguity-gated requirement discovery |
+| "ralplan", "consensus plan" | `$ralplan` | Use for consensus planning when tradeoffs need review |
+| "ecomode", "eco", "budget" | `$ecomode` | Use only when budget constraints are explicit or clearly implied |
+| "cancel", "stop", "abort" | `$cancel` | Use to cancel active modes after checking current state |
+| "tdd", "test first" | keyword mode | Favor test-first execution with `test-engineer` when appropriate |
+| "cleanup", "deslop", "anti-slop" | `$ai-slop-cleaner` | Use for regression-safe cleanup with separate writer/reviewer passes |
+| "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Use only when the website-cloning workflow is installed and intended |
 
 Detection rules:
-- Keywords are case-insensitive and match anywhere in the user's message
-- If multiple keywords match, use the most specific (longest match)
-- Conflict resolution: explicit `$name` invocation overrides keyword detection
+- Routing phrases are case-insensitive signal candidates, not automatic commands
+- If multiple signals match, choose the one that best fits task shape and current runtime
+- Conflict resolution: explicit `$name` invocation is a strong signal, but still verify safety and runtime fit
 - The rest of the user's message (after keyword extraction) becomes the task description
 
 Ralph / Ralplan execution gate:
@@ -188,7 +188,7 @@ Ralph / Ralplan execution gate:
 ---
 
 <skills>
-Skills are workflow commands. Invoke via `$name` (e.g., `$ralph`) or browse with `/skills`.
+Skills are workflow capabilities. Explicit `$name` invocations are strong capability signals; natural-language intent remains the primary interface.
 
 Workflow Skills:
 - `autopilot`: Full autonomous execution from idea to working code

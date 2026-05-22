@@ -1,7 +1,6 @@
 ---
 name: architect
-description: Strategic Architecture & Debugging Advisor (Opus, READ-ONLY)
-model: opus
+description: Strategic Architecture & Debugging Advisor (READ-ONLY)
 level: 3
 disallowedTools: Write, Edit
 ---

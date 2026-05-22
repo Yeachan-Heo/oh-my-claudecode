@@ -55,63 +55,60 @@ OMC provides 19 specialized agents organized into 4 lanes. Each agent is invoked
 
 Covers the full development lifecycle from exploration to verification.
 
-| Agent | Default Model | Role |
-|-------|---------------|------|
-| `explore` | haiku | Codebase discovery, file/symbol mapping |
-| `analyst` | opus | Requirements analysis, hidden constraint discovery |
-| `planner` | opus | Task sequencing, execution plan creation |
-| `architect` | opus | System design, interface definition, trade-off analysis |
-| `debugger` | sonnet | Root-cause analysis, build error resolution |
-| `executor` | sonnet | Code implementation, refactoring |
-| `verifier` | sonnet | Completion verification, test adequacy confirmation |
-| `tracer` | sonnet | Evidence-driven causal tracing, competing hypothesis analysis |
+| Agent | Role |
+|-------|------|
+| `explore` | Codebase discovery, file/symbol mapping |
+| `analyst` | Requirements analysis, hidden constraint discovery |
+| `planner` | Task sequencing, execution plan creation |
+| `architect` | System design, interface definition, trade-off analysis |
+| `debugger` | Root-cause analysis, build error resolution |
+| `executor` | Code implementation, refactoring |
+| `verifier` | Completion verification, test adequacy confirmation |
+| `tracer` | Evidence-driven causal tracing, competing hypothesis analysis |
 
 ### Review Lane
 
 Quality gates before handoff. Catches correctness and security issues.
 
-| Agent | Default Model | Role |
-|-------|---------------|------|
-| `security-reviewer` | sonnet | Security vulnerabilities, trust boundaries, authn/authz review |
-| `code-reviewer` | opus | Comprehensive code review, API contracts, backward compatibility |
+| Agent | Role |
+|-------|------|
+| `security-reviewer` | Security vulnerabilities, trust boundaries, authn/authz review |
+| `code-reviewer` | Comprehensive code review, API contracts, backward compatibility |
 
 ### Domain Lane
 
 Domain experts called in when needed.
 
-| Agent | Default Model | Role |
-|-------|---------------|------|
-| `test-engineer` | sonnet | Test strategy, coverage, flaky-test hardening |
-| `designer` | sonnet | UI/UX architecture, interaction design |
-| `writer` | haiku | Documentation, migration notes |
-| `qa-tester` | sonnet | Interactive CLI/service runtime validation via tmux |
-| `scientist` | sonnet | Data analysis, statistical research |
-| `git-master` | sonnet | Git operations, commits, rebase, history management |
-| `document-specialist` | sonnet | External documentation, API/SDK reference lookup |
-| `code-simplifier` | opus | Code clarity, simplification, maintainability improvement |
+| Agent | Role |
+|-------|------|
+| `test-engineer` | Test strategy, coverage, flaky-test hardening |
+| `designer` | UI/UX architecture, interaction design |
+| `writer` | Documentation, migration notes |
+| `qa-tester` | Interactive CLI/service runtime validation via tmux |
+| `scientist` | Data analysis, statistical research |
+| `git-master` | Git operations, commits, rebase, history management |
+| `document-specialist` | External documentation, API/SDK reference lookup |
+| `code-simplifier` | Code clarity, simplification, maintainability improvement |
 
 ### Coordination Lane
 
 Challenges plans and designs made by other agents. A plan passes only when no gaps can be found.
 
-| Agent | Default Model | Role |
-|-------|---------------|------|
-| `critic` | opus | Gap analysis of plans and designs, multi-angle review |
+| Agent | Role |
+|-------|------|
+| `critic` | Gap analysis of plans and designs, multi-angle review |
 
 ### Model Routing
 
-OMC uses three model tiers:
+OMC resolves model choices through the current Claude/OMC runtime configuration. LOW, MEDIUM, and HIGH are capability tiers, not permanent model aliases or fixed model ids.
 
-| Tier | Model | Characteristics | Cost |
-|------|-------|-----------------|------|
-| LOW | haiku | Fast and inexpensive | Low |
-| MEDIUM | sonnet | Balanced performance and cost | Medium |
-| HIGH | opus | Highest-quality reasoning | High |
+| Tier | Characteristics | Cost |
+|------|-----------------|------|
+| LOW | Fast and inexpensive | Low |
+| MEDIUM | Balanced performance and cost | Medium |
+| HIGH | Highest-quality reasoning | High |
 
-Default assignments by role:
-- **haiku**: Fast lookups and simple tasks (`explore`, `writer`)
-- **sonnet**: Code implementation, debugging, testing (`executor`, `debugger`, `test-engineer`)
-- **opus**: Architecture, strategic analysis, review (`architect`, `planner`, `critic`, `code-reviewer`)
+Role-to-tier assignments are runtime facts from the active agent catalog and config. Do not copy them into prompt doctrine without a freshness source.
 
 ### Delegation
 
@@ -120,7 +117,7 @@ Work is delegated through the Task tool with intelligent model routing:
 ```typescript
 Task(
   subagent_type="oh-my-claudecode:executor",
-  model="sonnet",
+  model="<current runtime default or explicit override>",
   prompt="Implement feature..."
 )
 ```
@@ -139,19 +136,19 @@ Task(
 
 ### Agent Selection Guide
 
-| Task Type | Recommended Agent | Model |
-|-----------|-------------------|-------|
-| Quick code lookup | `explore` | haiku |
-| Feature implementation | `executor` | sonnet |
-| Complex refactoring | `executor` (model=opus) | opus |
-| Simple bug fix | `debugger` | sonnet |
-| Complex debugging | `architect` | opus |
-| UI component | `designer` | sonnet |
-| Documentation | `writer` | haiku |
-| Test strategy | `test-engineer` | sonnet |
-| Security review | `security-reviewer` | sonnet |
-| Code review | `code-reviewer` | opus |
-| Data analysis | `scientist` | sonnet |
+| Task Type | Recommended Agent | Capability |
+|-----------|-------------------|------------|
+| Quick code lookup | `explore` | LOW |
+| Feature implementation | `executor` | MEDIUM |
+| Complex refactoring | `executor` or `architect` | HIGH when justified |
+| Simple bug fix | `debugger` | MEDIUM |
+| Complex debugging | `architect` | HIGH |
+| UI component | `designer` | MEDIUM |
+| Documentation | `writer` | LOW or MEDIUM |
+| Test strategy | `test-engineer` | MEDIUM |
+| Security review | `security-reviewer` | MEDIUM or HIGH |
+| Code review | `code-reviewer` | HIGH |
+| Data analysis | `scientist` | MEDIUM |
 
 ### Typical Agent Workflow
 
@@ -217,12 +214,13 @@ Active skills: ultrawork + default + git-master
 /oh-my-claudecode:team 3:executor "implement fullstack app"
 ```
 
-**Magic keywords** — include a keyword in natural language and the skill activates automatically:
+**Routing phrases** — hooks may emit advisory context when a natural-language phrase resembles a workflow:
 ```bash
-autopilot build me a todo app      # activates autopilot
-ralph: refactor the auth module    # activates ralph
-ultrawork implement OAuth          # activates ultrawork
+autopilot build me a todo app      # candidate autopilot signal
+ralph: refactor the auth module    # candidate ralph signal
+ultrawork implement OAuth          # candidate ultrawork signal
 ```
+The acting agent must still validate task shape, runtime support, and user intent before treating a signal as activation.
 
 ### Core Workflow Skills
 
@@ -307,14 +305,14 @@ ralplan this feature
 
 ### Keyword Detection Sources
 
-Keywords are processed in two places:
+Routing signals are processed in two places:
 
 | Source | Role | Customizable |
 |--------|------|--------------|
-| `config.jsonc` `magicKeywords` | 4 categories (ultrawork, search, analyze, ultrathink) | Yes |
-| `keyword-detector` hook | 11+ triggers (autopilot, ralph, ccg, etc.) | No |
+| `config.jsonc` routing phrases | User-configured advisory categories | Yes |
+| `keyword-detector` hook | Built-in advisory workflow hints | Partly; inspect current registry |
 
-The `autopilot`, `ralph`, and `ccg` triggers are hardcoded in the hook and cannot be changed through config.
+Built-in trigger lists are implementation defaults. They provide routing hints; they do not replace the agent's task-shape and runtime-fit judgment.
 
 ---
 
@@ -330,7 +328,7 @@ Claude Code provides 11 lifecycle events. OMC registers hooks on these events:
 
 | Event | When It Fires | OMC Usage |
 |-------|---------------|-----------|
-| `UserPromptSubmit` | User submits a prompt | Magic keyword detection, skill injection |
+| `UserPromptSubmit` | User submits a prompt | Routing evidence and optional skill context |
 | `SessionStart` | Session begins | Initial setup, project memory load |
 | `PreToolUse` | Before a tool is used | Permission validation, parallel execution hints |
 | `PermissionRequest` | Permission requested | Bash command permission handling |
@@ -358,12 +356,12 @@ Injected pattern meanings:
 |---------|---------|
 | `hook success: Success` | Hook ran normally, continue as planned |
 | `hook additional context: ...` | Additional context information, take note |
-| `[MAGIC KEYWORD: ...]` | Magic keyword detected, execute indicated skill |
+| `[MAGIC KEYWORD: ...]` | Routing hint; validate task/runtime fit before activation |
 | `The boulder never stops` | ralph/ultrawork mode is active |
 
 ### Key Hooks
 
-**keyword-detector** — fires on `UserPromptSubmit`. Detects magic keywords in user input and activates the corresponding skill.
+**keyword-detector** — fires on `UserPromptSubmit`. Detects routing phrases in user input and emits advisory context for the acting agent.
 
 **persistent-mode** — fires on `Stop`. When a persistent mode (ralph, ultrawork) is active, prevents Claude from stopping until work is verified complete.
 

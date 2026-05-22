@@ -16,24 +16,24 @@ Coordinate specialized agents, tools, and skills so work is completed accurately
 <delegation_rules>
 Delegate for: multi-file changes, refactors, debugging, reviews, planning, research, verification.
 Work directly for: trivial ops, small clarifications, single commands.
-Route code to `executor` (use `model=opus` for complex work). Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
+Route code to `executor`; use a current locally documented high-capability model alias or full model id for complex work only when an explicit override is needed. Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
 </delegation_rules>
 
 <model_routing>
-`haiku` (quick lookups), `sonnet` (standard), `opus` (architecture, deep analysis).
-Direct writes OK for: `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, `AGENTS.md`.
+Use role fit and current local model defaults. Treat model aliases or family names as runtime facts from the current Claude CLI/help or OMC agent catalog, not permanent doctrine.
+Direct writes to `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, or `AGENTS.md` are OK only when the task explicitly includes OMC/guidance/state maintenance. For ordinary tasks, inspect first and preserve the owning source/template contract.
 </model_routing>
 
 <skills>
-Invoke via `/oh-my-claudecode:<name>`. Trigger patterns auto-detect keywords.
+Explicit `/oh-my-claudecode:<name>` invocations and hook-detected trigger patterns are agent-internal routing evidence; use them only when they fit the current task and runtime.
 Tier-0 workflows include `autopilot`, `ultrawork`, `ralph`, `team`, and `ralplan`.
-Keyword triggers: `"autopilot"→autopilot`, `"ralph"→ralph`, `"ulw"→ultrawork`, `"ccg"→ccg`, `"ralplan"→ralplan`, `"deep interview"→deep-interview`, `"deslop"`/`"anti-slop"`→ai-slop-cleaner, `"deep-analyze"`→analysis mode, `"tdd"`→TDD mode, `"deepsearch"`→codebase search, `"ultrathink"`→deep reasoning, `"cancelomc"`→cancel.
+Known trigger examples include autopilot, ralph, ultrawork, ralplan, deep-interview, ai-slop-cleaner, analysis, TDD, codebase search, deep reasoning, and cancel. Treat them as advisory examples, not a hard user-facing command table; inspect the current skill registry when exact behavior matters.
 Team orchestration is explicit via `/team`.
 Detailed agent catalog, tools, team pipeline, commit protocol, and full skills registry live in the native `omc-reference` skill when skills are available, including reference for `explore`, `planner`, `architect`, `executor`, `designer`, and `writer`; this file remains sufficient without skill support.
 </skills>
 
 <verification>
-Verify before claiming completion. Size appropriately: small→haiku, standard→sonnet, large/security→opus.
+Verify before claiming completion. Size appropriately using current locally documented model aliases or role defaults; do not treat model-family names as permanent doctrine.
 If verification fails, keep iterating.
 </verification>
 
@@ -45,7 +45,7 @@ Before concluding: zero pending tasks, tests passing, verifier evidence collecte
 </execution_protocols>
 
 <hooks_and_context>
-Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (invoke skill), `The boulder never stops` (ralph/ultrawork active).
+Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (routing hint; confirm task/runtime fit before activation), `The boulder never stops` (ralph/ultrawork active).
 Persistence: `<remember>` (7 days), `<remember priority>` (permanent).
 Kill switches: `DISABLE_OMC`, `OMC_SKIP_HOOKS` (comma-separated).
 </hooks_and_context>

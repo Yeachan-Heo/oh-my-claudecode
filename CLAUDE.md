@@ -1,5 +1,5 @@
 <!-- OMC:START -->
-<!-- OMC:VERSION:4.9.1 -->
+<!-- OMC:VERSION:4.14.1 -->
 
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
@@ -16,18 +16,18 @@ Coordinate specialized agents, tools, and skills so work is completed accurately
 <delegation_rules>
 Delegate for: multi-file changes, refactors, debugging, reviews, planning, research, verification.
 Work directly for: trivial ops, small clarifications, single commands.
-Route code to `executor` (use `model=opus` for complex work). Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
+Route code to `executor`; use a current locally documented high-capability model alias or full model id for complex work only when an explicit override is needed. Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
 </delegation_rules>
 
 <model_routing>
-`haiku` (quick lookups), `sonnet` (standard), `opus` (architecture, deep analysis).
-Direct writes OK for: `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, `AGENTS.md`.
+Use role fit and current local model defaults. Treat model aliases or family names as runtime facts from the current Claude CLI/help or OMC agent catalog, not permanent doctrine.
+Direct writes to `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, or `AGENTS.md` are OK only when the task explicitly includes OMC/guidance/state maintenance. For ordinary tasks, inspect first and preserve the owning source/template contract.
 </model_routing>
 
 <agent_catalog>
 Prefix: `oh-my-claudecode:`. See `agents/*.md` for full prompts.
 
-explore (haiku), analyst (opus), planner (opus), architect (opus), debugger (sonnet), executor (sonnet), verifier (sonnet), tracer (sonnet), security-reviewer (sonnet), code-reviewer (opus), test-engineer (sonnet), designer (sonnet), writer (haiku), qa-tester (sonnet), scientist (sonnet), document-specialist (sonnet), git-master (sonnet), code-simplifier (opus), critic (opus)
+explore, analyst, planner, architect, debugger, executor, verifier, tracer, security-reviewer, code-reviewer, test-engineer, designer, writer, qa-tester, scientist, document-specialist, git-master, code-simplifier, critic. Model selection comes from current OMC/Claude configuration, not this catalog line.
 </agent_catalog>
 
 <tools>
@@ -40,10 +40,10 @@ Code Intel: LSP (`lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp
 </tools>
 
 <skills>
-Invoke via `/oh-my-claudecode:<name>`. Trigger patterns auto-detect keywords.
+Explicit `/oh-my-claudecode:<name>` invocations and hook-detected trigger patterns are agent-internal routing evidence; use them only when they fit the current task and runtime.
 
 Workflow: `autopilot`, `ralph`, `ultrawork`, `team`, `ccg`, `ultraqa`, `omc-plan`, `ralplan`, `sciomc`, `external-context`, `deepinit`, `deep-interview`, `ai-slop-cleaner`, `self-improve`
-Keyword triggers: "autopilot"→autopilot, "ralph"→ralph, "ulw"→ultrawork, "ccg"→ccg, "ralplan"→ralplan, "deep interview"→deep-interview, "deslop"/"anti-slop"/cleanup+slop-smell→ai-slop-cleaner, "deep-analyze"→analysis mode, "tdd"→TDD mode, "deepsearch"→codebase search, "ultrathink"→deep reasoning, "cancelomc"→cancel. Team orchestration is explicit via `/team`.
+Known trigger examples include autopilot, ralph, ultrawork, ralplan, deep-interview, ai-slop-cleaner, analysis, TDD, codebase search, deep reasoning, and cancel. Treat them as advisory examples, not a hard user-facing command table; inspect the current skill registry when exact behavior matters. Team orchestration remains explicit.
 Utilities: `ask-codex`, `ask-gemini`, `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `ralph-init`, `configure-notifications`, `learn-about-omc` (`trace` is the evidence-driven tracing lane)
 Per-role `/team` routing: configure provider/model per canonical role (codex critic, gemini reviewer, etc.) in `.claude/omc.jsonc` under `team.roleRouting` — accepted aliases such as `reviewer` are normalized and applied at runtime. See `skills/team/SKILL.md#per-role-provider--model-routing`.
 </skills>
@@ -54,7 +54,7 @@ Fix loop bounded by max attempts. `team ralph` links both modes.
 </team_pipeline>
 
 <verification>
-Verify before claiming completion. Size appropriately: small→haiku, standard→sonnet, large/security→opus.
+Verify before claiming completion. Size appropriately using current locally documented model aliases or role defaults; do not treat model-family names as permanent doctrine.
 If verification fails, keep iterating.
 </verification>
 
@@ -96,7 +96,7 @@ Not-tested: Auth service cold-start latency >500ms
 </commit_protocol>
 
 <hooks_and_context>
-Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (invoke skill), `The boulder never stops` (ralph/ultrawork active).
+Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (routing hint; confirm task/runtime fit before activation), `The boulder never stops` (ralph/ultrawork active).
 Persistence: `<remember>` (7 days), `<remember priority>` (permanent).
 Kill switches: `DISABLE_OMC`, `OMC_SKIP_HOOKS` (comma-separated).
 </hooks_and_context>
