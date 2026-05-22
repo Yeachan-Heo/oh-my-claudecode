@@ -281,6 +281,10 @@ For `/goal` behavior, rely on Claude Code/Anthropic sources: the [Claude Code `/
 
 Want to contribute to OMC? See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full developer guide, including how to fork, set up a local checkout, link it as your active plugin, run tests, and submit PRs.
 
+### Community Plugins
+
+Third-party plugins built on top of OMC and Claude Code. See [docs/COMMUNITY-PLUGINS.md](./docs/COMMUNITY-PLUGINS.md) for the full list and install instructions.
+
 ### Custom Skills
 
 Learn once, reuse forever. OMC extracts hard-won debugging knowledge into portable skill files that auto-inject when relevant.
