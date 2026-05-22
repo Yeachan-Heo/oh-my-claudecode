@@ -11014,6 +11014,7 @@ var init_installer = __esm({
       "scripts",
       "skills",
       "agents",
+      "commands",
       "templates",
       "docs",
       ".claude-plugin",

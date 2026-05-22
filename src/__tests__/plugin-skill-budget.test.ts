@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join, win32 } from 'path';
 import { fileURLToPath } from 'url';
 import { isPathInsideOrEqual } from '../features/builtin-skills/skills.js';
-import { compactPluginSkillPayload } from '../installer/index.js';
+import { compactPluginSkillPayload, copyPluginSyncPayload } from '../installer/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -107,6 +116,35 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
         expect(commandContent).toContain(expectedSkillPath);
         expect(commandContent).toContain('$ARGUMENTS');
       }
+    }
+  });
+
+  it('materializes declared plugin command wrappers into cache sync targets', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-plugin-commands-cache-'));
+    try {
+      const sourceRoot = join(tempRoot, 'source');
+      const targetRoot = join(tempRoot, 'cache', 'omc', 'oh-my-claudecode', '4.14.1');
+      mkdirSync(join(sourceRoot, '.claude-plugin'), { recursive: true });
+      mkdirSync(join(sourceRoot, 'commands'), { recursive: true });
+      writeFileSync(join(sourceRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({
+        name: 'oh-my-claudecode',
+        commands: './commands/',
+      }, null, 2));
+      writeFileSync(join(sourceRoot, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
+
+      const result = copyPluginSyncPayload(sourceRoot, [targetRoot]);
+
+      expect(result.errors).toEqual([]);
+      expect(result.synced).toBe(true);
+
+      const manifest = JSON.parse(
+        readFileSync(join(targetRoot, '.claude-plugin', 'plugin.json'), 'utf-8')
+      ) as { commands?: string };
+      expect(manifest.commands).toBe('./commands/');
+      expect(existsSync(join(targetRoot, 'commands'))).toBe(true);
+      expect(readFileSync(join(targetRoot, 'commands', 'omc-setup.md'), 'utf-8')).toContain('$ARGUMENTS');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
     }
   });
 

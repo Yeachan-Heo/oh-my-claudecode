@@ -18,6 +18,7 @@ function writePayloadTree(root: string, version = '9.9.9-test'): void {
   writeFile(join(root, 'scripts', 'run.cjs'), 'console.log("run");\n');
   writeFile(join(root, 'skills', 'plan', 'SKILL.md'), '# plan\n');
   writeFile(join(root, 'agents', 'executor.md'), '# executor\n');
+  writeFile(join(root, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
   writeFile(join(root, 'templates', 'deliverables.json'), '{}\n');
   writeFile(join(root, 'docs', 'CLAUDE.md'), '# docs\n');
   writeFile(join(root, '.claude-plugin', 'plugin.json'), '{"name":"oh-my-claudecode"}\n');
@@ -90,6 +91,7 @@ describe('syncInstalledPluginPayload', () => {
     expect(existsSync(join(cacheRoot, 'skills', 'plan', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'hooks', 'hooks.json'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'scripts', 'run.cjs'))).toBe(true);
+    expect(existsSync(join(cacheRoot, 'commands', 'omc-setup.md'))).toBe(true);
     expect(JSON.parse(readFileSync(join(cacheRoot, 'package.json'), 'utf-8')).version).toBe('9.9.9-test');
   });
 
@@ -141,6 +143,7 @@ describe('syncInstalledPluginPayload', () => {
     expect(existsSync(join(cacheRoot, 'skills', 'plan', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'hooks', 'hooks.json'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'scripts', 'run.cjs'))).toBe(true);
+    expect(existsSync(join(cacheRoot, 'commands', 'omc-setup.md'))).toBe(true);
   });
 
   it('rejects cache install roots that escape the cache directory via .. segments', async () => {
