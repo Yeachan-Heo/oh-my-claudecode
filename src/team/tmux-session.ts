@@ -252,6 +252,18 @@ function escapeForCmdSet(value: string): string {
   return value.replace(/"/g, '""');
 }
 
+function escapeForPowerShellSingleQuotedString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function isNativeWindowsPsmuxPowerShellPane(): boolean {
+  // psmux sets PSMUX_SESSION in panes. Native psmux defaults to PowerShell,
+  // while MSYS/Git Bash psmux panes still need the POSIX branch below.
+  return process.platform === 'win32' &&
+    !isUnixLikeOnWindows() &&
+    !!process.env.PSMUX_SESSION;
+}
+
 function shellNameFromPath(shellPath: string): string {
   const shellName = basename(shellPath.replace(/\\/g, '/'));
   return shellName.replace(/\.(exe|cmd|bat)$/i, '');
@@ -306,6 +318,19 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
   const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
   const launchWords = getLaunchWords(config);
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
+
+  if (isNativeWindowsPsmuxPowerShellPane()) {
+    const envStatements = Object.entries(config.envVars)
+      .map(([k, v]) => {
+        assertSafeEnvKey(k);
+        return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
+      });
+    const launch = [
+      '&',
+      ...launchWords.map(escapeForPowerShellSingleQuotedString),
+    ].join(' ');
+    return [...envStatements, launch].join('; ');
+  }
 
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     const envPrefix = Object.entries(config.envVars)

@@ -130,6 +130,102 @@ describe('buildWorkerStartCommand', () => {
     })).not.toThrow();
   });
 
+  it('uses PowerShell syntax for native Windows psmux worker panes', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 'team/worker-1' },
+      launchBinary: 'C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe',
+      launchArgs: ['--agent-id', 'worker-1'],
+      cwd: 'C:\\repo'
+    });
+
+    expect(cmd).toBe(
+      "$env:OMC_TEAM_WORKER='team/worker-1'; " +
+      "& 'C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe' '--agent-id' 'worker-1'"
+    );
+    expect(cmd).not.toContain('cmd.exe');
+    expect(cmd).not.toContain('/d /s /c');
+    expect(cmd).not.toContain('set "');
+  });
+
+  it('escapes psmux PowerShell env vars and quoted launch args without cmd.exe set syntax', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: {
+        OMC_TEAM_WORKER: "team name/worker 'one'",
+        OMC_TEAM_STATE_ROOT: 'C:\\Users\\Test User\\AppData\\Local\\omc state',
+        CLAUDE_CODE_USE_BEDROCK: 'value with spaces & [brackets] "quotes"',
+      },
+      launchBinary: 'C:\\Program Files\\Claude Code\\claude.exe',
+      launchArgs: [
+        '--model',
+        'sonnet "quoted"',
+        "--label=worker 'one'",
+      ],
+      cwd: 'C:\\repo'
+    });
+
+    expect(cmd).toContain("$env:OMC_TEAM_WORKER='team name/worker ''one'''");
+    expect(cmd).toContain("$env:OMC_TEAM_STATE_ROOT='C:\\Users\\Test User\\AppData\\Local\\omc state'");
+    expect(cmd).toContain("$env:CLAUDE_CODE_USE_BEDROCK='value with spaces & [brackets] \"quotes\"'");
+    expect(cmd).toContain("& 'C:\\Program Files\\Claude Code\\claude.exe' '--model' 'sonnet \"quoted\"' '--label=worker ''one'''");
+    expect(cmd).not.toContain('cmd.exe');
+    expect(cmd).not.toContain('/d /s /c');
+    expect(cmd).not.toContain('set "');
+  });
+
+  it('keeps cmd.exe worker startup syntax for native Windows without psmux', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 'team/worker-1' },
+      launchBinary: 'C:\\Program Files\\OpenAI\\Codex\\codex.exe',
+      launchArgs: ['--full-auto'],
+      cwd: 'C:\\repo'
+    });
+
+    expect(cmd).toBe(
+      'C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
+      '"C:\\Program Files\\OpenAI\\Codex\\codex.exe" "--full-auto""'
+    );
+  });
+
+  it('keeps MSYS/Git Bash worker startup syntax even when psmux env is present', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    vi.stubEnv('MSYSTEM', 'MINGW64');
+    vi.stubEnv('SHELL', '/usr/bin/bash');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 'team/worker-1' },
+      launchBinary: '/c/Program Files/Git/bin/bash.exe',
+      launchArgs: ['--login'],
+      cwd: '/c/repo'
+    });
+
+    expect(cmd).toContain("'env' OMC_TEAM_WORKER='team/worker-1'");
+    expect(cmd).toContain("'/usr/bin/bash' '-lc'");
+    expect(cmd).toContain("'--' '/c/Program Files/Git/bin/bash.exe' '--login'");
+    expect(cmd).not.toContain('/d /s /c');
+    expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
+  });
+
   it('uses exec \"$@\" for launchBinary with non-fish shells', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('SHELL', '/bin/zsh');
