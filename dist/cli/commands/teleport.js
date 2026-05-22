@@ -6,7 +6,7 @@
  */
 import chalk from 'chalk';
 import { execSync, execFileSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join, basename, isAbsolute, relative } from 'path';
 import { loadConfig } from '../../config/loader.js';
@@ -619,23 +619,21 @@ export async function teleportRemoveCommand(pathOrName, options) {
             cwd: worktreePath,
             encoding: 'utf-8',
         }).trim();
-        // The git-dir will be something like /path/to/main/.git/worktrees/name
-        // We need to get back to the main repo
-        const mainRepoMatch = gitDir.match(/(.+)[/\\]\.git[/\\]worktrees[/\\]/);
+        // A removable worktree reports a git-dir inside the main repo's .git/worktrees directory.
+        // Main repos report .git or <repo>/.git; any other shape is unexpected and must fail closed
+        // instead of deleting the target directory directly.
+        const mainRepoMatch = gitDir.match(/(.+)[/\\]\.git[/\\]worktrees[/\\][^/\\]+$/);
         const mainRepo = mainRepoMatch ? mainRepoMatch[1] : null;
-        if (mainRepo) {
-            const args = options.force
-                ? ['worktree', 'remove', '--force', worktreePath]
-                : ['worktree', 'remove', worktreePath];
-            execFileSync('git', args, {
-                cwd: mainRepo,
-                stdio: 'pipe',
-            });
+        if (!mainRepo) {
+            throw new Error(`Refusing to remove ${worktreePath}: git directory ${JSON.stringify(gitDir)} is not a registered worktree git-dir`);
         }
-        else {
-            // Fallback: just remove the directory
-            rmSync(worktreePath, { recursive: true, force: true });
-        }
+        const args = options.force
+            ? ['worktree', 'remove', '--force', worktreePath]
+            : ['worktree', 'remove', worktreePath];
+        execFileSync('git', args, {
+            cwd: mainRepo,
+            stdio: 'pipe',
+        });
         if (options.json) {
             console.log(JSON.stringify({ success: true, removed: worktreePath }));
         }

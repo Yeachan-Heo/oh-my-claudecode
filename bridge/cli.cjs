@@ -14826,7 +14826,7 @@ var init_types4 = __esm({
         "lastTool",
         "sessionSummary"
       ],
-      detail: ["missionBoard", "agents", "contextWarning", "todos"]
+      detail: ["missionBoard", "agents", "contextWarning", "payloadWarning", "todos"]
     };
     DEFAULT_HUD_USAGE_POLL_INTERVAL_MS = 90 * 1e3;
     DEFAULT_HUD_CONFIG = {
@@ -29599,6 +29599,12 @@ function buildWorkerLaunchSpec(shellPath) {
 function escapeForCmdSet2(value) {
   return value.replace(/"/g, '""');
 }
+function escapeForPowerShellSingleQuotedString(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function isNativeWindowsPsmuxPowerShellPane() {
+  return process.platform === "win32" && !isUnixLikeOnWindows2() && !!process.env.PSMUX_SESSION;
+}
 function shellNameFromPath(shellPath) {
   const shellName = (0, import_path85.basename)(shellPath.replace(/\\/g, "/"));
   return shellName.replace(/\.(exe|cmd|bat)$/i, "");
@@ -29645,6 +29651,17 @@ function buildWorkerStartCommand(config2) {
   const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
   const launchWords = getLaunchWords(config2);
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== "1";
+  if (isNativeWindowsPsmuxPowerShellPane()) {
+    const envStatements = Object.entries(config2.envVars).map(([k, v]) => {
+      assertSafeEnvKey(k);
+      return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
+    });
+    const launch = [
+      "&",
+      ...launchWords.map(escapeForPowerShellSingleQuotedString)
+    ].join(" ");
+    return [...envStatements, launch].join("; ");
+  }
   if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
     const envPrefix = Object.entries(config2.envVars).map(([k, v]) => {
       assertSafeEnvKey(k);
@@ -45788,6 +45805,15 @@ var init_hostname = __esm({
 });
 
 // src/hud/elements/git.ts
+function git2(args, cwd2) {
+  return (0, import_node_child_process10.execFileSync)("git", args, {
+    cwd: cwd2,
+    encoding: "utf-8",
+    timeout: 1e3,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
+  }).trim();
+}
 function getGitRepoName(cwd2) {
   const key = cwd2 ? (0, import_node_path16.resolve)(cwd2) : process.cwd();
   const cached2 = repoCache.get(key);
@@ -45796,13 +45822,7 @@ function getGitRepoName(cwd2) {
   }
   let result = null;
   try {
-    const url = (0, import_node_child_process10.execSync)("git remote get-url origin", {
-      cwd: cwd2,
-      encoding: "utf-8",
-      timeout: 1e3,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? "cmd.exe" : void 0
-    }).trim();
+    const url = git2(["remote", "get-url", "origin"], cwd2);
     if (!url) {
       result = null;
     } else {
@@ -45823,13 +45843,7 @@ function getGitBranch(cwd2) {
   }
   let result = null;
   try {
-    const branch = (0, import_node_child_process10.execSync)("git branch --show-current", {
-      cwd: cwd2,
-      encoding: "utf-8",
-      timeout: 1e3,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? "cmd.exe" : void 0
-    }).trim();
+    const branch = git2(["branch", "--show-current"], cwd2);
     result = branch || null;
   } catch {
     result = null;
@@ -45843,17 +45857,10 @@ function getWorktreeInfo(cwd2) {
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
   }
-  const execOpts = {
-    cwd: cwd2,
-    encoding: "utf-8",
-    timeout: 1e3,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: process.platform === "win32" ? "cmd.exe" : void 0
-  };
   let result = { isWorktree: false, worktreeName: null };
   try {
-    const gitDir = (0, import_node_child_process10.execSync)("git rev-parse --git-dir", execOpts).trim();
-    const gitCommonDir = (0, import_node_child_process10.execSync)("git rev-parse --git-common-dir", execOpts).trim();
+    const gitDir = git2(["rev-parse", "--git-dir"], cwd2);
+    const gitCommonDir = git2(["rev-parse", "--git-common-dir"], cwd2);
     let resolvedGitDir = (0, import_node_path16.resolve)(key, gitDir);
     let resolvedCommonDir = (0, import_node_path16.resolve)(key, gitCommonDir);
     try {
@@ -45894,13 +45901,7 @@ function getGitStatusCounts(cwd2) {
   }
   let result = null;
   try {
-    const output = (0, import_node_child_process10.execSync)("git --no-optional-locks status --porcelain -b", {
-      cwd: cwd2,
-      encoding: "utf-8",
-      timeout: 1e3,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? "cmd.exe" : void 0
-    }).trim();
+    const output = git2(["--no-optional-locks", "status", "--porcelain", "-b"], cwd2);
     let staged = 0, modified = 0, untracked = 0, ahead = 0, behind = 0;
     if (output) {
       const lines = output.split("\n");
@@ -46091,6 +46092,16 @@ function renderContextLimitWarning(contextPercent, threshold, autoCompact) {
   const icon = isCritical ? "!!" : "!";
   const action = autoCompact ? "(auto-compact queued)" : "run /compact";
   return `${color}${BOLD2}[${icon}] ctx ${safePercent}% >= ${threshold}% threshold - ${action}${RESET}`;
+}
+function renderPayloadLimitWarning(payloadEstimate) {
+  if (!payloadEstimate || payloadEstimate.pressure === "normal") {
+    return null;
+  }
+  const isCritical = payloadEstimate.pressure === "critical";
+  const color = isCritical ? RED7 : YELLOW9;
+  const icon = isCritical ? "!!" : "!";
+  const action = isCritical ? "compact may fail; consider new session" : "consider /compact soon";
+  return `${color}${BOLD2}[${icon}] ${payloadEstimate.label} - ${action}${RESET}`;
 }
 var YELLOW9, RED7, BOLD2;
 var init_context_warning = __esm({
@@ -46439,6 +46450,8 @@ async function render(context, config2) {
     config2.contextLimitWarning.autoCompact
   );
   if (ctxWarning) renderedDetail.set("contextWarning", [ctxWarning]);
+  const payloadWarning = renderPayloadLimitWarning(context.payloadEstimate);
+  if (payloadWarning) renderedDetail.set("payloadWarning", [payloadWarning]);
   if (enabledElements.todos) {
     const todos = renderTodosWithCurrent(context.todos);
     if (todos) renderedDetail.set("todos", [todos]);
@@ -46575,6 +46588,50 @@ var init_sanitize = __esm({
   }
 });
 
+// src/hud/payload-estimate.ts
+function toPressure(bytes) {
+  if (bytes >= PAYLOAD_CRITICAL_BYTES) return "critical";
+  if (bytes >= PAYLOAD_WARNING_BYTES) return "warning";
+  return "normal";
+}
+function formatPayloadMegabytes(bytes) {
+  const mb = bytes / 1e6;
+  if (mb < 10) return mb.toFixed(1);
+  return String(Math.round(mb));
+}
+function formatPayloadEstimateLabel(estimatedBytes, limitBytes = ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES) {
+  return `payload est ~${formatPayloadMegabytes(estimatedBytes)} MB / ${formatPayloadMegabytes(limitBytes)} MB`;
+}
+function createPayloadEstimate(estimatedBytes, limitBytes = ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES) {
+  if (!Number.isFinite(estimatedBytes) || estimatedBytes < 0) return null;
+  return {
+    estimatedBytes,
+    limitBytes,
+    pressure: toPressure(estimatedBytes),
+    label: formatPayloadEstimateLabel(estimatedBytes, limitBytes)
+  };
+}
+function estimatePayloadFromTranscriptPath(transcriptPath) {
+  if (!transcriptPath || !(0, import_fs109.existsSync)(transcriptPath)) return null;
+  try {
+    const stat2 = (0, import_fs109.statSync)(transcriptPath);
+    if (!stat2.isFile()) return null;
+    return createPayloadEstimate(stat2.size);
+  } catch {
+    return null;
+  }
+}
+var import_fs109, ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES, PAYLOAD_WARNING_BYTES, PAYLOAD_CRITICAL_BYTES;
+var init_payload_estimate = __esm({
+  "src/hud/payload-estimate.ts"() {
+    "use strict";
+    import_fs109 = require("fs");
+    ANTHROPIC_REQUEST_PAYLOAD_LIMIT_BYTES = 32e6;
+    PAYLOAD_WARNING_BYTES = 22e6;
+    PAYLOAD_CRITICAL_BYTES = 26e6;
+  }
+});
+
 // src/hud/index.ts
 var hud_exports = {};
 __export(hud_exports, {
@@ -46601,9 +46658,9 @@ function mergeStdinRateLimits(stdinRateLimits, usageResult) {
 }
 function readSessionSummary(stateDir, sessionId) {
   const statePath = (0, import_path128.join)(stateDir, `session-summary-${sessionId}.json`);
-  if (!(0, import_fs109.existsSync)(statePath)) return null;
+  if (!(0, import_fs110.existsSync)(statePath)) return null;
   try {
-    return JSON.parse((0, import_fs109.readFileSync)(statePath, "utf-8"));
+    return JSON.parse((0, import_fs110.readFileSync)(statePath, "utf-8"));
   } catch {
     return null;
   }
@@ -46637,7 +46694,7 @@ function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
     "scripts",
     "session-summary.mjs"
   );
-  if (!(0, import_fs109.existsSync)(scriptPath)) {
+  if (!(0, import_fs110.existsSync)(scriptPath)) {
     if (process.env.OMC_DEBUG) {
       console.error("[HUD] session-summary script not found:", scriptPath);
     }
@@ -46678,10 +46735,10 @@ function showDiagnostic() {
   const configDir = getClaudeConfigDir();
   const hudScript = (0, import_path128.join)(configDir, "hud", "omc-hud.mjs");
   const settingsFile = (0, import_path128.join)(configDir, "settings.json");
-  const hudExists = (0, import_fs109.existsSync)(hudScript);
+  const hudExists = (0, import_fs110.existsSync)(hudScript);
   let statusLineOk = false;
   try {
-    const settings = JSON.parse((0, import_fs109.readFileSync)(settingsFile, "utf-8"));
+    const settings = JSON.parse((0, import_fs110.readFileSync)(settingsFile, "utf-8"));
     const sl = settings.statusLine;
     if (sl && typeof sl === "object" && typeof sl.command === "string") {
       statusLineOk = sl.command.includes("omc-hud");
@@ -46819,6 +46876,7 @@ async function main2(watchMode = false, skipInit = false) {
     const missionBoardEnabled = config2.missionBoard?.enabled ?? config2.elements.missionBoard ?? false;
     const missionBoard = missionBoardEnabled ? await refreshMissionBoardState(cwd2, config2.missionBoard) : null;
     const contextPercent = getContextPercent(stdin);
+    const payloadEstimate = estimatePayloadFromTranscriptPath(resolvedTranscriptPath);
     const subscriptionInfo = (() => {
       try {
         return getSubscriptionInfo() ?? { subscriptionType: null, rateLimitTier: null };
@@ -46859,7 +46917,8 @@ async function main2(watchMode = false, skipInit = false) {
       rateLimitTier: subscriptionInfo.rateLimitTier,
       profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path128.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary,
-      lastToolName: transcriptData.lastToolName
+      lastToolName: transcriptData.lastToolName,
+      payloadEstimate
     };
     if (process.env.OMC_DEBUG) {
       console.error(
@@ -46874,9 +46933,9 @@ async function main2(watchMode = false, skipInit = false) {
     if (config2.contextLimitWarning.autoCompact && context.contextPercent >= config2.contextLimitWarning.threshold) {
       try {
         const omcStateDir = (0, import_path128.join)(getOmcRoot(cwd2), "state");
-        (0, import_fs109.mkdirSync)(omcStateDir, { recursive: true });
+        (0, import_fs110.mkdirSync)(omcStateDir, { recursive: true });
         const triggerFile = (0, import_path128.join)(omcStateDir, "compact-requested.json");
-        (0, import_fs109.writeFileSync)(
+        (0, import_fs110.writeFileSync)(
           triggerFile,
           JSON.stringify({
             requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -46915,7 +46974,7 @@ async function main2(watchMode = false, skipInit = false) {
     }
   }
 }
-var import_fs109, import_promises22, import_path128, import_os22, import_child_process37, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs110, import_promises22, import_path128, import_os22, import_child_process37, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -46929,10 +46988,11 @@ var init_hud = __esm({
     init_api_key_source();
     init_mission_board();
     init_sanitize();
+    init_payload_estimate();
     init_version();
     init_auto_update();
     init_worktree_paths();
-    import_fs109 = require("fs");
+    import_fs110 = require("fs");
     import_promises22 = require("fs/promises");
     import_path128 = require("path");
     import_os22 = require("os");
@@ -47468,7 +47528,7 @@ var source_default = chalk;
 
 // src/cli/index.ts
 var import_path129 = require("path");
-var import_fs110 = require("fs");
+var import_fs111 = require("fs");
 init_config_dir();
 
 // src/lib/env-vars.ts
@@ -91304,17 +91364,18 @@ async function teleportRemoveCommand(pathOrName, options) {
       cwd: worktreePath,
       encoding: "utf-8"
     }).trim();
-    const mainRepoMatch = gitDir.match(/(.+)[/\\]\.git[/\\]worktrees[/\\]/);
+    const mainRepoMatch = gitDir.match(/(.+)[/\\]\.git[/\\]worktrees[/\\][^/\\]+$/);
     const mainRepo = mainRepoMatch ? mainRepoMatch[1] : null;
-    if (mainRepo) {
-      const args = options.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
-      (0, import_child_process32.execFileSync)("git", args, {
-        cwd: mainRepo,
-        stdio: "pipe"
-      });
-    } else {
-      (0, import_fs101.rmSync)(worktreePath, { recursive: true, force: true });
+    if (!mainRepo) {
+      throw new Error(
+        `Refusing to remove ${worktreePath}: git directory ${JSON.stringify(gitDir)} is not a registered worktree git-dir`
+      );
     }
+    const args = options.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
+    (0, import_child_process32.execFileSync)("git", args, {
+      cwd: mainRepo,
+      stdio: "pipe"
+    });
     if (options.json) {
       console.log(JSON.stringify({ success: true, removed: worktreePath }));
     } else {
@@ -92396,8 +92457,8 @@ Examples:
     console.log(`  User:    ${paths.user}`);
     console.log(`  Project: ${paths.project}`);
     console.log(source_default.blue("\nFile status:"));
-    console.log(`  User:    ${(0, import_fs110.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
-    console.log(`  Project: ${(0, import_fs110.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  User:    ${(0, import_fs111.existsSync)(paths.user) ? source_default.green("exists") : source_default.gray("not found")}`);
+    console.log(`  Project: ${(0, import_fs111.existsSync)(paths.project) ? source_default.green("exists") : source_default.gray("not found")}`);
     return;
   }
   const config2 = loadConfig();
@@ -92566,7 +92627,7 @@ Examples:
     }
     config3.notificationProfiles[profileName] = profile;
     try {
-      (0, import_fs110.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
+      (0, import_fs111.writeFileSync)(CONFIG_FILE, JSON.stringify(config3, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${profileName}" \u2014 ${type} configured`));
       console.log(JSON.stringify(profile[type], null, 2));
     } catch (error2) {
@@ -92679,7 +92740,7 @@ Examples:
     }
   }
   try {
-    (0, import_fs110.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+    (0, import_fs111.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
     console.log(source_default.green(`\u2713 Stop callback '${type}' configured`));
     console.log(JSON.stringify(config2.stopHookCallbacks[type], null, 2));
   } catch (error2) {
@@ -92741,7 +92802,7 @@ Active profile (OMC_NOTIFY_PROFILE): ${activeProfile}`));
       delete config2.notificationProfiles;
     }
     try {
-      (0, import_fs110.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
+      (0, import_fs111.writeFileSync)(CONFIG_FILE, JSON.stringify(config2, null, 2), "utf-8");
       console.log(source_default.green(`\u2713 Profile "${name}" deleted`));
     } catch (error2) {
       console.error(source_default.red("Failed to write configuration:"), error2);

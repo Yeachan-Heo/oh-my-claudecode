@@ -28,7 +28,7 @@ import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovern
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { buildWorkerArgv, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, } from './model-contract.js';
-import { createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, } from './tmux-session.js';
+import { createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
@@ -186,13 +186,7 @@ async function getWorkerPaneLiveness(paneId) {
 async function captureWorkerPane(paneId) {
     if (!paneId)
         return '';
-    try {
-        const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
-        return result.stdout ?? '';
-    }
-    catch {
-        return '';
-    }
+    return captureTeamPane(paneId);
 }
 function isFreshTimestamp(value, maxAgeMs = MONITOR_SIGNAL_STALE_MS) {
     if (!value)
@@ -475,7 +469,7 @@ async function spawnV2Worker(opts) {
         // retries so a truly hung worker still fails fast.
         for (let attempt = 1; !settled && attempt <= 4; attempt++) {
             try {
-                await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter']);
+                await sendTeamPaneKey(paneId, 'Enter');
             }
             catch {
                 break;

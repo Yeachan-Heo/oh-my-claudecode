@@ -19,7 +19,7 @@ export interface NudgeConfig {
     message: string;
 }
 export declare const DEFAULT_NUDGE_CONFIG: NudgeConfig;
-/** Capture the last 80 lines of a tmux pane. Returns '' on error. */
+/** Capture the last 80 lines of a team pane. Returns '' on error. */
 export declare function capturePane(paneId: string): Promise<string>;
 /**
  * A pane is idle when it shows a prompt (ready for input) but has no

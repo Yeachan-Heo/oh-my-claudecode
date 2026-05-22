@@ -51,7 +51,7 @@ var import_path15 = require("path");
 var import_os3 = require("os");
 
 // src/team/mcp-team-bridge.ts
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_fs12 = require("fs");
 var import_path13 = require("path");
 
@@ -137,6 +137,8 @@ function getClaudeConfigDir() {
 
 // src/team/tmux-session.ts
 var import_fs2 = require("fs");
+var import_child_process2 = require("child_process");
+var import_util2 = require("util");
 var import_path4 = require("path");
 var import_promises = __toESM(require("fs/promises"), 1);
 
@@ -197,6 +199,7 @@ function resolveTmuxBinaryPath() {
 }
 
 // src/team/tmux-session.ts
+var execFileAsync = (0, import_util2.promisify)(import_child_process2.execFile);
 var TMUX_SESSION_PREFIX = "omc-team";
 function sanitizeName(name) {
   const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
@@ -224,10 +227,10 @@ var path = __toESM(require("path"), 1);
 var import_fs3 = require("fs");
 
 // src/platform/process-utils.ts
-var import_child_process2 = require("child_process");
-var import_util2 = require("util");
+var import_child_process3 = require("child_process");
+var import_util3 = require("util");
 var fsPromises = __toESM(require("fs/promises"), 1);
-var execFileAsync = (0, import_util2.promisify)(import_child_process2.execFile);
+var execFileAsync2 = (0, import_util3.promisify)(import_child_process3.execFile);
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -1379,7 +1382,7 @@ function sleep(ms) {
 function captureFileSnapshot(cwd) {
   const files = /* @__PURE__ */ new Set();
   try {
-    const statusOutput = (0, import_child_process3.execSync)("git status --porcelain", {
+    const statusOutput = (0, import_child_process4.execSync)("git status --porcelain", {
       cwd,
       encoding: "utf-8",
       timeout: 1e4
@@ -1391,7 +1394,7 @@ function captureFileSnapshot(cwd) {
       const fileName = arrowIdx !== -1 ? filePart.slice(arrowIdx + 4) : filePart;
       files.add(fileName.trim());
     }
-    const untrackedOutput = (0, import_child_process3.execSync)(
+    const untrackedOutput = (0, import_child_process4.execSync)(
       "git ls-files --others --exclude-standard",
       { cwd, encoding: "utf-8", timeout: 1e4 }
     );
@@ -1653,7 +1656,7 @@ function spawnCliProcess(provider, prompt, model, cwd, timeoutMs) {
     args = ["--approval-mode", "yolo"];
     if (model) args.push("--model", model);
   }
-  const child = (0, import_child_process3.spawn)(cmd, args, {
+  const child = (0, import_child_process4.spawn)(cmd, args, {
     stdio: ["pipe", "pipe", "pipe"],
     cwd
   });
@@ -2128,7 +2131,7 @@ ${violationSummary}`
 
 // src/lib/worktree-paths.ts
 var import_crypto = require("crypto");
-var import_child_process4 = require("child_process");
+var import_child_process5 = require("child_process");
 var import_fs13 = require("fs");
 var import_os2 = require("os");
 var import_path14 = require("path");
@@ -2143,7 +2146,7 @@ function getWorktreeRoot(cwd) {
     return root || null;
   }
   try {
-    const root = (0, import_child_process4.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process5.execSync)("git rev-parse --show-toplevel", {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

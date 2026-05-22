@@ -74,10 +74,10 @@ export declare function spawnBridgeInSession(tmuxSession: string, bridgeScriptPa
  * is true, creates a detached dedicated tmux window first and then splits worker
  * panes there.
  *
- * When running inside cmux (CMUX_SURFACE_ID without TMUX) or a plain terminal,
- * falls back to a detached tmux session because the current surface cannot be
- * targeted as a normal tmux pane/window. Returns sessionName in "session:window"
- * form.
+ * When running inside cmux (CMUX_SURFACE_ID without TMUX), creates native
+ * cmux splits from the current surface. When running in a plain terminal, falls
+ * back to a detached tmux session. Returns sessionName in "session:window" form
+ * for tmux and "cmux:<workspace>" form for cmux.
  *
  * Layout: leader pane on the left, worker panes stacked vertically on the right.
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
@@ -89,6 +89,9 @@ export declare function createTeamSession(teamName: string, workerCount: number,
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
  */
 export declare function spawnWorkerInPane(sessionName: string, paneId: string, config: WorkerPaneConfig): Promise<void>;
+export declare function captureTeamPane(paneId: string): Promise<string>;
+export declare function sendTeamPaneKey(paneId: string, key: string): Promise<void>;
+export declare function killTeamPane(paneId: string): Promise<void>;
 export declare function paneHasActiveTask(captured: string): boolean;
 export declare function paneLooksReady(captured: string): boolean;
 export interface WaitForPaneReadyOptions {
