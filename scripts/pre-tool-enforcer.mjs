@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
+import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
@@ -1050,6 +1051,31 @@ async function main() {
     }
 
     const todoStatus = getTodoStatus(directory);
+
+    // Force-agent-delegation: symmetric to evaluateAgentHeavyPreflight. Where
+    // preflight blocks Task/Agent spawning when context is exhausted, this
+    // evaluator blocks raw Read/Edit/Write/Grep/Glob when configured rules
+    // indicate the work should be delegated to a specialised agent. Default OFF
+    // — only fires when `.omc/config.json` has `routing.forceDelegation.enforce`.
+    const delegationBlock = evaluateForceAgentDelegation({
+      toolName,
+      stateDir,
+      loadOmcConfig,
+    });
+    if (delegationBlock) {
+      // Force-delegation preflight returns `{ decision: 'block', reason }` to
+      // match the agent-heavy preflight contract. Translate to the
+      // Claude Code hookSpecificOutput shape (`permissionDecision: 'deny'`).
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: delegationBlock.reason,
+        },
+      }));
+      return;
+    }
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
