@@ -268,6 +268,7 @@ For `/goal` behavior, rely on Claude Code/Anthropic sources: the [Claude Code `/
 - **19 specialized agents** (with tier variants) for architecture, research, design, testing, data science
 - **Smart model routing** - Haiku for simple tasks, Opus for complex reasoning
 - **Automatic delegation** - Right agent for the job, every time
+- **[Model × Agent Compatibility Matrix](docs/agents/model-compatibility.md)** - Which model to pair with each agent, with premium/balanced/budget presets
 
 ### Developer Experience
 
@@ -500,6 +501,7 @@ See `scripts/openclaw-gateway-demo.mjs` for a reference gateway that relays Open
 - **[Migration Guide](docs/MIGRATION.md)** - Upgrade from v2.x
 - **[Architecture](docs/ARCHITECTURE.md)** - How it works under the hood
 - **[Performance Monitoring](docs/PERFORMANCE-MONITORING.md)** - Agent tracking, debugging, and optimization
+- **[Model × Agent Compatibility Matrix](docs/agents/model-compatibility.md)** - Which model to pair with each agent (premium / balanced / budget presets)
 - **[Security Guide](SECURITY.md)** - Enterprise deployment and hardening
 
 ---
