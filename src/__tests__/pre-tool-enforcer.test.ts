@@ -1823,3 +1823,166 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     ).toBe(false);
   });
 });
+
+// === Force-agent-delegation tests (issue #3095) ===
+
+describe('pre-tool-enforcer force-agent-delegation enforcement', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-enforcer-fad-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeDelegationConfig(rules: Array<Record<string, unknown>>, enforce = true): void {
+    writeJson(join(tempDir, '.omc', 'config.json'), {
+      routing: {
+        forceDelegation: { enforce, rules },
+      },
+    });
+  }
+
+  it('does nothing when force-delegation config is absent (default off)', () => {
+    for (let i = 0; i < 5; i++) {
+      const output = runPreToolEnforcer({
+        tool_name: 'Read',
+        toolInput: { file_path: `${tempDir}/file-${i}.ts` },
+        cwd: tempDir,
+        session_id: 'session-fad-no-config',
+      });
+      expect(output.continue).toBe(true);
+      const hookOutput = (output.hookSpecificOutput as Record<string, unknown>) || {};
+      expect(hookOutput.permissionDecision).toBeUndefined();
+    }
+  });
+
+  it('does nothing when enforce: false even if rules are defined', () => {
+    writeDelegationConfig(
+      [{ pattern: 'Read', threshold: { count: 2, windowSeconds: 60 } }],
+      false,
+    );
+    for (let i = 0; i < 5; i++) {
+      const output = runPreToolEnforcer({
+        tool_name: 'Read',
+        toolInput: { file_path: `${tempDir}/file-${i}.ts` },
+        cwd: tempDir,
+        session_id: 'session-fad-disabled',
+      });
+      expect(output.continue).toBe(true);
+      const hookOutput = (output.hookSpecificOutput as Record<string, unknown>) || {};
+      expect(hookOutput.permissionDecision).toBeUndefined();
+    }
+  });
+
+  it('allows tool calls under the configured threshold', () => {
+    writeDelegationConfig([
+      { pattern: 'Read', threshold: { count: 5, windowSeconds: 60 } },
+    ]);
+    for (let i = 0; i < 4; i++) {
+      const output = runPreToolEnforcer({
+        tool_name: 'Read',
+        toolInput: { file_path: `${tempDir}/file-${i}.ts` },
+        cwd: tempDir,
+        session_id: 'session-fad-under',
+      });
+      const hookOutput = (output.hookSpecificOutput as Record<string, unknown>) || {};
+      expect(hookOutput.permissionDecision).toBeUndefined();
+    }
+  });
+
+  it('blocks the call that crosses the threshold and surfaces the configured deny message', () => {
+    const denyMessage =
+      'Too many Reads — spawn Agent(subagent_type=\'oh-my-claudecode:explore\', model=\'haiku\'). Bypass: ALLOW_RAW_READ=1.';
+    writeDelegationConfig([
+      {
+        pattern: 'Read',
+        threshold: { count: 3, windowSeconds: 60 },
+        denyMessage,
+        bypassEnv: 'ALLOW_RAW_READ',
+      },
+    ]);
+
+    let lastOutput: Record<string, unknown> = {};
+    for (let i = 0; i < 3; i++) {
+      lastOutput = runPreToolEnforcer({
+        tool_name: 'Read',
+        toolInput: { file_path: `${tempDir}/file-${i}.ts` },
+        cwd: tempDir,
+        session_id: 'session-fad-block',
+      });
+    }
+
+    const hookOutput = lastOutput.hookSpecificOutput as Record<string, unknown>;
+    expect(lastOutput.continue).toBe(true);
+    expect(hookOutput.hookEventName).toBe('PreToolUse');
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason).toBe(denyMessage);
+  });
+
+  it('respects the per-rule bypass env var', () => {
+    writeDelegationConfig([
+      {
+        pattern: 'Read',
+        threshold: { count: 2, windowSeconds: 60 },
+        bypassEnv: 'ALLOW_RAW_READ',
+      },
+    ]);
+
+    for (let i = 0; i < 5; i++) {
+      const output = runPreToolEnforcerWithEnv(
+        {
+          tool_name: 'Read',
+          toolInput: { file_path: `${tempDir}/file-${i}.ts` },
+          cwd: tempDir,
+          session_id: 'session-fad-bypass',
+        },
+        { ALLOW_RAW_READ: '1' },
+      );
+      const hookOutput = (output.hookSpecificOutput as Record<string, unknown>) || {};
+      expect(hookOutput.permissionDecision).toBeUndefined();
+    }
+  });
+
+  it('matches only the configured pattern and ignores other tools', () => {
+    writeDelegationConfig([
+      { pattern: 'Read', threshold: { count: 2, windowSeconds: 60 } },
+    ]);
+
+    for (let i = 0; i < 5; i++) {
+      const output = runPreToolEnforcer({
+        tool_name: 'Bash',
+        toolInput: { command: `echo ${i}` },
+        cwd: tempDir,
+        session_id: 'session-fad-other-tool',
+      });
+      const hookOutput = (output.hookSpecificOutput as Record<string, unknown>) || {};
+      expect(hookOutput.permissionDecision).toBeUndefined();
+    }
+  });
+
+  it('supports alternation patterns for Read|Grep|Glob', () => {
+    writeDelegationConfig([
+      {
+        pattern: 'Read|Grep|Glob',
+        threshold: { count: 3, windowSeconds: 60 },
+        denyMessage: 'Investigation budget exhausted — delegate to explore agent.',
+      },
+    ]);
+
+    runPreToolEnforcer({ tool_name: 'Read', cwd: tempDir, session_id: 'session-fad-alt' });
+    runPreToolEnforcer({ tool_name: 'Grep', cwd: tempDir, session_id: 'session-fad-alt', toolInput: { pattern: 'foo' } });
+    const third = runPreToolEnforcer({
+      tool_name: 'Glob',
+      cwd: tempDir,
+      session_id: 'session-fad-alt',
+      toolInput: { pattern: '**/*.ts' },
+    });
+
+    const hookOutput = third.hookSpecificOutput as Record<string, unknown>;
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(String(hookOutput.permissionDecisionReason)).toContain('Investigation budget');
+  });
+});
