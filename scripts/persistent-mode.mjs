@@ -5,7 +5,7 @@
  * Minimal continuation enforcer for all OMC modes.
  * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
  *
- * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
+ * Supported modes: ralph, ultragoal, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
  */
 
 import {
@@ -193,6 +193,17 @@ const TEAM_TERMINAL_PHASES = new Set([
   "aborted",
   "terminated",
   "done",
+]);
+const ULTRAGOAL_TERMINAL_PHASES = new Set([
+  "complete",
+  "completed",
+  "done",
+  "all-done",
+  "all_done",
+  "failed",
+  "cancelled",
+  "canceled",
+  "aborted",
 ]);
 const TEAM_ACTIVE_PHASES = new Set([
   "team-plan",
@@ -499,6 +510,55 @@ function isAuthoritativeModeActive(stateDir, mode, loaded, sessionId) {
   return true;
 }
 
+function normalizePhaseValue(value) {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim().toLowerCase()
+    : "";
+}
+
+function isUltragoalTerminalState(state, directory) {
+  if (!state || typeof state !== "object") return false;
+  if (state.active === false) return true;
+  if (typeof state.completed_at === "string" && state.completed_at.length > 0) return true;
+  if (state.all_done === true || state.done === true) return true;
+
+  const phase = normalizePhaseValue(state.current_phase ?? state.phase ?? state.status);
+  if (phase && ULTRAGOAL_TERMINAL_PHASES.has(phase)) return true;
+
+  const plan = readJsonFile(join(directory, ".omc", "ultragoal", "goals.json"));
+  if (!plan || typeof plan !== "object") return false;
+  if (plan.aggregateCompletion?.status === "complete") return true;
+  if (!Array.isArray(plan.goals) || plan.goals.length === 0) return false;
+  return plan.goals.every((goal) => {
+    const status = normalizePhaseValue(goal?.status);
+    return status === "complete" || status === "review_blocked";
+  });
+}
+
+function getUltragoalObjective(state, directory) {
+  const candidates = [
+    state?.claude_goal_objective,
+    state?.claudeGoalObjective,
+    state?.codex_objective,
+    state?.codexObjective,
+    state?.goal_objective,
+    state?.goalObjective,
+    state?.objective,
+    state?.prompt,
+    state?.original_prompt,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const plan = readJsonFile(join(directory, ".omc", "ultragoal", "goals.json"));
+  if (typeof plan?.claudeObjective === "string" && plan.claudeObjective.trim()) return plan.claudeObjective.trim();
+  if (typeof plan?.aggregateCompletion?.objective === "string" && plan.aggregateCompletion.objective.trim()) {
+    return plan.aggregateCompletion.objective.trim();
+  }
+  const activeGoal = Array.isArray(plan?.goals) ? plan.goals.find((goal) => goal?.status === "in_progress") : null;
+  if (typeof activeGoal?.objective === "string" && activeGoal.objective.trim()) return activeGoal.objective.trim();
+  return "";
+}
 
 function isSessionCancelInProgress(stateDir, sessionId) {
   const isActiveSignal = (signalPath) => {
@@ -876,6 +936,12 @@ async function main() {
       "ralph-state.json",
       sessionId,
     );
+    const ultragoal = readStateFileWithSession(
+      stateDir,
+      globalStateDir,
+      "ultragoal-state.json",
+      sessionId,
+    );
     const autopilot = readStateFileWithSession(
       stateDir,
       globalStateDir,
@@ -1009,6 +1075,47 @@ async function main() {
             reason: ralphExtendedReason,
           }),
         );
+        return;
+      }
+    }
+
+    // Priority 1.5: Ultragoal durable goal execution
+    if (
+      isAuthoritativeModeActive(stateDir, "ultragoal", ultragoal, sessionId) && !isAwaitingConfirmation(ultragoal.state) &&
+      !isStaleState(ultragoal.state) &&
+      isStateForCurrentProject(ultragoal.state, directory, ultragoal.isGlobal)
+    ) {
+      const sessionMatches = hasValidSessionId
+        ? ultragoal.state.session_id === sessionId
+        : !ultragoal.state.session_id || ultragoal.state.session_id === sessionId;
+      if (sessionMatches && !isUltragoalTerminalState(ultragoal.state, directory)) {
+        const newCount = (ultragoal.state.reinforcement_count || 0) + 1;
+        const maxReinforcements = ultragoal.state.max_reinforcements || 50;
+
+        if (newCount > maxReinforcements) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
+
+        const toolError = readLastToolError(stateDir);
+        const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+        ultragoal.state.reinforcement_count = newCount;
+        ultragoal.state.last_checked_at = new Date().toISOString();
+        if (!shouldWriteStateBack(ultragoal.path)) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
+        writeJsonFile(ultragoal.path, ultragoal.state);
+
+        let reason = `[ULTRAGOAL #${newCount}/${maxReinforcements}] Ultragoal mode is active. Continue the durable goal workflow, keep the matching Claude /goal active, and checkpoint .omc/ultragoal/ledger.jsonl before stopping. When all ultragoal stories are complete and the final quality gate passes, run /oh-my-claudecode:cancel to cleanly exit.`;
+        const objective = getUltragoalObjective(ultragoal.state, directory);
+        if (objective) reason += `\nClaude /goal objective: ${objective}`;
+        if (errorGuidance) {
+          reason = errorGuidance + reason;
+        }
+
+        console.log(JSON.stringify({ decision: "block", reason }));
         return;
       }
     }

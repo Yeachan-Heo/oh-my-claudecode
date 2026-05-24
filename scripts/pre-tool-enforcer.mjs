@@ -311,6 +311,7 @@ const MODE_STATE_FILES = [
   'autopilot-state.json',
   'ultrapilot-state.json',
   'ralph-state.json',
+  'ultragoal-state.json',
   'ultrawork-state.json',
   'ultraqa-state.json',
   'pipeline-state.json',
@@ -463,6 +464,148 @@ function readJsonFile(filePath) {
   } catch {
     return null;
   }
+}
+
+const STATE_STALE_MS = 2 * 60 * 60 * 1000;
+const ULTRAGOAL_TERMINAL_PHASES = new Set([
+  'complete',
+  'completed',
+  'done',
+  'all-done',
+  'all_done',
+  'failed',
+  'cancelled',
+  'canceled',
+  'aborted',
+]);
+
+function isStaleModeState(state) {
+  if (!state || typeof state !== 'object') return true;
+  const timestamps = [state.last_checked_at, state.updated_at, state.started_at]
+    .filter(value => typeof value === 'string' && value.length > 0)
+    .map(value => new Date(value).getTime())
+    .filter(value => Number.isFinite(value));
+  if (timestamps.length === 0) return true;
+  return Date.now() - Math.max(...timestamps) > STATE_STALE_MS;
+}
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+}
+
+function normalizePhase(value) {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : '';
+}
+
+function isUltragoalTerminalState(state, directory) {
+  if (!state || typeof state !== 'object') return true;
+  if (state.active === false) return true;
+  if (typeof state.completed_at === 'string' && state.completed_at.length > 0) return true;
+  if (state.all_done === true || state.done === true) return true;
+
+  const phase = normalizePhase(state.current_phase ?? state.phase ?? state.status);
+  if (phase && ULTRAGOAL_TERMINAL_PHASES.has(phase)) return true;
+
+  const plan = readJsonFile(join(directory, '.omc', 'ultragoal', 'goals.json'));
+  if (!plan || typeof plan !== 'object') return false;
+  if (plan.aggregateCompletion?.status === 'complete') return true;
+  if (!Array.isArray(plan.goals) || plan.goals.length === 0) return false;
+  return plan.goals.every(goal => {
+    const status = normalizePhase(goal?.status);
+    return status === 'complete' || status === 'review_blocked';
+  });
+}
+
+function readSessionModeState(stateDir, mode, sessionId) {
+  const filename = `${mode}-state.json`;
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  const candidates = safeSessionId
+    ? [join(stateDir, 'sessions', safeSessionId, filename), join(stateDir, filename)]
+    : [join(stateDir, filename)];
+  for (const statePath of candidates) {
+    const state = readJsonFile(statePath);
+    if (!state) continue;
+    if (safeSessionId && state.session_id && state.session_id !== safeSessionId) continue;
+    return { state, path: statePath };
+  }
+  return { state: null, path: '' };
+}
+
+function getExpectedUltragoalObjective(state, directory) {
+  const candidates = [
+    state?.claude_goal_objective,
+    state?.claudeGoalObjective,
+    state?.codex_objective,
+    state?.codexObjective,
+    state?.goal_objective,
+    state?.goalObjective,
+    state?.objective,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  const plan = readJsonFile(join(directory, '.omc', 'ultragoal', 'goals.json'));
+  if (typeof plan?.claudeObjective === 'string' && plan.claudeObjective.trim()) return plan.claudeObjective.trim();
+  if (typeof plan?.aggregateCompletion?.objective === 'string' && plan.aggregateCompletion.objective.trim()) {
+    return plan.aggregateCompletion.objective.trim();
+  }
+  const activeGoal = Array.isArray(plan?.goals) ? plan.goals.find(goal => goal?.status === 'in_progress') : null;
+  if (typeof activeGoal?.objective === 'string' && activeGoal.objective.trim()) return activeGoal.objective.trim();
+  return '';
+}
+
+function extractClaudeGoalSnapshot(data) {
+  const candidates = [
+    data.goal,
+    data.claude_goal,
+    data.claudeGoal,
+    data.goal_state,
+    data.goalState,
+    data.codex_goal,
+    data.codexGoal,
+    data.context?.goal,
+    data.context?.claude_goal,
+  ];
+  for (const candidate of candidates) {
+    const goal = candidate?.goal && typeof candidate.goal === 'object' ? candidate.goal : candidate;
+    if (goal && typeof goal === 'object') {
+      const objective = goal.objective ?? goal.condition ?? goal.prompt ?? goal.description;
+      const status = goal.status ?? goal.state;
+      if (typeof objective === 'string' || typeof status === 'string') {
+        return { objective: typeof objective === 'string' ? objective : '', status: typeof status === 'string' ? status : '' };
+      }
+    }
+  }
+  return null;
+}
+
+function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
+  if (process.env.ALLOW_ULTRAGOAL_WITHOUT_GOAL === '1') return null;
+  const toolName = data.tool_name || data.toolName || '';
+  const toolInput = data.toolInput || data.tool_input || {};
+  if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return null;
+  const loaded = readSessionModeState(stateDir, 'ultragoal', sessionId);
+  const state = loaded.state;
+  if (!state?.active) return null;
+  if (isStaleModeState(state)) return null;
+  if (state.project_path && resolve(String(state.project_path)) !== resolve(directory)) return null;
+  if (isUltragoalTerminalState(state, directory)) return null;
+
+  const expected = getExpectedUltragoalObjective(state, directory);
+  const actual = extractClaudeGoalSnapshot(data);
+  const actualObjective = normalizeText(actual?.objective);
+  const expectedObjective = normalizeText(expected);
+  const status = normalizePhase(actual?.status);
+  const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
+  const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
+
+  if (objectiveMatches && activeStatus) return null;
+
+  const mismatch = actualObjective
+    ? `current Claude /goal appears unrelated: "${actual.objective}".`
+    : 'no active Claude /goal snapshot was visible to the hook.';
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
@@ -681,7 +824,7 @@ const SKILL_PROTECTION_CONFIGS = {
 
 const SKILL_PROTECTION_MAP = {
   // === Already have mode state → no additional protection ===
-  autopilot: 'none', ralph: 'none', ultrawork: 'none', team: 'none',
+  autopilot: 'none', ralph: 'none', ultragoal: 'none', ultrawork: 'none', team: 'none',
   'omc-teams': 'none', ultraqa: 'none', cancel: 'none',
 
   // === Instant / read-only → no protection needed ===
@@ -841,6 +984,9 @@ function confirmSkillModeStates(stateDir, skillName, sessionId) {
       clearAwaitingConfirmationFlag(stateDir, 'ralph', sessionId);
       clearAwaitingConfirmationFlag(stateDir, 'ultrawork', sessionId);
       break;
+    case 'ultragoal':
+      clearAwaitingConfirmationFlag(stateDir, 'ultragoal', sessionId);
+      break;
     case 'ultrawork':
       clearAwaitingConfirmationFlag(stateDir, 'ultrawork', sessionId);
       break;
@@ -920,6 +1066,20 @@ async function main() {
         : typeof data.sessionId === 'string'
           ? data.sessionId
           : '';
+
+    const ultragoalDenyReason = evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data);
+    if (ultragoalDenyReason) {
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: ultragoalDenyReason
+        }
+      }));
+      return;
+    }
+
     const modeActive = hasActiveMode(stateDir, sessionId);
 
     // Force-inherit check: deny Task/Agent calls with invalid model param when forceInherit is

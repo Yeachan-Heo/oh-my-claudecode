@@ -473,7 +473,7 @@ function sanitizePromptForState(prompt) {
     : base;
 }
 const MODE_REFERENCE_PATTERN =
-  /\b(?:ralph|autopilot|auto[\s-]?pilot|ultrawork|ulw|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|ccg|claude-codex-gemini|deerflow)\b/gi;
+  /\b(?:ralph|autopilot|auto[\s-]?pilot|ultragoal|ultrawork|ulw|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|ccg|claude-codex-gemini|deerflow)\b/gi;
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -690,6 +690,21 @@ function activateState(directory, prompt, stateName, sessionId) {
       started_at: now,
       session_id: sessionId || undefined,
       project_path: directory,
+      awaiting_confirmation: true,
+      awaiting_confirmation_set_at: now,
+      last_checked_at: now
+    };
+  } else if (stateName === 'ultragoal') {
+    // Ultragoal persists a durable goal workflow and requires Claude /goal parity.
+    state = {
+      active: true,
+      started_at: now,
+      current_phase: 'executing',
+      original_prompt: safePrompt,
+      session_id: sessionId || undefined,
+      project_path: directory,
+      reinforcement_count: 0,
+      max_reinforcements: 50,
       awaiting_confirmation: true,
       awaiting_confirmation_set_at: now,
       last_checked_at: now
@@ -924,7 +939,7 @@ function resolveConflicts(matches) {
   // Team keyword detection removed — team is now explicit-only via /team skill.
 
   // Sort by priority order
-  const priorityOrder = ['cancel','ralph','autopilot','ultrawork',
+  const priorityOrder = ['cancel','ralph','ultragoal','autopilot','ultrawork',
     'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','code-review','security-review','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
@@ -1033,6 +1048,11 @@ async function main() {
         hasActionableKeyword(cleanPrompt, /\bend\s+to\s+end\b/i) ||
         hasActionableKeyword(cleanPrompt, /\be2e\s+this\b/i)) {
       matches.push({ name: 'autopilot', args: '' });
+    }
+
+    // Ultragoal keywords
+    if (hasActionableKeyword(cleanPrompt, /\b(ultragoal)\b/i)) {
+      matches.push({ name: 'ultragoal', args: '' });
     }
 
     // Ultrapilot keywords removed — routed to team which is now explicit-only (/team).
@@ -1185,13 +1205,13 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork', 'swarm', 'ralplan'], sessionId);
+      clearStateFiles(directory, ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'swarm', 'ralplan'], sessionId);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }
 
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
-    const stateModes = resolved.filter(m => ['ralph', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
+    const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
       activateState(directory, prompt, mode.name, sessionId);
     }

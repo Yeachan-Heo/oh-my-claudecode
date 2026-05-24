@@ -228,7 +228,7 @@ See the [Magic Keywords](#magic-keywords) section for the full keyword list.
 Enforces continuation when an execution mode is active. This is the hook that keeps skills like autopilot, ralph, and ultrawork running.
 
 - **Event**: Stop
-- **Behavior**: Checks `.omc/state/` for active mode state files. If any mode (ralph, autopilot, ultrawork, ultraqa, team, pipeline) is active, injects a reinforcement message to prevent Claude from stopping.
+- **Behavior**: Checks `.omc/state/` for active mode state files. If any mode (ralph, ultragoal, autopilot, ultrawork, ultraqa, team, pipeline) is active, injects a reinforcement message to prevent Claude from stopping.
 - **Reinforcement message**: "The boulder never stops" — prompts Claude to continue working
 - **Staleness check**: States older than 2 hours are treated as inactive to prevent stale state from blocking new sessions
 - **Notification**: Sends Discord/Telegram/Slack notification on first stop (if configured)
@@ -255,6 +255,17 @@ Execution mode hooks manage state files in the `.omc/state/` directory.
 ```
 
 When a session ID is present, state is stored in session scope under `.omc/state/sessions/{sessionId}/`.
+
+
+#### ultragoal-state.json lifecycle
+
+`ultragoal-state.json` is the session-scoped Stop/PreToolUse guard for `$ultragoal` runs. The durable plan and audit trail remain `.omc/ultragoal/goals.json` and `.omc/ultragoal/ledger.jsonl`; the state file only records the active runtime guard.
+
+- **Location**: `.omc/state/sessions/{sessionId}/ultragoal-state.json` when a Claude session id is available; legacy fallback is `.omc/state/ultragoal-state.json`.
+- **Active fields**: `active: true`, `session_id`, `project_path`, `started_at`, `last_checked_at`, `current_phase`, optional `claude_goal_objective`, and `reinforcement_count`.
+- **Stop hook**: reinforces only when the state is active, fresh (within the normal 2-hour mode-state freshness window), session-matching, and project-matching. Terminal phases (`complete`, `completed`, `done`, `all-done`, `failed`, `cancelled`) and all-done `.omc/ultragoal/goals.json` plans are ignored.
+- **PreToolUse guard**: while active, tools are denied unless the hook can see a matching active Claude `/goal` snapshot. Use `ALLOW_ULTRAGOAL_WITHOUT_GOAL=1` only as an intentional local bypass.
+- **Completion**: after the final quality gate and ultragoal checkpoint, mark the state inactive or run `/oh-my-claudecode:cancel` so the state file is cleared with other workflow state.
 
 #### Canceling a Mode
 

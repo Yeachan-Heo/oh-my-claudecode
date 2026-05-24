@@ -111,6 +111,7 @@ Standardized state file locations.
 | Mode | State File |
 |------|-----------|
 | ralph | `ralph-state.json` |
+| ultragoal | `ultragoal-state.json` |
 | autopilot | `autopilot-state.json` |
 | ultrawork | `ultrawork-state.json` |
 |  | `-state.json` |
