@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -59,6 +59,27 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
     expect(result.hookSpecificOutput?.permissionDecision).not.toBe('deny');
   });
 
+  it('allows ultragoal CLI bootstrap commands before Claude /goal is visible', () => {
+    const cwd = makeTempProject('omc-ultragoal-bootstrap-');
+    writeUltragoalState(cwd);
+
+    const createGoals = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Bash',
+      tool_input: { command: 'omc ultragoal create-goals --brief "fix issue"' },
+    });
+    const completeGoals = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Bash',
+      tool_input: { command: 'omc ultragoal complete-goals' },
+    });
+
+    expect(createGoals.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    expect(completeGoals.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+  });
+
   it('denies PreToolUse when active ultragoal has no visible Claude /goal', () => {
     const cwd = makeTempProject('omc-ultragoal-deny-');
     writeUltragoalState(cwd);
@@ -108,6 +129,29 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
 
     expect(stop.continue).toBe(true);
     expect(stop.decision).toBeUndefined();
+  });
+
+  it('does not activate ultragoal state for unrelated prose mentions', () => {
+    const cwd = makeTempProject('omc-ultragoal-keyword-prose-');
+
+    runHook(keywordScript, {
+      cwd,
+      session_id: 'session-a',
+      prompt: 'Review whether ultragoal keyword activation steals unrelated prompts',
+    });
+
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'session-a', 'ultragoal-state.json');
+    expect(existsSync(statePath)).toBe(false);
+  });
+
+  it('activates ultragoal session state from explicit natural-language invocation', () => {
+    const cwd = makeTempProject('omc-ultragoal-keyword-natural-');
+
+    runHook(keywordScript, { cwd, session_id: 'session-a', prompt: 'run ultragoal for issue #3098' });
+
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'session-a', 'ultragoal-state.json');
+    const state = JSON.parse(execFileSync('cat', [statePath], { encoding: 'utf-8' }));
+    expect(state.active).toBe(true);
   });
 
   it('activates ultragoal session state from keyword-detector', () => {

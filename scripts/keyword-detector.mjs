@@ -630,6 +630,46 @@ function hasActionableKeyword(text, pattern) {
   return false;
 }
 
+
+function hasExplicitWorkflowInvocationContext(text, position, keywordLength, keywordText) {
+  const prefix = text.slice(0, position);
+  if (/^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)$/i.test(prefix)) {
+    return true;
+  }
+
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const context = text.slice(start, end);
+  return hasActivationIntentNearKeyword(context, keywordText);
+}
+
+function hasExplicitActionableKeyword(text, pattern) {
+  const searchText = looksLikeSystemEcho(text)
+    ? stripSystemEchoes(text)
+    : text;
+
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+
+  for (const match of searchText.matchAll(globalPattern)) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    if (isInformationalKeywordContext(searchText, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    if (!hasExplicitWorkflowInvocationContext(searchText, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 function hasActionableRalplanKeyword(text, pattern) {
   // Same echo guard as hasActionableKeyword.
   const searchText = looksLikeSystemEcho(text)
@@ -1051,7 +1091,7 @@ async function main() {
     }
 
     // Ultragoal keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(ultragoal)\b/i)) {
+    if (hasExplicitActionableKeyword(cleanPrompt, /\b(ultragoal)\b/i)) {
       matches.push({ name: 'ultragoal', args: '' });
     }
 

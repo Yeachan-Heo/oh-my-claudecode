@@ -580,11 +580,19 @@ function extractClaudeGoalSnapshot(data) {
   return null;
 }
 
+
+function isUltragoalBootstrapTool(toolName, toolInput) {
+  if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return true;
+  if (toolName !== 'Bash') return false;
+  const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode)\s+ultragoal\s+(?:create(?:-goals)?|create-goals|complete(?:-goals)?|complete-goals|next|start-next|status)\b/.test(command);
+}
+
 function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
   if (process.env.ALLOW_ULTRAGOAL_WITHOUT_GOAL === '1') return null;
   const toolName = data.tool_name || data.toolName || '';
   const toolInput = data.toolInput || data.tool_input || {};
-  if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return null;
+  if (isUltragoalBootstrapTool(toolName, toolInput)) return null;
   const loaded = readSessionModeState(stateDir, 'ultragoal', sessionId);
   const state = loaded.state;
   if (!state?.active) return null;
