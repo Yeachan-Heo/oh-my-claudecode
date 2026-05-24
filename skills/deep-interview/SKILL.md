@@ -262,7 +262,12 @@ Round {n} | Component: {target_component_name} | Targeting: {weakest_dimension} 
 {question}
 ```
 
-Options should include contextually relevant choices plus free-text.
+Options should include contextually relevant choices plus two free-text entry points with distinct behaviors:
+
+- **"Type your answer"** — treat the user's input as their choice for this round and proceed immediately to Step 2c.
+- **"Chat about this"** — treat the user's text as the opening of a focused discussion. Respond with a follow-up or clarification, then continue with `AskUserQuestion`. The round resolves when the user selects a non-chat option, submits a "Type your answer" input, or the discussion itself yields a clear answer (e.g. the user adopts a suggestion, or proactively supplies the missing information). When clarity emerges naturally from the discussion, record the conclusion and advance to Step 2c without re-presenting the original question.
+
+The key distinction: both options accept user text immediately. "Type your answer" resolves the round directly; "Chat about this" opens a discussion that resolves once clarity is reached.
 
 ### Step 2c: Score Ambiguity
 
