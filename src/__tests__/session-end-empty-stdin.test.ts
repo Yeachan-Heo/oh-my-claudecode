@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
-const sessionEndScript = join(process.cwd(), 'scripts', 'session-end.mjs');
+const sessionEndScripts = [
+  ['session-end', join(process.cwd(), 'scripts', 'session-end.mjs')],
+  ['wiki-session-end', join(process.cwd(), 'scripts', 'wiki-session-end.mjs')],
+] as const;
 const fallback = JSON.stringify({ continue: true, suppressOutput: true });
 
-describe('session-end hook stdin handling', () => {
-  it.each([
-    ['empty stdin', ''],
-    ['whitespace stdin', '  \n\t  '],
-  ])('treats %s as a clean no-op', (_label, input) => {
-    const result = spawnSync(process.execPath, [sessionEndScript], {
+describe('SessionEnd hook stdin handling', () => {
+  it.each(sessionEndScripts.flatMap(([name, script]) => [
+    [name, 'empty stdin', script, ''],
+    [name, 'whitespace stdin', script, '  \n\t  '],
+  ] as const))('%s treats %s as a clean no-op', (_name, _label, script, input) => {
+    const result = spawnSync(process.execPath, [script], {
       input,
       encoding: 'utf-8',
     });

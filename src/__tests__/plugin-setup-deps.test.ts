@@ -100,13 +100,14 @@ describe('plugin-setup.mjs hook command portability', () => {
   // does not break these tests; a real behavior regression does.
   const UNIX_PREFIX =
     'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+  const WINDOWS_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
 
   /** Run one command string through the same patching rules as plugin-setup.mjs. */
   function patchCommand(cmd: string, prefix = UNIX_PREFIX): string {
     const findNodePattern =
       /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
     const currentFindNodePattern =
-      /^"\/bin\/sh" "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
 
     if (cmd.startsWith('node ') && cmd.includes('/scripts/run.cjs')) {
       return cmd.replace(/^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+/, prefix);
@@ -162,6 +163,27 @@ describe('plugin-setup.mjs hook command portability', () => {
     const result = patchCommand(absolute);
     expect(result).toBe(
       `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`,
+    );
+  });
+
+  it('keeps generated SessionEnd hooks native-Windows safe without sh', () => {
+    const sessionEnd =
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs';
+    const wikiSessionEnd =
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/wiki-session-end.mjs';
+
+    expect(patchCommand(sessionEnd, WINDOWS_PREFIX)).toBe(sessionEnd);
+    expect(patchCommand(wikiSessionEnd, WINDOWS_PREFIX)).toBe(wikiSessionEnd);
+    expect(sessionEnd).not.toContain('sh ');
+    expect(wikiSessionEnd).not.toContain('sh ');
+  });
+
+  it('normalizes current sh find-node commands to node run.cjs on Windows', () => {
+    const current =
+      'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs';
+
+    expect(patchCommand(current, WINDOWS_PREFIX)).toBe(
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
     );
   });
 });
