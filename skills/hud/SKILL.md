@@ -172,6 +172,7 @@ You can manually edit the config file. Each option can be set individually - any
   "preset": "focused",
   "elements": {
     "omcLabel": true,
+    "updateNotification": true,
     "ralph": true,
     "autopilot": true,
     "prdStory": true,

@@ -92,6 +92,7 @@ export const DEFAULT_HUD_CONFIG = {
         model: true, // Show only when Claude Code statusline stdin provides a model
         modelFormat: 'versioned', // Preserve model version by default
         omcLabel: true,
+        updateNotification: true, // Preserve existing update prompt behavior by default
         rateLimits: true, // Show rate limits by default
         ralph: true,
         autopilot: true,
@@ -151,6 +152,7 @@ export const PRESET_CONFIGS = {
         model: true,
         modelFormat: 'versioned',
         omcLabel: true,
+        updateNotification: true,
         rateLimits: true,
         ralph: true,
         autopilot: true,
@@ -193,6 +195,7 @@ export const PRESET_CONFIGS = {
         model: true,
         modelFormat: 'versioned',
         omcLabel: true,
+        updateNotification: true,
         rateLimits: true,
         ralph: true,
         autopilot: true,
@@ -235,6 +238,7 @@ export const PRESET_CONFIGS = {
         model: true,
         modelFormat: 'versioned',
         omcLabel: true,
+        updateNotification: true,
         rateLimits: true,
         ralph: true,
         autopilot: true,
@@ -277,6 +281,7 @@ export const PRESET_CONFIGS = {
         model: true,
         modelFormat: 'versioned',
         omcLabel: true,
+        updateNotification: true,
         rateLimits: false,
         ralph: true,
         autopilot: true,
@@ -319,6 +324,7 @@ export const PRESET_CONFIGS = {
         model: true,
         modelFormat: 'versioned',
         omcLabel: true,
+        updateNotification: true,
         rateLimits: true,
         ralph: true,
         autopilot: true,

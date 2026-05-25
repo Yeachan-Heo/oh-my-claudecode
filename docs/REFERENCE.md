@@ -994,6 +994,7 @@ Configure HUD elements in `~/.claude/settings.json`:
 | `gitRepo`    | Show git repository name                                                                                             | `false` |
 | `gitBranch`  | Show current git branch                                                                                              | `false` |
 | `omcLabel`   | Show [OMC] label                                                                                                     | `true`  |
+| `updateNotification` | Show available-update prompt text after the OMC label                                                                  | `true`  |
 | `contextBar` | Show context window usage                                                                                            | `true`  |
 | `agents`     | Show active agents count                                                                                             | `true`  |
 | `todos`      | Show todo progress                                                                                                   | `true`  |

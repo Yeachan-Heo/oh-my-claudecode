@@ -234,7 +234,7 @@ export async function render(context, config) {
     // -- main-group elements (default: main statusline) --
     if (enabledElements.omcLabel) {
         const versionTag = context.omcVersion ? `#${context.omcVersion}` : "";
-        if (context.updateAvailable) {
+        if (enabledElements.updateNotification !== false && context.updateAvailable) {
             rendered.set("omcLabel", bold(`[OMC${versionTag}] -> ${context.updateAvailable} omc update`));
         }
         else {

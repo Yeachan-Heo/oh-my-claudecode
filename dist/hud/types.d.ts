@@ -388,6 +388,7 @@ export interface HudElementConfig {
     model: boolean;
     modelFormat: ModelFormat;
     omcLabel: boolean;
+    updateNotification?: boolean;
     rateLimits: boolean;
     ralph: boolean;
     autopilot: boolean;
