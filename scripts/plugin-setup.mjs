@@ -107,14 +107,14 @@ try {
 // Patch hooks.json to keep plugin-provided hook commands portable across
 // machines. Hooks must not bake the installer's local Node path into package
 // metadata, but they must also not depend on `node` being on hook PATH. The
-// portable Unix bootstrap is /bin/sh + find-node.sh + run.cjs; setup still
+// portable Unix bootstrap is sh + find-node.sh + run.cjs; setup still
 // persists an absolute Node path to .omc-config.json for find-node.sh.
 //
 // The source hooks.json uses shell-expanded `$CLAUDE_PLUGIN_ROOT` path segments
 // so bash preserves spaces in Windows profile paths.
 const runCjsHookPrefix = process.platform === 'win32'
   ? 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs '
-  : '"/bin/sh" "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+  : 'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
 //
 // Three patterns are handled:
 //  1. Bare run.cjs format – node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ...
@@ -132,7 +132,7 @@ try {
     const findNodePattern =
       /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
     const currentFindNodePattern =
-      /^"\/bin\/sh" "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
 
     for (const groups of Object.values(data.hooks ?? {})) {
       for (const group of groups) {

@@ -434,18 +434,9 @@ describe('Contract 5: no hardcoded ~/.claude in LLM-consumed artifacts', () => {
 describe('Contract 9: hooks/hooks.json portability', () => {
   const HOOKS_JSON_PATH = join(REPO_ROOT, 'hooks', 'hooks.json');
 
-  // Other test suites (e.g. hud-marketplace-resolution) call plugin-setup.mjs which
-  // rewrites hooks/hooks.json with an absolute node binary path. When vitest runs test
-  // files in parallel workers, that mutation can arrive before Contract 9 reads the
-  // file. Restore to the committed state before this suite runs so the check is always
-  // against the canonical source, not a side-effected copy.
-  beforeAll(() => {
-    try {
-      execFileSync('git', ['checkout', '--', 'hooks/hooks.json'], { cwd: REPO_ROOT, stdio: 'pipe' });
-    } catch {
-      // Non-fatal: if git is unavailable or hooks.json is already clean, proceed anyway.
-    }
-  });
+  // This suite checks the current worktree source manifest directly. Do not
+  // restore hooks/hooks.json from git here: hook portability hotfixes intentionally
+  // change that source file, and a checkout would hide the working-tree contract.
 
   it('all hook commands reference $CLAUDE_PLUGIN_ROOT', () => {
     if (!existsSync(HOOKS_JSON_PATH)) return;
@@ -469,6 +460,33 @@ describe('Contract 9: hooks/hooks.json portability', () => {
       expect.fail(
         `Found hook commands not using $CLAUDE_PLUGIN_ROOT:\n${details}\n\n` +
         `All plugin hook commands must reference $CLAUDE_PLUGIN_ROOT for portability.`
+      );
+    }
+  });
+
+
+  it('source hook commands do not hardcode /bin/sh so native Windows can spawn them', () => {
+    if (!existsSync(HOOKS_JSON_PATH)) return;
+
+    const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
+    const violations: { event: string; command: string }[] = [];
+
+    for (const [eventType, eventHooks] of Object.entries(hooksJson.hooks || {})) {
+      for (const hookGroup of eventHooks as Array<{ hooks: Array<{ type: string; command: string }> }>) {
+        for (const hook of hookGroup.hooks) {
+          if (hook.type !== 'command') continue;
+          if (hook.command.includes('/bin/sh')) {
+            violations.push({ event: eventType, command: hook.command });
+          }
+        }
+      }
+    }
+
+    if (violations.length > 0) {
+      const details = violations.map(v => `  ${v.event}: ${v.command}`).join('\n');
+      expect.fail(
+        `Found hook commands hardcoding /bin/sh:\n${details}\n\n` +
+        `Source hook commands must not hardcode an absolute shell path; use portable sh while preserving find-node.`
       );
     }
   });

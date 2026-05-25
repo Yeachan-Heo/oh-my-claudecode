@@ -25,10 +25,10 @@ function getHookCommands() {
         .filter((command) => typeof command === 'string');
 }
 describe('hooks.json command escaping', () => {
-    it('uses shell-expanded CLAUDE_PLUGIN_ROOT segments instead of pre-expanded ${...} placeholders', () => {
+    it('uses portable sh hook commands without absolute /bin/sh or pre-expanded ${...} placeholders', () => {
         for (const command of getHookCommands()) {
-            expect(command).toContain('"$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh');
-            expect(command).toContain('"$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs');
+            expect(command).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+            expect(command).not.toContain('/bin/sh');
             expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
             expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/');
         }
@@ -37,7 +37,7 @@ describe('hooks.json command escaping', () => {
         const pluginRoot = '/c/Users/First Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10';
         for (const command of getHookCommands()) {
             const argv = expandHookCommandArgv(command, pluginRoot);
-            expect(argv[0]).toBe('/bin/sh');
+            expect(argv[0]).toBe('sh');
             expect(argv[1]).toBe(`${pluginRoot}/scripts/find-node.sh`);
             expect(argv[2]).toBe(`${pluginRoot}/scripts/run.cjs`);
             expect(argv[3]).toContain(`${pluginRoot}/scripts/`);

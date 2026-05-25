@@ -99,7 +99,7 @@ describe('plugin-setup.mjs hook command portability', () => {
   // Tests behavior, not source shape: a cosmetic reformat of the source
   // does not break these tests; a real behavior regression does.
   const UNIX_PREFIX =
-    '"/bin/sh" "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+    'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
 
   /** Run one command string through the same patching rules as plugin-setup.mjs. */
   function patchCommand(cmd: string, prefix = UNIX_PREFIX): string {
@@ -124,7 +124,7 @@ describe('plugin-setup.mjs hook command portability', () => {
     return cmd;
   }
 
-  it('leaves the canonical /bin/sh+find-node+run.cjs command unchanged', () => {
+  it('leaves the canonical sh+find-node+run.cjs command unchanged', () => {
     const canonical =
       `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`;
     expect(patchCommand(canonical)).toBe(canonical);
@@ -146,6 +146,14 @@ describe('plugin-setup.mjs hook command portability', () => {
     expect(result).toBe(
       `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs`,
     );
+  });
+
+  it('keeps source hook commands portable with sh rather than absolute /bin/sh', () => {
+    const source =
+      `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`;
+
+    expect(source).not.toContain('/bin/sh');
+    expect(patchCommand(source)).toBe(source);
   });
 
   it('self-heals an absolute node path baked in at publish time', () => {

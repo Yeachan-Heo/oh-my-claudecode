@@ -8,6 +8,13 @@ async function main() {
   // and doesn't need the default 5s wait. This saves ~4s toward the hook timeout (#1700).
   const input = await readStdin(1000);
 
+  const fallback = { continue: true, suppressOutput: true };
+
+  if (input.trim().length === 0) {
+    console.log(JSON.stringify(fallback));
+    return;
+  }
+
   try {
     const data = JSON.parse(input);
     const { processSessionEnd } = await import('../dist/hooks/session-end/index.js');
@@ -15,7 +22,7 @@ async function main() {
     console.log(JSON.stringify(result));
   } catch (error) {
     console.error('[session-end] Error:', error.message);
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    console.log(JSON.stringify(fallback));
   }
 }
 
