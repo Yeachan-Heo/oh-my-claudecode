@@ -3049,6 +3049,12 @@ function getClaudeConfigDir() {
   }
   return stripTrailingSep((0, import_path.normalize)(configured));
 }
+function getOmcConfigDir() {
+  return (0, import_path.join)(getClaudeConfigDir(), ".omc");
+}
+function getUpdateCheckCachePath() {
+  return (0, import_path.join)(getOmcConfigDir(), "update-check.json");
+}
 var import_path, import_os;
 var init_config_dir = __esm({
   "src/utils/config-dir.ts"() {
@@ -46945,7 +46951,7 @@ async function main2(watchMode = false, skipInit = false) {
       }
     }
     try {
-      const updateCacheFile = (0, import_path128.join)((0, import_os22.homedir)(), ".omc", "update-check.json");
+      const updateCacheFile = getUpdateCheckCachePath();
       await (0, import_promises22.access)(updateCacheFile);
       const content = await (0, import_promises22.readFile)(updateCacheFile, "utf-8");
       const cached2 = JSON.parse(content);
@@ -47075,7 +47081,7 @@ async function main2(watchMode = false, skipInit = false) {
     }
   }
 }
-var import_fs110, import_promises22, import_path128, import_os22, import_child_process37, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs110, import_promises22, import_path128, import_child_process37, import_url16, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -47096,7 +47102,6 @@ var init_hud = __esm({
     import_fs110 = require("fs");
     import_promises22 = require("fs/promises");
     import_path128 = require("path");
-    import_os22 = require("os");
     import_child_process37 = require("child_process");
     import_url16 = require("url");
     init_worktree_paths();

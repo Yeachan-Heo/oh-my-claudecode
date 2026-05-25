@@ -28,4 +28,12 @@ function getClaudeConfigDir() {
   return stripTrailingSep(normalize(configured));
 }
 
-module.exports = { getClaudeConfigDir };
+function getOmcConfigDir() {
+  return join(getClaudeConfigDir(), '.omc');
+}
+
+function getUpdateCheckCachePath() {
+  return join(getOmcConfigDir(), 'update-check.json');
+}
+
+module.exports = { getClaudeConfigDir, getOmcConfigDir, getUpdateCheckCachePath };

@@ -53,11 +53,10 @@ import {
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { access, readFile } from "fs/promises";
 import { join, basename, dirname } from "path";
-import { homedir } from "os";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
-import { getClaudeConfigDir } from "../utils/config-dir.js";
+import { getClaudeConfigDir, getUpdateCheckCachePath } from "../utils/config-dir.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -394,7 +393,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     }
     // Async file read to avoid blocking event loop (Issue #1273)
     try {
-      const updateCacheFile = join(homedir(), ".omc", "update-check.json");
+      const updateCacheFile = getUpdateCheckCachePath();
       await access(updateCacheFile);
       const content = await readFile(updateCacheFile, "utf-8");
       const cached = JSON.parse(content);

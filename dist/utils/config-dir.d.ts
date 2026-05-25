@@ -19,4 +19,12 @@
  * preserved.
  */
 export declare function getClaudeConfigDir(): string;
+/**
+ * Resolve the OMC global configuration/cache directory under the active Claude
+ * config dir. This keeps hook/updater/HUD caches aligned with CLAUDE_CONFIG_DIR
+ * instead of mixing in ~/.omc.
+ */
+export declare function getOmcConfigDir(): string;
+/** Resolve the canonical update-check cache file path. */
+export declare function getUpdateCheckCachePath(): string;
 //# sourceMappingURL=config-dir.d.ts.map

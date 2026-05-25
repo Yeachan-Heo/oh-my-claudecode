@@ -51,3 +51,17 @@ export function getClaudeConfigDir(): string {
 
   return stripTrailingSep(normalize(configured));
 }
+
+/**
+ * Resolve the OMC global configuration/cache directory under the active Claude
+ * config dir. This keeps hook/updater/HUD caches aligned with CLAUDE_CONFIG_DIR
+ * instead of mixing in ~/.omc.
+ */
+export function getOmcConfigDir(): string {
+  return join(getClaudeConfigDir(), '.omc');
+}
+
+/** Resolve the canonical update-check cache file path. */
+export function getUpdateCheckCachePath(): string {
+  return join(getOmcConfigDir(), 'update-check.json');
+}

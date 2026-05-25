@@ -10,7 +10,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync
 import { spawn } from 'child_process';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -580,7 +580,7 @@ function shouldNotifyDrift(driftInfo) {
 
 // Check npm registry for available update (with 24h cache)
 async function checkNpmUpdate(currentVersion) {
-  const cacheFile = join(configDir, '.omc', 'update-check.json');
+  const cacheFile = getUpdateCheckCachePath();
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
   const now = Date.now();
 
