@@ -39,6 +39,8 @@ const CLAUDE_CODE_NPM_PACKAGE = '@anthropic-ai/claude-code';
 interface GlobalClaudeCodeInstall {
   status: 'present' | 'absent' | 'unknown';
   version?: string;
+  installMethod?: 'npm' | 'native' | 'manual';
+  binaryPath?: string;
   error?: string;
 }
 
@@ -72,21 +74,106 @@ function npmInstallGlobalPackage(packageSpec: string, verbose: boolean = false):
   execFileSync('npm', ['install', '-g', packageSpec], npmExecOptions(verbose));
 }
 
-function detectGlobalClaudeCodeInstall(): GlobalClaudeCodeInstall {
+function parseClaudeCodeVersion(output: string): string | undefined {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/)?.[1];
+}
+
+function getFirstResolvedBinaryPath(output: string, binaryName: string): string {
+  const resolved = output
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean);
+
+  if (!resolved) {
+    throw new Error(`Unable to resolve ${binaryName} binary path`);
+  }
+
+  return resolved;
+}
+
+function resolveClaudeBinaryPath(): string | undefined {
   try {
-    const npmRoot = String(execSync('npm root -g', {
+    if (process.platform === 'win32') {
+      return getFirstResolvedBinaryPath(execFileSync('where.exe', ['claude'], {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 5000,
+        windowsHide: true,
+      }), 'claude');
+    }
+
+    return getFirstResolvedBinaryPath(execSync('command -v claude 2>/dev/null || which claude 2>/dev/null', {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 5000,
+    }), 'claude');
+  } catch {
+    return undefined;
+  }
+}
+
+function detectClaudeCodeFromBinary(npmRoot?: string): GlobalClaudeCodeInstall {
+  try {
+    const versionOutput = String(execFileSync('claude', ['--version'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10000,
+      ...(process.platform === 'win32' ? { shell: true, windowsHide: true } : {}),
+    }) ?? '');
+    const binaryPath = resolveClaudeBinaryPath();
+    const version = parseClaudeCodeVersion(versionOutput);
+    if (!version && !binaryPath) {
+      return { status: 'unknown', error: 'claude --version returned no parseable version and binary path could not be resolved' };
+    }
+
+    const normalizedBinaryPath = binaryPath?.replace(/\\/g, '/').toLowerCase();
+    const normalizedNpmRoot = npmRoot?.replace(/\\/g, '/').toLowerCase();
+    const isNpmBinary = Boolean(
+      normalizedBinaryPath &&
+      normalizedNpmRoot &&
+      normalizedBinaryPath.startsWith(normalizedNpmRoot.replace(/\/node_modules$/, '')),
+    );
+
+    return {
+      status: 'present',
+      version,
+      installMethod: isNpmBinary ? 'npm' : process.platform === 'win32' ? 'native' : 'manual',
+      binaryPath,
+    };
+  } catch (error) {
+    return {
+      status: 'unknown',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function detectGlobalClaudeCodeInstall(): GlobalClaudeCodeInstall {
+  let npmRoot: string | undefined;
+
+  try {
+    npmRoot = String(execSync('npm root -g', {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 10000,
       ...(process.platform === 'win32' ? { windowsHide: true } : {}),
     }) ?? '').trim();
     if (!npmRoot) {
-      return { status: 'unknown', error: 'npm root -g returned an empty path' };
+      const binaryInstall = detectClaudeCodeFromBinary();
+      return binaryInstall.status === 'present'
+        ? binaryInstall
+        : { status: 'unknown', error: 'npm root -g returned an empty path' };
     }
 
     const packageJsonPath = join(npmRoot, '@anthropic-ai', 'claude-code', 'package.json');
     if (!existsSync(packageJsonPath)) {
-      return { status: 'absent' };
+      const binaryInstall = detectClaudeCodeFromBinary(npmRoot);
+      return binaryInstall.status === 'present' ? binaryInstall : { status: 'absent' };
     }
 
     const packageJson = JSON.parse(String(readFileSync(packageJsonPath, 'utf-8') ?? '')) as {
@@ -97,8 +184,14 @@ function detectGlobalClaudeCodeInstall(): GlobalClaudeCodeInstall {
       version: typeof packageJson.version === 'string' && packageJson.version.trim()
         ? packageJson.version.trim()
         : undefined,
+      installMethod: 'npm',
     };
   } catch (error) {
+    const binaryInstall = detectClaudeCodeFromBinary(npmRoot);
+    if (binaryInstall.status === 'present') {
+      return binaryInstall;
+    }
+
     return {
       status: 'unknown',
       error: error instanceof Error ? error.message : String(error),
@@ -110,7 +203,7 @@ function restoreGlobalClaudeCodeIfNeeded(
   beforeUpdate: GlobalClaudeCodeInstall,
   verbose: boolean = false,
 ): { restored: boolean } {
-  if (beforeUpdate.status !== 'present') {
+  if (beforeUpdate.status !== 'present' || beforeUpdate.installMethod !== 'npm') {
     return { restored: false };
   }
 
@@ -960,19 +1053,6 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
   };
 }
 
-function getFirstResolvedBinaryPath(output: string): string {
-  const resolved = output
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .find(Boolean);
-
-  if (!resolved) {
-    throw new Error('Unable to resolve omc binary path for update reconciliation');
-  }
-
-  return resolved;
-}
-
 function resolveOmcBinaryPath(): string {
   if (process.platform === 'win32') {
     return getFirstResolvedBinaryPath(execFileSync('where.exe', ['omc.cmd'], {
@@ -980,14 +1060,14 @@ function resolveOmcBinaryPath(): string {
       stdio: 'pipe',
       timeout: 5000,
       windowsHide: true,
-    }));
+    }), 'omc');
   }
 
   return getFirstResolvedBinaryPath(execSync('which omc 2>/dev/null || where omc 2>NUL', {
     encoding: 'utf-8',
     stdio: 'pipe',
     timeout: 5000,
-  }));
+  }), 'omc');
 }
 
 /**
