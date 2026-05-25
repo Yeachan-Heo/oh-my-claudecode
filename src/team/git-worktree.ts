@@ -17,6 +17,7 @@ import { existsSync, realpathSync, readFileSync, readdirSync, rmSync, unlinkSync
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteJson, ensureDirWithMode, validateResolvedPath } from './fs-utils.js';
+import { validateWorktreeRemovalTarget } from '../lib/worktree-cleanup-safety.js';
 import { sanitizeName } from './tmux-session.js';
 import { withFileLockSync } from '../lib/file-lock.js';
 
@@ -540,6 +541,12 @@ export function checkWorkerWorktreeRemovalSafety(
 
   if (!existsSync(wtPath)) return;
 
+  validateWorktreeRemovalTarget({
+    candidatePath: wtPath,
+    expectedRoots: [join(repoRoot, '.omc', 'team', sanitizeName(teamName), 'worktrees')],
+    mainRepoRoots: [repoRoot],
+  });
+
   let ignoreRootAgents = false;
   if (backup) {
     const agentsPath = join(wtPath, 'AGENTS.md');
@@ -622,8 +629,14 @@ export function removeWorkerWorktree(
       execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
     } catch { /* branch may not exist */ }
 
-    // If a stale plain directory remains and it is not a registered worktree, remove it.
+    // If a stale plain directory remains and it is not a registered worktree, remove it
+    // only after the shared path guard proves it is an OMC team worktree child.
     if (existsSync(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
+      validateWorktreeRemovalTarget({
+        candidatePath: wtPath,
+        expectedRoots: [join(repoRoot, '.omc', 'team', sanitizeName(teamName), 'worktrees')],
+        mainRepoRoots: [repoRoot],
+      });
       rmSync(wtPath, { recursive: true, force: true });
     }
 

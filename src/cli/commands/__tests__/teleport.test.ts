@@ -12,6 +12,10 @@ vi.mock('fs', async (importOriginal) => {
     readFileSync: vi.fn(),
     rmSync: vi.fn(),
     symlinkSync: vi.fn(),
+    lstatSync: vi.fn((target: unknown) => ({
+      isDirectory: () => typeof target === 'string' && !target.endsWith('/.git'),
+      isSymbolicLink: () => false,
+    })),
   };
 });
 

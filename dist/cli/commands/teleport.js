@@ -11,6 +11,7 @@ import { homedir } from 'os';
 import { join, basename, isAbsolute, relative } from 'path';
 import { loadConfig } from '../../config/loader.js';
 import { parseRemoteUrl, getProvider } from '../../providers/index.js';
+import { validateWorktreeRemovalTarget } from '../../lib/worktree-cleanup-safety.js';
 // Default worktree root directory
 const DEFAULT_WORKTREE_ROOT = join(homedir(), 'Workspace', 'omc-worktrees');
 const PACKAGE_JSON_NAME = 'package.json';
@@ -574,20 +575,17 @@ export async function teleportRemoveCommand(pathOrName, options) {
     if (!isAbsolute(pathOrName)) {
         worktreePath = join(worktreeRoot, pathOrName);
     }
-    if (!existsSync(worktreePath)) {
-        const error = `Worktree not found: ${worktreePath}`;
-        if (options.json) {
-            console.log(JSON.stringify({ success: false, error }));
-        }
-        else {
-            console.error(chalk.red(error));
-        }
-        return 1;
+    try {
+        validateWorktreeRemovalTarget({
+            candidatePath: worktreePath,
+            expectedRoots: [worktreeRoot],
+        });
     }
-    // Safety check: must be under worktree root
-    const rel = relative(worktreeRoot, worktreePath);
-    if (rel.startsWith('..') || isAbsolute(rel)) {
-        const error = `Refusing to remove worktree outside of ${worktreeRoot}`;
+    catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const error = detail.startsWith('worktree_path_missing:')
+            ? `Worktree not found: ${worktreePath}`
+            : `Refusing to remove unsafe worktree path: ${detail}`;
         if (options.json) {
             console.log(JSON.stringify({ success: false, error }));
         }
@@ -627,6 +625,11 @@ export async function teleportRemoveCommand(pathOrName, options) {
         if (!mainRepo) {
             throw new Error(`Refusing to remove ${worktreePath}: git directory ${JSON.stringify(gitDir)} is not a registered worktree git-dir`);
         }
+        validateWorktreeRemovalTarget({
+            candidatePath: worktreePath,
+            expectedRoots: [worktreeRoot],
+            mainRepoRoots: [mainRepo],
+        });
         const args = options.force
             ? ['worktree', 'remove', '--force', worktreePath]
             : ['worktree', 'remove', worktreePath];

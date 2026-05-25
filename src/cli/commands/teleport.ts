@@ -13,6 +13,7 @@ import { join, basename, isAbsolute, relative } from 'path';
 import { loadConfig } from '../../config/loader.js';
 import { parseRemoteUrl, getProvider } from '../../providers/index.js';
 import type { ProviderName, GitProvider } from '../../providers/types.js';
+import { validateWorktreeRemovalTarget } from '../../lib/worktree-cleanup-safety.js';
 
 export interface TeleportOptions {
   worktree?: boolean;
@@ -695,20 +696,16 @@ export async function teleportRemoveCommand(
     worktreePath = join(worktreeRoot, pathOrName);
   }
 
-  if (!existsSync(worktreePath)) {
-    const error = `Worktree not found: ${worktreePath}`;
-    if (options.json) {
-      console.log(JSON.stringify({ success: false, error }));
-    } else {
-      console.error(chalk.red(error));
-    }
-    return 1;
-  }
-
-  // Safety check: must be under worktree root
-  const rel = relative(worktreeRoot, worktreePath);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    const error = `Refusing to remove worktree outside of ${worktreeRoot}`;
+  try {
+    validateWorktreeRemovalTarget({
+      candidatePath: worktreePath,
+      expectedRoots: [worktreeRoot],
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const error = detail.startsWith('worktree_path_missing:')
+      ? `Worktree not found: ${worktreePath}`
+      : `Refusing to remove unsafe worktree path: ${detail}`;
     if (options.json) {
       console.log(JSON.stringify({ success: false, error }));
     } else {
@@ -753,6 +750,12 @@ export async function teleportRemoveCommand(
         `Refusing to remove ${worktreePath}: git directory ${JSON.stringify(gitDir)} is not a registered worktree git-dir`,
       );
     }
+
+    validateWorktreeRemovalTarget({
+      candidatePath: worktreePath,
+      expectedRoots: [worktreeRoot],
+      mainRepoRoots: [mainRepo],
+    });
 
     const args = options.force
       ? ['worktree', 'remove', '--force', worktreePath]

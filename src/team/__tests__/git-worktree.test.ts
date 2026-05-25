@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -152,6 +152,16 @@ describe('git-worktree', () => {
 
     it('does not throw for non-existent worktree', () => {
       expect(() => removeWorkerWorktree(teamName, 'nonexistent', repoDir)).not.toThrow();
+    });
+
+    it('refuses a symlink at the canonical worker worktree path', () => {
+      const workerName = 'worker-symlink';
+      const worktreePath = join(repoDir, '.omc', 'team', teamName, 'worktrees', workerName);
+      mkdirSync(join(repoDir, '.omc', 'team', teamName, 'worktrees'), { recursive: true });
+      symlinkSync(repoDir, worktreePath, 'dir');
+
+      expect(() => removeWorkerWorktree(teamName, workerName, repoDir)).toThrow(/worktree_path_is_symlink/);
+      expect(existsSync(join(repoDir, 'README.md'))).toBe(true);
     });
   });
 
