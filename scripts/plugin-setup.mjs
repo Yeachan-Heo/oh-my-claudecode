@@ -104,18 +104,26 @@ try {
   console.log('[OMC] Warning: Could not configure settings.json:', e.message);
 }
 
-// Patch hooks.json to keep plugin-provided hook commands native-spawnable across
-// platforms. Claude Code's plugin loader reads hooks/hooks.json directly, so the
-// shipped manifest must not depend on a POSIX shell bootstrap being available.
-// Keep stale cache self-healing for older manifests that used sh/find-node or an
-// accidentally baked absolute node path, but normalize every command to the
-// Windows-safe direct node -> run.cjs form.
-const runCjsHookPrefix = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+// Patch hooks.json to keep plugin-provided hook commands safe for the
+// platform that is installing the plugin cache. Claude Code's plugin loader
+// reads hooks/hooks.json directly, so the shipped manifest remains native
+// Windows-spawnable (direct node -> run.cjs, no sh/find-node). During setup on
+// Unix/macOS, repair the cached manifest back to the find-node.sh bootstrap so
+// nvm/fnm users whose non-interactive hook PATH lacks node keep working.
+//
+// Keep stale cache self-healing for older manifests that used sh/find-node, an
+// accidentally baked absolute node path, or the Windows-safe direct node form.
+const windowsRunCjsHookPrefix = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+const unixFindNodeHookPrefix = 'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+const platformHookPrefix = process.platform === 'win32'
+  ? windowsRunCjsHookPrefix
+  : unixFindNodeHookPrefix;
 //
 // Patterns handled:
-//  1. Old current find-node.sh format – sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh ...
+//  1. Current find-node.sh format – sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh ...
 //  2. Legacy find-node.sh format – sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" ...
-//  3. Absolute run.cjs format from older setup patches/publish mistakes
+//  3. Direct run.cjs format from the Windows-safe shipped manifest
+//  4. Absolute run.cjs format from older setup patches/publish mistakes
 //
 // Fixes issues #909, #899, #892, #869, #3121.
 try {
@@ -125,31 +133,38 @@ try {
     let patched = false;
 
     const legacyFindNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^\"]+)"(.*)$/;
+      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^\"\s]+)"?(.*)$/;
     const currentFindNodePattern =
-      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
+    const directRunCjsPattern =
+      /^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
+    const absoluteNodeRunCjsPattern =
+      /^"([^\"]*\/node|[A-Za-z]:\\[^\"]*\\node(?:\.exe)?)"\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
 
     for (const groups of Object.values(data.hooks ?? {})) {
       for (const group of groups) {
         for (const hook of (group.hooks ?? [])) {
           if (typeof hook.command !== 'string') continue;
 
-          const findNodeMatch = hook.command.match(currentFindNodePattern) ?? hook.command.match(legacyFindNodePattern);
-          if (findNodeMatch) {
-            hook.command = `${runCjsHookPrefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${findNodeMatch[1]}${findNodeMatch[2]}`;
-            patched = true;
+          const match = hook.command.match(currentFindNodePattern)
+            ?? hook.command.match(legacyFindNodePattern)
+            ?? hook.command.match(directRunCjsPattern);
+          if (match) {
+            const nextCommand = `${platformHookPrefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${match[1]}${match[2]}`;
+            if (hook.command !== nextCommand) {
+              hook.command = nextCommand;
+              patched = true;
+            }
             continue;
           }
 
-          const absNodeMatch = hook.command.match(
-            /^"([^\"]*\/node|[A-Za-z]:\\[^\"]*\\node(?:\.exe)?)"\s+.*\/scripts\/run\.cjs/,
-          );
+          const absNodeMatch = hook.command.match(absoluteNodeRunCjsPattern);
           if (absNodeMatch) {
-            hook.command = hook.command.replace(
-              /^"[^\"]*"\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+/,
-              runCjsHookPrefix,
-            );
-            patched = true;
+            const nextCommand = `${platformHookPrefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${absNodeMatch[2]}${absNodeMatch[3]}`;
+            if (hook.command !== nextCommand) {
+              hook.command = nextCommand;
+              patched = true;
+            }
           }
         }
       }
@@ -157,7 +172,8 @@ try {
 
     if (patched) {
       writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-      console.log('[OMC] Patched hooks.json to use direct node run.cjs hook commands');
+      const platformLabel = process.platform === 'win32' ? 'direct node run.cjs' : 'find-node.sh run.cjs';
+      console.log(`[OMC] Patched hooks.json to use ${platformLabel} hook commands`);
     }
   }
 } catch (e) {

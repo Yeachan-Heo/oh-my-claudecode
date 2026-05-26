@@ -98,6 +98,9 @@ describe('plugin-setup.mjs hook command portability', () => {
   // Mirror of the patcher logic from scripts/plugin-setup.mjs (lines 115–177).
   // Tests behavior, not source shape: a cosmetic reformat of the source
   // does not break these tests; a real behavior regression does.
+  const scriptContent = existsSync(PLUGIN_SETUP_PATH)
+    ? readFileSync(PLUGIN_SETUP_PATH, 'utf-8')
+    : '';
   const UNIX_PREFIX =
     'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
   const WINDOWS_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
@@ -105,25 +108,30 @@ describe('plugin-setup.mjs hook command portability', () => {
   /** Run one command string through the same patching rules as plugin-setup.mjs. */
   function patchCommand(cmd: string, prefix = UNIX_PREFIX): string {
     const findNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
+      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"\s]+)"?(.*)$/;
     const currentFindNodePattern =
-      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^"\s]+)"?(.*)$/;
+    const directRunCjsPattern =
+      /^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^"\s]+)"?(.*)$/;
+    const absNodePattern =
+      /^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^"\s]+)"?(.*)$/;
 
-    if (cmd.startsWith('node ') && cmd.includes('/scripts/run.cjs')) {
-      return cmd.replace(/^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+/, prefix);
-    }
-    const absNodeMatch = cmd.match(
-      /^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+.*\/scripts\/run\.cjs/,
-    );
-    if (absNodeMatch) {
-      return cmd.replace(/^"[^"]*"\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+/, prefix);
-    }
-    const m = cmd.match(currentFindNodePattern) ?? cmd.match(findNodePattern);
+    const m = cmd.match(currentFindNodePattern) ?? cmd.match(findNodePattern) ?? cmd.match(directRunCjsPattern);
     if (m) {
       return `${prefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${m[1]}${m[2]}`;
     }
+    const absNodeMatch = cmd.match(absNodePattern);
+    if (absNodeMatch) {
+      return `${prefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${absNodeMatch[2]}${absNodeMatch[3]}`;
+    }
     return cmd;
   }
+
+  it('selects direct node only on win32 and find-node bootstrap elsewhere', () => {
+    expect(scriptContent).toContain("process.platform === 'win32'");
+    expect(scriptContent).toContain('windowsRunCjsHookPrefix');
+    expect(scriptContent).toContain('unixFindNodeHookPrefix');
+  });
 
   it('leaves the canonical sh+find-node+run.cjs command unchanged', () => {
     const canonical =
@@ -198,6 +206,28 @@ describe('plugin-setup.mjs hook command portability', () => {
       expect(patched, event).not.toContain('find-node.sh');
       expect(patched, event).not.toContain('/bin/sh');
       expect(patched, event).not.toMatch(/^sh /);
+    }
+  });
+
+  it('repairs every bundled direct-node hook command to find-node on Unix/macOS', () => {
+    const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8')) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
+    };
+    const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) =>
+      groups.flatMap(group =>
+        group.hooks
+          .map(hook => hook.command)
+          .filter((command): command is string => typeof command === 'string')
+          .map(command => ({ event, command })),
+      ),
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const { event, command } of commands) {
+      const patched = patchCommand(command, UNIX_PREFIX);
+      expect(patched, event).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+      expect(patched, event).toContain('"$CLAUDE_PLUGIN_ROOT"/scripts/');
+      expect(patched, event).not.toContain('/bin/sh');
     }
   });
 
