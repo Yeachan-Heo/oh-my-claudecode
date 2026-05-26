@@ -25,15 +25,10 @@ function getHookCommands() {
 }
 describe('hooks.json command escaping', () => {
     it('uses portable hook commands without absolute /bin/sh or pre-expanded ${...} placeholders', () => {
-        for (const { event, command } of getHookCommands()) {
-            if (event === 'SessionEnd') {
-                expect(command).toMatch(/^node "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
-                expect(command).not.toContain('find-node.sh');
-                expect(command).not.toMatch(/^sh /);
-            }
-            else {
-                expect(command).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
-            }
+        for (const { command } of getHookCommands()) {
+            expect(command).toMatch(/^node "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/[^\s]+/);
+            expect(command).not.toContain('find-node.sh');
+            expect(command).not.toMatch(/^sh /);
             expect(command).not.toContain('/bin/sh');
             expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs');
             expect(command).not.toContain('${CLAUDE_PLUGIN_ROOT}/scripts/');
@@ -41,24 +36,13 @@ describe('hooks.json command escaping', () => {
     });
     it('keeps Windows-style plugin roots with spaces intact when bash expands the command', () => {
         const pluginRoot = '/c/Users/First Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10';
-        for (const { event, command } of getHookCommands()) {
+        for (const { command } of getHookCommands()) {
             const argv = expandHookCommandArgv(command, pluginRoot);
-            if (event === 'SessionEnd') {
-                expect(argv[0]).toBe('node');
-                expect(argv[1]).toBe(`${pluginRoot}/scripts/run.cjs`);
-                expect(argv[2]).toContain(`${pluginRoot}/scripts/`);
-                expect(argv[1]).toContain('First Last');
-                expect(argv[2]).toContain('First Last');
-            }
-            else {
-                expect(argv[0]).toBe('sh');
-                expect(argv[1]).toBe(`${pluginRoot}/scripts/find-node.sh`);
-                expect(argv[2]).toBe(`${pluginRoot}/scripts/run.cjs`);
-                expect(argv[3]).toContain(`${pluginRoot}/scripts/`);
-                expect(argv[1]).toContain('First Last');
-                expect(argv[2]).toContain('First Last');
-                expect(argv[3]).toContain('First Last');
-            }
+            expect(argv[0]).toBe('node');
+            expect(argv[1]).toBe(`${pluginRoot}/scripts/run.cjs`);
+            expect(argv[2]).toContain(`${pluginRoot}/scripts/`);
+            expect(argv[1]).toContain('First Last');
+            expect(argv[2]).toContain('First Last');
             expect(argv).not.toContain('/c/Users/First');
             expect(argv).not.toContain('Last/.claude/plugins/cache/omc/oh-my-claudecode/4.7.10/scripts/run.cjs');
         }

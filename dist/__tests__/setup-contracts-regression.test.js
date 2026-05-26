@@ -418,7 +418,32 @@ describe('Contract 9: hooks/hooks.json portability', () => {
         if (violations.length > 0) {
             const details = violations.map(v => `  ${v.event}: ${v.command}`).join('\n');
             expect.fail(`Found hook commands hardcoding /bin/sh:\n${details}\n\n` +
-                `Source hook commands must not hardcode an absolute shell path; use portable sh while preserving find-node.`);
+                `Source hook commands must not use shell bootstraps; use direct node run.cjs commands.`);
+        }
+    });
+    it('source hook commands use direct node run.cjs without sh/find-node bootstraps', () => {
+        if (!existsSync(HOOKS_JSON_PATH))
+            return;
+        const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
+        const violations = [];
+        for (const [eventType, eventHooks] of Object.entries(hooksJson.hooks || {})) {
+            for (const hookGroup of eventHooks) {
+                for (const hook of hookGroup.hooks) {
+                    if (hook.type !== 'command')
+                        continue;
+                    if (!hook.command.startsWith('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ')) {
+                        violations.push({ event: eventType, command: hook.command, reason: 'not direct node run.cjs' });
+                    }
+                    if (/^(?:"\/bin\/sh"|sh)\s/.test(hook.command) || hook.command.includes('find-node.sh')) {
+                        violations.push({ event: eventType, command: hook.command, reason: 'uses sh/find-node bootstrap' });
+                    }
+                }
+            }
+        }
+        if (violations.length > 0) {
+            const details = violations.map(v => `  ${v.event} (${v.reason}): ${v.command}`).join('\n');
+            expect.fail(`Found non-Windows-safe source hook commands in hooks.json:\n${details}\n\n` +
+                `Source plugin manifest commands must be direct: node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ...`);
         }
     });
     it('no hook command contains an absolute node binary path', () => {

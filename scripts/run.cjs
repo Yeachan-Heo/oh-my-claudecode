@@ -4,20 +4,13 @@
  * OMC Cross-platform hook runner (run.cjs)
  *
  * Uses process.execPath (the Node binary already running this script) to spawn
- * the target .mjs hook. On Unix, hooks/find-node.sh locates Node first without
- * relying on hook shell PATH; on Windows, setup can route directly through
- * `node ... run.cjs` to avoid /bin/sh.
- *
- * Keeps the Windows-safe process.execPath handoff once Node has launched this
- * runner.
+ * the target .mjs hook. The shipped plugin manifest launches this runner directly with
+ * `node ... run.cjs` so native Windows can spawn hooks without /bin/sh.
+ * Once Node has launched this runner, process.execPath is used for the
+ * hook-script handoff.
  * Fixes issues #909, #899, #892, #869.
  *
- * Unix usage (from hooks.json):
- *   /bin/sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" \
- *       "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" \
- *       "${CLAUDE_PLUGIN_ROOT}/scripts/<hook>.mjs" [args...]
- *
- * Windows setup may patch the leading bootstrap to:
+ * Manifest usage (from hooks.json):
  *   node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" \
  *       "${CLAUDE_PLUGIN_ROOT}/scripts/<hook>.mjs" [args...]
  */
