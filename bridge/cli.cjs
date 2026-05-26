@@ -11087,25 +11087,62 @@ function npmInstallGlobalPackage(packageSpec, verbose = false) {
   }
   (0, import_child_process14.execFileSync)("npm", ["install", "-g", packageSpec], npmExecOptions(verbose));
 }
-function detectGlobalClaudeCodeInstall() {
+function parseClaudeCodeVersion(output) {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return void 0;
+  }
+  return trimmed.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/)?.[1];
+}
+function getFirstResolvedBinaryPath(output, binaryName) {
+  const resolved = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  if (!resolved) {
+    throw new Error(`Unable to resolve ${binaryName} binary path`);
+  }
+  return resolved;
+}
+function resolveClaudeBinaryPath() {
   try {
-    const npmRoot = String((0, import_child_process14.execSync)("npm root -g", {
+    if (process.platform === "win32") {
+      return getFirstResolvedBinaryPath((0, import_child_process14.execFileSync)("where.exe", ["claude"], {
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 5e3,
+        windowsHide: true
+      }), "claude");
+    }
+    return getFirstResolvedBinaryPath((0, import_child_process14.execSync)("command -v claude 2>/dev/null || which claude 2>/dev/null", {
+      encoding: "utf-8",
+      stdio: "pipe",
+      timeout: 5e3
+    }), "claude");
+  } catch {
+    return void 0;
+  }
+}
+function detectClaudeCodeFromBinary(npmRoot) {
+  try {
+    const versionOutput = String((0, import_child_process14.execFileSync)("claude", ["--version"], {
       encoding: "utf-8",
       stdio: "pipe",
       timeout: 1e4,
-      ...process.platform === "win32" ? { windowsHide: true } : {}
-    }) ?? "").trim();
-    if (!npmRoot) {
-      return { status: "unknown", error: "npm root -g returned an empty path" };
+      ...process.platform === "win32" ? { shell: true, windowsHide: true } : {}
+    }) ?? "");
+    const binaryPath = resolveClaudeBinaryPath();
+    const version3 = parseClaudeCodeVersion(versionOutput);
+    if (!version3 && !binaryPath) {
+      return { status: "unknown", error: "claude --version returned no parseable version and binary path could not be resolved" };
     }
-    const packageJsonPath = (0, import_path50.join)(npmRoot, "@anthropic-ai", "claude-code", "package.json");
-    if (!(0, import_fs38.existsSync)(packageJsonPath)) {
-      return { status: "absent" };
-    }
-    const packageJson = JSON.parse(String((0, import_fs38.readFileSync)(packageJsonPath, "utf-8") ?? ""));
+    const normalizedBinaryPath = binaryPath?.replace(/\\/g, "/").toLowerCase();
+    const normalizedNpmRoot = npmRoot?.replace(/\\/g, "/").toLowerCase();
+    const isNpmBinary = Boolean(
+      normalizedBinaryPath && normalizedNpmRoot && normalizedBinaryPath.startsWith(normalizedNpmRoot.replace(/\/node_modules$/, ""))
+    );
     return {
       status: "present",
-      version: typeof packageJson.version === "string" && packageJson.version.trim() ? packageJson.version.trim() : void 0
+      version: version3,
+      installMethod: isNpmBinary ? "npm" : process.platform === "win32" ? "native" : "manual",
+      binaryPath
     };
   } catch (error2) {
     return {
@@ -11114,8 +11151,43 @@ function detectGlobalClaudeCodeInstall() {
     };
   }
 }
+function detectGlobalClaudeCodeInstall() {
+  let npmRoot;
+  try {
+    npmRoot = String((0, import_child_process14.execSync)("npm root -g", {
+      encoding: "utf-8",
+      stdio: "pipe",
+      timeout: 1e4,
+      ...process.platform === "win32" ? { windowsHide: true } : {}
+    }) ?? "").trim();
+    if (!npmRoot) {
+      const binaryInstall = detectClaudeCodeFromBinary();
+      return binaryInstall.status === "present" ? binaryInstall : { status: "unknown", error: "npm root -g returned an empty path" };
+    }
+    const packageJsonPath = (0, import_path50.join)(npmRoot, "@anthropic-ai", "claude-code", "package.json");
+    if (!(0, import_fs38.existsSync)(packageJsonPath)) {
+      const binaryInstall = detectClaudeCodeFromBinary(npmRoot);
+      return binaryInstall.status === "present" ? binaryInstall : { status: "absent" };
+    }
+    const packageJson = JSON.parse(String((0, import_fs38.readFileSync)(packageJsonPath, "utf-8") ?? ""));
+    return {
+      status: "present",
+      version: typeof packageJson.version === "string" && packageJson.version.trim() ? packageJson.version.trim() : void 0,
+      installMethod: "npm"
+    };
+  } catch (error2) {
+    const binaryInstall = detectClaudeCodeFromBinary(npmRoot);
+    if (binaryInstall.status === "present") {
+      return binaryInstall;
+    }
+    return {
+      status: "unknown",
+      error: error2 instanceof Error ? error2.message : String(error2)
+    };
+  }
+}
 function restoreGlobalClaudeCodeIfNeeded(beforeUpdate, verbose = false) {
-  if (beforeUpdate.status !== "present") {
+  if (beforeUpdate.status !== "present" || beforeUpdate.installMethod !== "npm") {
     return { restored: false };
   }
   if (detectGlobalClaudeCodeInstall().status === "present") {
@@ -11626,13 +11698,6 @@ function reconcileUpdateRuntime(options) {
     message: "Runtime state reconciled successfully"
   };
 }
-function getFirstResolvedBinaryPath(output) {
-  const resolved = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-  if (!resolved) {
-    throw new Error("Unable to resolve omc binary path for update reconciliation");
-  }
-  return resolved;
-}
 function resolveOmcBinaryPath() {
   if (process.platform === "win32") {
     return getFirstResolvedBinaryPath((0, import_child_process14.execFileSync)("where.exe", ["omc.cmd"], {
@@ -11640,13 +11705,13 @@ function resolveOmcBinaryPath() {
       stdio: "pipe",
       timeout: 5e3,
       windowsHide: true
-    }));
+    }), "omc");
   }
   return getFirstResolvedBinaryPath((0, import_child_process14.execSync)("which omc 2>/dev/null || where omc 2>NUL", {
     encoding: "utf-8",
     stdio: "pipe",
     timeout: 5e3
-  }));
+  }), "omc");
 }
 async function performUpdate(options) {
   const installed = getInstalledVersion();
@@ -36770,7 +36835,7 @@ function patchHooksJsonForWindows(pluginRoot) {
   try {
     const content = (0, import_fs79.readFileSync)(hooksJsonPath, "utf-8");
     const data = JSON.parse(content);
-    const currentPattern = /^"\/bin\/sh" "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+    const currentPattern = /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
     const legacyPattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
     let patched = false;
     for (const groups of Object.values(data.hooks ?? {})) {
@@ -87033,6 +87098,38 @@ function checkHookConflicts() {
   }
   return merged;
 }
+function isWindowsUnsafePluginHookCommand(command) {
+  return command.includes("find-node.sh") || command.includes("/bin/sh") || /^sh\s/.test(command);
+}
+function checkWindowsUnsafePluginHooks() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  const roots = [process.env.CLAUDE_PLUGIN_ROOT, ...readInstalledPluginRoots()].filter((root2) => typeof root2 === "string" && root2.length > 0);
+  const seenRoots = /* @__PURE__ */ new Set();
+  const unsafe = [];
+  for (const pluginRoot of roots) {
+    if (seenRoots.has(pluginRoot)) continue;
+    seenRoots.add(pluginRoot);
+    const hooksJsonPath = (0, import_path117.join)(pluginRoot, "hooks", "hooks.json");
+    if (!(0, import_fs98.existsSync)(hooksJsonPath)) continue;
+    try {
+      const parsed = JSON.parse((0, import_fs98.readFileSync)(hooksJsonPath, "utf-8"));
+      for (const [event, groups] of Object.entries(parsed.hooks ?? {})) {
+        for (const group of groups) {
+          for (const hook of group.hooks ?? []) {
+            if (hook.type !== "command" || typeof hook.command !== "string") continue;
+            if (isWindowsUnsafePluginHookCommand(hook.command)) {
+              unsafe.push({ pluginRoot, event, command: hook.command });
+            }
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  return unsafe;
+}
 function checkFileForOmcMarkers(filePath) {
   if (!(0, import_fs98.existsSync)(filePath)) return null;
   try {
@@ -87290,12 +87387,14 @@ function runConflictCheck() {
   const legacySkills = checkLegacySkills();
   const envFlags = checkEnvFlags();
   const configIssues = checkConfigIssues();
+  const windowsUnsafePluginHooks = checkWindowsUnsafePluginHooks();
   const mcpRegistrySync = inspectUnifiedMcpRegistrySync();
   const hasConflicts = hookConflicts.some((h) => !h.isOmc) || // Non-OMC hooks present
   legacySkills.length > 0 || // Legacy skills colliding with plugin
   envFlags.disableOmc || // OMC is disabled
   envFlags.skipHooks.length > 0 || // Hooks are being skipped
   configIssues.unknownFields.length > 0 || // Unknown config fields
+  windowsUnsafePluginHooks.length > 0 || // Stale plugin hooks still use sh/find-node on Windows
   mcpRegistrySync.claudeMissing.length > 0 || mcpRegistrySync.claudeMismatched.length > 0 || mcpRegistrySync.codexMissing.length > 0 || mcpRegistrySync.codexMismatched.length > 0;
   return {
     hookConflicts,
@@ -87303,6 +87402,7 @@ function runConflictCheck() {
     legacySkills,
     envFlags,
     configIssues,
+    windowsUnsafePluginHooks,
     mcpRegistrySync,
     hasConflicts
   };
@@ -87378,6 +87478,17 @@ function formatReport2(report, json) {
       lines.push(`    - ${skill.name} ${colors.gray(`(${skill.path})`)}`);
     }
     lines.push(`    ${colors.gray("These legacy files shadow plugin skills. Remove them or rename to avoid conflicts.")}`);
+    lines.push("");
+  }
+  if (report.windowsUnsafePluginHooks.length > 0) {
+    lines.push(colors.bold("\u{1FA9F} Windows Plugin Hooks"));
+    lines.push("");
+    lines.push(`  ${colors.yellow("\u26A0")} Plugin hooks still route through sh/find-node on native Windows:`);
+    for (const hook of report.windowsUnsafePluginHooks) {
+      lines.push(`    - ${hook.event} ${colors.gray(`(${hook.pluginRoot})`)}`);
+      lines.push(`      ${colors.gray(hook.command)}`);
+    }
+    lines.push(`    ${colors.gray("Run /oh-my-claudecode:omc-setup or update/reinstall the plugin to rewrite hooks to direct node run.cjs commands.")}`);
     lines.push("");
   }
   if (report.configIssues.unknownFields.length > 0) {
