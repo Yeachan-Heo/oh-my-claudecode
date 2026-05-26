@@ -169,6 +169,130 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(context).not.toContain('[MAGIC KEYWORD: RALPLAN]');
   });
 
+  it('does not launch execution follow-up while ralplan is still active after compact continuation', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-compact-readonly-'));
+    const sessionId = 'session-3122-compact-active';
+    const sessionStateDir = join(cwd, '.omc', 'state', 'sessions', sessionId);
+    const omxPlansDir = join(cwd, '.omx', 'plans');
+
+    mkdirSync(sessionStateDir, { recursive: true });
+    mkdirSync(omxPlansDir, { recursive: true });
+
+    writeFileSync(
+      join(sessionStateDir, 'ralplan-state.json'),
+      JSON.stringify(
+        {
+          active: true,
+          session_id: sessionId,
+          current_phase: 'ralplan',
+          started_at: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
+
+    writeFileSync(
+      join(omxPlansDir, 'prd-compact-readonly.md'),
+      [
+        '# PRD',
+        '',
+        '## Acceptance criteria',
+        '- done',
+        '',
+        '## Requirement coverage map',
+        '- req -> impl',
+        '',
+        'omx team ".omx/plans/ralplan-compact-readonly.md"',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(omxPlansDir, 'test-spec-compact-readonly.md'),
+      [
+        '# Test Spec',
+        '',
+        '## Unit coverage',
+        '- unit',
+        '',
+        '## Verification mapping',
+        '- verify',
+        '',
+      ].join('\n'),
+    );
+
+    for (const prompt of ['team', 'ralph']) {
+      const output = runKeywordDetector(prompt, cwd, sessionId);
+      const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+      expect(output.continue).toBe(true);
+      expect(context).not.toContain('TEAM');
+      expect(context).not.toContain('RALPH');
+      expect(context).not.toContain('[MAGIC KEYWORD: RALPLAN]');
+    }
+  });
+
+  it('does not launch execution follow-up from a pending approval plan without a launch hint', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-no-hint-'));
+    const sessionId = 'session-3122-no-hint';
+    const sessionStateDir = join(cwd, '.omc', 'state', 'sessions', sessionId);
+    const omxPlansDir = join(cwd, '.omx', 'plans');
+
+    mkdirSync(sessionStateDir, { recursive: true });
+    mkdirSync(omxPlansDir, { recursive: true });
+
+    writeFileSync(
+      join(sessionStateDir, 'ralplan-state.json'),
+      JSON.stringify(
+        {
+          active: false,
+          session_id: sessionId,
+          current_phase: 'pending_approval',
+          completed_at: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
+
+    writeFileSync(
+      join(omxPlansDir, 'prd-compact-readonly.md'),
+      [
+        '# PRD',
+        '',
+        '## Acceptance criteria',
+        '- done',
+        '',
+        '## Requirement coverage map',
+        '- req -> impl',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(omxPlansDir, 'test-spec-compact-readonly.md'),
+      [
+        '# Test Spec',
+        '',
+        '## Unit coverage',
+        '- unit',
+        '',
+        '## Verification mapping',
+        '- verify',
+        '',
+      ].join('\n'),
+    );
+
+    for (const prompt of ['team', 'ralph']) {
+      const output = runKeywordDetector(prompt, cwd, sessionId);
+      const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+      expect(output.continue).toBe(true);
+      expect(context).not.toContain('TEAM');
+      expect(context).not.toContain('RALPH');
+      expect(context).not.toContain('[MAGIC KEYWORD: RALPLAN]');
+    }
+  });
+
   it('does not activate ralplan from a delegated /ask codex payload', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'keyword-detector-ask-codex-'));
 

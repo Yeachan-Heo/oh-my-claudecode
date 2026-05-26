@@ -49,12 +49,18 @@ export function isShortRalphFollowupRequest(text) {
  * Returns true when ALL of the following conditions hold:
  * 1. Planning is complete (planningComplete === true)
  * 2. The prior skill was 'ralplan'
- * 3. The text matches a short follow-up for the given mode
+ * 3. The ralplan workflow is terminal (not still in planning after compact)
+ * 4. An approved execution launch hint exists for the selected mode
+ * 5. The text matches a short follow-up for the given mode
  */
 export function isApprovedExecutionFollowupShortcut(mode, text, context) {
     if (!context.planningComplete)
         return false;
     if (context.priorSkill !== 'ralplan')
+        return false;
+    if (!context.ralplanTerminal)
+        return false;
+    if (!context.approvedExecutionLaunchHint)
         return false;
     if (mode === 'team')
         return isShortTeamFollowupRequest(text);

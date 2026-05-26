@@ -36,6 +36,57 @@ const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT ||
   join(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILL_INVOCATION_USER_REQUEST_MAX = 1200;
 
+const RALPLAN_FOLLOWUP_TERMINAL_PHASES = new Set([
+  'completed',
+  'complete',
+  'failed',
+  'cancelled',
+  'canceled',
+  'aborted',
+  'terminated',
+  'done',
+  'handoff',
+  'pending approval',
+  'pending-approval',
+  'pending_approval',
+  'awaiting approval',
+  'awaiting-approval',
+  'awaiting_approval',
+  'approval-required',
+  'approval_required',
+]);
+
+function normalizeRalplanFollowupPhase(state) {
+  if (!state || typeof state !== 'object') return null;
+  const raw = state.current_phase ?? state.phase ?? state.status;
+  if (typeof raw !== 'string') return null;
+  const phase = raw.trim().toLowerCase();
+  if (!phase) return null;
+  if (phase === 'handoff' || phase.startsWith('handoff:') || phase.startsWith('handoff-')) return 'handoff';
+  return phase;
+}
+
+function readRalplanFollowupState(statePaths, sessionId) {
+  const safeSessionId = sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId) ? sessionId : '';
+  for (const statePath of statePaths) {
+    try {
+      if (!existsSync(statePath)) continue;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (!state || typeof state !== 'object') continue;
+      if (safeSessionId && typeof state.session_id === 'string' && state.session_id !== safeSessionId) continue;
+      return state;
+    } catch { /* ignore malformed state */ }
+  }
+  return null;
+}
+
+function isRalplanFollowupTerminal(state) {
+  if (!state || typeof state !== 'object') return false;
+  if (state.active === true) return false;
+  const phase = normalizeRalplanFollowupPhase(state);
+  return Boolean(phase && RALPLAN_FOLLOWUP_TERMINAL_PHASES.has(phase));
+}
+
 function compactHookText(text, maxChars = SKILL_INVOCATION_USER_REQUEST_MAX) {
   const notice = '\n...[truncated; original user prompt remains available in the conversation]';
   if (!text || text.length <= maxChars) return text || '';
@@ -630,7 +681,6 @@ function hasActionableKeyword(text, pattern) {
   return false;
 }
 
-
 function hasExplicitWorkflowInvocationContext(text, position, keywordLength, keywordText) {
   const prefix = text.slice(0, position);
   if (/^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)$/i.test(prefix)) {
@@ -975,7 +1025,6 @@ function resolveConflicts(matches) {
 
   let resolved = [...matches];
 
-
   // Team keyword detection removed — team is now explicit-only via /team skill.
 
   // Sort by priority order
@@ -1102,10 +1151,8 @@ async function main() {
       matches.push({ name: 'ultrawork', args: '' });
     }
 
-
     // Team keyword detection removed — team mode is now explicit-only via /team skill.
     // This prevents infinite spawning when Claude workers receive prompts containing "team".
-
 
     // CCG keywords (Claude-Codex-Gemini tri-model orchestration)
     if (hasActionableKeyword(cleanPrompt, /\b(ccg|claude-codex-gemini)\b|(씨씨지)/i)) {
@@ -1206,15 +1253,27 @@ async function main() {
             join(directory, '.omc', 'state', 'ralplan-state.json'),
             join(directory, '.omx', 'state', 'ralplan-state.json'),
           ];
-      const ralplanWasActive = ralplanStatePaths.some(statePath => existsSync(statePath));
+      const ralplanState = readRalplanFollowupState(ralplanStatePaths, sessionId);
+      const ralplanTerminal = isRalplanFollowupTerminal(ralplanState);
 
-      if (ralplanWasActive) {
+      if (ralplanState) {
         const artifacts = planningArtifacts.readPlanningArtifacts(directory);
         const planningComplete = planningArtifacts.isPlanningComplete(artifacts);
-        const context = { planningComplete, priorSkill: 'ralplan' };
+        const teamHint = planningArtifacts.readApprovedExecutionLaunchHint?.(directory, 'team');
+        const ralphHint = planningArtifacts.readApprovedExecutionLaunchHint?.(directory, 'ralph');
 
-        const isTeamFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('team', prompt, context);
-        const isRalphFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('ralph', prompt, context);
+        const isTeamFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('team', prompt, {
+          planningComplete,
+          priorSkill: 'ralplan',
+          ralplanTerminal,
+          approvedExecutionLaunchHint: Boolean(teamHint),
+        });
+        const isRalphFollowup = followupPlanner.isApprovedExecutionFollowupShortcut('ralph', prompt, {
+          planningComplete,
+          priorSkill: 'ralplan',
+          ralplanTerminal,
+          approvedExecutionLaunchHint: Boolean(ralphHint),
+        });
 
         if (isTeamFollowup) {
           console.log(JSON.stringify(createHookOutput(createSkillInvocation('team', prompt))));
@@ -1222,6 +1281,16 @@ async function main() {
         }
         if (isRalphFollowup) {
           console.log(JSON.stringify(createHookOutput(createSkillInvocation('ralph', prompt))));
+          return;
+        }
+
+        const isShortTeamRequest = followupPlanner.isShortTeamFollowupRequest?.(prompt) === true;
+        const isShortRalphRequest = followupPlanner.isShortRalphFollowupRequest?.(prompt) === true;
+        if (isShortTeamRequest || isShortRalphRequest) {
+          // A compact continuation can echo the saved plan and a terse lane hint.
+          // Unless the ralplan state is terminal and a launch hint is present,
+          // keep ralplan read-only instead of falling through to generic ralph.
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
           return;
         }
       }

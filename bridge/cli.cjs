@@ -19966,8 +19966,9 @@ async function checkRalplan(sessionId, directory, cancelInProgress) {
 
 [RALPLAN - CONSENSUS PLANNING | REINFORCEMENT ${breakerCount}/${RALPLAN_STOP_BLOCKER_MAX}]
 
-The ralplan consensus workflow is active. Continue the Planner/Architect/Critic loop.
-Do not stop until consensus is reached or the workflow completes.
+The ralplan consensus workflow is active. Continue the Planner/Architect/Critic planning loop only.
+Ralplan is read-only/planning mode: do not implement, invoke execution skills, edit source, commit, push, or open PRs from this continuation.
+When consensus is reached, stop at a pending-approval handoff and require explicit user approval before execution.
 When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
 
 </ralplan-continuation>
@@ -20264,7 +20265,15 @@ var init_persistent_mode = __esm({
       "aborted",
       "terminated",
       "done",
-      "handoff"
+      "handoff",
+      "pending approval",
+      "pending-approval",
+      "pending_approval",
+      "awaiting approval",
+      "awaiting-approval",
+      "awaiting_approval",
+      "approval-required",
+      "approval_required"
     ]);
     REVIEWER_TASK_TOOL_NAMES = /* @__PURE__ */ new Set(["Task", "proxy_Task", "Agent"]);
     REVIEWER_COMMAND_TOOL_NAMES = /* @__PURE__ */ new Set(["Bash", "proxy_Bash"]);

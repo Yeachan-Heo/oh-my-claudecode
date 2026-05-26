@@ -61,6 +61,8 @@ describe("team/followup-planner", () => {
         isApprovedExecutionFollowupShortcut("team", "team", {
           planningComplete: false,
           priorSkill: "ralplan",
+          ralplanTerminal: true,
+          approvedExecutionLaunchHint: true,
         }),
       ).toBe(false);
     });
@@ -70,6 +72,30 @@ describe("team/followup-planner", () => {
         isApprovedExecutionFollowupShortcut("team", "team", {
           planningComplete: true,
           priorSkill: "plan",
+          ralplanTerminal: true,
+          approvedExecutionLaunchHint: true,
+        }),
+      ).toBe(false);
+    });
+
+    it("requires ralplan to be terminal so compact continuation cannot launch execution mid-plan", () => {
+      expect(
+        isApprovedExecutionFollowupShortcut("team", "team", {
+          planningComplete: true,
+          priorSkill: "ralplan",
+          ralplanTerminal: false,
+          approvedExecutionLaunchHint: true,
+        }),
+      ).toBe(false);
+    });
+
+    it("requires an approved launch hint before short follow-up execution", () => {
+      expect(
+        isApprovedExecutionFollowupShortcut("team", "team", {
+          planningComplete: true,
+          priorSkill: "ralplan",
+          ralplanTerminal: true,
+          approvedExecutionLaunchHint: false,
         }),
       ).toBe(false);
     });
@@ -79,6 +105,8 @@ describe("team/followup-planner", () => {
         isApprovedExecutionFollowupShortcut("team", "team", {
           planningComplete: true,
           priorSkill: "ralplan",
+          ralplanTerminal: true,
+          approvedExecutionLaunchHint: true,
         }),
       ).toBe(true);
     });
@@ -88,6 +116,8 @@ describe("team/followup-planner", () => {
         isApprovedExecutionFollowupShortcut("ralph", "ralph", {
           planningComplete: true,
           priorSkill: "ralplan",
+          ralplanTerminal: true,
+          approvedExecutionLaunchHint: true,
         }),
       ).toBe(true);
     });
