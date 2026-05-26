@@ -27,6 +27,26 @@ const { existsSync, readFileSync, realpathSync } = require('fs');
 const { join, basename, dirname } = require('path');
 
 const target = process.argv[2];
+
+// On native Windows, opportunistically rewrite the plugin hooks.json away from
+// the sh/find-node.sh bootstrap that Claude Code cannot execute on win32. This
+// runner is the only node entry point Claude Code reaches on a fresh Windows
+// marketplace install (via the SessionEnd hook, the one command shipped in the
+// `node ... run.cjs` form), so healing here makes hooks converge to the working
+// form after the first session and re-heals after every plugin update.
+// Unix keeps find-node.sh for nvm/fnm Node discovery (issue #892), hence the
+// win32 guard. Best-effort: a heal failure must never block hook execution.
+// See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/3121
+if (process.platform === 'win32') {
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
+      || (target ? dirname(dirname(target)) : '');
+    require('./lib/win-hook-heal.cjs').healWindowsHookManifest(pluginRoot);
+  } catch {
+    // Ignore — self-heal is opportunistic and must not affect hook output.
+  }
+}
+
 if (!target) {
   // Nothing to run — exit cleanly so Claude Code hooks are never blocked.
   process.exit(0);
