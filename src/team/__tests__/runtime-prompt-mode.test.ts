@@ -18,6 +18,7 @@ import { tmpdir } from 'os';
 const tmuxCalls = vi.hoisted(() => ({
   args: [] as string[][],
   capturePaneText: '❯ ready\n',
+  lastLiteralSend: '',
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -28,11 +29,19 @@ vi.mock('child_process', async (importOriginal) => {
     tmuxCalls.args.push(args);
     if (args[0] === 'split-window') {
       cb(null, '%42\n', '');
+    } else if (args[0] === 'send-keys' && args.includes('-l')) {
+      tmuxCalls.lastLiteralSend = args[args.length - 1] ?? '';
+      cb(null, '', '');
+    } else if (args[0] === 'send-keys') {
+      tmuxCalls.lastLiteralSend = '';
+      cb(null, '', '');
     } else if (args[0] === 'capture-pane') {
-      cb(null, tmuxCalls.capturePaneText, '');
+      cb(null, `${tmuxCalls.lastLiteralSend}\n${tmuxCalls.capturePaneText}`, '');
     } else if (args[0] === 'display-message') {
-      // pane_dead check → "0" means alive; pane_in_mode → "0" means not in copy mode
-      cb(null, '0', '');
+      // pane_dead check → "0" means alive; pane_current_command zsh means shell is ready;
+      // pane_in_mode → "0" means not in copy mode.
+      const format = args[args.length - 1] ?? '';
+      cb(null, format.includes('pane_current_command') ? '0 zsh\n' : '0\n', '');
     } else {
       cb(null, '', '');
     }
@@ -45,11 +54,20 @@ vi.mock('child_process', async (importOriginal) => {
     if (args[0] === 'split-window') {
       return { stdout: '%42\n', stderr: '' };
     }
+    if (args[0] === 'send-keys' && args.includes('-l')) {
+      tmuxCalls.lastLiteralSend = args[args.length - 1] ?? '';
+      return { stdout: '', stderr: '' };
+    }
+    if (args[0] === 'send-keys') {
+      tmuxCalls.lastLiteralSend = '';
+      return { stdout: '', stderr: '' };
+    }
     if (args[0] === 'capture-pane') {
-      return { stdout: tmuxCalls.capturePaneText, stderr: '' };
+      return { stdout: `${tmuxCalls.lastLiteralSend}\n${tmuxCalls.capturePaneText}`, stderr: '' };
     }
     if (args[0] === 'display-message') {
-      return { stdout: '0', stderr: '' };
+      const format = args[args.length - 1] ?? '';
+      return { stdout: format.includes('pane_current_command') ? '0 zsh\n' : '0\n', stderr: '' };
     }
     return { stdout: '', stderr: '' };
   };
@@ -57,6 +75,8 @@ vi.mock('child_process', async (importOriginal) => {
   function mockExec(cmd: string, cb: (err: Error | null, stdout: string, stderr: string) => void) {
     if (cmd.includes('display-message') && cmd.includes('#{window_width}')) {
       cb(null, '160\n', '');
+    } else if (cmd.includes('display-message') && cmd.includes('#{pane_current_command}')) {
+      cb(null, '0 zsh\n', '');
     } else {
       cb(null, '', '');
     }
@@ -66,6 +86,9 @@ vi.mock('child_process', async (importOriginal) => {
   (mockExec as any)[utilPromisify.custom] = async (cmd: string) => {
     if (cmd.includes('display-message') && cmd.includes('#{window_width}')) {
       return { stdout: '160\n', stderr: '' };
+    }
+    if (cmd.includes('display-message') && cmd.includes('#{pane_current_command}')) {
+      return { stdout: '0 zsh\n', stderr: '' };
     }
     return { stdout: '', stderr: '' };
   };
@@ -130,6 +153,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
   beforeEach(() => {
     tmuxCalls.args = [];
     tmuxCalls.capturePaneText = '❯ ready\n';
+    tmuxCalls.lastLiteralSend = '';
     delete process.env.OMC_SHELL_READY_TIMEOUT_MS;
     cwd = mkdtempSync(join(tmpdir(), 'runtime-gemini-prompt-'));
     setupTaskDir(cwd);
@@ -288,6 +312,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
   beforeEach(() => {
     tmuxCalls.args = [];
     tmuxCalls.capturePaneText = '❯ ready\n';
+    tmuxCalls.lastLiteralSend = '';
     delete process.env.OMC_SHELL_READY_TIMEOUT_MS;
     // Clear model/provider env vars before each test
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL;
