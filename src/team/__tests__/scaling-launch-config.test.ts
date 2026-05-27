@@ -127,7 +127,10 @@ describe('scaleUp launch config', () => {
       if (args[0] === 'split-window') {
         return { status: 0, stdout: '%12\n', stderr: '' };
       }
-      if (args[0] === 'display-message') {
+      if (args[0] === 'display-message' && args.includes('#{session_name}:#{window_index}')) {
+        return { status: 0, stdout: 'demo-session:0\n', stderr: '' };
+      }
+      if (args[0] === 'display-message' && args.includes('#{pane_pid}')) {
         return { status: 0, stdout: '4321\n', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -239,7 +242,6 @@ describe('scaleUp launch config', () => {
     expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-1', resolve(cwd));
   });
 
-
   it('rolls back a pending worktree when root overlay installation fails', async () => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/codex']);
     teamOpsMocks.teamReadConfig.mockResolvedValueOnce({
@@ -331,7 +333,6 @@ describe('scaleUp launch config', () => {
 
 
 
-
   it('keeps reused worktree worker tracked if post-drain cleanup safety fails', async () => {
     const config = {
       name: 'demo-team',
@@ -372,7 +373,6 @@ describe('scaleUp launch config', () => {
     expect(gitWorktreeMocks.prepareWorkerWorktreeForRemoval).toHaveBeenCalledWith('demo-team', 'worker-1', resolve(cwd), join(resolve(cwd), 'reuse'));
     expect(monitorMocks.saveTeamConfig).not.toHaveBeenCalled();
   });
-
 
   it('preserves worktree and config when target pane remains alive after kill request', async () => {
     const config = {
