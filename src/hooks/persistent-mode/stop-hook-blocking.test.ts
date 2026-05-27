@@ -870,6 +870,163 @@ describe("Stop Hook Blocking Contract", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
+    type PersistentModeScriptMode =
+      | "ultrawork"
+      | "ralph"
+      | "autopilot"
+      | "ultragoal"
+      | "pipeline"
+      | "team"
+      | "ultraqa"
+      | "swarm";
+
+    const stopHookActiveModes: PersistentModeScriptMode[] = [
+      "ultrawork",
+      "ralph",
+      "autopilot",
+      "ultragoal",
+      "pipeline",
+      "team",
+      "ultraqa",
+      "swarm",
+    ];
+
+    function makeCaseDir(caseName: string): string {
+      const caseDir = join(tempDir, caseName);
+      mkdirSync(caseDir, { recursive: true });
+      execSync("git init -q", { cwd: caseDir });
+      return caseDir;
+    }
+
+    function writeActiveStopHookModeState(
+      caseDir: string,
+      sessionId: string,
+      mode: PersistentModeScriptMode,
+    ): void {
+      const stateDir = join(caseDir, ".omc", "state");
+      const sessionDir = join(stateDir, "sessions", sessionId);
+      const now = new Date().toISOString();
+
+      if (mode === "swarm") {
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(join(stateDir, "swarm-active.marker"), "");
+        writeFileSync(
+          join(stateDir, "swarm-summary.json"),
+          JSON.stringify({
+            active: true,
+            tasks_pending: 1,
+            tasks_claimed: 0,
+            reinforcement_count: 0,
+            started_at: now,
+            last_checked_at: now,
+            project_path: caseDir,
+          }),
+        );
+        return;
+      }
+
+      mkdirSync(sessionDir, { recursive: true });
+      const baseState = {
+        active: true,
+        session_id: sessionId,
+        started_at: now,
+        last_checked_at: now,
+        project_path: caseDir,
+        reinforcement_count: 0,
+      };
+
+      const stateByMode: Record<Exclude<PersistentModeScriptMode, "swarm">, Record<string, unknown>> = {
+        ultrawork: {
+          ...baseState,
+          original_prompt: "Test ultrawork task",
+        },
+        ralph: {
+          ...baseState,
+          iteration: 1,
+          max_iterations: 50,
+          prompt: "Test ralph task",
+        },
+        autopilot: {
+          ...baseState,
+          current_phase: "execution",
+        },
+        ultragoal: {
+          ...baseState,
+          current_phase: "in_progress",
+          max_reinforcements: 50,
+          objective: "Test ultragoal objective",
+        },
+        pipeline: {
+          ...baseState,
+          current_stage: 0,
+          stages: [{ name: "stage-one" }],
+        },
+        team: {
+          ...baseState,
+          current_phase: "team-exec",
+        },
+        ultraqa: {
+          ...baseState,
+          cycle: 1,
+          max_cycles: 10,
+          all_passing: false,
+        },
+      };
+
+      writeFileSync(
+        join(sessionDir, `${mode}-state.json`),
+        JSON.stringify(stateByMode[mode], null, 2),
+      );
+    }
+
+    it.each(stopHookActiveModes)(
+      "returns continue without decision:block when stop_hook_active is true and %s state is active",
+      (mode) => {
+        const caseDir = makeCaseDir(`stop-hook-active-${mode}`);
+        const sessionId = `stop-hook-active-${mode}`;
+        writeActiveStopHookModeState(caseDir, sessionId, mode);
+
+        const output = runScript({
+          directory: caseDir,
+          sessionId,
+          stop_hook_active: true,
+        });
+
+        expect(output.continue).toBe(true);
+        expect(output.suppressOutput).toBe(true);
+        expect(output.decision).not.toBe("block");
+      },
+    );
+
+    it.each(stopHookActiveModes)(
+      "preserves normal decision:block behavior when stop_hook_active is false and %s state is active",
+      (mode) => {
+        const caseDir = makeCaseDir(`stop-hook-inactive-false-${mode}`);
+        const sessionId = `stop-hook-inactive-false-${mode}`;
+        writeActiveStopHookModeState(caseDir, sessionId, mode);
+
+        const output = runScript({
+          directory: caseDir,
+          sessionId,
+          stop_hook_active: false,
+        });
+
+        expect(output.decision).toBe("block");
+      },
+    );
+
+    it.each(stopHookActiveModes)(
+      "preserves normal decision:block behavior when stop_hook_active is absent and %s state is active",
+      (mode) => {
+        const caseDir = makeCaseDir(`stop-hook-inactive-absent-${mode}`);
+        const sessionId = `stop-hook-inactive-absent-${mode}`;
+        writeActiveStopHookModeState(caseDir, sessionId, mode);
+
+        const output = runScript({ directory: caseDir, sessionId });
+
+        expect(output.decision).toBe("block");
+      },
+    );
 
     it("returns continue: true when ralph is awaiting confirmation", () => {
       const sessionId = "ralph-awaiting-confirmation-mjs";

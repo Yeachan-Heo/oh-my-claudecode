@@ -886,6 +886,14 @@ async function main() {
       data = JSON.parse(input);
     } catch {}
 
+    // Claude Code sets stop_hook_active when a Stop hook is already running.
+    // Never emit another decision:block in that re-entrant path: doing so trips
+    // Claude Code's safety override for repeatedly blocked Stop hooks.
+    if (data.stop_hook_active === true) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
     const directory = data.cwd || data.directory || process.cwd();
     const sessionIdRaw = data.sessionId || data.session_id || data.sessionid || "";
     const sessionId = sanitizeSessionId(sessionIdRaw);
