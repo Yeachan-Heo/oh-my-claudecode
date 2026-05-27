@@ -476,6 +476,15 @@ function compactBudgetedText(text, maxChars) {
   return `${text.slice(0, maxChars - notice.length).trimEnd()}${notice}`;
 }
 
+function formatUpdateNoticeForUser(updateInfo, options = {}) {
+  const latestVersion = updateInfo?.latestVersion || 'latest';
+  const currentVersion = updateInfo?.currentVersion || 'unknown';
+  const action = options.autoUpgradePrompt === false
+    ? 'To update later, run: omc update'
+    : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode';
+  return `[OMC UPDATE AVAILABLE] oh-my-claudecode v${latestVersion} is available (current: v${currentVersion}). ${action}`;
+}
+
 function buildSessionStartAdditionalContext(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return '';
 
@@ -758,6 +767,7 @@ async function main() {
     const sessionId = data.session_id || data.sessionId || '';
     const omcRoot = await resolveOmcStateRoot(directory);
     const messages = [];
+    const userMessages = [];
 
     // Fire sibling-retrofit warning once per session (lifted off getOmcRoot hot path)
     try {
@@ -793,7 +803,8 @@ async function main() {
       if (pluginVersion) {
         const updateInfo = await checkNpmUpdate(pluginVersion);
         if (updateInfo) {
-          messages.push(`<session-restore>\n\n[OMC UPDATE AVAILABLE]\n\nA new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: v${updateInfo.currentVersion})\n\nTo update, run: omc update\n(This syncs plugin, npm package, and CLAUDE.md together)\n\n</session-restore>\n\n---\n`);
+          const omcConfig = readJsonFile(join(configDir, '.omc-config.json')) || {};
+          userMessages.push(formatUpdateNoticeForUser(updateInfo, { autoUpgradePrompt: omcConfig.autoUpgradePrompt !== false }));
         }
       }
     } catch {}
@@ -1094,14 +1105,20 @@ ${cleanContent}
       // Notification module not available, skip silently
     }
 
-    if (messages.length > 0) {
-      console.log(JSON.stringify({
+    if (messages.length > 0 || userMessages.length > 0) {
+      const output = {
         continue: true,
-        hookSpecificOutput: {
+      };
+      if (userMessages.length > 0) {
+        output.systemMessage = userMessages.join('\n');
+      }
+      if (messages.length > 0) {
+        output.hookSpecificOutput = {
           hookEventName: 'SessionStart',
           additionalContext: buildSessionStartAdditionalContext(messages)
-        }
-      }));
+        };
+      }
+      console.log(JSON.stringify(output));
     } else {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     }

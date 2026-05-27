@@ -215,6 +215,83 @@ ${'- oversized startup guidance\n'.repeat(700)}
     expect(context.length).toBeLessThanOrEqual(6000);
   });
 
+  it('surfaces update notices through systemMessage without injecting them into additionalContext', () => {
+    const omcDir = join(fakeHome, '.claude', '.omc');
+    mkdirSync(omcDir, { recursive: true });
+    writeFileSync(
+      join(omcDir, 'update-check.json'),
+      JSON.stringify({
+        timestamp: Date.now(),
+        latestVersion: '999.0.0',
+        currentVersion: '1.0.0',
+        updateAvailable: true,
+      }),
+    );
+
+    const result = spawnSync(NODE, [SCRIPT_PATH], {
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: 'session-update-visible',
+        cwd: fakeProject,
+      }),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      timeout: 15000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const output = JSON.parse(result.stdout) as {
+      continue: boolean;
+      systemMessage?: string;
+      hookSpecificOutput?: { additionalContext?: string };
+    };
+    expect(output.continue).toBe(true);
+    expect(output.systemMessage).toContain('[OMC UPDATE AVAILABLE]');
+    expect(output.systemMessage).toContain('v999.0.0');
+    expect(output.systemMessage).toContain('/update');
+    expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('[OMC UPDATE AVAILABLE]');
+    expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('999.0.0');
+  });
+
+  it('honors autoUpgradePrompt=false with passive systemMessage wording', () => {
+    const omcDir = join(fakeHome, '.claude', '.omc');
+    mkdirSync(omcDir, { recursive: true });
+    writeFileSync(join(fakeHome, '.claude', '.omc-config.json'), JSON.stringify({ autoUpgradePrompt: false }));
+    writeFileSync(
+      join(omcDir, 'update-check.json'),
+      JSON.stringify({
+        timestamp: Date.now(),
+        latestVersion: '999.0.0',
+        currentVersion: '1.0.0',
+        updateAvailable: true,
+      }),
+    );
+
+    const result = spawnSync(NODE, [SCRIPT_PATH], {
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: 'session-update-passive',
+        cwd: fakeProject,
+      }),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      timeout: 15000,
+    });
+
+    const output = JSON.parse(result.stdout) as { systemMessage?: string };
+    expect(output.systemMessage).toContain('To update later, run: omc update');
+    expect(output.systemMessage).not.toContain('Run /update to upgrade now');
+  });
+
 });
 
 // ==========================================================================
@@ -350,8 +427,9 @@ describe('session-start template cwd validation (Wave B1)', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'omc-session-start-cwdval-'));
     fakeHome = join(tempDir, 'home');
     mkdirSync(fakeHome, { recursive: true });
-    // A truly empty directory with no .omc-workspace or .git marker
-    emptyCwd = mkdtempSync(join(tmpdir(), 'omc-empty-cwd-'));
+    // A truly empty directory with no .omc-workspace or .git marker.
+    // Keep it under fakeHome so validateCwd stops before ambient /tmp markers.
+    emptyCwd = mkdtempSync(join(fakeHome, 'omc-empty-cwd-'));
   });
 
   afterEach(() => {

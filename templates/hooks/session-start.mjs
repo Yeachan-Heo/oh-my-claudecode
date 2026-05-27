@@ -250,6 +250,15 @@ function compactOmcStartupGuidance(content) {
   return `${normalized.slice(0, OMC_STARTUP_GUIDANCE_MAX_CHARS - notice.length).trimEnd()}${notice}`;
 }
 
+function formatUpdateNoticeForUser(updateInfo, options = {}) {
+  const latestVersion = updateInfo?.latestVersion || 'latest';
+  const currentVersion = updateInfo?.currentVersion || 'unknown';
+  const action = options.autoUpgradePrompt === false
+    ? 'To update later, run: omc update'
+    : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode';
+  return `[OMC UPDATE AVAILABLE] oh-my-claudecode v${latestVersion} is available (current: v${currentVersion}). ${action}`;
+}
+
 function buildSessionStartAdditionalContext(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return '';
 
@@ -528,6 +537,7 @@ async function main() {
     }
     const sessionId = data.sessionId || data.session_id || data.sessionid || '';
     const messages = [];
+    const userMessages = [];
 
     // Check for updates (non-blocking)
     // Read version from OMC's own package.json, not the project's (fixes #516)
@@ -562,43 +572,11 @@ async function main() {
 
     const updateInfo = currentVersion ? await checkForUpdates(currentVersion) : null;
     if (updateInfo) {
-      // Read config to check autoUpgradePrompt preference
       const configPath = join(getClaudeConfigDir(), '.omc-config.json');
       const omcConfig = readJsonFile(configPath) || {};
-      const autoUpgradePrompt = omcConfig.autoUpgradePrompt !== false; // default: true
-
-      if (autoUpgradePrompt) {
-        messages.push(`<session-restore>
-
-[OMC AUTO-UPGRADE AVAILABLE]
-
-oh-my-claudecode v${updateInfo.latestVersion} is available (current: v${updateInfo.currentVersion}).
-
-ACTION: Use AskUserQuestion to ask the user if they want to upgrade now. Offer these options:
-- "Upgrade now" (Recommended): Run \`npm install -g oh-my-claude-sisyphus@latest\` via Bash, then run \`omc install --force --skip-claude-check --refresh-hooks\` to reconcile hooks and CLAUDE.md
-- "Skip this time": Continue the session without upgrading
-- "Don't ask again": Tell the user to set "autoUpgradePrompt": false in [$CLAUDE_CONFIG_DIR|~/.claude]/.omc-config.json to disable future prompts
-
-Keep the prompt brief. If the user accepts, execute the upgrade commands and report the result.
-
-</session-restore>
-
----
-`);
-      } else {
-        messages.push(`<session-restore>
-
-[OMC UPDATE AVAILABLE]
-
-A new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
-
-To update, run: omc update
-
-</session-restore>
-
----
-`);
-      }
+      userMessages.push(formatUpdateNoticeForUser(updateInfo, {
+        autoUpgradePrompt: omcConfig.autoUpgradePrompt !== false,
+      }));
     }
 
     if (await shouldEmitModelRoutingOverride(directory)) {
@@ -707,14 +685,20 @@ ${agentsContent}
       }
     }
 
-    if (messages.length > 0) {
-      console.log(JSON.stringify({
+    if (messages.length > 0 || userMessages.length > 0) {
+      const output = {
         continue: true,
-        hookSpecificOutput: {
+      };
+      if (userMessages.length > 0) {
+        output.systemMessage = userMessages.join('\n');
+      }
+      if (messages.length > 0) {
+        output.hookSpecificOutput = {
           hookEventName: 'SessionStart',
           additionalContext: buildSessionStartAdditionalContext(messages)
-        }
-      }));
+        };
+      }
+      console.log(JSON.stringify(output));
     } else {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -196,6 +196,57 @@ ${'- oversized startup guidance\n'.repeat(700)}
     expect(context).not.toContain('Do NOT pass the `model` parameter');
     expect(context).not.toContain('Omit it entirely');
     expect(context.length).toBeLessThanOrEqual(6000);
+  });
+
+  it('surfaces update notices through systemMessage without injecting them into additionalContext', () => {
+    const claudeDir = join(fakeHome, '.claude');
+    const pluginRoot = join(tempDir, 'plugin');
+    mkdirSync(join(claudeDir, '.omc'), { recursive: true });
+    mkdirSync(join(claudeDir, 'hud'), { recursive: true });
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '1.0.0', type: 'module' }));
+    writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
+    writeFileSync(
+      join(claudeDir, '.omc', 'update-check.json'),
+      JSON.stringify({
+        timestamp: Date.now(),
+        latestVersion: '999.0.0',
+        currentVersion: '1.0.0',
+        updateAvailable: true,
+      }),
+    );
+
+    const result = spawnSync(NODE, [SCRIPT_PATH], {
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: 'session-update-script',
+        cwd: fakeProject,
+      }),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        OMC_NOTIFY: '0',
+      },
+      timeout: 15000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const output = JSON.parse(result.stdout) as {
+      continue: boolean;
+      systemMessage?: string;
+      hookSpecificOutput?: { additionalContext?: string };
+    };
+    expect(output.continue).toBe(true);
+    expect(output.systemMessage).toContain('[OMC UPDATE AVAILABLE]');
+    expect(output.systemMessage).toContain('v999.0.0');
+    expect(output.systemMessage).toContain('/update');
+    expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('[OMC UPDATE AVAILABLE]');
+    expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('999.0.0');
   });
 
 });
