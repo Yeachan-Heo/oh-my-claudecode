@@ -5,7 +5,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { ProjectMemory } from './types.js';
+import type { ProjectMemory } from './types.js';
 import { CACHE_EXPIRY_MS } from './constants.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 import { getWorktreeProjectMemoryPath } from '../../lib/worktree-paths.js';
@@ -16,6 +16,20 @@ import { lockPathFor, withFileLock, type FileLockOptions } from '../../lib/file-
  */
 export function getMemoryPath(projectRoot: string): string {
   return getWorktreeProjectMemoryPath(projectRoot);
+}
+
+/**
+ * Normalize persisted project memory into the current runtime shape.
+ * Older/minimal project-memory.json files may not contain list fields that
+ * read-only context and compaction paths iterate over.
+ */
+export function normalizeProjectMemory(memory: ProjectMemory): ProjectMemory {
+  return {
+    ...memory,
+    customNotes: Array.isArray(memory.customNotes) ? memory.customNotes : [],
+    userDirectives: Array.isArray(memory.userDirectives) ? memory.userDirectives : [],
+    hotPaths: Array.isArray(memory.hotPaths) ? memory.hotPaths : [],
+  };
 }
 
 /**
@@ -34,7 +48,7 @@ export async function loadProjectMemory(projectRoot: string): Promise<ProjectMem
       return null;
     }
 
-    return memory;
+    return normalizeProjectMemory(memory);
   } catch (_error) {
     // File doesn't exist or invalid JSON
     return null;
