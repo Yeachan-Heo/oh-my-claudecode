@@ -132,7 +132,7 @@ function resolveClaudeModel(
  * explicit non-tier model ID is passed through.
  */
 function resolveExternalModel(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'grok',
   raw: string | undefined,
   cfg: PluginConfig,
 ): string {
@@ -142,6 +142,9 @@ function resolveExternalModel(
   const defaults = cfg.externalModels?.defaults;
   if (provider === 'codex') {
     return defaults?.codexModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+  }
+  if (provider === 'grok') {
+    return defaults?.grokModel ?? '';
   }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
