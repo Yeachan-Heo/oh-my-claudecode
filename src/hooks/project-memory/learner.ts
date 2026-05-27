@@ -79,6 +79,7 @@ export async function learnFromToolOutput(
 
       // Detect directives from user messages
       if (userMessage) {
+        memory.userDirectives = Array.isArray(memory.userDirectives) ? memory.userDirectives : [];
         const detectedDirectives = detectDirectivesFromMessage(userMessage);
         for (const directive of detectedDirectives) {
           memory.userDirectives = addDirective(memory.userDirectives, directive);
@@ -120,6 +121,7 @@ export async function learnFromToolOutput(
         // Extract environment hints from output
         const hints = extractEnvironmentHints(toolOutput);
         if (hints.length > 0) {
+          memory.customNotes = Array.isArray(memory.customNotes) ? memory.customNotes : [];
           for (const hint of hints) {
             // Only add if not already present
             const exists = memory.customNotes.some(
@@ -255,6 +257,8 @@ export async function addCustomNote(
         if (!memory) {
           return;
         }
+
+        memory.customNotes = Array.isArray(memory.customNotes) ? memory.customNotes : [];
 
         memory.customNotes.push({
           timestamp: Date.now(),

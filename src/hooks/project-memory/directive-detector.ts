@@ -126,31 +126,33 @@ function normalizeCommand(cmd: string): string {
  * Add directive if not duplicate
  */
 export function addDirective(
-  directives: UserDirective[],
+  directives: UserDirective[] | null | undefined,
   newDirective: UserDirective
 ): UserDirective[] {
+  const directiveList = Array.isArray(directives) ? directives : [];
+
   // Check for duplicates
-  const isDuplicate = directives.some(d =>
+  const isDuplicate = directiveList.some(d =>
     d.directive.toLowerCase() === newDirective.directive.toLowerCase()
   );
 
   if (!isDuplicate) {
-    directives.push(newDirective);
+    directiveList.push(newDirective);
 
     // Keep only most recent 20 directives
-    if (directives.length > 20) {
-      directives.sort((a, b) => {
+    if (directiveList.length > 20) {
+      directiveList.sort((a, b) => {
         // Sort by priority first, then by timestamp
         if (a.priority !== b.priority) {
           return a.priority === 'high' ? -1 : 1;
         }
         return b.timestamp - a.timestamp;
       });
-      directives.splice(20);
+      directiveList.splice(20);
     }
   }
 
-  return directives;
+  return directiveList;
 }
 
 /**

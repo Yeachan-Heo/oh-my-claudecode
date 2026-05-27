@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { projectMemoryWriteTool } from '../memory-tools.js';
+import {
+  projectMemoryAddDirectiveTool,
+  projectMemoryAddNoteTool,
+  projectMemoryWriteTool,
+} from '../memory-tools.js';
 import { getProjectIdentifier } from '../../lib/worktree-paths.js';
 
 const TEST_DIR = '/tmp/memory-tools-test';
@@ -95,6 +99,58 @@ describe('memory-tools payload validation', () => {
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }
+  });
+
+  it('should add a directive when existing memory lacks userDirectives', async () => {
+    const memoryPath = join(TEST_DIR, '.omc', 'project-memory.json');
+    writeFileSync(memoryPath, JSON.stringify({
+      version: '1.0.0',
+      lastScanned: Date.now(),
+      projectRoot: TEST_DIR,
+    }));
+
+    const result = await projectMemoryAddDirectiveTool.handler({
+      directive: 'Prefer focused regression tests',
+      workingDirectory: TEST_DIR,
+    });
+
+    const saved = JSON.parse(readFileSync(memoryPath, 'utf-8'));
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('Successfully added directive');
+    expect(saved.userDirectives).toEqual([
+      expect.objectContaining({
+        directive: 'Prefer focused regression tests',
+        context: '',
+        source: 'explicit',
+        priority: 'normal',
+      }),
+    ]);
+  });
+
+  it('should add a note when existing memory lacks customNotes', async () => {
+    const memoryPath = join(TEST_DIR, '.omc', 'project-memory.json');
+    writeFileSync(memoryPath, JSON.stringify({
+      version: '1.0.0',
+      lastScanned: Date.now(),
+      projectRoot: TEST_DIR,
+    }));
+
+    const result = await projectMemoryAddNoteTool.handler({
+      category: 'test',
+      content: 'Minimal project memory fixtures are supported',
+      workingDirectory: TEST_DIR,
+    });
+
+    const saved = JSON.parse(readFileSync(memoryPath, 'utf-8'));
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('Successfully added note');
+    expect(saved.customNotes).toEqual([
+      expect.objectContaining({
+        source: 'manual',
+        category: 'test',
+        content: 'Minimal project memory fixtures are supported',
+      }),
+    ]);
   });
 
   it('should allow normal-sized memory writes', async () => {
