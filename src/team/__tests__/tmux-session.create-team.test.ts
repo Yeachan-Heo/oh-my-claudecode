@@ -33,6 +33,10 @@ vi.mock('child_process', async (importOriginal) => {
       return { stdout: '160\n', stderr: '' };
     }
 
+    if (args[0] === 'display-message' && args.includes('#{pane_dead} #{pane_current_command}')) {
+      return { stdout: '0 zsh\n', stderr: '' };
+    }
+
     if (args[0] === 'split-window') {
       mockedCalls.splitCount += 1;
       return { stdout: `%50${mockedCalls.splitCount}\n`, stderr: '' };

@@ -643,6 +643,33 @@ describe('runtime v2 startup inbox dispatch', () => {
   });
 
 
+
+  it('aborts startup without persisting a live worker when worker start command delivery fails', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-start-delivery-fail-'));
+    mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('worker_start_delivery_unverified:worker-1:%2:abc123'));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['codex'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify start command delivery failure aborts startup' }],
+      cwd,
+    })).rejects.toThrow('worker_start_delivery_unverified:worker-1:%2:abc123');
+
+    expect(mocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+    expect(mocks.killTeamSession).toHaveBeenCalledWith(
+      'dispatch-session',
+      [],
+      '%1',
+      { sessionMode: 'split-pane' },
+    );
+    const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
+    const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
+    expect(persisted.workers[0].pane_id).toBeUndefined();
+    expect(persisted.workers[0].assigned_tasks).toEqual([]);
+  });
+
   it('does not auto-kill a worker pane when startup readiness fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-ready-'));
     mocks.waitForPaneReady.mockResolvedValue(false);
