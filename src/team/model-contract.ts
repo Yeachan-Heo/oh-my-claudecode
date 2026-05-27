@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'antigravity';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'antigravity' | 'grok';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -66,6 +66,7 @@ function getTrustedPrefixes(): string[] {
     trusted.push(`${home}/.local/bin`);
     trusted.push(`${home}/.nvm/`);
     trusted.push(`${home}/.cargo/bin`);
+    trusted.push(`${home}/.grok/bin`);
   }
 
   const custom = (process.env.OMC_TRUSTED_CLI_DIRS ?? '')
@@ -266,6 +267,21 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     buildLaunchArgs(_model?: string, extraFlags: string[] = []): string[] {
       // agy does not accept --model; model is set in ~/.gemini/antigravity-cli/settings.json
       return ['--dangerously-skip-permissions', ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
+  grok: {
+    agentType: 'grok',
+    binary: 'grok',
+    installInstructions: 'Install Grok CLI: https://build.grok.com',
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
+      const args = ['--always-approve'];
+      if (model) args.push('--model', model);
+      return [...args, ...extraFlags];
     },
     parseOutput(rawOutput: string): string {
       return rawOutput.trim();

@@ -7,15 +7,15 @@ import { fileURLToPath } from 'url';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
 export const ASK_USAGE = [
-  'Usage: omc ask <claude|codex|gemini|antigravity> <question or task>',
-  '   or: omc ask <claude|codex|gemini|antigravity> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|antigravity> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|antigravity> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|antigravity> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|antigravity> --agent-prompt=<role> --prompt "<prompt>"',
+  'Usage: omc ask <claude|codex|gemini|antigravity|grok> <question or task>',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok> --agent-prompt=<role> --prompt "<prompt>"',
 ].join('\n');
 
-const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'antigravity'] as const;
+const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'antigravity', 'grok'] as const;
 export type AskProvider = (typeof ASK_PROVIDERS)[number];
 const ASK_PROVIDER_SET = new Set<string>(ASK_PROVIDERS);
 
