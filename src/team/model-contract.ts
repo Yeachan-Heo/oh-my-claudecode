@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -66,6 +66,7 @@ function getTrustedPrefixes(): string[] {
     trusted.push(`${home}/.local/bin`);
     trusted.push(`${home}/.nvm/`);
     trusted.push(`${home}/.cargo/bin`);
+    trusted.push(`${home}/.grok/bin`);
   }
 
   const custom = (process.env.OMC_TRUSTED_CLI_DIRS ?? '')
@@ -250,6 +251,21 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       return rawOutput.trim();
     },
   },
+  grok: {
+    agentType: 'grok',
+    binary: 'grok',
+    installInstructions: 'Install Grok Build: https://build.grok.com',
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
+      const args = ['--always-approve'];
+      if (model) args.push('--model', model);
+      return [...args, ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
   cursor: {
     agentType: 'cursor',
     binary: 'cursor-agent',
@@ -388,6 +404,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
   'OMC_CODEX_DEFAULT_MODEL',
   'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
   'OMC_GEMINI_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL',
+  'OMC_GROK_DEFAULT_MODEL',
 ] as const;
 
 export function getWorkerEnv(

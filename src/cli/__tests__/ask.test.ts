@@ -272,6 +272,8 @@ describe('parseAskArgs', () => {
     expect(parseAskArgs(['claude', '--print', 'draft', 'summary'])).toEqual({ provider: 'claude', prompt: 'draft summary' });
     expect(parseAskArgs(['gemini', '--prompt=ship safely'])).toEqual({ provider: 'gemini', prompt: 'ship safely' });
     expect(parseAskArgs(['codex', 'review', 'this'])).toEqual({ provider: 'codex', prompt: 'review this' });
+    expect(parseAskArgs(['grok', 'review', 'this'])).toEqual({ provider: 'grok', prompt: 'review this' });
+    expect(parseAskArgs(['grok', '-p', 'brainstorm'])).toEqual({ provider: 'grok', prompt: 'brainstorm' });
   });
 
   it('supports --agent-prompt flag and equals syntax', () => {
@@ -485,6 +487,7 @@ describe('run-provider-advisor script contract', () => {
     ['claude', ['claude', '--prompt', 'nested claude prompt']],
     ['codex', ['codex', '--prompt', 'nested codex prompt']],
     ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
+    ['grok', ['grok', '--prompt', 'nested grok prompt']],
   ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
     const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
     try {
@@ -528,6 +531,41 @@ describe('run-provider-advisor script contract', () => {
           CLAUDE_CODE_ENTRYPOINT: null,
         });
       }
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches grok as `grok -p <prompt> --always-approve` and never pipes stdin', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-grok-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // A multiline prompt is piped over stdin for codex/gemini; grok reserves stdin
+      // for ACP JSON-RPC, so it must take the prompt as a `-p` arg instead.
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['grok', '--prompt', 'review this\nand that'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { input: string | null };
+      }>;
+
+      // version probe + launch, both via the `grok` binary
+      expect(calls).toHaveLength(2);
+      const launch = calls.find((c) => !c.args.includes('--version'));
+      expect(launch).toBeDefined();
+      expect(launch!.command).toBe('grok');
+      expect(launch!.args).toEqual(['-p', 'review this\nand that', '--always-approve']);
+      expect(launch!.options.input ?? null).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

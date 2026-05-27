@@ -110,7 +110,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { spawnWorkerForTask, type TeamRuntime } from '../runtime.js';
 
-function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude'): TeamRuntime {
+function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude' | 'grok'): TeamRuntime {
   return {
     teamName: 'test-team',
     sessionName: 'test-session:0',
@@ -319,6 +319,8 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     delete process.env.OMC_CODEX_DEFAULT_MODEL;
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
     delete process.env.OMC_GEMINI_DEFAULT_MODEL;
+    delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL;
+    delete process.env.OMC_GROK_DEFAULT_MODEL;
     delete process.env.ANTHROPIC_MODEL;
     delete process.env.CLAUDE_MODEL;
     delete process.env.ANTHROPIC_BASE_URL;
@@ -437,6 +439,85 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     const launchCmd = launchCall![launchCall!.length - 1];
 
     expect(launchCmd).toContain("'--model' 'gemini-2.0-flash'");
+  });
+
+  it('grok worker passes model from OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL', async () => {
+    process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL = 'grok-4-fast';
+    const runtime = makeRuntime(cwd, 'grok');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--always-approve'");
+    expect(launchCmd).toContain("'--model'");
+    expect(launchCmd).toContain("'grok-4-fast'");
+  });
+
+  it('grok worker falls back to OMC_GROK_DEFAULT_MODEL', async () => {
+    process.env.OMC_GROK_DEFAULT_MODEL = 'grok-code-fast-1';
+    const runtime = makeRuntime(cwd, 'grok');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--model'");
+    expect(launchCmd).toContain("'grok-code-fast-1'");
+  });
+
+  it('grok worker prefers OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL over legacy fallback', async () => {
+    process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL = 'grok-4-fast';
+    process.env.OMC_GROK_DEFAULT_MODEL = 'grok-code-fast-1';
+    const runtime = makeRuntime(cwd, 'grok');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--model' 'grok-4-fast'");
+  });
+
+  it('direct grok worker does not fall through to a Claude/Bedrock model (maintainer key ask)', async () => {
+    // A DIRECT grok launch must resolve its model only from grok env vars.
+    // Even with Bedrock/Claude model env present, grok must NOT receive any
+    // --model flag (its grok env vars are unset here) and must NOT pick up a
+    // Claude/Bedrock model id via resolveClaudeWorkerModel().
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+    process.env.ANTHROPIC_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.OMC_MODEL_MEDIUM = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const runtime = makeRuntime(cwd, 'grok');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // grok env vars unset → no --model flag at all. The grok IIFE branch returns
+    // undefined and never falls through to resolveClaudeWorkerModel(), so the
+    // Claude/Bedrock model id is never passed as a `--model` CLI argument.
+    // (The Bedrock ids still appear in the forwarded env prefix via the worker
+    //  model-env allowlist, exactly as they would for any non-claude worker —
+    //  that is pane startup env, not the grok model selection.)
+    expect(launchCmd).toContain("'--always-approve'");
+    expect(launchCmd).not.toContain("'--model'");
+    expect(launchCmd).not.toContain("'--model' 'us.anthropic.claude-sonnet-4-6-v1:0'");
   });
 
   it('claude worker does not pass model flag (not supported)', async () => {
