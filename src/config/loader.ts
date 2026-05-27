@@ -477,7 +477,7 @@ function warnOnDeprecatedDelegationRouting(config: PluginConfig): void {
 const CANONICAL_TEAM_ROLE_SET = new Set<string>(CANONICAL_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set<string>(KNOWN_AGENT_NAMES);
 // /team CLI workers — codex/gemini here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
-const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini"]);
+const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "antigravity", "grok"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
 
 export function validateTeamConfig(config: PluginConfig): void {
@@ -1059,7 +1059,7 @@ export function generateConfigSchema(): object {
           },
           defaultProvider: {
             type: "string",
-            enum: ["claude", "codex", "gemini"],
+            enum: ["claude", "codex", "gemini", "antigravity", "grok"],
             default: "claude",
             description:
               "Default provider for delegation routing when no specific role mapping exists",
@@ -1072,7 +1072,7 @@ export function generateConfigSchema(): object {
               properties: {
                 provider: {
                   type: "string",
-                  enum: ["claude", "codex", "gemini"],
+                  enum: ["claude", "codex", "gemini", "antigravity", "grok"],
                 },
                 tool: { type: "string", enum: ["Task"] },
                 model: { type: "string" },
@@ -1094,7 +1094,7 @@ export function generateConfigSchema(): object {
               maxAgents: { type: "integer", minimum: 1 },
               defaultAgentType: {
                 type: "string",
-                enum: ["claude", "codex", "gemini"],
+                enum: ["claude", "codex", "gemini", "antigravity", "grok"],
                 default: "claude",
               },
               monitorIntervalMs: { type: "integer", minimum: 1 },
@@ -1108,7 +1108,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["claude", "codex", "gemini"] },
+                provider: { type: "string", enum: ["claude", "codex", "gemini", "antigravity", "grok"] },
                 model: { type: "string" },
                 agent: { type: "string" },
               },
