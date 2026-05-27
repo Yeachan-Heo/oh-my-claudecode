@@ -23,6 +23,7 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeHooksDataForPlatform } from './lib/hook-command-normalizer.mjs';
 
 function getClaudeConfigDir() {
   const configured = (process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')).replace(/[\\/]+$/, '');
@@ -91,6 +92,18 @@ function writeJsonAtomic(path, value) {
     try { rmSync(tmp, { force: true }); } catch {}
     throw error;
   }
+}
+
+function patchHooksJsonForPlatform(pluginRoot, platform = process.platform) {
+  const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
+  if (!existsSync(hooksJsonPath)) return false;
+
+  const data = readJson(hooksJsonPath);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+
+  const patched = normalizeHooksDataForPlatform(data, platform);
+  if (patched) writeJsonAtomic(hooksJsonPath, data);
+  return patched;
 }
 
 function normalizePath(pathValue) {
@@ -165,9 +178,15 @@ export function repairPluginCacheReferences() {
   const configDir = getClaudeConfigDir();
   const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
   const latestRoot = latestValidCacheRoot(cacheBase);
-  const result = { latestRoot, registryUpdated: false, symlinked: 0, errors: [] };
+  const result = { latestRoot, registryUpdated: false, hooksPatched: false, symlinked: 0, errors: [] };
 
   if (!latestRoot) return result;
+
+  try {
+    result.hooksPatched = patchHooksJsonForPlatform(latestRoot, process.env.OMC_REPAIR_PLUGIN_CACHE_PLATFORM || process.platform);
+  } catch (error) {
+    result.errors.push(`hooks.json platform repair failed: ${error instanceof Error ? error.message : error}`);
+  }
 
   const installedPluginsPath = join(configDir, 'plugins', 'installed_plugins.json');
   try {
@@ -218,8 +237,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   if (!result.latestRoot) {
     console.log('[OMC] No OMC plugin cache found (normal for new installs)');
-  } else if (result.registryUpdated || result.symlinked > 0) {
-    console.log(`[OMC] Repaired plugin cache references: active=${result.latestRoot}, symlinked=${result.symlinked}`);
+  } else if (result.registryUpdated || result.hooksPatched || result.symlinked > 0) {
+    console.log(`[OMC] Repaired plugin cache references: active=${result.latestRoot}, symlinked=${result.symlinked}${result.hooksPatched ? ', hooks=platform' : ''}`);
   } else {
     console.log('[OMC] Plugin cache references are current');
   }

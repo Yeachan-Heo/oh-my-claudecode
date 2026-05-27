@@ -13,6 +13,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { buildHudWrapper } from './lib/hud-wrapper-template.mjs';
+import { hookPrefixForPlatform, normalizeHooksDataForPlatform } from './lib/hook-command-normalizer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -113,11 +114,6 @@ try {
 //
 // Keep stale cache self-healing for older manifests that used sh/find-node, an
 // accidentally baked absolute node path, or the Windows-safe direct node form.
-const windowsRunCjsHookPrefix = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
-const unixFindNodeHookPrefix = 'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
-const platformHookPrefix = process.platform === 'win32'
-  ? windowsRunCjsHookPrefix
-  : unixFindNodeHookPrefix;
 //
 // Patterns handled:
 //  1. Current find-node.sh format – sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh ...
@@ -130,49 +126,11 @@ try {
   const hooksJsonPath = join(__dirname, '..', 'hooks', 'hooks.json');
   if (existsSync(hooksJsonPath)) {
     const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-    let patched = false;
-
-    const legacyFindNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^\"\s]+)"?(.*)$/;
-    const currentFindNodePattern =
-      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
-    const directRunCjsPattern =
-      /^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
-    const absoluteNodeRunCjsPattern =
-      /^"([^\"]*\/node|[A-Za-z]:\\[^\"]*\\node(?:\.exe)?)"\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\"\s]+)"?(.*)$/;
-
-    for (const groups of Object.values(data.hooks ?? {})) {
-      for (const group of groups) {
-        for (const hook of (group.hooks ?? [])) {
-          if (typeof hook.command !== 'string') continue;
-
-          const match = hook.command.match(currentFindNodePattern)
-            ?? hook.command.match(legacyFindNodePattern)
-            ?? hook.command.match(directRunCjsPattern);
-          if (match) {
-            const nextCommand = `${platformHookPrefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${match[1]}${match[2]}`;
-            if (hook.command !== nextCommand) {
-              hook.command = nextCommand;
-              patched = true;
-            }
-            continue;
-          }
-
-          const absNodeMatch = hook.command.match(absoluteNodeRunCjsPattern);
-          if (absNodeMatch) {
-            const nextCommand = `${platformHookPrefix}"$CLAUDE_PLUGIN_ROOT"/scripts/${absNodeMatch[2]}${absNodeMatch[3]}`;
-            if (hook.command !== nextCommand) {
-              hook.command = nextCommand;
-              patched = true;
-            }
-          }
-        }
-      }
-    }
+    const patched = normalizeHooksDataForPlatform(data);
 
     if (patched) {
       writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-      const platformLabel = process.platform === 'win32' ? 'direct node run.cjs' : 'find-node.sh run.cjs';
+      const platformLabel = hookPrefixForPlatform().startsWith('node ') ? 'direct node run.cjs' : 'find-node.sh run.cjs';
       console.log(`[OMC] Patched hooks.json to use ${platformLabel} hook commands`);
     }
   }

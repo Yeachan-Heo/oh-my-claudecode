@@ -53,7 +53,7 @@ describe('repair-plugin-cache.mjs', () => {
     }, null, 2));
 
     const result = spawnSync(process.execPath, [SCRIPT_PATH], {
-      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'linux' },
       encoding: 'utf-8',
     });
 
@@ -88,7 +88,7 @@ describe('repair-plugin-cache.mjs', () => {
     }, null, 2));
 
     const result = spawnSync(process.execPath, [SCRIPT_PATH], {
-      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'linux' },
       encoding: 'utf-8',
     });
 
@@ -102,6 +102,109 @@ describe('repair-plugin-cache.mjs', () => {
       installPath: newRoot,
       version: '4.14.1',
     });
+  });
+
+  it.runIf(process.platform !== 'win32')('repairs Unix cache hooks from direct node to the find-node bootstrap', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-repair-unix-hooks-'));
+    tempRoots.push(root);
+
+    const configDir = join(root, '.claude');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pluginRoot = join(cacheBase, '4.14.4');
+    writePluginRoot(pluginRoot, '4.14.4');
+    writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        SessionEnd: [{
+          matcher: '*',
+          hooks: [{
+            type: 'command',
+            command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+          }],
+        }],
+      },
+    }, null, 2));
+
+    const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('hooks=platform');
+    const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
+    expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe(
+      'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+    );
+  });
+
+  it.runIf(process.platform !== 'win32')('repairs every bundled direct-node hook command to find-node on Unix/macOS', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-repair-unix-bundled-hooks-'));
+    tempRoots.push(root);
+
+    const configDir = join(root, '.claude');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pluginRoot = join(cacheBase, '4.14.4');
+    writePluginRoot(pluginRoot, '4.14.4');
+    writeFileSync(
+      join(pluginRoot, 'hooks', 'hooks.json'),
+      readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf-8'),
+    );
+
+    const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8')) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
+    };
+    const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) =>
+      groups.flatMap(group =>
+        group.hooks
+          .map(hook => hook.command)
+          .filter((command): command is string => typeof command === 'string')
+          .map(command => ({ event, command })),
+      ),
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const { event, command } of commands) {
+      expect(command, event).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+      expect(command, event).not.toContain('/bin/sh');
+    }
+  });
+
+  it('repairs Windows cache hooks from find-node to direct node', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-repair-win-hooks-'));
+    tempRoots.push(root);
+
+    const configDir = join(root, '.claude');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pluginRoot = join(cacheBase, '4.14.4');
+    writePluginRoot(pluginRoot, '4.14.4');
+    writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        SessionEnd: [{
+          matcher: '*',
+          hooks: [{
+            type: 'command',
+            command: 'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+          }],
+        }],
+      },
+    }, null, 2));
+
+    const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'win32' },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
+    expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe(
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+    );
   });
 
   it('setup instructions repair cache references before prompts and avoid direct cache deletion', () => {
