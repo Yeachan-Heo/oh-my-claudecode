@@ -12,7 +12,7 @@ const MAX_HOT_PATHS = 50;
  * Track file or directory access
  */
 export function trackAccess(
-  hotPaths: HotPath[],
+  hotPaths: HotPath[] | null | undefined,
   filePath: string,
   projectRoot: string,
   type: "file" | "directory",
@@ -21,17 +21,19 @@ export function trackAccess(
     ? path.relative(projectRoot, filePath)
     : filePath;
 
+  const normalizedHotPaths = ensureHotPathList(hotPaths);
+
   if (relativePath.startsWith("..") || shouldIgnorePath(relativePath)) {
-    return hotPaths;
+    return normalizedHotPaths;
   }
 
-  const existing = hotPaths.find((hp) => hp.path === relativePath);
+  const existing = normalizedHotPaths.find((hp) => hp.path === relativePath);
 
   if (existing) {
     existing.accessCount++;
     existing.lastAccessed = Date.now();
   } else {
-    hotPaths.push({
+    normalizedHotPaths.push({
       path: relativePath,
       accessCount: 1,
       lastAccessed: Date.now(),
@@ -39,13 +41,18 @@ export function trackAccess(
     });
   }
 
-  hotPaths.sort((a, b) => b.accessCount - a.accessCount);
+  normalizedHotPaths.sort((a, b) => b.accessCount - a.accessCount);
 
-  if (hotPaths.length > MAX_HOT_PATHS) {
-    hotPaths.splice(MAX_HOT_PATHS);
+  if (normalizedHotPaths.length > MAX_HOT_PATHS) {
+    normalizedHotPaths.splice(MAX_HOT_PATHS);
   }
 
-  return hotPaths;
+  return normalizedHotPaths;
+}
+
+
+function ensureHotPathList(hotPaths: HotPath[] | null | undefined): HotPath[] {
+  return Array.isArray(hotPaths) ? hotPaths : [];
 }
 
 function shouldIgnorePath(relativePath: string): boolean {
@@ -69,14 +76,14 @@ function shouldIgnorePath(relativePath: string): boolean {
  * Get top hot paths for display
  */
 export function getTopHotPaths(
-  hotPaths: HotPath[],
+  hotPaths: HotPath[] | null | undefined,
   limit: number = 10,
   context?: ProjectMemoryContext,
 ): HotPath[] {
   const now = context?.now ?? Date.now();
   const scopePath = normalizeScopePath(context?.workingDirectory);
 
-  return [...hotPaths]
+  return ensureHotPathList(hotPaths)
     .filter((hp) => !shouldIgnorePath(hp.path))
     .sort(
       (a, b) =>
@@ -88,11 +95,11 @@ export function getTopHotPaths(
 /**
  * Decay old hot paths (reduce access count over time)
  */
-export function decayHotPaths(hotPaths: HotPath[]): HotPath[] {
+export function decayHotPaths(hotPaths: HotPath[] | null | undefined): HotPath[] {
   const now = Date.now();
   const dayInMs = 24 * 60 * 60 * 1000;
 
-  return hotPaths
+  return ensureHotPathList(hotPaths)
     .map((hp) => {
       const age = now - hp.lastAccessed;
       if (age > dayInMs * 7) {
