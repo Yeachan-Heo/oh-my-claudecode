@@ -143,7 +143,15 @@ function resolveExternalModel(
   if (provider === 'codex') {
     return defaults?.codexModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
   }
-  return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+  if (provider === 'gemini') {
+    return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+  }
+  // grok and antigravity: return explicit config value or empty string so
+  // buildLaunchArgs skips --model entirely when no model is configured.
+  if (provider === 'grok') {
+    return (defaults as Record<string, string> | undefined)?.grokModel ?? '';
+  }
+  return '';
 }
 
 /**
