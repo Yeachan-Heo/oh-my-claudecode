@@ -17,7 +17,7 @@ import { join, resolve, sep } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../../lib/file-lock.js';
-import { WIKI_SCHEMA_VERSION, } from './types.js';
+import { WIKI_SCHEMA_VERSION, normalizeCategory, } from './types.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -92,7 +92,7 @@ export function parseFrontmatter(raw) {
             updated: String(fm.updated || new Date().toISOString()),
             sources: parseYamlArray(fm.sources),
             links: parseYamlArray(fm.links),
-            category: (fm.category || 'reference'),
+            category: normalizeCategory(fm.category || 'reference'),
             confidence: (fm.confidence || 'medium'),
             schemaVersion: Number(fm.schemaVersion) || WIKI_SCHEMA_VERSION,
         };

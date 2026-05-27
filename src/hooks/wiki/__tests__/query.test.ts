@@ -83,12 +83,12 @@ describe('Wiki Query', () => {
 
   it('should filter by category', () => {
     writePage(tempDir, makePage('arch.md', { title: 'Architecture', category: 'architecture' }));
-    writePage(tempDir, makePage('debug.md', { title: 'Debug Info', category: 'debugging' }));
+    writePage(tempDir, makePage('debug.md', { title: 'Debug Info', category: 'finding' }));
 
-    const results = queryWiki(tempDir, 'info', { category: 'debugging' });
+    const results = queryWiki(tempDir, 'info', { category: 'finding' });
     // Should only return debugging category
     for (const r of results) {
-      expect(r.page.frontmatter.category).toBe('debugging');
+      expect(r.page.frontmatter.category).toBe('finding');
     }
   });
 

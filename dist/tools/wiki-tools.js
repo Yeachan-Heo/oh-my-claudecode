@@ -10,9 +10,13 @@ import { readPage, listPages, readIndex, deletePage, appendLog, titleToSlug, } f
 import { ingestKnowledge } from '../hooks/wiki/ingest.js';
 import { queryWiki } from '../hooks/wiki/query.js';
 import { lintWiki } from '../hooks/wiki/lint.js';
+import { normalizeCategory } from '../hooks/wiki/types.js';
 const WIKI_CATEGORIES = [
-    'architecture', 'decision', 'pattern', 'debugging',
-    'environment', 'session-log', 'reference', 'convention',
+    // Current canonical categories
+    'architecture', 'decision', 'guide', 'setup',
+    'finding', 'reference', 'log',
+    // Legacy aliases (normalized to canonical on use)
+    'pattern', 'convention', 'debugging', 'environment', 'session-log',
 ];
 // ============================================================================
 // wiki_ingest
@@ -36,7 +40,7 @@ export const wikiIngestTool = {
                 title: args.title,
                 content: args.content,
                 tags: args.tags,
-                category: args.category,
+                category: normalizeCategory(args.category),
                 sources: args.sources,
                 confidence: args.confidence,
             });
@@ -76,7 +80,7 @@ export const wikiQueryTool = {
             const root = validateWorkingDirectoryOrLinkedWorktree(args.workingDirectory);
             const matches = queryWiki(root, args.query, {
                 tags: args.tags,
-                category: args.category,
+                category: args.category ? normalizeCategory(args.category) : undefined,
                 limit: args.limit,
             });
             if (matches.length === 0) {
@@ -188,7 +192,7 @@ export const wikiAddTool = {
                 title: args.title,
                 content: args.content,
                 tags: args.tags || [],
-                category: (args.category || 'reference'),
+                category: normalizeCategory(args.category || 'reference'),
             });
             return {
                 content: [{

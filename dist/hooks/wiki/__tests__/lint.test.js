@@ -138,7 +138,7 @@ describe('Wiki Lint', () => {
             writePage(tempDir, makePage('db-ops-debug.md', {
                 title: 'DB Ops Debug',
                 tags: ['database'],
-                category: 'debugging',
+                category: 'finding',
             }));
             const report = lintWiki(tempDir);
             const tagContra = report.issues.find(i => i.type === 'structural-contradiction' && i.message.includes('database'));

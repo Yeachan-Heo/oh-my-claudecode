@@ -174,7 +174,7 @@ describe('Wiki Lint', () => {
       writePage(tempDir, makePage('db-ops-debug.md', {
         title: 'DB Ops Debug',
         tags: ['database'],
-        category: 'debugging',
+        category: 'finding',
       }));
 
       const report = lintWiki(tempDir);

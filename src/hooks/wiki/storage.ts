@@ -23,6 +23,7 @@ import {
   type WikiPageFrontmatter,
   type WikiLogEntry,
   WIKI_SCHEMA_VERSION,
+  normalizeCategory,
 } from './types.js';
 
 // ============================================================================
@@ -109,7 +110,7 @@ export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatte
       updated: String(fm.updated || new Date().toISOString()),
       sources: parseYamlArray(fm.sources),
       links: parseYamlArray(fm.links),
-      category: (fm.category || 'reference') as WikiPageFrontmatter['category'],
+      category: normalizeCategory(fm.category || 'reference'),
       confidence: (fm.confidence || 'medium') as WikiPageFrontmatter['confidence'],
       schemaVersion: Number(fm.schemaVersion) || WIKI_SCHEMA_VERSION,
     };

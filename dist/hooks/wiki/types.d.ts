@@ -28,8 +28,17 @@ export interface WikiPageFrontmatter {
     /** Schema version for future migration support */
     schemaVersion: number;
 }
-/** Supported page categories. */
-export type WikiCategory = 'architecture' | 'decision' | 'pattern' | 'debugging' | 'environment' | 'session-log' | 'reference' | 'convention';
+/** Supported page categories.
+ * Orthogonal taxonomy — each answers a different question:
+ *   architecture  → what IS the system (structure, components, data models)
+ *   decision      → WHY it was built that way (ADRs, tradeoffs, rejected alternatives)
+ *   guide         → HOW to work with it (patterns, conventions, coding standards, workflows)
+ *   setup         → HOW to run/configure it (environment, dependencies, onboarding)
+ *   finding       → WHAT was learned empirically (bugs, gotchas, experiments, perf)
+ *   reference     → WHERE external knowledge lives (third-party docs, specs, links)
+ *   log           → WHAT happened (auto-captured session logs, incident records)
+ */
+export type WikiCategory = 'architecture' | 'decision' | 'guide' | 'setup' | 'finding' | 'reference' | 'log';
 /** A wiki page: frontmatter + markdown content + filename. */
 export interface WikiPage {
     /** Filename without path (e.g., "auth-architecture.md") */
@@ -122,6 +131,16 @@ export interface WikiLintReport {
         contradictionCount: number;
     };
 }
+/**
+ * Maps legacy category names to their canonical replacements.
+ * Used to migrate existing wiki pages written before the 7-category taxonomy.
+ */
+export declare const LEGACY_CATEGORY_MAP: Record<string, WikiCategory>;
+/**
+ * Normalize a category string, mapping legacy names to current canonical ones.
+ * Returns the input unchanged if it is already a valid current category.
+ */
+export declare function normalizeCategory(cat: string): WikiCategory;
 /** Wiki configuration (from .omc-config.json). */
 export interface WikiConfig {
     /** Whether auto-capture is enabled at session end (default: true) */
