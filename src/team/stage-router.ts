@@ -132,7 +132,7 @@ function resolveClaudeModel(
  * explicit non-tier model ID is passed through.
  */
 function resolveExternalModel(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'antigravity',
   raw: string | undefined,
   cfg: PluginConfig,
 ): string {

@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'antigravity';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -252,6 +252,20 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       // Minimal flags — cursor-agent owns its own session/auth state.
       // The model is selected interactively inside cursor-agent itself.
       return [...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
+  antigravity: {
+    agentType: 'antigravity',
+    binary: 'agy',
+    installInstructions: 'Install Antigravity CLI: https://antigravity.dev',
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(_model?: string, extraFlags: string[] = []): string[] {
+      // agy does not accept --model; model is set in ~/.gemini/antigravity-cli/settings.json
+      return ['--dangerously-skip-permissions', ...extraFlags];
     },
     parseOutput(rawOutput: string): string {
       return rawOutput.trim();
