@@ -779,6 +779,16 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('tmux capture-pane -pt <pane-id> -S -20');
     });
 
+    it('should accept native Windows psmux before emitting WSL-required team guidance', () => {
+      const skill = getBuiltinSkill('team');
+      expect(skill).toBeDefined();
+      expect(skill?.template).toContain('Windows psmux tmux-compatible gate');
+      expect(skill?.template).toContain('do **not** tell users that `/team` requires WSL');
+      expect(skill?.template).toContain('Treat a successful psmux-backed `tmux -V` as tmux available');
+      expect(skill?.template).toContain('continue the normal Team flow; do not emit WSL-required guidance');
+      expect(skill?.template).toContain('Only when no tmux-compatible binary is available');
+    });
+
     it('should document allowed omc-teams agent types and native team fallback', () => {
       const skill = getBuiltinSkill('omc-teams');
       expect(skill).toBeDefined();
