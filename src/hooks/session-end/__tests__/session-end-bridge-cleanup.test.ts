@@ -51,7 +51,7 @@ describe('processSessionEnd python bridge cleanup', () => {
     ];
     fs.writeFileSync(transcriptPath, transcriptLines.join('\n'), 'utf-8');
 
-    await processSessionEnd({
+    const result = await processSessionEnd({
       session_id: 'session-123',
       transcript_path: transcriptPath,
       cwd: tmpDir,
@@ -59,6 +59,7 @@ describe('processSessionEnd python bridge cleanup', () => {
       hook_event_name: 'SessionEnd',
       reason: 'clear',
     });
+    await result.pending;
 
     expect(cleanupBridgeSessions).toHaveBeenCalledTimes(1);
     const calledWith = vi.mocked(cleanupBridgeSessions).mock.calls[0]?.[0] as string[];

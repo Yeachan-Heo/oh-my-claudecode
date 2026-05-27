@@ -115,7 +115,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       workers: [{ name: 'worker-1', pane_id: '%1' }],
     } as never);
 
-    await processSessionEnd({
+    const result = await processSessionEnd({
       session_id: sessionId,
       transcript_path: transcriptPath,
       cwd: tmpDir,
@@ -123,6 +123,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       hook_event_name: 'SessionEnd',
       reason: 'clear',
     });
+    await result.pending;
 
     expect(teamCleanupMocks.shutdownTeamV2).toHaveBeenCalledWith(
       'delivery-team',
@@ -149,7 +150,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       tmuxOwnsWindow: false,
     } as never);
 
-    await processSessionEnd({
+    const result = await processSessionEnd({
       session_id: sessionId,
       transcript_path: transcriptPath,
       cwd: tmpDir,
@@ -157,6 +158,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       hook_event_name: 'SessionEnd',
       reason: 'clear',
     });
+    await result.pending;
 
     expect(teamCleanupMocks.shutdownTeam).toHaveBeenCalledWith(
       'legacy-team',
@@ -190,7 +192,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       workers: [{ name: `${teamName}-worker`, pane_id: '%1' }],
     })) as never);
 
-    await processSessionEnd({
+    const result = await processSessionEnd({
       session_id: sessionId,
       transcript_path: transcriptPath,
       cwd: tmpDir,
@@ -198,6 +200,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       hook_event_name: 'SessionEnd',
       reason: 'clear',
     });
+    await result.pending;
 
     expect(teamCleanupMocks.shutdownTeamV2).toHaveBeenCalledTimes(1);
     expect(teamCleanupMocks.shutdownTeamV2).toHaveBeenCalledWith(

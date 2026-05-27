@@ -33,6 +33,16 @@ export interface SessionMetrics {
 
 export interface HookOutput {
   continue: boolean;
+  /**
+   * Promise that resolves when all fire-and-forget cleanup work
+   * (notifications, team shutdown, python REPL bridge cleanup, reply listener
+   * cleanup) has settled. The hook runner does not need to await this — Node
+   * keeps the process alive until stdout closes — but tests and other
+   * in-process callers can await it to verify cleanup completion.
+   *
+   * Not serialized over the hook protocol. See `handleSessionEnd`.
+   */
+  pending?: Promise<unknown>;
 }
 
 interface SessionOwnedTeamCleanupResult {
@@ -753,12 +763,15 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   const metrics = recordSessionMetrics(directory, input);
   exportSessionSummary(directory, metrics);
 
-  // Best-effort cleanup for tmux-backed team workers owned by this Claude Code
-  // session. This does not fix upstream signal-forwarding behavior, but it
-  // meaningfully reduces orphaned panes/windows when SessionEnd runs normally.
-  await cleanupSessionOwnedTeams(directory, input.session_id);
+  // Kick off team cleanup BEFORE the mode-state wiping below. The synchronous
+  // portion of `cleanupSessionOwnedTeams` (specifically `readModeState('team', …)`
+  // inside `findSessionOwnedTeams`) must observe the live `team-state.json`
+  // before `cleanupModeStates` removes it. The remaining async shutdown work
+  // is pushed onto `fireAndForget` further below so it does not block the
+  // hook's critical path.
+  const teamCleanupPromise = cleanupSessionOwnedTeams(directory, input.session_id);
 
-  // Clean up transient state files
+  // Clean up transient state files (synchronous, fast).
   cleanupTransientState(directory, input.session_id);
 
   // Clean up mode state files to prevent stale state issues
@@ -774,17 +787,6 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   // not treat it as hard-terminated.
   cleanupSessionStartedMarker(directory, input.session_id);
 
-  // Clean up Python REPL bridge sessions used in this transcript (#641).
-  // Best-effort only: session end should not fail because cleanup fails.
-  try {
-    const pythonSessionIds = await extractPythonReplSessionIdsFromTranscript(input.transcript_path);
-    if (pythonSessionIds.length > 0) {
-      await cleanupBridgeSessions(pythonSessionIds);
-    }
-  } catch {
-    // Ignore cleanup errors
-  }
-
   const profileName = process.env.OMC_NOTIFY_PROFILE;
   const notificationConfig = getNotificationConfig(profileName);
   const shouldUseNewNotificationSystem = Boolean(
@@ -799,6 +801,56 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   // We collect the promises but don't await them — Node will flush them before
   // the process exits (the hook runner keeps the process alive until stdout closes).
   const fireAndForget: Promise<unknown>[] = [];
+
+  // Soft cap on tmux/python REPL cleanup so a hung worker can't push the hook
+  // toward the 30s SessionEnd timeout. Tunable via env for users who prefer
+  // longer cleanup windows. See discussion in the issue: tmux signal escalation
+  // (SIGINT -> SIGTERM -> SIGKILL with 100ms polling) and Python REPL bridge
+  // kill (5s SIGINT grace + 2.5s SIGTERM + poll) can take 15-25s combined on
+  // sessions with active teams + python REPL usage.
+  const cleanupBudgetMs = Number.parseInt(
+    process.env.OMC_SESSIONEND_CLEANUP_BUDGET_MS ?? '',
+    10,
+  );
+  const CLEANUP_BUDGET_MS = Number.isFinite(cleanupBudgetMs) && cleanupBudgetMs > 0
+    ? cleanupBudgetMs
+    : 2000;
+  const withCleanupBudget = <T>(p: Promise<T>): Promise<T | void> =>
+    Promise.race<T | void>([
+      p,
+      new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, CLEANUP_BUDGET_MS);
+        t.unref?.();
+      }),
+    ]);
+
+  // Best-effort cleanup for tmux-backed team workers owned by this Claude Code
+  // session. The promise was started above (before state wiping) so team
+  // discovery sees the live state; here we push it onto fireAndForget so the
+  // tmux signal-escalation tail does not block the hook's critical path.
+  // Internal timeout (`timeoutMs: 0` passed to `shutdownTeamV2 / shutdownTeam`)
+  // already caps per-team work, so we don't apply `withCleanupBudget` here —
+  // doing so would race the dynamic imports the cleanup needs to finish.
+  fireAndForget.push(
+    teamCleanupPromise.catch(() => { /* team cleanup failures must not block session end */ }),
+  );
+
+  // Clean up Python REPL bridge sessions used in this transcript (#641).
+  // Best-effort only. Moved off the critical path because the signal-escalation
+  // kill (5s SIGINT + 2.5s SIGTERM + poll) was adding up to 15s of blocking
+  // wait on sessions that used python_repl.
+  fireAndForget.push(
+    (async () => {
+      try {
+        const pythonSessionIds = await extractPythonReplSessionIdsFromTranscript(input.transcript_path);
+        if (pythonSessionIds.length > 0) {
+          await withCleanupBudget(cleanupBridgeSessions(pythonSessionIds));
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    })(),
+  );
 
   // Trigger stop hook callbacks (#395). When an explicit session-end notification
   // config already covers Discord/Telegram, skip the overlapping legacy callback
@@ -858,15 +910,20 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
   // The hook runner keeps the process alive until stdout closes, so these
   // will settle naturally. Awaiting them would defeat the fire-and-forget
   // optimization and risk hitting the hook timeout (#1700).
-  void Promise.allSettled(fireAndForget);
+  // `pending` is exposed on the return value so in-process callers (tests,
+  // adjacent hooks) can await cleanup completion without blocking the hook.
+  const pending = Promise.allSettled(fireAndForget);
 
   // Return simple response - metrics are persisted to .omc/sessions/
-  return { continue: true };
+  return { continue: true, pending };
 }
 
 /**
- * Main hook entry point
+ * Main hook entry point. Strips the `pending` promise from the response so
+ * it isn't serialized over the hook protocol; the in-process work still
+ * completes because Node keeps the process alive until stdout closes.
  */
 export async function handleSessionEnd(input: SessionEndInput): Promise<HookOutput> {
-  return processSessionEnd(input);
+  const { continue: shouldContinue } = await processSessionEnd(input);
+  return { continue: shouldContinue };
 }
