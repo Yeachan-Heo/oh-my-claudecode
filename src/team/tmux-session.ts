@@ -331,7 +331,7 @@ async function verifyWorkerStartCommandDelivered(paneId: string, startCmd: strin
   if (isCmuxSurfaceTarget(paneId)) return true;
   const expected = normalizeTmuxCapture(startCmd);
   for (let attempt = 1; attempt <= 5; attempt++) {
-    const captured = await capturePaneAsync(paneId);
+    const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
     if (normalizeTmuxCapture(captured).includes(expected)) {
       return true;
     }
@@ -903,12 +903,15 @@ function normalizeTmuxCapture(value: string): string {
   return value.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
 }
 
-async function capturePaneAsync(paneId: string): Promise<string> {
+async function capturePaneAsync(paneId: string, opts: { joinWrappedLines?: boolean } = {}): Promise<string> {
   try {
     if (isCmuxSurfaceTarget(paneId)) {
       return await cmuxCaptureSurface(paneId);
     }
-    const result = await tmuxExecAsync(['capture-pane', '-t', paneId, '-p', '-S', '-80']);
+    const args = opts.joinWrappedLines
+      ? ['capture-pane', '-J', '-t', paneId, '-p', '-S', '-80']
+      : ['capture-pane', '-t', paneId, '-p', '-S', '-80'];
+    const result = await tmuxExecAsync(args);
     return result.stdout;
   } catch {
     return '';

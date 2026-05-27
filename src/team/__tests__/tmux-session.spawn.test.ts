@@ -6,6 +6,7 @@ const mockedCalls = vi.hoisted(() => ({
   paneCapture: '',
   paneStatus: '0 zsh\n',
   echoOnLiteralSend: true,
+  wrapLiteralCapture: false,
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -38,10 +39,16 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
     tmuxExecAsync: vi.fn(async (args: string[]) => {
       mockedCalls.tmuxArgs.push(args);
       if (args[0] === 'capture-pane') {
-        return { stdout: mockedCalls.paneCapture, stderr: '' };
+        const stdout = args.includes('-J')
+          ? mockedCalls.paneCapture.replace(/\n/g, '')
+          : mockedCalls.paneCapture;
+        return { stdout, stderr: '' };
       }
       if (args[0] === 'send-keys' && args.includes('-l') && mockedCalls.echoOnLiteralSend) {
-        mockedCalls.paneCapture = args[args.length - 1] ?? '';
+        const literal = args[args.length - 1] ?? '';
+        mockedCalls.paneCapture = mockedCalls.wrapLiteralCapture
+          ? `${literal.slice(0, 80)}\n${literal.slice(80)}`
+          : literal;
       }
       return { stdout: '', stderr: '' };
     }),
@@ -64,6 +71,7 @@ describe('spawnWorkerInPane', () => {
     mockedCalls.paneCapture = '';
     mockedCalls.paneStatus = '0 zsh\n';
     mockedCalls.echoOnLiteralSend = true;
+    mockedCalls.wrapLiteralCapture = false;
     vi.unstubAllEnvs();
   });
 
@@ -165,6 +173,27 @@ describe('spawnWorkerInPane', () => {
 
     const enterSend = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys' && args.at(-1) === 'Enter');
     expect(enterSend).toBeUndefined();
+  });
+
+  it('verifies wrapped worker start commands with joined tmux capture before Enter', async () => {
+    mockedCalls.wrapLiteralCapture = true;
+
+    await spawnWorkerInPane('session:0', '%2', {
+      teamName: 'safe-team',
+      workerName: 'worker-1',
+      envVars: {
+        OMC_TEAM_NAME: 'safe-team',
+        OMC_TEAM_WORKER: 'safe-team/worker-1',
+        OMC_TEAM_LONG_VALUE: 'x'.repeat(160),
+      },
+      launchBinary: 'codex',
+      launchArgs: ['--full-auto', '--model', 'gpt-5.5', '--reasoning-effort', 'high'],
+      cwd: '/tmp',
+    });
+
+    expect(mockedCalls.tmuxArgs).toContainEqual(['capture-pane', '-J', '-t', '%2', '-p', '-S', '-80']);
+    const enterSend = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys' && args.at(-1) === 'Enter');
+    expect(enterSend).toBeDefined();
   });
 
   it('fails before send-keys when the target pane shell never becomes ready', async () => {
