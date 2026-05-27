@@ -90,6 +90,50 @@ describe('stage-router resolveRoleAssignment', () => {
       expect(out.agent).toBe('codeReviewer');
     });
 
+    it('respects provider=antigravity and resolves to empty model (no Claude fallthrough) when omitted', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { 'code-reviewer': { provider: 'antigravity' } } },
+      };
+      const out = resolveRoleAssignment('code-reviewer', cfg);
+      expect(out.provider).toBe('antigravity');
+      // antigravity has no builtin default model and none configured → resolves to ''
+      // (NOT a Claude tier model id). agy has no --model flag anyway.
+      expect(out.model).toBe('');
+      expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
+      expect(out.agent).toBe('codeReviewer');
+    });
+
+    it('respects provider=antigravity with explicit model passthrough', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { critic: { provider: 'antigravity', model: 'gemini-2.5-pro' } } },
+      };
+      const out = resolveRoleAssignment('critic', cfg);
+      expect(out.provider).toBe('antigravity');
+      expect(out.model).toBe('gemini-2.5-pro');
+      expect(out.agent).toBe('critic');
+    });
+
+    it('antigravity resolves configured externalModels.defaults.antigravityModel when model omitted', () => {
+      const cfg: PluginConfig = {
+        externalModels: { defaults: { antigravityModel: 'gemini-2.5-flash' } },
+        team: { roleRouting: { 'code-reviewer': { provider: 'antigravity' } } },
+      };
+      const out = resolveRoleAssignment('code-reviewer', cfg);
+      expect(out.provider).toBe('antigravity');
+      expect(out.model).toBe('gemini-2.5-flash');
+    });
+
+    it('tier name on antigravity provider falls back to provider default (tiers are claude-centric)', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { executor: { provider: 'antigravity', model: 'HIGH' } } },
+      };
+      const out = resolveRoleAssignment('executor', cfg);
+      expect(out.provider).toBe('antigravity');
+      // tier names are claude-centric → antigravity ignores them and uses its (empty) default
+      expect(out.model).toBe('');
+      expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
+    });
+
     it('resolves tier name (HIGH) into Claude opus model for claude provider', () => {
       const cfg: PluginConfig = {
         team: { roleRouting: { executor: { provider: 'claude', model: 'HIGH' } } },

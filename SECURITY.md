@@ -14,7 +14,7 @@ This enables:
 - Tool path restriction (AST tools confined to project root)
 - Python REPL sandbox (dangerous modules/builtins blocked)
 - Remote MCP server disable (Exa, Context7 not started)
-- External LLM disable (Codex, Gemini workers blocked in team mode)
+- External LLM disable (Codex, Gemini, Antigravity workers blocked in team mode)
 - Auto-update disable (prevents unverified version installs)
 - Hard max iterations for persistent modes (200 cap)
 
@@ -71,7 +71,9 @@ Prevents Exa (web search) and Context7 (external documentation) MCP servers from
 
 ### External LLM Disable (`disableExternalLLM`)
 
-Blocks Codex (OpenAI) and Gemini (Google) CLI workers from being spawned in team mode. Only Claude workers are allowed. Enforced at the `getContract()` level in the team worker contract system.
+Blocks Codex (OpenAI), Gemini (Google), and Antigravity CLI workers from being spawned in team mode. Only Claude workers are allowed. Enforced at the `getContract()` level in the team worker contract system: any non-Claude provider throws `External LLM provider "<provider>" is blocked by security policy (disableExternalLLM)`. `OMC_SECURITY=strict` sets this on. Affects `omc team N:<provider>` and `omc ask <provider>` alike.
+
+> **Auto-approval risk class.** Headless CLI workers launch with auto-approve flags so they can run unattended: Codex uses `--dangerously-bypass-approvals-and-sandbox`, Gemini uses `--approval-mode yolo`, and Antigravity uses `--dangerously-skip-permissions` (the same auto-approve flag as Claude). All auto-approve the worker's own tool calls — treat them as the same risk class as Claude's `--dangerously-skip-permissions`. The CLI binary must resolve under a trusted prefix — `/usr/local/bin`, `/usr/bin`, `/opt/homebrew/`, `~/.local/bin`, `~/.nvm/`, `~/.cargo/bin` (extend via `OMC_TRUSTED_CLI_DIRS`); the check is directory-boundary safe, so a sibling like `~/.local/bin-evil` is rejected. Antigravity's `agy` binary resolves under the already-trusted `~/.local/bin`, so it adds no new trusted prefix. Use `OMC_SECURITY=strict` (or `"disableExternalLLM": true`) to disable all external providers — including Antigravity — in untrusted environments.
 
 ### Auto-Update Disable (`disableAutoUpdate`)
 

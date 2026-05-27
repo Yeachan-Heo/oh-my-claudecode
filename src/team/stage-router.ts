@@ -132,7 +132,7 @@ function resolveClaudeModel(
  * explicit non-tier model ID is passed through.
  */
 function resolveExternalModel(
-  provider: 'codex' | 'gemini',
+  provider: 'codex' | 'gemini' | 'antigravity',
   raw: string | undefined,
   cfg: PluginConfig,
 ): string {
@@ -142,6 +142,11 @@ function resolveExternalModel(
   const defaults = cfg.externalModels?.defaults;
   if (provider === 'codex') {
     return defaults?.codexModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+  }
+  if (provider === 'antigravity') {
+    // `agy` has no builtin default model and no `--model` flag — model is set in
+    // antigravity's own settings file. Resolve to '' so buildLaunchArgs skips it.
+    return defaults?.antigravityModel ?? '';
   }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }

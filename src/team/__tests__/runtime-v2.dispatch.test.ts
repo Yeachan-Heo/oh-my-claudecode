@@ -42,6 +42,7 @@ const modelContractMocks = vi.hoisted(() => ({
   getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'dispatch-team/worker-1' })),
   isPromptModeAgent: vi.fn(() => false),
   getPromptModeArgs: vi.fn((_agentType: string, instruction: string) => [instruction]),
+  resolveClaudeWorkerModel: vi.fn(() => undefined),
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -67,7 +68,7 @@ vi.mock('../model-contract.js', () => ({
   getWorkerEnv: modelContractMocks.getWorkerEnv,
   isPromptModeAgent: modelContractMocks.isPromptModeAgent,
   getPromptModeArgs: modelContractMocks.getPromptModeArgs,
-  resolveClaudeWorkerModel: vi.fn(() => undefined),
+  resolveClaudeWorkerModel: modelContractMocks.resolveClaudeWorkerModel,
 }));
 
 vi.mock('../tmux-session.js', async (importOriginal) => {
@@ -123,6 +124,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     modelContractMocks.getWorkerEnv.mockReset();
     modelContractMocks.isPromptModeAgent.mockReset();
     modelContractMocks.getPromptModeArgs.mockReset();
+    modelContractMocks.resolveClaudeWorkerModel.mockReset();
     mergeMocks.startMergeOrchestrator.mockReset();
     mergeMocks.recoverFromRestart.mockReset();
     mergeMocks.registerWorker.mockReset();
@@ -152,6 +154,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     modelContractMocks.isPromptModeAgent.mockReturnValue(false);
     modelContractMocks.getPromptModeArgs.mockImplementation((_agentType: string, instruction: string) => [instruction]);
+    modelContractMocks.resolveClaudeWorkerModel.mockReturnValue(undefined);
     mergeMocks.recoverFromRestart.mockResolvedValue(undefined);
     mergeMocks.registerWorker.mockResolvedValue(undefined);
     mergeMocks.unregisterWorker.mockResolvedValue(undefined);
@@ -821,6 +824,69 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('direct antigravity launch passes model undefined and never calls resolveClaudeWorkerModel', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-antigravity-direct-'));
+    const originalModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+    const originalExternal = process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+    delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+    delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+    try {
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['antigravity'],
+        tasks: [{ subject: 'Antigravity dispatch', description: 'Verify direct antigravity model resolution' }],
+        cwd,
+      });
+
+      // DIRECT antigravity launch: agy has no --model flag → model is always undefined.
+      expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
+        'antigravity',
+        expect.objectContaining({ model: undefined }),
+      );
+      // crucially, an antigravity worker must never fall through to the Claude/Bedrock resolver.
+      expect(modelContractMocks.resolveClaudeWorkerModel).not.toHaveBeenCalled();
+    } finally {
+      if (originalModel === undefined) delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+      else process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL = originalModel;
+      if (originalExternal === undefined) delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+      else process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL = originalExternal;
+    }
+  });
+
+  it('direct antigravity launch IGNORES OMC_ANTIGRAVITY_DEFAULT_MODEL and still passes model undefined', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-antigravity-model-'));
+    const originalModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+    const originalExternal = process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+    delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+    // Even with the env set, agy has no --model flag → modelForAgent short-circuits to undefined.
+    process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL = 'gemini-2.5-pro';
+    try {
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['antigravity'],
+        tasks: [{ subject: 'Antigravity dispatch', description: 'Verify antigravity ignores env model' }],
+        cwd,
+      });
+
+      expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
+        'antigravity',
+        expect.objectContaining({ model: undefined }),
+      );
+      expect(modelContractMocks.resolveClaudeWorkerModel).not.toHaveBeenCalled();
+    } finally {
+      if (originalModel === undefined) delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+      else process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL = originalModel;
+      if (originalExternal === undefined) delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+      else process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL = originalExternal;
+    }
   });
 
   it('keeps gemini prompt-mode launch args to a short inbox pointer and waits for claim evidence', async () => {

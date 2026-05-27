@@ -110,7 +110,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { spawnWorkerForTask, type TeamRuntime } from '../runtime.js';
 
-function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude'): TeamRuntime {
+function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude' | 'antigravity'): TeamRuntime {
   return {
     teamName: 'test-team',
     sessionName: 'test-session:0',
@@ -319,6 +319,8 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     delete process.env.OMC_CODEX_DEFAULT_MODEL;
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL;
     delete process.env.OMC_GEMINI_DEFAULT_MODEL;
+    delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+    delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
     delete process.env.ANTHROPIC_MODEL;
     delete process.env.CLAUDE_MODEL;
     delete process.env.ANTHROPIC_BASE_URL;
@@ -437,6 +439,56 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     const launchCmd = launchCall![launchCall!.length - 1];
 
     expect(launchCmd).toContain("'--model' 'gemini-2.0-flash'");
+  });
+
+  it('antigravity worker IGNORES OMC_ANTIGRAVITY_DEFAULT_MODEL (agy has no --model flag)', async () => {
+    // agy reads its model from ~/.gemini/antigravity-cli/settings.json, never from
+    // a CLI --model flag. Even with the env set, the launch must carry no --model.
+    process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL = 'gemini-2.5-pro';
+    process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL = 'gemini-2.5-flash';
+    const runtime = makeRuntime(cwd, 'antigravity');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // The model id may still appear in the forwarded env prefix via the worker
+    // model-env allowlist (pane startup env) — that is NOT model selection. The
+    // invariant is that NO `--model` CLI flag is emitted for antigravity.
+    expect(launchCmd).toContain("'--dangerously-skip-permissions'");
+    expect(launchCmd).not.toContain("'--model'");
+    expect(launchCmd).not.toContain("'--model' 'gemini-2.5-pro'");
+    expect(launchCmd).not.toContain("'--model' 'gemini-2.5-flash'");
+  });
+
+  it('direct antigravity worker does not fall through to a Claude/Bedrock model (maintainer key ask)', async () => {
+    // A DIRECT antigravity launch must never receive a --model flag, and must NOT
+    // pick up a Claude/Bedrock model id via resolveClaudeWorkerModel().
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+    process.env.ANTHROPIC_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.OMC_MODEL_MEDIUM = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const runtime = makeRuntime(cwd, 'antigravity');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // antigravity's modelForAgent branch returns undefined and never falls through to
+    // resolveClaudeWorkerModel(), so no Claude/Bedrock model id is passed as --model.
+    // (Bedrock ids may still appear in the forwarded env prefix via the worker
+    //  model-env allowlist — that is pane startup env, not antigravity model selection.)
+    expect(launchCmd).toContain("'--dangerously-skip-permissions'");
+    expect(launchCmd).not.toContain("'--model'");
+    expect(launchCmd).not.toContain("'--model' 'us.anthropic.claude-sonnet-4-6-v1:0'");
   });
 
   it('claude worker does not pass model flag (not supported)', async () => {

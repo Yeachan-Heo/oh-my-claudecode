@@ -272,6 +272,8 @@ describe('parseAskArgs', () => {
     expect(parseAskArgs(['claude', '--print', 'draft', 'summary'])).toEqual({ provider: 'claude', prompt: 'draft summary' });
     expect(parseAskArgs(['gemini', '--prompt=ship safely'])).toEqual({ provider: 'gemini', prompt: 'ship safely' });
     expect(parseAskArgs(['codex', 'review', 'this'])).toEqual({ provider: 'codex', prompt: 'review this' });
+    expect(parseAskArgs(['antigravity', 'review', 'this'])).toEqual({ provider: 'antigravity', prompt: 'review this' });
+    expect(parseAskArgs(['antigravity', '-p', 'brainstorm'])).toEqual({ provider: 'antigravity', prompt: 'brainstorm' });
   });
 
   it('supports --agent-prompt flag and equals syntax', () => {
@@ -528,6 +530,43 @@ describe('run-provider-advisor script contract', () => {
           CLAUDE_CODE_ENTRYPOINT: null,
         });
       }
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches antigravity as `agy -p <prompt> --dangerously-skip-permissions` and never pipes stdin', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // A multiline prompt would be piped over stdin for codex/gemini; antigravity
+      // (like grok/claude) is excluded from stdin-piping and must take it as a `-p` arg.
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['antigravity', '--prompt', 'review this\nand that'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { input: string | null };
+      }>;
+
+      // version probe + launch, both via the `agy` binary
+      expect(calls).toHaveLength(2);
+      const launch = calls.find((c) => !c.args.includes('--version'));
+      expect(launch).toBeDefined();
+      expect(launch!.command).toBe('agy');
+      // agy takes the prompt as a `-p` arg, never `--model`, never via stdin
+      expect(launch!.args).toEqual(['-p', 'review this\nand that', '--dangerously-skip-permissions']);
+      expect(launch!.args).not.toContain('--model');
+      expect(launch!.options.input ?? null).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

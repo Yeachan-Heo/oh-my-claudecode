@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'antigravity';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -250,6 +250,22 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       return rawOutput.trim();
     },
   },
+  antigravity: {
+    agentType: 'antigravity',
+    binary: 'agy',
+    installInstructions: 'Install Antigravity: https://antigravity.dev',
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(_model?: string, extraFlags: string[] = []): string[] {
+      // `agy` does NOT accept a `--model` flag — the model is selected in
+      // `~/.gemini/antigravity-cli/settings.json`, not via CLI args. Any model
+      // passed by the runtime is intentionally ignored here.
+      return ['--dangerously-skip-permissions', ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
   cursor: {
     agentType: 'cursor',
     binary: 'cursor-agent',
@@ -388,6 +404,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
   'OMC_CODEX_DEFAULT_MODEL',
   'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
   'OMC_GEMINI_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL',
+  'OMC_ANTIGRAVITY_DEFAULT_MODEL',
 ] as const;
 
 export function getWorkerEnv(

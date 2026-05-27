@@ -161,6 +161,12 @@ describe('model-contract', () => {
       expect(c.agentType).toBe('gemini');
       expect(c.binary).toBe('gemini');
     });
+    it('returns contract for antigravity', () => {
+      const c = getContract('antigravity');
+      expect(c.agentType).toBe('antigravity');
+      expect(c.binary).toBe('agy');
+      expect(c.supportsPromptMode).toBe(true);
+    });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
@@ -190,6 +196,24 @@ describe('model-contract', () => {
         const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
         clearSecurityConfigCache();
         expect(() => getContract('gemini')).toThrow('blocked by security policy');
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
+
+    it('blocks antigravity when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('antigravity')).toThrow('blocked by security policy');
       } finally {
         if (origSecurity === undefined) {
           delete process.env.OMC_SECURITY;
@@ -267,6 +291,18 @@ describe('model-contract', () => {
       expect(args).toContain('--approval-mode');
       expect(args).toContain('yolo');
       expect(args).not.toContain('-p');
+    });
+    it('antigravity uses --dangerously-skip-permissions and IGNORES any model arg (agy has no --model flag)', () => {
+      const noModel = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+      expect(noModel).toEqual(['--dangerously-skip-permissions']);
+      expect(noModel).not.toContain('--model');
+
+      // agy's model is set in ~/.gemini/antigravity-cli/settings.json, not via CLI args.
+      // Even when a model is passed, buildLaunchArgs must ignore it and emit no --model.
+      const withModel = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gemini-2.5-pro' });
+      expect(withModel).toEqual(['--dangerously-skip-permissions']);
+      expect(withModel).not.toContain('--model');
+      expect(withModel).not.toContain('gemini-2.5-pro');
     });
     it('passes model flag when specified', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });
@@ -479,6 +515,18 @@ describe('model-contract', () => {
       const c = getContract('gemini');
       expect(c.supportsPromptMode).toBe(true);
       expect(c.promptModeFlag).toBe('-p');
+    });
+
+    it('antigravity supports prompt mode', () => {
+      expect(isPromptModeAgent('antigravity')).toBe(true);
+      const c = getContract('antigravity');
+      expect(c.supportsPromptMode).toBe(true);
+      expect(c.promptModeFlag).toBe('-p');
+    });
+
+    it('getPromptModeArgs returns flag + instruction for antigravity', () => {
+      const args = getPromptModeArgs('antigravity', 'Read inbox');
+      expect(args).toEqual(['-p', 'Read inbox']);
     });
 
     it('claude does not support prompt mode', () => {

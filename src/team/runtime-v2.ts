@@ -677,6 +677,13 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
         || process.env.OMC_GEMINI_DEFAULT_MODEL
         || undefined;
     }
+    if (opts.agentType === 'antigravity') {
+      // `agy` has no `--model` flag — model is set in
+      // `~/.gemini/antigravity-cli/settings.json`, not via CLI args. Return
+      // undefined so no model is passed and we never fall through to the
+      // Claude/Bedrock resolver below.
+      return undefined;
+    }
     // Claude agents: resolve Bedrock/Vertex model when on those providers
     return resolveClaudeWorkerModel();
   })();

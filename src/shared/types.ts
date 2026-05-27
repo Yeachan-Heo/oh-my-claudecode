@@ -293,6 +293,7 @@ export interface ExternalModelsDefaults {
   provider?: ExternalModelProvider;
   codexModel?: string;
   geminiModel?: string;
+  antigravityModel?: string;
 }
 
 /**
@@ -414,7 +415,7 @@ export const CANONICAL_TEAM_ROLES = [
 export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
 
 /** Provider for /team role routing. */
-export type TeamRoleProvider = 'claude' | 'codex' | 'gemini';
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'antigravity';
 
 /** Tier name accepted in role-assignment `model` field. */
 export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';
