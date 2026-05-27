@@ -278,7 +278,7 @@ export interface WorkerInfo {
   name: string;
   index: number;
   role: string;
-  worker_cli?: 'codex' | 'claude' | 'gemini' | 'cursor';
+  worker_cli?: 'codex' | 'claude' | 'gemini' | 'cursor' | 'antigravity';
   assigned_tasks: string[];
   pid?: number;
   pane_id?: string;
