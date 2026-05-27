@@ -2208,7 +2208,7 @@ function warnOnDeprecatedDelegationRouting(config) {
 }
 var CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
 var KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
+var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "antigravity", "grok"]);
 var TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
 function validateTeamConfig(config) {
   const team = config.team;
@@ -2916,6 +2916,7 @@ function getTrustedPrefixes() {
     trusted.push(`${home}/.local/bin`);
     trusted.push(`${home}/.nvm/`);
     trusted.push(`${home}/.cargo/bin`);
+    trusted.push(`${home}/.grok/bin`);
   }
   const custom = (process.env.OMC_TRUSTED_CLI_DIRS ?? "").split(":").map((part) => part.trim()).filter(Boolean).filter((part) => (0, import_path7.isAbsolute)(part));
   trusted.push(...custom);
@@ -3039,6 +3040,34 @@ var CONTRACTS = {
     supportsPromptMode: false,
     buildLaunchArgs(_model, extraFlags = []) {
       return [...extraFlags];
+    },
+    parseOutput(rawOutput) {
+      return rawOutput.trim();
+    }
+  },
+  antigravity: {
+    agentType: "antigravity",
+    binary: "agy",
+    installInstructions: "Install Antigravity CLI: https://antigravity.dev",
+    supportsPromptMode: true,
+    promptModeFlag: "-p",
+    buildLaunchArgs(_model, extraFlags = []) {
+      return ["--dangerously-skip-permissions", ...extraFlags];
+    },
+    parseOutput(rawOutput) {
+      return rawOutput.trim();
+    }
+  },
+  grok: {
+    agentType: "grok",
+    binary: "grok",
+    installInstructions: "Install Grok Build: https://build.grok.com",
+    supportsPromptMode: true,
+    promptModeFlag: "-p",
+    buildLaunchArgs(model, extraFlags = []) {
+      const args = ["--always-approve"];
+      if (model) args.push("--model", model);
+      return [...args, ...extraFlags];
     },
     parseOutput(rawOutput) {
       return rawOutput.trim();
@@ -4805,7 +4834,7 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
     teamName
   });
   const configData = await readJsonSafe((0, import_path14.join)(root, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "cursor", "antigravity", "grok"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
