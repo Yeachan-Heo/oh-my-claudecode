@@ -25372,8 +25372,9 @@ function startReplyListener(_config) {
   }
   ensureStateDir2();
   const modulePath = resolveDaemonModulePath(__filename2, ["notifications", "reply-listener.js"]);
+  const moduleUrl = (0, import_url11.pathToFileURL)(modulePath).href;
   const daemonScript = `
-    import('${modulePath}').then(({ pollLoop }) => {
+    import(${JSON.stringify(moduleUrl)}).then(({ pollLoop }) => {
       return pollLoop();
     }).catch((err) => { console.error('[reply-listener] Fatal:', err instanceof Error ? err.message : 'unknown error'); process.exit(1); });
   `;
@@ -87065,6 +87066,7 @@ function startDaemon(config2) {
   }
   ensureStateDir7(cfg);
   const modulePath = resolveDaemonModulePath(__filename3, ["features", "rate-limit-wait", "daemon.js"]);
+  const moduleUrl = (0, import_url15.pathToFileURL)(modulePath).href;
   const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   const configPath = (0, import_path116.join)((0, import_path116.dirname)(cfg.stateFilePath), `.daemon-config-${configId}.json`);
   try {
@@ -87073,7 +87075,7 @@ function startDaemon(config2) {
     return { success: false, message: "Failed to write daemon config file" };
   }
   const daemonScript = `
-    import('${modulePath}').then(async ({ pollLoopWithConfigFile }) => {
+    import(${JSON.stringify(moduleUrl)}).then(async ({ pollLoopWithConfigFile }) => {
       await pollLoopWithConfigFile(process.env.OMC_DAEMON_CONFIG_FILE);
     }).catch((err) => { console.error(err); process.exit(1); });
   `;

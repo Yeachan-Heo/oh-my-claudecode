@@ -86,7 +86,7 @@ describe('daemon bootstrap', () => {
     const [command, args, spawnOptions] = mockSpawn.mock.calls[0]!;
     expect(command).toBe('node');
     expect(args[0]).toBe('-e');
-    expect(args[1]).toContain("import('/repo/dist/features/rate-limit-wait/daemon.js')");
+    expect(args[1]).toContain("import(\"file:///repo/dist/features/rate-limit-wait/daemon.js\")");
     expect(spawnOptions?.detached).toBe(true);
     expect(spawnOptions?.stdio).toBe('ignore');
 
@@ -102,6 +102,28 @@ describe('daemon bootstrap', () => {
     const persistedConfig = JSON.parse(readFileSync(configPath!, 'utf-8')) as Record<string, unknown>;
     expect(persistedConfig.pollIntervalMs).toBe(1234);
     expect(persistedConfig.verbose).toBe(true);
+  });
+
+  it('uses a file URL in daemon import script so Windows backslashes are not parsed as JS escapes', () => {
+    const unref = vi.fn();
+    mockSpawn.mockReturnValue({ pid: 4243, unref } as any);
+    mockResolveDaemonModulePath.mockReturnValue('C:\\Users\\soung\\AppData\\Roaming\\npm\\node_modules\\oh-my-claude-sisyphus\\dist\\features\\rate-limit-wait\\daemon.js');
+
+    const config: DaemonConfig = {
+      stateFilePath: join(testDir, 'state.json'),
+      pidFilePath: join(testDir, 'daemon.pid'),
+      logFilePath: join(testDir, 'daemon.log'),
+    };
+
+    const result = startDaemon(config);
+
+    expect(result.success).toBe(true);
+    const [, args] = mockSpawn.mock.calls[0]!;
+    const daemonScript = args[1] as string;
+
+    expect(daemonScript).toContain('import("file://');
+    expect(daemonScript).not.toContain("import('C:\\Users");
+    expect(daemonScript).not.toContain('\\features\\rate-limit-wait\\daemon.js');
   });
 
   it('returns already running when config pid file points to a live process', () => {

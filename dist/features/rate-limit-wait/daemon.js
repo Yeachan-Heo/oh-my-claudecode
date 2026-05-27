@@ -13,7 +13,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
 import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
 import { getGlobalOmcStatePath } from '../../utils/paths.js';
@@ -401,6 +401,7 @@ export function startDaemon(config) {
     // Fork a new process for the daemon using dynamic import() for ESM compatibility.
     // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
     const modulePath = resolveDaemonModulePath(__filename, ['features', 'rate-limit-wait', 'daemon.js']);
+    const moduleUrl = pathToFileURL(modulePath).href;
     // Write config to a temp file to avoid config injection via template string.
     // This prevents malicious config values from being interpreted as code.
     const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -412,7 +413,7 @@ export function startDaemon(config) {
         return { success: false, message: 'Failed to write daemon config file' };
     }
     const daemonScript = `
-    import('${modulePath}').then(async ({ pollLoopWithConfigFile }) => {
+    import(${JSON.stringify(moduleUrl)}).then(async ({ pollLoopWithConfigFile }) => {
       await pollLoopWithConfigFile(process.env.OMC_DAEMON_CONFIG_FILE);
     }).catch((err) => { console.error(err); process.exit(1); });
   `;

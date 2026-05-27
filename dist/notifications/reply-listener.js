@@ -17,7 +17,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
 import { tmuxExec } from '../cli/tmux-utils.js';
 import { request as httpsRequest } from 'https';
@@ -788,8 +788,9 @@ export function startReplyListener(_config) {
     ensureStateDir();
     // Fork a new process for the daemon
     const modulePath = resolveDaemonModulePath(__filename, ['notifications', 'reply-listener.js']);
+    const moduleUrl = pathToFileURL(modulePath).href;
     const daemonScript = `
-    import('${modulePath}').then(({ pollLoop }) => {
+    import(${JSON.stringify(moduleUrl)}).then(({ pollLoop }) => {
       return pollLoop();
     }).catch((err) => { console.error('[reply-listener] Fatal:', err instanceof Error ? err.message : 'unknown error'); process.exit(1); });
   `;

@@ -364,6 +364,9 @@ describe("reply-listener", () => {
 
       expect(source).toContain("resolveDaemonModulePath");
       expect(source).toContain("['notifications', 'reply-listener.js']");
+      expect(source).toContain("pathToFileURL(modulePath).href");
+      expect(source).toContain("import(${JSON.stringify(moduleUrl)})");
+      expect(source).not.toContain("import('${modulePath}')");
     });
 
   });
