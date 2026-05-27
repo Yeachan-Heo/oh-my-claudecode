@@ -20,10 +20,10 @@ vi.mock('../../../tools/python-repl/bridge-manager.js', () => ({
   })),
 }));
 
-import { processSessionEnd } from '../index.js';
+import { processSessionEndCleanupWorker } from '../index.js';
 import { cleanupBridgeSessions } from '../../../tools/python-repl/bridge-manager.js';
 
-describe('processSessionEnd python bridge cleanup', () => {
+describe('processSessionEndCleanupWorker python bridge cleanup', () => {
   let tmpDir: string;
   let transcriptPath: string;
 
@@ -51,13 +51,11 @@ describe('processSessionEnd python bridge cleanup', () => {
     ];
     fs.writeFileSync(transcriptPath, transcriptLines.join('\n'), 'utf-8');
 
-    await processSessionEnd({
-      session_id: 'session-123',
-      transcript_path: transcriptPath,
-      cwd: tmpDir,
-      permission_mode: 'default',
-      hook_event_name: 'SessionEnd',
-      reason: 'clear',
+    await processSessionEndCleanupWorker({
+      directory: tmpDir,
+      sessionId: 'session-123',
+      transcriptPath,
+      cleanupBudgetMs: 2000,
     });
 
     expect(cleanupBridgeSessions).toHaveBeenCalledTimes(1);

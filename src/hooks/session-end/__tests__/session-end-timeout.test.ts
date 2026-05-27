@@ -61,8 +61,27 @@ vi.mock('../../../openclaw/index.js', () => ({
   wakeOpenClaw: vi.fn().mockResolvedValue({ gateway: 'test', success: true }),
 }));
 
-import { processSessionEnd } from '../index.js';
+const childProcessMocks = vi.hoisted(() => ({
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+}));
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    spawn: childProcessMocks.spawn,
+  };
+});
+
+import { processSessionEnd, processSessionEndCleanupWorker, resolveSessionEndCleanupBudgetMs } from '../index.js';
 import { triggerStopCallbacks } from '../callbacks.js';
+import { cleanupBridgeSessions } from '../../../tools/python-repl/bridge-manager.js';
+
+function decodeSpawnedCleanupPayload(): { sessionId?: string; initialTeamNames?: string[] } {
+  const spawnArgs = (childProcessMocks.spawn.mock.calls as unknown as Array<[unknown, string[]]>)[0]?.[1];
+  const encodedPayload = spawnArgs?.[spawnArgs.indexOf('--omc-session-end-cleanup-worker') + 1];
+  return JSON.parse(Buffer.from(encodedPayload ?? '', 'base64url').toString('utf-8'));
+}
 
 describe('SessionEnd fire-and-forget notifications (issue #1700)', () => {
   let tmpDir: string;
@@ -87,6 +106,90 @@ describe('SessionEnd fire-and-forget notifications (issue #1700)', () => {
     vi.restoreAllMocks();
   });
 
+
+  it('processSessionEnd captures session team state in the detached cleanup payload', async () => {
+    const sessionId = 'timeout-test-team-payload';
+    const cwd = process.cwd();
+    const sessionDir = path.join(cwd, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'team-state.json'),
+      JSON.stringify({ active: true, session_id: sessionId, team_name: 'payload-team' }),
+      'utf-8',
+    );
+
+    try {
+      await processSessionEnd({
+        session_id: sessionId,
+        transcript_path: transcriptPath,
+        cwd,
+        permission_mode: 'default',
+        hook_event_name: 'SessionEnd',
+        reason: 'clear',
+      });
+
+      expect(decodeSpawnedCleanupPayload()).toEqual(expect.objectContaining({
+        sessionId,
+        initialTeamNames: ['payload-team'],
+      }));
+    } finally {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it('processSessionEnd schedules detached resource cleanup instead of running it in-process', async () => {
+    await processSessionEnd({
+      session_id: 'timeout-test-python',
+      transcript_path: transcriptPath,
+      cwd: tmpDir,
+      permission_mode: 'default',
+      hook_event_name: 'SessionEnd',
+      reason: 'clear',
+    });
+
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(['--omc-session-end-cleanup-worker']),
+      expect.objectContaining({ detached: true, stdio: 'ignore' }),
+    );
+    expect(cleanupBridgeSessions).not.toHaveBeenCalled();
+  });
+
+  it('cleanup worker applies bounded parallel Python REPL cleanup options', async () => {
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'python_repl', input: { researchSessionID: 'py-worker' } }] },
+      }),
+      'utf-8',
+    );
+
+    await processSessionEndCleanupWorker({
+      directory: tmpDir,
+      sessionId: 'timeout-test-python-worker',
+      transcriptPath,
+      cleanupBudgetMs: 250,
+    });
+
+    expect(cleanupBridgeSessions).toHaveBeenCalledWith(
+      ['py-worker'],
+      expect.objectContaining({
+        gracePeriodMs: 100,
+        sigtermGraceMs: 100,
+        finalWaitMs: 50,
+        parallel: true,
+      }),
+    );
+  });
+
+  it('resolves bounded cleanup budget from env with sane defaults and cap', () => {
+    expect(resolveSessionEndCleanupBudgetMs({})).toBe(2000);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: '250' })).toBe(250);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: '25000' })).toBe(10000);
+    expect(resolveSessionEndCleanupBudgetMs({ OMC_SESSIONEND_CLEANUP_BUDGET_MS: 'not-a-number' })).toBe(2000);
+  });
+
   it('processSessionEnd completes well before slow notifications finish', async () => {
     const start = Date.now();
 
@@ -105,8 +208,7 @@ describe('SessionEnd fire-and-forget notifications (issue #1700)', () => {
     expect(triggerStopCallbacks).toHaveBeenCalled();
 
     // The function should complete in well under the 2s mock delay.
-    // With fire-and-forget, it races with a 5s cap, but the synchronous
-    // work should be fast. We give generous margin but ensure it's not
+    // Fire-and-forget cleanup should keep synchronous work fast and avoid
     // waiting the full 2s for the mock notification to resolve.
     // In practice this finishes in <100ms; 1500ms is a safe CI threshold.
     expect(elapsed).toBeLessThan(1500);

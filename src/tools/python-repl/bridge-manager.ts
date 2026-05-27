@@ -49,6 +49,16 @@ export interface BridgeSessionCleanupResult {
   errors: string[];
 }
 
+export interface BridgeEscalationOptions {
+  gracePeriodMs?: number;
+  sigtermGraceMs?: number;
+  finalWaitMs?: number;
+}
+
+export interface BridgeSessionCleanupOptions extends BridgeEscalationOptions {
+  parallel?: boolean;
+}
+
 export interface StaleBridgeCleanupResult {
   scannedSessions: number;
   staleSessions: number;
@@ -579,9 +589,11 @@ export async function ensureBridge(sessionId: string, projectDir?: string): Prom
  */
 export async function killBridgeWithEscalation(
   sessionId: string,
-  options?: { gracePeriodMs?: number }
+  options?: BridgeEscalationOptions,
 ): Promise<EscalationResult> {
   const gracePeriod = options?.gracePeriodMs ?? DEFAULT_GRACE_PERIOD_MS;
+  const sigtermGraceMs = options?.sigtermGraceMs ?? SIGTERM_GRACE_MS;
+  const finalWaitMs = options?.finalWaitMs ?? 1000;
   const startTime = Date.now();
 
   const metaPath = getBridgeMetaPath(sessionId);
@@ -629,11 +641,11 @@ export async function killBridgeWithEscalation(
     terminatedBy = 'SIGTERM';
     killProcessGroup(meta.pid, 'SIGTERM');
 
-    if (!(await waitForExit(SIGTERM_GRACE_MS))) {
+    if (!(await waitForExit(sigtermGraceMs))) {
       // Stage 3: SIGKILL
       terminatedBy = 'SIGKILL';
       killProcessGroup(meta.pid, 'SIGKILL');
-      await waitForExit(1000); // Brief wait for SIGKILL
+      await waitForExit(finalWaitMs); // Brief wait for SIGKILL
     }
   }
 
@@ -661,7 +673,8 @@ export async function killBridgeWithEscalation(
  * Used by session-end to terminate bridges created during the ending session.
  */
 export async function cleanupBridgeSessions(
-  sessionIds: Iterable<string>
+  sessionIds: Iterable<string>,
+  options: BridgeSessionCleanupOptions = {},
 ): Promise<BridgeSessionCleanupResult> {
   const uniqueSessionIds = [...new Set(Array.from(sessionIds).filter(Boolean))];
 
@@ -672,7 +685,7 @@ export async function cleanupBridgeSessions(
     errors: [],
   };
 
-  for (const sessionId of uniqueSessionIds) {
+  const cleanupOne = async (sessionId: string): Promise<void> => {
     try {
       ownedBridgeSessionIds.delete(sessionId);
       const metaPath = getBridgeMetaPath(sessionId);
@@ -683,14 +696,14 @@ export async function cleanupBridgeSessions(
         fs.existsSync(metaPath) || fs.existsSync(socketPath) || fs.existsSync(portPath) || fs.existsSync(lockPath);
 
       if (!hasArtifacts) {
-        continue;
+        return;
       }
 
       result.foundSessions++;
 
       const meta = await safeReadJson<BridgeMeta>(metaPath);
       if (meta && isValidBridgeMeta(meta)) {
-        const escalation = await killBridgeWithEscalation(sessionId);
+        const escalation = await killBridgeWithEscalation(sessionId, options);
         if (escalation.terminatedBy) {
           result.terminatedSessions++;
         }
@@ -704,6 +717,14 @@ export async function cleanupBridgeSessions(
       await removeFileIfExists(lockPath);
     } catch (error) {
       result.errors.push(`session=${sessionId}: ${(error as Error).message}`);
+    }
+  };
+
+  if (options.parallel) {
+    await Promise.all(uniqueSessionIds.map(cleanupOne));
+  } else {
+    for (const sessionId of uniqueSessionIds) {
+      await cleanupOne(sessionId);
     }
   }
 
