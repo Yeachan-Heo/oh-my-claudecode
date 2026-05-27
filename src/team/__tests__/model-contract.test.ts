@@ -112,6 +112,38 @@ describe('model-contract', () => {
       expect(prefixes).toContain('/usr/local/bin');
       expect(prefixes).toContain('/usr/bin');
     });
+
+    it('isTrustedPrefix enforces directory boundaries (no sibling-prefix bypass)', () => {
+      const origHome = process.env.HOME;
+      process.env.HOME = '/home/tester';
+      try {
+        const { isTrustedPrefix } = _testInternals;
+        // exact trusted dir + true descendants are trusted
+        expect(isTrustedPrefix('/usr/bin')).toBe(true);
+        expect(isTrustedPrefix('/usr/bin/codex')).toBe(true);
+        expect(isTrustedPrefix('/usr/local/bin/claude')).toBe(true);
+        expect(isTrustedPrefix('/opt/homebrew/bin/gemini')).toBe(true);
+        expect(isTrustedPrefix('/home/tester/.local/bin/cli')).toBe(true);
+        // siblings whose name merely begins with a trusted prefix are NOT trusted
+        expect(isTrustedPrefix('/usr/bin-malicious/cli')).toBe(false);
+        expect(isTrustedPrefix('/home/tester/.local/bin-evil/cli')).toBe(false);
+        expect(isTrustedPrefix('/opt/homebrew-evil/x')).toBe(false);
+        expect(isTrustedPrefix('/home/tester/Downloads/cli')).toBe(false);
+        // custom trusted dirs (OMC_TRUSTED_CLI_DIRS) get the same boundary check
+        const origCustom = process.env.OMC_TRUSTED_CLI_DIRS;
+        process.env.OMC_TRUSTED_CLI_DIRS = '/opt/mybins';
+        try {
+          expect(isTrustedPrefix('/opt/mybins/grok')).toBe(true);
+          expect(isTrustedPrefix('/opt/mybins-evil/grok')).toBe(false);
+        } finally {
+          if (origCustom === undefined) delete process.env.OMC_TRUSTED_CLI_DIRS;
+          else process.env.OMC_TRUSTED_CLI_DIRS = origCustom;
+        }
+      } finally {
+        if (origHome === undefined) delete process.env.HOME;
+        else process.env.HOME = origHome;
+      }
+    });
   });
   describe('getContract', () => {
     it('returns contract for claude', () => {
