@@ -275,7 +275,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
   grok: {
     agentType: 'grok',
     binary: 'grok',
-    installInstructions: 'Install Grok CLI: https://build.grok.com',
+    installInstructions: 'Install Grok Build: https://build.grok.com',
     supportsPromptMode: true,
     promptModeFlag: '-p',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
