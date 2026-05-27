@@ -11,6 +11,7 @@ import {
   buildWorkerStartCommand,
   paneLooksReady,
   paneHasActiveTask,
+  paneHasTrustPrompt,
 } from '../tmux-session.js';
 
 afterEach(() => {
@@ -411,6 +412,24 @@ describe('pane readiness startup banners', () => {
     ].join('\n');
 
     expect(paneLooksReady(capture)).toBe(false);
+  });
+
+  it('detects Codex CLI hook-trust review screen as a trust prompt', () => {
+    const capture = [
+      '  Hooks need review',
+      '  3 hooks are new or changed.',
+      '  Hooks can run outside the sandbox after you trust them.',
+      '',
+      '› 1. Review hooks',
+      '  2. Trust all and continue',
+      "  3. Continue without trusting (hooks won't run)",
+      '',
+      '  Press enter to confirm or esc to go back',
+    ].join('\n');
+
+    expect(paneHasTrustPrompt(capture)).toBe(true);
+    expect(paneLooksReady(capture)).toBe(true);
+    expect(paneHasActiveTask(capture)).toBe(false);
   });
 
   it('still treats actual prompt lines as ready', () => {

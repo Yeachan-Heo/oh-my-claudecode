@@ -92,6 +92,7 @@ export declare function spawnWorkerInPane(sessionName: string, paneId: string, c
 export declare function captureTeamPane(paneId: string): Promise<string>;
 export declare function sendTeamPaneKey(paneId: string, key: string): Promise<void>;
 export declare function killTeamPane(paneId: string): Promise<void>;
+export declare function paneHasTrustPrompt(captured: string): boolean;
 export declare function paneHasActiveTask(captured: string): boolean;
 export declare function paneLooksReady(captured: string): boolean;
 export interface WaitForPaneReadyOptions {

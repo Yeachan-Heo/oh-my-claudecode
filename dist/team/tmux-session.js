@@ -665,12 +665,22 @@ export async function killTeamPane(paneId) {
     }
     await tmuxExecAsync(['kill-pane', '-t', paneId]);
 }
-function paneHasTrustPrompt(captured) {
+function detectPaneTrustPromptKind(captured) {
     const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
     const tail = lines.slice(-12);
-    const hasQuestion = tail.some(l => /Do you trust the contents of this directory\?/i.test(l));
-    const hasChoices = tail.some(l => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
-    return hasQuestion && hasChoices;
+    const hasDirectoryQuestion = tail.some(l => /Do you trust the contents of this directory\?/i.test(l));
+    const hasDirectoryChoices = tail.some(l => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
+    if (hasDirectoryQuestion && hasDirectoryChoices)
+        return 'directory';
+    const hasHookReview = tail.some(l => /Hooks need review/i.test(l));
+    const hasHookTrustChoice = tail.some(l => /Continue without trusting/i.test(l));
+    const hasHookConfirm = tail.some(l => /Press enter to confirm or esc to go back/i.test(l));
+    if (hasHookReview && hasHookTrustChoice && hasHookConfirm)
+        return 'codex_hooks';
+    return null;
+}
+export function paneHasTrustPrompt(captured) {
+    return detectPaneTrustPromptKind(captured) !== null;
 }
 function paneHasClaudeStartupBanner(captured) {
     const lines = captured
@@ -732,6 +742,8 @@ export function paneLooksReady(captured) {
         .filter(line => line.trim() !== '');
     if (lines.length === 0)
         return false;
+    if (paneHasTrustPrompt(content))
+        return true;
     if (paneIsBootstrapping(content))
         return false;
     const lastLine = lines[lines.length - 1];
@@ -818,8 +830,18 @@ export async function sendToWorker(_sessionName, paneId, message) {
             return false;
         }
         const paneBusy = paneHasActiveTask(initialCapture);
-        if (paneHasTrustPrompt(initialCapture)) {
+        const trustPromptKind = detectPaneTrustPromptKind(initialCapture);
+        if (trustPromptKind === 'directory') {
             await sendKey('C-m');
+            await sleep(120);
+            await sendKey('C-m');
+            await sleep(200);
+        }
+        else if (trustPromptKind === 'codex_hooks') {
+            // Codex CLI 0.133+ may block on a hook-trust menu. Do not choose
+            // "Trust all" automatically; select the safe non-trusting continuation
+            // so non-interactive team workers can bootstrap without widening trust.
+            await sendKey('3');
             await sleep(120);
             await sendKey('C-m');
             await sleep(200);
