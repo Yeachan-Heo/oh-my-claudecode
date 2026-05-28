@@ -26,12 +26,14 @@ vi.mock('fs', async () => {
     readFileSync: vi.fn(),
     writeFileSync: vi.fn(),
     renameSync: vi.fn(),
+    readdirSync: vi.fn(),
     rmSync: vi.fn(),
+    statSync: vi.fn(),
   };
 });
 
 import { execSync, execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { install, isProjectScopedPlugin, checkNodeVersion, CLAUDE_CONFIG_DIR } from '../installer/index.js';
 import {
@@ -50,6 +52,8 @@ const mockedMkdirSync = vi.mocked(mkdirSync);
 const mockedReadFileSync = vi.mocked(readFileSync);
 const mockedWriteFileSync = vi.mocked(writeFileSync);
 const mockedRenameSync = vi.mocked(renameSync);
+const mockedReaddirSync = vi.mocked(readdirSync);
+const mockedStatSync = vi.mocked(statSync);
 const mockedInstall = vi.mocked(install);
 const mockedIsProjectScopedPlugin = vi.mocked(isProjectScopedPlugin);
 const mockedCheckNodeVersion = vi.mocked(checkNodeVersion);
@@ -73,8 +77,32 @@ describe('auto-update reconciliation', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedIsProjectScopedPlugin.mockReturnValue(false);
     mockedRenameSync.mockImplementation(() => undefined);
+    mockedStatSync.mockImplementation((path: Parameters<typeof statSync>[0]) => {
+      if (!mockedExistsSync(path)) {
+        throw new Error(`ENOENT: no such file or directory, stat '${String(path)}'`);
+      }
+      return { isFile: () => true } as ReturnType<typeof statSync>;
+    });
+    mockedReaddirSync.mockImplementation((path: Parameters<typeof readdirSync>[0], options?: Parameters<typeof readdirSync>[1]) => {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/commands')) {
+        return options && typeof options === 'object' && 'withFileTypes' in options
+          ? [{ name: 'omc-setup.md', isFile: () => true, isDirectory: () => false }] as any
+          : ['omc-setup.md'] as any;
+      }
+      if (normalized.endsWith('/skills')) {
+        return options && typeof options === 'object' && 'withFileTypes' in options
+          ? [{ name: 'plan', isFile: () => false, isDirectory: () => true }] as any
+          : ['plan'] as any;
+      }
+      return [] as any;
+    });
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
-      if (String(path).includes('.omc-version.json')) {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
+      if (normalized.includes('.omc-version.json')) {
         return JSON.stringify({
           version: '4.1.5',
           installedAt: '2026-02-09T00:00:00.000Z',
@@ -304,6 +332,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized.includes('.omc-version.json')) {
         return JSON.stringify({
           version: '4.1.5',
@@ -323,6 +354,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized.endsWith('/plugins/installed_plugins.json')) {
         return true;
       }
@@ -356,11 +390,56 @@ describe('auto-update reconciliation', () => {
     expect(consoleLogSpy).toHaveBeenCalledWith('[omc update] Synced plugin cache');
   });
 
+
+
+  it('fails reconciliation when active plugin cache repair reports validation errors', () => {
+    const activeRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.14.1');
+
+    mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
+      if (normalized.endsWith('/plugins/installed_plugins.json')) {
+        return JSON.stringify({
+          plugins: {
+            'oh-my-claudecode': [{ installPath: activeRoot }],
+          },
+        });
+      }
+      return '';
+    });
+    mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
+      if (normalized.endsWith('/plugins/installed_plugins.json') || normalized === activeRoot.replace(/\\/g, '/')) {
+        return true;
+      }
+      if (normalized.endsWith('/dist/hooks/skill-bridge.cjs')) {
+        return false;
+      }
+      return true;
+    });
+
+    const result = reconcileUpdateRuntime({ verbose: false });
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('Plugin cache sync failed:'),
+      expect.stringContaining('dist/hooks/skill-bridge.cjs'),
+    ]));
+  });
+
   it('skips plugin cache sync silently when no active plugin roots exist', () => {
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized.endsWith('/plugins/installed_plugins.json')) {
         return false;
       }
@@ -389,6 +468,9 @@ describe('auto-update reconciliation', () => {
     });
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
         return JSON.stringify({ version: '4.14.1' });
       }
@@ -406,6 +488,7 @@ describe('auto-update reconciliation', () => {
       const normalized = String(path).replace(/\\/g, '/');
       return normalized.endsWith('/plugins/cache/omc/oh-my-claudecode')
         || normalized.endsWith('/plugins/installed_plugins.json')
+        || normalized.startsWith(join(cacheRoot, '4.14.1').replace(/\\/g, '/'))
         || normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus');
     });
 
@@ -434,6 +517,9 @@ describe('auto-update reconciliation', () => {
     });
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/oh-my-claude-sisyphus/package.json') {
         return JSON.stringify({ version: '4.14.1' });
       }
@@ -451,6 +537,7 @@ describe('auto-update reconciliation', () => {
       const normalized = String(path).replace(/\\/g, '/');
       return normalized === cacheRoot.replace(/\\/g, '/')
         || normalized.endsWith('/plugins/installed_plugins.json')
+        || normalized.startsWith(join(cacheRoot, '4.14.1').replace(/\\/g, '/'))
         || normalized.startsWith('C:/Users/bellman/AppData/Roaming/npm/node_modules/oh-my-claude-sisyphus');
     });
 
@@ -475,6 +562,9 @@ describe('auto-update reconciliation', () => {
     });
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
         return JSON.stringify({ version: '4.14.1' });
       }
@@ -492,6 +582,7 @@ describe('auto-update reconciliation', () => {
       const normalized = String(path).replace(/\\/g, '/');
       return normalized.endsWith('/plugins/cache/omc/oh-my-claudecode')
         || normalized.endsWith('/plugins/installed_plugins.json')
+        || normalized.startsWith(join(cacheRoot, '4.14.1').replace(/\\/g, '/'))
         || normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus');
     });
     mockedCpSync.mockImplementationOnce(() => {
@@ -501,6 +592,55 @@ describe('auto-update reconciliation', () => {
     const result = syncPluginCache(false);
 
     expect(result.errors).toContain(`Failed to sync dist to ${join(cacheRoot, '4.14.1')}: copy failed`);
+    expect(mockedWriteFileSync.mock.calls.some(([path]) => String(path).includes('installed_plugins.json.tmp-'))).toBe(false);
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining('installed_plugins.json.tmp-'), expect.anything());
+  });
+  it('does not rewrite installed_plugins.json when the versioned cache is missing runtime-critical files after sync', () => {
+    const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const versionedCacheRoot = join(cacheRoot, '4.14.1');
+
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command === 'npm root -g') {
+        return '/usr/lib/node_modules\n';
+      }
+      return '';
+    });
+    mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
+      if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
+        return JSON.stringify({ version: '4.14.1' });
+      }
+      if (normalized.endsWith('/plugins/installed_plugins.json')) {
+        return JSON.stringify({
+          version: 2,
+          plugins: {
+            'oh-my-claudecode@omc': [{ installPath: join(cacheRoot, '4.14.0'), version: '4.14.0' }],
+          },
+        });
+      }
+      return '';
+    });
+    mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
+      const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
+      if (normalized === `${versionedCacheRoot.replace(/\\/g, '/')}/dist/hooks/skill-bridge.cjs`) {
+        return false;
+      }
+      return normalized.endsWith('/plugins/cache/omc/oh-my-claudecode')
+        || normalized.endsWith('/plugins/installed_plugins.json')
+        || normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus')
+        || normalized.startsWith(versionedCacheRoot.replace(/\\/g, '/'));
+    });
+
+    const result = syncPluginCache(false);
+
+    expect(result.synced).toBe(false);
+    expect(result.errors).toContain(`${versionedCacheRoot}: Missing required plugin payload file: dist/hooks/skill-bridge.cjs`);
     expect(mockedWriteFileSync.mock.calls.some(([path]) => String(path).includes('installed_plugins.json.tmp-'))).toBe(false);
     expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining('installed_plugins.json.tmp-'), expect.anything());
   });
@@ -519,6 +659,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
         return JSON.stringify({ version: '4.9.0' });
       }
@@ -534,11 +677,23 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === cacheRoot) {
         return true;
       }
       if (normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus/')) {
-        return normalized.endsWith('/dist') || normalized.endsWith('/package.json');
+        return normalized.endsWith('/dist')
+          || normalized.endsWith('/package.json')
+          || normalized.endsWith('/.claude-plugin/plugin.json')
+          || normalized.endsWith('/dist/hooks/skill-bridge.cjs')
+          || normalized.endsWith('/bridge/cli.cjs')
+          || normalized.endsWith('/hooks/hooks.json')
+          || normalized.endsWith('/commands')
+          || normalized.endsWith('/commands/omc-setup.md')
+          || normalized.endsWith('/skills')
+          || normalized.endsWith('/skills/plan/SKILL.md');
       }
       return true;
     });
@@ -569,6 +724,9 @@ describe('auto-update reconciliation', () => {
     const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === cacheRoot) {
         return false;
       }
@@ -596,6 +754,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
         return JSON.stringify({ version: '4.9.0' });
       }
@@ -611,11 +772,23 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === cacheRoot) {
         return true;
       }
       if (normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus/')) {
-        return normalized.endsWith('/dist');
+        return normalized.endsWith('/dist')
+          || normalized.endsWith('/package.json')
+          || normalized.endsWith('/.claude-plugin/plugin.json')
+          || normalized.endsWith('/dist/hooks/skill-bridge.cjs')
+          || normalized.endsWith('/bridge/cli.cjs')
+          || normalized.endsWith('/hooks/hooks.json')
+          || normalized.endsWith('/commands')
+          || normalized.endsWith('/commands/omc-setup.md')
+          || normalized.endsWith('/skills')
+          || normalized.endsWith('/skills/plan/SKILL.md');
       }
       return true;
     });
@@ -630,6 +803,9 @@ describe('auto-update reconciliation', () => {
     expect(result.skipped).toBe(false);
     expect(result.errors).toEqual([
       `Failed to sync dist to ${versionedCacheRoot}: copy failed`,
+      `Failed to sync skills to ${versionedCacheRoot}: copy failed`,
+      `Failed to sync commands to ${versionedCacheRoot}: copy failed`,
+      `Failed to sync package.json to ${versionedCacheRoot}: copy failed`,
     ]);
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       `[omc update] Plugin cache sync warning: Failed to sync dist to ${versionedCacheRoot}: copy failed`,
@@ -662,6 +838,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized.includes('.omc-version.json')) {
         return JSON.stringify({
           version: '4.1.5',
@@ -684,6 +863,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized.endsWith('/plugins/installed_plugins.json')) {
         return true;
       }
@@ -740,6 +922,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === pluginRoot.replace(/\\/g, '/')) {
         return true;
       }
@@ -778,6 +963,9 @@ describe('auto-update reconciliation', () => {
     let claudeCodePackageCheckCount = 0;
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === '/usr/lib/node_modules/@anthropic-ai/claude-code/package.json') {
         claudeCodePackageCheckCount += 1;
         return claudeCodePackageCheckCount === 1 || claudeCodePackageCheckCount === 3;
@@ -793,6 +981,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/@anthropic-ai/claude-code/package.json') {
         return JSON.stringify({ version: '1.2.3' });
       }
@@ -853,6 +1044,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === '/usr/lib/node_modules/@anthropic-ai/claude-code/package.json') {
         return false;
       }
@@ -900,6 +1094,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized.endsWith('/plugins/marketplaces/omc')) {
         return false;
       }
@@ -948,6 +1145,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === '/usr/lib/node_modules/@anthropic-ai/claude-code/package.json') {
         return true;
       }
@@ -963,6 +1163,9 @@ describe('auto-update reconciliation', () => {
     let claudeCodeReadCount = 0;
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === '/usr/lib/node_modules/@anthropic-ai/claude-code/package.json') {
         claudeCodeReadCount += 1;
         if (claudeCodeReadCount === 2) {
@@ -1022,6 +1225,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/package.json') {
         return false;
       }
@@ -1087,6 +1293,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/package.json') {
         return false;
       }
@@ -1147,6 +1356,9 @@ describe('auto-update reconciliation', () => {
     let claudeCodePackageCheckCount = 0;
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/package.json') {
         claudeCodePackageCheckCount += 1;
         return claudeCodePackageCheckCount === 1 || claudeCodePackageCheckCount === 3;
@@ -1162,6 +1374,9 @@ describe('auto-update reconciliation', () => {
 
     mockedReadFileSync.mockImplementation((path: Parameters<typeof readFileSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] });
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/package.json') {
         return JSON.stringify({ version: '1.2.3' });
       }
@@ -1456,6 +1671,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized === 'C:/Users/bellman/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/package.json') {
         return false;
       }
@@ -1526,6 +1744,9 @@ describe('auto-update reconciliation', () => {
 
     mockedExistsSync.mockImplementation((path: Parameters<typeof existsSync>[0]) => {
       const normalized = String(path).replace(/\\/g, '/');
+      if (normalized.endsWith('/.claude-plugin/plugin.json')) {
+        return true;
+      }
       if (normalized.endsWith('/plugins/marketplaces/omc')) {
         return false;
       }

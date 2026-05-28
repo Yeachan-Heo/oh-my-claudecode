@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
@@ -13,6 +13,27 @@ let testHomeDir: string;
 async function loadInstaller() {
   vi.resetModules();
   return import('../index.js');
+}
+
+function writePluginFile(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
+
+function writeCompletePluginPayload(root: string): void {
+  writePluginFile(join(root, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
+  writePluginFile(join(root, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  writePluginFile(join(root, 'hooks', 'hooks.json'), JSON.stringify({
+    hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node test.mjs' }] }] },
+  }));
+  writePluginFile(join(root, 'skills', 'plan', 'SKILL.md'), '# plan\n');
+  writePluginFile(join(root, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
+  writePluginFile(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
+    name: 'oh-my-claudecode',
+    commands: './commands/',
+    skills: ['./skills/plan/'],
+  }, null, 2));
+  writePluginFile(join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }, null, 2));
 }
 
 describe('install() standalone hook reconciliation', () => {
@@ -224,13 +245,10 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
   });
 
   function setupPluginWithHooks() {
-    // Create a fake plugin root with hooks/hooks.json
+    // Create a fake plugin root with the complete runtime payload required
+    // before installer code may trust plugin-provided hooks.
     fakePluginRoot = mkdtempSync(join(tmpdir(), 'omc-fake-plugin-'));
-    const hooksDir = join(fakePluginRoot, 'hooks');
-    mkdirSync(hooksDir, { recursive: true });
-    writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
-      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node test.mjs' }] }] },
-    }));
+    writeCompletePluginPayload(fakePluginRoot);
 
     // Register plugin in installed_plugins.json
     const pluginsDir = join(testClaudeDir, 'plugins');

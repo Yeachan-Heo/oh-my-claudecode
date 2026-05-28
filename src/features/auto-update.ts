@@ -1012,15 +1012,19 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
 
   try {
     const pluginSyncResult = syncActivePluginCache();
-    if (pluginSyncResult.errors.length > 0 && options?.verbose) {
-      for (const err of pluginSyncResult.errors) {
-        console.warn(`[omc] Plugin cache sync warning: ${err}`);
+    if (pluginSyncResult.errors.length > 0) {
+      errors.push(...pluginSyncResult.errors.map(err => `Plugin cache sync failed: ${err}`));
+      if (options?.verbose) {
+        for (const err of pluginSyncResult.errors) {
+          console.warn(`[omc] Plugin cache sync error: ${err}`);
+        }
       }
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    errors.push(`Plugin cache sync failed: ${message}`);
     if (options?.verbose) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[omc] Plugin cache sync warning: ${message}`);
+      console.warn(`[omc] Plugin cache sync error: ${message}`);
     }
   }
 
@@ -1121,7 +1125,12 @@ export async function performUpdate(options?: {
         console.warn(`[omc update] ${marketplaceSync.message}`);
       }
 
-      syncPluginCache(options?.verbose ?? false);
+      const pluginCacheSync = syncPluginCache(options?.verbose ?? false);
+      if (pluginCacheSync.errors.length > 0 && options?.verbose) {
+        for (const error of pluginCacheSync.errors) {
+          console.warn(`[omc update] Plugin cache sync warning: ${error}`);
+        }
+      }
 
       // CRITICAL FIX: After npm updates the global package, the current process
       // still has OLD code loaded in memory. We must re-exec to run reconciliation
