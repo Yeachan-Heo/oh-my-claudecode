@@ -11,11 +11,11 @@ are deliberately out of scope.
 
 | Agent | Role | Recommended (premium) | Recommended (cost-effective) | Avoid | Notes |
 |---|---|---|---|---|---|
-| Prometheus | Planning | Claude Opus 4.7, GPT-5.5 high | Sonnet 4.6 | — | Heavy reasoning; runs 1–2x per session |
-| Hyperplan | Planning | Claude Opus 4.7, GPT-5.5 high | Sonnet 4.6 | — | Same as Prometheus |
+| Prometheus | Planning | Claude Opus 4.8, GPT-5.5 high | Sonnet 4.6 | — | Heavy reasoning; runs 1–2x per session |
+| Hyperplan | Planning | Claude Opus 4.8, GPT-5.5 high | Sonnet 4.6 | — | Same as Prometheus |
 | Sisyphus | Implementation | Sonnet 4.6 | DeepSeek V4 Pro, Kimi K2.5 | — | Token-heavy; cost matters most here |
 | Hephaestus | Implementation | Sonnet 4.6, Kimi K2.5 | DeepSeek V4 Pro | **GPT-\* (tool-calling/format breakage)** | Tuned for non-GPT |
-| Oracle | Review | Claude Opus 4.7, GPT-5.5 high | Sonnet 4.6 | — | Quality > cost; called sparingly |
+| Oracle | Review | Claude Opus 4.8, GPT-5.5 high | Sonnet 4.6 | — | Quality > cost; called sparingly |
 | Aletheia | Review | Sonnet 4.6 | DeepSeek V4 Pro | — | |
 | Hermes | Coordination | Sonnet 4.6 | DeepSeek V4 Flash | — | Coordinator only, not direct executor |
 
@@ -54,11 +54,11 @@ reviews, architecture decisions.
 
 ```yaml
 agents:
-  Prometheus:  { model: claude-opus-4-7 }
-  Hyperplan:   { model: claude-opus-4-7 }
+  Prometheus:  { model: claude-opus-4-8 }
+  Hyperplan:   { model: claude-opus-4-8 }
   Sisyphus:    { model: claude-sonnet-4-6 }
   Hephaestus:  { model: claude-sonnet-4-6 }   # never GPT-*
-  Oracle:      { model: claude-opus-4-7 }
+  Oracle:      { model: claude-opus-4-8 }
   Aletheia:    { model: claude-sonnet-4-6 }
   Hermes:      { model: claude-sonnet-4-6 }
 ```
