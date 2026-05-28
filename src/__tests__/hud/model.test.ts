@@ -4,7 +4,7 @@ import { formatModelName, renderModel } from '../../hud/elements/model.js';
 describe('model element', () => {
   describe('formatModelName', () => {
     it('returns Opus for opus model IDs', () => {
-      expect(formatModelName('claude-opus-4-7-20260416')).toBe('Opus');
+      expect(formatModelName('claude-opus-4-8-20260528')).toBe('Opus');
       expect(formatModelName('claude-3-opus-20240229')).toBe('Opus');
     });
 
@@ -23,14 +23,14 @@ describe('model element', () => {
     });
 
     it('returns versioned name from model IDs', () => {
-      expect(formatModelName('claude-opus-4-7-20260416', 'versioned')).toBe('Opus 4.7');
+      expect(formatModelName('claude-opus-4-8-20260528', 'versioned')).toBe('Opus 4.8');
       expect(formatModelName('claude-sonnet-4-6-20260217', 'versioned')).toBe('Sonnet 4.6');
       expect(formatModelName('claude-haiku-4-5-20251001', 'versioned')).toBe('Haiku 4.5');
     });
 
     it('returns versioned name from display names', () => {
       expect(formatModelName('Sonnet 4.5', 'versioned')).toBe('Sonnet 4.5');
-      expect(formatModelName('Opus 4.7', 'versioned')).toBe('Opus 4.7');
+      expect(formatModelName('Opus 4.8', 'versioned')).toBe('Opus 4.8');
       expect(formatModelName('Haiku 4.5', 'versioned')).toBe('Haiku 4.5');
     });
 
@@ -46,7 +46,7 @@ describe('model element', () => {
     });
 
     it('returns full model ID in full format', () => {
-      expect(formatModelName('claude-opus-4-7-20260416', 'full')).toBe('claude-opus-4-7-20260416');
+      expect(formatModelName('claude-opus-4-8-20260528', 'full')).toBe('claude-opus-4-8-20260528');
     });
 
     it('truncates long unrecognized model names', () => {
@@ -57,21 +57,21 @@ describe('model element', () => {
 
   describe('renderModel', () => {
     it('renders formatted model name', () => {
-      const result = renderModel('claude-opus-4-7-20260416');
+      const result = renderModel('claude-opus-4-8-20260528');
       expect(result).not.toBeNull();
-      expect(result).toContain('Model: Opus 4.7');
+      expect(result).toContain('Model: Opus 4.8');
     });
 
     it('renders versioned format', () => {
-      const result = renderModel('claude-opus-4-7-20260416', 'versioned');
+      const result = renderModel('claude-opus-4-8-20260528', 'versioned');
       expect(result).not.toBeNull();
-      expect(result).toContain('Model: Opus 4.7');
+      expect(result).toContain('Model: Opus 4.8');
     });
 
     it('renders full format', () => {
-      const result = renderModel('claude-opus-4-7-20260416', 'full');
+      const result = renderModel('claude-opus-4-8-20260528', 'full');
       expect(result).not.toBeNull();
-      expect(result).toContain('Model: claude-opus-4-7');
+      expect(result).toContain('Model: claude-opus-4-8');
     });
 
     it('renders configured model label', () => {

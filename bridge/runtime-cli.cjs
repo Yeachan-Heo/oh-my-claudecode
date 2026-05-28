@@ -1865,7 +1865,7 @@ var TIER_ENV_KEYS = {
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
   SONNET: "claude-sonnet-4-6",
-  OPUS: "claude-opus-4-7"
+  OPUS: "claude-opus-4-8"
 };
 var BUILTIN_TIER_MODEL_DEFAULTS = {
   LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,

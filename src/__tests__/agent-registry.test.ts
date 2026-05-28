@@ -146,7 +146,7 @@ describe('Agent Registry Validation', () => {
 
     expect(agents.executor?.model).toBe('kimi-k2.6:cloud');
     expect(agents.architect?.model).toBe('glm-5.1:cloud');
-    expect(agents.architect?.model).not.toBe('claude-opus-4-7');
+    expect(agents.architect?.model).not.toBe('claude-opus-4-8');
   });
 
   test('partial tier env override does not collapse all agents to inherit', () => {
