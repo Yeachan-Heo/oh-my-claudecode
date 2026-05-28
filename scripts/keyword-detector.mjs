@@ -620,6 +620,36 @@ function hasDiagnosticIntentNearKeyword(context, keyword) {
   return patterns.some((pattern) => pattern.test(context));
 }
 
+function isRalphUltraworkMetaOrBanterContext(context, keywordText) {
+  const normalizedKeyword = (keywordText || '').toLowerCase().replace(/\s+/g, '');
+  if (!['ralph', '랄프', 'ultrawork', 'ulw', 'uw', '울트라워크'].includes(normalizedKeyword)) {
+    return false;
+  }
+
+  const currentKeywordAliases = normalizedKeyword === 'ralph' || normalizedKeyword === '랄프'
+    ? ['랄프']
+    : ['울트라워크'];
+  const currentKeywordPattern = currentKeywordAliases.join('|');
+  const imperativeVerbPattern = '켜|켜줘|실행|시작|돌려|돌려줘|써|써줘|사용해|진행해';
+  const koreanImperativePatterns = [
+    new RegExp(`(?:${currentKeywordPattern})[^?？\n]{0,16}(?:${imperativeVerbPattern})`, 'u'),
+    new RegExp(`(?:${imperativeVerbPattern})[^?？\n]{0,16}(?:${currentKeywordPattern})`, 'u'),
+  ];
+  if (koreanImperativePatterns.some((pattern) => pattern.test(context))) {
+    return false;
+  }
+
+  const metaOrBanterPatterns = [
+    /[?？].{0,12}(?:ㅋ{1,}|ㅎ{1,}|lol|lmao)/iu,
+    /(?:ㅋ{1,}|ㅎ{1,}|lol|lmao).{0,40}[?？]/iu,
+    /(?:ralph|랄프|ultrawork|ulw|uw|울트라워크).{0,40}(?:라도|줘야\s*해|쥐어\s*줘야\s*해|해야\s*해).{0,20}[?？]/iu,
+    /(?:관계|관련|연관|차이|비교).{0,40}(?:뭐|무엇|어떻게|설명|알려|궁금|인가|야|냐|니|까|[?？])/u,
+    /(?:뭐|무엇|어떻게|설명|알려|궁금).{0,40}(?:관계|관련|연관|차이|비교)/u,
+  ];
+
+  return metaOrBanterPatterns.some((pattern) => pattern.test(context));
+}
+
 function isInformationalKeywordContext(text, position, keywordLength, keywordText) {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
@@ -632,6 +662,9 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   if (keywordText) {
     if (hasActivationIntentNearKeyword(context, keywordText)) {
       return false;
+    }
+    if (isRalphUltraworkMetaOrBanterContext(context, keywordText)) {
+      return true;
     }
     if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
       return true;

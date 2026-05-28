@@ -482,6 +482,75 @@ diff --git a/a b/b
     expect(context).not.toContain('[MAGIC KEYWORD: CODE-REVIEW]');
   });
 
+  it('does not activate ralph for Korean banter/question wording from issue #3162', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-banter-'));
+    const sessionId = 'session-3162-ralph-banter';
+    const output = runKeywordDetector('너도 ralph라도 쥐어줘야해?ㅋㅋ', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(false);
+  });
+
+  it('does not activate ralph or ultrawork for Korean relationship meta-question from issue #3162', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ultrawork-meta-'));
+    const sessionId = 'session-3162-ultrawork-meta';
+    const output = runKeywordDetector('울트라워크랑 랄프는 무슨 관계야?', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const stateDir = join(cwd, '.omc', 'state', 'sessions', sessionId);
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(existsSync(join(stateDir, 'ralph-state.json'))).toBe(false);
+    expect(existsSync(join(stateDir, 'ultrawork-state.json'))).toBe(false);
+  });
+
+  it('still activates ralph and ultrawork for explicit imperative prompts from issue #3162', () => {
+    const cases = [
+      { prompt: '/ralph fix parser', mode: 'ralph' },
+      { prompt: 'run ralph on this issue', mode: 'ralph' },
+      { prompt: '랄프 켜', mode: 'ralph' },
+      { prompt: 'start ultrawork on this issue', mode: 'ultrawork' },
+      { prompt: '울트라워크 돌려', mode: 'ultrawork' },
+    ] as const;
+
+    for (const { prompt, mode } of cases) {
+      const cwd = mkdtempSync(join(tmpdir(), `keyword-detector-${mode}-positive-`));
+      const sessionId = `session-3162-${mode}-positive-${prompt.replace(/\W+/g, '-')}`;
+      const output = runKeywordDetector(prompt, cwd, sessionId);
+      const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+      expect(context).toContain(`[MAGIC KEYWORD: ${mode.toUpperCase()}]`);
+      expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, `${mode}-state.json`))).toBe(true);
+    }
+  });
+
+  it('only activates the explicitly commanded mode in mixed Korean meta-plus-imperative prompts', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-mixed-intent-'));
+    const sessionId = 'session-3162-mixed-intent';
+    const output = runKeywordDetector('랄프랑 울트라워크는 무슨 관계야? 울트라워크 돌려', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const stateDir = join(cwd, '.omc', 'state', 'sessions', sessionId);
+
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(context).toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(existsSync(join(stateDir, 'ralph-state.json'))).toBe(false);
+    expect(existsSync(join(stateDir, 'ultrawork-state.json'))).toBe(true);
+  });
+
+  it('does not activate script-only uw alias for Korean banter/question wording', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-uw-banter-'));
+    const sessionId = 'session-3162-uw-banter';
+    const output = runKeywordDetector('너도 uw라도 쥐어줘야해?ㅋㅋ', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ultrawork-state.json'))).toBe(false);
+  });
+
   // Regression: "autonomous" appearing in technical / research prose must not
   // trigger autopilot (false positive previously created spurious
   // autopilot-state.json and a stop-hook loop). The TS source and the

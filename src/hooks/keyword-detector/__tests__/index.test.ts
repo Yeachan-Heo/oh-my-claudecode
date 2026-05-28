@@ -295,6 +295,17 @@ Final draft.`);
         expect(result).toEqual([]);
       });
 
+      it('should NOT detect Korean ralph banter as activation', () => {
+        const result = detectKeywordsWithType('너도 ralph라도 쥐어줘야해?ㅋㅋ');
+        expect(result).toEqual([]);
+      });
+
+      it('should still detect explicit ralph imperative activation', () => {
+        expect(detectKeywordsWithType('/ralph fix parser').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('run ralph on this issue').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('랄프 켜').find((r) => r.type === 'ralph')).toBeDefined();
+      });
+
       it('should NOT detect informational English questions about ralph', () => {
         const result = detectKeywordsWithType('What is ralph and how do I use it?');
         expect(result).toEqual([]);
@@ -477,6 +488,25 @@ OMC Ultrawork = "특수부대 작전 반"
       it('should NOT detect quoted follow-up references after a bad activation', () => {
         const result = detectKeywordsWithType('The article said "OMC Ultrawork", but why is the answer the same?');
         expect(result).toEqual([]);
+      });
+
+      it('should NOT detect Korean ultrawork/ralph relationship meta-question as activation', () => {
+        const result = detectKeywordsWithType('울트라워크랑 랄프는 무슨 관계야?');
+        expect(result).toEqual([]);
+      });
+
+      it('should still detect explicit ultrawork imperative activation', () => {
+        expect(detectKeywordsWithType('start ultrawork on this issue').find((r) => r.type === 'ultrawork')).toBeDefined();
+        expect(detectKeywordsWithType('울트라워크 돌려').find((r) => r.type === 'ultrawork')).toBeDefined();
+      });
+
+      it('should only detect the explicitly commanded mode in mixed Korean meta-plus-imperative prompts', () => {
+        expect(detectKeywordsWithType('랄프랑 울트라워크는 무슨 관계야? 울트라워크 돌려')).toEqual([
+          expect.objectContaining({ type: 'ultrawork', keyword: '울트라워크' }),
+        ]);
+        expect(detectKeywordsWithType('랄프랑 울트라워크는 무슨 관계야? 랄프 켜')).toEqual([
+          expect.objectContaining({ type: 'ralph', keyword: '랄프' }),
+        ]);
       });
 
       it('should NOT detect single-mode explanatory definitions followed by an unrelated question', () => {
