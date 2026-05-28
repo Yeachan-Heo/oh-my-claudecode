@@ -76,6 +76,171 @@ function writeTranscriptWithContext(filePath: string, contextWindow: number, inp
   writeFileSync(filePath, `${line}\n`, 'utf-8');
 }
 
+
+describe('pre-tool-enforcer advisory throttling (issue #3163)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-enforcer-advisory-throttle-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function runWithThrottle(toolName: string, nowMs = '1000'): Record<string, unknown> {
+    return runPreToolEnforcerWithEnv(
+      {
+        tool_name: toolName,
+        cwd: tempDir,
+        session_id: 'session-3163',
+      },
+      {
+        OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: '5000',
+        OMC_PRE_TOOL_ADVISORY_NOW_MS: nowMs,
+      },
+    );
+  }
+
+  it('emits the first advisory and suppresses an immediate repeated identical advisory', () => {
+    const first = runWithThrottle('Bash');
+    const repeated = runWithThrottle('Bash');
+
+    expect(first.continue).toBe(true);
+    expect((first.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Use parallel execution for independent tasks',
+    );
+    expect(repeated).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('still emits a different advisory while the previous advisory is cooling down', () => {
+    const first = runWithThrottle('Bash');
+    const different = runWithThrottle('Edit');
+
+    expect((first.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Use parallel execution for independent tasks',
+    );
+    expect((different.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Verify changes work after editing',
+    );
+  });
+
+  it('does not throttle repeated hard-gate denials', () => {
+    const sessionId = 'session-3163';
+    writeJson(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ultragoal-state.json'), {
+      active: true,
+      session_id: sessionId,
+      project_path: tempDir,
+      objective: 'complete the aggregate ultragoal',
+      last_checked_at: new Date().toISOString(),
+    });
+
+    const input = {
+      tool_name: 'Bash',
+      cwd: tempDir,
+      session_id: sessionId,
+      tool_input: { command: 'echo safe' },
+    };
+    const env = {
+      OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: '5000',
+      OMC_PRE_TOOL_ADVISORY_NOW_MS: '1000',
+    };
+
+    const first = runPreToolEnforcerWithEnv(input, env);
+    const repeated = runPreToolEnforcerWithEnv(input, env);
+
+    for (const output of [first, repeated]) {
+      const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+      expect(output.continue).toBe(true);
+      expect(hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(hookSpecificOutput.permissionDecisionReason).toContain('[ULTRAGOAL /GOAL REQUIRED]');
+    }
+  });
+
+  it('uses deterministic cooldown interval boundaries', () => {
+    const first = runWithThrottle('Bash', '1000');
+    const beforeCooldown = runWithThrottle('Bash', '5999');
+    const atCooldown = runWithThrottle('Bash', '6000');
+
+    expect((first.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Use parallel execution for independent tasks',
+    );
+    expect(beforeCooldown).toEqual({ continue: true, suppressOutput: true });
+    expect((atCooldown.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Use parallel execution for independent tasks',
+    );
+  });
+
+  it('does not let a future throttle timestamp suppress an advisory', () => {
+    runWithThrottle('Bash', '10000');
+
+    const output = runWithThrottle('Bash', '1000');
+
+    expect((output.hookSpecificOutput as Record<string, unknown>).additionalContext).toContain(
+      'Use parallel execution for independent tasks',
+    );
+  });
+
+  it('keeps advisory throttle state capped after adding a new entry', () => {
+    const sessionId = 'session-3163';
+    const throttlePath = join(
+      tempDir,
+      '.omc',
+      'state',
+      'sessions',
+      sessionId,
+      'pre-tool-advisory-throttle.json',
+    );
+    const entries = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => [
+        `old-${index}`,
+        {
+          last_emitted_at_ms: 10_000 - index,
+          message: `old message ${index}`,
+        },
+      ]),
+    );
+    writeJson(throttlePath, { version: 1, entries });
+
+    runWithThrottle('Bash', '20000');
+
+    const state = JSON.parse(readFileSync(throttlePath, 'utf-8')) as {
+      entries: Record<string, unknown>;
+    };
+    expect(Object.keys(state.entries)).toHaveLength(100);
+  });
+
+  it('prunes future throttle entries so they cannot consume the cap', () => {
+    const sessionId = 'session-3163';
+    const throttlePath = join(
+      tempDir,
+      '.omc',
+      'state',
+      'sessions',
+      sessionId,
+      'pre-tool-advisory-throttle.json',
+    );
+    const entries = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => [
+        `future-${index}`,
+        {
+          last_emitted_at_ms: 999_000 + index,
+          message: `future message ${index}`,
+        },
+      ]),
+    );
+    writeJson(throttlePath, { version: 1, entries });
+
+    runWithThrottle('Bash', '20000');
+
+    const state = JSON.parse(readFileSync(throttlePath, 'utf-8')) as {
+      entries: Record<string, { last_emitted_at_ms: number }>;
+    };
+    expect(Object.keys(state.entries)).toHaveLength(1);
+    expect(Object.values(state.entries)[0].last_emitted_at_ms).toBe(20_000);
+  });
+});
+
 describe('pre-tool-enforcer fallback gating (issue #970)', () => {
   let tempDir: string;
 

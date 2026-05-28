@@ -7,6 +7,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
@@ -306,6 +307,96 @@ function generateSlopWarning(data, toolName) {
 
 function combineHookMessages(...messages) {
   return messages.filter(Boolean).join('\n\n');
+}
+
+
+const ADVISORY_THROTTLE_STATE_FILE = 'pre-tool-advisory-throttle.json';
+const ADVISORY_THROTTLE_MAX_ENTRIES = 100;
+const ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+const ADVISORY_THROTTLE_MIN_PRUNE_WINDOW_MS = 60 * 60 * 1000;
+
+function getAdvisoryThrottleCooldownMs() {
+  const raw = process.env.OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS;
+  if (raw == null || raw === '') return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
+  return Math.max(0, parsed);
+}
+
+function getAdvisoryThrottleNowMs() {
+  const raw = process.env.OMC_PRE_TOOL_ADVISORY_NOW_MS;
+  if (raw != null && raw !== '') {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
+function getAdvisoryThrottlePath(stateDir, sessionId) {
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  return safeSessionId
+    ? join(stateDir, 'sessions', safeSessionId, ADVISORY_THROTTLE_STATE_FILE)
+    : join(stateDir, ADVISORY_THROTTLE_STATE_FILE);
+}
+
+function advisoryThrottleKey(message) {
+  return createHash('sha256').update(message).digest('hex');
+}
+
+function normalizeAdvisoryThrottleState(state) {
+  if (!state || typeof state !== 'object' || !state.entries || typeof state.entries !== 'object') {
+    return { version: 1, entries: {} };
+  }
+  return { ...state, version: 1, entries: state.entries };
+}
+
+function pruneAdvisoryThrottleEntries(entries, nowMs, cooldownMs) {
+  const pruneWindowMs = Math.max(cooldownMs * 2, ADVISORY_THROTTLE_MIN_PRUNE_WINDOW_MS);
+  const freshEntries = Object.entries(entries)
+    .filter(([, entry]) => {
+      const last = Number(entry?.last_emitted_at_ms);
+      return Number.isFinite(last) && last <= nowMs && nowMs - last <= pruneWindowMs;
+    })
+    .sort(([, a], [, b]) => Number(b?.last_emitted_at_ms || 0) - Number(a?.last_emitted_at_ms || 0))
+    .slice(0, ADVISORY_THROTTLE_MAX_ENTRIES);
+  return Object.fromEntries(freshEntries);
+}
+
+function shouldEmitAdvisoryMessage(stateDir, sessionId, message) {
+  const cooldownMs = getAdvisoryThrottleCooldownMs();
+  if (!message || cooldownMs <= 0) return true;
+
+  const nowMs = getAdvisoryThrottleNowMs();
+  const throttlePath = getAdvisoryThrottlePath(stateDir, sessionId);
+  const key = advisoryThrottleKey(message);
+
+  try {
+    const state = normalizeAdvisoryThrottleState(readJsonFile(throttlePath));
+    state.entries = pruneAdvisoryThrottleEntries(state.entries, nowMs, cooldownMs);
+
+    const previous = state.entries[key];
+    const previousMs = Number(previous?.last_emitted_at_ms);
+    const shouldEmit = !Number.isFinite(previousMs) || previousMs > nowMs || nowMs - previousMs >= cooldownMs;
+
+    if (shouldEmit) {
+      state.entries[key] = {
+        last_emitted_at_ms: nowMs,
+        message,
+      };
+      state.entries = pruneAdvisoryThrottleEntries(state.entries, nowMs, cooldownMs);
+      state.updated_at = new Date(nowMs).toISOString();
+      mkdirSync(dirname(throttlePath), { recursive: true });
+      const tmpPath = `${throttlePath}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2), { mode: 0o600 });
+      renameSync(tmpPath, throttlePath);
+    }
+
+    return shouldEmit;
+  } catch {
+    // Fail open: advisory throttling must never silence safety output because
+    // state IO failed. The hook may repeat a nudge rather than risk hiding it.
+    return true;
+  }
 }
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
@@ -1337,6 +1428,11 @@ async function main() {
     message = combineHookMessages(slopWarning, message);
 
     if (!message) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (!shouldEmitAdvisoryMessage(stateDir, sessionId, message)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
