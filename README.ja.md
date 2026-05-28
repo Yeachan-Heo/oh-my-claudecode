@@ -7,7 +7,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
-[![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
+[![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/sj4exxQ9v)
 
 > **Codex ユーザーの方へ:** [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) をチェックしてください — OpenAI Codex CLI 向けの同じオーケストレーション体験を提供します。
 
@@ -15,7 +15,7 @@
 
 *Claude Code を学ぶ必要はありません。OMC を使うだけ。*
 
-[はじめる](#クイックスタート) • [ドキュメント](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI リファレンス](https://yeachan-heo.github.io/oh-my-claudecode-website/docs/#cli-reference) • [ワークフロー](https://yeachan-heo.github.io/oh-my-claudecode-website/docs/#workflows) • [移行ガイド](docs/MIGRATION.md) • [Discord](https://discord.gg/PUwSMR9XNk)
+[はじめる](#クイックスタート) • [ドキュメント](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI リファレンス](https://yeachan-heo.github.io/oh-my-claudecode-website/docs/#cli-reference) • [ワークフロー](https://yeachan-heo.github.io/oh-my-claudecode-website/docs/#workflows) • [移行ガイド](docs/MIGRATION.md) • [Discord](https://discord.gg/sj4exxQ9v)
 
 ---
 
