@@ -183,7 +183,11 @@ describe('Installer Constants', () => {
 
       for (const file of files) {
         const content = readFileSync(join(commandsDir, file), 'utf-8');
-        expect(content, `${file} should dispatch to a bundled skill`).toContain('SKILL.md');
+        if (file === 'compact.md') {
+          expect(content, 'compact.md should invoke the host/native compaction surface').toContain('Skill("compact")');
+        } else {
+          expect(content, `${file} should dispatch to a bundled skill`).toContain('SKILL.md');
+        }
         expect(content, `${file} should pass through user arguments`).toContain('$ARGUMENTS');
       }
     });
