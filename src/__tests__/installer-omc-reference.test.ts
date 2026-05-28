@@ -70,6 +70,29 @@ function writeEnabledPluginSettings(claudeConfigDir: string): void {
   );
 }
 
+function writeMinimallyCompletePluginPayload(pluginRoot: string): void {
+  mkdirSync(join(pluginRoot, 'dist', 'hooks'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
+  mkdirSync(join(pluginRoot, 'bridge'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'hooks', 'hooks.json'), '{}\n');
+  mkdirSync(join(pluginRoot, 'commands'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md.\n');
+  mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
+  mkdirSync(join(pluginRoot, '.claude-plugin'), { recursive: true });
+  writeFileSync(
+    join(pluginRoot, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({
+      name: 'oh-my-claudecode',
+      commands: './commands/',
+      skills: ['./skills/ralph/'],
+    }, null, 2)
+  );
+  writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '4.10.2' }, null, 2));
+}
+
 function getBundledSkillNames(): string[] {
   const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug']);
 
@@ -173,8 +196,7 @@ describe('installer bundled + standalone skill sync', () => {
 
   it('skips bundled skill sync when an installed plugin already provides skills', async () => {
     const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
-    mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
-    writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
+    writeMinimallyCompletePluginPayload(pluginRoot);
     writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
     writeEnabledPluginSettings(claudeConfigDir);
 
