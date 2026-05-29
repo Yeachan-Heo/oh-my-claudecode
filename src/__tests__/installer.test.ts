@@ -184,7 +184,8 @@ describe('Installer Constants', () => {
       for (const file of files) {
         const content = readFileSync(join(commandsDir, file), 'utf-8');
         if (file === 'compact.md') {
-          expect(content, 'compact.md should invoke the host/native compaction surface').toContain('Skill("compact")');
+          expect(content, 'compact.md should avoid unsupported Skill compact invocation').not.toContain('Skill("compact")');
+          expect(content, 'compact.md should provide a manual native /compact handoff').toContain('bare Claude Code command');
         } else {
           expect(content, `${file} should dispatch to a bundled skill`).toContain('SKILL.md');
         }

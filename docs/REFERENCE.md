@@ -758,7 +758,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 ## Slash Commands
 
-Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction entrypoint is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC.
+Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -766,7 +766,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Inte
 | `/oh-my-claudecode:ask <claude\|codex\|gemini\|grok> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact                   |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
-| `/oh-my-claudecode:compact [note]`                        | Manually trigger Claude Code native context compaction with OMC pre-compact preservation       |
+| `/oh-my-claudecode:compact [note]`                        | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
 | `/oh-my-claudecode:deep-dive <problem>`                  | Run the trace → deep-interview pipeline                                                       |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |

@@ -42,7 +42,9 @@ describe('manual compact command', () => {
     const command = readFileSync(COMMAND_PATH, 'utf-8');
     expect(command).toContain('/oh-my-claudecode:compact');
     expect(command).toContain('Bare `/compact` is reserved for Claude Code');
-    expect(command).toContain('Skill("compact")');
+    expect(command).not.toContain('Skill("compact")');
+    expect(command).toContain('instruction-only');
+    expect(command).toContain('Run this as a bare Claude Code command now');
     expect(command).toContain('$ARGUMENTS');
     expect(command).toContain('PreCompact');
 
@@ -51,7 +53,7 @@ describe('manual compact command', () => {
     expect(detectSlashCommand('/compact')).toBeNull();
   });
 
-  it('expands through the command utility to the native compact trigger', async () => {
+  it('expands through the command utility to a safe manual handoff', async () => {
     writeFileSync(
       join(tempConfigDir, 'commands', 'compact.md'),
       readFileSync(COMMAND_PATH, 'utf-8'),
@@ -62,8 +64,10 @@ describe('manual compact command', () => {
     const expanded = expandCommand('compact', 'preserve current issue and PR state');
 
     expect(expanded).not.toBeNull();
-    expect(expanded?.description).toContain('Manually trigger Claude Code context compaction');
-    expect(expanded?.prompt).toContain('Skill("compact")');
+    expect(expanded?.description).toContain('Prepare OMC context for a manual Claude Code /compact handoff');
+    expect(expanded?.prompt).not.toContain('Skill("compact")');
+    expect(expanded?.prompt).toContain('/compact preserve current issue and PR state');
+    expect(expanded?.prompt).toContain('plugin commands cannot trigger Claude Code');
     expect(expanded?.prompt).toContain('preserve current issue and PR state');
     expect(expanded?.prompt).toContain('Do not create a separate OMC summarizer');
   });
