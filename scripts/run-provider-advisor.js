@@ -15,14 +15,20 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
  * Build CLI args for a given provider.
  * - claude: `claude -p <prompt>`
  * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
- * - gemini: `gemini -p <prompt> --yolo`
+ * - gemini: `gemini -p <prompt> --skip-trust`
+ *
+ * NOTE: gemini uses `--skip-trust` (not `--yolo`). `--yolo` puts gemini into
+ * agentic auto-approve mode, where even a one-shot advisory question makes it
+ * attempt tool execution, which can hit rate limits / empty responses and
+ * retry indefinitely — so `omc ask gemini "..."` hangs. `--skip-trust` only
+ * bypasses the workspace trust prompt, keeping the call a single-shot answer.
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
     return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
   }
   if (provider === 'gemini') {
-    return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+    return pipePromptViaStdin ? ['--skip-trust'] : ['-p', prompt, '--skip-trust'];
   }
   return ['-p', prompt];
 }
