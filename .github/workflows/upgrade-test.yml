@@ -14,7 +14,8 @@ concurrency:
 jobs:
   upgrade-test:
     name: omc update + session-start hook
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, gajae-layofflabs-2]
     timeout-minutes: 20
 
     steps:
