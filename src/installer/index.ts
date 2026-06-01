@@ -73,6 +73,14 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
   'debug',
 ]);
 
+function currentAgentsDir(): string {
+  return join(getClaudeConfigDir(), 'agents');
+}
+
+function currentSkillsDir(): string {
+  return join(getClaudeConfigDir(), 'skills');
+}
+
 /**
  * Detects the newest installed OMC version from persistent metadata or
  * existing CLAUDE.md markers so an older CLI package cannot overwrite a
@@ -721,20 +729,21 @@ function mergeHookGroups(
  * known OMC agent) are preserved.
  */
 export function cleanupStaleAgents(log: (msg: string) => void): string[] {
-  if (!existsSync(AGENTS_DIR)) return [];
+  const agentsDir = currentAgentsDir();
+  if (!existsSync(agentsDir)) return [];
 
   const currentAgentFiles = new Set(
     Object.keys(loadAgentDefinitions()),
   );
 
   const removed: string[] = [];
-  for (const file of readdirSync(AGENTS_DIR)) {
+  for (const file of readdirSync(agentsDir)) {
     if (!file.endsWith('.md')) continue;
     if (file === 'AGENTS.md') continue;
     if (currentAgentFiles.has(file)) continue;
 
     // Check if this looks like an OMC-created agent (kebab-case .md with frontmatter)
-    const filepath = join(AGENTS_DIR, file);
+    const filepath = join(agentsDir, file);
     try {
       const content = readFileSync(filepath, 'utf-8');
       if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
@@ -759,20 +768,21 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
  * filename matches a current package agent.
  */
 export function prunePluginDuplicateAgents(log: (msg: string) => void): string[] {
-  if (!existsSync(AGENTS_DIR)) return [];
+  const agentsDir = currentAgentsDir();
+  if (!existsSync(agentsDir)) return [];
 
   const currentAgentFiles = new Set(
     Object.keys(loadAgentDefinitions()),
   );
 
   const removed: string[] = [];
-  for (const file of readdirSync(AGENTS_DIR)) {
+  for (const file of readdirSync(agentsDir)) {
     if (!file.endsWith('.md')) continue;
     if (file === 'AGENTS.md') continue;
     // Only prune agents whose name matches a current package agent
     if (!currentAgentFiles.has(file)) continue;
 
-    const filepath = join(AGENTS_DIR, file);
+    const filepath = join(agentsDir, file);
     try {
       const content = readFileSync(filepath, 'utf-8');
       if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
@@ -796,7 +806,8 @@ export function prunePluginDuplicateAgents(log: (msg: string) => void): string[]
  * the current package version. User-created skills are preserved.
  */
 export function cleanupStaleSkills(log: (msg: string) => void): string[] {
-  if (!existsSync(SKILLS_DIR)) return [];
+  const skillsDir = currentSkillsDir();
+  if (!existsSync(skillsDir)) return [];
 
   const packageSkillsDir = join(getPackageDir(), 'skills');
   const currentSkillNames = new Set<string>();
@@ -819,12 +830,12 @@ export function cleanupStaleSkills(log: (msg: string) => void): string[] {
   }
 
   const removed: string[] = [];
-  for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+  for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (currentSkillNames.has(entry.name)) continue;
     if (entry.name === 'omc-learned') continue;
 
-    const skillDir = join(SKILLS_DIR, entry.name);
+    const skillDir = join(skillsDir, entry.name);
     const skillMdPath = join(skillDir, 'SKILL.md');
     if (!existsSync(skillMdPath)) continue;
     if (!isOmcManagedSkillDir(skillDir)) continue;
@@ -851,7 +862,8 @@ export function cleanupStaleSkills(log: (msg: string) => void): string[] {
  * skills that happen to share a name.
  */
 export function prunePluginDuplicateSkills(log: (msg: string) => void): string[] {
-  if (!existsSync(SKILLS_DIR)) return [];
+  const skillsDir = currentSkillsDir();
+  if (!existsSync(skillsDir)) return [];
 
   const packageSkillsDir = join(getPackageDir(), 'skills');
   if (!existsSync(packageSkillsDir)) return [];
@@ -883,14 +895,14 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
   }
 
   const removed: string[] = [];
-  for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+  for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name === 'omc-learned' || entry.name === '.omc-trash') continue;
 
     // Only prune skills whose name matches a plugin-provided skill
     if (!pluginSkillNames.has(entry.name)) continue;
 
-    const skillMdPath = join(SKILLS_DIR, entry.name, 'SKILL.md');
+    const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
     if (!existsSync(skillMdPath)) continue;
 
     try {
@@ -901,7 +913,7 @@ export function prunePluginDuplicateSkills(log: (msg: string) => void): string[]
       // .omc-managed marker file. Frontmatter structure alone is not a reliable
       // ownership signal — user skills routinely use the same ---/name: format.
       const pluginContent = pluginSkillHashes.get(entry.name);
-      const skillDir = join(SKILLS_DIR, entry.name);
+      const skillDir = join(skillsDir, entry.name);
 
       if (pluginContent === standaloneContent || isOmcManagedSkillDir(skillDir)) {
         rmSync(skillDir, { recursive: true, force: true });

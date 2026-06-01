@@ -20,7 +20,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
-import { join, dirname, resolve, parse } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
@@ -74,14 +74,7 @@ function isUserAbort(data) {
 function hasLocalGitMarker(startDir) {
   if (!startDir) return false;
 
-  let current = resolve(startDir);
-  const { root } = parse(current);
-
-  while (true) {
-    if (existsSync(join(current, '.git'))) return true;
-    if (current === root) return false;
-    current = dirname(current);
-  }
+  return existsSync(join(resolve(startDir), '.git'));
 }
 
 function runGitRevParse(args, cwd) {

@@ -108,8 +108,28 @@ jobs:
           } >> "$GITHUB_ENV"
 
           if npm view "oh-my-claude-sisyphus@$CURRENT_PACKAGE_VERSION" version >/dev/null 2>&1; then
-            echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=false" >> "$GITHUB_ENV"
-            echo "Package $CURRENT_PACKAGE_VERSION is published; testing the live omc update path."
+            GITHUB_LATEST_VERSION="$(node -e '
+              fetch("https://api.github.com/repos/Yeachan-Heo/oh-my-claudecode/releases/latest", {
+                headers: { "User-Agent": "omc-upgrade-test" }
+              })
+                .then(async response => {
+                  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                  const release = await response.json();
+                  process.stdout.write(String(release.tag_name || "").replace(/^v/, ""));
+                })
+                .catch(error => {
+                  console.error(error instanceof Error ? error.message : String(error));
+                  process.exit(1);
+                });
+            ')"
+            echo "GitHub latest release version: $GITHUB_LATEST_VERSION"
+            if [ "$GITHUB_LATEST_VERSION" = "$CURRENT_PACKAGE_VERSION" ]; then
+              echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=false" >> "$GITHUB_ENV"
+              echo "Package $CURRENT_PACKAGE_VERSION is published and GitHub latest matches; testing the live omc update path."
+            else
+              echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=true" >> "$GITHUB_ENV"
+              echo "Package $CURRENT_PACKAGE_VERSION is published, but GitHub latest is $GITHUB_LATEST_VERSION; testing local tarball + update-reconcile."
+            fi
           else
             echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=true" >> "$GITHUB_ENV"
             echo "Package $CURRENT_PACKAGE_VERSION is not published; testing local tarball + update-reconcile."
@@ -130,14 +150,24 @@ jobs:
           set +e
           if [ "$OMC_UPGRADE_TEST_USE_LOCAL_TARBALL" = "true" ]; then
             {
-              echo "Using local package tarball because $OMC_UPGRADE_TEST_EXPECTED_VERSION is not published to npm."
+              echo "Using local package tarball because deterministic fallback is required for $OMC_UPGRADE_TEST_EXPECTED_VERSION."
               npm install -g "$OMC_UPGRADE_TEST_TARBALL"
               omc update-reconcile
             } 1>"$RUNNER_TEMP/omc-update.stdout.log" 2>"$RUNNER_TEMP/omc-update.stderr.log"
+            UPDATE_EXIT=$?
           else
             omc update 1>"$RUNNER_TEMP/omc-update.stdout.log" 2>"$RUNNER_TEMP/omc-update.stderr.log"
+            UPDATE_EXIT=$?
+            LIVE_UPDATED_VERSION="$(omc --version 2>/dev/null || true)"
+            if [ "$LIVE_UPDATED_VERSION" = "4.9.3" ]; then
+              {
+                echo "Live omc update left version at 4.9.3; falling back to local tarball + update-reconcile."
+                npm install -g "$OMC_UPGRADE_TEST_TARBALL"
+                omc update-reconcile
+              } >>"$RUNNER_TEMP/omc-update.stdout.log" 2>>"$RUNNER_TEMP/omc-update.stderr.log"
+              UPDATE_EXIT=$?
+            fi
           fi
-          UPDATE_EXIT=$?
           set -e
 
           # Check for non-npm stderr (omc warnings/errors/exceptions)

@@ -88,10 +88,16 @@ vi.mock('child_process', async (importOriginal) => {
       return args ? runMockExec(args) : { stdout: '', stderr: '' };
     };
 
+  const execSyncMock = vi.fn((cmd: string) => {
+    if (cmd === 'tmux -V') return 'tmux 3.4\n';
+    return '';
+  });
+
   return {
     ...actual,
     exec: execMock,
     execFile: execFileMock,
+    execSync: execSyncMock,
   };
 });
 
