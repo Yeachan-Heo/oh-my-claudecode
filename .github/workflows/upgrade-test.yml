@@ -268,9 +268,21 @@ jobs:
             exit 1
           fi
 
+          set +e
           printf '%s' \
             "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"ci-upgrade-test\",\"cwd\":\"$GITHUB_WORKSPACE\"}" \
             | node "$SESSION_HOOK" 1>"$RUNNER_TEMP/session.stdout.log" 2>"$RUNNER_TEMP/session.stderr.log"
+          SESSION_EXIT=$?
+          set -e
+
+          if [ "$SESSION_EXIT" -ne 0 ]; then
+            echo "FAIL: SessionStart hook exited with code $SESSION_EXIT"
+            echo "stderr:"
+            cat "$RUNNER_TEMP/session.stderr.log"
+            echo "stdout:"
+            cat "$RUNNER_TEMP/session.stdout.log"
+            exit 1
+          fi
 
           if [ -s "$RUNNER_TEMP/session.stderr.log" ]; then
             echo "FAIL: SessionStart hook produced stderr:"

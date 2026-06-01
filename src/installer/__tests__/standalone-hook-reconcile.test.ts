@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -107,6 +108,44 @@ describe('install() standalone hook reconciliation', () => {
     expect(readFileSync(join(testClaudeDir, 'hooks', 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'pre-tool-use.mjs'), 'utf-8')).toContain('PreToolUse');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'code-simplifier.mjs'), 'utf-8')).toContain('Code Simplifier');
+  });
+
+  it('installs a standalone SessionStart hook with all runtime helper imports', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-session-start-project-'));
+    try {
+      mkdirSync(join(projectDir, '.git'), { recursive: true });
+
+      const { install } = await loadInstaller();
+      const result = install({
+        force: true,
+        skipClaudeCheck: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(existsSync(join(testClaudeDir, 'hooks', 'lib', 'state-root.mjs'))).toBe(true);
+      expect(existsSync(join(testClaudeDir, 'hooks', 'lib', 'model-routing-override-message.mjs'))).toBe(true);
+
+      const raw = execFileSync(process.execPath, [join(testClaudeDir, 'hooks', 'session-start.mjs')], {
+        input: JSON.stringify({
+          hook_event_name: 'SessionStart',
+          session_id: 'ci-upgrade-test',
+          cwd: projectDir,
+        }),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: testClaudeDir,
+          HOME: testHomeDir,
+          USERPROFILE: testHomeDir,
+        },
+        timeout: 15000,
+      }).trim();
+
+      const parsed = JSON.parse(raw) as { continue?: boolean };
+      expect(parsed.continue).toBe(true);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 
   it('preserves non-OMC ~/.claude/hooks commands while adding standalone OMC hooks', async () => {
