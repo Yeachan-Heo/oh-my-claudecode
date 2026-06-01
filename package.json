@@ -12,13 +12,14 @@
     }
   },
   "bin": {
-    "oh-my-claudecode": "bridge/cli.cjs",
-    "omc": "bridge/cli.cjs",
+    "oh-my-claudecode": "bin/oh-my-claudecode.js",
+    "omc": "bin/oh-my-claudecode.js",
     "omc-cli": "bridge/cli.cjs"
   },
   "files": [
     "dist",
     "agents",
+    "bin",
     "bridge",
     "bridge/mcp-server.cjs",
     "bridge/team-bridge.cjs",

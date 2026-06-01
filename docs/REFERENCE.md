@@ -42,7 +42,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 This integrates directly with Claude Code's plugin system and uses Node.js hooks.
 
-> **Note**: Direct npm/bun global installs are **not supported**. The plugin system handles all installation and hook setup automatically.
+> **Note**: Direct npm/bun global installs are **not supported** for the plugin install flow. When you only need the packaged CLI surface, the npm package exposes both `oh-my-claudecode` and `omc`; use `omc` in examples unless troubleshooting needs the long alias.
 
 ### Requirements
 
