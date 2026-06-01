@@ -19,7 +19,7 @@ import type {
 } from './types.js';
 import { resolveLiveData } from './live-data.js';
 import { parseFrontmatter, parseFrontmatterAliases, stripOptionalQuotes } from '../../utils/frontmatter.js';
-import { formatOmcCliInvocation, rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
+import { rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
 import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../utils/skill-pipeline.js';
 import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from '../../features/builtin-skills/runtime-guidance.js';
@@ -192,21 +192,24 @@ function discoverSkillsFromDir(skillsDir: string): CommandInfo[] {
 export function discoverAllCommands(): CommandInfo[] {
   const userCommandsDir = join(CLAUDE_CONFIG_DIR, 'commands');
   const projectCommandsDir = join(process.cwd(), '.claude', 'commands');
+  const projectClaudeSkillsDir = join(process.cwd(), '.claude', 'skills');
   const projectOmcSkillsDir = join(getOmcRoot(), 'skills');
   const projectAgentSkillsDir = join(process.cwd(), '.agents', 'skills');
   const userSkillsDir = join(CLAUDE_CONFIG_DIR, 'skills');
 
   const userCommands = discoverCommandsFromDir(userCommandsDir, 'user');
   const projectCommands = discoverCommandsFromDir(projectCommandsDir, 'project');
+  const projectClaudeSkills = discoverSkillsFromDir(projectClaudeSkillsDir);
   const projectOmcSkills = discoverSkillsFromDir(projectOmcSkillsDir);
   const projectAgentSkills = discoverSkillsFromDir(projectAgentSkillsDir);
   const userSkills = discoverSkillsFromDir(userSkillsDir);
   const builtinSkills = discoverSkillsFromDir(getSkillsDir());
 
-  // Priority: project commands > user commands > project OMC skills > project compatibility skills > user skills > builtin skills
+  // Priority: project commands > user commands > project Claude Code skills > project OMC skills > project compatibility skills > user skills > builtin skills
   const prioritized = [
     ...projectCommands,
     ...userCommands,
+    ...projectClaudeSkills,
     ...projectOmcSkills,
     ...projectAgentSkills,
     ...userSkills,

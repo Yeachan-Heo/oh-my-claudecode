@@ -3,7 +3,7 @@
  *
  * Detects and expands slash commands in user prompts.
  * Complements Claude Code's native slash command system by adding:
- * - Skill-based commands from ~/.claude/skills/
+ * - Skill-based commands from ~/.claude/skills/ and .claude/skills/
  * - Project-level commands from .claude/commands/
  * - Template expansion with $ARGUMENTS placeholder
  *
