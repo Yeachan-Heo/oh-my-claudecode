@@ -110,8 +110,8 @@ describe('install() standalone hook reconciliation', () => {
     expect(readFileSync(join(testClaudeDir, 'hooks', 'code-simplifier.mjs'), 'utf-8')).toContain('Code Simplifier');
   });
 
-  it('installs a standalone SessionStart hook with all runtime helper imports', async () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-session-start-project-'));
+  it('installs standalone hooks with all runtime helper imports', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-hook-project-'));
     try {
       mkdirSync(join(projectDir, '.git'), { recursive: true });
 
@@ -125,24 +125,53 @@ describe('install() standalone hook reconciliation', () => {
       expect(existsSync(join(testClaudeDir, 'hooks', 'lib', 'state-root.mjs'))).toBe(true);
       expect(existsSync(join(testClaudeDir, 'hooks', 'lib', 'model-routing-override-message.mjs'))).toBe(true);
 
-      const raw = execFileSync(process.execPath, [join(testClaudeDir, 'hooks', 'session-start.mjs')], {
-        input: JSON.stringify({
-          hook_event_name: 'SessionStart',
-          session_id: 'ci-upgrade-test',
-          cwd: projectDir,
-        }),
-        encoding: 'utf-8',
-        env: {
-          ...process.env,
-          CLAUDE_CONFIG_DIR: testClaudeDir,
-          HOME: testHomeDir,
-          USERPROFILE: testHomeDir,
+      const hookInputs: Array<{ file: string; input: Record<string, unknown> }> = [
+        {
+          file: 'session-start.mjs',
+          input: { hook_event_name: 'SessionStart', session_id: 'ci-upgrade-test', cwd: projectDir },
         },
-        timeout: 15000,
-      }).trim();
+        {
+          file: 'keyword-detector.mjs',
+          input: { hook_event_name: 'UserPromptSubmit', session_id: 'ci-upgrade-test', cwd: projectDir, prompt: 'hello' },
+        },
+        {
+          file: 'pre-tool-use.mjs',
+          input: { hook_event_name: 'PreToolUse', session_id: 'ci-upgrade-test', cwd: projectDir, tool_name: 'Read', tool_input: {} },
+        },
+        {
+          file: 'post-tool-use.mjs',
+          input: { hook_event_name: 'PostToolUse', session_id: 'ci-upgrade-test', cwd: projectDir, tool_name: 'Read', tool_input: {}, tool_response: 'ok' },
+        },
+        {
+          file: 'post-tool-use-failure.mjs',
+          input: { hook_event_name: 'PostToolUseFailure', session_id: 'ci-upgrade-test', cwd: projectDir, tool_name: 'Read', tool_input: {}, error: 'synthetic failure' },
+        },
+        {
+          file: 'persistent-mode.mjs',
+          input: { hook_event_name: 'Stop', session_id: 'ci-upgrade-test', cwd: projectDir },
+        },
+        {
+          file: 'code-simplifier.mjs',
+          input: { hook_event_name: 'Stop', session_id: 'ci-upgrade-test', cwd: projectDir },
+        },
+      ];
 
-      const parsed = JSON.parse(raw) as { continue?: boolean };
-      expect(parsed.continue).toBe(true);
+      for (const { file, input } of hookInputs) {
+        const raw = execFileSync(process.execPath, [join(testClaudeDir, 'hooks', file)], {
+          input: JSON.stringify(input),
+          encoding: 'utf-8',
+          env: {
+            ...process.env,
+            CLAUDE_CONFIG_DIR: testClaudeDir,
+            HOME: testHomeDir,
+            USERPROFILE: testHomeDir,
+          },
+          timeout: 15000,
+        }).trim();
+
+        const parsed = JSON.parse(raw) as { continue?: boolean };
+        expect(parsed.continue, file).toBe(true);
+      }
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }

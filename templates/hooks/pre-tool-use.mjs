@@ -16,7 +16,7 @@ const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module
 const { readStdin } = await import(pathToFileURL(path.join(__dirname, 'lib', 'stdin.mjs')).href);
-const { resolveOmcStateRoot } = await import(pathToFileURL(path.join(__dirname, '..', '..', 'scripts', 'lib', 'state-root.mjs')).href);
+const { resolveOmcStateRoot } = await import(pathToFileURL(path.join(__dirname, 'lib', 'state-root.mjs')).href);
 
 // ---------------------------------------------------------------------------
 // Skill Active State (issue #1033)

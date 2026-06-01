@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 // Dynamic imports for shared modules (use pathToFileURL for Windows compatibility, #524)
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
 const { atomicWriteFileSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
-const { resolveSessionStatePathsForHook, resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'lib', 'state-root.mjs')).href);
+const { resolveSessionStatePathsForHook, resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 
 // Constants
 const NOTEPAD_TEMPLATE = '# Notepad\n' +

@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 // Dynamic imports for shared modules
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
 const { atomicWriteFileSync, ensureDirSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
-const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'lib', 'state-root.mjs')).href);
+const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 
 // ============================================================================
 // Session ID resolution (mirrors src/lib/session-id.ts — inlined for .mjs)

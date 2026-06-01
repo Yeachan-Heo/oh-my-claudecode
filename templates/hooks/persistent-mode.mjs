@@ -29,7 +29,7 @@ const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib',
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
 );
-const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'lib', 'state-root.mjs')).href);
+const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 
 function readJsonFile(path) {
   try {

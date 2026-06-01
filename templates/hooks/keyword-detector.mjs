@@ -35,7 +35,7 @@ const __dirname = dirname(__filename);
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
 const { atomicWriteFileSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
-const { resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'lib', 'state-root.mjs')).href);
+const { resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 
 
 const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
