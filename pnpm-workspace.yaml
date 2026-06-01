@@ -1,0 +1,7 @@
+# pnpm settings. pnpm 11 reads native-build approvals from this file.
+# Allow these dependencies to run their install/build scripts:
+#   better-sqlite3 -> runs prebuild-install to fetch the node-v147 (Node 26 ABI) binary
+#   esbuild        -> postinstall sets up its platform binary, used by scripts/build-*.mjs
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
