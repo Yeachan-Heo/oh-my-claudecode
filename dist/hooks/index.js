@@ -31,9 +31,6 @@ export {
 // Hook Bridge (main entry point for shell scripts)
 processHook } from './bridge.js';
 export { 
-// Think Mode
-createThinkModeHook, detectThinkKeyword, detectUltrathinkKeyword, extractPromptText as extractThinkPromptText, removeCodeBlocks as removeThinkCodeBlocks, getHighVariant, isAlreadyHighVariant, getThinkingConfig, getClaudeThinkingConfig, clearThinkModeState, getThinkModeState, isThinkModeActive, processThinkMode, shouldActivateThinkMode, shouldActivateUltrathink, THINKING_CONFIGS } from './think-mode/index.js';
-export { 
 // Rules Injector
 createRulesInjectorHook, getRulesForPath, findProjectRoot, findRuleFiles, parseRuleFrontmatter, shouldApplyRule, createContentHash, isDuplicateByRealPath, isDuplicateByContentHash, loadInjectedRules, saveInjectedRules, clearInjectedRules, RULES_INJECTOR_STORAGE, PROJECT_MARKERS, PROJECT_RULE_SUBDIRS, PROJECT_RULE_FILES, RULE_EXTENSIONS, TRACKED_TOOLS } from './rules-injector/index.js';
 export { 
@@ -70,9 +67,6 @@ createDirectoryReadmeInjectorHook, getReadmesForPath, loadInjectedPaths, saveInj
 export { 
 // Empty Message Sanitizer
 createEmptyMessageSanitizerHook, sanitizeMessages, sanitizeMessage, hasTextContent, isToolPart, hasValidContent, PLACEHOLDER_TEXT, TOOL_PART_TYPES, HOOK_NAME as EMPTY_MESSAGE_SANITIZER_HOOK_NAME, DEBUG_PREFIX as EMPTY_MESSAGE_SANITIZER_DEBUG_PREFIX, ERROR_PATTERNS as EMPTY_MESSAGE_SANITIZER_ERROR_PATTERNS } from './empty-message-sanitizer/index.js';
-export { 
-// Thinking Block Validator
-createThinkingBlockValidatorHook, isExtendedThinkingModel, hasContentParts, startsWithThinkingBlock, findPreviousThinkingContent, prependThinkingBlock, validateMessage, validateMessages, getValidationStats, HOOK_NAME as THINKING_BLOCK_VALIDATOR_HOOK_NAME, CONTENT_PART_TYPES, THINKING_PART_TYPES, THINKING_MODEL_PATTERNS, DEFAULT_THINKING_CONTENT, SYNTHETIC_THINKING_ID_PREFIX, PREVENTED_ERROR } from './thinking-block-validator/index.js';
 export { 
 // Non-Interactive Environment
 nonInteractiveEnvHook, isNonInteractive, HOOK_NAME as NON_INTERACTIVE_ENV_HOOK_NAME, NON_INTERACTIVE_ENV, SHELL_COMMAND_PATTERNS } from './non-interactive-env/index.js';

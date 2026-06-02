@@ -3286,7 +3286,7 @@ function shouldAutoForceInherit() {
   }
   return false;
 }
-var DIRECT_MODEL_ENV_KEYS, INHERIT_TIER_PRIORITY, CLAUDE_TIER_ALIASES, TIER_ENV_KEYS, CLAUDE_FAMILY_DEFAULTS, BUILTIN_TIER_MODEL_DEFAULTS, CLAUDE_FAMILY_HIGH_VARIANTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS;
+var DIRECT_MODEL_ENV_KEYS, INHERIT_TIER_PRIORITY, CLAUDE_TIER_ALIASES, TIER_ENV_KEYS, CLAUDE_FAMILY_DEFAULTS, BUILTIN_TIER_MODEL_DEFAULTS, BUILTIN_EXTERNAL_MODEL_DEFAULTS;
 var init_models = __esm({
   "src/config/models.ts"() {
     "use strict";
@@ -3314,17 +3314,12 @@ var init_models = __esm({
     CLAUDE_FAMILY_DEFAULTS = {
       HAIKU: "claude-haiku-4-5",
       SONNET: "claude-sonnet-4-6",
-      OPUS: "claude-opus-4-7"
+      OPUS: "claude-opus-4-8"
     };
     BUILTIN_TIER_MODEL_DEFAULTS = {
       LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
       MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
       HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS
-    };
-    CLAUDE_FAMILY_HIGH_VARIANTS = {
-      HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
-      SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
-      OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
     };
     BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
       codexModel: "gpt-5.3-codex",
@@ -9194,6 +9189,9 @@ var init_runtime_v2 = __esm({
         this.cwd = cwd;
         this.threshold = threshold;
       }
+      teamName;
+      cwd;
+      threshold;
       consecutiveFailures = 0;
       tripped = false;
       recordSuccess() {

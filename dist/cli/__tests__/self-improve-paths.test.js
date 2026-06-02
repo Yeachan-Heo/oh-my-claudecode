@@ -51,8 +51,10 @@ describe('self-improve path scoping helpers', () => {
             cwd: root,
             encoding: 'utf-8',
         });
-        const expectedSettings = normalize(join(scopedConfigDir, 'settings.json')).replace(/^\/private(?=\/var\/)/, '');
-        const normalizedOutput = normalize(output).replace(/^Settings: \/private(?=\/var\/)/m, 'Settings: ');
+        // macOS symlinks both /var and /tmp under /private; validate.sh resolves the
+        // real path, so strip a leading /private before either prefix to compare.
+        const expectedSettings = normalize(join(scopedConfigDir, 'settings.json')).replace(/^\/private(?=\/(?:var|tmp)\/)/, '');
+        const normalizedOutput = normalize(output).replace(/^Settings: \/private(?=\/(?:var|tmp)\/)/m, 'Settings: ');
         expect(normalizedOutput).toContain(`Settings: ${expectedSettings}`);
         expect(output).toContain('All checks passed');
     });

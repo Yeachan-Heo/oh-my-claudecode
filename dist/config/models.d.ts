@@ -7,8 +7,6 @@ export type ClaudeModelFamily = 'HAIKU' | 'SONNET' | 'OPUS';
 export declare const CLAUDE_FAMILY_DEFAULTS: Record<ClaudeModelFamily, string>;
 /** Canonical tier->model mapping used as built-in defaults */
 export declare const BUILTIN_TIER_MODEL_DEFAULTS: Record<ModelTier, string>;
-/** Canonical Claude high-reasoning variants by family */
-export declare const CLAUDE_FAMILY_HIGH_VARIANTS: Record<ClaudeModelFamily, string>;
 /** Built-in defaults for external provider models */
 export declare const BUILTIN_EXTERNAL_MODEL_DEFAULTS: {
     readonly codexModel: "gpt-5.3-codex";
@@ -29,11 +27,6 @@ export declare function getDefaultTierModels(): Record<ModelTier, string>;
  * Supports Anthropic IDs and provider-prefixed forms (e.g. vertex_ai/...).
  */
 export declare function resolveClaudeFamily(modelId: string): ClaudeModelFamily | null;
-/**
- * Resolve a canonical Claude high variant from a Claude model ID.
- * Returns null for non-Claude model IDs.
- */
-export declare function getClaudeHighVariantFromModel(modelId: string): string | null;
 /** Get built-in default model for an external provider */
 export declare function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini'): string;
 /**

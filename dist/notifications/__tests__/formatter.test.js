@@ -214,6 +214,9 @@ describe("parseTmuxTail noise filters", () => {
     it("drops unversioned OMC HUD lines", () => {
         expect(parseTmuxTail("[OMC] | session:5m")).toBe("");
     });
+    it("drops OhMy-branded HUD status lines", () => {
+        expect(parseTmuxTail("OhMy:1.0.0 | thinking | session:510m | ctx:61% | 🔧57")).toBe("");
+    });
     it("drops bypass-permissions indicator lines starting with ⏵", () => {
         expect(parseTmuxTail("⏵⏵ bypass permissions on · python3 -m intentio mission missions/py… (running)")).toBe("");
     });

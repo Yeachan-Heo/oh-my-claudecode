@@ -1089,17 +1089,12 @@ function findPermissionViolations(changedPaths, permissions, cwd) {
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
   SONNET: "claude-sonnet-4-6",
-  OPUS: "claude-opus-4-7"
+  OPUS: "claude-opus-4-8"
 };
 var BUILTIN_TIER_MODEL_DEFAULTS = {
   LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
   MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
   HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS
-};
-var CLAUDE_FAMILY_HIGH_VARIANTS = {
-  HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
-  SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
-  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
 };
 var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: "gpt-5.3-codex",

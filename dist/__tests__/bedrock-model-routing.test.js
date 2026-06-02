@@ -116,7 +116,7 @@ describe('Bedrock model routing repro', () => {
             const defs = getAgentDefinitions({ config });
             expect(defs['executor'].model).toBe('claude-sonnet-4-6');
             expect(defs['explore'].model).toBe('claude-haiku-4-5');
-            expect(defs['architect'].model).toBe('claude-opus-4-7');
+            expect(defs['architect'].model).toBe('claude-opus-4-8');
             // 4. enforceModel normalizes to bare CC-supported aliases (FIX)
             const { enforceModel } = await import('../features/delegation-enforcer.js');
             // 4a. executor → 'sonnet' (normalized from config's full model ID)
