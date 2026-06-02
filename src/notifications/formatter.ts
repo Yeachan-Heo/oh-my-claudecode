@@ -180,8 +180,8 @@ const CTRL_O_RE = /ctrl\+o to expand/i;
 /** Lines composed entirely of box-drawing characters and whitespace. */
 const BOX_DRAWING_RE = /^[\s─═│║┌┐└┘┬┴├┤╔╗╚╝╠╣╦╩╬╟╢╤╧╪━┃┏┓┗┛┣┫┳┻╋┠┨┯┷┿╂]+$/;
 
-/** OMC HUD status lines: [OMC#...] or [OMC] (unversioned). */
-const OMC_HUD_RE = /\[OMC[#\]]/;
+/** OMC HUD status lines: OhMy:<ver> (current), or legacy [OMC#...]/[OMC]. */
+const OMC_HUD_RE = /\[OMC[#\]]|OhMy:/;
 
 /** Bypass-permissions indicator lines starting with ⏵. */
 const BYPASS_PERM_RE = /^⏵/;

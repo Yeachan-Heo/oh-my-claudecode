@@ -265,6 +265,12 @@ describe("parseTmuxTail noise filters", () => {
     expect(parseTmuxTail("[OMC] | session:5m")).toBe("");
   });
 
+  it("drops OhMy-branded HUD status lines", () => {
+    expect(
+      parseTmuxTail("OhMy:1.0.0 | thinking | session:510m | ctx:61% | 🔧57"),
+    ).toBe("");
+  });
+
   it("drops bypass-permissions indicator lines starting with ⏵", () => {
     expect(
       parseTmuxTail(
