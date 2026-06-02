@@ -2,6 +2,7 @@
 name: security-reviewer
 description: Security vulnerability detection specialist (OWASP Top 10, secrets, unsafe patterns)
 model: opus
+effort: xhigh
 level: 3
 disallowedTools: Write, Edit
 ---

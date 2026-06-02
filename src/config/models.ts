@@ -32,7 +32,7 @@ const TIER_ENV_KEYS: Record<ModelTier, readonly string[]> = {
 export const CLAUDE_FAMILY_DEFAULTS: Record<ClaudeModelFamily, string> = {
   HAIKU: 'claude-haiku-4-5',
   SONNET: 'claude-sonnet-4-6',
-  OPUS: 'claude-opus-4-7',
+  OPUS: 'claude-opus-4-8',
 };
 
 /** Canonical tier->model mapping used as built-in defaults */
@@ -40,13 +40,6 @@ export const BUILTIN_TIER_MODEL_DEFAULTS: Record<ModelTier, string> = {
   LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
   MEDIUM: CLAUDE_FAMILY_DEFAULTS.SONNET,
   HIGH: CLAUDE_FAMILY_DEFAULTS.OPUS,
-};
-
-/** Canonical Claude high-reasoning variants by family */
-export const CLAUDE_FAMILY_HIGH_VARIANTS: Record<ClaudeModelFamily, string> = {
-  HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
-  SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
-  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`,
 };
 
 /** Built-in defaults for external provider models */
@@ -192,15 +185,6 @@ export function resolveClaudeFamily(modelId: string): ClaudeModelFamily | null {
   if (lower.includes('haiku')) return 'HAIKU';
 
   return null;
-}
-
-/**
- * Resolve a canonical Claude high variant from a Claude model ID.
- * Returns null for non-Claude model IDs.
- */
-export function getClaudeHighVariantFromModel(modelId: string): string | null {
-  const family = resolveClaudeFamily(modelId);
-  return family ? CLAUDE_FAMILY_HIGH_VARIANTS[family] : null;
 }
 
 /** Get built-in default model for an external provider */

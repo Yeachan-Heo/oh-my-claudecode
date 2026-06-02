@@ -2,6 +2,7 @@
 name: planner
 description: Strategic planning consultant with interview workflow (Opus)
 model: opus
+effort: xhigh
 level: 4
 ---
 

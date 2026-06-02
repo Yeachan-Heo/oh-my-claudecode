@@ -116,32 +116,6 @@ export {
 } from './bridge.js';
 
 export {
-  // Think Mode
-  createThinkModeHook,
-  detectThinkKeyword,
-  detectUltrathinkKeyword,
-  extractPromptText as extractThinkPromptText,
-  removeCodeBlocks as removeThinkCodeBlocks,
-  getHighVariant,
-  isAlreadyHighVariant,
-  getThinkingConfig,
-  getClaudeThinkingConfig,
-  clearThinkModeState,
-  getThinkModeState,
-  isThinkModeActive,
-  processThinkMode,
-  shouldActivateThinkMode,
-  shouldActivateUltrathink,
-  THINKING_CONFIGS,
-  type ThinkModeState,
-  type ModelRef,
-  type MessageWithModel,
-  type ThinkModeInput,
-  type ClaudeThinkingConfig,
-  type ThinkingConfig
-} from './think-mode/index.js';
-
-export {
   // Rules Injector
   createRulesInjectorHook,
   getRulesForPath,
@@ -371,33 +345,6 @@ export {
   type EmptyMessageSanitizerOutput,
   type EmptyMessageSanitizerConfig
 } from './empty-message-sanitizer/index.js';
-
-export {
-  // Thinking Block Validator
-  createThinkingBlockValidatorHook,
-  isExtendedThinkingModel,
-  hasContentParts,
-  startsWithThinkingBlock,
-  findPreviousThinkingContent,
-  prependThinkingBlock,
-  validateMessage,
-  validateMessages,
-  getValidationStats,
-  HOOK_NAME as THINKING_BLOCK_VALIDATOR_HOOK_NAME,
-  CONTENT_PART_TYPES,
-  THINKING_PART_TYPES,
-  THINKING_MODEL_PATTERNS,
-  DEFAULT_THINKING_CONTENT,
-  SYNTHETIC_THINKING_ID_PREFIX,
-  PREVENTED_ERROR,
-  type MessagePart as ThinkingValidatorMessagePart,
-  type MessageInfo as ThinkingValidatorMessageInfo,
-  type MessageWithParts as ThinkingValidatorMessageWithParts,
-  type MessagesTransformInput,
-  type MessagesTransformOutput,
-  type MessagesTransformHook,
-  type ValidationResult
-} from './thinking-block-validator/index.js';
 
 export {
   // Non-Interactive Environment
