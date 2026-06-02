@@ -22,17 +22,23 @@ describe('update-check cache path', () => {
     );
   });
 
-  it('keeps the hook updater writer and HUD reader on the shared helper path', () => {
+  it('keeps the HUD update reader on the shared helper path while the fork removes the hook update pollers', () => {
     const hudSource = readFileSync('src/hud/index.ts', 'utf-8');
     const hookSource = readFileSync('scripts/session-start.mjs', 'utf-8');
     const templateSource = readFileSync('templates/hooks/session-start.mjs', 'utf-8');
     const templateHelperSource = readFileSync('templates/hooks/lib/config-dir.mjs', 'utf-8');
 
+    // The HUD still reads the shared update-check cache via the canonical helper,
+    // and the helper itself remains defined for that reader.
     expect(hudSource).toContain('getUpdateCheckCachePath()');
-    expect(hookSource).toContain('getUpdateCheckCachePath()');
-    expect(templateSource).toContain('getUpdateCheckCachePath()');
     expect(templateHelperSource).toContain('function getUpdateCheckCachePath()');
 
+    // OhMy fork: neither session-start hook polls the public npm registry for
+    // updates (the upstream-version banner/poller was removed).
+    expect(hookSource).not.toContain('registry.npmjs.org');
+    expect(templateSource).not.toContain('registry.npmjs.org');
+
+    // No source should hardcode the update-check cache path (regression guard).
     for (const source of [hudSource, hookSource, templateSource]) {
       expect(source).not.toMatch(/join\(homedir\(\),\s*['"]\.omc['"],\s*['"]update-check\.json['"]\)/);
     }

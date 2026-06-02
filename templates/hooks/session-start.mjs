@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const { getClaudeConfigDir, getUpdateCheckCachePath } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
+const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const configDir = getClaudeConfigDir();
 
 // Import timeout-protected stdin reader (prevents hangs on Linux/Windows, see issue #240, #524)
@@ -79,49 +79,9 @@ function shouldRestoreModeState(directory, mode, state, sessionId) {
   return true;
 }
 
-async function checkForUpdates(currentVersion) {
-  const cacheFile = getUpdateCheckCachePath();
-  const now = Date.now();
-  const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-
-  // Check cache first
-  const cached = readJsonFile(cacheFile);
-  if (cached && cached.timestamp && (now - cached.timestamp) < CACHE_DURATION) {
-    return cached.updateAvailable ? cached : null;
-  }
-
-  // Fetch latest version from npm
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2000);
-  try {
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-
-    const data = await response.json();
-    const latestVersion = data.version;
-
-    const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
-
-    const cacheData = {
-      timestamp: now,
-      latestVersion,
-      currentVersion,
-      updateAvailable
-    };
-
-    writeJsonFile(cacheFile, cacheData);
-
-    return updateAvailable ? cacheData : null;
-  } catch (error) {
-    // Silent fail - network unavailable or timeout
-    return null;
-  } finally { clearTimeout(timeoutId); }
-}
+// Upstream update poller removed for the OhMy fork. The standalone-install
+// session-start hook no longer fetches the latest published version or writes
+// the update-check cache; the fork manages its own version.
 
 function compareVersions(v1, v2) {
   const parts1 = v1.replace(/^v/, '').split('.').map(p => parseInt(p, 10) || 0);
@@ -465,58 +425,9 @@ async function main() {
     const sessionId = data.sessionId || data.session_id || data.sessionid || '';
     const messages = [];
 
-    // Check for updates (non-blocking)
-    // Read version from OMC's own package.json, not the project's (fixes #516)
-    let currentVersion = null;
-    for (let i = 1; i <= 4; i++) {
-      const candidate = join(__dirname, ...Array(i).fill('..'), 'package.json');
-      const pkg = readJsonFile(candidate);
-      if ((pkg?.name === 'oh-my-claude-sisyphus' || pkg?.name === 'oh-my-claudecode') && pkg?.version) {
-        currentVersion = pkg.version;
-        break;
-      }
-    }
-
-    const updateInfo = currentVersion ? await checkForUpdates(currentVersion) : null;
-    if (updateInfo) {
-      // Read config to check autoUpgradePrompt preference
-      const configPath = join(getClaudeConfigDir(), '.omc-config.json');
-      const omcConfig = readJsonFile(configPath) || {};
-      const autoUpgradePrompt = omcConfig.autoUpgradePrompt !== false; // default: true
-
-      if (autoUpgradePrompt) {
-        messages.push(`<session-restore>
-
-[OMC AUTO-UPGRADE AVAILABLE]
-
-oh-my-claudecode v${updateInfo.latestVersion} is available (current: v${updateInfo.currentVersion}).
-
-ACTION: Use AskUserQuestion to ask the user if they want to upgrade now. Offer these options:
-- "Upgrade now" (Recommended): Run \`npm install -g oh-my-claude-sisyphus@latest\` via Bash, then run \`omc install --force --skip-claude-check --refresh-hooks\` to reconcile hooks and CLAUDE.md
-- "Skip this time": Continue the session without upgrading
-- "Don't ask again": Tell the user to set "autoUpgradePrompt": false in [$CLAUDE_CONFIG_DIR|~/.claude]/.omc-config.json to disable future prompts
-
-Keep the prompt brief. If the user accepts, execute the upgrade commands and report the result.
-
-</session-restore>
-
----
-`);
-      } else {
-        messages.push(`<session-restore>
-
-[OMC UPDATE AVAILABLE]
-
-A new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
-
-To update, run: omc update
-
-</session-restore>
-
----
-`);
-      }
-    }
+    // Upstream update check removed for the OhMy fork: the session-start hook
+    // no longer detects the installed version, polls the public npm registry,
+    // or surfaces an update/upgrade notice. The fork manages its own version.
 
     if (shouldEmitModelRoutingOverride(directory)) {
       messages.push(MODEL_ROUTING_OVERRIDE_MESSAGE);

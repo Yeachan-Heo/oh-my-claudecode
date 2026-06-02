@@ -1,40 +1,21 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
-describe('BUG 4: session-start hooks clear timeout in finally', () => {
-  it('templates/hooks/session-start.mjs uses finally for clearTimeout', async () => {
-    const { readFileSync } = await import('fs');
-    const { join } = await import('path');
-    const source = readFileSync(
-      join(process.cwd(), 'templates/hooks/session-start.mjs'),
-      'utf-8',
-    );
-
-    // Find the checkForUpdates function
-    const fnStart = source.indexOf('async function checkForUpdates');
-    expect(fnStart).toBeGreaterThan(-1);
-
-    const fnBody = source.slice(fnStart, fnStart + 1500);
-    expect(fnBody).toMatch(/finally\s*\{[\s\S]*?clearTimeout/);
+// The OhMy fork removed the upstream update poller from both session-start
+// hooks. (Previously "BUG 4" guarded that poller's AbortController timeout was
+// cleared in a `finally` block; with the poller gone, these tests guard that it
+// stays removed so the fork never silently reintroduces upstream version polling.)
+describe('OhMy fork: session-start hooks do not poll npm for updates', () => {
+  it('scripts/session-start.mjs has no npm update poller', () => {
+    const source = readFileSync(join(process.cwd(), 'scripts/session-start.mjs'), 'utf-8');
+    expect(source).not.toContain('registry.npmjs.org');
+    expect(source).not.toMatch(/async function checkNpmUpdate/);
   });
 
-  it('scripts/session-start.mjs uses finally for clearTimeout', async () => {
-    const { readFileSync } = await import('fs');
-    const { join } = await import('path');
-    const source = readFileSync(
-      join(process.cwd(), 'scripts/session-start.mjs'),
-      'utf-8',
-    );
-
-    // The checkNpmUpdate function should use finally for clearTimeout
-    // Look for the npm fetch section
-    const fetchSection = source.indexOf('registry.npmjs.org');
-    expect(fetchSection).toBeGreaterThan(-1);
-
-    // Find the surrounding try/finally block
-    const surroundingCode = source.slice(
-      Math.max(0, fetchSection - 300),
-      fetchSection + 800,
-    );
-    expect(surroundingCode).toMatch(/finally\s*\{[\s\S]*?clearTimeout/);
+  it('templates/hooks/session-start.mjs has no npm update poller', () => {
+    const source = readFileSync(join(process.cwd(), 'templates/hooks/session-start.mjs'), 'utf-8');
+    expect(source).not.toContain('registry.npmjs.org');
+    expect(source).not.toMatch(/async function checkForUpdates/);
   });
 });

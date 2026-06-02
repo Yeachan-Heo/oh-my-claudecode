@@ -10,7 +10,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync
 import { spawn } from 'child_process';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
+import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -578,47 +578,9 @@ function shouldNotifyDrift(driftInfo) {
   return true;
 }
 
-// Check npm registry for available update (with 24h cache)
-async function checkNpmUpdate(currentVersion) {
-  const cacheFile = getUpdateCheckCachePath();
-  const CACHE_DURATION = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-
-  // Check cache
-  try {
-    if (existsSync(cacheFile)) {
-      const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
-      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION) {
-        return (cached.updateAvailable && semverCompare(cached.latestVersion, currentVersion) > 0)
-          ? { currentVersion, latestVersion: cached.latestVersion }
-          : null;
-      }
-    }
-  } catch {}
-
-  // Fetch from npm registry with 2s timeout
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2000);
-  try {
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
-      signal: controller.signal
-    });
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const latestVersion = data.version;
-    const updateAvailable = semverCompare(latestVersion, currentVersion) > 0;
-
-    // Update cache
-    try {
-      const dir = join(configDir, '.omc');
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(cacheFile, JSON.stringify({ timestamp: now, latestVersion, currentVersion, updateAvailable }));
-    } catch {}
-
-    return updateAvailable ? { currentVersion, latestVersion } : null;
-  } catch { return null; } finally { clearTimeout(timeoutId); }
-}
+// Upstream npm update check removed for the OhMy fork. This fork is pinned at
+// its own version and intentionally does not poll the public npm registry for
+// the upstream package, so no update banner is ever surfaced at session start.
 
 // Check if HUD is properly installed (with retry for race conditions)
 async function checkHudInstallation(retryCount = 0) {
@@ -732,16 +694,9 @@ async function main() {
       messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
     }
 
-    // Check npm registry for available update (with 24h cache)
-    try {
-      const pluginVersion = getPluginVersion();
-      if (pluginVersion) {
-        const updateInfo = await checkNpmUpdate(pluginVersion);
-        if (updateInfo) {
-          messages.push(`<session-restore>\n\n[OMC UPDATE AVAILABLE]\n\nA new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: v${updateInfo.currentVersion})\n\nTo update, run: omc update\n(This syncs plugin, npm package, and CLAUDE.md together)\n\n</session-restore>\n\n---\n`);
-        }
-      }
-    } catch {}
+    // Upstream npm update banner removed for the OhMy fork: this fork pins its
+    // own version and intentionally does not query the upstream npm package or
+    // emit an "update available" banner. (The checkNpmUpdate helper was removed too.)
 
     // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
     if (process.env.CLAUDE_PLUGIN_ROOT) {
