@@ -1,1 +1,0 @@
-{"version":3,"file":"thinking.d.ts","sourceRoot":"","sources":["../../../src/hud/elements/thinking.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,OAAO,KAAK,EAAE,aAAa,EAAE,cAAc,EAAE,SAAS,EAAE,MAAM,aAAa,CAAC;AAM5E;;;;;;GAMG;AACH,wBAAgB,cAAc,CAC5B,KAAK,EAAE,aAAa,GAAG,IAAI,EAC3B,MAAM,GAAE,cAAuB,EAC/B,MAAM,GAAE,IAAI,CAAC,SAAS,EAAE,UAAU,CAAsB,GACvD,MAAM,GAAG,IAAI,CAef"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"types.d.ts","sourceRoot":"","sources":["../../../src/hooks/directory-readme-injector/types.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AAEH;;;GAGG;AACH,MAAM,WAAW,iBAAiB;IAChC,yBAAyB;IACzB,SAAS,EAAE,MAAM,CAAC;IAClB,+DAA+D;IAC/D,aAAa,EAAE,MAAM,EAAE,CAAC;IACxB,+BAA+B;IAC/B,SAAS,EAAE,MAAM,CAAC;CACnB"}
