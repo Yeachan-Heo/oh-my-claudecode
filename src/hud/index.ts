@@ -34,6 +34,7 @@ import { getUsage, getSubscriptionInfo } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
 import { detectApiKeySource } from "./elements/api-key-source.js";
+import { getPrInfo } from "./elements/pr.js";
 import { refreshMissionBoardState } from "./mission-board.js";
 import { sanitizeOutput } from "./sanitize.js";
 import { estimatePayloadFromTranscriptPath } from "./payload-estimate.js";
@@ -497,6 +498,11 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       sessionSummary,
       lastToolName: transcriptData.lastToolName,
       payloadEstimate,
+      // Effort badge: $CLAUDE_EFFORT is set by Claude Code per session; default
+      // to "auto" so the badge still renders when the var is absent.
+      effort: process.env.CLAUDE_EFFORT ?? "auto",
+      // PR badge: only do the (cached, non-blocking) gh work when enabled.
+      pr: config.elements.pr ? getPrInfo(cwd) : null,
     };
 
     // Debug: log data if OMC_DEBUG is set

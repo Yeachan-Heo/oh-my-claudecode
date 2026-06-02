@@ -170,6 +170,18 @@ export interface PrdStateForHud {
   total: number;
 }
 
+/** Pull request info for the current branch (from `gh pr view`). */
+export interface PrInfo {
+  /** PR number, e.g. 123 */
+  number: number;
+  /** PR state as reported by gh: 'OPEN' | 'CLOSED' | 'MERGED' */
+  state: string;
+  /** Whether the PR is a draft */
+  isDraft: boolean;
+  /** PR title (optional; not currently rendered) */
+  title?: string;
+}
+
 
 // ============================================================================
 // Render Context
@@ -416,6 +428,12 @@ export interface HudRenderContext {
 
   /** Best-effort local transcript-backed request payload pressure estimate. */
   payloadEstimate?: PayloadEstimate | null;
+
+  /** Reasoning-effort level from $CLAUDE_EFFORT (null/undefined hides the badge) */
+  effort?: string | null;
+
+  /** Open PR for the current branch (null when none/unavailable) */
+  pr?: PrInfo | null;
 }
 
 // ============================================================================
@@ -583,6 +601,8 @@ export interface HudElementConfig {
   apiKeySource: boolean;       // Show API key source (project/global/env)
   hostname: boolean;           // Show machine hostname (useful for multi-host SSH workflows)
   profile: boolean;            // Show active profile name (from CLAUDE_CONFIG_DIR)
+  effort: boolean;             // Show reasoning-effort badge from $CLAUDE_EFFORT
+  pr: boolean;                 // Show open PR for current branch (uses `gh`, cached, non-blocking)
   missionBoard?: boolean;      // Show opt-in mission board above existing HUD detail lines
   promptTime: boolean;        // Show last prompt submission time (HH:MM:SS)
   sessionHealth: boolean;     // Show session health/duration
@@ -649,7 +669,7 @@ export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
     'omcLabel', 'model', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
     'skills', 'lastSkill', 'contextBar', 'agents', 'background',
-    'callCounts', 'lastTool', 'sessionSummary',
+    'callCounts', 'lastTool', 'sessionSummary', 'effort', 'pr',
   ],
   detail: ['missionBoard', 'agents', 'contextWarning', 'payloadWarning', 'todos'],
 };
@@ -716,6 +736,8 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     apiKeySource: false, // Disabled by default
     hostname: false,
     profile: true,  // Show profile name when CLAUDE_CONFIG_DIR is set
+    effort: false,  // Opt-in: reasoning-effort badge from $CLAUDE_EFFORT ("auto" when unset)
+    pr: false,      // Opt-in: requires `gh` and a network call (cached, non-blocking)
     missionBoard: false,  // Opt-in mission board for whole-run progress tracking
     promptTime: true,  // Show last prompt time by default
     sessionHealth: true,
@@ -751,8 +773,8 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwd: false,
     cwdFormat: 'folder',
     useHyperlinks: false,
-    gitRepo: false,
-    gitBranch: false,
+    gitRepo: true,
+    gitBranch: true,
     gitStatus: false,
     gitInfoPosition: 'above',
     model: true,
@@ -794,7 +816,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwd: false,
     cwdFormat: 'relative',
     useHyperlinks: false,
-    gitRepo: false,
+    gitRepo: true,
     gitBranch: true,
     gitStatus: true,
     gitInfoPosition: 'above',
@@ -880,7 +902,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     cwd: false,
     cwdFormat: 'relative',
     useHyperlinks: false,
-    gitRepo: false,
+    gitRepo: true,
     gitBranch: true,
     gitStatus: false,
     gitInfoPosition: 'above',

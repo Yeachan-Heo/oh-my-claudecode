@@ -25,3 +25,5 @@ export { renderMissionBoard } from './mission-board.js';
 export { renderSessionSummary, type SessionSummaryState } from './session-summary.js';
 export { renderLastTool } from './last-tool.js';
 export { renderHostname } from './hostname.js';
+export { renderEffort } from './effort.js';
+export { renderPr, getPrInfo, readPrInfo } from './pr.js';

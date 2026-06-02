@@ -51,11 +51,6 @@ describe('HUD Default Configuration', () => {
       });
     });
 
-    it('should have gitRepo enabled in full and dense presets', () => {
-      expect(PRESET_CONFIGS.full.gitRepo).toBe(true);
-      expect(PRESET_CONFIGS.dense.gitRepo).toBe(true);
-    });
-
     it('should enable model display in all presets while render omits unavailable models', () => {
       presets.forEach(preset => {
         expect(PRESET_CONFIGS[preset].model).toBe(true);
@@ -63,21 +58,16 @@ describe('HUD Default Configuration', () => {
       });
     });
 
-    it('should have gitRepo disabled in minimal, focused, and opencode presets', () => {
-      expect(PRESET_CONFIGS.minimal.gitRepo).toBe(false);
-      expect(PRESET_CONFIGS.focused.gitRepo).toBe(false);
-      expect(PRESET_CONFIGS.opencode.gitRepo).toBe(false);
+    it('should have gitRepo enabled in every preset', () => {
+      presets.forEach(preset => {
+        expect(PRESET_CONFIGS[preset].gitRepo, `${preset}.gitRepo`).toBe(true);
+      });
     });
 
-    it('should have gitBranch enabled in focused, full, opencode, and dense presets', () => {
-      expect(PRESET_CONFIGS.focused.gitBranch).toBe(true);
-      expect(PRESET_CONFIGS.full.gitBranch).toBe(true);
-      expect(PRESET_CONFIGS.opencode.gitBranch).toBe(true);
-      expect(PRESET_CONFIGS.dense.gitBranch).toBe(true);
-    });
-
-    it('should have gitBranch disabled in minimal preset', () => {
-      expect(PRESET_CONFIGS.minimal.gitBranch).toBe(false);
+    it('should have gitBranch enabled in every preset', () => {
+      presets.forEach(preset => {
+        expect(PRESET_CONFIGS[preset].gitBranch, `${preset}.gitBranch`).toBe(true);
+      });
     });
 
     it('should keep token usage display disabled in all presets', () => {

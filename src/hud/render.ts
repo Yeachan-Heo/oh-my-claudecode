@@ -44,6 +44,8 @@ import {
 import { renderMissionBoard } from "./mission-board.js";
 import { renderSessionSummary } from "./elements/session-summary.js";
 import { renderLastTool } from "./elements/last-tool.js";
+import { renderEffort } from "./elements/effort.js";
+import { renderPr } from "./elements/pr.js";
 
 /**
  * ANSI escape sequence regex (matches SGR and other CSI sequences).
@@ -481,6 +483,16 @@ export async function render(
   if (enabledElements.sessionSummary && context.sessionSummary) {
     const summary = renderSessionSummary(context.sessionSummary);
     if (summary) rendered.set("sessionSummary", summary);
+  }
+
+  if (enabledElements.effort) {
+    const effort = renderEffort(context.effort);
+    if (effort) rendered.set("effort", effort);
+  }
+
+  if (enabledElements.pr) {
+    const pr = renderPr(context.pr);
+    if (pr) rendered.set("pr", pr);
   }
 
   // -- detail-group elements --

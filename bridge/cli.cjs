@@ -14890,7 +14890,9 @@ var init_types4 = __esm({
         "background",
         "callCounts",
         "lastTool",
-        "sessionSummary"
+        "sessionSummary",
+        "effort",
+        "pr"
       ],
       detail: ["missionBoard", "agents", "contextWarning", "payloadWarning", "todos"]
     };
@@ -14944,6 +14946,10 @@ var init_types4 = __esm({
         hostname: false,
         profile: true,
         // Show profile name when CLAUDE_CONFIG_DIR is set
+        effort: false,
+        // Opt-in: reasoning-effort badge from $CLAUDE_EFFORT ("auto" when unset)
+        pr: false,
+        // Opt-in: requires `gh` and a network call (cached, non-blocking)
         missionBoard: false,
         // Opt-in mission board for whole-run progress tracking
         promptTime: true,
@@ -14985,8 +14991,8 @@ var init_types4 = __esm({
         cwd: false,
         cwdFormat: "folder",
         useHyperlinks: false,
-        gitRepo: false,
-        gitBranch: false,
+        gitRepo: true,
+        gitBranch: true,
         gitStatus: false,
         gitInfoPosition: "above",
         model: true,
@@ -15028,7 +15034,7 @@ var init_types4 = __esm({
         cwd: false,
         cwdFormat: "relative",
         useHyperlinks: false,
-        gitRepo: false,
+        gitRepo: true,
         gitBranch: true,
         gitStatus: true,
         gitInfoPosition: "above",
@@ -15116,7 +15122,7 @@ var init_types4 = __esm({
         cwd: false,
         cwdFormat: "relative",
         useHyperlinks: false,
-        gitRepo: false,
+        gitRepo: true,
         gitBranch: true,
         gitStatus: false,
         gitInfoPosition: "above",
@@ -32704,8 +32710,8 @@ async function startMergeOrchestrator(config2) {
   let persisted = { lastShas: {} };
   if ((0, import_node_fs8.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync90 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync90(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync91 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync91(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -33094,8 +33100,8 @@ async function recoverFromRestart(config2) {
   let persistedShasLoaded = 0;
   if ((0, import_node_fs8.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync90 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync90(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync91 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync91(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -34074,16 +34080,16 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
     await writeFile9(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync90, writeFileSync: writeFileSync38 } = await import("fs");
+      const { readFileSync: readFileSync91, writeFileSync: writeFileSync39 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
-        const raw = readFileSync90(taskPath2, "utf-8");
+        const raw = readFileSync91(taskPath2, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status === "in_progress") {
           taskData.status = "pending";
           taskData.owner = void 0;
           taskData.claim = void 0;
-          writeFileSync38(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
+          writeFileSync39(taskPath2, JSON.stringify(taskData, null, 2), "utf-8");
           requeued.push(task.id);
         }
       });
@@ -34107,7 +34113,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename3 } = await import("fs/promises");
-  const { readFileSync: readFileSync90, writeFileSync: writeFileSync38, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync91, writeFileSync: writeFileSync39, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config2.workers) {
     const outputFile = worker.output_file;
@@ -34141,7 +34147,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
       const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, taskId));
       if (!fsExistsSync(taskPath2)) continue;
       try {
-        const taskRaw = readFileSync90(taskPath2, "utf-8");
+        const taskRaw = readFileSync91(taskPath2, "utf-8");
         const taskData = JSON.parse(taskRaw);
         if (taskData.owner === worker.name && taskData.status === "in_progress") {
           targetTaskId = taskId;
@@ -34169,7 +34175,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
     let transitionOk = false;
     try {
       withFileLockSync2(targetTaskPath + ".lock", () => {
-        const raw = readFileSync90(targetTaskPath, "utf-8");
+        const raw = readFileSync91(targetTaskPath, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status !== "in_progress" || taskData.owner !== worker.name) {
           return;
@@ -34189,7 +34195,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
         if (terminalStatus === "failed") {
           taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
         }
-        writeFileSync38(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
+        writeFileSync39(targetTaskPath, JSON.stringify(taskData, null, 2), "utf-8");
         transitionOk = true;
       });
     } catch {
@@ -46327,6 +46333,125 @@ var init_last_tool = __esm({
   }
 });
 
+// src/hud/elements/effort.ts
+function renderEffort(effort) {
+  if (!effort) return null;
+  const value = effort.trim();
+  if (!value) return null;
+  return `${dim("effort:")}${cyan(bold(value))}`;
+}
+var init_effort = __esm({
+  "src/hud/elements/effort.ts"() {
+    "use strict";
+    init_colors();
+  }
+});
+
+// src/hud/elements/pr.ts
+function getPrCacheDir() {
+  return (0, import_node_path18.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".pr-cache");
+}
+function getPrCachePath(cwd2, branch) {
+  const hash = (0, import_node_crypto2.createHash)("sha1").update(`${cwd2}@${branch}`).digest("hex").slice(0, 16);
+  return (0, import_node_path18.join)(getPrCacheDir(), `${hash}.json`);
+}
+function readPrInfo(cwd2, branch) {
+  const path22 = getPrCachePath(cwd2, branch);
+  if (!(0, import_node_fs14.existsSync)(path22)) return null;
+  let raw;
+  try {
+    raw = (0, import_node_fs14.readFileSync)(path22, "utf-8").trim();
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.number !== "number") return null;
+    return {
+      number: parsed.number,
+      state: typeof parsed.state === "string" ? parsed.state : "OPEN",
+      isDraft: parsed.isDraft === true,
+      title: typeof parsed.title === "string" ? parsed.title : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+function cacheAgeMs(path22) {
+  try {
+    return Date.now() - (0, import_node_fs14.statSync)(path22).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+function refreshPrCacheIfStale(cwd2, branch) {
+  if (process.platform === "win32") return;
+  const path22 = getPrCachePath(cwd2, branch);
+  if (cacheAgeMs(path22) <= CACHE_TTL_MS4) return;
+  try {
+    (0, import_node_fs14.mkdirSync)(getPrCacheDir(), { recursive: true });
+    (0, import_node_fs14.writeFileSync)(path22, "");
+  } catch {
+    return;
+  }
+  const tmp = `${path22}.tmp`;
+  const script = `gh pr view --json number,state,title,isDraft > "${tmp}" 2>/dev/null & ghpid=$!; ( sleep 8; kill "$ghpid" 2>/dev/null ) & wdpid=$!; wait "$ghpid" 2>/dev/null; kill "$wdpid" 2>/dev/null; if [ -s "${tmp}" ]; then mv "${tmp}" "${path22}"; else : > "${path22}"; rm -f "${tmp}"; fi`;
+  try {
+    const child = (0, import_node_child_process11.spawn)("sh", ["-c", script], {
+      cwd: cwd2,
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        GH_PROMPT_DISABLED: "1",
+        GH_NO_UPDATE_NOTIFIER: "1",
+        GIT_TERMINAL_PROMPT: "0"
+      }
+    });
+    child.unref();
+  } catch {
+  }
+}
+function getCurrentBranch(cwd2) {
+  try {
+    const out = (0, import_node_child_process11.execFileSync)("git", ["branch", "--show-current"], {
+      cwd: cwd2,
+      encoding: "utf-8",
+      timeout: 1e3,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+function getPrInfo(cwd2) {
+  const branch = getCurrentBranch(cwd2);
+  if (!branch) return null;
+  refreshPrCacheIfStale(cwd2, branch);
+  return readPrInfo(cwd2, branch);
+}
+function renderPr(pr) {
+  if (!pr || typeof pr.number !== "number") return null;
+  const tag = pr.isDraft ? "DRAFT" : pr.state;
+  return `${dim("pr:")}${yellow(bold(`#${pr.number} ${tag}`))}`;
+}
+var import_node_child_process11, import_node_crypto2, import_node_fs14, import_node_path18, CACHE_TTL_MS4;
+var init_pr = __esm({
+  "src/hud/elements/pr.ts"() {
+    "use strict";
+    import_node_child_process11 = require("node:child_process");
+    import_node_crypto2 = require("node:crypto");
+    import_node_fs14 = require("node:fs");
+    import_node_path18 = require("node:path");
+    init_colors();
+    init_config_dir();
+    CACHE_TTL_MS4 = 3e4;
+  }
+});
+
 // src/hud/render.ts
 function buildMainElementOrder(elementOrder) {
   if (!Array.isArray(elementOrder) || elementOrder.length === 0) {
@@ -46622,6 +46747,14 @@ async function render(context, config2) {
     const summary = renderSessionSummary(context.sessionSummary);
     if (summary) rendered.set("sessionSummary", summary);
   }
+  if (enabledElements.effort) {
+    const effort = renderEffort(context.effort);
+    if (effort) rendered.set("effort", effort);
+  }
+  if (enabledElements.pr) {
+    const pr = renderPr(context.pr);
+    if (pr) rendered.set("pr", pr);
+  }
   if (context.missionBoard && (config2.missionBoard?.enabled ?? config2.elements.missionBoard ?? false)) {
     const mbLines = renderMissionBoard(context.missionBoard, config2.missionBoard);
     if (mbLines.length > 0) renderedDetail.set("missionBoard", mbLines);
@@ -46739,6 +46872,8 @@ var init_render = __esm({
     init_mission_board();
     init_session_summary();
     init_last_tool();
+    init_effort();
+    init_pr();
     ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
     PLAIN_SEPARATOR = " | ";
     DIM_SEPARATOR = dim(PLAIN_SEPARATOR);
@@ -47100,7 +47235,12 @@ async function main2(watchMode = false, skipInit = false) {
       profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path128.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
       sessionSummary,
       lastToolName: transcriptData.lastToolName,
-      payloadEstimate
+      payloadEstimate,
+      // Effort badge: $CLAUDE_EFFORT is set by Claude Code per session; default
+      // to "auto" so the badge still renders when the var is absent.
+      effort: process.env.CLAUDE_EFFORT ?? "auto",
+      // PR badge: only do the (cached, non-blocking) gh work when enabled.
+      pr: config2.elements.pr ? getPrInfo(cwd2) : null
     };
     if (process.env.OMC_DEBUG) {
       console.error(
@@ -47168,6 +47308,7 @@ var init_hud = __esm({
     init_custom_rate_provider();
     init_render();
     init_api_key_source();
+    init_pr();
     init_mission_board();
     init_sanitize();
     init_payload_estimate();
