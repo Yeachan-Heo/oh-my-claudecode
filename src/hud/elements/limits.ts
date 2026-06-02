@@ -59,7 +59,8 @@ function formatResetTime(date: Date | null | undefined): string | null {
 /**
  * Render rate limits display.
  *
- * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
+ * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) op:5%(1d2h)
+ * (OhMy fork: the sn/sonnet-weekly window is intentionally not rendered.)
  */
 export function renderRateLimits(limits: RateLimits | null, stale?: boolean): string | null {
   if (!limits) return null;
@@ -101,17 +102,7 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     parts.push(monthlyPart);
   }
 
-  if (limits.sonnetWeeklyPercent != null) {
-    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
-    const sonnetColor = getColor(sonnet);
-    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
-
-    const sonnetPart = sonnetReset
-      ? `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
-      : `${DIM}sn:${RESET}${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
-
-    parts.push(sonnetPart);
-  }
+  // OhMy fork: the sn (sonnet-weekly) window is intentionally not rendered.
 
   if (limits.opusWeeklyPercent != null) {
     const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
@@ -144,7 +135,7 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
 /**
  * Render compact rate limits (just percentages).
  *
- * Format: 45%/12% or 45%/12%/8%/20%/5% (5h/wk/mo/sn/op)
+ * Format: 45%/12% or 45%/12%/8%/5% (5h/wk/mo/op)
  */
 export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boolean): string | null {
   if (!limits) return null;
@@ -166,11 +157,7 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
     parts.push(`${monthlyColor}${monthly}%${RESET}`);
   }
 
-  if (limits.sonnetWeeklyPercent != null) {
-    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
-    const sonnetColor = getColor(sonnet);
-    parts.push(`${sonnetColor}${sonnet}%${RESET}`);
-  }
+  // OhMy fork: the sn (sonnet-weekly) window is intentionally not rendered.
 
   if (limits.opusWeeklyPercent != null) {
     const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
@@ -191,7 +178,7 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
 /**
  * Render rate limits with visual progress bars.
  *
- * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h) sn:[██░░░░░░░░]20%(1d2h) op:[░░░░░░░░░░]5%(1d2h)
+ * Format: 5h:[████░░░░░░]45%(3h42m) wk:[█░░░░░░░░░]12%(2d5h) mo:[░░░░░░░░░░]8%(15d3h) op:[░░░░░░░░░░]5%(1d2h)
  */
 export function renderRateLimitsWithBar(
   limits: RateLimits | null,
@@ -246,20 +233,7 @@ export function renderRateLimitsWithBar(
     parts.push(monthlyPart);
   }
 
-  if (limits.sonnetWeeklyPercent != null) {
-    const sonnet = Math.min(100, Math.max(0, Math.round(limits.sonnetWeeklyPercent)));
-    const sonnetColor = getColor(sonnet);
-    const sonnetFilled = Math.round((sonnet / 100) * barWidth);
-    const sonnetEmpty = barWidth - sonnetFilled;
-    const sonnetBar = `${sonnetColor}${'█'.repeat(sonnetFilled)}${DIM}${'░'.repeat(sonnetEmpty)}${RESET}`;
-    const sonnetReset = formatResetTime(limits.sonnetWeeklyResetsAt);
-
-    const sonnetPart = sonnetReset
-      ? `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}${DIM}(${resetPrefix}${sonnetReset})${RESET}`
-      : `${DIM}sn:${RESET}[${sonnetBar}]${sonnetColor}${sonnet}%${RESET}${staleMarker}`;
-
-    parts.push(sonnetPart);
-  }
+  // OhMy fork: the sn (sonnet-weekly) window is intentionally not rendered.
 
   if (limits.opusWeeklyPercent != null) {
     const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));

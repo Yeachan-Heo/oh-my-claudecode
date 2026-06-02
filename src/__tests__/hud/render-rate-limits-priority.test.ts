@@ -92,7 +92,7 @@ describe('render: rate limits display priority', () => {
     expect(output).not.toContain('[API 429]');
   });
 
-  it('renders 5h/wk/sn rate limits when subscription info is unavailable', async () => {
+  it('renders 5h/wk rate limits when subscription info is unavailable (sn window removed in fork)', async () => {
     const context = makeContext({
       subscriptionType: null,
       rateLimitTier: null,
@@ -110,8 +110,8 @@ describe('render: rate limits display priority', () => {
     expect(output).toContain('36%');
     expect(output).toContain('wk:');
     expect(output).toContain('32%');
-    expect(output).toContain('sn:');
-    expect(output).toContain('8%');
+    // OhMy fork: sn (sonnet-weekly) window removed from the rate-limit renderer.
+    expect(output).not.toContain('sn:');
   });
 
   it('renders exact Max 20x cache-shaped rate limits when legacy enterprise spend fields are present', async () => {
@@ -140,7 +140,7 @@ describe('render: rate limits display priority', () => {
     expect(plain).not.toContain('spent:');
   });
 
-  it('renders Max 20x 5h/wk/sn limits when enterprise spent exists but enterprise limit is null', async () => {
+  it('renders Max 20x 5h/wk limits when enterprise spent exists but enterprise limit is null (sn window removed in fork)', async () => {
     const context = makeContext({
       subscriptionType: 'max',
       rateLimitTier: 'default_claude_max_20x',
@@ -164,8 +164,8 @@ describe('render: rate limits display priority', () => {
     expect(plain).toContain('36%');
     expect(plain).toContain('wk:');
     expect(plain).toContain('32%');
-    expect(plain).toContain('sn:');
-    expect(plain).toContain('8%');
+    // OhMy fork: sn (sonnet-weekly) window removed from the rate-limit renderer.
+    expect(plain).not.toContain('sn:');
     expect(plain).not.toContain('spent:');
   });
 
@@ -198,8 +198,8 @@ describe('render: rate limits display priority', () => {
       expect(output).toContain('36%');
       expect(output).toContain('wk:');
       expect(output).toContain('32%');
-      expect(output).toContain('sn:');
-      expect(output).toContain('8%');
+      // OhMy fork: sn (sonnet-weekly) window removed from the rate-limit renderer.
+      expect(output).not.toContain('sn:');
       expect(output).not.toContain('spent:');
     },
   );
