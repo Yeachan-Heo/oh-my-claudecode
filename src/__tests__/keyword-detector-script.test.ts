@@ -583,4 +583,63 @@ diff --git a/a b/b
     expect(context).toContain('[MAGIC KEYWORD: AUTOPILOT]');
     expect(existsSync(autopilotStatePath)).toBe(true);
   });
+
+  // Japanese full-width katakana variants must fire on the deployed runtime
+  // hook (scripts/keyword-detector.mjs), not just the TS source. Mirrors the
+  // existing Korean positive controls above and guards the standalone copy
+  // against drift from src/hooks/keyword-detector/index.ts.
+  it('activates ralph for "ラルフ 起動" katakana invocation', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-katakana-'));
+    const sessionId = 'session-katakana-ralph';
+    const output = runKeywordDetector('ラルフ 起動', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
+
+  it('activates ultrawork for "ウルトラワークで並列実行して" katakana invocation', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ultrawork-katakana-'));
+    const sessionId = 'session-katakana-ultrawork';
+    const output = runKeywordDetector('ウルトラワークで並列実行して', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ultrawork-state.json'))).toBe(true);
+  });
+
+  it('activates ralplan for bare "ラルプラン" katakana invocation', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-katakana-'));
+    const sessionId = 'session-katakana-ralplan';
+    const output = runKeywordDetector('ラルプラン', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPLAN]');
+    expect(existsSync(getRalplanStatePath(cwd, sessionId))).toBe(true);
+  });
+
+  it('does not activate ralph for "ラルフローレンのシャツ" (Ralph Lauren exclusion)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-lauren-'));
+    const sessionId = 'session-katakana-ralph-lauren';
+    const output = runKeywordDetector('ラルフローレンのシャツ', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
+  });
+
+  it('does not activate ralph for Japanese complaint "ラルフ、また失敗した"', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-jp-complaint-'));
+    const sessionId = 'session-katakana-ralph-complaint';
+    const output = runKeywordDetector('ラルフ、また失敗した', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
+  });
 });
