@@ -1,10 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { mkdtempSync } from 'fs';
-import { join, dirname } from 'path';
+import { execFileSync, spawnSync } from 'child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { spawnSync } from 'child_process';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { describe, expect, it } from 'vitest';
 import { parseAskArgs, resolveAskAdvisorScriptPath } from '../ask.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -789,5 +788,52 @@ describe('resolveAskAdvisorScriptPath', () => {
       .toBe('/tmp/pkg-root/scripts/custom.js');
     expect(resolveAskAdvisorScriptPath(packageRoot, { OMC_ASK_ADVISOR_SCRIPT: '/opt/custom.js' } as NodeJS.ProcessEnv))
       .toBe('/opt/custom.js');
+  });
+});
+
+describe('venus codex wrapper compatibility', () => {
+  const wrapperPath = join(process.cwd(), 'scripts', 'venus-codex-wrapper.py');
+  const pythonBin = process.env.PYTHON || 'python3';
+
+  it('prints a codex-compatible version string', () => {
+    const output = execFileSync(pythonBin, [wrapperPath, '--version'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
+
+    expect(output.trim()).toContain('venus-codex-wrapper');
+  });
+
+  it('uses positional prompt text for codex exec', () => {
+    const result = spawnSync(pythonBin, [wrapperPath, 'exec', '-m', 'gpt-5.5', 'Say', 'hi'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        OPENAI_BASE_URL: 'http://127.0.0.1:1/v1',
+        OPENAI_API_KEY: 'test-key',
+        VENUS_TIMEOUT_SECONDS: '1',
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/HTTPConnectionPool|OpenAI-compatible HTTP|Connection refused/);
+  });
+
+  it('accepts stdin-driven interactive prompts', () => {
+    const result = spawnSync(pythonBin, [wrapperPath, '-m', 'gpt-5.5'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      input: 'hello from team worker\nquit\n',
+      env: {
+        ...process.env,
+        OPENAI_BASE_URL: 'http://127.0.0.1:1/v1',
+        OPENAI_API_KEY: 'test-key',
+        VENUS_TIMEOUT_SECONDS: '1',
+      },
+    });
+
+    expect(result.stdout).toContain('Venus Codex interactive mode ready');
+    expect(result.stderr).toMatch(/HTTPConnectionPool|OpenAI-compatible HTTP|Connection refused/);
   });
 });

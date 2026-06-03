@@ -1,15 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
-import { triggerStopCallbacks } from './callbacks.js';
 import { getOMCConfig } from '../../features/auto-update.js';
+import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
+import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
+import { getOmcRoot, isValidTranscriptPath, resolveSessionStatePath, resolveToWorktreeRoot, validateSessionId } from '../../lib/worktree-paths.js';
 import { buildConfigFromEnv, getEnabledPlatforms, getNotificationConfig } from '../../notifications/config.js';
 import { notify } from '../../notifications/index.js';
 import type { NotificationPlatform } from '../../notifications/types.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
-import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
-import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
-import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
+import { triggerStopCallbacks } from './callbacks.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -406,51 +405,43 @@ export async function extractPythonReplSessionIdsFromTranscript(transcriptPath: 
   }
 
   const sessionIds = new Set<string>();
-  const stream = fs.createReadStream(transcriptPath, { encoding: 'utf-8' });
-  const rl = readline.createInterface({
-    input: stream,
-    crlfDelay: Infinity,
-  });
+  const content = fs.readFileSync(transcriptPath, 'utf-8');
+  const lines = content.split(/\r?\n/);
 
-  try {
-    for await (const line of rl) {
-      if (!line.trim()) {
+  for (const line of lines) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const entry = parsed as { message?: { content?: unknown[] } };
+    const contentBlocks = entry.message?.content;
+    if (!Array.isArray(contentBlocks)) {
+      continue;
+    }
+
+    for (const block of contentBlocks) {
+      const toolUse = block as {
+        type?: string;
+        name?: string;
+        input?: { researchSessionID?: unknown };
+      };
+
+      if (toolUse.type !== 'tool_use' || !toolUse.name || !PYTHON_REPL_TOOL_NAMES.has(toolUse.name)) {
         continue;
       }
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      const entry = parsed as { message?: { content?: unknown[] } };
-      const contentBlocks = entry.message?.content;
-      if (!Array.isArray(contentBlocks)) {
-        continue;
-      }
-
-      for (const block of contentBlocks) {
-        const toolUse = block as {
-          type?: string;
-          name?: string;
-          input?: { researchSessionID?: unknown };
-        };
-
-        if (toolUse.type !== 'tool_use' || !toolUse.name || !PYTHON_REPL_TOOL_NAMES.has(toolUse.name)) {
-          continue;
-        }
-
-        const sessionId = toolUse.input?.researchSessionID;
-        if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
-          sessionIds.add(sessionId.trim());
-        }
+      const sessionId = toolUse.input?.researchSessionID;
+      if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+        sessionIds.add(sessionId.trim());
       }
     }
-  } finally {
-    rl.close();
-    stream.destroy();
   }
 
   return [...sessionIds];

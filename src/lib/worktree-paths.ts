@@ -9,11 +9,11 @@
  * of {worktree}/.omc/. This preserves state across worktree deletions.
  */
 
-import { createHash } from 'crypto';
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, realpathSync, readdirSync } from 'fs';
-import { homedir } from 'os';
-import { resolve, normalize, relative, sep, join, isAbsolute, basename, dirname } from 'path';
+import { createHash } from 'crypto';
+import { existsSync, mkdirSync, readdirSync, realpathSync } from 'fs';
+import { homedir, tmpdir } from 'os';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 
 /** Standard .omc subdirectories */
@@ -465,10 +465,11 @@ export function isValidTranscriptPath(transcriptPath: string): boolean {
   const normalized = normalize(expandedPath);
   const home = homedir();
 
-  // Allowed: [$CLAUDE_CONFIG_DIR|~/.claude], ~/.omc/..., /tmp/...
+  // Allowed: [$CLAUDE_CONFIG_DIR|~/.claude], ~/.omc/..., system tmpdir()
   const allowedPrefixes = [
     getClaudeConfigDir(),
     join(home, '.omc'),
+    tmpdir(),
     '/tmp',
     '/var/folders', // macOS temp
   ];
