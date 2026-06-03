@@ -54,6 +54,7 @@
     "./skills/verify/",
     "./skills/visual-verdict/",
     "./skills/wiki/",
+    "./skills/workflow/",
     "./skills/writer-memory/"
   ],
   "mcpServers": "./.mcp.json",

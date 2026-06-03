@@ -355,6 +355,20 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     };
   }
 
+  // Dynamic Workflows integration from environment
+  if (process.env.OMC_WORKFLOWS_ENABLED !== undefined) {
+    config.workflows = {
+      ...config.workflows,
+      enabled: process.env.OMC_WORKFLOWS_ENABLED === "true",
+    };
+  }
+  if (process.env.OMC_WORKFLOWS_ALLOW_HEADLESS !== undefined) {
+    config.workflows = {
+      ...config.workflows,
+      allowInHeadless: process.env.OMC_WORKFLOWS_ALLOW_HEADLESS === "true",
+    };
+  }
+
   // External models configuration from environment
   const externalModelsDefaults: ExternalModelsConfig["defaults"] = {};
 

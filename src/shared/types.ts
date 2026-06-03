@@ -130,6 +130,22 @@ export interface PluginConfig {
     simplificationKeywords?: string[];
   };
 
+  // Dynamic Workflows integration (Claude Code native workflows).
+  // Opt-in, capability-detected, always-fallback routing of heavy parallel
+  // stages to native workflows. See src/features/workflows.
+  workflows?: {
+    /** Master opt-in. Default false; OMC never routes to workflows unless true. Env: OMC_WORKFLOWS_ENABLED */
+    enabled?: boolean;
+    /** Allow routing under `claude -p` / Agent SDK / bypass (acceptEdits auto-approve). Default false. Env: OMC_WORKFLOWS_ALLOW_HEADLESS */
+    allowInHeadless?: boolean;
+    /** Allow launching a workflow while an OMC fan-out mode (ultrawork/team) is active. Default false. */
+    allowNesting?: boolean;
+    /** Heavy-scope signals required before routing to a workflow. Default 1. */
+    minScopeSignals?: number;
+    /** Optional explicit trigger keyword (e.g. 'ultracode'); default uses version-proof natural language. */
+    triggerKeyword?: string;
+  };
+
   // External models configuration (Codex, Gemini)
   externalModels?: ExternalModelsConfig;
 

@@ -44,6 +44,10 @@ Never self-approve in the same active context; use `code-reviewer` or `verifier`
 Before concluding: zero pending tasks, tests passing, verifier evidence collected.
 </execution_protocols>
 
+<dynamic_workflows>
+Claude Code native dynamic workflows are an optional execution backend (opt-in via `workflows.enabled`). When a stage is too big for one conversation — a codebase-wide audit, a large migration, cross-checked research — and workflows are available on the Claude lane, delegate THAT stage to a workflow via a natural-language "use a dynamic workflow" request; do not hand-author the script. One stage per workflow. Do not nest inside an active ultrawork/team run. Workflows use meaningfully more tokens, take no mid-run input, resume only within the same Claude Code session, and stop from `/workflows` (not `/cancel`). If workflows are disabled, the Claude Code version is too old, the run is headless without opt-in, or the lane is codex/gemini, continue with OMC orchestration. See `docs/WORKFLOW-INTEGRATION.md`.
+</dynamic_workflows>
+
 <hooks_and_context>
 Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (invoke skill), `The boulder never stops` (ralph/ultrawork active).
 Persistence: `<remember>` (7 days), `<remember priority>` (permanent).

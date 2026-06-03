@@ -13,6 +13,7 @@ import {
   type TaskSizeResult,
   type TaskSizeThresholds,
 } from '../task-size-detector/index.js';
+import { hasNativeWorkflowTrigger } from '../../features/workflows/routing.js';
 
 export type KeywordType =
   | 'cancel'      // Priority 1
@@ -37,6 +38,18 @@ export interface DetectedKeyword {
   keyword: string;
   position: number;
 }
+
+/**
+ * OMC fan-out keywords that OMC suppresses (when auto-detected) if the user has
+ * explicitly invoked a Claude Code native dynamic workflow (`ultracode` /
+ * `workflow`). This prevents two orchestrators from both seizing the task.
+ * Explicit slash invocations (e.g. `/ultrawork`) are preserved.
+ */
+const FANOUT_KEYWORDS_SUPPRESSED_BY_NATIVE_WORKFLOW = new Set<KeywordType>([
+  'ultrawork',
+  'autopilot',
+  'ralph',
+]);
 
 /**
  * Keyword patterns for each mode
@@ -676,6 +689,18 @@ export function detectKeywordsWithType(
         type,
       });
     }
+  }
+
+  // If the user explicitly invoked a Claude Code native workflow (the
+  // `ultracode` / `workflow` trigger), suppress OMC's auto-detected fan-out
+  // keywords so the two orchestrators don't both seize the task. Explicit
+  // slash invocations (e.g. `/ultrawork`) are a deliberate choice and kept.
+  if (detected.length > 0 && hasNativeWorkflowTrigger(text)) {
+    return detected.filter(
+      (entry) =>
+        entry.type === explicitSlashType ||
+        !FANOUT_KEYWORDS_SUPPRESSED_BY_NATIVE_WORKFLOW.has(entry.type),
+    );
   }
 
   return detected;
