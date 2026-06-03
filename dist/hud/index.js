@@ -355,6 +355,7 @@ async function main(watchMode = false, skipInit = false) {
             contextDisplayScope: currentSessionId ?? cwd,
             modelName: getModelName(stdin),
             modelId: getModelId(stdin),
+            contextWindowSize: stdin.context_window?.context_window_size ?? null,
             ralph,
             ultrawork,
             prd,

@@ -324,6 +324,9 @@ export interface HudRenderContext {
   /** Raw model id from Claude Code statusline stdin; used when full model format is requested */
   modelId?: string | null;
 
+  /** Context window size (tokens) from Claude Code statusline stdin; drives the 1M model badge */
+  contextWindowSize?: number | null;
+
   /** Ralph loop state */
   ralph: RalphStateForHud | null;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatModelName, renderModel } from '../../hud/elements/model.js';
+import { formatModelName, renderModel, hasOneMillionContext } from '../../hud/elements/model.js';
 
 describe('model element', () => {
   describe('formatModelName', () => {
@@ -82,6 +82,53 @@ describe('model element', () => {
 
     it('returns null for null input', () => {
       expect(renderModel(null)).toBeNull();
+    });
+
+    it('appends a 1M badge when the context window is 1M (native opus-4-8)', () => {
+      // Native 1M models report no "1M" hint in their display name, so the
+      // badge must come from the context window size, not the name.
+      const result = renderModel('claude-opus-4-8', 'versioned', { model: 'Model' }, 1_000_000);
+      expect(result).toContain('Model: Opus 4.8 1M');
+    });
+
+    it('appends a 1M badge from a [1m]-tagged model id when size is absent', () => {
+      const result = renderModel('claude-opus-4-8[1m]', 'versioned');
+      expect(result).toContain('Model: Opus 4.8 1M');
+    });
+
+    it('omits the 1M badge for a 200k context window', () => {
+      const result = renderModel('claude-opus-4-8', 'versioned', { model: 'Model' }, 200_000);
+      expect(result).toContain('Model: Opus 4.8');
+      expect(result).not.toContain('1M');
+    });
+
+    it('omits the 1M badge when the context window size is unknown', () => {
+      const result = renderModel('claude-opus-4-8', 'versioned');
+      expect(result).not.toContain('1M');
+    });
+
+    it('does not double the marker when a [1m] tag survives full format', () => {
+      const result = renderModel('claude-opus-4-8[1m]', 'full', { model: 'Model' }, 1_000_000);
+      // The raw id already carries [1m]; the badge must not be appended again.
+      expect(result).toContain('claude-opus-4-8[1m]');
+      expect(result).not.toContain('[1m] 1M');
+    });
+  });
+
+  describe('hasOneMillionContext', () => {
+    it('is true when the context window size is 1M or larger', () => {
+      expect(hasOneMillionContext('claude-opus-4-8', 1_000_000)).toBe(true);
+      expect(hasOneMillionContext('claude-sonnet-4-6', 2_000_000)).toBe(true);
+    });
+
+    it('is true for a [1m]-tagged model id even without a size', () => {
+      expect(hasOneMillionContext('claude-opus-4-8[1m]')).toBe(true);
+    });
+
+    it('is false for a 200k window and an untagged id', () => {
+      expect(hasOneMillionContext('claude-opus-4-8', 200_000)).toBe(false);
+      expect(hasOneMillionContext('claude-opus-4-8')).toBe(false);
+      expect(hasOneMillionContext(null)).toBe(false);
     });
   });
 });

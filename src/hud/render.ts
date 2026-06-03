@@ -278,6 +278,7 @@ export async function render(
       modelSource,
       enabledElements.modelFormat,
       hudLabels,
+      context.contextWindowSize,
     );
     if (modelElement) rendered.set("model", modelElement);
   }

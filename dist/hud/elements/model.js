@@ -6,6 +6,22 @@
 import { cyan } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
 import { DEFAULT_HUD_LABELS } from '../types.js';
+/** Context window size (in tokens) that marks a session as running with 1M context. */
+const ONE_MILLION_CONTEXT = 1_000_000;
+/**
+ * Detect whether the current session is running with a 1M context window.
+ *
+ * The authoritative signal is `context_window_size` reported by Claude Code's
+ * statusline stdin: it is 1,000,000 for both `[1m]`-tagged models AND natively
+ * 1M models (e.g. `claude-opus-4-8`) whose display name carries no "1M" hint.
+ * The `[1m]` id tag is a defensive fallback for when the size is unavailable.
+ */
+export function hasOneMillionContext(modelId, contextWindowSize) {
+    if (typeof contextWindowSize === 'number' && contextWindowSize >= ONE_MILLION_CONTEXT) {
+        return true;
+    }
+    return Boolean(modelId && /\[1m\]/i.test(modelId));
+}
 /**
  * Extract version from a model ID string.
  * E.g., 'claude-opus-4-7-20260416' -> '4.7'
@@ -62,10 +78,16 @@ export function formatModelName(modelId, format = 'short') {
 /**
  * Render model element.
  */
-export function renderModel(modelId, format = 'versioned', labels = DEFAULT_HUD_LABELS) {
+export function renderModel(modelId, format = 'versioned', labels = DEFAULT_HUD_LABELS, contextWindowSize) {
     const name = formatModelName(modelId, format);
     if (!name)
         return null;
-    return cyan(`${labels.model}: ${name}`);
+    // Surface a 1M badge so the HUD distinguishes a 1M-context session from a
+    // 200k one. Skip it when the formatted name already advertises 1M (e.g. a
+    // `[1m]` tag surviving in `full` format) to avoid a doubled marker.
+    const badge = hasOneMillionContext(modelId, contextWindowSize) && !/1m/i.test(name)
+        ? ' 1M'
+        : '';
+    return cyan(`${labels.model}: ${name}${badge}`);
 }
 //# sourceMappingURL=model.js.map

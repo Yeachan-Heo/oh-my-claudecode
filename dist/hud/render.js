@@ -219,7 +219,7 @@ export async function render(context, config) {
         ? context.modelId ?? context.modelName
         : context.modelName;
     if (enabledElements.model && modelSource) {
-        const modelElement = renderModel(modelSource, enabledElements.modelFormat, hudLabels);
+        const modelElement = renderModel(modelSource, enabledElements.modelFormat, hudLabels, context.contextWindowSize);
         if (modelElement)
             rendered.set("model", modelElement);
     }
