@@ -2183,6 +2183,20 @@ This article argues that fake popularity signals damage trust in open source.`;
       expect(result).toEqual([]);
     });
 
+    it.each([
+      ['ウルトラワークについて教えて', 'ultrawork'],
+      ['オートパイロットについて教えて', 'autopilot'],
+      ['ラルフについて教えて', 'ralph'],
+    ] as const)('should NOT detect informational "%s" as %s', (prompt, type) => {
+      const result = detectKeywordsWithType(prompt);
+      expect(result.find((r) => r.type === type)).toBeUndefined();
+    });
+
+    it('should detect Japanese ralph execution request that asks for the result', () => {
+      const result = detectKeywordsWithType('ラルフを実行して結果を教えて');
+      expect(result.find((r) => r.type === 'ralph')).toBeDefined();
+    });
+
     // Japanese diagnostic/complaint prompts must not fire execution modes,
     // mirroring the Korean 자꾸/계속 suppression.
     it('should NOT detect ralph for complaint "ラルフ、また失敗した"', () => {

@@ -642,4 +642,30 @@ diff --git a/a b/b
     expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
   });
+
+  it.each([
+    ['ウルトラワークについて教えて', '[MAGIC KEYWORD: ULTRAWORK]', 'ultrawork-state.json'],
+    ['オートパイロットについて教えて', '[MAGIC KEYWORD: AUTOPILOT]', 'autopilot-state.json'],
+    ['ラルフについて教えて', '[MAGIC KEYWORD: RALPH]', 'ralph-state.json'],
+  ] as const)('does not activate workflow for informational Japanese prompt "%s"', (prompt, marker, stateFile) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-jp-info-'));
+    const sessionId = 'session-jp-info';
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain(marker);
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, stateFile))).toBe(false);
+  });
+
+  it('activates ralph for Japanese execution request that asks for the result', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-jp-ralph-exec-'));
+    const sessionId = 'session-jp-ralph-exec';
+    const output = runKeywordDetector('ラルフを実行して結果を教えて', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
 });
