@@ -26,6 +26,8 @@ const SETTINGS_FILE = join(CLAUDE_DIR, 'settings.json');
 // nvm/fnm users whose non-interactive hook shells do not include node on PATH
 // (issue #892).
 const nodeBin = process.execPath || 'node';
+const isPublishedPluginCache = !existsSync(join(__dirname, '..', '.git'));
+
 
 console.log('[OMC] Running post-install setup...');
 
@@ -105,12 +107,13 @@ try {
   console.log('[OMC] Warning: Could not configure settings.json:', e.message);
 }
 
-// Patch hooks.json to keep plugin-provided hook commands safe for the
-// platform that is installing the plugin cache. Claude Code's plugin loader
-// reads hooks/hooks.json directly, so the shipped manifest remains native
-// Windows-spawnable (direct node -> run.cjs, no sh/find-node). During setup on
-// Unix/macOS, repair the cached manifest back to the find-node.sh bootstrap so
-// nvm/fnm users whose non-interactive hook PATH lacks node keep working.
+// Patch packaged plugin-cache hooks.json to keep plugin-provided hook commands
+// safe for the platform that is installing the plugin cache. Claude Code's
+// plugin loader reads hooks/hooks.json directly, so the source manifest remains
+// native Windows-spawnable (direct node -> run.cjs, no sh/find-node). During
+// setup from a published plugin cache on Unix/macOS, repair the cached manifest
+// back to the find-node.sh bootstrap so nvm/fnm users whose non-interactive hook
+// PATH lacks node keep working.
 //
 // Keep stale cache self-healing for older manifests that used sh/find-node, an
 // accidentally baked absolute node path, or the Windows-safe direct node form.
@@ -123,8 +126,8 @@ try {
 //
 // Fixes issues #909, #899, #892, #869, #3121.
 try {
-  const hooksJsonPath = join(__dirname, '..', 'hooks', 'hooks.json');
-  if (existsSync(hooksJsonPath)) {
+  const hooksJsonPath = isPublishedPluginCache ? join(__dirname, '..', 'hooks', 'hooks.json') : null;
+  if (hooksJsonPath && existsSync(hooksJsonPath)) {
     const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
     const patched = normalizeHooksDataForPlatform(data);
 

@@ -233,6 +233,33 @@ describe('plugin-setup.mjs hook command portability', () => {
     }
   });
 
+  it('does not rewrite the source hooks manifest when run from a repository checkout', () => {
+    const hooksJsonPath = join(PACKAGE_ROOT, 'hooks', 'hooks.json');
+    const before = readFileSync(hooksJsonPath, 'utf-8');
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-plugin-setup-source-hooks-'));
+
+    try {
+      const configDir = join(tempRoot, 'claude');
+      const fakeHome = join(tempRoot, 'home');
+      mkdirSync(configDir, { recursive: true });
+      mkdirSync(fakeHome, { recursive: true });
+
+      execFileSync(process.execPath, [PLUGIN_SETUP_PATH], {
+        cwd: PACKAGE_ROOT,
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: configDir,
+          HOME: fakeHome,
+        },
+        stdio: 'pipe',
+      });
+
+      expect(readFileSync(hooksJsonPath, 'utf-8')).toBe(before);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('normalizes current sh find-node commands to node run.cjs on Windows', () => {
     const current =
       'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs';
