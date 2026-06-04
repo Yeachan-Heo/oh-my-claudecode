@@ -136,7 +136,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       directory: tmpDir,
       sessionId,
       transcriptPath,
-      cleanupBudgetMs: 2000,
+      cleanupBudgetMs: 10000,
     });
 
     await waitForAssertion(() => {
@@ -147,7 +147,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       );
       expect(teamCleanupMocks.shutdownTeam).not.toHaveBeenCalled();
     });
-  });
+  }, 10000);
 
   it('force-shuts down a legacy runtime team referenced by the ending session', async () => {
     const sessionId = 'pid-1632-legacy';

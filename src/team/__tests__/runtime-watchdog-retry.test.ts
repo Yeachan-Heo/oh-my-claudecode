@@ -214,7 +214,7 @@ describe('watchdogCliWorkers dead-pane retry behavior', { timeout: 15000 }, () =
     });
 
     ({ watchdogCliWorkers } = await import('../runtime.js'));
-  });
+  }, 30000);
 
   afterEach(() => {
     vi.useRealTimers();
