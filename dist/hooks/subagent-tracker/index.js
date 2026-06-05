@@ -562,32 +562,29 @@ export function processSubagentStop(input) {
             }
             // Write updated state
             writeTrackingState(input.cwd, state, sessionId);
-            // Record to session replay JSONL for /trace
-            // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
-            try {
-                const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
-                const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
-                recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+            if (input.agent_id) {
+                // Record to session replay JSONL for /trace
+                // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
+                try {
+                    const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
+                    const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
+                    recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+                }
+                catch { /* best-effort */ }
+                try {
+                    recordMissionAgentStop(input.cwd, {
+                        sessionId: input.session_id,
+                        agentId: input.agent_id,
+                        success: succeeded,
+                        outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
+                        at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
+                    }, sessionId);
+                }
+                catch { /* best-effort */ }
             }
-            catch { /* best-effort */ }
-            try {
-                recordMissionAgentStop(input.cwd, {
-                    sessionId: input.session_id,
-                    agentId: input.agent_id,
-                    success: succeeded,
-                    outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
-                    at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
-                }, sessionId);
-            }
-            catch { /* best-effort */ }
-            const runningCount = state.agents.filter((a) => a.status === "running").length;
             return {
                 continue: true,
-                hookSpecificOutput: {
-                    hookEventName: "SubagentStop",
-                    additionalContext: `Agent ${input.agent_type} ${succeeded ? "completed" : "failed"} (${input.agent_id})`,
-                    agent_count: runningCount,
-                },
+                suppressOutput: true,
             };
         }, LOCK_OPTS);
     }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { recordToolUsage, getAgentDashboard, getStaleAgents, getTrackingStats, processSubagentStart, readTrackingState, writeTrackingState, recordToolUsageWithTiming, getAgentPerformance, updateTokenUsage, recordFileOwnership, detectFileConflicts, suggestInterventions, calculateParallelEfficiency, getAgentObservatory, flushPendingWrites, } from "../index.js";
+import { recordToolUsage, getAgentDashboard, getStaleAgents, getTrackingStats, processSubagentStart, processSubagentStop, readTrackingState, writeTrackingState, recordToolUsageWithTiming, getAgentPerformance, updateTokenUsage, recordFileOwnership, detectFileConflicts, suggestInterventions, calculateParallelEfficiency, getAgentObservatory, flushPendingWrites, } from "../index.js";
 import { readMissionBoardState } from "../../../hud/mission-board.js";
 describe("subagent-tracker", () => {
     let testDir;
@@ -564,6 +564,59 @@ describe("subagent-tracker", () => {
             const entries = require("fs").readdirSync(sessionsDir);
             expect(entries.filter((name) => name.startsWith("pid-"))).toHaveLength(0);
             expect(entries).toContain("parent-uuid-xyz");
+        });
+    });
+    describe("processSubagentStop", () => {
+        it("updates tracking state without injecting additional context into the stopping subagent", () => {
+            const startInput = {
+                session_id: "session-stop-output",
+                transcript_path: join(testDir, "transcript.jsonl"),
+                cwd: testDir,
+                permission_mode: "default",
+                hook_event_name: "SubagentStart",
+                agent_id: "worker-stop-output",
+                agent_type: "oh-my-claudecode:executor",
+                prompt: "Return a detailed final report",
+                model: "claude-sonnet-4-6",
+            };
+            processSubagentStart(startInput);
+            flushPendingWrites();
+            const output = processSubagentStop({
+                session_id: "session-stop-output",
+                transcript_path: join(testDir, "transcript.jsonl"),
+                cwd: testDir,
+                permission_mode: "default",
+                hook_event_name: "SubagentStop",
+                agent_id: "worker-stop-output",
+                agent_type: "oh-my-claudecode:executor",
+                output: "Detailed final report with implementation evidence.",
+            });
+            flushPendingWrites();
+            expect(output.continue).toBe(true);
+            expect(output.suppressOutput).toBe(true);
+            expect(output.hookSpecificOutput).toBeUndefined();
+            const state = readTrackingState(testDir, "session-stop-output");
+            const agent = state.agents.find((item) => item.agent_id === "worker-stop-output");
+            expect(agent?.status).toBe("completed");
+            expect(agent?.output_summary).toBe("Detailed final report with implementation evidence.");
+            expect(state.total_completed).toBe(1);
+        });
+        it("suppresses output without undefined context when stop payload lacks agent fields", () => {
+            const output = processSubagentStop({
+                session_id: "session-stop-missing-fields",
+                transcript_path: join(testDir, "transcript.jsonl"),
+                cwd: testDir,
+                permission_mode: "default",
+                hook_event_name: "SubagentStop",
+                output: "Final report should remain the terminal subagent message.",
+            });
+            flushPendingWrites();
+            expect(output).toEqual({ continue: true, suppressOutput: true });
+            expect(JSON.stringify(output)).not.toContain("undefined");
+            const state = readTrackingState(testDir, "session-stop-missing-fields");
+            expect(state.agents).toHaveLength(0);
+            expect(state.total_completed).toBe(0);
+            expect(state.total_failed).toBe(0);
         });
     });
     describe("Tool Timing (Phase 1.1)", () => {

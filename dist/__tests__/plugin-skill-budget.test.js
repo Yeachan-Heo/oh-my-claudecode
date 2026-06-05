@@ -63,6 +63,10 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
                 expect(Buffer.byteLength(shim), `${skillDir} compact shim size`).toBeLessThan(COMPACT_PLUGIN_SKILL_PER_FILE_BUDGET_BYTES);
                 expect(shim, `${skillDir} shim should point to archived body`).toContain(`../../skill-bodies/${skillDir}/SKILL.md`);
                 expect(shim, `${skillDir} shim should expose runtime body override`).toContain('omc-full-body:');
+                expect(shim, `${skillDir} shim should prefer plugin root env vars`).toContain(`\${CLAUDE_PLUGIN_ROOT:-\${OMC_PLUGIN_ROOT}}/skill-bodies/${skillDir}/SKILL.md`);
+                expect(shim, `${skillDir} shim should define plugin root by containing directories`).toContain('The plugin root is the directory containing both `skills/` and `skill-bodies/`.');
+                expect(shim, `${skillDir} shim should reject file-relative skill-bodies lookup`).toContain(`Do not resolve \`skill-bodies/${skillDir}/SKILL.md\` under this shim's \`skills/${skillDir}/\` directory`);
+                expect(shim, `${skillDir} shim should not instruct ambiguous SKILL.md-relative resolution`).not.toContain('Resolve that path relative to this SKILL.md file');
                 expect(archived, `${skillDir} full skill body should be preserved`).toBe(source);
             }
         }

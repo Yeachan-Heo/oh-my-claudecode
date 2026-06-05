@@ -707,6 +707,26 @@ describe("subagent-tracker", () => {
       expect(agent?.output_summary).toBe("Detailed final report with implementation evidence.");
       expect(state.total_completed).toBe(1);
     });
+
+    it("suppresses output without undefined context when stop payload lacks agent fields", () => {
+      const output = processSubagentStop({
+        session_id: "session-stop-missing-fields",
+        transcript_path: join(testDir, "transcript.jsonl"),
+        cwd: testDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        output: "Final report should remain the terminal subagent message.",
+      });
+      flushPendingWrites();
+
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+      expect(JSON.stringify(output)).not.toContain("undefined");
+
+      const state = readTrackingState(testDir, "session-stop-missing-fields");
+      expect(state.agents).toHaveLength(0);
+      expect(state.total_completed).toBe(0);
+      expect(state.total_failed).toBe(0);
+    });
   });
 
   describe("Tool Timing (Phase 1.1)", () => {

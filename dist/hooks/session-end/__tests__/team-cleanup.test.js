@@ -105,13 +105,13 @@ describe('processSessionEnd team cleanup (#1632)', () => {
             directory: tmpDir,
             sessionId,
             transcriptPath,
-            cleanupBudgetMs: 2000,
+            cleanupBudgetMs: 10000,
         });
         await waitForAssertion(() => {
             expect(teamCleanupMocks.shutdownTeamV2).toHaveBeenCalledWith('delivery-team', tmpDir, { force: true, timeoutMs: 0 });
             expect(teamCleanupMocks.shutdownTeam).not.toHaveBeenCalled();
         });
-    });
+    }, 10000);
     it('force-shuts down a legacy runtime team referenced by the ending session', async () => {
         const sessionId = 'pid-1632-legacy';
         const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);

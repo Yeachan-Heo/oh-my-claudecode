@@ -76,8 +76,8 @@ export interface SubagentStopInput {
     cwd: string;
     permission_mode: string;
     hook_event_name: "SubagentStop";
-    agent_id: string;
-    agent_type: string;
+    agent_id?: string;
+    agent_type?: string;
     output?: string;
     /** @deprecated The SDK does not provide a success field. Use inferred status instead. */
     success?: boolean;
@@ -90,6 +90,7 @@ export interface HookOutput {
         agent_count?: number;
         stale_agents?: string[];
     };
+    suppressOutput?: boolean;
 }
 export interface AgentIntervention {
     type: "timeout" | "deadlock" | "excessive_cost" | "file_conflict";

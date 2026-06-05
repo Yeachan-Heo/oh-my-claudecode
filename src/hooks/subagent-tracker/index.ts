@@ -103,8 +103,8 @@ export interface SubagentStopInput {
   cwd: string;
   permission_mode: string;
   hook_event_name: "SubagentStop";
-  agent_id: string;
-  agent_type: string;
+  agent_id?: string;
+  agent_type?: string;
   output?: string;
   /** @deprecated The SDK does not provide a success field. Use inferred status instead. */
   success?: boolean;
@@ -758,23 +758,25 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
       // Write updated state
       writeTrackingState(input.cwd, state, sessionId);
 
-      // Record to session replay JSONL for /trace
-      // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
-      try {
-        const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
-        const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
-        recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
-      } catch { /* best-effort */ }
+      if (input.agent_id) {
+        // Record to session replay JSONL for /trace
+        // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
+        try {
+          const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
+          const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
+          recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+        } catch { /* best-effort */ }
 
-      try {
-        recordMissionAgentStop(input.cwd, {
-          sessionId: input.session_id,
-          agentId: input.agent_id,
-          success: succeeded,
-          outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
-          at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
-        }, sessionId);
-      } catch { /* best-effort */ }
+        try {
+          recordMissionAgentStop(input.cwd, {
+            sessionId: input.session_id,
+            agentId: input.agent_id,
+            success: succeeded,
+            outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
+            at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
+          }, sessionId);
+        } catch { /* best-effort */ }
+      }
       return {
         continue: true,
         suppressOutput: true,
