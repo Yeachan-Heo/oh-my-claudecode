@@ -118,6 +118,7 @@ export interface HookOutput {
     agent_count?: number;
     stale_agents?: string[];
   };
+  suppressOutput?: boolean;
 }
 
 export interface AgentIntervention {
@@ -774,18 +775,9 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
           at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
         }, sessionId);
       } catch { /* best-effort */ }
-
-      const runningCount = state.agents.filter(
-        (a) => a.status === "running",
-      ).length;
-
       return {
         continue: true,
-        hookSpecificOutput: {
-          hookEventName: "SubagentStop",
-          additionalContext: `Agent ${input.agent_type} ${succeeded ? "completed" : "failed"} (${input.agent_id})`,
-          agent_count: runningCount,
-        },
+        suppressOutput: true,
       };
     }, LOCK_OPTS);
   } catch {
