@@ -3,10 +3,32 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("https", () => {
     const EventEmitter = require("events");
     return {
-        request: vi.fn((_opts, callback) => {
+        request: vi.fn((opts, callback) => {
             const req = new EventEmitter();
             req.write = vi.fn();
+            req.emit = req.emit.bind(req);
             req.end = vi.fn(() => {
+                if (typeof opts?.createConnection === "function") {
+                    opts.createConnection(opts, (error) => {
+                        if (error) {
+                            req.emit("error", error);
+                            return;
+                        }
+                        const res = new EventEmitter();
+                        res.statusCode = 200;
+                        res.resume = vi.fn();
+                        callback(res);
+                        setImmediate(() => {
+                            const responseBody = JSON.stringify({
+                                ok: true,
+                                result: { message_id: 12345 },
+                            });
+                            res.emit("data", Buffer.from(responseBody));
+                            res.emit("end");
+                        });
+                    });
+                    return;
+                }
                 // Simulate successful response by default
                 const res = new EventEmitter();
                 res.statusCode = 200;
@@ -24,6 +46,36 @@ vi.mock("https", () => {
             });
             req.destroy = vi.fn();
             return req;
+        }),
+    };
+});
+vi.mock("net", () => {
+    const EventEmitter = require("events");
+    return {
+        connect: vi.fn(() => {
+            const socket = new EventEmitter();
+            socket.write = vi.fn(() => {
+                setImmediate(() => socket.emit("data", Buffer.from("HTTP/1.1 200 OK\r\n\r\n")));
+            });
+            socket.destroy = vi.fn();
+            setImmediate(() => socket.emit("connect"));
+            return socket;
+        }),
+    };
+});
+vi.mock("tls", () => {
+    const EventEmitter = require("events");
+    return {
+        connect: vi.fn((...args) => {
+            const socket = new EventEmitter();
+            socket.write = vi.fn();
+            socket.destroy = vi.fn();
+            const callback = args.find((arg) => typeof arg === "function");
+            setImmediate(() => {
+                socket.emit("secureConnect");
+                callback?.();
+            });
+            return socket;
         }),
     };
 });
@@ -324,6 +376,7 @@ describe("sendTelegram", () => {
     });
     afterEach(() => {
         vi.restoreAllMocks();
+        vi.useRealTimers();
         vi.unstubAllEnvs();
     });
     it("returns not configured when disabled", async () => {
@@ -442,6 +495,33 @@ describe("sendTelegram", () => {
             .mocked(request)
             .mock.calls.at(-1)[0];
         expect(callArgs).not.toHaveProperty("createConnection");
+    });
+    it("fails promptly when proxy accepts CONNECT but never responds", async () => {
+        vi.useFakeTimers();
+        vi.stubEnv("HTTPS_PROXY", "http://proxy.example:8080");
+        const { connect } = await import("net");
+        const EventEmitter = require("events");
+        const stalledSocket = new EventEmitter();
+        stalledSocket.write = vi.fn();
+        stalledSocket.destroy = vi.fn();
+        vi.mocked(connect).mockImplementationOnce(() => {
+            setImmediate(() => stalledSocket.emit("connect"));
+            return stalledSocket;
+        });
+        const config = {
+            enabled: true,
+            botToken: "123456:ABCdef",
+            chatId: "999",
+        };
+        const resultPromise = sendTelegram(config, basePayload);
+        await vi.advanceTimersByTimeAsync(10_000);
+        const result = await resultPromise;
+        expect(result).toEqual({
+            platform: "telegram",
+            success: false,
+            error: "Proxy CONNECT timeout",
+        });
+        expect(stalledSocket.destroy).toHaveBeenCalledOnce();
     });
     it("handles response parse failure gracefully", async () => {
         const { request } = await import("https");

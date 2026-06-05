@@ -83,12 +83,18 @@ function createTelegramProxyConnection(proxyUrl) {
         const connectSocket = proxyUrl.protocol === "https:"
             ? tlsConnect({ host: proxyHost, port: proxyPort, servername: proxyHost })
             : netConnect({ host: proxyHost, port: proxyPort });
+        let tlsSocket;
         let settled = false;
+        const handshakeTimer = setTimeout(() => {
+            fail(new Error("Proxy CONNECT timeout"));
+        }, SEND_TIMEOUT_MS);
         const fail = (error) => {
             if (settled)
                 return;
             settled = true;
+            clearTimeout(handshakeTimer);
             connectSocket.destroy();
+            tlsSocket?.destroy();
             callback(error);
         };
         connectSocket.once("error", fail);
@@ -115,10 +121,11 @@ function createTelegramProxyConnection(proxyUrl) {
             }
             connectSocket.removeAllListeners("data");
             connectSocket.removeListener("error", fail);
-            const tlsSocket = tlsConnect({ socket: connectSocket, servername: TELEGRAM_API_HOST }, () => {
+            tlsSocket = tlsConnect({ socket: connectSocket, servername: TELEGRAM_API_HOST }, () => {
                 if (settled)
                     return;
                 settled = true;
+                clearTimeout(handshakeTimer);
                 callback(null, tlsSocket);
             });
             tlsSocket.once("error", fail);
