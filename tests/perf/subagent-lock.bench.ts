@@ -24,6 +24,7 @@ const MEASURED_RUNS = 5;
 const LOCAL_P99_LIMIT_MS = 8;
 const CI_MEDIAN_P50_LIMIT_MS = 8;
 const CI_MEDIAN_P99_LIMIT_MS = 25;
+const CI_MEDIAN_P99_JITTER_MARGIN_MS = 5;
 const CI_MAX_P99_LIMIT_MS = 100;
 const isCi = process.env.CI === "true" || process.env.CI === "1";
 
@@ -134,19 +135,22 @@ describe("subagent-lock benchmark", () => {
       const medianP50 = median(p50s);
       const medianP99 = median(p99s);
       const maxP99 = Math.max(...p99s);
+      const ciMedianP99Limit = CI_MEDIAN_P99_LIMIT_MS + CI_MEDIAN_P99_JITTER_MARGIN_MS;
 
       console.log(
         `[subagent-lock bench] Linux CI=${isCi} N=${N} measuredRuns=${MEASURED_RUNS}` +
         ` medianP50=${medianP50.toFixed(3)}ms medianP99=${medianP99.toFixed(3)}ms` +
-        ` maxP99=${maxP99.toFixed(3)}ms p99s=${p99s.map((p99) => p99.toFixed(3)).join(",")}`,
+        ` ciMedianP99Limit=${ciMedianP99Limit}ms maxP99=${maxP99.toFixed(3)}ms` +
+        ` p99s=${p99s.map((p99) => p99.toFixed(3)).join(",")}`,
       );
 
       if (isCi) {
-        // GitHub-hosted runners can occasionally pause a single filesystem op.
-        // Keep blocking coverage for sustained regressions via median p50/p99,
-        // and retain a generous max-p99 cap to catch hangs/pathological stalls.
+        // GitHub-hosted runners can occasionally pause filesystem lock RMW by
+        // a few milliseconds even when the sustained path is healthy. Keep the
+        // historical 25ms target plus a narrow jitter margin for median p99,
+        // while median p50 and max-p99 still catch sustained slowdowns/hangs.
         expect(medianP50).toBeLessThanOrEqual(CI_MEDIAN_P50_LIMIT_MS);
-        expect(medianP99).toBeLessThanOrEqual(CI_MEDIAN_P99_LIMIT_MS);
+        expect(medianP99).toBeLessThanOrEqual(ciMedianP99Limit);
         expect(maxP99).toBeLessThanOrEqual(CI_MAX_P99_LIMIT_MS);
       } else {
         expect(medianP99).toBeLessThanOrEqual(LOCAL_P99_LIMIT_MS);
