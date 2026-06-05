@@ -98,6 +98,8 @@ jobs:
         run: npm run build
 
       - name: Prepare local package tarball
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           CURRENT_PACKAGE_VERSION="$(node -p "require('./package.json').version")"
@@ -108,10 +110,12 @@ jobs:
           } >> "$GITHUB_ENV"
 
           if npm view "oh-my-claude-sisyphus@$CURRENT_PACKAGE_VERSION" version >/dev/null 2>&1; then
+            set +e
             GITHUB_LATEST_VERSION="$(node -e '
-              fetch("https://api.github.com/repos/Yeachan-Heo/oh-my-claudecode/releases/latest", {
-                headers: { "User-Agent": "omc-upgrade-test" }
-              })
+              const headers = { "User-Agent": "omc-upgrade-test" };
+              if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+
+              fetch("https://api.github.com/repos/Yeachan-Heo/oh-my-claudecode/releases/latest", { headers })
                 .then(async response => {
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   const release = await response.json();
@@ -121,9 +125,18 @@ jobs:
                   console.error(error instanceof Error ? error.message : String(error));
                   process.exit(1);
                 });
-            ')"
-            echo "GitHub latest release version: $GITHUB_LATEST_VERSION"
-            if [ "$GITHUB_LATEST_VERSION" = "$CURRENT_PACKAGE_VERSION" ]; then
+            ' 2>"$RUNNER_TEMP/github-latest-release.stderr")"
+            GITHUB_LATEST_EXIT=$?
+            set -e
+
+            if [ "$GITHUB_LATEST_EXIT" -ne 0 ] || [ -z "$GITHUB_LATEST_VERSION" ]; then
+              echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=true" >> "$GITHUB_ENV"
+              echo "GitHub latest release lookup failed or returned empty; testing local tarball + update-reconcile."
+              if [ -s "$RUNNER_TEMP/github-latest-release.stderr" ]; then
+                echo "GitHub latest release lookup stderr:"
+                cat "$RUNNER_TEMP/github-latest-release.stderr"
+              fi
+            elif [ "$GITHUB_LATEST_VERSION" = "$CURRENT_PACKAGE_VERSION" ]; then
               echo "OMC_UPGRADE_TEST_USE_LOCAL_TARBALL=false" >> "$GITHUB_ENV"
               echo "Package $CURRENT_PACKAGE_VERSION is published and GitHub latest matches; testing the live omc update path."
             else
