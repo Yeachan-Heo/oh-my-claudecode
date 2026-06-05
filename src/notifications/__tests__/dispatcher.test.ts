@@ -386,8 +386,18 @@ describe("sendDiscordBot", () => {
 });
 
 describe("sendTelegram", () => {
+  beforeEach(() => {
+    vi.stubEnv("HTTPS_PROXY", "");
+    vi.stubEnv("https_proxy", "");
+    vi.stubEnv("HTTP_PROXY", "");
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("no_proxy", "");
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("returns not configured when disabled", async () => {
@@ -451,6 +461,74 @@ describe("sendTelegram", () => {
     expect(request).toHaveBeenCalled();
     const callArgs = vi.mocked(request).mock.calls[0][0];
     expect(callArgs).toHaveProperty("family", 4);
+  });
+
+  it("adds createConnection when HTTPS_PROXY is configured", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.example:8080");
+    const { request } = await import("https");
+    const config: TelegramNotificationConfig = {
+      enabled: true,
+      botToken: "123456:ABCdef",
+      chatId: "999",
+    };
+    await sendTelegram(config, basePayload);
+
+    const callArgs = vi
+      .mocked(request)
+      .mock.calls.at(-1)![0] as unknown as Record<string, unknown>;
+    expect(callArgs).toHaveProperty("createConnection");
+    expect(callArgs).not.toHaveProperty("agent");
+  });
+
+  it("falls back to HTTP_PROXY when HTTPS_PROXY is unset", async () => {
+    vi.stubEnv("HTTP_PROXY", "http://proxy.example:3128");
+    const { request } = await import("https");
+    const config: TelegramNotificationConfig = {
+      enabled: true,
+      botToken: "123456:ABCdef",
+      chatId: "999",
+    };
+    await sendTelegram(config, basePayload);
+
+    const callArgs = vi
+      .mocked(request)
+      .mock.calls.at(-1)![0] as unknown as Record<string, unknown>;
+    expect(callArgs).toHaveProperty("createConnection");
+  });
+
+  it("bypasses proxy when NO_PROXY matches api.telegram.org", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.example:8080");
+    vi.stubEnv("NO_PROXY", "localhost,api.telegram.org");
+    const { request } = await import("https");
+    const config: TelegramNotificationConfig = {
+      enabled: true,
+      botToken: "123456:ABCdef",
+      chatId: "999",
+    };
+    await sendTelegram(config, basePayload);
+
+    const callArgs = vi
+      .mocked(request)
+      .mock.calls.at(-1)![0] as unknown as Record<string, unknown>;
+    expect(callArgs).not.toHaveProperty("createConnection");
+    expect(callArgs).not.toHaveProperty("agent");
+  });
+
+  it("bypasses proxy when NO_PROXY matches parent domain", async () => {
+    vi.stubEnv("https_proxy", "http://proxy.example:8080");
+    vi.stubEnv("no_proxy", ".telegram.org");
+    const { request } = await import("https");
+    const config: TelegramNotificationConfig = {
+      enabled: true,
+      botToken: "123456:ABCdef",
+      chatId: "999",
+    };
+    await sendTelegram(config, basePayload);
+
+    const callArgs = vi
+      .mocked(request)
+      .mock.calls.at(-1)![0] as unknown as Record<string, unknown>;
+    expect(callArgs).not.toHaveProperty("createConnection");
   });
 
   it("handles response parse failure gracefully", async () => {
@@ -1320,8 +1398,8 @@ describe("dispatcher mention separation", () => {
       path.join(import.meta.dirname, "..", "dispatcher.ts"),
       "utf-8",
     );
-    // Dispatcher should not reference process.env at all - mention resolution is in config layer
-    expect(dispatcherSource).not.toContain("process.env");
+    // Dispatcher should not read mention env vars; mention resolution is in config layer.
+    expect(dispatcherSource).not.toContain("OMC_DISCORD_MENTION");
   });
 
   it("sendDiscordBot uses config.mention directly without env lookup", async () => {
