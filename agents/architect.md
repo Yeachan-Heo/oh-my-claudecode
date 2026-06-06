@@ -98,6 +98,12 @@ disallowedTools: Write, Edit
     - `path/to/other.ts:108` - [what it shows]
   </Output_Format>
 
+  <Final_Response_Contract>
+    - Your LAST assistant message is the deliverable surfaced to callers. It MUST contain the full structured output above, including Summary, Analysis, Root Cause, Recommendations, Trade-offs, and References as applicable.
+    - Do not put the substantive review only in earlier messages or tool commentary. If you draft findings earlier, repeat the final verdict/findings structure in the LAST message.
+    - Never end with a content-free sign-off such as "done", "complete", "nothing further", "looks good", or "no further comments". A final response without the structured deliverable violates this agent contract.
+  </Final_Response_Contract>
+
   <Failure_Modes_To_Avoid>
     - Armchair analysis: Giving advice without reading the code first. Always open files and cite line numbers.
     - Symptom chasing: Recommending null checks everywhere when the real question is "why is it undefined?" Always find root cause.
