@@ -193,9 +193,15 @@ function sanitizeForKeywordDetection(text) {
     .replace(/^\s*>\s.*$/gm, '')
     .replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '')
     .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '')
-    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it)
-    // The TypeScript version (index.ts) uses capture group + $1 replacement for broader compat
-    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '')
+    // 4. Strip file paths — uses lookbehind (Node.js supports it). Requires at least one
+    // slash-terminated directory segment (?:SEG+\/)+ so bare slash-commands like /ralph are NOT
+    // stripped (the .mjs has no pre-sanitization slash handler for them). Directory/stem segments
+    // are Unicode-aware (\w.- plus the NON_LATIN_SCRIPT_PATTERN ranges) so CJK file names like
+    // docs/コードレビュー.md are stripped. The final segment is bounded: a CJK-capable stem ending
+    // in a .ext, OR an ASCII-only extensionless name — so a no-space CJK directive following a path
+    // (e.g. src/auth.tsをコードレビューして) is NOT consumed by a greedy CJK tail and the alias
+    // still activates.
+    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]+\/)+(?:[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]*\.\w+|[\w.\-]+)/gm, '')
     // 5. Strip markdown code blocks (existing)
     .replace(/```[\s\S]*?```/g, '')
     // 6. Strip inline code (existing)

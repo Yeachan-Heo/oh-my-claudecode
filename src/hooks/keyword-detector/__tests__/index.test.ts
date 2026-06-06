@@ -2075,6 +2075,81 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
     });
 
+    describe('CJK file-path stripping (no false activation)', () => {
+      it('should NOT detect code-review for a Japanese file path "docs/コードレビュー.mdを読んで"', () => {
+        const result = detectKeywordsWithType('docs/コードレビュー.mdを読んで');
+        expect(result.find((r) => r.type === 'code-review')).toBeUndefined();
+      });
+
+      it('should NOT detect code-review for a leading-slash path "/docs/コードレビュー.md"', () => {
+        const result = detectKeywordsWithType('/docs/コードレビュー.md を確認して');
+        expect(result.find((r) => r.type === 'code-review')).toBeUndefined();
+      });
+
+      it('should NOT detect security-review for "src/セキュリティレビュー.ts"', () => {
+        const result = detectKeywordsWithType('src/セキュリティレビュー.ts を開いて');
+        expect(result.find((r) => r.type === 'security-review')).toBeUndefined();
+      });
+
+      it('should NOT detect deepsearch for "docs/ディープサーチ.md"', () => {
+        const result = detectKeywordsWithType('docs/ディープサーチ.md を読む');
+        expect(result.find((r) => r.type === 'deepsearch')).toBeUndefined();
+      });
+
+      it('should NOT detect analyze for "notes/ディープアナライズ.md"', () => {
+        const result = detectKeywordsWithType('notes/ディープアナライズ.md を見て');
+        expect(result.find((r) => r.type === 'analyze')).toBeUndefined();
+      });
+
+      it('control: bare "コードレビューして" (no path) STILL detects code-review', () => {
+        const result = detectKeywordsWithType('コードレビューして');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
+      it('control: bare "ディープアナライズして" (no path) STILL detects analyze', () => {
+        const result = detectKeywordsWithType('ディープアナライズして');
+        expect(result.find((r) => r.type === 'analyze')).toBeDefined();
+      });
+
+      // r3367755945: a no-space directive after a path must not be swallowed — the .ext
+      // anchor bounds the path at the file name, so the trailing alias still activates.
+      it('detects code-review for "src/auth.tsをコードレビューして" (directive after path)', () => {
+        const result = detectKeywordsWithType('src/auth.tsをコードレビューして');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
+      // A CJK-only, extensionless final segment is intentionally NOT treated as a path
+      // (the final segment must be `stem.ext` or ASCII-extensionless), so the alias fires.
+      it('detects code-review for "src/コードレビューして" (CJK extensionless, not a path)', () => {
+        const result = detectKeywordsWithType('src/コードレビューして');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
+      // Leading-slash / relative paths must also bound at the extension (parity with the
+      // runtime .mjs) — the directive after the path must still activate the alias.
+      it('detects code-review for "/src/auth.tsをコードレビューして" (leading-slash path)', () => {
+        const result = detectKeywordsWithType('/src/auth.tsをコードレビューして');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
+      it('detects analyze for "./lib/parser.tsをディープアナライズして" (relative path)', () => {
+        const result = detectKeywordsWithType('./lib/parser.tsをディープアナライズして');
+        expect(result.find((r) => r.type === 'analyze')).toBeDefined();
+      });
+
+      // Extensionless multi-segment paths are stripped (parity with the .mjs), so a keyword
+      // that is merely a directory name does not false-fire — for CJK aliases and ASCII alike.
+      it('does NOT detect code-review for "lib/コードレビュー/index を見て" (alias as a directory name)', () => {
+        const result = detectKeywordsWithType('lib/コードレビュー/index を見て');
+        expect(result.find((r) => r.type === 'code-review')).toBeUndefined();
+      });
+
+      it('does NOT detect ralph for "lib/ralph/index を見て" (keyword as a directory name)', () => {
+        const result = detectKeywordsWithType('lib/ralph/index を見て');
+        expect(result.find((r) => r.type === 'ralph')).toBeUndefined();
+      });
+    });
+
     describe('Regression — English keywords still work', () => {
       it('should detect "autopilot mode" as autopilot (unchanged)', () => {
         const result = detectKeywordsWithType('autopilot mode');
