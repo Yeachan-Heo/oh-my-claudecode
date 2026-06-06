@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync } from 'fs';
 import { spawn } from 'child_process';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, resolve, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
@@ -536,9 +536,29 @@ function extractOmcVersion(content) {
   return match ? match[1] : null;
 }
 
+function getPluginCacheBase() {
+  return join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+}
+
+function isPathInsideOrEqual(parent, child) {
+  const relativePath = relative(resolve(parent), resolve(child));
+  return relativePath === '' || (relativePath && !relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function isManagedPluginCacheRoot(pluginRoot) {
+  const normalizedRoot = pluginRoot.replace(/[\\/]+$/, '');
+  const cacheBase = getPluginCacheBase();
+  if (isPathInsideOrEqual(cacheBase, normalizedRoot)) return true;
+
+  // A stale root can come from an older config-dir location; the canonical
+  // cache path shape still proves it is an OMC managed cache version.
+  const unixRoot = normalizedRoot.replace(/\\/g, '/');
+  return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(unixRoot);
+}
+
 function getLatestPluginCacheVersion() {
   try {
-    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const cacheBase = getPluginCacheBase();
     if (!existsSync(cacheBase)) return null;
     const versions = readdirSync(cacheBase)
       .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
@@ -555,7 +575,7 @@ function getPluginVersion() {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     if (!pluginRoot) return null;
     const pkg = readJsonFile(join(pluginRoot, 'package.json'));
-    const latestCacheVersion = getLatestPluginCacheVersion();
+    const latestCacheVersion = isManagedPluginCacheRoot(pluginRoot) ? getLatestPluginCacheVersion() : null;
     if (latestCacheVersion && (!pkg?.version || semverCompare(latestCacheVersion, pkg.version) > 0)) {
       return latestCacheVersion;
     }

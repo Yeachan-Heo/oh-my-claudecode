@@ -39,6 +39,7 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
         mkdirSync(join(versionDir, 'scripts'), { recursive: true });
         writeFileSync(join(versionDir, 'scripts', 'run.cjs'), '// stub');
         writeFileSync(join(versionDir, 'scripts', 'session-start.mjs'), '// stub');
+        writeFileSync(join(versionDir, 'package.json'), JSON.stringify({ version }));
         return versionDir;
     }
     function runSessionStart(env = {}) {
@@ -70,6 +71,45 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
             return err.stdout?.trim() || '';
         }
     }
+    function createExternalPluginRoot(version) {
+        const externalRoot = join(tmpDir, 'external-plugin-root');
+        mkdirSync(join(externalRoot, 'dist', 'notifications'), { recursive: true });
+        writeFileSync(join(externalRoot, 'package.json'), JSON.stringify({ version }));
+        writeFileSync(join(externalRoot, 'dist', 'notifications', 'index.js'), 'export async function notify() {}\n');
+        writeFileSync(join(externalRoot, 'dist', 'notifications', 'reply-listener.js'), 'export async function buildDaemonConfig() { return null; }\nexport function startReplyListener() {}\n');
+        return externalRoot;
+    }
+    it('keeps explicit external plugin roots authoritative for update checks', () => {
+        createFakeVersion('4.14.5');
+        const externalRoot = createExternalPluginRoot('4.14.4');
+        const updateCache = join(fakeHome, '.claude', '.omc', 'update-check.json');
+        mkdirSync(join(fakeHome, '.claude', '.omc'), { recursive: true });
+        writeFileSync(updateCache, JSON.stringify({
+            timestamp: Date.now(),
+            latestVersion: '4.14.5',
+            currentVersion: '4.14.4',
+            updateAvailable: true,
+        }));
+        const output = runSessionStart({ CLAUDE_PLUGIN_ROOT: externalRoot });
+        const parsed = JSON.parse(output);
+        expect(parsed.systemMessage).toContain('[OMC UPDATE AVAILABLE]');
+        expect(parsed.systemMessage).toContain('current: v4.14.4');
+    });
+    it('uses latest managed cache version for stale managed cache roots', () => {
+        createFakeVersion('4.14.4');
+        createFakeVersion('4.14.5');
+        const updateCache = join(fakeHome, '.claude', '.omc', 'update-check.json');
+        mkdirSync(join(fakeHome, '.claude', '.omc'), { recursive: true });
+        writeFileSync(updateCache, JSON.stringify({
+            timestamp: Date.now(),
+            latestVersion: '4.14.5',
+            currentVersion: '4.14.4',
+            updateAvailable: true,
+        }));
+        const output = runSessionStart({ CLAUDE_PLUGIN_ROOT: join(fakeCacheBase, '4.14.4') });
+        const parsed = JSON.parse(output);
+        expect(parsed.systemMessage).toBeUndefined();
+    });
     it('replaces old versions (beyond latest 2) with symlinks to the latest', () => {
         createFakeVersion('4.4.1');
         createFakeVersion('4.4.2');
