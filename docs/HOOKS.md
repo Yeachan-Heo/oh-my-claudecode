@@ -418,6 +418,12 @@ These keywords inject an inline mode message rather than invoking a skill.
 | `deepsearch`, `search the codebase`, `find in codebase` | Activates codebase-focused search mode |
 | `deep-analyze`, `deepanalyze` | Activates deep analysis mode |
 
+### Localized Triggers (Korean / Japanese)
+
+`keyword-detector.mjs` also recognizes Korean and Japanese aliases for these keywords (e.g. `랄프` / `ラルフ` → ralph, `코드 리뷰` / `コード レビュー` → code-review, `딥 분석` / `ディープ アナライズ` → analyze). Because Korean and Japanese have no ASCII word boundary, these aliases match by substring, so a localized alias inside a longer noun phrase still routes (e.g. `コードレビュー記事を要約して` → code-review).
+
+See [REFERENCE.md → Magic Keywords → Localized triggers](./REFERENCE.md#magic-keywords) for the full alias table and routing-behavior details (reviewer-suffix guard, informational suppression, and the known `違いを教えて` gap).
+
 ### Priority and Conflict Resolution
 
 When multiple keywords are detected simultaneously, they resolve by the following priority:
