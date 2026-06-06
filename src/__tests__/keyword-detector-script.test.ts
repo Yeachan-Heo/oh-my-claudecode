@@ -93,6 +93,8 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
   it.each([
     ['コードレビューとは何ですか', '<code-review-mode>'],
     ['テストファーストの使い方を教えて', '<tdd-mode>'],
+    ['ディープサーチと普通の検索の違いを教えて', '<search-mode>'],
+    ['ディープアナライズと分析の違いを教えて', '<analyze-mode>'],
   ])('suppresses Japanese informational question %s', (prompt, marker) => {
     const output = runKeywordDetector(prompt);
     const context = output.hookSpecificOutput?.additionalContext ?? '';

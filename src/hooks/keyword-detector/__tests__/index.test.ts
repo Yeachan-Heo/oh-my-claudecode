@@ -334,6 +334,29 @@ Final draft.`);
         expect(result).toEqual([]);
       });
 
+      it('should NOT detect Japanese "違いを教えて" difference questions', () => {
+        // "...の違いを教えて" (explain the difference) is informational, not an activation.
+        expect(
+          detectKeywordsWithType('ディープサーチと普通の検索の違いを教えて').find(
+            (r) => r.type === 'deepsearch',
+          ),
+        ).toBeUndefined();
+        expect(
+          detectKeywordsWithType('ディープアナライズと分析の違いを教えて').find(
+            (r) => r.type === 'analyze',
+          ),
+        ).toBeUndefined();
+        expect(
+          detectKeywordsWithType('何が違うのか教えて').length,
+        ).toBe(0);
+      });
+
+      it('Japanese "違い" with a work verb (修正) is NOT suppressed', () => {
+        // "違いを修正して" is a work request, not a difference question — must still fire.
+        const result = detectKeywordsWithType('コードレビューの違いを修正して');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
       it('should NOT detect informational Chinese questions about ralph', () => {
         const result = detectKeywordsWithType('ralph 是什么？怎么用？');
         expect(result).toEqual([]);
