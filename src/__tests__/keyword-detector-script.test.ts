@@ -65,6 +65,41 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(context).not.toContain('[MAGIC KEYWORD:');
   });
 
+  it.each([
+    ['テストファーストで実装して', '<tdd-mode>'],
+    ['テスト ファースト で実装して', '<tdd-mode>'],
+    ['コードレビューして', '<code-review-mode>'],
+    ['セキュリティレビューお願いします', '<security-review-mode>'],
+    ['ディープサーチでコードベースを探して', '<search-mode>'],
+    ['ディープ分析して', '<analyze-mode>'],
+  ])('routes Japanese mode keyword %s to the context-injection path', (prompt, marker) => {
+    const output = runKeywordDetector(prompt);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain(marker);
+    expect(context).not.toContain('[MAGIC KEYWORD:');
+  });
+
+  it.each([
+    ['ディープインタビューしたい', '[MAGIC KEYWORD: DEEP-INTERVIEW]'],
+    ['シーシージーで実装して', '[MAGIC KEYWORD: CCG]'],
+  ])('emits magic keyword invocation for Japanese skill keyword %s', (prompt, marker) => {
+    const output = runKeywordDetector(prompt);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain(marker);
+  });
+
+  it.each([
+    ['コードレビューとは何ですか', '<code-review-mode>'],
+    ['テストファーストの使い方を教えて', '<tdd-mode>'],
+  ])('suppresses Japanese informational question %s', (prompt, marker) => {
+    const output = runKeywordDetector(prompt);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).not.toContain(marker);
+  });
+
   it('still emits magic keyword invocation for true skills like ralplan', () => {
     const output = runKeywordDetector('ralplan fix issue #2053');
     const context = output.hookSpecificOutput?.additionalContext ?? '';

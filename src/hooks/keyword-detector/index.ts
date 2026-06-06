@@ -50,14 +50,14 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   // This prevents infinite spawning when Claude workers receive prompts containing "team".
   team: /(?!x)x/,  // never-match placeholder (type system requires the key)
   ralplan: /\b(ralplan)\b|(랄플랜)|(ラルプラン)/i,
-  tdd: /\b(tdd)\b|\btest\s+first\b|(테스트\s?퍼스트)/i,
-  'code-review': /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)/i,
-  'security-review': /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)/i,
+  tdd: /\b(tdd)\b|\btest\s+first\b|(테스트\s?퍼스트)|(テスト\s?ファースト)/i,
+  'code-review': /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)|(コード\s?レビュー)(?!ア)/i,
+  'security-review': /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)|(セキュリティ[ー]?\s?レビュー)(?!ア)/i,
   ultrathink: /\b(ultrathink)\b|(울트라씽크)|(ウルトラシンク)/i,
-  deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)/i,
-  analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)/i,
-  'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)/i,
-  ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)/i,
+  deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
+  analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?分析)/i,
+  'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
+  ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
 };
