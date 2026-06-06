@@ -536,12 +536,29 @@ function extractOmcVersion(content) {
   return match ? match[1] : null;
 }
 
+function getLatestPluginCacheVersion() {
+  try {
+    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    if (!existsSync(cacheBase)) return null;
+    const versions = readdirSync(cacheBase)
+      .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
+      .filter(v => readJsonFile(join(cacheBase, v, 'package.json'))?.version === v)
+      .sort(semverCompare)
+      .reverse();
+    return versions[0] || null;
+  } catch { return null; }
+}
+
 // Get plugin version from CLAUDE_PLUGIN_ROOT
 function getPluginVersion() {
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     if (!pluginRoot) return null;
     const pkg = readJsonFile(join(pluginRoot, 'package.json'));
+    const latestCacheVersion = getLatestPluginCacheVersion();
+    if (latestCacheVersion && (!pkg?.version || semverCompare(latestCacheVersion, pkg.version) > 0)) {
+      return latestCacheVersion;
+    }
     return pkg?.version || null;
   } catch { return null; }
 }

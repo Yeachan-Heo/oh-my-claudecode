@@ -205,5 +205,47 @@ ${'- oversized startup guidance\n'.repeat(700)}
         expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('[OMC UPDATE AVAILABLE]');
         expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('999.0.0');
     });
+    it('does not show update notice when stale CLAUDE_PLUGIN_ROOT is older than plugin cache', () => {
+        const claudeDir = join(fakeHome, '.claude');
+        const stalePluginRoot = join(claudeDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.14.4');
+        const latestPluginRoot = join(claudeDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.14.5');
+        mkdirSync(join(claudeDir, '.omc'), { recursive: true });
+        mkdirSync(join(claudeDir, 'hud'), { recursive: true });
+        mkdirSync(stalePluginRoot, { recursive: true });
+        mkdirSync(latestPluginRoot, { recursive: true });
+        writeFileSync(join(stalePluginRoot, 'package.json'), JSON.stringify({ version: '4.14.4', type: 'module' }));
+        writeFileSync(join(latestPluginRoot, 'package.json'), JSON.stringify({ version: '4.14.5', type: 'module' }));
+        writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
+        writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
+        writeFileSync(join(claudeDir, '.omc', 'update-check.json'), JSON.stringify({
+            timestamp: Date.now(),
+            latestVersion: '4.14.5',
+            currentVersion: '4.14.4',
+            updateAvailable: true,
+        }));
+        const result = spawnSync(NODE, [SCRIPT_PATH], {
+            input: JSON.stringify({
+                hook_event_name: 'SessionStart',
+                session_id: 'session-stale-plugin-root',
+                cwd: fakeProject,
+            }),
+            encoding: 'utf-8',
+            env: {
+                ...process.env,
+                HOME: fakeHome,
+                USERPROFILE: fakeHome,
+                CLAUDE_PLUGIN_ROOT: stalePluginRoot,
+                OMC_NOTIFY: '0',
+            },
+            timeout: 15000,
+        });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        const output = JSON.parse(result.stdout);
+        expect(output.continue).toBe(true);
+        expect(output.systemMessage ?? '').not.toContain('[OMC UPDATE AVAILABLE]');
+        expect(output.systemMessage ?? '').not.toContain('4.14.4');
+        expect(output.hookSpecificOutput?.additionalContext ?? '').not.toContain('[OMC UPDATE AVAILABLE]');
+    });
 });
 //# sourceMappingURL=session-start-script-context.test.js.map
