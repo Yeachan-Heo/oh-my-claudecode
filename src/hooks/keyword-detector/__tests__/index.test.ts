@@ -1977,6 +1977,104 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
     });
 
+    describe('Japanese keyword detection (basic matching — KO parity)', () => {
+      it('should detect "コードレビュー" as code-review', () => {
+        const result = detectKeywordsWithType('コードレビューして');
+        const match = result.find((r) => r.type === 'code-review');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "コード レビュー" (spaced) as code-review', () => {
+        const result = detectKeywordsWithType('コード レビュー お願い');
+        const match = result.find((r) => r.type === 'code-review');
+        expect(match).toBeDefined();
+      });
+
+      it('should NOT detect "コードレビューアー募集" as code-review (reviewer false positive)', () => {
+        const result = detectKeywordsWithType('コードレビューアー募集');
+        const match = result.find((r) => r.type === 'code-review');
+        expect(match).toBeUndefined();
+      });
+
+      it('should detect "セキュリティレビュー" as security-review', () => {
+        const result = detectKeywordsWithType('セキュリティレビューして');
+        const match = result.find((r) => r.type === 'security-review');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "セキュリティーレビュー" (long vowel) as security-review', () => {
+        const result = detectKeywordsWithType('セキュリティーレビューして');
+        const match = result.find((r) => r.type === 'security-review');
+        expect(match).toBeDefined();
+      });
+
+      it('should NOT detect "セキュリティレビューアー募集" as security-review (reviewer false positive)', () => {
+        const result = detectKeywordsWithType('セキュリティレビューアー募集');
+        const match = result.find((r) => r.type === 'security-review');
+        expect(match).toBeUndefined();
+      });
+
+      it('should detect "ディープサーチ" as deepsearch', () => {
+        const result = detectKeywordsWithType('ディープサーチして');
+        const match = result.find((r) => r.type === 'deepsearch');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "ディープ サーチ" (spaced) as deepsearch', () => {
+        const result = detectKeywordsWithType('ディープ サーチ して');
+        const match = result.find((r) => r.type === 'deepsearch');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "ディープアナライズ" as analyze', () => {
+        const result = detectKeywordsWithType('ディープアナライズして');
+        const match = result.find((r) => r.type === 'analyze');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "ディープ アナライズ" (spaced) as analyze', () => {
+        const result = detectKeywordsWithType('ディープ アナライズ して');
+        const match = result.find((r) => r.type === 'analyze');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "ディープインタビュー" as deep-interview', () => {
+        const result = detectKeywordsWithType('ディープインタビューしたい');
+        const match = result.find((r) => r.type === 'deep-interview');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "シーシージー" as ccg', () => {
+        const result = detectKeywordsWithType('シーシージーで実装して');
+        const match = result.find((r) => r.type === 'ccg');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "テストファースト" as tdd', () => {
+        const result = detectKeywordsWithType('テストファーストで実装して');
+        const match = result.find((r) => r.type === 'tdd');
+        expect(match).toBeDefined();
+      });
+
+      it('should detect "テスト ファースト" (spaced) as tdd (KO \\s? parity)', () => {
+        const result = detectKeywordsWithType('テスト ファースト で実装して');
+        const match = result.find((r) => r.type === 'tdd');
+        expect(match).toBeDefined();
+      });
+
+      it('should NOT trigger code-review for informational "コードレビューとは何ですか"', () => {
+        const result = detectKeywordsWithType('コードレビューとは何ですか');
+        const match = result.find((r) => r.type === 'code-review');
+        expect(match).toBeUndefined();
+      });
+
+      it('should NOT trigger tdd for informational "テストファーストの使い方を教えて"', () => {
+        const result = detectKeywordsWithType('テストファーストの使い方を教えて');
+        const match = result.find((r) => r.type === 'tdd');
+        expect(match).toBeUndefined();
+      });
+    });
+
     describe('Regression — English keywords still work', () => {
       it('should detect "autopilot mode" as autopilot (unchanged)', () => {
         const result = detectKeywordsWithType('autopilot mode');

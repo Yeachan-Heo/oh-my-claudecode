@@ -1197,7 +1197,7 @@ async function main() {
     // This prevents infinite spawning when Claude workers receive prompts containing "team".
 
     // CCG keywords (Claude-Codex-Gemini tri-model orchestration)
-    if (hasActionableKeyword(cleanPrompt, /\b(ccg|claude-codex-gemini)\b|(씨씨지)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i)) {
       matches.push({ name: 'ccg', args: '' });
     }
 
@@ -1207,7 +1207,7 @@ async function main() {
     }
 
     // Deep interview keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i)) {
       matches.push({ name: 'deep-interview', args: '' });
     }
 
@@ -1217,7 +1217,7 @@ async function main() {
     }
 
     // TDD keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(tdd)\b|(테스트\s?퍼스트)/i) ||
+    if (hasActionableKeyword(cleanPrompt, /\b(tdd)\b|(테스트\s?퍼스트)|(テスト\s?ファースト)/i) ||
         hasActionableKeyword(cleanPrompt, /\btest\s+first\b/i) ||
         hasActionableKeyword(cleanPrompt, /\bred\s+green\b/i)) {
       matches.push({ name: 'tdd', args: '' });
@@ -1225,13 +1225,13 @@ async function main() {
 
     // Code review keywords — skip when the prompt is echoed review-instruction text
     if (!isReviewSeedContext(cleanPrompt) &&
-        hasActionableKeyword(cleanPrompt, /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)/i)) {
+        hasActionableKeyword(cleanPrompt, /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)|(コード\s?レビュー)(?!ア)/i)) {
       matches.push({ name: 'code-review', args: '' });
     }
 
     // Security review keywords — skip when the prompt is echoed review-instruction text
     if (!isReviewSeedContext(cleanPrompt) &&
-        hasActionableKeyword(cleanPrompt, /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)/i)) {
+        hasActionableKeyword(cleanPrompt, /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)|(セキュリティ[ー]?\s?レビュー)(?!ア)/i)) {
       matches.push({ name: 'security-review', args: '' });
     }
 
@@ -1241,14 +1241,14 @@ async function main() {
     }
 
     // Deepsearch keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(deepsearch)\b|(딥\s?서치)/i) ||
+    if (hasActionableKeyword(cleanPrompt, /\b(deepsearch)\b|(딥\s?서치)|(ディープ\s?サーチ)/i) ||
         hasActionableKeyword(cleanPrompt, /\bsearch\s+(the\s+)?(codebase|code|files?|project)\b/i) ||
         hasActionableKeyword(cleanPrompt, /\bfind\s+(in\s+)?(codebase|code|all\s+files?)\b/i)) {
       matches.push({ name: 'deepsearch', args: '' });
     }
 
     // Analyze keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i)) {
       matches.push({ name: 'analyze', args: '' });
     }
 
