@@ -323,6 +323,38 @@ export const NON_LATIN_SCRIPT_PATTERN =
   /[\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]/u;
 
 /**
+ * Character class for a single file-path segment. Includes `\w.-` plus the same
+ * non-Latin script ranges as NON_LATIN_SCRIPT_PATTERN, so CJK/etc. file names
+ * (e.g. `docs/\u30B3\u30FC\u30C9\u30EC\u30D3\u30E5\u30FC.md`) are recognized as paths and stripped before
+ * keyword detection. Without this, a CJK alias embedded in a path survives
+ * sanitization and falsely activates its mode (path detection is ASCII-only
+ * with a bare `[\w.-]`). Building the path regex from this shared constant
+ * avoids the class drifting across its repeated uses below.
+ */
+const PATH_SEGMENT_CHARS =
+  '[\\w.\\-\\u3000-\\u9FFF\\uAC00-\\uD7AF\\u0400-\\u04FF\\u0600-\\u06FF\\u0900-\\u097F\\u0E00-\\u0E7F\\u1000-\\u109F]';
+
+/**
+ * File-path matcher used by sanitizeForKeywordDetection: leading `/`/`./` path,
+ * or a multi-segment `dir/file.ext`. Mirrors the prior ASCII regex but with
+ * Unicode-aware segments. The trailing `.\w+` extension stays ASCII.
+ */
+/* eslint-disable no-misleading-character-class -- Same script ranges as NON_LATIN_SCRIPT_PATTERN: intentional range set, not grapheme clusters */
+const FILE_PATH_PATTERN = new RegExp(
+  '(^|[\\s"\'`(])(?:\\.?\\/(?:' +
+    PATH_SEGMENT_CHARS +
+    '+\\/)*' +
+    PATH_SEGMENT_CHARS +
+    '+|(?:' +
+    PATH_SEGMENT_CHARS +
+    '+\\/)+' +
+    PATH_SEGMENT_CHARS +
+    '+\\.\\w+)',
+  'gm',
+);
+/* eslint-enable no-misleading-character-class */
+
+/**
 * Sanitize text for keyword detection by removing structural noise.
  * Strips XML tags, URLs, file paths, and code blocks.
  */
@@ -340,8 +372,9 @@ export function sanitizeForKeywordDetection(text: string): string {
   result = result.replace(/^\s*>\s.*$/gm, '');
   result = result.replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '');
   result = result.replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '');
-  // Remove file paths — requires leading / or ./ or multi-segment dir/file.ext
-  result = result.replace(/(^|[\s"'`(])(?:\.?\/(?:[\w.-]+\/)*[\w.-]+|(?:[\w.-]+\/)+[\w.-]+\.\w+)/gm, '$1');
+  // Remove file paths — requires leading / or ./ or multi-segment dir/file.ext.
+  // Unicode-aware segments (FILE_PATH_PATTERN) so CJK file names are stripped too.
+  result = result.replace(FILE_PATH_PATTERN, '$1');
   // Remove code blocks (fenced and inline)
   result = removeCodeBlocks(result);
   return result;

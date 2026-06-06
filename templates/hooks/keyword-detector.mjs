@@ -193,9 +193,12 @@ function sanitizeForKeywordDetection(text) {
     .replace(/^\s*>\s.*$/gm, '')
     .replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '')
     .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '')
-    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it)
+    // 4. Strip file paths: /foo/bar/baz or foo/bar/baz — uses lookbehind (Node.js supports it).
+    // Path segments are Unicode-aware (\w.- plus the NON_LATIN_SCRIPT_PATTERN ranges) so CJK
+    // file names like docs/コードレビュー.md are stripped before keyword detection; otherwise a
+    // CJK alias inside a path would survive and falsely activate its mode.
     // The TypeScript version (index.ts) uses capture group + $1 replacement for broader compat
-    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '')
+    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]+\/)+[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]+/gm, '')
     // 5. Strip markdown code blocks (existing)
     .replace(/```[\s\S]*?```/g, '')
     // 6. Strip inline code (existing)

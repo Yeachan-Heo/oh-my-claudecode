@@ -2075,6 +2075,43 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
     });
 
+    describe('CJK file-path stripping (no false activation)', () => {
+      it('should NOT detect code-review for a Japanese file path "docs/コードレビュー.mdを読んで"', () => {
+        const result = detectKeywordsWithType('docs/コードレビュー.mdを読んで');
+        expect(result.find((r) => r.type === 'code-review')).toBeUndefined();
+      });
+
+      it('should NOT detect code-review for a leading-slash path "/docs/コードレビュー.md"', () => {
+        const result = detectKeywordsWithType('/docs/コードレビュー.md を確認して');
+        expect(result.find((r) => r.type === 'code-review')).toBeUndefined();
+      });
+
+      it('should NOT detect security-review for "src/セキュリティレビュー.ts"', () => {
+        const result = detectKeywordsWithType('src/セキュリティレビュー.ts を開いて');
+        expect(result.find((r) => r.type === 'security-review')).toBeUndefined();
+      });
+
+      it('should NOT detect deepsearch for "docs/ディープサーチ.md"', () => {
+        const result = detectKeywordsWithType('docs/ディープサーチ.md を読む');
+        expect(result.find((r) => r.type === 'deepsearch')).toBeUndefined();
+      });
+
+      it('should NOT detect analyze for "notes/ディープアナライズ.md"', () => {
+        const result = detectKeywordsWithType('notes/ディープアナライズ.md を見て');
+        expect(result.find((r) => r.type === 'analyze')).toBeUndefined();
+      });
+
+      it('control: bare "コードレビューして" (no path) STILL detects code-review', () => {
+        const result = detectKeywordsWithType('コードレビューして');
+        expect(result.find((r) => r.type === 'code-review')).toBeDefined();
+      });
+
+      it('control: bare "ディープアナライズして" (no path) STILL detects analyze', () => {
+        const result = detectKeywordsWithType('ディープアナライズして');
+        expect(result.find((r) => r.type === 'analyze')).toBeDefined();
+      });
+    });
+
     describe('Regression — English keywords still work', () => {
       it('should detect "autopilot mode" as autopilot (unchanged)', () => {
         const result = detectKeywordsWithType('autopilot mode');

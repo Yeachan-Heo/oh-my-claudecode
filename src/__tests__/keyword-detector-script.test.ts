@@ -100,6 +100,17 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(context).not.toContain(marker);
   });
 
+  it.each([
+    ['docs/コードレビュー.mdを読んで', '<code-review-mode>'],
+    ['src/セキュリティレビュー.ts を開いて', '<security-review-mode>'],
+    ['notes/ディープアナライズ.md を見て', '<analyze-mode>'],
+  ])('does not activate a mode for a CJK file path %s', (prompt, marker) => {
+    const output = runKeywordDetector(prompt);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).not.toContain(marker);
+  });
+
   it('still emits magic keyword invocation for true skills like ralplan', () => {
     const output = runKeywordDetector('ralplan fix issue #2053');
     const context = output.hookSpecificOutput?.additionalContext ?? '';
