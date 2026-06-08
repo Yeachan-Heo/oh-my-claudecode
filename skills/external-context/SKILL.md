@@ -44,15 +44,17 @@ Given a query, decompose into 2-5 independent search facets:
 
 ### Step 2: Parallel Agent Invocation
 
-Fire independent facets in parallel via Task tool:
+Fire independent facets in parallel via Task tool. **Always spawn the facet agents with `model="opus"`** (see note below):
 
 ```
-Task(subagent_type="oh-my-claudecode:document-specialist", model="sonnet", prompt="Search for: <facet 1 description>. Use WebSearch and WebFetch to find official documentation and examples. Cite all sources with URLs.")
+Task(subagent_type="oh-my-claudecode:document-specialist", model="opus", prompt="Search for: <facet 1 description>. Use WebSearch and WebFetch to find official documentation and examples. Cite all sources with URLs.")
 
-Task(subagent_type="oh-my-claudecode:document-specialist", model="sonnet", prompt="Search for: <facet 2 description>. Use WebSearch and WebFetch to find official documentation and examples. Cite all sources with URLs.")
+Task(subagent_type="oh-my-claudecode:document-specialist", model="opus", prompt="Search for: <facet 2 description>. Use WebSearch and WebFetch to find official documentation and examples. Cite all sources with URLs.")
 ```
 
 Maximum 5 parallel document-specialist agents.
+
+> **Why opus (not sonnet):** this skill's whole value is the facet agents' *free-form research reports* coming back to the orchestrator. Current Claude Code has a subagent bug where a non-opus subagent's final free-form message is frequently lost and replaced by a degenerate idle/wrap-up line (e.g. `"Standing by."`, `"Acknowledged."`, `"(awaiting input)"`), so the report never reaches the caller — which silently breaks this skill. Opus is effectively immune; in controlled testing opus returned the cited report 48/48 while sonnet/haiku lost it in the large majority of free-form runs. Spawn facets on opus until the upstream bug is fixed (anthropics/claude-code#47936).
 
 ### Step 3: Synthesis Output Format
 
