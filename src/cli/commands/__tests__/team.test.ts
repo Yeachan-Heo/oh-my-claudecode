@@ -482,6 +482,42 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.role).toBe('architect');
   });
 
+
+  it('fails loudly when N:agent:role uses an invalid agent type instead of collapsing to claude', () => {
+    expect(() => parseTeamArgs(['2:foo:architect', 'design auth'])).toThrow(
+      /Invalid agent type "foo" in worker spec/,
+    );
+  });
+
+  it('rejects invalid agent in a comma-separated three-segment spec', () => {
+    expect(() => parseTeamArgs(['1:codex:architect,1:foo:writer', 'do task'])).toThrow(
+      /Invalid agent type "foo" in worker spec/,
+    );
+  });
+
+  it('suggests the role-only shorthand in the invalid-agent error', () => {
+    expect(() => parseTeamArgs(['3:reviewer:executor', 'go'])).toThrow(
+      /use "3:executor"/,
+    );
+  });
+
+
+  it('fails loudly on a malformed worker spec instead of swallowing it into the task', () => {
+    expect(() => parseTeamArgs(['2:claude:executor:extra', 'go'])).toThrow(
+      /Invalid worker spec "2:claude:executor:extra"/,
+    );
+    expect(() => parseTeamArgs(['1:codex,bogus', 'go'])).toThrow(
+      /Invalid worker spec "1:codex,bogus"/,
+    );
+  });
+
+  it('does not misread a time-like task prefix as a worker spec', () => {
+    const parsed = parseTeamArgs(['12:00 standup notes']);
+    expect(parsed.workerCount).toBe(3);
+    expect(parsed.agentTypes).toEqual(['claude', 'claude', 'claude']);
+    expect(parsed.task).toBe('12:00 standup notes');
+  });
+
   it('supports --json and --new-window flags with comma-separated specs', () => {
     const parsed = parseTeamArgs(['1:codex,1:gemini', '--new-window', '--json', 'compare']);
     expect(parsed.workerCount).toBe(2);
