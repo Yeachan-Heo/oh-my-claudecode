@@ -1680,6 +1680,8 @@ __export(runtime_cli_exports, {
   buildTerminalCliResult: () => buildTerminalCliResult,
   checkWatchdogFailedMarker: () => checkWatchdogFailedMarker,
   getTerminalStatus: () => getTerminalStatus,
+  isTerseFinalSummary: () => isTerseFinalSummary,
+  readTaskOutputFallback: () => readTaskOutputFallback,
   writeResultArtifact: () => writeResultArtifact
 });
 module.exports = __toCommonJS(runtime_cli_exports);
@@ -7004,9 +7006,9 @@ function cliWorkerOutputFilePath(teamStateRootAbs, workerName2) {
 
 // src/team/merge-orchestrator.ts
 var import_node_child_process3 = require("node:child_process");
-var import_node_fs3 = require("node:fs");
+var import_node_fs4 = require("node:fs");
 var import_promises9 = require("node:fs/promises");
-var import_node_path3 = require("node:path");
+var import_node_path4 = require("node:path");
 init_worktree_paths();
 
 // src/team/runtime-flags.ts
@@ -7022,11 +7024,42 @@ init_tmux_session();
 
 // src/team/merge-coordinator.ts
 var import_node_child_process2 = require("node:child_process");
+var import_node_fs3 = require("node:fs");
+var import_node_path3 = require("node:path");
 var BRANCH_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/;
 function validateBranchName(branch) {
   if (!BRANCH_NAME_RE.test(branch)) {
     throw new Error(`Invalid branch name: "${branch}" \u2014 must match ${BRANCH_NAME_RE}`);
   }
+}
+var HARNESS_MERGE_PATHS = ["AGENTS.md", ".claude/**"];
+function configureHarnessMergeAttributes(repoRoot) {
+  (0, import_node_child_process2.execFileSync)("git", ["config", "merge.ours.driver", "true"], {
+    cwd: repoRoot,
+    stdio: "pipe"
+  });
+  const commonDir = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    stdio: "pipe"
+  }).trim();
+  const resolvedCommonDir = (0, import_node_path3.isAbsolute)(commonDir) ? commonDir : (0, import_node_path3.join)(repoRoot, commonDir);
+  const infoDir = (0, import_node_path3.join)(resolvedCommonDir, "info");
+  (0, import_node_fs3.mkdirSync)(infoDir, { recursive: true });
+  const attrPath = (0, import_node_path3.join)(infoDir, "attributes");
+  let existing = "";
+  try {
+    existing = (0, import_node_fs3.readFileSync)(attrPath, "utf-8");
+  } catch {
+  }
+  const existingLines = new Set(existing.split("\n").map((l) => l.trim()));
+  const missing = HARNESS_MERGE_PATHS.map((p) => `${p} merge=ours`).filter(
+    (line) => !existingLines.has(line)
+  );
+  if (missing.length === 0) return;
+  const prefix = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+  (0, import_node_fs3.appendFileSync)(attrPath, `${prefix}${missing.join("\n")}
+`, "utf-8");
 }
 function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
   validateBranchName(workerBranch);
@@ -7363,10 +7396,10 @@ async function uninstallCommitCadence(ctx) {
 var DEFAULT_POLL_INTERVAL_MS = 1e3;
 var DEFAULT_DRAIN_TIMEOUT_MS = 1e4;
 function mergerWorktreePathFor(repoRoot, teamName) {
-  return (0, import_node_path3.join)(getOmcRoot(repoRoot), "team", sanitizeName(teamName), "merger");
+  return (0, import_node_path4.join)(getOmcRoot(repoRoot), "team", sanitizeName(teamName), "merger");
 }
 function persistedStatePath(repoRoot, teamName) {
-  return (0, import_node_path3.join)(
+  return (0, import_node_path4.join)(
     getOmcRoot(repoRoot),
     "state",
     "team",
@@ -7375,7 +7408,7 @@ function persistedStatePath(repoRoot, teamName) {
   );
 }
 function teardownAuditPath(repoRoot, teamName) {
-  return (0, import_node_path3.join)(
+  return (0, import_node_path4.join)(
     getOmcRoot(repoRoot),
     "state",
     "team",
@@ -7384,7 +7417,7 @@ function teardownAuditPath(repoRoot, teamName) {
   );
 }
 function orchestratorEventLogPath(repoRoot, teamName) {
-  return (0, import_node_path3.join)(
+  return (0, import_node_path4.join)(
     getOmcRoot(repoRoot),
     "state",
     "team",
@@ -7405,7 +7438,7 @@ function assertRuntimeV2Gate() {
 }
 async function appendEvent(repoRoot, teamName, event) {
   const path4 = orchestratorEventLogPath(repoRoot, teamName);
-  await (0, import_promises9.mkdir)((0, import_node_path3.dirname)(path4), { recursive: true });
+  await (0, import_promises9.mkdir)((0, import_node_path4.dirname)(path4), { recursive: true });
   const full = {
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     team: teamName,
@@ -7439,10 +7472,10 @@ function gitPath(worktreePath, gitPathName) {
     if (resolved) return resolved;
   } catch {
   }
-  return (0, import_node_path3.join)(worktreePath, ".git", gitPathName);
+  return (0, import_node_path4.join)(worktreePath, ".git", gitPathName);
 }
 function isRebaseInProgress(worktreePath) {
-  return (0, import_node_fs3.existsSync)(gitPath(worktreePath, "rebase-merge"));
+  return (0, import_node_fs4.existsSync)(gitPath(worktreePath, "rebase-merge"));
 }
 function isWorktreeRegistered(repoRoot, wtPath) {
   try {
@@ -7461,8 +7494,8 @@ function isWorktreeRegistered(repoRoot, wtPath) {
   return false;
 }
 function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
-  ensureDirWithMode((0, import_node_path3.dirname)(mergerPath));
-  if ((0, import_node_fs3.existsSync)(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
+  ensureDirWithMode((0, import_node_path4.dirname)(mergerPath));
+  if ((0, import_node_fs4.existsSync)(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
     return;
   }
   (0, import_node_child_process3.execFileSync)("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
@@ -7501,15 +7534,16 @@ async function startMergeOrchestrator(config) {
   const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const drainTimeoutMs = config.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
   const mergerPath = mergerWorktreePathFor(config.repoRoot, config.teamName);
-  validateResolvedPath(mergerPath, (0, import_node_path3.join)(getOmcRoot(config.repoRoot), "team"));
+  validateResolvedPath(mergerPath, (0, import_node_path4.join)(getOmcRoot(config.repoRoot), "team"));
   ensureMergerWorktree(config.repoRoot, mergerPath, config.leaderBranch);
   await ensureLeaderInbox(config.teamName, config.cwd);
+  configureHarnessMergeAttributes(config.repoRoot);
   const persistedPath = persistedStatePath(config.repoRoot, config.teamName);
   let persisted = { lastShas: {} };
-  if ((0, import_node_fs3.existsSync)(persistedPath)) {
+  if ((0, import_node_fs4.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync12 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync12(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync13 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync13(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -7857,7 +7891,7 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
       }
       if (unmerged.length > 0) {
         const auditPath = teardownAuditPath(config.repoRoot, config.teamName);
-        await (0, import_promises9.mkdir)((0, import_node_path3.dirname)(auditPath), { recursive: true });
+        await (0, import_promises9.mkdir)((0, import_node_path4.dirname)(auditPath), { recursive: true });
         for (const u of unmerged) {
           const row = JSON.stringify({
             type: "unmerged_at_shutdown",
@@ -7896,10 +7930,10 @@ ${unmerged.map((u) => `- ${u.workerName}: ${u.reason}`).join("\n")}`;
 async function recoverFromRestart(config) {
   const persistedPath = persistedStatePath(config.repoRoot, config.teamName);
   let persistedShasLoaded = 0;
-  if ((0, import_node_fs3.existsSync)(persistedPath)) {
+  if ((0, import_node_fs4.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync12 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync12(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync13 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync13(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -8825,7 +8859,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename4 } = await import("fs/promises");
-  const { readFileSync: readFileSync12, writeFileSync: writeFileSync4, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync13, writeFileSync: writeFileSync4, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -8859,7 +8893,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
       const taskPath2 = absPath(cwd, TeamPaths.taskFile(sanitized, taskId));
       if (!fsExistsSync(taskPath2)) continue;
       try {
-        const taskRaw = readFileSync12(taskPath2, "utf-8");
+        const taskRaw = readFileSync13(taskPath2, "utf-8");
         const taskData = JSON.parse(taskRaw);
         if (taskData.owner === worker.name && taskData.status === "in_progress") {
           targetTaskId = taskId;
@@ -8887,7 +8921,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     let transitionOk = false;
     try {
       withFileLockSync2(targetTaskPath + ".lock", () => {
-        const raw = readFileSync12(targetTaskPath, "utf-8");
+        const raw = readFileSync13(targetTaskPath, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status !== "in_progress" || taskData.owner !== worker.name) {
           return;
@@ -9430,18 +9464,74 @@ async function writePanesFile(jobId, paneIds, leaderPaneId, sessionName2, ownsWi
   );
   await (0, import_promises11.rename)(panesPath + ".tmp", panesPath);
 }
+var MAX_FALLBACK_SUMMARY_CHARS = 2e3;
+function isTerseFinalSummary(summary) {
+  const trimmed = summary.trim();
+  if (trimmed.length === 0) return true;
+  const normalized = trimmed.toLowerCase().replace(/[\s.!]+$/g, "");
+  const TERSE_ACKS = /* @__PURE__ */ new Set([
+    "done",
+    "ready",
+    "ok",
+    "okay",
+    "complete",
+    "completed",
+    "finished",
+    "success",
+    "all done",
+    "task complete",
+    "task completed"
+  ]);
+  return TERSE_ACKS.has(normalized);
+}
+function readTaskOutputFallback(outputsDir, teamName, taskId) {
+  let entries;
+  try {
+    entries = (0, import_fs21.readdirSync)(outputsDir);
+  } catch {
+    return null;
+  }
+  const prefix = `team-${teamName}-task-${taskId}-`;
+  const candidates = entries.filter((f) => f.startsWith(prefix) && f.endsWith(".md"));
+  if (candidates.length === 0) return null;
+  let newest = null;
+  for (const name of candidates) {
+    const full = (0, import_path23.join)(outputsDir, name);
+    try {
+      const mtime = (0, import_fs21.statSync)(full).mtimeMs;
+      if (!newest || mtime > newest.mtime) newest = { path: full, mtime };
+    } catch {
+    }
+  }
+  if (!newest) return null;
+  try {
+    const content = (0, import_fs21.readFileSync)(newest.path, "utf-8").trim();
+    if (content.length === 0) return null;
+    return content.length > MAX_FALLBACK_SUMMARY_CHARS ? content.slice(0, MAX_FALLBACK_SUMMARY_CHARS) + "\n... (truncated)" : content;
+  } catch {
+    return null;
+  }
+}
 function collectTaskResults(stateRoot2) {
   const tasksDir = (0, import_path23.join)(stateRoot2, "tasks");
+  const teamName = (0, import_path23.basename)(stateRoot2);
+  const outputsDir = (0, import_path23.join)(stateRoot2, "..", "..", "..", "outputs");
   try {
     const files = (0, import_fs21.readdirSync)(tasksDir).filter((f) => f.endsWith(".json"));
     return files.map((f) => {
       try {
         const raw = (0, import_fs21.readFileSync)((0, import_path23.join)(tasksDir, f), "utf-8");
         const task = JSON.parse(raw);
+        const taskId = task.id ?? f.replace(".json", "");
+        let summary = task.result ?? task.summary ?? "";
+        if (isTerseFinalSummary(summary)) {
+          const fallback = readTaskOutputFallback(outputsDir, teamName, taskId);
+          if (fallback) summary = fallback;
+        }
         return {
-          taskId: task.id ?? f.replace(".json", ""),
+          taskId,
           status: task.status ?? "unknown",
-          summary: task.result ?? task.summary ?? ""
+          summary
         };
       } catch {
         return { taskId: f.replace(".json", ""), status: "unknown", summary: "" };
@@ -9819,5 +9909,7 @@ if (require.main === module) {
   buildTerminalCliResult,
   checkWatchdogFailedMarker,
   getTerminalStatus,
+  isTerseFinalSummary,
+  readTaskOutputFallback,
   writeResultArtifact
 });
