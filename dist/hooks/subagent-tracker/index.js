@@ -580,15 +580,16 @@ export function processSubagentStop(input) {
                 }, sessionId);
             }
             catch { /* best-effort */ }
-            const runningCount = state.agents.filter((a) => a.status === "running").length;
-            return {
-                continue: true,
-                hookSpecificOutput: {
-                    hookEventName: "SubagentStop",
-                    additionalContext: `Agent ${input.agent_type} ${succeeded ? "completed" : "failed"} (${input.agent_id})`,
-                    agent_count: runningCount,
-                },
-            };
+            // SubagentStop must NOT return additionalContext. The harness feeds a
+            // SubagentStop additionalContext back into the just-finished subagent,
+            // re-invoking it past the end_turn it already chose; the re-invocation ends,
+            // SubagentStop fires again, and it loops. Non-opus subagents fill those forced
+            // turns with idle filler ("Acknowledged.", "무엇을 도와드릴까요?"), and the
+            // harness surfaces that last turn as the subagent's result — silently
+            // discarding the real answer. Tracking/HUD/trace read the state file, replay
+            // JSONL, and mission-board written above, not this return value, so suppressing
+            // the output is side-effect-free. See anthropics/claude-code#47936.
+            return { continue: true, suppressOutput: true };
         }, LOCK_OPTS);
     }
     catch {

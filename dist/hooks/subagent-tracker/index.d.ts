@@ -84,6 +84,7 @@ export interface SubagentStopInput {
 }
 export interface HookOutput {
     continue: boolean;
+    suppressOutput?: boolean;
     hookSpecificOutput?: {
         hookEventName: string;
         additionalContext?: string;

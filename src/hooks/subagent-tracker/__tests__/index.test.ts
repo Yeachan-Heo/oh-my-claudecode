@@ -8,6 +8,7 @@ import {
   getStaleAgents,
   getTrackingStats,
   processSubagentStart,
+  processSubagentStop,
   readTrackingState,
   writeTrackingState,
   recordToolUsageWithTiming,
@@ -663,6 +664,48 @@ describe("subagent-tracker", () => {
       const entries = require("fs").readdirSync(sessionsDir) as string[];
       expect(entries.filter((name) => name.startsWith("pid-"))).toHaveLength(0);
       expect(entries).toContain("parent-uuid-xyz");
+    });
+  });
+
+  describe("processSubagentStop", () => {
+    it("returns suppressOutput with no additionalContext, but still records completion side effects", () => {
+      const base = {
+        session_id: "session-stop-1",
+        transcript_path: join(testDir, "transcript.jsonl"),
+        cwd: testDir,
+        permission_mode: "default",
+        agent_id: "worker-stop",
+        agent_type: "oh-my-claudecode:executor",
+      };
+
+      processSubagentStart({
+        ...base,
+        hook_event_name: "SubagentStart" as const,
+        prompt: "do the thing",
+        model: "claude-sonnet-4-6",
+      });
+
+      const result = processSubagentStop({
+        ...base,
+        hook_event_name: "SubagentStop" as const,
+        output: "completed the thing",
+      });
+
+      // A SubagentStop additionalContext is fed back into the just-finished subagent
+      // and re-invokes it past the end_turn it already chose, corrupting non-opus
+      // subagent results. So the hook must suppress its output and carry NO
+      // additionalContext. See anthropics/claude-code#47936.
+      expect(result.continue).toBe(true);
+      expect(result.suppressOutput).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+
+      // Side effects must still occur — every consumer reads the state file / replay
+      // JSONL / mission-board, written before the return, not the return value itself.
+      flushPendingWrites();
+      const state = readTrackingState(testDir);
+      const agent = state.agents.find((a) => a.agent_id === "worker-stop");
+      expect(agent?.status).toBe("completed");
+      expect(state.total_completed).toBe(1);
     });
   });
 
