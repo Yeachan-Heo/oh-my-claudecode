@@ -4,9 +4,12 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   assertAutoMergeRuntimeSupported,
+  buildCliOutput,
   buildTerminalCliResult,
   checkWatchdogFailedMarker,
   getTerminalStatus,
+  isTerseFinalSummary,
+  readTaskOutputFallback,
   writeResultArtifact,
 } from '../runtime-cli.js';
 
@@ -293,6 +296,148 @@ describe('runtime-cli terminal preservation helper', () => {
       ]);
       expect(result.notice).toContain('phase=cancelled');
       expect(result.notice).toContain(`omc team shutdown ${teamName}`);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runtime-cli terse-final output fallback', () => {
+  function seedTask(
+    cwd: string,
+    teamName: string,
+    task: { id: string; status?: string; result?: string; summary?: string },
+  ): string {
+    const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
+    const tasksDir = join(stateRoot, 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+    writeFileSync(
+      join(tasksDir, `${task.id}.json`),
+      JSON.stringify({ status: 'completed', ...task }),
+      'utf-8',
+    );
+    return stateRoot;
+  }
+
+  function writeOutputFile(cwd: string, teamName: string, taskId: string, content: string): void {
+    const outputsDir = join(cwd, '.omc', 'outputs');
+    mkdirSync(outputsDir, { recursive: true });
+    const suffix = Math.random().toString(36).slice(2, 8);
+    writeFileSync(
+      join(outputsDir, `team-${teamName}-task-${taskId}-${Date.now()}-${suffix}.md`),
+      content,
+      'utf-8',
+    );
+  }
+
+  describe('isTerseFinalSummary', () => {
+    it('treats empty / whitespace-only finals as terse', () => {
+      expect(isTerseFinalSummary('')).toBe(true);
+      expect(isTerseFinalSummary('   \n\t ')).toBe(true);
+    });
+
+    it('treats bare acknowledgements as terse regardless of punctuation/case', () => {
+      expect(isTerseFinalSummary('Done.')).toBe(true);
+      expect(isTerseFinalSummary('ready')).toBe(true);
+      expect(isTerseFinalSummary('OK!')).toBe(true);
+      expect(isTerseFinalSummary('Task complete.')).toBe(true);
+    });
+
+    it('preserves substantive finals', () => {
+      expect(isTerseFinalSummary('PASS: complete without shutdown')).toBe(false);
+      expect(isTerseFinalSummary('Done refactoring the auth module; added 3 tests.')).toBe(false);
+    });
+  });
+
+  describe('readTaskOutputFallback', () => {
+    it('returns null when the outputs directory is missing', () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-none-'));
+      try {
+        expect(
+          readTaskOutputFallback(join(cwd, '.omc', 'outputs'), 'team-x', '1'),
+        ).toBeNull();
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it('does not match a different task whose id is a prefix', () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-prefix-'));
+      try {
+        writeOutputFile(cwd, 'team-x', '10', 'output for task ten');
+        expect(
+          readTaskOutputFallback(join(cwd, '.omc', 'outputs'), 'team-x', '1'),
+        ).toBeNull();
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it('substitutes the task output file when the final is empty', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-empty-'));
+    try {
+      const teamName = 'fallback-empty';
+      const stateRoot = seedTask(cwd, teamName, { id: '1', status: 'completed', result: '' });
+      writeOutputFile(cwd, teamName, '1', 'Implemented the parser fix and added regression coverage.');
+
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+
+      expect(output.taskResults).toEqual([
+        {
+          taskId: '1',
+          status: 'completed',
+          summary: 'Implemented the parser fix and added regression coverage.',
+        },
+      ]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('substitutes the task output file when the final is a terse ack', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-ack-'));
+    try {
+      const teamName = 'fallback-ack';
+      const stateRoot = seedTask(cwd, teamName, { id: '2', status: 'completed', result: 'Done.' });
+      writeOutputFile(cwd, teamName, '2', 'Detailed worker report with real findings.');
+
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+
+      expect(output.taskResults[0]?.summary).toBe('Detailed worker report with real findings.');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves a substantive final even when an output file exists', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-preserve-'));
+    try {
+      const teamName = 'fallback-preserve';
+      const stateRoot = seedTask(cwd, teamName, {
+        id: '3',
+        status: 'completed',
+        result: 'PASS: complete without shutdown',
+      });
+      writeOutputFile(cwd, teamName, '3', 'Some other longer output that must NOT override the final.');
+
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+
+      expect(output.taskResults[0]?.summary).toBe('PASS: complete without shutdown');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a terse final untouched when no output file is available', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-fallback-missing-'));
+    try {
+      const teamName = 'fallback-missing';
+      const stateRoot = seedTask(cwd, teamName, { id: '4', status: 'completed', result: 'Done.' });
+
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+
+      expect(output.taskResults[0]?.summary).toBe('Done.');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
