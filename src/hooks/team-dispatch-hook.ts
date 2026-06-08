@@ -655,17 +655,6 @@ export async function drainPendingTeamDispatch(options: {
         }
 
         const result = await injector(request, config, resolve(cwd));
-        if (issueKey && issueCooldownMs > 0) {
-          issueCooldownByIssue[issueKey] = Date.now();
-          mutated = true;
-        }
-        if (triggerKey && triggerCooldownMs > 0) {
-          triggerCooldownByKey[triggerKey] = {
-            at: Date.now(),
-            last_request_id: safeString(request.request_id).trim(),
-          };
-          mutated = true;
-        }
         const nowIso = new Date().toISOString();
         request.attempt_count = Number.isFinite(request.attempt_count) ? Math.max(0, request.attempt_count + 1) : 1;
         request.updated_at = nowIso;
@@ -706,6 +695,19 @@ export async function drainPendingTeamDispatch(options: {
           request.status = 'notified';
           request.notified_at = nowIso;
           request.last_reason = result.reason;
+          // Only stamp issue/trigger cooldowns once a dispatch is actually
+          // delivered. Stamping on failure (or before an unconfirmed retry)
+          // would gate legitimate re-dispatch for the cooldown window and
+          // strand the worker — the dispatch gap from #3224.
+          if (issueKey && issueCooldownMs > 0) {
+            issueCooldownByIssue[issueKey] = Date.now();
+          }
+          if (triggerKey && triggerCooldownMs > 0) {
+            triggerCooldownByKey[triggerKey] = {
+              at: Date.now(),
+              last_request_id: safeString(request.request_id).trim(),
+            };
+          }
           if (request.kind === 'mailbox' && request.message_id) {
             await updateMailboxNotified(stateDir, teamName, request.to_worker, request.message_id).catch(logMailboxSyncFailure);
           }
