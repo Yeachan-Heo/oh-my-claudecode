@@ -64,7 +64,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 import { isRuntimeV2Enabled } from './runtime-flags.js';
 import { sanitizeName } from './tmux-session.js';
 import { listTeamWorktrees, getWorktreePath, getBranchName } from './git-worktree.js';
-import { checkMergeConflicts, mergeWorkerBranch, validateBranchName } from './merge-coordinator.js';
+import { checkMergeConflicts, mergeWorkerBranch, validateBranchName, configureHarnessMergeAttributes } from './merge-coordinator.js';
 import { appendToInbox } from './worker-bootstrap.js';
 import { appendToLeaderInbox, ensureLeaderInbox } from './leader-inbox.js';
 import {
@@ -360,6 +360,12 @@ export async function startMergeOrchestrator(
   // Bootstrap merger worktree + leader inbox.
   ensureMergerWorktree(config.repoRoot, mergerPath, config.leaderBranch);
   await ensureLeaderInbox(config.teamName, config.cwd);
+
+  // Stop harness overlay files (AGENTS.md, .claude/**) from blocking the
+  // auto-merge/auto-rebase fan-out on infrastructure unrelated to the task.
+  // Applies across the merger worktree and every worker worktree because they
+  // share the common git dir (#3224).
+  configureHarnessMergeAttributes(config.repoRoot);
 
   // Hydrate from persisted state if present (M6).
   const persistedPath = persistedStatePath(config.repoRoot, config.teamName);

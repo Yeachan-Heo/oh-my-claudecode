@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { checkMergeConflicts, mergeWorkerBranch, mergeAllWorkerBranches } from '../merge-coordinator.js';
+import { checkMergeConflicts, mergeWorkerBranch, mergeAllWorkerBranches, configureHarnessMergeAttributes, HARNESS_MERGE_PATHS } from '../merge-coordinator.js';
 import { createWorkerWorktree, cleanupTeamWorktrees } from '../git-worktree.js';
 
 describe('merge-coordinator', () => {
@@ -136,5 +136,103 @@ describe('merge-coordinator', () => {
       expect(results).toHaveLength(2);
       expect(results.every(r => r.success)).toBe(true);
     });
+  });
+});
+
+describe('harness-file auto-merge (#3224)', () => {
+  let repoDir: string;
+
+  beforeEach(() => {
+    repoDir = mkdtempSync(join(tmpdir(), 'harness-merge-test-'));
+    execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'pipe' });
+    // Base tree with a tracked harness file (AGENTS.md) and a task file.
+    writeFileSync(join(repoDir, 'AGENTS.md'), 'base agents\n');
+    writeFileSync(join(repoDir, 'app.ts'), 'export const x = 1;\n');
+    execFileSync('git', ['add', '.'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repoDir, stdio: 'pipe' });
+  });
+
+  afterEach(() => {
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  function mainBranch(): string {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoDir, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+  }
+
+  function commitAll(cwd: string, message: string): void {
+    execFileSync('git', ['add', '-A'], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', message], { cwd, stdio: 'pipe' });
+  }
+
+  it('configureHarnessMergeAttributes registers the driver and is idempotent', () => {
+    configureHarnessMergeAttributes(repoDir);
+    configureHarnessMergeAttributes(repoDir);
+
+    const driver = execFileSync('git', ['config', '--get', 'merge.ours.driver'], {
+      cwd: repoDir, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+    expect(driver).toBe('true');
+
+    const commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoDir, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+    const attrPath = join(repoDir, commonDir, 'info', 'attributes');
+    const lines = readFileSync(attrPath, 'utf-8').split('\n').filter((l) => l.trim());
+    for (const p of HARNESS_MERGE_PATHS) {
+      // Each harness path appears exactly once despite two calls.
+      expect(lines.filter((l) => l === `${p} merge=ours`)).toHaveLength(1);
+    }
+  });
+
+  it('auto-resolves AGENTS.md conflict so disjoint task work still merges', () => {
+    const main = mainBranch();
+
+    // Worker branch: per-worker AGENTS.md overlay + real disjoint work.
+    execFileSync('git', ['checkout', '-q', '-b', 'wkr'], { cwd: repoDir, stdio: 'pipe' });
+    writeFileSync(join(repoDir, 'AGENTS.md'), 'worker overlay\n');
+    writeFileSync(join(repoDir, 'feature.ts'), 'export const y = 2;\n');
+    commitAll(repoDir, 'worker change');
+
+    // Leader branch independently changed the same harness file (e.g. an
+    // earlier worker already merged its overlay).
+    execFileSync('git', ['checkout', '-q', main], { cwd: repoDir, stdio: 'pipe' });
+    writeFileSync(join(repoDir, 'AGENTS.md'), 'leader overlay\n');
+    commitAll(repoDir, 'leader change');
+
+    // Without the driver this is a hard AGENTS.md conflict.
+    expect(checkMergeConflicts('wkr', main, repoDir)).toContain('AGENTS.md');
+
+    configureHarnessMergeAttributes(repoDir);
+
+    const result = mergeWorkerBranch('wkr', main, repoDir);
+    expect(result.success).toBe(true);
+    expect(result.conflicts).toEqual([]);
+    // The real task work survived the merge.
+    expect(readFileSync(join(repoDir, 'feature.ts'), 'utf-8')).toContain('export const y = 2;');
+    // Harness file kept the leader-side ("ours") content.
+    expect(readFileSync(join(repoDir, 'AGENTS.md'), 'utf-8')).toBe('leader overlay\n');
+  });
+
+  it('still fails on genuine conflicts in task files', () => {
+    const main = mainBranch();
+
+    execFileSync('git', ['checkout', '-q', '-b', 'wkr2'], { cwd: repoDir, stdio: 'pipe' });
+    writeFileSync(join(repoDir, 'app.ts'), 'export const x = 100;\n');
+    commitAll(repoDir, 'worker task change');
+
+    execFileSync('git', ['checkout', '-q', main], { cwd: repoDir, stdio: 'pipe' });
+    writeFileSync(join(repoDir, 'app.ts'), 'export const x = 200;\n');
+    commitAll(repoDir, 'leader task change');
+
+    configureHarnessMergeAttributes(repoDir);
+
+    const result = mergeWorkerBranch('wkr2', main, repoDir);
+    expect(result.success).toBe(false);
+    expect(result.conflicts).toContain('app.ts');
   });
 });
