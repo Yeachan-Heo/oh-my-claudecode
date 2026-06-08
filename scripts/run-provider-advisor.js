@@ -15,7 +15,7 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
 /**
  * Build CLI args for a given provider.
- * - claude: `claude -p <prompt>`
+ * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
  * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
  * - gemini: `gemini -p <prompt> --yolo`
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
@@ -33,19 +33,34 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     // for ACP JSON-RPC, not the prompt, so it never uses the stdin pipe path.
     return ['-p', prompt, '--always-approve'];
   }
-  return ['-p', prompt];
+  // claude: `claude -p` reads the prompt from stdin when no prompt arg is given.
+  return pipePromptViaStdin ? ['-p'] : ['-p', prompt];
 }
 
 function shouldPipePromptViaStdin(provider, prompt) {
-  if (provider !== 'codex' && provider !== 'gemini') {
-    return false;
+  if (provider === 'codex' || provider === 'gemini') {
+    if (typeof prompt === 'string' && (prompt.includes('\n') || prompt.length > 500)) {
+      return true;
+    }
+
+    return SHOULD_USE_WINDOWS_SHELL;
   }
 
-  if (typeof prompt === 'string' && (prompt.includes('\n') || prompt.length > 500)) {
-    return true;
+  // #3221: long/multiline/frontmatter prompts must not be passed to Claude as a
+  // raw argv value. Claude's CLI parses a leading `-`/`--`/`---` (YAML
+  // frontmatter) token as an option and either errors out or drops the prompt.
+  // Route those over stdin (`claude -p` reads the prompt from stdin). Short,
+  // single-line, non-option prompts keep the existing `-p <prompt>` behavior.
+  if (provider === 'claude') {
+    if (typeof prompt !== 'string') {
+      return false;
+    }
+
+    return prompt.includes('\n') || prompt.length > 500 || /^\s*-/.test(prompt);
   }
 
-  return SHOULD_USE_WINDOWS_SHELL;
+  // grok (ACP stdin) and any other provider never pipe the prompt.
+  return false;
 }
 
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
