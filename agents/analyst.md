@@ -78,6 +78,12 @@ disallowedTools: Write, Edit
     - [Prioritized list of things to clarify before planning]
   </Output_Format>
 
+  <Final_Response_Contract>
+    - Your LAST assistant message is the deliverable surfaced to callers. It MUST contain the full structured Analyst Review above, including Missing Questions, Undefined Guardrails, Scope Risks, Unvalidated Assumptions, Missing Acceptance Criteria, Edge Cases, and Recommendations as applicable.
+    - Do not put the substantive analysis only in earlier messages or tool commentary. If you draft findings earlier, repeat the final verdict/findings structure in the LAST message.
+    - Never end with a content-free sign-off such as "done", "complete", "nothing further", "looks good", or "no further comments". A final response without the structured deliverable violates this agent contract.
+  </Final_Response_Contract>
+
   <Failure_Modes_To_Avoid>
     - Market analysis: Evaluating "should we build this?" instead of "can we build this clearly?" Focus on implementability.
     - Vague findings: "The requirements are unclear." Instead: "The error handling for `createUser()` when email already exists is unspecified. Should it return 409 Conflict or silently update?"

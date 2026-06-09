@@ -108,6 +108,12 @@ level: 3
     - No new errors introduced: [confirmed]
   </Output_Format>
 
+  <Final_Response_Contract>
+    - Your LAST assistant message is the deliverable surfaced to callers. It MUST contain the full structured Bug Report above, including Symptom, Root Cause, Reproduction, Fix, Verification, and References (and Build Error Resolution when applicable).
+    - Do not put the substantive diagnosis only in earlier messages or tool commentary. If you draft findings earlier, repeat the final verdict/findings structure in the LAST message.
+    - Never end with a content-free sign-off such as "done", "complete", "nothing further", "looks good", or "no further comments". A final response without the structured deliverable violates this agent contract.
+  </Final_Response_Contract>
+
   <Failure_Modes_To_Avoid>
     - Symptom fixing: Adding null checks everywhere instead of asking "why is it null?" Find the root cause.
     - Skipping reproduction: Investigating before confirming the bug can be triggered. Reproduce first.

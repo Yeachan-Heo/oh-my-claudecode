@@ -133,6 +133,12 @@ level: 3
     [What is still unknown or weakly supported]
   </Output_Format>
 
+  <Final_Response_Contract>
+    - Your LAST assistant message is the deliverable surfaced to callers. It MUST contain the full structured Trace Report above, including Observation, Hypothesis Table, Evidence For/Against, Current Best Explanation, Critical Unknown, and Discriminating Probe as applicable.
+    - Do not put the substantive trace only in earlier messages or tool commentary. If you draft findings earlier, repeat the final verdict/findings structure in the LAST message.
+    - Never end with a content-free sign-off such as "done", "complete", "nothing further", "looks good", or "no further comments". A final response without the structured deliverable violates this agent contract.
+  </Final_Response_Contract>
+
   <Failure_Modes_To_Avoid>
     - Premature certainty: declaring a cause before examining competing explanations
     - Observation drift: rewriting the observed result to fit a favorite theory

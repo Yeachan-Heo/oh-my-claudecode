@@ -3,7 +3,16 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { getAgentDefinitions } from '../agents/definitions.js';
 
-const advisoryAgents = ['architect', 'critic', 'code-reviewer', 'security-reviewer'] as const;
+const advisoryAgents = [
+  'architect',
+  'critic',
+  'code-reviewer',
+  'security-reviewer',
+  'verifier',
+  'analyst',
+  'tracer',
+  'debugger',
+] as const;
 
 const forbiddenSignoffPattern = /(?:done|complete|nothing further|looks good|no further comments)/i;
 
@@ -12,6 +21,10 @@ const requiredMarkers: Record<(typeof advisoryAgents)[number], string[]> = {
   critic: ['<Final_Response_Contract>', '**VERDICT:', '**Critical Findings**', '**Major Findings**', '**Verdict Justification**'],
   'code-reviewer': ['<Final_Response_Contract>', '## Code Review Summary', '### Issues', '### Recommendation'],
   'security-reviewer': ['<Final_Response_Contract>', '# Security Review Report', '**Risk Level:**', '## Security Checklist'],
+  verifier: ['<Final_Response_Contract>', '## Verification Report', '### Verdict', '### Evidence', '### Recommendation'],
+  analyst: ['<Final_Response_Contract>', '## Analyst Review', '### Scope Risks', '### Recommendations'],
+  tracer: ['<Final_Response_Contract>', '## Trace Report', '### Hypothesis Table', '### Discriminating Probe'],
+  debugger: ['<Final_Response_Contract>', '## Bug Report', '## References', '## Build Error Resolution'],
 };
 
 function agentPrompt(name: string): string {
