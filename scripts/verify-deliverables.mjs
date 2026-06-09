@@ -11,13 +11,15 @@
  *   1. .omc/deliverables.json (project-specific overrides)
  *   2. ${CLAUDE_PLUGIN_ROOT}/templates/deliverables.json (OMC defaults)
  *
- * This hook is ADVISORY (non-blocking). It returns additionalContext warnings
- * when deliverables are missing, but never prevents the agent from stopping.
+ * This hook is ADVISORY (non-blocking) and never prevents the agent from
+ * stopping. Because it runs on SubagentStop, it does NOT emit
+ * hookSpecificOutput.additionalContext: that context would be reinjected into
+ * the finishing subagent (the regression fixed in #3209 / #3233). It always
+ * suppresses its own output.
  *
  * Hook output:
- *   - { continue: true, hookSpecificOutput: { additionalContext: "warning" } }
- *     when deliverables are missing
- *   - { continue: true, suppressOutput: true } when all checks pass or on error
+ *   - { continue: true, suppressOutput: true } in all cases (deliverables
+ *     missing, all checks pass, or on error)
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -216,19 +218,12 @@ async function main() {
       return;
     }
 
-    // Build advisory warning
-    const warnings = issues.map(i => `  - ${i.path}: ${i.reason}`).join('\n');
-    const message = `[OMC] Deliverable verification for stage "${stage}":\n` +
-      `${issues.length} issue(s) found:\n${warnings}\n` +
-      `These deliverables may be expected by the next stage.`;
-
-    console.log(JSON.stringify({
-      continue: true,
-      hookSpecificOutput: {
-        hookEventName: 'SubagentStop',
-        additionalContext: message,
-      },
-    }));
+    // Deliverables are missing or incomplete. Do NOT emit
+    // hookSpecificOutput.additionalContext here: this hook runs on
+    // SubagentStop, and additionalContext would be reinjected into the
+    // finishing subagent's context (the regression fixed in #3209 for
+    // subagent-tracker). Suppress output and let the agent stop instead.
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch {
     // On any error, allow the agent to stop (never block on hook failure)
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
