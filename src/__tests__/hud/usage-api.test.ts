@@ -58,6 +58,7 @@ describe('isZaiHost', () => {
   it('accepts subdomains of z.ai', () => {
     expect(isZaiHost('https://api.z.ai')).toBe(true);
     expect(isZaiHost('https://api.z.ai/v1/messages')).toBe(true);
+    expect(isZaiHost('https://api.z.ai/api/anthropic')).toBe(true);
     expect(isZaiHost('https://foo.bar.z.ai')).toBe(true);
   });
 
@@ -778,8 +779,8 @@ describe('getUsage routing', () => {
     expect(result.rateLimits!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
   });
 
-  it('routes to z.ai when ANTHROPIC_BASE_URL is z.ai host', async () => {
-    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+  it('routes z.ai Anthropic Messages endpoint to the quota API', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/api/anthropic';
     process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
 
     // https.request mock not wired, so fetchUsageFromZai resolves to null (network error)
