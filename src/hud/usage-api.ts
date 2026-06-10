@@ -69,6 +69,8 @@ interface OAuthCredentials {
   refreshToken?: string;
   /** Where the credentials were read from, needed for write-back */
   source?: 'keychain' | 'file';
+  /** Keychain account name used when reading (null = service-only lookup) */
+  keychainAccount?: string | null;
   /** Subscription type from OAuth credentials (e.g. 'enterprise') */
   subscriptionType?: string;
   /** Rate limit tier from OAuth credentials (e.g. 'default_claude_zero') */
@@ -466,6 +468,7 @@ function readKeychainCredential(serviceName: string, account?: string): OAuthCre
       expiresAt: creds.expiresAt,
       refreshToken: creds.refreshToken,
       source: 'keychain' as const,
+      keychainAccount: account ?? null,
       subscriptionType: creds.subscriptionType,
       rateLimitTier: creds.rateLimitTier,
     };
@@ -766,11 +769,75 @@ function fetchUsageFromZai(): Promise<FetchResult<ZaiQuotaResponse>> {
 }
 
 /**
- * Persist refreshed credentials back to the file-based credential store.
- * Keychain write-back is not supported (read-only for HUD).
- * Updates only the claudeAiOauth fields, preserving other data.
+ * Persist refreshed credentials back to the Keychain.
+ * Reads the existing Keychain entry, merges the updated fields, and writes it back.
+ */
+function writeKeychainCredentials(creds: OAuthCredentials): void {
+  if (process.platform !== 'darwin') return;
+  try {
+    const serviceName = getKeychainServiceName();
+    const account = creds.keychainAccount ?? undefined;
+
+    // Read the existing Keychain entry to preserve any extra fields
+    const readArgs = account
+      ? ['find-generic-password', '-s', serviceName, '-a', account, '-w']
+      : ['find-generic-password', '-s', serviceName, '-w'];
+
+    let existing: Record<string, unknown> = {};
+    try {
+      const raw = execFileSync('/usr/bin/security', readArgs, {
+        encoding: 'utf-8',
+        timeout: 2000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // If we can't read it, we'll write a fresh entry
+    }
+
+    // Merge into the correct structure
+    if (existing.claudeAiOauth && typeof existing.claudeAiOauth === 'object') {
+      const inner = existing.claudeAiOauth as Record<string, unknown>;
+      inner.accessToken = creds.accessToken;
+      if (creds.expiresAt != null) inner.expiresAt = creds.expiresAt;
+      if (creds.refreshToken) inner.refreshToken = creds.refreshToken;
+    } else {
+      // Flat structure or empty
+      (existing as Record<string, unknown>).accessToken = creds.accessToken;
+      if (creds.expiresAt != null) (existing as Record<string, unknown>).expiresAt = creds.expiresAt;
+      if (creds.refreshToken) (existing as Record<string, unknown>).refreshToken = creds.refreshToken;
+    }
+
+    const newJson = JSON.stringify(existing);
+    const writeArgs = account
+      ? ['add-generic-password', '-s', serviceName, '-a', account, '-w', newJson, '-U']
+      : ['add-generic-password', '-s', serviceName, '-w', newJson, '-U'];
+
+    execFileSync('/usr/bin/security', writeArgs, {
+      encoding: 'utf-8',
+      timeout: 2000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    // Silent failure - Keychain write-back is best-effort
+    if (process.env.OMC_DEBUG) {
+      console.error('[usage-api] Failed to write back refreshed credentials to Keychain');
+    }
+  }
+}
+
+/**
+ * Persist refreshed credentials back to the credential store.
+ * When the credentials originated from Keychain, writes back to Keychain.
+ * When they originated from file, updates ~/.claude/.credentials.json.
+ * Updates only the OAuth token fields, preserving other data.
  */
 function writeBackCredentials(creds: OAuthCredentials): void {
+  if (creds.source === 'keychain') {
+    writeKeychainCredentials(creds);
+    return;
+  }
+
   try {
     const credPath = join(getClaudeConfigDir(), '.credentials.json');
     if (!existsSync(credPath)) return;
