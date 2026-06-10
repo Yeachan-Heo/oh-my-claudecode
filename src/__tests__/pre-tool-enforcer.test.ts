@@ -2151,3 +2151,115 @@ describe('pre-tool-enforcer force-agent-delegation enforcement', () => {
     expect(String(hookOutput.permissionDecisionReason)).toContain('Investigation budget');
   });
 });
+
+describe('pre-tool-enforcer agents.<name>.model injection (issue #3242)', () => {
+  let tempDir: string;
+  let xdgConfigHome: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-enforcer-agent-model-'));
+    xdgConfigHome = join(tempDir, 'xdg-config');
+    mkdirSync(join(xdgConfigHome, 'claude-omc'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeUserConfig(jsonc: string): void {
+    writeFileSync(join(xdgConfigHome, 'claude-omc', 'config.jsonc'), jsonc);
+  }
+
+  function writeProjectConfig(jsonc: string): void {
+    const dir = join(tempDir, '.claude');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'omc.jsonc'), jsonc);
+  }
+
+  function run(input: Record<string, unknown>, env: Record<string, string> = {}): Record<string, unknown> {
+    return runPreToolEnforcerWithEnv(
+      { cwd: tempDir, ...input },
+      { XDG_CONFIG_HOME: xdgConfigHome, OMC_ROUTING_FORCE_INHERIT: 'false', ...env },
+    );
+  }
+
+  function updatedModel(output: Record<string, unknown>): unknown {
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown> | undefined;
+    const updatedInput = hookOutput?.updatedInput as Record<string, unknown> | undefined;
+    return updatedInput?.model;
+  }
+
+  it('injects configured model via updatedInput for native Task calls without a model param', () => {
+    writeUserConfig('{ "agents": { "explore": { "model": "sonnet" } } }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:explore', prompt: 'x', description: 'find files' },
+      session_id: 'session-3242-inject',
+    });
+    expect(updatedModel(output)).toBe('sonnet');
+  });
+
+  it('does not inject when no per-agent override is configured', () => {
+    writeUserConfig('{ "agents": {} }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:architect', prompt: 'x', description: 'design' },
+      session_id: 'session-3242-noop',
+    });
+    expect(updatedModel(output)).toBeUndefined();
+  });
+
+  it('preserves an explicit model param and does not inject', () => {
+    writeUserConfig('{ "agents": { "explore": { "model": "sonnet" } } }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:explore', model: 'opus', prompt: 'x', description: 'd' },
+      session_id: 'session-3242-explicit',
+    });
+    expect(updatedModel(output)).toBeUndefined();
+  });
+
+  it('normalizes full Claude model IDs to a CC tier alias', () => {
+    writeUserConfig('{ "agents": { "executor": { "model": "claude-opus-4-6" } } }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:executor', prompt: 'x', description: 'd' },
+      session_id: 'session-3242-normalize',
+    });
+    expect(updatedModel(output)).toBe('opus');
+  });
+
+  it('lets project config override user config', () => {
+    writeUserConfig('{ "agents": { "explore": { "model": "haiku" } } }');
+    writeProjectConfig('{ "agents": { "explore": { "model": "sonnet" } } }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:explore', prompt: 'x', description: 'd' },
+      session_id: 'session-3242-precedence',
+    });
+    expect(updatedModel(output)).toBe('sonnet');
+  });
+
+  it('resolves deprecated subagent aliases to the canonical config key', () => {
+    writeUserConfig('{ "agents": { "codeReviewer": { "model": "opus" } } }');
+    const output = run({
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:reviewer', prompt: 'x', description: 'd' },
+      session_id: 'session-3242-alias',
+    });
+    expect(updatedModel(output)).toBe('opus');
+  });
+
+  it('does not inject under forceInherit even when an override is configured', () => {
+    writeUserConfig('{ "agents": { "explore": { "model": "sonnet" } } }');
+    const output = run(
+      {
+        tool_name: 'Task',
+        toolInput: { subagent_type: 'oh-my-claudecode:explore', prompt: 'x', description: 'd' },
+        session_id: 'session-3242-force-inherit',
+      },
+      { OMC_ROUTING_FORCE_INHERIT: 'true' },
+    );
+    expect(updatedModel(output)).toBeUndefined();
+  });
+});

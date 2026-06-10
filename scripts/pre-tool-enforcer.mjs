@@ -17,6 +17,7 @@ import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.m
 import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
+import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -1245,6 +1246,10 @@ async function main() {
 
     const modeActive = hasActiveMode(stateDir, sessionId);
 
+    // When set, replaces the Task/Agent tool input via hookSpecificOutput.updatedInput
+    // so a configured per-agent model (agents.<name>.model) is applied (issue #3242).
+    let updatedToolInput = null;
+
     // Force-inherit check: deny Task/Agent calls with invalid model param when forceInherit is
     // enabled (Bedrock, Vertex, CC Switch, etc.) - issues #1135, #1201, #1767, #1868
     //
@@ -1344,6 +1349,19 @@ async function main() {
         }
         // else: no model param and no [1m] on session model → normal forceInherit,
         // agents inherit the parent session's model cleanly.
+      } else if (!toolModel && toolInput.subagent_type) {
+        // Non-forceInherit: honor agents.<name>.model from config.jsonc for native
+        // Task/Agent calls without an explicit model param. Without this, Claude Code
+        // reads the static agents/*.md frontmatter and silently ignores the user's
+        // per-agent override (issue #3242). Inject the resolved tier alias via
+        // updatedInput so the spawned subagent runs on the configured model.
+        const configuredModel = resolveConfiguredAgentModel(toolInput.subagent_type, directory);
+        if (configuredModel && configuredModel !== 'inherit') {
+          const normalizedModel = normalizeToCcAlias(configuredModel);
+          if (normalizedModel) {
+            updatedToolInput = { ...toolInput, model: normalizedModel };
+          }
+        }
       }
     }
 
@@ -1421,19 +1439,34 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || null;
-      message = generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId);
+      // Reflect any injected per-agent model (issue #3242) in the advisory label.
+      message = generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, todoStatus, sessionId);
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }
     message = combineHookMessages(slopWarning, message);
 
+    // Carry any per-agent model injection (issue #3242) even when the advisory
+    // message is empty or throttled, so the configured model is always applied.
+    const modelInjection = updatedToolInput
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: updatedToolInput } }
+      : null;
+
     if (!message) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      console.log(JSON.stringify(
+        modelInjection
+          ? { continue: true, suppressOutput: true, ...modelInjection }
+          : { continue: true, suppressOutput: true }
+      ));
       return;
     }
 
     if (!shouldEmitAdvisoryMessage(stateDir, sessionId, message)) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      console.log(JSON.stringify(
+        modelInjection
+          ? { continue: true, suppressOutput: true, ...modelInjection }
+          : { continue: true, suppressOutput: true }
+      ));
       return;
     }
 
@@ -1441,7 +1474,8 @@ async function main() {
       continue: true,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        additionalContext: message
+        additionalContext: message,
+        ...(updatedToolInput ? { updatedInput: updatedToolInput } : {})
       }
     }, null, 2));
   } catch (error) {
