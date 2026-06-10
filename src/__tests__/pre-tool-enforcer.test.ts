@@ -2262,4 +2262,29 @@ describe('pre-tool-enforcer agents.<name>.model injection (issue #3242)', () => 
     );
     expect(updatedModel(output)).toBeUndefined();
   });
+
+  it('still injects the configured model when the advisory message is throttled (suppressOutput)', () => {
+    writeUserConfig('{ "agents": { "explore": { "model": "sonnet" } } }');
+    const input = {
+      tool_name: 'Task',
+      toolInput: { subagent_type: 'oh-my-claudecode:explore', prompt: 'x', description: 'find files' },
+      session_id: 'session-3242-throttle',
+    };
+    // Pin the throttle clock so the second identical call lands inside the cooldown
+    // window and is advisory-throttled.
+    const throttleEnv = {
+      OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: '5000',
+      OMC_PRE_TOOL_ADVISORY_NOW_MS: '1000',
+    };
+
+    const first = run(input, throttleEnv);
+    const throttled = run(input, throttleEnv);
+
+    // First call: advisory emitted alongside the injection.
+    expect(updatedModel(first)).toBe('sonnet');
+    // Second identical call: advisory suppressed, but the model injection MUST survive.
+    expect(throttled.suppressOutput).toBe(true);
+    expect(throttled.hookSpecificOutput).toBeDefined();
+    expect(updatedModel(throttled)).toBe('sonnet');
+  });
 });
