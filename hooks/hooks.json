@@ -198,12 +198,14 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/session-end.mjs",
-            "timeout": 30
+            "timeout": 30,
+            "async": true
           },
           {
             "type": "command",
             "command": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/wiki-session-end.mjs",
-            "timeout": 30
+            "timeout": 30,
+            "async": true
           }
         ]
       }
