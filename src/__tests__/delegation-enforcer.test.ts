@@ -71,6 +71,20 @@ describe('delegation-enforcer', () => {
       expect(result.modifiedInput.model).toBe('sonnet');
     });
 
+    it('normalizes claude-fable-5 to the fable tier alias (issue #3246)', () => {
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'oh-my-claudecode:executor',
+        model: 'claude-fable-5'
+      };
+
+      const result = enforceModel(input);
+
+      expect(result.injected).toBe(false);
+      expect(result.modifiedInput.model).toBe('fable');
+    });
+
     it('preserves explicit provider-specific Bedrock model ID', () => {
       const input: AgentInput = {
         description: 'Test task',

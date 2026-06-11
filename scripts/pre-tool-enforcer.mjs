@@ -80,7 +80,7 @@ function acceptsProxyAnthropicDefaultTierValue(key, value) {
     && !isBedrockProviderEnv()
     && !isVertexProviderEnv();
 }
-const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
+const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable']);
 function isTierAlias(modelId) {
   return TIER_ALIASES.has((modelId || '').toLowerCase());
 }
@@ -96,6 +96,7 @@ const TIER_TO_DEFAULT_ENV_KEYS = {
   haiku:  ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL',  'ANTHROPIC_DEFAULT_HAIKU_MODEL'],
   sonnet: ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'],
   opus:   ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL',   'ANTHROPIC_DEFAULT_OPUS_MODEL'],
+  fable:  ['OMC_SUBAGENT_MODEL', 'CLAUDE_CODE_BEDROCK_FABLE_MODEL',  'ANTHROPIC_DEFAULT_FABLE_MODEL'],
 };
 function resolveTierAliasToSafeModel(tierAlias) {
   const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
@@ -113,13 +114,14 @@ function resolveTierAliasToSafeModel(tierAlias) {
   }
   return '';
 }
-/** Map a bare Anthropic model ID to its CC tier alias (sonnet/opus/haiku), or null if unrecognised. */
+/** Map a bare Anthropic model ID to its CC tier alias (sonnet/opus/haiku/fable), or null if unrecognised. */
 function normalizeToCcAlias(model) {
   if (!model) return null;
   const lower = model.toLowerCase();
   if (lower.includes('opus'))   return 'opus';
   if (lower.includes('sonnet')) return 'sonnet';
   if (lower.includes('haiku'))  return 'haiku';
+  if (lower.includes('fable'))  return 'fable';
   return null;
 }
 /**
