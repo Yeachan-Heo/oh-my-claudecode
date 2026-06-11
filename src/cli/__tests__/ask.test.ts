@@ -108,6 +108,7 @@ function writeAdvisorStub(dir: string): string {
       '  prompt: process.argv[3],',
       '  originalTask: process.env.OMC_ASK_ORIGINAL_TASK ?? null,',
       '  passthrough: process.env.ASK_WRAPPER_TOKEN ?? null,',
+      '  reasoningEffort: process.env.OMC_ASK_REASONING_EFFORT ?? null,',
       '};',
       'process.stdout.write(JSON.stringify(payload));',
       'if (process.env.ASK_STUB_STDERR) process.stderr.write(process.env.ASK_STUB_STDERR);',
@@ -293,6 +294,33 @@ describe('parseAskArgs', () => {
   it('rejects unsupported provider matrix', () => {
     expect(() => parseAskArgs(['openai', 'hi'])).toThrow(/Invalid provider/i);
   });
+
+  it('parses --effort flag and equals syntax (case-insensitive)', () => {
+    expect(parseAskArgs(['codex', '--effort', 'xhigh', 'review', 'this'])).toEqual({
+      provider: 'codex',
+      prompt: 'review this',
+      reasoningEffort: 'xhigh',
+    });
+
+    expect(parseAskArgs(['codex', '--effort=HIGH', '--prompt', 'audit it'])).toEqual({
+      provider: 'codex',
+      prompt: 'audit it',
+      reasoningEffort: 'high',
+    });
+
+    expect(parseAskArgs(['codex', '--agent-prompt', 'critic', '--effort', 'xhigh', '--prompt', 'judge'])).toEqual({
+      provider: 'codex',
+      prompt: 'judge',
+      agentPromptRole: 'critic',
+      reasoningEffort: 'xhigh',
+    });
+  });
+
+  it('rejects invalid or missing --effort levels', () => {
+    expect(() => parseAskArgs(['codex', '--effort', 'turbo', 'go'])).toThrow(/Invalid --effort/i);
+    expect(() => parseAskArgs(['codex', '--effort=', 'go'])).toThrow(/Missing level after --effort/i);
+    expect(() => parseAskArgs(['codex', '--effort', '--prompt', 'go'])).toThrow(/Missing level after --effort/i);
+  });
 });
 
 describe('omc ask command', () => {
@@ -316,6 +344,7 @@ describe('omc ask command', () => {
         prompt: 'hello world',
         originalTask: 'hello world',
         passthrough: null,
+        reasoningEffort: null,
       });
     } finally {
       rmSync(wd, { recursive: true, force: true });
@@ -370,6 +399,7 @@ describe('omc ask command', () => {
         prompt: 'cli nested codex prompt',
         originalTask: 'cli nested codex prompt',
         passthrough: null,
+        reasoningEffort: null,
       });
     } finally {
       rmSync(wd, { recursive: true, force: true });
@@ -426,6 +456,28 @@ describe('omc ask command', () => {
       expect(payload.originalTask).toBe('ship feature');
       expect(payload.prompt).toContain('ROLE HEADER');
       expect(payload.prompt).toContain('ship feature');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards --effort to the advisor as OMC_ASK_REASONING_EFFORT', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-effort-forward-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runCli(
+        ['ask', 'codex', '--effort', 'xhigh', '--prompt', 'judge the plan'],
+        wd,
+        { OMC_ASK_ADVISOR_SCRIPT: stubPath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload.provider).toBe('codex');
+      expect(payload.prompt).toBe('judge the plan');
+      expect(payload.reasoningEffort).toBe('xhigh');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
@@ -594,6 +646,74 @@ describe('run-provider-advisor script contract', () => {
       expect(artifact).toContain('CODEX_OK');
       expect(artifact).not.toContain('RUST_LEAK');
       expect(artifact).not.toContain('trace');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('injects -c model_reasoning_effort=<level> for codex when OMC_ASK_REASONING_EFFORT is set', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-effort-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', 'short prompt'],
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          OMC_ASK_REASONING_EFFORT: 'xhigh',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+      }>;
+
+      const launch = calls.find((c) => c.args[0] === 'exec');
+      expect(launch).toBeDefined();
+      expect(launch!.args).toEqual([
+        'exec',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'model_reasoning_effort=xhigh',
+        'short prompt',
+      ]);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores an invalid OMC_ASK_REASONING_EFFORT instead of injecting it', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-effort-invalid-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', 'short prompt'],
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          OMC_ASK_REASONING_EFFORT: 'turbo; rm -rf /',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+      }>;
+
+      const launch = calls.find((c) => c.args[0] === 'exec');
+      expect(launch).toBeDefined();
+      expect(launch!.args).toEqual(['exec', '--dangerously-bypass-approvals-and-sandbox', 'short prompt']);
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

@@ -13,17 +13,36 @@ const PROVIDER_BINARIES = {
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
+const ASK_REASONING_EFFORT_ENV = 'OMC_ASK_REASONING_EFFORT';
+// Codex `model_reasoning_effort` levels. Also an injection allowlist, since the
+// value is interpolated into a `-c model_reasoning_effort=<level>` arg.
+const VALID_REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
+function resolveReasoningEffort(env = process.env) {
+  const raw = env[ASK_REASONING_EFFORT_ENV];
+  if (!raw) {
+    return null;
+  }
+  const level = raw.trim().toLowerCase();
+  return VALID_REASONING_EFFORTS.has(level) ? level : null;
+}
+
 /**
  * Build CLI args for a given provider.
  * - claude: `claude -p <prompt>`
- * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
+ * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox [-c model_reasoning_effort=<level>] <prompt>`
  * - gemini: `gemini -p <prompt> --yolo`
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
  */
-function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
+function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false, reasoningEffort = null } = {}) {
   if (provider === 'codex') {
-    return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
+    const args = ['exec', '--dangerously-bypass-approvals-and-sandbox'];
+    if (reasoningEffort) {
+      args.push('-c', `model_reasoning_effort=${reasoningEffort}`);
+    }
+    args.push(pipePromptViaStdin ? '-' : prompt);
+    return args;
   }
   if (provider === 'gemini') {
     return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
@@ -53,6 +72,7 @@ const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
   console.error('Usage: omc ask <claude|codex|gemini|grok> "<prompt>"');
+  console.error('Codex reasoning effort: set OMC_ASK_REASONING_EFFORT=<minimal|low|medium|high|xhigh> (via `omc ask codex --effort <level>`)');
   console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|grok> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
@@ -238,7 +258,8 @@ async function main() {
   ensureBinary(provider, binary);
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
-  const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
+  const reasoningEffort = resolveReasoningEffort();
+  const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin, reasoningEffort });
   const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,

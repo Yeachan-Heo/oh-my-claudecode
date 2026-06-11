@@ -13,6 +13,7 @@ export const ASK_USAGE = [
   '   or: omc ask <claude|codex|gemini|grok> --prompt "<prompt>"',
   '   or: omc ask <claude|codex|gemini|grok> --agent-prompt <role> "<prompt>"',
   '   or: omc ask <claude|codex|gemini|grok> --agent-prompt=<role> --prompt "<prompt>"',
+  '   or: omc ask codex --effort <minimal|low|medium|high|xhigh> "<prompt>"',
 ].join('\n');
 
 const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'grok'] as const;
@@ -20,15 +21,22 @@ export type AskProvider = (typeof ASK_PROVIDERS)[number];
 const ASK_PROVIDER_SET = new Set<string>(ASK_PROVIDERS);
 
 const ASK_AGENT_PROMPT_FLAG = '--agent-prompt';
+const ASK_EFFORT_FLAG = '--effort';
 const SAFE_ROLE_PATTERN = /^[a-z][a-z0-9-]*$/;
+// Codex `model_reasoning_effort` levels. Doubles as an injection allowlist:
+// the value is interpolated into a `-c model_reasoning_effort=<level>` arg.
+const VALID_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+const VALID_REASONING_EFFORT_SET = new Set<string>(VALID_REASONING_EFFORTS);
 const ASK_ADVISOR_SCRIPT_ENV = 'OMC_ASK_ADVISOR_SCRIPT';
 const ASK_ADVISOR_SCRIPT_ENV_ALIAS = 'OMX_ASK_ADVISOR_SCRIPT';
 const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
+const ASK_REASONING_EFFORT_ENV = 'OMC_ASK_REASONING_EFFORT';
 
 export interface ParsedAskArgs {
   provider: AskProvider;
   prompt: string;
   agentPromptRole?: string;
+  reasoningEffort?: string;
 }
 
 function askUsageError(reason: string): Error {
@@ -37,6 +45,16 @@ function askUsageError(reason: string): Error {
 
 function warnDeprecatedAlias(alias: string, canonical: string): void {
   process.stderr.write(`[ask] DEPRECATED: ${alias} is deprecated; use ${canonical} instead.\n`);
+}
+
+function normalizeReasoningEffort(raw: string): string {
+  const level = raw.trim().toLowerCase();
+  if (!VALID_REASONING_EFFORT_SET.has(level)) {
+    throw askUsageError(
+      `Invalid --effort "${raw}". Expected one of: ${VALID_REASONING_EFFORTS.join(', ')}.`,
+    );
+  }
+  return level;
 }
 
 function getPackageRoot(): string {
@@ -131,6 +149,7 @@ export function parseAskArgs(args: readonly string[]): ParsedAskArgs {
   }
 
   let agentPromptRole: string | undefined;
+  let reasoningEffort: string | undefined;
   let prompt = '';
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -151,6 +170,25 @@ export function parseAskArgs(args: readonly string[]): ParsedAskArgs {
         throw askUsageError('Missing role after --agent-prompt=');
       }
       agentPromptRole = role;
+      continue;
+    }
+
+    if (token === ASK_EFFORT_FLAG) {
+      const level = rest[i + 1]?.trim();
+      if (!level || level.startsWith('-')) {
+        throw askUsageError('Missing level after --effort.');
+      }
+      reasoningEffort = normalizeReasoningEffort(level);
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith(`${ASK_EFFORT_FLAG}=`)) {
+      const level = token.slice(`${ASK_EFFORT_FLAG}=`.length).trim();
+      if (!level) {
+        throw askUsageError('Missing level after --effort=');
+      }
+      reasoningEffort = normalizeReasoningEffort(level);
       continue;
     }
 
@@ -177,6 +215,7 @@ export function parseAskArgs(args: readonly string[]): ParsedAskArgs {
     provider: provider as AskProvider,
     prompt,
     ...(agentPromptRole ? { agentPromptRole } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
@@ -241,6 +280,7 @@ export async function askCommand(args: string[]): Promise<void> {
       env: {
         ...process.env,
         [ASK_ORIGINAL_TASK_ENV]: parsed.prompt,
+        ...(parsed.reasoningEffort ? { [ASK_REASONING_EFFORT_ENV]: parsed.reasoningEffort } : {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
