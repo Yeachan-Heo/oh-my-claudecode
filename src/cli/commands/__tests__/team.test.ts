@@ -444,6 +444,29 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.task).toBe('fix tests');
   });
 
+  it('parses single-type spec 3:cursor into uniform agentTypes', () => {
+    const parsed = parseTeamArgs(['3:cursor', 'apply implementation']);
+    expect(parsed.workerCount).toBe(3);
+    expect(parsed.agentTypes).toEqual(['cursor', 'cursor', 'cursor']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'cursor' },
+      { agentType: 'cursor' },
+      { agentType: 'cursor' },
+    ]);
+    expect(parsed.task).toBe('apply implementation');
+  });
+
+  it('supports cursor in mixed explicit cli specs', () => {
+    const parsed = parseTeamArgs(['1:cursor,1:codex', 'compare edits']);
+    expect(parsed.workerCount).toBe(2);
+    expect(parsed.agentTypes).toEqual(['cursor', 'codex']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'cursor' },
+      { agentType: 'codex' },
+    ]);
+    expect(parsed.task).toBe('compare edits');
+  });
+
   it('defaults to 3 claude workers when no spec is given', () => {
     const parsed = parseTeamArgs(['run all tests']);
     expect(parsed.workerCount).toBe(3);
@@ -452,12 +475,12 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
   });
 
   it('uses configured CLI provider default when it is supported', () => {
-    const parsed = parseTeamArgs(['run all tests'], 'codex');
-    expect(parsed.agentTypes).toEqual(['codex', 'codex', 'codex']);
+    const parsed = parseTeamArgs(['run all tests'], 'cursor');
+    expect(parsed.agentTypes).toEqual(['cursor', 'cursor', 'cursor']);
     expect(parsed.workerSpecs).toEqual([
-      { agentType: 'codex' },
-      { agentType: 'codex' },
-      { agentType: 'codex' },
+      { agentType: 'cursor' },
+      { agentType: 'cursor' },
+      { agentType: 'cursor' },
     ]);
   });
 

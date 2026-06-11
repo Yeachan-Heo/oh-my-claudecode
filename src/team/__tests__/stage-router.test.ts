@@ -20,7 +20,7 @@ const ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ];
 
-let savedEnv: Record<string, string | undefined> = {};
+const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(() => {
   for (const key of ENV_KEYS) {
@@ -111,6 +111,17 @@ describe('stage-router resolveRoleAssignment', () => {
       expect(out.provider).toBe('grok');
       expect(out.model).toBe('grok-4-fast');
       expect(out.agent).toBe('critic');
+    });
+
+    it('respects provider=cursor and resolves to empty model (cursor-agent owns model selection)', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { executor: { provider: 'cursor' } } },
+      };
+      const out = resolveRoleAssignment('executor', cfg);
+      expect(out.provider).toBe('cursor');
+      expect(out.model).toBe('');
+      expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
+      expect(out.agent).toBe('executor');
     });
 
     it('grok resolves configured externalModels.defaults.grokModel when model omitted', () => {

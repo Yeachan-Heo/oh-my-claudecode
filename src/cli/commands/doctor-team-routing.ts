@@ -25,6 +25,7 @@ const PROVIDER_BINARY: Record<TeamRoleProvider, string> = {
   codex: 'codex',
   gemini: 'gemini',
   grok: 'grok',
+  cursor: 'cursor-agent',
 };
 
 function probeProvider(provider: TeamRoleProvider): ProviderProbe {
@@ -62,7 +63,7 @@ function collectConfiguredProviders(): Set<TeamRoleProvider> {
   const roleRouting = cfg.team?.roleRouting ?? {};
   for (const spec of Object.values(roleRouting)) {
     const provider = spec?.provider as TeamRoleProvider | undefined;
-    if (provider === 'claude' || provider === 'codex' || provider === 'gemini' || provider === 'grok') {
+    if (provider === 'claude' || provider === 'codex' || provider === 'gemini' || provider === 'grok' || provider === 'cursor') {
       providers.add(provider);
     }
   }

@@ -6,14 +6,14 @@ import { basename, dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 export const ASK_USAGE = [
-    'Usage: omc ask <claude|codex|gemini|grok> <question or task>',
-    '   or: omc ask <claude|codex|gemini|grok> -p "<prompt>"',
-    '   or: omc ask <claude|codex|gemini|grok> --print "<prompt>"',
-    '   or: omc ask <claude|codex|gemini|grok> --prompt "<prompt>"',
-    '   or: omc ask <claude|codex|gemini|grok> --agent-prompt <role> "<prompt>"',
-    '   or: omc ask <claude|codex|gemini|grok> --agent-prompt=<role> --prompt "<prompt>"',
+    'Usage: omc ask <claude|codex|gemini|grok|cursor> <question or task>',
+    '   or: omc ask <claude|codex|gemini|grok|cursor> -p "<prompt>"',
+    '   or: omc ask <claude|codex|gemini|grok|cursor> --print "<prompt>"',
+    '   or: omc ask <claude|codex|gemini|grok|cursor> --prompt "<prompt>"',
+    '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt <role> "<prompt>"',
+    '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"',
 ].join('\n');
-const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'grok'];
+const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'grok', 'cursor'];
 const ASK_PROVIDER_SET = new Set(ASK_PROVIDERS);
 const ASK_AGENT_PROMPT_FLAG = '--agent-prompt';
 const SAFE_ROLE_PATTERN = /^[a-z][a-z0-9-]*$/;

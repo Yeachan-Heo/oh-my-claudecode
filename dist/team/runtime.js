@@ -347,7 +347,7 @@ export async function monitorTeam(teamName, cwd, workerPaneIds) {
         workers.push(status);
         if (!alive)
             deadWorkers.push(wName);
-        // Note: CLI workers (codex/gemini/grok) may not write heartbeat.json — stall is advisory only
+        // Note: CLI workers (codex/gemini/grok/cursor) may not write heartbeat.json — stall is advisory only
     }
     const workerScanMs = Date.now() - workerScanStartedAt;
     // Infer phase from task counts
@@ -572,6 +572,9 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
                 || process.env.OMC_GROK_DEFAULT_MODEL
                 || undefined;
         }
+        if (agentType === 'cursor') {
+            return undefined;
+        }
         // Claude agents: resolve Bedrock/Vertex model when on those providers
         return resolveClaudeWorkerModel();
     })();
@@ -714,11 +717,11 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
         teamName,
     });
     const configData = await readJsonSafe(join(root, 'config.json'));
-    // CLI workers (claude/codex/gemini/grok tmux pane processes) never write shutdown-ack.json.
+    // CLI workers (claude/codex/gemini/grok/cursor tmux pane processes) never write shutdown-ack.json.
     // Polling for ACK files on CLI worker teams wastes the full timeoutMs on every shutdown.
     // Detect CLI worker teams by checking if all agent types are known CLI types, and skip
     // ACK polling — the tmux kill below handles process cleanup instead.
-    const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok']);
+    const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor']);
     const agentTypes = configData?.agentTypes ?? [];
     const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every(t => CLI_AGENT_TYPES.has(t));
     if (!isCliWorkerTeam) {

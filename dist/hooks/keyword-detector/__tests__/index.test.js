@@ -778,6 +778,28 @@ This article argues that fake popularity signals damage trust in open source.`;
                 expect(geminiMatch).toBeUndefined();
             });
         });
+        describe('cursor keyword', () => {
+            it('should detect "ask cursor"', () => {
+                const result = detectKeywordsWithType('ask cursor to implement');
+                const cursorMatch = result.find((r) => r.type === 'cursor');
+                expect(cursorMatch).toBeDefined();
+            });
+            it('should detect "use cursor"', () => {
+                const result = detectKeywordsWithType('use cursor for edits');
+                const cursorMatch = result.find((r) => r.type === 'cursor');
+                expect(cursorMatch).toBeDefined();
+            });
+            it('should detect "delegate to cursor"', () => {
+                const result = detectKeywordsWithType('delegate to cursor');
+                const cursorMatch = result.find((r) => r.type === 'cursor');
+                expect(cursorMatch).toBeDefined();
+            });
+            it('should NOT detect bare cursor keyword', () => {
+                const result = detectKeywordsWithType('move the cursor there');
+                const cursorMatch = result.find((r) => r.type === 'cursor');
+                expect(cursorMatch).toBeUndefined();
+            });
+        });
         describe('sanitization false-positive prevention', () => {
             it('should NOT detect codex in URL', () => {
                 const result = detectKeywordsWithType('see https://example.com/gpt');

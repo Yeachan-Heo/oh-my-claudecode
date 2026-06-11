@@ -90,7 +90,7 @@ export interface McpWorkerMember {
 export interface HeartbeatData {
     workerName: string;
     teamName: string;
-    provider: 'codex' | 'gemini' | 'claude';
+    provider: 'codex' | 'gemini' | 'claude' | 'cursor' | 'grok';
     pid: number;
     lastPollAt: string;
     currentTaskId?: string;
@@ -245,7 +245,7 @@ export interface WorkerInfo {
     team_state_root?: string;
     /**
      * Verdict-output file path for CLI-worker output contract (AC-7).
-     * Set when the worker was spawned for a reviewer role on codex/gemini.
+     * Set when the worker was spawned for a reviewer role on codex/gemini/grok.
      * Consumed by the worker-completion handler in runtime-v2.
      */
     output_file?: string;

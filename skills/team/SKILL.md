@@ -923,7 +923,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
 ```
 
 - **ops.maxAgents** - Maximum teammates (default: 20)
-- **ops.defaultAgentType** - CLI provider when a `/team` invocation does not specify one (`claude` | `codex` | `gemini`, default: `claude`)
+- **ops.defaultAgentType** - CLI provider when a `/team` invocation does not specify one (`claude` | `codex` | `gemini` | `grok` | `cursor`, default: `claude`)
 - **ops.monitorIntervalMs** - How often to poll `TaskList` (default: 30s)
 - **ops.shutdownTimeoutMs** - How long to wait for shutdown responses (default: 15s)
 
@@ -933,7 +933,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
 
 > **Scope:** Applies to `/team` only. Task-based delegation uses `delegationRouting` (see separate docs). The two systems coexist by design.
 
-Declare which provider (`claude`, `codex`, `gemini`) and which model tier should back each canonical role. Routing is resolved **once** at team creation and persisted in `TeamConfig.resolved_routing` — spawn, scale-up, and restart all read from the snapshot, so a role's worker CLI and model are stable for the lifetime of the team.
+Declare which provider (`claude`, `codex`, `gemini`, `grok`, `cursor`) and which model tier should back each canonical role. Routing is resolved **once** at team creation and persisted in `TeamConfig.resolved_routing` — spawn, scale-up, and restart all read from the snapshot, so a role's worker CLI and model are stable for the lifetime of the team.
 
 ### Example — user target mapping
 
@@ -946,6 +946,7 @@ Declare which provider (`claude`, `codex`, `gemini`) and which model tier should
       "planner": { "provider": "claude", "model": "HIGH" },
       "analyst": { "provider": "claude", "model": "HIGH" },
       "executor": { "provider": "claude", "model": "MEDIUM" },
+      "debugger": { "provider": "cursor" },
       "critic": { "provider": "codex" },
       "code-reviewer": { "provider": "gemini" },
       "test-engineer": { "provider": "gemini", "model": "MEDIUM" },
@@ -960,6 +961,7 @@ Declare which provider (`claude`, `codex`, `gemini`) and which model tier should
 | `planner`       | claude          | `HIGH` (opus)             |
 | `analyst`       | claude          | `HIGH` (opus)             |
 | `executor`      | claude          | `MEDIUM` (sonnet)         |
+| `debugger`      | cursor          | cursor-agent default      |
 | `critic`        | codex           | codex default             |
 | `code-reviewer` | gemini          | gemini default            |
 | `test-engineer` | gemini          | `MEDIUM` (sonnet)         |
@@ -972,11 +974,13 @@ User-friendly aliases normalize via `normalizeDelegationRole()` — e.g. `review
 
 ### Spec fields (`TeamRoleAssignmentSpec`)
 
-- **provider** — `"claude" | "codex" | "gemini"`. Omitted → defaults to `claude`.
+- **provider** — `"claude" | "codex" | "gemini" | "grok" | "cursor"`. Omitted → defaults to `claude`.
 - **model** — tier name (`"HIGH" | "MEDIUM" | "LOW"`) or an explicit model ID. Tiers resolve through `routing.tierModels`.
 - **agent** — optional Claude agent name (e.g. `"critic"`, `"executor"`). Only honored when the resolved provider is `claude`.
 
 `orchestrator` is pinned to `claude`; only `model` is user-configurable. Any other key on `orchestrator` is rejected by the validator.
+
+`cursor` launches `cursor-agent` as an interactive executor/refactor worker. Do not route reviewer/verdict roles (`critic`, `code-reviewer`, `security-reviewer`, `test-engineer`) to Cursor unless its CLI gains a compatible verdict-output mode; the runtime intentionally skips the structured verdict contract for Cursor panes.
 
 ### Env override
 

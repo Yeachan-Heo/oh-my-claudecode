@@ -274,6 +274,8 @@ describe('parseAskArgs', () => {
     expect(parseAskArgs(['codex', 'review', 'this'])).toEqual({ provider: 'codex', prompt: 'review this' });
     expect(parseAskArgs(['grok', 'review', 'this'])).toEqual({ provider: 'grok', prompt: 'review this' });
     expect(parseAskArgs(['grok', '-p', 'brainstorm'])).toEqual({ provider: 'grok', prompt: 'brainstorm' });
+    expect(parseAskArgs(['cursor', 'review', 'this'])).toEqual({ provider: 'cursor', prompt: 'review this' });
+    expect(parseAskArgs(['cursor', '-p', 'brainstorm'])).toEqual({ provider: 'cursor', prompt: 'brainstorm' });
   });
 
   it('supports --agent-prompt flag and equals syntax', () => {
@@ -404,6 +406,34 @@ describe('omc ask command', () => {
     }
   });
 
+  it('allows cursor ask inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-cursor-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runCli(
+        ['ask', 'cursor', '--prompt', 'cli nested cursor prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload.provider).toBe('cursor');
+      expect(payload.prompt).toBe('cli nested cursor prompt');
+      expect(payload.originalTask).toBe('cli nested cursor prompt');
+      expect(payload.passthrough).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
   it('loads --agent-prompt role from resolved prompts dir and prepends role content', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-agent-prompt-'));
     try {
@@ -488,6 +518,7 @@ describe('run-provider-advisor script contract', () => {
     ['codex', ['codex', '--prompt', 'nested codex prompt']],
     ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
     ['grok', ['grok', '--prompt', 'nested grok prompt']],
+    ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
   ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
     const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
     try {
@@ -565,6 +596,47 @@ describe('run-provider-advisor script contract', () => {
       expect(launch).toBeDefined();
       expect(launch!.command).toBe('grok');
       expect(launch!.args).toEqual(['-p', 'review this\nand that', '--always-approve']);
+      expect(launch!.options.input ?? null).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches cursor as `cursor-agent --print --force --trust --sandbox disabled <prompt>` and never pipes stdin', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cursor-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // cursor-agent print mode takes the prompt as a positional arg; stdin is
+      // interactive input and must stay closed even for multiline prompts.
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['cursor', '--prompt', 'review this\nand that'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { input: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      const launch = calls.find((c) => !c.args.includes('--version'));
+      expect(launch).toBeDefined();
+      expect(launch!.command).toBe('cursor-agent');
+      expect(launch!.args).toEqual([
+        '--print',
+        '--force',
+        '--trust',
+        '--sandbox',
+        'disabled',
+        'review this\nand that',
+      ]);
       expect(launch!.options.input ?? null).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });

@@ -376,6 +376,28 @@ describe("team.roleRouting (Option E)", () => {
             rmSync(tempDir, { recursive: true, force: true });
         }
     });
+    it("accepts cursor as team defaultAgentType and roleRouting provider", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-routing-cursor-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    ops: { defaultAgentType: "cursor" },
+                    roleRouting: {
+                        executor: { provider: "cursor" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            const config = loadConfig();
+            expect(config.team?.ops?.defaultAgentType).toBe("cursor");
+            expect(config.team?.roleRouting?.executor).toEqual({ provider: "cursor" });
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
     it("OMC_TEAM_ROLE_OVERRIDES env wins over file config", () => {
         const tempDir = mkdtempSync(join(tmpdir(), "omc-team-routing-env-"));
         try {

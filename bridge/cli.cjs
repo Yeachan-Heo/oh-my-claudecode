@@ -4326,7 +4326,7 @@ var init_loader = __esm({
     DEFAULT_CONFIG = buildDefaultConfig();
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok"]);
+    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
     TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
     OMC_STARTUP_COMPACTABLE_SECTIONS = [
       "agent_catalog",
@@ -32481,6 +32481,9 @@ function resolveExternalModel(provider, raw, cfg) {
   if (provider === "grok") {
     return defaults?.grokModel ?? "";
   }
+  if (provider === "cursor") {
+    return "";
+  }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 function resolveRoleAssignment(role, cfg) {
@@ -34165,6 +34168,9 @@ async function spawnV2Worker(opts) {
     }
     if (opts.agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
+    }
+    if (opts.agentType === "cursor") {
+      return void 0;
     }
     return resolveClaudeWorkerModel();
   })();
@@ -36068,6 +36074,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     if (agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
     }
+    if (agentType === "cursor") {
+      return void 0;
+    }
     return resolveClaudeWorkerModel();
   })();
   const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
@@ -36194,7 +36203,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
     teamName
   });
   const configData = await readJsonSafe5((0, import_path93.join)(root2, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
@@ -82435,7 +82444,8 @@ var KEYWORD_PATTERNS = {
   "deep-interview": /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
   ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
-  gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i
+  gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
+  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i
 };
 var OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
 var KEYWORD_SKIP_PREDICATES = {
@@ -82457,7 +82467,8 @@ var KEYWORD_PRIORITY = [
   "analyze",
   "deep-interview",
   "codex",
-  "gemini"
+  "gemini",
+  "cursor"
 ];
 var CANONICAL_WORKFLOW_SLASH_SKILLS = [
   "autopilot",
@@ -84896,7 +84907,7 @@ function getPromptText(input) {
   return "";
 }
 function isExplicitAskSlashInvocation(promptText) {
-  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|grok)\b/i.test(promptText);
+  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|grok|cursor)\b/i.test(promptText);
 }
 function activateRalplanStartupState(directory, sessionId) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -85204,7 +85215,8 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
         );
         break;
       case "codex":
-      case "gemini": {
+      case "gemini":
+      case "cursor": {
         const teamStartCommand = formatOmcCliInvocation(`team start --agent ${keywordType} --count N --task "<task from user message>"`);
         messages.push(
           `[MAGIC KEYWORD: team]
@@ -88630,7 +88642,8 @@ var PROVIDER_BINARY = {
   claude: "claude",
   codex: "codex",
   gemini: "gemini",
-  grok: "grok"
+  grok: "grok",
+  cursor: "cursor-agent"
 };
 function probeProvider(provider) {
   const binary = PROVIDER_BINARY[provider];
@@ -88658,7 +88671,7 @@ function collectConfiguredProviders() {
   const roleRouting = cfg.team?.roleRouting ?? {};
   for (const spec of Object.values(roleRouting)) {
     const provider = spec?.provider;
-    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok") {
+    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok" || provider === "cursor") {
       providers.add(provider);
     }
   }
@@ -89631,7 +89644,7 @@ init_worktree_paths();
 var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
 var MIN_WORKER_COUNT = 1;
 var MAX_WORKER_COUNT = 20;
-var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok"]);
+var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
 var DEFAULT_TEAM_CLI_AGENT_TYPE = "claude";
 var TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
@@ -89645,6 +89658,7 @@ Examples:
   omc team 2:codex:architect "design auth system"
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
+  omc team 1:cursor:executor "apply the implementation"
   omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
@@ -93440,14 +93454,14 @@ var import_path122 = require("path");
 var import_url16 = require("url");
 init_security_config();
 var ASK_USAGE = [
-  "Usage: omc ask <claude|codex|gemini|grok> <question or task>",
-  '   or: omc ask <claude|codex|gemini|grok> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok> --agent-prompt=<role> --prompt "<prompt>"'
+  "Usage: omc ask <claude|codex|gemini|grok|cursor> <question or task>",
+  '   or: omc ask <claude|codex|gemini|grok|cursor> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"'
 ].join("\n");
-var ASK_PROVIDERS = ["claude", "codex", "gemini", "grok"];
+var ASK_PROVIDERS = ["claude", "codex", "gemini", "grok", "cursor"];
 var ASK_PROVIDER_SET = new Set(ASK_PROVIDERS);
 var ASK_AGENT_PROMPT_FLAG = "--agent-prompt";
 var SAFE_ROLE_PATTERN = /^[a-z][a-z0-9-]*$/;

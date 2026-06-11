@@ -531,7 +531,7 @@ interface SpawnV2WorkerOptions {
   model?: string;
   /**
    * Canonical role resolved from the task. When set to a reviewer role AND
-   * agentType is codex/gemini, the CLI-worker output contract (AC-7) is
+   * agentType is codex/gemini/grok, the CLI-worker output contract (AC-7) is
    * injected into the task instruction + startup prompt, and `output_file`
    * is populated for the completion handler.
    */
@@ -625,7 +625,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const usePromptMode = isPromptModeAgent(opts.agentType);
 
   // AC-7: render the CLI-worker output contract when a reviewer-style role
-  // is routed to an external provider (codex/gemini). Claude workers speak
+  // is routed to an external provider (codex/gemini/grok). Claude workers speak
   // through the team messaging API and do not use the verdict-file contract.
   const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
   const outputFile = injectContract && opts.role
@@ -665,7 +665,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   // For Claude agents on Bedrock/Vertex, resolve the provider-specific model
   // so workers don't fall back to invalid Anthropic API model names. (#1695)
   // Snapshot-provided model (from resolved_routing) takes precedence so
-  // per-role routing (codex/gemini/claude-tier) is honored at spawn time.
+  // per-role routing (codex/gemini/grok/cursor/claude-tier) is honored at spawn time.
   const modelForAgent = opts.model ?? (() => {
     if (opts.agentType === 'codex') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL
@@ -681,6 +681,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL
         || process.env.OMC_GROK_DEFAULT_MODEL
         || undefined;
+    }
+    if (opts.agentType === 'cursor') {
+      return undefined;
     }
     // Claude agents: resolve Bedrock/Vertex model when on those providers
     return resolveClaudeWorkerModel();
@@ -955,7 +958,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     }
   }
   // Best-effort resolve extra providers referenced by the routing snapshot
-  // (codex/gemini critic, reviewer, etc.). Missing binaries are tolerated —
+  // (codex/gemini/grok/cursor critic, reviewer, etc.). Missing binaries are tolerated —
   // the spawn path falls back to the snapshot's Claude fallback (AC-8).
   for (const { primary } of Object.values(resolvedRouting)) {
     const provider = primary.provider as CliAgentType;

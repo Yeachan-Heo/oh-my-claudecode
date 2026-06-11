@@ -35,7 +35,7 @@ export interface CliWorkerOutputPayload {
 }
 /**
  * Returns true when a role + provider pair requires the verdict-output contract.
- * External providers (codex/gemini) on reviewer-style roles need it; Claude
+ * External providers (codex/gemini/grok) on reviewer-style roles need it; Claude
  * teammates speak through the team messaging API directly.
  */
 export declare function shouldInjectContract(role: CanonicalTeamRole | null | undefined, provider: CliAgentType | null | undefined): boolean;

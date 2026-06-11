@@ -141,13 +141,14 @@ describe('team cli', () => {
         const end = vi.fn();
         const unref = vi.fn();
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-start-json-'));
         mocks.spawn.mockReturnValue({
             pid: 7777,
             stdin: { write, end },
             unref,
         });
         const { teamCommand } = await import('../team.js');
-        await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--json']);
+        await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--cwd', cwd, '--json']);
         expect(mocks.spawn).toHaveBeenCalledTimes(1);
         expect(write).toHaveBeenCalledTimes(1);
         expect(end).toHaveBeenCalledTimes(1);
@@ -163,6 +164,7 @@ describe('team cli', () => {
         expect(output.jobId).toMatch(/^omc-[a-z0-9]{1,16}$/);
         expect(output.status).toBe('running');
         expect(output.pid).toBe(7777);
+        rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
     it('teamCommand start forwards --new-window to runtime-cli payload', async () => {
@@ -170,15 +172,17 @@ describe('team cli', () => {
         const end = vi.fn();
         const unref = vi.fn();
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-new-window-'));
         mocks.spawn.mockReturnValue({
             pid: 8787,
             stdin: { write, end },
             unref,
         });
         const { teamCommand } = await import('../team.js');
-        await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--new-window', '--json']);
+        await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--new-window', '--cwd', cwd, '--json']);
         const stdinPayload = JSON.parse(write.mock.calls[0][0]);
         expect(stdinPayload.newWindow).toBe(true);
+        rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
     it('teamCommand start --json with --count expands agent types', async () => {
@@ -186,6 +190,7 @@ describe('team cli', () => {
         const end = vi.fn();
         const unref = vi.fn();
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-count-'));
         mocks.spawn.mockReturnValue({
             pid: 8888,
             stdin: { write, end },
@@ -194,7 +199,7 @@ describe('team cli', () => {
         const { teamCommand } = await import('../team.js');
         await teamCommand([
             'start', '--agent', 'gemini', '--count', '3',
-            '--task', 'lint all modules', '--name', 'lint-team', '--json',
+            '--task', 'lint all modules', '--name', 'lint-team', '--cwd', cwd, '--json',
         ]);
         const stdinPayload = JSON.parse(write.mock.calls[0][0]);
         expect(stdinPayload.teamName).toBe('lint-team');
@@ -203,6 +208,7 @@ describe('team cli', () => {
         expect(stdinPayload.tasks.every((t) => t.description === 'lint all modules')).toBe(true);
         const output = JSON.parse(logSpy.mock.calls[0][0]);
         expect(output.status).toBe('running');
+        rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
     it('legacy team alias reuses an approved short follow-up launch hint', async () => {
@@ -310,18 +316,20 @@ describe('team cli', () => {
         const end = vi.fn();
         const unref = vi.fn();
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-start-plain-'));
         mocks.spawn.mockReturnValue({
             pid: 9999,
             stdin: { write, end },
             unref,
         });
         const { teamCommand } = await import('../team.js');
-        await teamCommand(['start', '--agent', 'claude', '--task', 'do stuff']);
+        await teamCommand(['start', '--agent', 'claude', '--task', 'do stuff', '--cwd', cwd]);
         expect(logSpy).toHaveBeenCalledTimes(1);
         // Without --json, output is a raw object (not JSON-stringified)
         const rawOutput = logSpy.mock.calls[0][0];
         expect(typeof rawOutput).toBe('object');
         expect(rawOutput.status).toBe('running');
+        rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
     it('getTeamJobStatus converges to result artifact state', async () => {
@@ -754,13 +762,14 @@ describe('team cli', () => {
         const end = vi.fn();
         const unref = vi.fn();
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-legacy-'));
         mocks.spawn.mockReturnValue({
             pid: 5151,
             stdin: { write, end },
             unref,
         });
         const { teamCommand } = await import('../team.js');
-        await teamCommand(['ralph', '2:codex', 'ship', 'feature', '--json']);
+        await teamCommand(['ralph', '2:codex', 'ship', 'feature', '--cwd', cwd, '--json']);
         expect(write).toHaveBeenCalledTimes(1);
         const payload = JSON.parse(write.mock.calls[0][0]);
         expect(payload.agentTypes).toEqual(['codex', 'codex']);
@@ -769,6 +778,7 @@ describe('team cli', () => {
         const out = JSON.parse(logSpy.mock.calls[0][0]);
         expect(out.status).toBe('running');
         expect(out.pid).toBe(5151);
+        rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
     it('team api legacy facade delegates send-message to canonical mailbox state', async () => {

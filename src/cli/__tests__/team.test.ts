@@ -167,6 +167,7 @@ describe('team cli', () => {
     const end = vi.fn();
     const unref = vi.fn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-start-json-'));
 
     mocks.spawn.mockReturnValue({
       pid: 7777,
@@ -175,7 +176,7 @@ describe('team cli', () => {
     });
 
     const { teamCommand } = await import('../team.js');
-    await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--json']);
+    await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--cwd', cwd, '--json']);
 
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     expect(write).toHaveBeenCalledTimes(1);
@@ -202,6 +203,7 @@ describe('team cli', () => {
     expect(output.status).toBe('running');
     expect(output.pid).toBe(7777);
 
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 
@@ -210,6 +212,7 @@ describe('team cli', () => {
     const end = vi.fn();
     const unref = vi.fn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-new-window-'));
 
     mocks.spawn.mockReturnValue({
       pid: 8787,
@@ -218,11 +221,12 @@ describe('team cli', () => {
     });
 
     const { teamCommand } = await import('../team.js');
-    await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--new-window', '--json']);
+    await teamCommand(['start', '--agent', 'codex', '--task', 'review auth flow', '--new-window', '--cwd', cwd, '--json']);
 
     const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as { newWindow?: boolean };
     expect(stdinPayload.newWindow).toBe(true);
 
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 
@@ -231,6 +235,7 @@ describe('team cli', () => {
     const end = vi.fn();
     const unref = vi.fn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-count-'));
 
     mocks.spawn.mockReturnValue({
       pid: 8888,
@@ -241,7 +246,7 @@ describe('team cli', () => {
     const { teamCommand } = await import('../team.js');
     await teamCommand([
       'start', '--agent', 'gemini', '--count', '3',
-      '--task', 'lint all modules', '--name', 'lint-team', '--json',
+      '--task', 'lint all modules', '--name', 'lint-team', '--cwd', cwd, '--json',
     ]);
 
     const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
@@ -257,6 +262,7 @@ describe('team cli', () => {
     const output = JSON.parse(logSpy.mock.calls[0][0] as string) as { status: string };
     expect(output.status).toBe('running');
 
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 
@@ -395,6 +401,7 @@ describe('team cli', () => {
     const end = vi.fn();
     const unref = vi.fn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-start-plain-'));
 
     mocks.spawn.mockReturnValue({
       pid: 9999,
@@ -403,7 +410,7 @@ describe('team cli', () => {
     });
 
     const { teamCommand } = await import('../team.js');
-    await teamCommand(['start', '--agent', 'claude', '--task', 'do stuff']);
+    await teamCommand(['start', '--agent', 'claude', '--task', 'do stuff', '--cwd', cwd]);
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     // Without --json, output is a raw object (not JSON-stringified)
@@ -411,6 +418,7 @@ describe('team cli', () => {
     expect(typeof rawOutput).toBe('object');
     expect(rawOutput.status).toBe('running');
 
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 
@@ -930,6 +938,7 @@ describe('team cli', () => {
     const end = vi.fn();
     const unref = vi.fn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-legacy-'));
 
     mocks.spawn.mockReturnValue({
       pid: 5151,
@@ -938,7 +947,7 @@ describe('team cli', () => {
     });
 
     const { teamCommand } = await import('../team.js');
-    await teamCommand(['ralph', '2:codex', 'ship', 'feature', '--json']);
+    await teamCommand(['ralph', '2:codex', 'ship', 'feature', '--cwd', cwd, '--json']);
 
     expect(write).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(write.mock.calls[0][0] as string) as { agentTypes: string[]; tasks: Array<{ subject: string; description: string }> };
@@ -950,6 +959,7 @@ describe('team cli', () => {
     expect(out.status).toBe('running');
     expect(out.pid).toBe(5151);
 
+    rmSync(cwd, { recursive: true, force: true });
     logSpy.mockRestore();
   });
 

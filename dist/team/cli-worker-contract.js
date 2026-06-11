@@ -25,7 +25,7 @@ const VALID_VERDICTS = new Set(['approve', 'revise', 'reject']);
 const VALID_SEVERITIES = new Set(['critical', 'major', 'minor', 'nit']);
 /**
  * Returns true when a role + provider pair requires the verdict-output contract.
- * External providers (codex/gemini) on reviewer-style roles need it; Claude
+ * External providers (codex/gemini/grok) on reviewer-style roles need it; Claude
  * teammates speak through the team messaging API directly.
  */
 export function shouldInjectContract(role, provider) {
