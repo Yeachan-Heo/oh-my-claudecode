@@ -8,26 +8,58 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 const PROVIDER_BINARIES = {
   claude: 'claude',
   codex: 'codex',
-  gemini: 'gemini',
+  // gemini: dynamically resolved — `agy` (Antigravity CLI) takes precedence,
+  // falls back to `gemini` CLI when agy is not installed. See resolveGeminiBinary().
+  gemini: null,
   grok: 'grok',
   cursor: 'cursor-agent',
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
 /**
- * Build CLI args for a given provider.
- * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
- * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
- * - gemini: `gemini -p <prompt> --yolo`
- * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
- *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
- * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
+ * Resolve the binary to use for the `gemini` provider.
+ *
+ * Google Antigravity CLI (`agy`) supersedes the legacy Gemini CLI (`gemini`).
+ * Both support a non-interactive print mode:
+ *   - agy:    `agy --print <prompt>`
+ *   - gemini: `gemini -p <prompt> --yolo`
+ *
+ * Resolution order: agy → gemini. If neither is available, returns 'agy' so
+ * ensureBinary() produces a clear installation error.
  */
-function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
+function resolveGeminiBinary(env) {
+  for (const bin of ['agy', 'gemini']) {
+    const probe = spawnSync(bin, ['--version'], {
+      stdio: 'ignore',
+      encoding: 'utf8',
+      env,
+      shell: SHOULD_USE_WINDOWS_SHELL,
+    });
+    if (!probe.error && probe.status === 0) return bin;
+  }
+  return 'agy';
+}
+
+/**
+ * Build CLI args for a given provider.
+ * - claude:  `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
+ * - codex:   `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
+ * - gemini/agy:    `agy --print <prompt>`  (Antigravity CLI, preferred)
+ * - gemini/gemini: `gemini -p <prompt> --yolo`  (legacy Gemini CLI, fallback)
+ * - grok:    `grok -p <prompt> --always-approve`
+ * - cursor:  `cursor-agent --print --force --trust --sandbox disabled <prompt>`
+ */
+function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false, resolvedBinary = null } = {}) {
   if (provider === 'codex') {
     return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
   }
   if (provider === 'gemini') {
+    if (resolvedBinary === 'agy') {
+      // agy --print always takes the prompt as a positional arg.
+      // Stdin prompt piping is not supported by agy's --print mode.
+      return ['--print', prompt];
+    }
+    // Legacy gemini CLI
     return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
   }
   if (provider === 'grok') {
@@ -44,7 +76,11 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
   return pipePromptViaStdin ? ['-p'] : ['-p', prompt];
 }
 
-function shouldPipePromptViaStdin(provider, prompt) {
+function shouldPipePromptViaStdin(provider, prompt, { resolvedBinary = null } = {}) {
+  if (provider === 'gemini' && resolvedBinary === 'agy') {
+    // agy --print does not support stdin prompt piping; always pass as arg.
+    return false;
+  }
   if (provider === 'codex' || provider === 'gemini') {
     if (typeof prompt === 'string' && (prompt.includes('\n') || prompt.length > 500)) {
       return true;
@@ -76,6 +112,7 @@ const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
   console.error('Usage: omc ask <claude|codex|gemini|grok|cursor> "<prompt>"');
+  console.error('       gemini provider uses agy (Antigravity CLI) when available, falls back to gemini CLI');
   console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|grok|cursor> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
@@ -256,16 +293,21 @@ async function writeArtifact({ provider, originalTask, finalPrompt, rawOutput, e
 
 async function main() {
   const { provider, prompt } = parseArgs(process.argv.slice(2));
-  const binary = PROVIDER_BINARIES[provider];
+
+  // Resolve binary: gemini uses agy (preferred) or gemini CLI (fallback).
+  const providerEnv = buildProviderEnv(provider);
+  const binary = provider === 'gemini'
+    ? resolveGeminiBinary(providerEnv)
+    : PROVIDER_BINARIES[provider];
 
   ensureBinary(provider, binary);
 
-  const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
-  const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
+  const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt, { resolvedBinary: binary });
+  const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin, resolvedBinary: binary });
   const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
-    env: buildProviderEnv(provider),
+    env: providerEnv,
     shell: SHOULD_USE_WINDOWS_SHELL,
     ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
   });
