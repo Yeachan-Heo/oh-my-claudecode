@@ -37,7 +37,7 @@ function resolveGeminiBinary(env) {
     });
     if (!probe.error && probe.status === 0) return bin;
   }
-  return 'agy';
+  return null;
 }
 
 /**
@@ -245,7 +245,7 @@ function resolveOriginalTask(prompt) {
   return prompt;
 }
 
-async function writeArtifact({ provider, originalTask, finalPrompt, rawOutput, exitCode }) {
+async function writeArtifact({ provider, resolvedBinary, originalTask, finalPrompt, rawOutput, exitCode }) {
   const root = process.cwd();
   const artifactDir = join(await resolveOmcStateRoot(root), 'artifacts', 'ask');
   const slug = slugify(originalTask);
@@ -259,6 +259,7 @@ async function writeArtifact({ provider, originalTask, finalPrompt, rawOutput, e
     `# ${provider} advisor artifact`,
     '',
     `- Provider: ${provider}`,
+    `- Resolved binary: ${resolvedBinary || provider}`,
     `- Exit code: ${exitCode}`,
     `- Created at: ${new Date().toISOString()}`,
     '',
@@ -296,11 +297,20 @@ async function main() {
 
   // Resolve binary: gemini uses agy (preferred) or gemini CLI (fallback).
   const providerEnv = buildProviderEnv(provider);
-  const binary = provider === 'gemini'
-    ? resolveGeminiBinary(providerEnv)
-    : PROVIDER_BINARIES[provider];
-
-  ensureBinary(provider, binary);
+  let binary;
+  if (provider === 'gemini') {
+    // Resolution already probes each candidate; skip separate ensureBinary.
+    binary = resolveGeminiBinary(providerEnv);
+    if (!binary) {
+      console.error('[ask-gemini] Missing required CLI binary: agy or gemini');
+      console.error('[ask-gemini] Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash');
+      console.error('[ask-gemini] Or install legacy Gemini CLI: npm install -g @google/gemini-cli');
+      process.exit(1);
+    }
+  } else {
+    binary = PROVIDER_BINARIES[provider];
+    ensureBinary(provider, binary);
+  }
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt, { resolvedBinary: binary });
   const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin, resolvedBinary: binary });
@@ -319,6 +329,7 @@ async function main() {
 
   const artifactPath = await writeArtifact({
     provider,
+    resolvedBinary: binary,
     originalTask: resolveOriginalTask(prompt),
     finalPrompt: prompt,
     rawOutput,

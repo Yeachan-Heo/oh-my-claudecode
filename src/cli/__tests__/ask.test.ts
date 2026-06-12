@@ -123,6 +123,12 @@ function writeAdvisorStub(dir: string): string {
 function writeFakeProviderBinary(dir: string, provider: 'claude' | 'gemini'): string {
   const binDir = join(dir, 'bin');
   mkdirSync(binDir, { recursive: true });
+
+  // Write a failing agy stub so resolveGeminiBinary deterministically falls back
+  const agyPath = join(binDir, 'agy');
+  writeFileSync(agyPath, '#!/bin/sh\nexit 1\n', 'utf8');
+  chmodSync(agyPath, 0o755);
+
   const binPath = join(binDir, provider);
   writeFileSync(
     binPath,
@@ -145,6 +151,7 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "Object.defineProperty(process, 'platform', { value: 'win32' });",
       'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
       "const mode = process.env.SPAWN_CAPTURE_MODE || 'success';",
+      "const agyMode = process.env.SPAWN_CAPTURE_AGY_MODE || 'absent';",
       'const calls = [];',
       'childProcess.spawnSync = (command, args = [], options = {}) => {',
       '  calls.push({',
@@ -165,6 +172,11 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       '      },',
       '    },',
       '  });',
+      "  if (command === 'agy' && Array.isArray(args) && args[0] === '--version') {",
+      "    if (agyMode === 'absent') {",
+      "      return { status: 1, stdout: '', stderr: \"'agy' is not recognized\", pid: 0, output: [], signal: null };",
+      "    }",
+      "  }",
       "  if (mode === 'missing' && command === 'where') {",
       "    return { status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
       '  }',
@@ -553,7 +565,10 @@ describe('run-provider-advisor script contract', () => {
         };
       }>;
 
-      expect(calls).toHaveLength(2);
+      // gemini: agy probe (fails) + gemini probe + gemini launch = 3 calls
+      // all other providers: version probe + launch = 2 calls
+      const expectedLength = provider === 'gemini' ? 3 : 2;
+      expect(calls).toHaveLength(expectedLength);
       for (const call of calls) {
         expect(call.options.env).toMatchObject({
           CLAUDECODE: null,
@@ -729,13 +744,19 @@ describe('run-provider-advisor script contract', () => {
         options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
       }>;
 
-      expect(calls).toHaveLength(2);
+      // agy probe (fails) + gemini probe + gemini launch = 3 calls
+      expect(calls).toHaveLength(3);
       expect(calls[0]).toMatchObject({
-        command: 'gemini',
+        command: 'agy',
         args: ['--version'],
         options: { shell: true, encoding: 'utf8', stdio: 'ignore', input: null },
       });
       expect(calls[1]).toMatchObject({
+        command: 'gemini',
+        args: ['--version'],
+        options: { shell: true, encoding: 'utf8', stdio: 'ignore', input: null },
+      });
+      expect(calls[2]).toMatchObject({
         command: 'gemini',
         args: ['--yolo'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
@@ -800,8 +821,9 @@ describe('run-provider-advisor script contract', () => {
         options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
       }>;
 
-      expect(calls).toHaveLength(2);
-      expect(calls[1]).toMatchObject({
+      // agy probe (fails) + gemini probe + gemini launch = 3 calls
+      expect(calls).toHaveLength(3);
+      expect(calls[2]).toMatchObject({
         command: 'gemini',
         args: ['--yolo'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: longPrompt },
@@ -1019,6 +1041,92 @@ describe('run-provider-advisor script contract', () => {
       // Provider spawn must close stdin to prevent hangs when parent stdin is a pipe
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
       expect(calls[1].options.input).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches agy with --print when agy is installed', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-agy-preferred-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['gemini', '--prompt', 'hello agy'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_AGY_MODE: 'present' },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { input: string | null };
+      }>;
+
+      // agy probe + agy launch = 2 calls
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({ command: 'agy', args: ['--version'] });
+      const launch = calls[1];
+      expect(launch.command).toBe('agy');
+      expect(launch.args).toEqual(['--print', 'hello agy']);
+      expect(launch.options.input).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to gemini CLI when agy is absent (gemini provider)', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gemini-fallback-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      // Windows prelude (platform=win32): agy absent by default, gemini found on fallback.
+      // On win32 the prompt is piped via stdin so args are ['--yolo'].
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['gemini', '--prompt', 'hello gemini'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { input: string | null };
+      }>;
+
+      // agy probe (fail) + gemini probe + gemini launch = 3 calls
+      expect(calls).toHaveLength(3);
+      expect(calls[0]).toMatchObject({ command: 'agy', args: ['--version'] });
+      expect(calls[1]).toMatchObject({ command: 'gemini', args: ['--version'] });
+      const launch = calls[2];
+      expect(launch.command).toBe('gemini');
+      // On win32 prompt is piped via stdin, so args are ['--yolo'] (no prompt arg)
+      expect(launch.args).toEqual(['--yolo']);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('shows install guidance when neither agy nor gemini is installed', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gemini-neither-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['gemini', '--prompt', 'install guidance'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_MODE: 'missing' },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('Missing required CLI binary: agy or gemini');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
