@@ -514,6 +514,51 @@ export function processSubagentStart(input) {
     }
 }
 /**
+ * Find a single running agent that can be safely reconciled against an
+ * unmatched Stop event. The tracking state is already session-scoped, so any
+ * running entry here belongs to the current session. Reconciliation is only
+ * considered reliable when there is exactly one candidate (optionally narrowed
+ * by agent_type metadata) — otherwise the choice would be ambiguous and could
+ * close the wrong agent. Returns the index of the candidate, or -1.
+ */
+function findReconcilableRunningAgent(state, agentType) {
+    const candidates = [];
+    for (let i = 0; i < state.agents.length; i++) {
+        const agent = state.agents[i];
+        if (agent.status !== "running")
+            continue;
+        if (agentType && agent.agent_type !== agentType)
+            continue;
+        candidates.push(i);
+    }
+    return candidates.length === 1 ? candidates[0] : -1;
+}
+/**
+ * Mark running agents that have exceeded the stale threshold as failed. Used
+ * during unmatched Stop reconciliation so native fork stop events carrying an
+ * unknown agent_id cannot leave running entries lingering forever. Returns the
+ * number of agents reaped.
+ */
+function reapStaleRunningAgents(state, nowIso) {
+    const now = new Date(nowIso).getTime();
+    let reaped = 0;
+    for (const agent of state.agents) {
+        if (agent.status !== "running")
+            continue;
+        const startTime = new Date(agent.started_at).getTime();
+        if (now - startTime > STALE_THRESHOLD_MS) {
+            agent.status = "failed";
+            agent.completed_at = nowIso;
+            agent.duration_ms = now - startTime;
+            agent.output_summary =
+                "Marked as stale during unmatched stop reconciliation - exceeded timeout";
+            state.total_failed++;
+            reaped++;
+        }
+    }
+    return reaped;
+}
+/**
  * Process SubagentStop event
  */
 export function processSubagentStop(input) {
@@ -524,18 +569,28 @@ export function processSubagentStop(input) {
     try {
         return withFileLockSync(lockPath, () => {
             const state = readTrackingState(input.cwd, sessionId);
-            // Find the agent
-            const agentIndex = state.agents.findIndex((a) => a.agent_id === input.agent_id);
             // SDK does not provide `success` field, so default to 'completed' when undefined (Bug #1 fix)
             const succeeded = input.success !== false;
+            const nowIso = new Date().toISOString();
+            // Find the agent by exact agent_id first.
+            let agentIndex = input.agent_id
+                ? state.agents.findIndex((a) => a.agent_id === input.agent_id)
+                : -1;
+            // Native fork stop events can arrive with an agent_id that was never
+            // registered by SubagentStart (#3252). When the exact lookup misses,
+            // attempt a safe fallback reconciliation against running agents in this
+            // (session-scoped) state before falling back to reap + create-and-close,
+            // so the running entry cannot leak as "running" forever.
+            if (agentIndex === -1 && input.agent_id) {
+                agentIndex = findReconcilableRunningAgent(state, input.agent_type);
+            }
             if (agentIndex !== -1) {
                 const agent = state.agents[agentIndex];
                 agent.status = succeeded ? "completed" : "failed";
-                agent.completed_at = new Date().toISOString();
+                agent.completed_at = nowIso;
                 // Calculate duration
                 const startTime = new Date(agent.started_at).getTime();
-                const endTime = new Date(agent.completed_at).getTime();
-                agent.duration_ms = endTime - startTime;
+                agent.duration_ms = new Date(nowIso).getTime() - startTime;
                 // Store output summary (truncated)
                 if (input.output) {
                     agent.output_summary = input.output.substring(0, 500);
@@ -548,6 +603,33 @@ export function processSubagentStop(input) {
                     state.total_failed++;
                 }
             }
+            else if (input.agent_id) {
+                // No exact or fallback match. Reap any stale running agents so unmatched
+                // fork stops cannot accumulate "running" entries forever, then record
+                // this stop as a synthetic closed entry (create-and-close) so the event
+                // is not silently dropped.
+                reapStaleRunningAgents(state, nowIso);
+                const synthetic = {
+                    agent_id: input.agent_id,
+                    agent_type: input.agent_type || "unknown",
+                    started_at: nowIso,
+                    parent_mode: detectParentMode(input.cwd),
+                    status: succeeded ? "completed" : "failed",
+                    completed_at: nowIso,
+                    duration_ms: 0,
+                    output_summary: input.output ? input.output.substring(0, 500) : undefined,
+                };
+                state.agents.push(synthetic);
+                agentIndex = state.agents.length - 1;
+                if (succeeded) {
+                    state.total_completed++;
+                }
+                else {
+                    state.total_failed++;
+                }
+            }
+            // Capture the closed agent before eviction may reorder/remove entries.
+            const stoppedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
             // Evict oldest completed agents if over limit
             const completedAgents = state.agents.filter((a) => a.status === "completed" || a.status === "failed");
             if (completedAgents.length > MAX_COMPLETED_AGENTS) {
@@ -566,9 +648,8 @@ export function processSubagentStop(input) {
                 // Record to session replay JSONL for /trace
                 // Fix: SDK doesn't populate agent_type in SubagentStop, so use tracked state
                 try {
-                    const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : undefined;
-                    const agentType = trackedAgent?.agent_type || input.agent_type || 'unknown';
-                    recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+                    const agentType = stoppedAgent?.agent_type || input.agent_type || 'unknown';
+                    recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, stoppedAgent?.duration_ms);
                 }
                 catch { /* best-effort */ }
                 try {
@@ -576,8 +657,8 @@ export function processSubagentStop(input) {
                         sessionId: input.session_id,
                         agentId: input.agent_id,
                         success: succeeded,
-                        outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
-                        at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : new Date().toISOString(),
+                        outputSummary: stoppedAgent?.output_summary ?? input.output,
+                        at: stoppedAgent?.completed_at ?? nowIso,
                     }, sessionId);
                 }
                 catch { /* best-effort */ }
