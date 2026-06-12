@@ -90,6 +90,39 @@ describe('cleanupStaleAgents', () => {
     expect(readFileSync(join(agentsDir, '.omc-managed.json'), 'utf-8')).not.toContain('removed-agent.md');
   });
 
+  it('ignores unsafe manifest filenames instead of deleting outside the agents directory', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(tempDir, 'victim.md'), '# do not delete\n');
+    writeFileSync(join(agentsDir, '.omc-managed.json'), JSON.stringify({
+      version: 1,
+      files: {
+        '../victim.md': { source: 'builtin' },
+      },
+    }));
+
+    const removed = cleanup(log);
+
+    expect(removed).toEqual([]);
+    expect(existsSync(join(tempDir, 'victim.md'))).toBe(true);
+    expect(readFileSync(join(agentsDir, '.omc-managed.json'), 'utf-8')).not.toContain('../victim.md');
+  });
+
+  it('removes stale pre-manifest legacy OMC agent files from known historical names', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    createAgentFile(agentsDir, 'tdd-guide.md', 'tdd-guide');
+
+    const removed = cleanup(log);
+
+    expect(removed).toContain('tdd-guide.md');
+    expect(existsSync(join(agentsDir, 'tdd-guide.md'))).toBe(false);
+  });
+
   it('preserves agent files that are in the current package', async () => {
     vi.resetModules();
     const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
@@ -507,17 +540,17 @@ describe('prunePluginDuplicateAgents', () => {
     expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
   });
 
-  it('preserves user-authored agents with standard Claude Code frontmatter', async () => {
+  it('prunes pre-manifest plugin duplicate agents even when content drifted', async () => {
     vi.resetModules();
     const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
 
     mkdirSync(agentsDir, { recursive: true });
-    createAgentFile(agentsDir, 'architect.md', 'architect');
+    writeFileSync(join(agentsDir, 'architect.md'), `---\nname: architect\ndescription: Locally drifted old OMC copy\nmodel: claude-sonnet-4-6\n---\n\n# architect\nDrifted content.\n`);
 
     const removed = prune(log);
 
-    expect(removed).not.toContain('architect.md');
-    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
+    expect(removed).toContain('architect.md');
+    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(false);
   });
 
   it('does not remove agents not in the current package', async () => {

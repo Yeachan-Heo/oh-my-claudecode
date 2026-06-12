@@ -9,7 +9,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync, realpathSync, statSync } from 'fs';
-import { join, dirname, resolve, isAbsolute } from 'path';
+import { basename, join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
@@ -42,6 +42,18 @@ const OMC_MANAGED_SKILL_MARKER = '.omc-managed';
 const OMC_MANAGED_AGENT_MANIFEST = '.omc-managed.json';
 const PLUGIN_FULL_SKILL_BODIES_DIR = 'skill-bodies';
 const PLUGIN_COMPACT_SKILL_SHIM_MARKER = '<!-- OMC:COMPACT-PLUGIN-SKILL -->';
+const LEGACY_OMC_AGENT_FILES = new Set([
+  'api-reviewer.md',
+  'build-fixer.md',
+  'deep-executor.md',
+  'dependency-expert.md',
+  'harsh-critic.md',
+  'performance-reviewer.md',
+  'quality-reviewer.md',
+  'quality-strategist.md',
+  'researcher.md',
+  'tdd-guide.md',
+]);
 
 type ManagedAgentManifestEntry =
   | { source: 'builtin' }
@@ -91,6 +103,19 @@ function getManagedAgentManifestPath(agentsDir: string = currentAgentsDir()): st
   return join(agentsDir, OMC_MANAGED_AGENT_MANIFEST);
 }
 
+function isSafeAgentManifestFilename(filename: string): boolean {
+  return filename === basename(filename) && /^[a-z0-9-]+\.md$/i.test(filename);
+}
+
+function getSafeAgentFilePath(agentsDir: string, filename: string): string | undefined {
+  if (!isSafeAgentManifestFilename(filename)) return undefined;
+  const resolvedAgentsDir = resolve(agentsDir);
+  const resolvedPath = resolve(agentsDir, filename);
+  const rel = relative(resolvedAgentsDir, resolvedPath);
+  if (rel.startsWith('..') || isAbsolute(rel)) return undefined;
+  return resolvedPath;
+}
+
 function isManagedAgentManifestEntry(value: unknown): value is ManagedAgentManifestEntry {
   if (!value || typeof value !== 'object') return false;
   const entry = value as Record<string, unknown>;
@@ -133,10 +158,25 @@ function writeManagedAgentManifest(manifest: ManagedAgentManifest, agentsDir: st
   const sortedManifest: ManagedAgentManifest = { version: 1, files: {} };
 
   for (const filename of filenames) {
+    if (!isSafeAgentManifestFilename(filename)) continue;
     sortedManifest.files[filename] = manifest.files[filename];
   }
 
   writeFileSync(getManagedAgentManifestPath(agentsDir), `${JSON.stringify(sortedManifest, null, 2)}\n`);
+}
+
+function getLegacyOmcAgentFileSet(currentAgentFiles: Set<string>): Set<string> {
+  return new Set([...currentAgentFiles, ...LEGACY_OMC_AGENT_FILES]);
+}
+
+function hasMatchingAgentNameFrontmatter(content: string, filename: string): boolean {
+  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) {
+    return false;
+  }
+
+  const expectedName = filename.replace(/\.md$/i, '');
+  const match = content.match(/^name:\s*['"]?([^'"\r\n]+)['"]?\s*$/m);
+  return match?.[1]?.trim() === expectedName;
 }
 
 function currentSkillsDir(): string {
@@ -789,21 +829,27 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
   const agentsDir = currentAgentsDir();
   if (!existsSync(agentsDir)) return [];
 
-  const currentAgentFiles = new Set(
-    Object.keys(loadAgentDefinitions()),
-  );
+  const currentAgentFiles = new Set(Object.keys(loadAgentDefinitions()));
+  const legacyOmcAgentFiles = getLegacyOmcAgentFileSet(currentAgentFiles);
   const manifest = readManagedAgentManifest(agentsDir);
   let manifestChanged = false;
 
   const removed: string[] = [];
   for (const [file, entry] of Object.entries(manifest.files)) {
+    const filepath = getSafeAgentFilePath(agentsDir, file);
+    if (!filepath) {
+      delete manifest.files[file];
+      manifestChanged = true;
+      log(`  Ignored unsafe managed agent manifest entry: ${file}`);
+      continue;
+    }
+
     const sourceExists = entry.source === 'builtin'
       ? currentAgentFiles.has(file)
       : existsSync(entry.sourcePath);
 
     if (sourceExists) continue;
 
-    const filepath = join(agentsDir, file);
     try {
       if (existsSync(filepath)) {
         unlinkSync(filepath);
@@ -817,6 +863,26 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
 
     delete manifest.files[file];
     manifestChanged = true;
+  }
+
+  for (const file of readdirSync(agentsDir)) {
+    if (currentAgentFiles.has(file)) continue;
+    if (!legacyOmcAgentFiles.has(file)) continue;
+    if (manifest.files[file]) continue;
+
+    const filepath = getSafeAgentFilePath(agentsDir, file);
+    if (!filepath) continue;
+
+    try {
+      const content = readFileSync(filepath, 'utf-8');
+      if (!hasMatchingAgentNameFrontmatter(content, file)) continue;
+
+      unlinkSync(filepath);
+      removed.push(file);
+      log(`  Removed stale legacy agent: ${file}`);
+    } catch {
+      // Skip files that can't be read or removed.
+    }
   }
 
   if (manifestChanged) {
@@ -841,6 +907,7 @@ export function prunePluginDuplicateAgents(log: (msg: string) => void): string[]
 
   const currentAgentDefinitions = loadAgentDefinitions();
   const currentAgentFiles = new Set(Object.keys(currentAgentDefinitions));
+  const legacyOmcAgentFiles = getLegacyOmcAgentFileSet(currentAgentFiles);
   const manifest = readManagedAgentManifest(agentsDir);
   let manifestChanged = false;
 
@@ -851,14 +918,18 @@ export function prunePluginDuplicateAgents(log: (msg: string) => void): string[]
     // Only prune agents whose name matches a current package agent
     if (!currentAgentFiles.has(file)) continue;
 
-    const filepath = join(agentsDir, file);
+    const filepath = getSafeAgentFilePath(agentsDir, file);
+    if (!filepath) continue;
+
     try {
       const content = readFileSync(filepath, 'utf-8');
-      if (manifest.files[file] || content === currentAgentDefinitions[file]) {
+      const isManifestManaged = manifest.files[file] !== undefined;
+      const isLegacyOmcStandalone = legacyOmcAgentFiles.has(file) && hasMatchingAgentNameFrontmatter(content, file);
+      if (isManifestManaged || content === currentAgentDefinitions[file] || isLegacyOmcStandalone) {
         unlinkSync(filepath);
         removed.push(file);
         log(`  Pruned plugin-duplicate agent: ${file}`);
-        if (manifest.files[file]) {
+        if (isManifestManaged) {
           delete manifest.files[file];
           manifestChanged = true;
         }
