@@ -39,8 +39,18 @@ export const HUD_DIR = join(CLAUDE_CONFIG_DIR, 'hud');
 export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 const OMC_MANAGED_SKILL_MARKER = '.omc-managed';
+const OMC_MANAGED_AGENT_MANIFEST = '.omc-managed.json';
 const PLUGIN_FULL_SKILL_BODIES_DIR = 'skill-bodies';
 const PLUGIN_COMPACT_SKILL_SHIM_MARKER = '<!-- OMC:COMPACT-PLUGIN-SKILL -->';
+
+type ManagedAgentManifestEntry =
+  | { source: 'builtin' }
+  | { source: 'custom'; sourcePath: string };
+
+interface ManagedAgentManifest {
+  version: 1;
+  files: Record<string, ManagedAgentManifestEntry>;
+}
 
 /**
  * Core commands - DISABLED for v3.0+
@@ -75,6 +85,58 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
 
 function currentAgentsDir(): string {
   return join(getClaudeConfigDir(), 'agents');
+}
+
+function getManagedAgentManifestPath(agentsDir: string = currentAgentsDir()): string {
+  return join(agentsDir, OMC_MANAGED_AGENT_MANIFEST);
+}
+
+function isManagedAgentManifestEntry(value: unknown): value is ManagedAgentManifestEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  if (entry.source === 'builtin') return true;
+  return entry.source === 'custom' && typeof entry.sourcePath === 'string';
+}
+
+function readManagedAgentManifest(agentsDir: string = currentAgentsDir()): ManagedAgentManifest {
+  const manifestPath = getManagedAgentManifestPath(agentsDir);
+  if (!existsSync(manifestPath)) {
+    return { version: 1, files: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8')) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      return { version: 1, files: {} };
+    }
+
+    const rawFiles = (parsed as { files?: unknown }).files;
+    if (!rawFiles || typeof rawFiles !== 'object' || Array.isArray(rawFiles)) {
+      return { version: 1, files: {} };
+    }
+
+    const files: Record<string, ManagedAgentManifestEntry> = {};
+    for (const [filename, entry] of Object.entries(rawFiles)) {
+      if (filename.endsWith('.md') && isManagedAgentManifestEntry(entry)) {
+        files[filename] = entry;
+      }
+    }
+
+    return { version: 1, files };
+  } catch {
+    return { version: 1, files: {} };
+  }
+}
+
+function writeManagedAgentManifest(manifest: ManagedAgentManifest, agentsDir: string = currentAgentsDir()): void {
+  const filenames = Object.keys(manifest.files).sort((a, b) => a.localeCompare(b));
+  const sortedManifest: ManagedAgentManifest = { version: 1, files: {} };
+
+  for (const filename of filenames) {
+    sortedManifest.files[filename] = manifest.files[filename];
+  }
+
+  writeFileSync(getManagedAgentManifestPath(agentsDir), `${JSON.stringify(sortedManifest, null, 2)}\n`);
 }
 
 function currentSkillsDir(): string {
@@ -719,14 +781,9 @@ function mergeHookGroups(
  * Remove stale OMC-created agent files from the config agents directory.
  *
  * When OMC drops an agent definition in a new version, the old .md file
- * lingers in ~/.claude/agents/. This function compares the installed files
- * against the current package's agent definitions and removes any that:
- *   1. Are .md files (OMC agent naming convention)
- *   2. Were previously shipped by OMC (match the frontmatter `name:` pattern)
- *   3. No longer exist in the current package's agents/ directory
- *
- * User-created files (those whose filename does not match any historically
- * known OMC agent) are preserved.
+ * lingers in ~/.claude/agents/. Ownership is tracked explicitly in
+ * .omc-managed.json so standard Claude Code agent files authored by users are
+ * never treated as OMC-owned based on frontmatter shape alone.
  */
 export function cleanupStaleAgents(log: (msg: string) => void): string[] {
   const agentsDir = currentAgentsDir();
@@ -735,25 +792,35 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
   const currentAgentFiles = new Set(
     Object.keys(loadAgentDefinitions()),
   );
+  const manifest = readManagedAgentManifest(agentsDir);
+  let manifestChanged = false;
 
   const removed: string[] = [];
-  for (const file of readdirSync(agentsDir)) {
-    if (!file.endsWith('.md')) continue;
-    if (file === 'AGENTS.md') continue;
-    if (currentAgentFiles.has(file)) continue;
+  for (const [file, entry] of Object.entries(manifest.files)) {
+    const sourceExists = entry.source === 'builtin'
+      ? currentAgentFiles.has(file)
+      : existsSync(entry.sourcePath);
 
-    // Check if this looks like an OMC-created agent (kebab-case .md with frontmatter)
+    if (sourceExists) continue;
+
     const filepath = join(agentsDir, file);
     try {
-      const content = readFileSync(filepath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+      if (existsSync(filepath)) {
         unlinkSync(filepath);
         removed.push(file);
         log(`  Removed stale agent: ${file}`);
       }
     } catch {
-      // Skip files that can't be read
+      // Skip files that can't be removed.
+      continue;
     }
+
+    delete manifest.files[file];
+    manifestChanged = true;
+  }
+
+  if (manifestChanged) {
+    writeManagedAgentManifest(manifest, agentsDir);
   }
 
   return removed;
@@ -764,16 +831,18 @@ export function cleanupStaleAgents(log: (msg: string) => void): string[] {
  *
  * When the plugin is the canonical agent source, standalone copies in
  * ~/.claude/agents/ from a prior `omc setup` cause agent definitions to
- * appear twice. Removes standalone copies with OMC frontmatter whose
- * filename matches a current package agent.
+ * appear twice. Removes standalone copies only when OMC ownership is recorded
+ * in the managed manifest or when the file content exactly matches the current
+ * packaged agent definition.
  */
 export function prunePluginDuplicateAgents(log: (msg: string) => void): string[] {
   const agentsDir = currentAgentsDir();
   if (!existsSync(agentsDir)) return [];
 
-  const currentAgentFiles = new Set(
-    Object.keys(loadAgentDefinitions()),
-  );
+  const currentAgentDefinitions = loadAgentDefinitions();
+  const currentAgentFiles = new Set(Object.keys(currentAgentDefinitions));
+  const manifest = readManagedAgentManifest(agentsDir);
+  let manifestChanged = false;
 
   const removed: string[] = [];
   for (const file of readdirSync(agentsDir)) {
@@ -785,14 +854,22 @@ export function prunePluginDuplicateAgents(log: (msg: string) => void): string[]
     const filepath = join(agentsDir, file);
     try {
       const content = readFileSync(filepath, 'utf-8');
-      if (content.startsWith('---\n') && /^name:\s+\S+/m.test(content)) {
+      if (manifest.files[file] || content === currentAgentDefinitions[file]) {
         unlinkSync(filepath);
         removed.push(file);
         log(`  Pruned plugin-duplicate agent: ${file}`);
+        if (manifest.files[file]) {
+          delete manifest.files[file];
+          manifestChanged = true;
+        }
       }
     } catch {
       // Skip files that can't be read
     }
+  }
+
+  if (manifestChanged) {
+    writeManagedAgentManifest(manifest, agentsDir);
   }
 
   return removed;
@@ -2001,15 +2078,33 @@ export function install(options: InstallOptions = {}): InstallResult {
       // Install agents
       if (shouldInstallLegacyAgents) {
         log('Installing agent definitions...');
-        for (const [filename, content] of Object.entries(loadAgentDefinitions())) {
+        const agentDefinitions = loadAgentDefinitions();
+        const agentManifest = readManagedAgentManifest(AGENTS_DIR);
+        let agentManifestChanged = false;
+
+        for (const [filename, content] of Object.entries(agentDefinitions)) {
           const filepath = join(AGENTS_DIR, filename);
           if (existsSync(filepath) && !options.force) {
             log(`  Skipping ${filename} (already exists)`);
+            try {
+              if (readFileSync(filepath, 'utf-8') === content && !agentManifest.files[filename]) {
+                agentManifest.files[filename] = { source: 'builtin' };
+                agentManifestChanged = true;
+              }
+            } catch {
+              // Ignore unreadable files; they remain user-managed.
+            }
           } else {
             writeFileSync(filepath, content);
+            agentManifest.files[filename] = { source: 'builtin' };
+            agentManifestChanged = true;
             result.installedAgents.push(filename);
             log(`  Installed ${filename}`);
           }
+        }
+
+        if (agentManifestChanged) {
+          writeManagedAgentManifest(agentManifest, AGENTS_DIR);
         }
       } else {
         log('Skipping legacy agent file installation (plugin-provided agents are available)');
