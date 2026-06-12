@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -44,6 +44,10 @@ function createManagedSkillMarker(dir: string, skillName: string): void {
   writeFileSync(join(dir, skillName, '.omc-managed'), 'omc-managed\n');
 }
 
+function createManagedAgentManifest(dir: string, files: Record<string, { source: 'builtin' }>): void {
+  writeFileSync(join(dir, '.omc-managed.json'), `${JSON.stringify({ version: 1, files }, null, 2)}\n`);
+}
+
 // ── Stale Agent Cleanup ──────────────────────────────────────────────────────
 
 describe('cleanupStaleAgents', () => {
@@ -67,20 +71,23 @@ describe('cleanupStaleAgents', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('removes agent files that have OMC frontmatter but are no longer in the package', async () => {
+  it('removes manifest-tracked agent files that are no longer in the package', async () => {
     // Re-import with fresh CLAUDE_CONFIG_DIR
     vi.resetModules();
     const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
 
     mkdirSync(agentsDir, { recursive: true });
 
-    // Create a fake "stale" agent that looks like OMC-created but isn't in current package
     createAgentFile(agentsDir, 'removed-agent.md', 'removed-agent');
+    createManagedAgentManifest(agentsDir, {
+      'removed-agent.md': { source: 'builtin' },
+    });
 
     const removed = cleanup(log);
 
     expect(removed).toContain('removed-agent.md');
     expect(existsSync(join(agentsDir, 'removed-agent.md'))).toBe(false);
+    expect(readFileSync(join(agentsDir, '.omc-managed.json'), 'utf-8')).not.toContain('removed-agent.md');
   });
 
   it('preserves agent files that are in the current package', async () => {
@@ -106,6 +113,19 @@ describe('cleanupStaleAgents', () => {
 
     // User-created file with no frontmatter
     createUserFile(agentsDir, 'my-custom-agent.md');
+
+    const removed = cleanup(log);
+
+    expect(removed).not.toContain('my-custom-agent.md');
+    expect(existsSync(join(agentsDir, 'my-custom-agent.md'))).toBe(true);
+  });
+
+  it('preserves user-authored agents with standard Claude Code frontmatter when unmanaged', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    createAgentFile(agentsDir, 'my-custom-agent.md', 'my-custom-agent');
 
     const removed = cleanup(log);
 
@@ -463,11 +483,15 @@ describe('prunePluginDuplicateAgents', () => {
 
     mkdirSync(agentsDir, { recursive: true });
     createAgentFile(agentsDir, 'architect.md', 'architect');
+    createManagedAgentManifest(agentsDir, {
+      'architect.md': { source: 'builtin' },
+    });
 
     const removed = prune(log);
 
     expect(removed).toContain('architect.md');
     expect(existsSync(join(agentsDir, 'architect.md'))).toBe(false);
+    expect(readFileSync(join(agentsDir, '.omc-managed.json'), 'utf-8')).not.toContain('architect.md');
   });
 
   it('preserves user-created agents without OMC frontmatter', async () => {
@@ -476,6 +500,19 @@ describe('prunePluginDuplicateAgents', () => {
 
     mkdirSync(agentsDir, { recursive: true });
     createUserFile(agentsDir, 'architect.md');
+
+    const removed = prune(log);
+
+    expect(removed).not.toContain('architect.md');
+    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
+  });
+
+  it('preserves user-authored agents with standard Claude Code frontmatter', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    createAgentFile(agentsDir, 'architect.md', 'architect');
 
     const removed = prune(log);
 
