@@ -41,6 +41,16 @@ export interface PluginConfig {
     documentSpecialist?: { model?: string };
   };
 
+  // User-extensible agent registry
+  customAgents?: {
+    /** Enable discovery from user/project custom agent directories. Defaults to true. */
+    enabled?: boolean;
+    /** Extra directories to scan. Relative paths resolve from the current project root. */
+    dirs?: string[];
+    /** Maximum number of custom agents to merge into the runtime registry. Defaults to 20. */
+    maxAgents?: number;
+  };
+
   // Feature toggles
   features?: {
     parallelExecution?: boolean;
@@ -446,12 +456,35 @@ export const KNOWN_AGENT_NAMES = [
 
 export type KnownAgentName = typeof KNOWN_AGENT_NAMES[number];
 
+/** Runtime subagent names registered with Claude Code. */
+export const KNOWN_AGENT_REGISTRY_NAMES = [
+  'explore',
+  'analyst',
+  'planner',
+  'architect',
+  'debugger',
+  'executor',
+  'verifier',
+  'security-reviewer',
+  'code-reviewer',
+  'test-engineer',
+  'designer',
+  'writer',
+  'qa-tester',
+  'scientist',
+  'tracer',
+  'git-master',
+  'code-simplifier',
+  'critic',
+  'document-specialist',
+] as const;
+
 /** User-facing per-role spec in `team.roleRouting`. */
 export interface TeamRoleAssignmentSpec {
   provider?: TeamRoleProvider;
   /** Tier name ('HIGH' | 'MEDIUM' | 'LOW') or explicit model ID. */
   model?: TeamRoleTier | string;
-  agent?: KnownAgentName;
+  agent?: string;
 }
 
 /** Orchestrator is pinned to claude; only `model` is user-configurable. */
@@ -484,5 +517,5 @@ export interface RoleAssignment {
   provider: TeamRoleProvider;
   /** Resolved model ID (tier names expanded to explicit model strings). */
   model: string;
-  agent: KnownAgentName;
+  agent: string;
 }

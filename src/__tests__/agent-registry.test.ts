@@ -1,8 +1,12 @@
-import { beforeEach, afterEach, describe, test, expect } from 'vitest';
+import { beforeEach, afterEach, describe, test, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import { getAgentDefinitions } from '../agents/definitions.js';
+import { loadAgentPrompt } from '../agents/utils.js';
+import { loadConfig } from '../config/loader.js';
+import { createOmcSession } from '../index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,20 +27,29 @@ const MODEL_ENV_KEYS = [
   'OMC_MODEL_MEDIUM',
   'OMC_MODEL_LOW',
   'OMC_ROUTING_FORCE_INHERIT',
+  'XDG_CONFIG_HOME',
 ] as const;
 
 describe('Agent Registry Validation', () => {
   let savedEnv: Record<string, string | undefined>;
+  let originalCwd: string;
+  let tempDir: string;
 
   beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(tmpdir(), 'omc-agent-registry-'));
+    process.chdir(tempDir);
+
     savedEnv = {};
     for (const key of MODEL_ENV_KEYS) {
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
+    process.env.XDG_CONFIG_HOME = path.join(tempDir, 'config');
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     for (const key of MODEL_ENV_KEYS) {
       if (savedEnv[key] === undefined) {
         delete process.env[key];
@@ -44,6 +57,7 @@ describe('Agent Registry Validation', () => {
         process.env[key] = savedEnv[key];
       }
     }
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
   test('agent count matches documentation', () => {
     const agentsDir = path.join(__dirname, '../../agents');
@@ -209,5 +223,225 @@ describe('Agent Registry Validation', () => {
       const content = fs.readFileSync(path.join(agentsDir, `${name}.ts`), 'utf-8');
       expect(content, `Hardcoded prompt found in ${name}.ts`).not.toMatch(/const\s+\w+_PROMPT\s*=\s*`/);
     }
+  });
+
+  test('discovers project custom agents with Claude Code frontmatter and omc metadata', () => {
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'proto-reviewer.md'), `---
+name: proto-reviewer
+description: Reviews protobuf schema changes (Sonnet)
+model: sonnet
+disallowedTools: Write, Edit
+omc:
+  category: reviewer
+  cost: CHEAP
+  promptAlias: proto
+  triggers:
+    - domain: protobuf schemas
+      trigger: ".proto files added or modified"
+  useWhen:
+    - "Schema review before merge"
+  avoidWhen:
+    - "General code review"
+---
+
+<Agent_Prompt>
+Review protobuf compatibility.
+</Agent_Prompt>
+`);
+
+    const agents = getAgentDefinitions();
+
+    expect(agents['proto-reviewer']).toMatchObject({
+      name: 'proto-reviewer',
+      description: 'Reviews protobuf schema changes (Sonnet)',
+      model: 'sonnet',
+      defaultModel: 'sonnet',
+      disallowedTools: ['Write', 'Edit'],
+    });
+    expect(agents['proto-reviewer']?.prompt).toContain('Review protobuf compatibility.');
+    expect(agents['proto-reviewer']?.metadata).toMatchObject({
+      category: 'reviewer',
+      cost: 'CHEAP',
+      promptAlias: 'proto',
+      triggers: [{ domain: 'protobuf schemas', trigger: '.proto files added or modified' }],
+      useWhen: ['Schema review before merge'],
+      avoidWhen: ['General code review'],
+    });
+  });
+
+  test('project custom agents override user custom agents with the same name', () => {
+    const userAgentsDir = path.join(process.env.XDG_CONFIG_HOME!, 'claude-omc', 'agents');
+    const projectAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(userAgentsDir, { recursive: true });
+    fs.mkdirSync(projectAgentsDir, { recursive: true });
+
+    fs.writeFileSync(path.join(userAgentsDir, 'domain-agent.md'), `---
+name: domain-agent
+description: User version
+---
+
+user prompt
+`);
+    fs.writeFileSync(path.join(projectAgentsDir, 'domain-agent.md'), `---
+name: domain-agent
+description: Project version
+---
+
+project prompt
+`);
+
+    const agents = getAgentDefinitions();
+
+    expect(agents['domain-agent']?.description).toBe('Project version');
+    expect(agents['domain-agent']?.prompt).toBe('project prompt');
+  });
+
+  test('rejects custom agents that collide with built-ins by default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'executor.md'), `---
+name: executor
+description: Replacement executor
+---
+
+custom executor prompt
+`);
+
+    const agents = getAgentDefinitions();
+
+    expect(agents.executor?.description).not.toBe('Replacement executor');
+    expect(agents.executor?.prompt).not.toBe('custom executor prompt');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('collides with a built-in agent'));
+    warn.mockRestore();
+  });
+
+  test('team.roleRouting accepts discovered custom agent names', () => {
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    const claudeDir = path.join(tempDir, '.claude');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'proto-reviewer.md'), `---
+name: proto-reviewer
+description: Reviews protobuf schema changes
+---
+
+Review protobuf compatibility.
+`);
+    fs.writeFileSync(path.join(claudeDir, 'omc.jsonc'), JSON.stringify({
+      team: {
+        roleRouting: {
+          'code-reviewer': { agent: 'proto-reviewer' },
+        },
+      },
+    }));
+
+    expect(() => loadConfig()).not.toThrow();
+    expect(loadConfig().team?.roleRouting?.['code-reviewer']?.agent).toBe('proto-reviewer');
+  });
+
+  test('team.roleRouting accepts built-in registry names in addition to config keys', () => {
+    const claudeDir = path.join(tempDir, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, 'omc.jsonc'), JSON.stringify({
+      team: {
+        roleRouting: {
+          critic: { agent: 'code-reviewer' },
+        },
+      },
+    }));
+
+    expect(() => loadConfig()).not.toThrow();
+    expect(loadConfig().team?.roleRouting?.critic?.agent).toBe('code-reviewer');
+  });
+
+  test('scans extra customAgents.dirs relative to the project root', () => {
+    const extraDir = path.join(tempDir, 'team-agents');
+    fs.mkdirSync(extraDir, { recursive: true });
+    fs.writeFileSync(path.join(extraDir, 'release-checker.md'), `---
+name: release-checker
+description: Reviews release readiness
+---
+
+Check release notes and versioning.
+`);
+
+    const agents = getAgentDefinitions({
+      config: {
+        customAgents: {
+          enabled: true,
+          dirs: ['./team-agents'],
+        },
+      },
+    });
+
+    expect(agents['release-checker']?.description).toBe('Reviews release readiness');
+  });
+
+  test('allows custom agents to override built-ins only with omc.overrideBuiltin', () => {
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'executor.md'), `---
+name: executor
+description: Project executor override
+omc:
+  overrideBuiltin: true
+---
+
+project executor prompt
+`);
+
+    const agents = getAgentDefinitions();
+
+    expect(agents.executor?.description).toBe('Project executor override');
+    expect(agents.executor?.prompt).toBe('project executor prompt');
+  });
+
+  test('loadAgentPrompt can read custom agent prompts from project source dir', () => {
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'schema-critic.md'), `---
+name: schema-critic
+description: Reviews schema changes
+---
+
+Review schemas from the custom source directory.
+`);
+
+    expect(loadAgentPrompt('schema-critic')).toBe('Review schemas from the custom source directory.');
+  });
+
+  test('adds custom agents with metadata to generated orchestrator prompt sections', () => {
+    const customAgentsDir = path.join(tempDir, '.omc', 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'schema-critic.md'), `---
+name: schema-critic
+description: Reviews schema changes
+omc:
+  category: reviewer
+  cost: CHEAP
+  promptAlias: schema
+  triggers:
+    - domain: database schemas
+      trigger: "schema files changed"
+  useWhen:
+    - "Schema compatibility review"
+  avoidWhen:
+    - "General implementation"
+---
+
+Review schemas from the custom source directory.
+`);
+
+    const session = createOmcSession();
+    const systemPrompt = session.queryOptions.options.systemPrompt;
+
+    expect(systemPrompt).toContain('## Custom Subagents');
+    expect(systemPrompt).toContain('**schema-critic**');
+    expect(systemPrompt).toContain('| schema | CHEAP | database schemas: schema files changed |');
+    expect(systemPrompt).toContain('**database schemas** → schema: schema files changed');
+    expect(systemPrompt).toContain('### schema-critic Use/Avoid Guidance');
   });
 });

@@ -13,7 +13,6 @@
 
 import type {
   CanonicalTeamRole,
-  KnownAgentName,
   PluginConfig,
   RoleAssignment,
   TeamRoleAssignmentSpec,
@@ -27,8 +26,8 @@ import {
   getDefaultTierModels,
 } from '../config/models.js';
 
-/** Map canonical team role → KnownAgentName key (matches PluginConfig.agents.*). */
-const ROLE_TO_AGENT: Record<CanonicalTeamRole, KnownAgentName> = {
+/** Map canonical team role → built-in agent key. */
+const ROLE_TO_AGENT: Record<CanonicalTeamRole, string> = {
   orchestrator: 'omc',
   planner: 'planner',
   analyst: 'analyst',
@@ -184,7 +183,7 @@ export function resolveRoleAssignment(
   const model = provider === 'claude'
     ? resolveClaudeModel(canonical, spec?.model, cfg)
     : resolveExternalModel(provider, spec?.model, cfg);
-  const agent: KnownAgentName = spec?.agent ?? ROLE_TO_AGENT[canonical];
+  const agent = spec?.agent ?? ROLE_TO_AGENT[canonical];
 
   return { provider, model, agent };
 }

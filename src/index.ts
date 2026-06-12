@@ -14,7 +14,9 @@
  */
 
 import { loadConfig, findContextFiles, loadContextFromFiles } from './config/loader.js';
-import { getAgentDefinitions, omcSystemPrompt } from './agents/definitions.js';
+import { BUILT_IN_AGENT_NAMES, getAgentDefinitions, omcSystemPrompt } from './agents/definitions.js';
+import { buildDelegationTable, buildKeyTriggersSection, buildUseAvoidSection, getAvailableAgents } from './agents/utils.js';
+import type { AgentConfig } from './agents/types.js';
 import { getDefaultMcpServers, toSdkMcpFormat } from './mcp/servers.js';
 import { omcToolsServer, getOmcToolNames } from './mcp/omc-tools-server.js';
 import { createMagicKeywordProcessor, detectMagicKeywords } from './features/magic-keywords.js';
@@ -299,6 +301,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
 
   // Get agent definitions
   const agents = getAgentDefinitions({ config });
+  systemPrompt += buildCustomAgentSystemPromptAddition(agents);
 
   // Build MCP servers configuration
   const externalMcpServers = getDefaultMcpServers({
@@ -402,4 +405,39 @@ export function getOmcSystemPrompt(options?: {
   }
 
   return prompt;
+}
+
+function buildCustomAgentSystemPromptAddition(agents: Record<string, AgentConfig>): string {
+  const builtIns = new Set(BUILT_IN_AGENT_NAMES);
+  const customAgents = Object.fromEntries(
+    Object.entries(agents).filter(([name]) => !builtIns.has(name)),
+  );
+  const customAgentList = Object.values(customAgents);
+
+  if (customAgentList.length === 0) {
+    return '';
+  }
+
+  const sections: string[] = [
+    '## Custom Subagents',
+    '',
+    ...customAgentList.map(agent => `- **${agent.name}**${agent.model ? ` (${agent.model})` : ''}: ${agent.description}`),
+  ];
+
+  const availableAgents = getAvailableAgents(customAgents);
+  const delegationTable = buildDelegationTable(availableAgents);
+  if (delegationTable) sections.push('', delegationTable);
+
+  const keyTriggers = buildKeyTriggersSection(availableAgents);
+  if (keyTriggers) sections.push('', keyTriggers);
+
+  for (const agent of customAgentList) {
+    if (!agent.metadata) continue;
+    const useAvoid = buildUseAvoidSection(agent.metadata);
+    if (useAvoid) {
+      sections.push('', `### ${agent.name} Use/Avoid Guidance`, '', useAvoid);
+    }
+  }
+
+  return `\n\n${sections.join('\n')}`;
 }

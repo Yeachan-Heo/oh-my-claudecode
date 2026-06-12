@@ -17,8 +17,10 @@ import type {
 } from "../shared/types.js";
 import {
   CANONICAL_TEAM_ROLES,
+  KNOWN_AGENT_REGISTRY_NAMES,
   KNOWN_AGENT_NAMES,
 } from "../shared/types.js";
+import { getDiscoveredCustomAgentNames } from "../agents/custom-registry.js";
 import { getConfigDir } from "../utils/paths.js";
 import { parseJsonc } from "../utils/jsonc.js";
 import {
@@ -165,6 +167,11 @@ export function buildDefaultConfig(): PluginConfig {
     team: {
       ops: {},
       roleRouting: {},
+    },
+    customAgents: {
+      enabled: true,
+      dirs: [],
+      maxAgents: 20,
     },
     planOutput: {
       directory: ".omc/plans",
@@ -518,6 +525,11 @@ export function validateTeamConfig(config: PluginConfig): void {
 
   const roleRouting = team.roleRouting as Record<string, unknown> | undefined;
   if (!roleRouting || typeof roleRouting !== "object") return;
+  const allowedAgentNames = new Set<string>([
+    ...KNOWN_AGENT_NAME_SET,
+    ...KNOWN_AGENT_REGISTRY_NAMES,
+    ...getDiscoveredCustomAgentNames(config),
+  ]);
 
   for (const [rawRoleKey, rawSpec] of Object.entries(roleRouting)) {
     const normalized = normalizeDelegationRole(rawRoleKey);
@@ -566,9 +578,9 @@ export function validateTeamConfig(config: PluginConfig): void {
     }
 
     if (spec.agent !== undefined) {
-      if (typeof spec.agent !== "string" || !KNOWN_AGENT_NAME_SET.has(spec.agent)) {
+      if (typeof spec.agent !== "string" || !allowedAgentNames.has(spec.agent)) {
         throw new Error(
-          `[OMC] team.roleRouting.${rawRoleKey}.agent: unknown agent "${String(spec.agent)}". Allowed: ${[...KNOWN_AGENT_NAME_SET].join(", ")}`,
+          `[OMC] team.roleRouting.${rawRoleKey}.agent: unknown agent "${String(spec.agent)}". Allowed: ${[...allowedAgentNames].join(", ")}`,
         );
       }
     }

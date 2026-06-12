@@ -10,6 +10,7 @@
 import { readFileSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
+import { loadCustomAgentPrompt } from './custom-registry.js';
 
 import type {
   AgentConfig,
@@ -118,6 +119,11 @@ export function loadAgentPrompt(agentName: string): string {
     const content = readFileSync(agentPath, 'utf-8');
     return stripFrontmatter(content);
   } catch (error) {
+    const customPrompt = loadCustomAgentPrompt(agentName);
+    if (customPrompt) {
+      return customPrompt;
+    }
+
     // Don't leak internal paths in error messages
     const message = error instanceof Error && error.message.includes('Invalid agent name')
       ? error.message

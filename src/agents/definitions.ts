@@ -8,11 +8,13 @@
  * 4. omcSystemPrompt for the main orchestrator
  */
 
-import type { AgentConfig, PluginConfig } from '../shared/types.js';
+import type { PluginConfig } from '../shared/types.js';
+import type { AgentConfig } from './types.js';
 import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveInheritedModelFromEnv } from '../config/models.js';
 import { appendSkininthegamebrosGuidance } from './skininthegamebros-guidance.js';
+import { discoverCustomAgents } from './custom-registry.js';
 
 // Re-export base agents from individual files (rebranded names)
 export { architectAgent } from './architect.js';
@@ -177,40 +179,8 @@ function getConfiguredAgentModel(name: string, config: PluginConfig): string | u
   return key ? config.agents?.[key]?.model : undefined;
 }
 
-// ============================================================
-// AGENT REGISTRY
-// ============================================================
-
-/**
- * Agent Role Disambiguation
- *
- * HIGH-tier review/planning agents have distinct, non-overlapping roles:
- *
- * | Agent | Role | What They Do | What They Don't Do |
- * |-------|------|--------------|-------------------|
- * | architect | code-analysis | Analyze code, debug, verify | Requirements, plan creation, plan review |
- * | analyst | requirements-analysis | Find requirement gaps | Code analysis, planning, plan review |
- * | planner | plan-creation | Create work plans | Requirements, code analysis, plan review |
- * | critic | plan-review | Review plan quality | Requirements, code analysis, plan creation |
- *
- * Workflow: explore → analyst → planner → critic → executor → architect (verify)
- */
-
-/**
- * Get all agent definitions as a record for use with Claude Agent SDK
- */
-export function getAgentDefinitions(options?: {
-  overrides?: Partial<Record<string, Partial<AgentConfig>>>;
-  config?: PluginConfig;
-}): Record<string, {
-  description: string;
-  prompt: string;
-  tools?: string[];
-  disallowedTools?: string[];
-  model?: string;
-  defaultModel?: string;
-}> {
-  const agents: Record<string, AgentConfig> = {
+function getBuiltInAgentDefinitions(): Record<string, AgentConfig> {
+  return {
     // ============================================================
     // BUILD/ANALYSIS LANE
     // ============================================================
@@ -250,21 +220,63 @@ export function getAgentDefinitions(options?: {
     // ============================================================
     'document-specialist': documentSpecialistAgent
   };
+}
 
+export const BUILT_IN_AGENT_NAMES = Object.keys(getBuiltInAgentDefinitions()).sort((a, b) => a.localeCompare(b));
+
+// ============================================================
+// AGENT REGISTRY
+// ============================================================
+
+/**
+ * Agent Role Disambiguation
+ *
+ * HIGH-tier review/planning agents have distinct, non-overlapping roles:
+ *
+ * | Agent | Role | What They Do | What They Don't Do |
+ * |-------|------|--------------|-------------------|
+ * | architect | code-analysis | Analyze code, debug, verify | Requirements, plan creation, plan review |
+ * | analyst | requirements-analysis | Find requirement gaps | Code analysis, planning, plan review |
+ * | planner | plan-creation | Create work plans | Requirements, code analysis, plan review |
+ * | critic | plan-review | Review plan quality | Requirements, code analysis, plan creation |
+ *
+ * Workflow: explore → analyst → planner → critic → executor → architect (verify)
+ */
+
+/**
+ * Get all agent definitions as a record for use with Claude Agent SDK
+ */
+export function getAgentDefinitions(options?: {
+  overrides?: Partial<Record<string, Partial<AgentConfig>>>;
+  config?: PluginConfig;
+}): Record<string, AgentConfig> {
   const resolvedConfig = options?.config ?? loadConfig();
+  const builtInAgents = getBuiltInAgentDefinitions();
+  const discovered = discoverCustomAgents(resolvedConfig, {
+    builtInNames: Object.keys(builtInAgents),
+  });
+  for (const warning of discovered.warnings) {
+    console.warn(`[custom-agents] ${warning}`);
+  }
+  const agents: Record<string, AgentConfig> = {
+    ...builtInAgents,
+    ...discovered.agents,
+  };
   const inheritModel = resolvedConfig.routing?.forceInherit
     ? resolveInheritedModelFromEnv()
     : undefined;
-  const result: Record<string, { description: string; prompt: string; tools?: string[]; disallowedTools?: string[]; model?: string; defaultModel?: string }> = {};
+  const result: Record<string, AgentConfig> = {};
 
   for (const [name, agentConfig] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
     const configuredModel = getConfiguredAgentModel(name, resolvedConfig);
-    const disallowedTools = agentConfig.disallowedTools ?? parseDisallowedTools(name);
+    const isBuiltInAgent = builtInAgents[name] !== undefined;
+    const disallowedTools = agentConfig.disallowedTools ?? (isBuiltInAgent ? parseDisallowedTools(name) : undefined);
     const resolvedModel = override?.model ?? inheritModel ?? configuredModel ?? agentConfig.model;
     const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
 
     result[name] = {
+      name,
       description: override?.description ?? agentConfig.description,
       prompt: appendSkininthegamebrosGuidance(
         override?.prompt ?? agentConfig.prompt,
@@ -274,6 +286,7 @@ export function getAgentDefinitions(options?: {
       disallowedTools,
       model: resolvedModel,
       defaultModel: resolvedDefaultModel,
+      metadata: override?.metadata ?? agentConfig.metadata,
     };
   }
 
