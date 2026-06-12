@@ -154,6 +154,8 @@ Fires when a tool use fails.
 |--------|------|---------|
 | `post-tool-use-failure.mjs` | Provides recovery guidance for failed tool use | 3s |
 
+Disable via `DISABLE_OMC=1` (or `DISABLE_OMC=true`) or `OMC_SKIP_HOOKS=post-tool-use-failure` (the `post-tool-use` token also skips it, alongside `post-tool-verifier.mjs`).
+
 ### SubagentStart
 
 Fires when a subagent is spawned.

@@ -394,6 +394,20 @@ function shouldSuppressOptionalStartupMethodNotFound(toolName, error) {
 }
 
 async function main() {
+  // Skip guard: honor DISABLE_OMC and OMC_SKIP_HOOKS (see issues #838, #3253).
+  // Token `post-tool-use-failure` is preferred; `post-tool-use` is accepted for
+  // compatibility with the sibling PostToolUse hook (post-tool-verifier.mjs).
+  const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
+  if (
+    process.env.DISABLE_OMC === '1' ||
+    process.env.DISABLE_OMC === 'true' ||
+    _skipHooks.includes('post-tool-use-failure') ||
+    _skipHooks.includes('post-tool-use')
+  ) {
+    console.log(JSON.stringify({ continue: true }));
+    return;
+  }
+
   try {
     const input = await readStdin();
     const data = JSON.parse(input);

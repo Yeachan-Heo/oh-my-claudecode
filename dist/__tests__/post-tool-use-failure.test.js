@@ -197,5 +197,62 @@ describe('post-tool-use-failure.mjs', () => {
         // Files are independent — different paths, different content
         expect(pathA).not.toBe(pathB);
     });
+    describe('skip guards (DISABLE_OMC / OMC_SKIP_HOOKS)', () => {
+        const FAILING_INPUT = {
+            tool_name: 'Bash',
+            tool_input: { command: 'false' },
+            error: 'exit code 1',
+        };
+        function expectSkipped(cwd, extraEnv) {
+            const result = runHook({ ...FAILING_INPUT, cwd }, extraEnv);
+            // Skipped hooks emit a bare continue with no guidance injected.
+            expect(result).toEqual({ continue: true });
+            // No state directory/file is created when the hook no-ops.
+            expect(existsSync(join(cwd, '.omc', 'state'))).toBe(false);
+        }
+        it('no-ops when DISABLE_OMC=1', () => {
+            expectSkipped(makeRepoLocalTempDir(), { DISABLE_OMC: '1', OMC_SKIP_HOOKS: '' });
+        });
+        it('no-ops when DISABLE_OMC=true', () => {
+            expectSkipped(makeRepoLocalTempDir(), { DISABLE_OMC: 'true', OMC_SKIP_HOOKS: '' });
+        });
+        it('no-ops when OMC_SKIP_HOOKS contains post-tool-use-failure', () => {
+            expectSkipped(makeRepoLocalTempDir(), {
+                DISABLE_OMC: '',
+                OMC_SKIP_HOOKS: 'post-tool-use-failure',
+            });
+        });
+        it('no-ops when OMC_SKIP_HOOKS contains the post-tool-use compat token', () => {
+            expectSkipped(makeRepoLocalTempDir(), {
+                DISABLE_OMC: '',
+                OMC_SKIP_HOOKS: 'post-tool-use',
+            });
+        });
+        it('honors whitespace and commas in OMC_SKIP_HOOKS', () => {
+            expectSkipped(makeRepoLocalTempDir(), {
+                DISABLE_OMC: '',
+                OMC_SKIP_HOOKS: ' keyword-detector , post-tool-use-failure ',
+            });
+        });
+        it('injects guidance normally when skip vars are empty', () => {
+            const cwd = makeRepoLocalTempDir();
+            const legacyPath = join(cwd, '.omc', 'state', 'last-tool-error.json');
+            const result = runHook({ ...FAILING_INPUT, cwd }, { DISABLE_OMC: '', OMC_SKIP_HOOKS: '' });
+            expect(result.continue).toBe(true);
+            expect(result.hookSpecificOutput?.hookEventName).toBe('PostToolUseFailure');
+            expect(result.hookSpecificOutput?.additionalContext).toContain('Tool "Bash" failed.');
+            expect(existsSync(legacyPath)).toBe(true);
+        });
+        it('processes normally when DISABLE_OMC=false', () => {
+            const cwd = makeRepoLocalTempDir();
+            const result = runHook({ ...FAILING_INPUT, cwd }, { DISABLE_OMC: 'false', OMC_SKIP_HOOKS: '' });
+            expect(result.hookSpecificOutput?.hookEventName).toBe('PostToolUseFailure');
+        });
+        it('does not skip for an unrelated OMC_SKIP_HOOKS token', () => {
+            const cwd = makeRepoLocalTempDir();
+            const result = runHook({ ...FAILING_INPUT, cwd }, { DISABLE_OMC: '', OMC_SKIP_HOOKS: 'keyword-detector' });
+            expect(result.hookSpecificOutput?.hookEventName).toBe('PostToolUseFailure');
+        });
+    });
 });
 //# sourceMappingURL=post-tool-use-failure.test.js.map
