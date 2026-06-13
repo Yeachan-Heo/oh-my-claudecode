@@ -27,7 +27,11 @@ export interface TmuxExecOptions {
 }
 
 export function tmuxEnv(): NodeJS.ProcessEnv {
-  const { TMUX: _, ...env } = process.env;
+  // Strip both TMUX (real tmux) and PSMUX_SESSION (psmux's drop-in tmux on
+  // native Windows). psmux gates `new-session -d` nesting on PSMUX_SESSION,
+  // not TMUX, so dropping only TMUX leaves psmux silently no-op'ing detached
+  // session creation. See issue #3265.
+  const { TMUX: _, PSMUX_SESSION: __, ...env } = process.env;
   return env;
 }
 

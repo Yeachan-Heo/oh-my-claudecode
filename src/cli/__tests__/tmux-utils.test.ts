@@ -29,6 +29,7 @@ import {
   listHudWatchPaneIdsInCurrentWindow,
   resolveLaunchPolicy,
   tmuxExec,
+  tmuxEnv,
   tmuxSpawn,
   wrapWithLoginShell,
   quoteShellArg,
@@ -180,6 +181,57 @@ describe('isClaudeAvailable', () => {
     });
 
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tmuxEnv — psmux detached-session env stripping (issue #3265)
+// ---------------------------------------------------------------------------
+describe('tmuxEnv', () => {
+  it('strips PSMUX_SESSION so psmux does not block detached new-session -d', () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-0/default,1,0');
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+
+    const env = tmuxEnv();
+
+    expect(env.TMUX).toBeUndefined();
+    expect(env.PSMUX_SESSION).toBeUndefined();
+  });
+
+  it('preserves unrelated env vars', () => {
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/tmp/cfg');
+
+    const env = tmuxEnv();
+
+    expect(env.CLAUDE_CONFIG_DIR).toBe('/tmp/cfg');
+    expect(env.PSMUX_SESSION).toBeUndefined();
+  });
+
+  it('passes a PSMUX_SESSION-free env to execFile for detached creation (stripTmux: true)', () => {
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    mockedExecFileSync.mockClear();
+    mockedExecFileSync.mockReturnValue('' as any);
+
+    tmuxExec(['new-session', '-d', '-s', 'omc-detached'], { stripTmux: true });
+
+    const lastCall = mockedExecFileSync.mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const passedEnv = (lastCall![2] as { env?: NodeJS.ProcessEnv }).env;
+    expect(passedEnv?.PSMUX_SESSION).toBeUndefined();
+  });
+
+  it('leaves PSMUX_SESSION intact when stripTmux is not set (in-session split path)', () => {
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    mockedExecFileSync.mockClear();
+    mockedExecFileSync.mockReturnValue('' as any);
+
+    tmuxExec(['split-window', '-h']);
+
+    const lastCall = mockedExecFileSync.mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const passedEnv = (lastCall![2] as { env?: NodeJS.ProcessEnv }).env;
+    expect(passedEnv?.PSMUX_SESSION).toBe('psmux-session-1');
   });
 });
 
