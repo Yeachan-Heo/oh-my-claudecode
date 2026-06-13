@@ -64,7 +64,7 @@ import {
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, type WorkerPaneConfig, type WorkerPaneLiveness, type TeamSessionMode,
+  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, splitTeamWorkerPane, type WorkerPaneConfig, type WorkerPaneLiveness, type TeamSessionMode,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -610,14 +610,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const splitTarget = opts.existingWorkerPaneIds.length === 0
     ? opts.leaderPaneId
     : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
-  const splitType = opts.existingWorkerPaneIds.length === 0 ? '-h' : '-v';
+  const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
 
-  const splitResult = await tmuxExecAsync([
-    'split-window', splitType, '-t', splitTarget,
-    '-d', '-P', '-F', '#{pane_id}',
-    '-c', opts.workerCwd ?? opts.cwd,
-  ]);
-  const paneId = splitResult.stdout.split('\n')[0]?.trim();
+  const paneId = await splitTeamWorkerPane(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
   if (!paneId) {
     return { paneId: null, startupAssigned: false, startupFailureReason: 'pane_id_missing' };
   }

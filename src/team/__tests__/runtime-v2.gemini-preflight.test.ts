@@ -38,6 +38,7 @@ vi.mock('../tmux-session.js', () => ({
   paneHasActiveTask: vi.fn(() => false),
   paneLooksReady: vi.fn(() => true),
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+  splitTeamWorkerPane: vi.fn(async () => '%2'),
 }));
 
 vi.mock('../model-contract.js', () => ({

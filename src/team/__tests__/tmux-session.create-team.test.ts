@@ -101,7 +101,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-import { createTeamSession, detectTeamMultiplexerContext } from '../tmux-session.js';
+import { createTeamSession, detectTeamMultiplexerContext, splitTeamWorkerPane } from '../tmux-session.js';
 
 describe('detectTeamMultiplexerContext', () => {
   afterEach(() => {
@@ -246,5 +246,51 @@ describe('createTeamSession context resolution', () => {
     expect(session.sessionName).toBe('omx:5');
     expect(session.workerPaneIds).toEqual(['%501']);
     expect(session.sessionMode).toBe('dedicated-window');
+  });
+});
+
+describe('splitTeamWorkerPane multiplexer routing (#3267)', () => {
+  beforeEach(() => {
+    mockedCalls.execFileArgs = [];
+    mockedCalls.splitCount = 0;
+    mockedCalls.newSplitStdouts = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('creates a native cmux surface (not a tmux pane) for on-demand workers under cmux', async () => {
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('TMUX_PANE', '');
+    vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+    vi.stubEnv('CMUX_WORKSPACE_ID', 'workspace-1');
+
+    const paneId = await splitTeamWorkerPane('cmux-leader', 'right', '/tmp');
+
+    // A cmux surface id (UUID/token) — NOT a tmux "%N" pane id — so that
+    // spawnWorkerInPane()/waitForShellReady() short-circuit instead of polling
+    // tmux and timing out with worker_start_shell_not_ready.
+    expect(paneId).toBe('cmux-worker-1');
+    expect(paneId?.startsWith('%')).toBe(false);
+    expect(mockedCalls.execFileArgs).toContainEqual(
+      ['new-split', 'right', '--surface', 'cmux-leader', '--workspace', 'workspace-1'],
+    );
+    expect(mockedCalls.execFileArgs.some((args) => args[0] === 'split-window')).toBe(false);
+  });
+
+  it('falls back to a tmux split-window pane id when running under tmux', async () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
+    vi.stubEnv('TMUX_PANE', '%732');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+
+    const paneId = await splitTeamWorkerPane('%732', 'down', '/tmp');
+
+    expect(paneId).toBe('%501');
+    expect(mockedCalls.execFileArgs).toContainEqual(
+      expect.arrayContaining(['split-window', '-v', '-t', '%732']),
+    );
+    expect(mockedCalls.execFileArgs.some((args) => args[0] === 'new-split')).toBe(false);
   });
 });

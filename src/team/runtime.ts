@@ -7,7 +7,7 @@ import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWo
 import { validateTeamName } from './team-name.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker,
-  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane,
+  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane, splitTeamWorkerPane,
   type TeamSession, type WorkerPaneConfig,
 } from './tmux-session.js';
 import {
@@ -686,13 +686,8 @@ export async function spawnWorkerForTask(
   const splitTarget = runtime.workerPaneIds.length === 0
     ? runtime.leaderPaneId
     : runtime.workerPaneIds[runtime.workerPaneIds.length - 1];
-  const splitType = runtime.workerPaneIds.length === 0 ? '-h' : '-v';
-  const splitResult = await tmuxExecAsync([
-    'split-window', splitType, '-t', splitTarget,
-    '-d', '-P', '-F', '#{pane_id}',
-    '-c', runtime.cwd,
-  ]);
-  const paneId = splitResult.stdout.split('\n')[0]?.trim();
+  const splitDirection = runtime.workerPaneIds.length === 0 ? 'right' : 'down';
+  const paneId = await splitTeamWorkerPane(splitTarget, splitDirection, runtime.cwd);
   if (!paneId) {
     try {
       await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd);

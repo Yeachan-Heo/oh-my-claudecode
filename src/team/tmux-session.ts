@@ -650,6 +650,33 @@ export function spawnBridgeInSession(
  * Layout: leader pane on the left, worker panes stacked vertically on the right.
  * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
  */
+/**
+ * Split a new worker pane off `splitTarget`, honoring the active multiplexer.
+ *
+ * Under cmux a worker MUST be a native cmux surface (UUID), not a tmux pane id
+ * (`%N`). Otherwise spawnWorkerInPane()/waitForShellReady() classify the worker
+ * as a tmux pane, poll tmux for shell readiness, and time out after 5s with
+ * `worker_start_shell_not_ready` — abandoning the worker's git worktree.
+ * createTeamSession() already branches this way for panes created up front; the
+ * on-demand worker spawns in both team runtimes must do the same. (#3267)
+ */
+export async function splitTeamWorkerPane(
+  splitTarget: string,
+  direction: 'right' | 'down',
+  cwd: string,
+): Promise<string | null> {
+  if (isCmuxContext()) {
+    return cmuxSplitSurface(splitTarget, direction, cwd);
+  }
+  const splitType = direction === 'right' ? '-h' : '-v';
+  const splitResult = await tmuxExecAsync([
+    'split-window', splitType, '-t', splitTarget,
+    '-d', '-P', '-F', '#{pane_id}',
+    '-c', cwd,
+  ]);
+  return splitResult.stdout.split('\n')[0]?.trim() || null;
+}
+
 export async function createTeamSession(
   teamName: string,
   workerCount: number,
