@@ -674,13 +674,15 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
-  it('launches gjc as `gjc <prompt>` and never pipes stdin', () => {
+  it('launches gjc as `gjc --print --no-session <prompt>` and never pipes stdin', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gjc-args-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
       const preludePath = writeSpawnSyncCapturePrelude(wd);
-      // gjc takes the prompt as a positional arg; stdin is interactive input
-      // and must stay closed even for multiline prompts.
+      // gjc needs --print for non-interactive process-and-exit mode (a bare
+      // `gjc <prompt>` routes to the interactive launch TUI and hangs). The
+      // prompt is a positional arg; stdin must stay closed even for multiline
+      // prompts.
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         ['gjc', '--prompt', 'review this\nand that'],
@@ -701,7 +703,7 @@ describe('run-provider-advisor script contract', () => {
       const launch = calls.find((c) => !c.args.includes('--version'));
       expect(launch).toBeDefined();
       expect(launch!.command).toBe('gjc');
-      expect(launch!.args).toEqual(['review this\nand that']);
+      expect(launch!.args).toEqual(['--print', '--no-session', 'review this\nand that']);
       expect(launch!.options.input ?? null).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });

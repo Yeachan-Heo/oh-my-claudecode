@@ -23,8 +23,10 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
  * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
- * - gjc: `gjc <prompt>` (gajae-code harness takes the prompt as a positional
- *   arg; its stdin is interactive input and must stay closed)
+ * - gjc: `gjc --print --no-session <prompt>` (gajae-code harness; --print is its
+ *   non-interactive "process prompt and exit" mode. A bare `gjc <prompt>` routes
+ *   to the interactive `launch` TUI and never exits, so --print is required.
+ *   The prompt is a positional arg; stdin stays closed.)
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
@@ -44,9 +46,11 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     return ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt];
   }
   if (provider === 'gjc') {
-    // gjc (gajae-code) takes the prompt as a positional arg. Keep stdin closed
-    // so the harness cannot interpret advisor prompt bytes as interactive input.
-    return [prompt];
+    // gjc (gajae-code) needs --print for non-interactive "process and exit"
+    // mode; a bare `gjc <prompt>` routes to the interactive launch TUI and
+    // hangs. --no-session keeps the one-shot advisory call ephemeral. The
+    // prompt is a positional arg; stdin stays closed.
+    return ['--print', '--no-session', prompt];
   }
   // claude: `claude -p` reads the prompt from stdin when no prompt arg is given.
   return pipePromptViaStdin ? ['-p'] : ['-p', prompt];

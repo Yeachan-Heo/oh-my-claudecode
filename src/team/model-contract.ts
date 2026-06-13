@@ -288,10 +288,13 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
     agentType: 'gjc',
     binary: 'gjc',
     installInstructions: 'Install Gajae-Code CLI: bun install -g gajae-code (see https://github.com/Yeachan-Heo/gajae-code)',
-    // gjc (gajae-code) runs as an interactive coding-agent harness — no
-    // exit-on-complete prompt mode. Keep supportsPromptMode false so the
-    // verdict-file contract path (CONTRACT_ROLES + shouldInjectContract)
-    // skips this provider; gjc workers participate as executors only.
+    // gjc (gajae-code) DOES have a non-interactive `--print` mode, but as a
+    // team tmux worker it is launched interactively (bare `gjc` → the `launch`
+    // TUI) and claims tasks from its mailbox, mirroring cursor. Keep
+    // supportsPromptMode false so the verdict-file contract path (CONTRACT_ROLES
+    // + shouldInjectContract) skips this provider; gjc team workers participate
+    // as executors only. (The `omc ask gjc` advisor path uses `gjc --print`
+    // separately — see scripts/run-provider-advisor.js.)
     supportsPromptMode: false,
     buildLaunchArgs(_model?: string, extraFlags: string[] = []): string[] {
       // Minimal flags — gjc owns its own session/auth state and selects its
