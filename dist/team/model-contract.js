@@ -228,6 +228,24 @@ const CONTRACTS = {
             return rawOutput.trim();
         },
     },
+    gjc: {
+        agentType: 'gjc',
+        binary: 'gjc',
+        installInstructions: 'Install Gajae-Code CLI: bun install -g gajae-code (see https://github.com/Yeachan-Heo/gajae-code)',
+        // gjc (gajae-code) runs as an interactive coding-agent harness — no
+        // exit-on-complete prompt mode. Keep supportsPromptMode false so the
+        // verdict-file contract path (CONTRACT_ROLES + shouldInjectContract)
+        // skips this provider; gjc workers participate as executors only.
+        supportsPromptMode: false,
+        buildLaunchArgs(_model, extraFlags = []) {
+            // Minimal flags — gjc owns its own session/auth state and selects its
+            // own model interactively inside the harness.
+            return [...extraFlags];
+        },
+        parseOutput(rawOutput) {
+            return rawOutput.trim();
+        },
+    },
 };
 export function getContract(agentType) {
     const contract = CONTRACTS[agentType];

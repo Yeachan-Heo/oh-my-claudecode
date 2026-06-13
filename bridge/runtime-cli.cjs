@@ -1980,7 +1980,7 @@ function validateAnthropicBaseUrl(urlString) {
 // src/config/models.ts
 var DIRECT_MODEL_ENV_KEYS = ["CLAUDE_MODEL", "ANTHROPIC_MODEL"];
 var INHERIT_TIER_PRIORITY = ["MEDIUM", "HIGH", "LOW"];
-var CLAUDE_TIER_ALIASES = /* @__PURE__ */ new Set(["sonnet", "opus", "haiku"]);
+var CLAUDE_TIER_ALIASES = /* @__PURE__ */ new Set(["sonnet", "opus", "haiku", "fable"]);
 var TIER_ENV_KEYS = {
   LOW: [
     "OMC_MODEL_LOW",
@@ -2001,7 +2001,8 @@ var TIER_ENV_KEYS = {
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
   SONNET: "claude-sonnet-4-6",
-  OPUS: "claude-opus-4-8"
+  OPUS: "claude-opus-4-8",
+  FABLE: "claude-fable-5"
 };
 var BUILTIN_TIER_MODEL_DEFAULTS = {
   LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
@@ -2011,7 +2012,8 @@ var BUILTIN_TIER_MODEL_DEFAULTS = {
 var CLAUDE_FAMILY_HIGH_VARIANTS = {
   HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
   SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
-  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
+  OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`,
+  FABLE: `${CLAUDE_FAMILY_DEFAULTS.FABLE}-high`
 };
 var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: "gpt-5.3-codex",
@@ -2079,6 +2081,7 @@ function resolveClaudeFamily(modelId) {
   if (lower.includes("sonnet")) return "SONNET";
   if (lower.includes("opus")) return "OPUS";
   if (lower.includes("haiku")) return "HAIKU";
+  if (lower.includes("fable")) return "FABLE";
   return null;
 }
 function hasBedrockModelId(modelIds) {
@@ -2542,7 +2545,7 @@ function warnOnDeprecatedDelegationRouting(config) {
 }
 var CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
 var KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "gjc"]);
 var TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
 function validateTeamConfig(config) {
   const team = config.team;
@@ -3150,7 +3153,8 @@ var codeSimplifierAgent = {
 var FAMILY_TO_ALIAS = {
   SONNET: "sonnet",
   OPUS: "opus",
-  HAIKU: "haiku"
+  HAIKU: "haiku",
+  FABLE: "fable"
 };
 function normalizeToCcAlias(model) {
   if (isProviderSpecificModelId(model)) {
@@ -3391,6 +3395,22 @@ var CONTRACTS = {
     // Keep supportsPromptMode false so the verdict-file contract path
     // (CONTRACT_ROLES + shouldInjectContract) skips this provider; cursor
     // workers participate as executors only.
+    supportsPromptMode: false,
+    buildLaunchArgs(_model, extraFlags = []) {
+      return [...extraFlags];
+    },
+    parseOutput(rawOutput) {
+      return rawOutput.trim();
+    }
+  },
+  gjc: {
+    agentType: "gjc",
+    binary: "gjc",
+    installInstructions: "Install Gajae-Code CLI: bun install -g gajae-code (see https://github.com/Yeachan-Heo/gajae-code)",
+    // gjc (gajae-code) runs as an interactive coding-agent harness — no
+    // exit-on-complete prompt mode. Keep supportsPromptMode false so the
+    // verdict-file contract path (CONTRACT_ROLES + shouldInjectContract)
+    // skips this provider; gjc workers participate as executors only.
     supportsPromptMode: false,
     buildLaunchArgs(_model, extraFlags = []) {
       return [...extraFlags];
@@ -3716,6 +3736,13 @@ function agentTypeGuidance(agentType) {
         "- You are an interactive REPL (cursor-agent), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.",
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT type \`/exit\` unless the leader sends an explicit shutdown.`,
         "- Reviewer/critic/security-review roles are NOT supported for cursor workers \u2014 those require a verdict-file write-and-exit which the REPL does not perform. Take only executor-style tasks."
+      ].join("\n");
+    case "gjc":
+      return [
+        "### Agent-Type Guidance (gjc)",
+        "- You are an interactive coding-agent harness (gajae-code), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.",
+        `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT exit unless the leader sends an explicit shutdown.`,
+        "- Reviewer/critic/security-review roles are NOT supported for gjc workers \u2014 those require a verdict-file write-and-exit which the harness does not perform. Take only executor-style tasks."
       ].join("\n");
     case "grok":
       return [
@@ -5099,6 +5126,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     if (agentType === "cursor") {
       return void 0;
     }
+    if (agentType === "gjc") {
+      return void 0;
+    }
     return resolveClaudeWorkerModel();
   })();
   const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
@@ -5180,7 +5210,7 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
     teamName
   });
   const configData = await readJsonSafe((0, import_path15.join)(root, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "gjc"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
@@ -6680,6 +6710,9 @@ function resolveExternalModel(provider, raw, cfg) {
   if (provider === "cursor") {
     return "";
   }
+  if (provider === "gjc") {
+    return "";
+  }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 function resolveRoleAssignment(role, cfg) {
@@ -6904,7 +6937,7 @@ var VALID_VERDICTS = /* @__PURE__ */ new Set(["approve", "revise", "reject"]);
 var VALID_SEVERITIES = /* @__PURE__ */ new Set(["critical", "major", "minor", "nit"]);
 function shouldInjectContract(role, provider) {
   if (!role || !provider) return false;
-  if (provider === "claude" || provider === "cursor") return false;
+  if (provider === "claude" || provider === "cursor" || provider === "gjc") return false;
   return CONTRACT_ROLES.has(role);
 }
 function renderCliWorkerOutputContract(role, output_file) {
@@ -8259,6 +8292,9 @@ async function spawnV2Worker(opts) {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
     }
     if (opts.agentType === "cursor") {
+      return void 0;
+    }
+    if (opts.agentType === "gjc") {
       return void 0;
     }
     return resolveClaudeWorkerModel();

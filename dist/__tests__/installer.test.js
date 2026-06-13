@@ -379,7 +379,7 @@ describe('Installer Constants', () => {
             }
         });
         it('should have read-only agents not include Edit/Write tools', () => {
-            const readOnlyAgents = ['architect.md', 'critic.md', 'analyst.md'];
+            const readOnlyAgents = ['architect.md', 'critic.md', 'analyst.md', 'verifier.md'];
             for (const agent of readOnlyAgents) {
                 const content = AGENT_DEFINITIONS[agent];
                 // Read-only agents use disallowedTools: to block Edit/Write

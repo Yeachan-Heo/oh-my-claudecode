@@ -527,4 +527,46 @@ describe('OMC setup Ralph Ruby dependency guidance (issue #2969)', () => {
         expect(content).toContain('restart Claude Code');
     });
 });
+// ── Contract 11: SessionEnd hooks carry async:true (issue #3240) ─────────────
+// On Windows shutdown, synchronous SessionEnd hooks are killed before completion,
+// producing "Hook cancelled". async:true lets the runtime fire-and-forget them.
+describe('Contract 11: SessionEnd hooks are async (issue #3240)', () => {
+    const HOOKS_JSON_PATH = join(REPO_ROOT, 'hooks', 'hooks.json');
+    it('every SessionEnd hook entry has async:true', () => {
+        if (!existsSync(HOOKS_JSON_PATH))
+            return;
+        const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
+        const sessionEndGroups = hooksJson.hooks?.['SessionEnd'] ?? [];
+        expect(sessionEndGroups.length).toBeGreaterThan(0);
+        const violations = [];
+        for (const group of sessionEndGroups) {
+            for (const hook of group.hooks ?? []) {
+                if (hook.type === 'command' && hook.async !== true) {
+                    violations.push({ command: hook.command ?? '(unknown)' });
+                }
+            }
+        }
+        if (violations.length > 0) {
+            const details = violations.map(v => `  ${v.command}`).join('\n');
+            expect.fail(`SessionEnd hook entries missing async:true (issue #3240 regression):\n${details}\n\n` +
+                `On Windows shutdown, synchronous SessionEnd hooks are killed before completion. ` +
+                `Add "async": true to every SessionEnd command hook.`);
+        }
+    });
+    it('non-SessionEnd hooks do not unconditionally carry async:true', () => {
+        if (!existsSync(HOOKS_JSON_PATH))
+            return;
+        const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
+        // Only SessionEnd should have async:true; verify at least one event type that
+        // is expected to be synchronous (Stop) is not accidentally marked async.
+        const stopGroups = hooksJson.hooks?.['Stop'] ?? [];
+        for (const group of stopGroups) {
+            for (const hook of group.hooks ?? []) {
+                if (hook.type === 'command') {
+                    expect(hook.async).not.toBe(true);
+                }
+            }
+        }
+    });
+});
 //# sourceMappingURL=setup-contracts-regression.test.js.map

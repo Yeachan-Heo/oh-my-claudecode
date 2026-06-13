@@ -65,7 +65,9 @@ export function shouldInjectContract(
   // role-router and worker-bootstrap guidance both flag this; here we
   // simply skip contract injection if a cursor worker somehow lands on
   // a CONTRACT_ROLES role rather than emit instructions it cannot follow.
-  if (provider === 'claude' || provider === 'cursor') return false;
+  // gjc, like cursor, runs as an interactive harness and cannot perform the
+  // verdict write-and-exit dance; skip contract injection for it too.
+  if (provider === 'claude' || provider === 'cursor' || provider === 'gjc') return false;
   return CONTRACT_ROLES.has(role);
 }
 

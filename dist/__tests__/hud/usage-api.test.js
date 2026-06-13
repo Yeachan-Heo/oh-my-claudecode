@@ -50,6 +50,7 @@ describe('isZaiHost', () => {
     it('accepts subdomains of z.ai', () => {
         expect(isZaiHost('https://api.z.ai')).toBe(true);
         expect(isZaiHost('https://api.z.ai/v1/messages')).toBe(true);
+        expect(isZaiHost('https://api.z.ai/api/anthropic')).toBe(true);
         expect(isZaiHost('https://foo.bar.z.ai')).toBe(true);
     });
     it('rejects hosts that merely contain z.ai as substring', () => {
@@ -688,8 +689,8 @@ describe('getUsage routing', () => {
         expect(result.rateLimits.weeklyResetsAt).toBeInstanceOf(Date);
         expect(result.rateLimits.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
     });
-    it('routes to z.ai when ANTHROPIC_BASE_URL is z.ai host', async () => {
-        process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/v1';
+    it('routes z.ai Anthropic Messages endpoint to the quota API', async () => {
+        process.env.ANTHROPIC_BASE_URL = 'https://api.z.ai/api/anthropic';
         process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
         // https.request mock not wired, so fetchUsageFromZai resolves to null (network error)
         const result = await getUsage();
@@ -1302,6 +1303,181 @@ describe('getUsage routing - minimax', () => {
         const written = JSON.parse(String(writeCall[1]));
         expect(written.source).toBe('minimax');
         expect(written.data.fiveHourPercent).toBe(50);
+    });
+});
+describe('writeBackCredentials — Keychain vs file refresh', () => {
+    const originalPlatform = process.platform;
+    beforeAll(() => {
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    });
+    afterAll(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    });
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+        vi.mocked(fs.readFileSync).mockReturnValue('{}');
+        vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+        delete process.env.ANTHROPIC_BASE_URL;
+        delete process.env.ANTHROPIC_AUTH_TOKEN;
+    });
+    it('writes refreshed token back to Keychain when source is keychain', async () => {
+        const oneHourAgo = Date.now() - 60 * 60 * 1000;
+        const execFileMock = vi.mocked(childProcess.execFileSync);
+        const httpsModule = await import('https');
+        // First call: read expired creds from keychain (username-scoped)
+        // Second call: token refresh HTTP (handled via httpsModule mock)
+        // Third call: read existing keychain entry for merge
+        // Fourth call: write updated creds back to keychain
+        let execCallCount = 0;
+        execFileMock.mockImplementation((_file, args) => {
+            const argsArr = args;
+            execCallCount++;
+            if (argsArr.includes('find-generic-password') && argsArr.includes('-a')) {
+                // First read: return expired keychain creds
+                if (execCallCount === 1) {
+                    return JSON.stringify({
+                        claudeAiOauth: {
+                            accessToken: 'expired-access-token',
+                            refreshToken: 'valid-refresh-token',
+                            expiresAt: oneHourAgo,
+                        },
+                    });
+                }
+                // Third call: re-read existing entry for merge before write
+                return JSON.stringify({
+                    claudeAiOauth: {
+                        accessToken: 'expired-access-token',
+                        refreshToken: 'valid-refresh-token',
+                        expiresAt: oneHourAgo,
+                    },
+                });
+            }
+            if (argsArr.includes('add-generic-password')) {
+                // Write-back call: capture what was written
+                return '';
+            }
+            // service-only fallback: no entry
+            throw new Error('mock: no service-only entry');
+        });
+        // Token refresh returns new tokens
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', JSON.stringify({
+                    access_token: 'new-access-token',
+                    refresh_token: 'new-refresh-token',
+                    expires_in: 3600,
+                }));
+                res.emit('end');
+            };
+            return req;
+        });
+        // Usage API call
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', JSON.stringify({
+                    five_hour: { utilization: 30 },
+                    seven_day: { utilization: 60 },
+                }));
+                res.emit('end');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result.error).toBeUndefined();
+        expect(result.rateLimits?.fiveHourPercent).toBe(30);
+        // Verify Keychain write-back was called with add-generic-password
+        const writeBackCall = execFileMock.mock.calls.find(c => Array.isArray(c[1]) && c[1].includes('add-generic-password'));
+        expect(writeBackCall).toBeTruthy();
+        const writeArgs = writeBackCall[1];
+        // Should use -U flag (update) to replace existing entry
+        expect(writeArgs).toContain('-U');
+        // The written JSON should contain the new tokens
+        const writtenJson = writeArgs[writeArgs.indexOf('-w') + 1];
+        const written = JSON.parse(writtenJson);
+        const inner = written.claudeAiOauth ?? written;
+        expect(inner.accessToken).toBe('new-access-token');
+        expect(inner.refreshToken).toBe('new-refresh-token');
+        // File credential store should NOT have been written
+        const fileWriteCall = vi.mocked(fs.writeFileSync).mock.calls.find(c => String(c[0]).endsWith('.credentials.json'));
+        expect(fileWriteCall).toBeUndefined();
+    });
+    it('writes refreshed token back to file when source is file, not to Keychain', async () => {
+        const oneHourAgo = Date.now() - 60 * 60 * 1000;
+        const execFileMock = vi.mocked(childProcess.execFileSync);
+        const mockedExistsSync = vi.mocked(fs.existsSync);
+        const mockedReadFileSync = vi.mocked(fs.readFileSync);
+        const httpsModule = await import('https');
+        // Keychain has no entry — only file credentials
+        execFileMock.mockImplementation(() => { throw new Error('mock: no keychain'); });
+        mockedExistsSync.mockImplementation((path) => String(path).endsWith('.credentials.json'));
+        mockedReadFileSync.mockImplementation((path) => {
+            if (String(path).endsWith('.credentials.json')) {
+                return JSON.stringify({
+                    claudeAiOauth: {
+                        accessToken: 'expired-file-token',
+                        refreshToken: 'file-refresh-token',
+                        expiresAt: oneHourAgo,
+                    },
+                });
+            }
+            return '{}';
+        });
+        // Token refresh returns new tokens
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', JSON.stringify({
+                    access_token: 'new-file-access-token',
+                    refresh_token: 'new-file-refresh-token',
+                    expires_in: 3600,
+                }));
+                res.emit('end');
+            };
+            return req;
+        });
+        // Usage API call
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', JSON.stringify({
+                    five_hour: { utilization: 20 },
+                    seven_day: { utilization: 40 },
+                }));
+                res.emit('end');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result.error).toBeUndefined();
+        expect(result.rateLimits?.fiveHourPercent).toBe(20);
+        // File should have been written with new tokens
+        const fileWriteCall = vi.mocked(fs.writeFileSync).mock.calls.find(c => String(c[0]).endsWith('.credentials.json.tmp.' + process.pid));
+        expect(fileWriteCall).toBeTruthy();
+        const written = JSON.parse(String(fileWriteCall[1]));
+        expect(written.claudeAiOauth.accessToken).toBe('new-file-access-token');
+        expect(written.claudeAiOauth.refreshToken).toBe('new-file-refresh-token');
+        // Keychain write-back should NOT have been called with add-generic-password
+        const keychainWriteCall = execFileMock.mock.calls.find(c => Array.isArray(c[1]) && c[1].includes('add-generic-password'));
+        expect(keychainWriteCall).toBeUndefined();
     });
 });
 //# sourceMappingURL=usage-api.test.js.map

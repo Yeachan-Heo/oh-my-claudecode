@@ -60,6 +60,13 @@ function agentTypeGuidance(agentType) {
                 `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT type \`/exit\` unless the leader sends an explicit shutdown.`,
                 '- Reviewer/critic/security-review roles are NOT supported for cursor workers — those require a verdict-file write-and-exit which the REPL does not perform. Take only executor-style tasks.',
             ].join('\n');
+        case 'gjc':
+            return [
+                '### Agent-Type Guidance (gjc)',
+                '- You are an interactive coding-agent harness (gajae-code), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.',
+                `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT exit unless the leader sends an explicit shutdown.`,
+                '- Reviewer/critic/security-review roles are NOT supported for gjc workers — those require a verdict-file write-and-exit which the harness does not perform. Take only executor-style tasks.',
+            ].join('\n');
         case 'grok':
             return [
                 '### Agent-Type Guidance (grok)',

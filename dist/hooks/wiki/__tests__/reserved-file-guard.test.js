@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import { writePageUnsafe, ensureWikiDir, withWikiLock } from '../storage.js';
 import { WIKI_SCHEMA_VERSION } from '../types.js';
+import { writeEnvironmentUnsafe, readPage } from '../storage.js';
 function makePage(filename) {
     return {
         filename,
@@ -38,6 +39,17 @@ describe('writePageUnsafe reserved file guard', () => {
         expect(() => {
             withWikiLock(tempDir, () => writePageUnsafe(tempDir, makePage('auth.md')));
         }).not.toThrow();
+    });
+    it('should throw when writing to environment.md via writePageUnsafe', () => {
+        expect(() => {
+            withWikiLock(tempDir, () => writePageUnsafe(tempDir, makePage('environment.md')));
+        }).toThrow('Cannot write to reserved wiki file');
+    });
+    it('writeEnvironmentUnsafe bypasses the reserved guard for environment.md', () => {
+        expect(() => {
+            withWikiLock(tempDir, () => writeEnvironmentUnsafe(tempDir, makePage('environment.md')));
+        }).not.toThrow();
+        expect(readPage(tempDir, 'environment.md')?.frontmatter.title).toBe('Test');
     });
 });
 //# sourceMappingURL=reserved-file-guard.test.js.map

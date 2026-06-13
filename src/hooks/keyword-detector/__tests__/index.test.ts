@@ -981,6 +981,32 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
     });
 
+    describe('gjc keyword', () => {
+      it('should detect "ask gjc"', () => {
+        const result = detectKeywordsWithType('ask gjc to implement');
+        const gjcMatch = result.find((r) => r.type === 'gjc');
+        expect(gjcMatch).toBeDefined();
+      });
+
+      it('should detect "use gjc"', () => {
+        const result = detectKeywordsWithType('use gjc for edits');
+        const gjcMatch = result.find((r) => r.type === 'gjc');
+        expect(gjcMatch).toBeDefined();
+      });
+
+      it('should detect "delegate to gjc"', () => {
+        const result = detectKeywordsWithType('delegate to gjc');
+        const gjcMatch = result.find((r) => r.type === 'gjc');
+        expect(gjcMatch).toBeDefined();
+      });
+
+      it('should NOT detect bare gjc keyword', () => {
+        const result = detectKeywordsWithType('the gjc harness is great');
+        const gjcMatch = result.find((r) => r.type === 'gjc');
+        expect(gjcMatch).toBeUndefined();
+      });
+    });
+
     describe('sanitization false-positive prevention', () => {
       it('should NOT detect codex in URL', () => {
         const result = detectKeywordsWithType('see https://example.com/gpt');

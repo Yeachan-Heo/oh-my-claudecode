@@ -313,6 +313,17 @@ export function appendLogUnsafe(root, entry) {
     }
     atomicWriteFileSync(logPath, existing + logLine);
 }
+/**
+ * Write the reserved environment.md page. MUST be called inside withWikiLock.
+ *
+ * environment.md is a reserved file (excluded from index/listPages and
+ * rejected by writePageUnsafe), so project-memory feeding gets a dedicated
+ * write path — mirroring updateIndexUnsafe and appendLogUnsafe.
+ */
+export function writeEnvironmentUnsafe(root, page) {
+    const wikiDir = ensureWikiDir(root);
+    atomicWriteFileSync(join(wikiDir, ENVIRONMENT_FILE), serializePage(page));
+}
 // ============================================================================
 // Safe Write Operations (acquire lock internally)
 // ============================================================================

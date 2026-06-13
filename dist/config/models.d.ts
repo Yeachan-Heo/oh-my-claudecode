@@ -1,5 +1,5 @@
 export type ModelTier = 'LOW' | 'MEDIUM' | 'HIGH';
-export type ClaudeModelFamily = 'HAIKU' | 'SONNET' | 'OPUS';
+export type ClaudeModelFamily = 'HAIKU' | 'SONNET' | 'OPUS' | 'FABLE';
 /**
  * Canonical Claude family defaults.
  * Keep these date-less so version bumps are a one-line edit per family.

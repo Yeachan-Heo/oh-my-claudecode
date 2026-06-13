@@ -467,6 +467,29 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.task).toBe('compare edits');
   });
 
+  it('parses single-type spec 3:gjc into uniform agentTypes', () => {
+    const parsed = parseTeamArgs(['3:gjc', 'apply implementation']);
+    expect(parsed.workerCount).toBe(3);
+    expect(parsed.agentTypes).toEqual(['gjc', 'gjc', 'gjc']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'gjc' },
+      { agentType: 'gjc' },
+      { agentType: 'gjc' },
+    ]);
+    expect(parsed.task).toBe('apply implementation');
+  });
+
+  it('supports gjc in mixed explicit cli specs', () => {
+    const parsed = parseTeamArgs(['1:gjc,1:codex', 'compare edits']);
+    expect(parsed.workerCount).toBe(2);
+    expect(parsed.agentTypes).toEqual(['gjc', 'codex']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'gjc' },
+      { agentType: 'codex' },
+    ]);
+    expect(parsed.task).toBe('compare edits');
+  });
+
   it('defaults to 3 claude workers when no spec is given', () => {
     const parsed = parseTeamArgs(['run all tests']);
     expect(parsed.workerCount).toBe(3);

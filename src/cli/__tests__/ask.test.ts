@@ -276,6 +276,8 @@ describe('parseAskArgs', () => {
     expect(parseAskArgs(['grok', '-p', 'brainstorm'])).toEqual({ provider: 'grok', prompt: 'brainstorm' });
     expect(parseAskArgs(['cursor', 'review', 'this'])).toEqual({ provider: 'cursor', prompt: 'review this' });
     expect(parseAskArgs(['cursor', '-p', 'brainstorm'])).toEqual({ provider: 'cursor', prompt: 'brainstorm' });
+    expect(parseAskArgs(['gjc', 'review', 'this'])).toEqual({ provider: 'gjc', prompt: 'review this' });
+    expect(parseAskArgs(['gjc', '-p', 'brainstorm'])).toEqual({ provider: 'gjc', prompt: 'brainstorm' });
   });
 
   it('supports --agent-prompt flag and equals syntax', () => {
@@ -434,6 +436,34 @@ describe('omc ask command', () => {
     }
   });
 
+  it('allows gjc ask inside a Claude Code session', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-gjc-nested-'));
+    try {
+      const stubPath = writeAdvisorStub(wd);
+      const result = runCli(
+        ['ask', 'gjc', '--prompt', 'cli nested gjc prompt'],
+        wd,
+        {
+          OMC_ASK_ADVISOR_SCRIPT: stubPath,
+          CLAUDECODE: '1',
+        },
+        { preserveClaudeSessionEnv: true },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('Nested launches are not supported');
+
+      const payload = JSON.parse(result.stdout);
+      expect(payload.provider).toBe('gjc');
+      expect(payload.prompt).toBe('cli nested gjc prompt');
+      expect(payload.originalTask).toBe('cli nested gjc prompt');
+      expect(payload.passthrough).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
   it('loads --agent-prompt role from resolved prompts dir and prepends role content', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-agent-prompt-'));
     try {
@@ -519,6 +549,7 @@ describe('run-provider-advisor script contract', () => {
     ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
     ['grok', ['grok', '--prompt', 'nested grok prompt']],
     ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
+    ['gjc', ['gjc', '--prompt', 'nested gjc prompt']],
   ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
     const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
     try {
@@ -637,6 +668,40 @@ describe('run-provider-advisor script contract', () => {
         'disabled',
         'review this\nand that',
       ]);
+      expect(launch!.options.input ?? null).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches gjc as `gjc <prompt>` and never pipes stdin', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gjc-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // gjc takes the prompt as a positional arg; stdin is interactive input
+      // and must stay closed even for multiline prompts.
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['gjc', '--prompt', 'review this\nand that'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { input: string | null };
+      }>;
+
+      expect(calls).toHaveLength(2);
+      const launch = calls.find((c) => !c.args.includes('--version'));
+      expect(launch).toBeDefined();
+      expect(launch!.command).toBe('gjc');
+      expect(launch!.args).toEqual(['review this\nand that']);
       expect(launch!.options.input ?? null).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });

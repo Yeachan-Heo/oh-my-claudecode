@@ -685,6 +685,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     if (opts.agentType === 'cursor') {
       return undefined;
     }
+    if (opts.agentType === 'gjc') {
+      return undefined;
+    }
     // Claude agents: resolve Bedrock/Vertex model when on those providers
     return resolveClaudeWorkerModel();
   })();

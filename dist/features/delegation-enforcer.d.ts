@@ -12,7 +12,7 @@
  * parameters so agents inherit the user's configured model instead of receiving
  * Claude-specific tier names (sonnet/opus/haiku) that the provider won't recognize.
  */
-/** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku) if possible */
+/** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku/fable) if possible */
 export declare function normalizeToCcAlias(model: string): string;
 /**
  * Agent input structure from Claude Agent SDK

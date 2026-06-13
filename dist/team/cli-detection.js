@@ -30,6 +30,7 @@ export function detectAllClis() {
         gemini: detectCli('gemini'),
         cursor: detectCli('cursor-agent'),
         grok: detectCli('grok'),
+        gjc: detectCli('gjc'),
     };
 }
 //# sourceMappingURL=cli-detection.js.map

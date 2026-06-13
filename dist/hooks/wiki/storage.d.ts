@@ -62,6 +62,14 @@ export declare function deletePageUnsafe(root: string, filename: string): boolea
 export declare function updateIndexUnsafe(root: string): void;
 /** Append a log entry to log.md. MUST be called inside withWikiLock. */
 export declare function appendLogUnsafe(root: string, entry: WikiLogEntry): void;
+/**
+ * Write the reserved environment.md page. MUST be called inside withWikiLock.
+ *
+ * environment.md is a reserved file (excluded from index/listPages and
+ * rejected by writePageUnsafe), so project-memory feeding gets a dedicated
+ * write path — mirroring updateIndexUnsafe and appendLogUnsafe.
+ */
+export declare function writeEnvironmentUnsafe(root: string, page: WikiPage): void;
 /** Write a page with automatic locking and index/log update. */
 export declare function writePage(root: string, page: WikiPage): void;
 /** Delete a page with automatic locking and index update. */

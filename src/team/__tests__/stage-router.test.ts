@@ -124,6 +124,17 @@ describe('stage-router resolveRoleAssignment', () => {
       expect(out.agent).toBe('executor');
     });
 
+    it('respects provider=gjc and resolves to empty model (gjc owns model selection)', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { executor: { provider: 'gjc' } } },
+      };
+      const out = resolveRoleAssignment('executor', cfg);
+      expect(out.provider).toBe('gjc');
+      expect(out.model).toBe('');
+      expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
+      expect(out.agent).toBe('executor');
+    });
+
     it('grok resolves configured externalModels.defaults.grokModel when model omitted', () => {
       const cfg: PluginConfig = {
         externalModels: { defaults: { grokModel: 'grok-code-fast-1' } },

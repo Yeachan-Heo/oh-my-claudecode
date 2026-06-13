@@ -11,6 +11,7 @@ const PROVIDER_BINARIES = {
   gemini: 'gemini',
   grok: 'grok',
   cursor: 'cursor-agent',
+  gjc: 'gjc',
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
@@ -22,6 +23,8 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
  * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
+ * - gjc: `gjc <prompt>` (gajae-code harness takes the prompt as a positional
+ *   arg; its stdin is interactive input and must stay closed)
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
@@ -39,6 +42,11 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     // Cursor Agent's print mode takes the prompt as a positional arg. Keep stdin
     // closed so it cannot interpret advisor prompt bytes as interactive input.
     return ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt];
+  }
+  if (provider === 'gjc') {
+    // gjc (gajae-code) takes the prompt as a positional arg. Keep stdin closed
+    // so the harness cannot interpret advisor prompt bytes as interactive input.
+    return [prompt];
   }
   // claude: `claude -p` reads the prompt from stdin when no prompt arg is given.
   return pipePromptViaStdin ? ['-p'] : ['-p', prompt];
@@ -66,8 +74,8 @@ function shouldPipePromptViaStdin(provider, prompt) {
     return prompt.includes('\n') || prompt.length > 500 || /^\s*-/.test(prompt);
   }
 
-  // grok (ACP stdin), cursor-agent (interactive stdin), and any other provider
-  // never pipe the prompt.
+  // grok (ACP stdin), cursor-agent (interactive stdin), gjc (interactive
+  // stdin), and any other provider never pipe the prompt.
   return false;
 }
 
@@ -75,8 +83,8 @@ const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
 const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
-  console.error('Usage: omc ask <claude|codex|gemini|grok|cursor> "<prompt>"');
-  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|grok|cursor> <prompt...>');
+  console.error('Usage: omc ask <claude|codex|gemini|grok|cursor|gjc> "<prompt>"');
+  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|grok|cursor|gjc> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
 }

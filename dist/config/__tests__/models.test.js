@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isBedrock, isVertexAI, isNonClaudeProvider, isProviderSpecificModelId, resolveClaudeFamily, hasExtendedContextSuffix, isSubagentSafeModelId, resolveInheritedModelFromEnv, shouldAutoForceInherit, } from '../models.js';
+import { isBedrock, isVertexAI, isNonClaudeProvider, isProviderSpecificModelId, resolveClaudeFamily, CLAUDE_FAMILY_DEFAULTS, hasExtendedContextSuffix, isSubagentSafeModelId, resolveInheritedModelFromEnv, shouldAutoForceInherit, } from '../models.js';
 import { saveAndClear, restore } from './test-helpers.js';
 const TIER_MODEL_ENV_KEYS = [
     'OMC_MODEL_HIGH',
@@ -267,6 +267,14 @@ describe('resolveClaudeFamily() — Bedrock inference profile IDs', () => {
         expect(resolveClaudeFamily('claude-sonnet-4-6')).toBe('SONNET');
         expect(resolveClaudeFamily('claude-opus-4-6')).toBe('OPUS');
         expect(resolveClaudeFamily('claude-haiku-4-5')).toBe('HAIKU');
+        expect(resolveClaudeFamily('claude-fable-5')).toBe('FABLE');
+    });
+    it('resolves fable provider profile IDs to FABLE (issue #3246)', () => {
+        expect(resolveClaudeFamily('us.anthropic.claude-fable-5-v1:0')).toBe('FABLE');
+        expect(resolveClaudeFamily('global.anthropic.claude-fable-5[1m]')).toBe('FABLE');
+    });
+    it('maps the FABLE family default to claude-fable-5 (issue #3246)', () => {
+        expect(CLAUDE_FAMILY_DEFAULTS.FABLE).toBe('claude-fable-5');
     });
     it('returns null for non-Claude model IDs', () => {
         expect(resolveClaudeFamily('gpt-4o')).toBeNull();

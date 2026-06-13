@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { getWikiDir, readIndex, readPage, readAllPages, listPages, withWikiLock, writePageUnsafe, updateIndexUnsafe, appendLogUnsafe, } from './storage.js';
+import { getWikiDir, readIndex, readPage, readAllPages, listPages, withWikiLock, writePageUnsafe, writeEnvironmentUnsafe, updateIndexUnsafe, appendLogUnsafe, } from './storage.js';
 import { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from './types.js';
 /**
  * Load wiki config from .omc-config.json.
@@ -183,8 +183,14 @@ function feedProjectMemory(root) {
         const lines = ['\n# Project Environment\n'];
         if (pm.techStack) {
             const ts = pm.techStack;
-            if (ts.languages?.length)
-                lines.push(`**Languages:** ${ts.languages.join(', ')}`);
+            if (ts.languages?.length) {
+                const names = ts.languages
+                    .map((l) => (typeof l === 'string' ? l : l?.name))
+                    .filter(Boolean)
+                    .join(', ');
+                if (names)
+                    lines.push(`**Languages:** ${names}`);
+            }
             if (ts.frameworks?.length)
                 lines.push(`**Frameworks:** ${ts.frameworks.join(', ')}`);
             if (ts.packageManager)
@@ -203,7 +209,7 @@ function feedProjectMemory(root) {
         }
         const now = new Date().toISOString();
         withWikiLock(root, () => {
-            writePageUnsafe(root, {
+            writeEnvironmentUnsafe(root, {
                 filename: envSlug,
                 frontmatter: {
                     title: 'Project Environment',

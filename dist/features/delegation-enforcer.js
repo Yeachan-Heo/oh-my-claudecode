@@ -76,8 +76,9 @@ const FAMILY_TO_ALIAS = {
     SONNET: 'sonnet',
     OPUS: 'opus',
     HAIKU: 'haiku',
+    FABLE: 'fable',
 };
-/** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku) if possible */
+/** Normalize a model ID to a CC-supported alias (sonnet/opus/haiku/fable) if possible */
 export function normalizeToCcAlias(model) {
     if (isProviderSpecificModelId(model)) {
         return model;

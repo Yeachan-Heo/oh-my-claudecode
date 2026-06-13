@@ -3578,6 +3578,7 @@ function resolveClaudeFamily(modelId) {
   if (lower.includes("sonnet")) return "SONNET";
   if (lower.includes("opus")) return "OPUS";
   if (lower.includes("haiku")) return "HAIKU";
+  if (lower.includes("fable")) return "FABLE";
   return null;
 }
 function hasBedrockModelId(modelIds) {
@@ -3661,7 +3662,7 @@ var init_models = __esm({
     init_ssrf_guard();
     DIRECT_MODEL_ENV_KEYS = ["CLAUDE_MODEL", "ANTHROPIC_MODEL"];
     INHERIT_TIER_PRIORITY = ["MEDIUM", "HIGH", "LOW"];
-    CLAUDE_TIER_ALIASES = /* @__PURE__ */ new Set(["sonnet", "opus", "haiku"]);
+    CLAUDE_TIER_ALIASES = /* @__PURE__ */ new Set(["sonnet", "opus", "haiku", "fable"]);
     TIER_ENV_KEYS = {
       LOW: [
         "OMC_MODEL_LOW",
@@ -3682,7 +3683,8 @@ var init_models = __esm({
     CLAUDE_FAMILY_DEFAULTS = {
       HAIKU: "claude-haiku-4-5",
       SONNET: "claude-sonnet-4-6",
-      OPUS: "claude-opus-4-8"
+      OPUS: "claude-opus-4-8",
+      FABLE: "claude-fable-5"
     };
     BUILTIN_TIER_MODEL_DEFAULTS = {
       LOW: CLAUDE_FAMILY_DEFAULTS.HAIKU,
@@ -3692,7 +3694,8 @@ var init_models = __esm({
     CLAUDE_FAMILY_HIGH_VARIANTS = {
       HAIKU: `${CLAUDE_FAMILY_DEFAULTS.HAIKU}-high`,
       SONNET: `${CLAUDE_FAMILY_DEFAULTS.SONNET}-high`,
-      OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`
+      OPUS: `${CLAUDE_FAMILY_DEFAULTS.OPUS}-high`,
+      FABLE: `${CLAUDE_FAMILY_DEFAULTS.FABLE}-high`
     };
     BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
       codexModel: "gpt-5.3-codex",
@@ -4326,7 +4329,7 @@ var init_loader = __esm({
     DEFAULT_CONFIG = buildDefaultConfig();
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "gjc"]);
     TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
     OMC_STARTUP_COMPACTABLE_SECTIONS = [
       "agent_catalog",
@@ -16530,6 +16533,33 @@ function processSubagentStart(input) {
     return { continue: true };
   }
 }
+function findReconcilableRunningAgent(state, agentType) {
+  const candidates = [];
+  for (let i = 0; i < state.agents.length; i++) {
+    const agent = state.agents[i];
+    if (agent.status !== "running") continue;
+    if (agentType && agent.agent_type !== agentType) continue;
+    candidates.push(i);
+  }
+  return candidates.length === 1 ? candidates[0] : -1;
+}
+function reapStaleRunningAgents(state, nowIso) {
+  const now = new Date(nowIso).getTime();
+  let reaped = 0;
+  for (const agent of state.agents) {
+    if (agent.status !== "running") continue;
+    const startTime = new Date(agent.started_at).getTime();
+    if (now - startTime > STALE_THRESHOLD_MS2) {
+      agent.status = "failed";
+      agent.completed_at = nowIso;
+      agent.duration_ms = now - startTime;
+      agent.output_summary = "Marked as stale during unmatched stop reconciliation - exceeded timeout";
+      state.total_failed++;
+      reaped++;
+    }
+  }
+  return reaped;
+}
 function processSubagentStop(input) {
   const sessionId = resolveSessionId({ context: "hook", hookPayload: input });
   const writePath = resolveWritePath(input.cwd, sessionId);
@@ -16538,17 +16568,18 @@ function processSubagentStop(input) {
   try {
     return withFileLockSync(lockPath, () => {
       const state = readTrackingState(input.cwd, sessionId);
-      const agentIndex = state.agents.findIndex(
-        (a) => a.agent_id === input.agent_id
-      );
       const succeeded = input.success !== false;
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      let agentIndex = input.agent_id ? state.agents.findIndex((a) => a.agent_id === input.agent_id) : -1;
+      if (agentIndex === -1 && input.agent_id) {
+        agentIndex = findReconcilableRunningAgent(state, input.agent_type);
+      }
       if (agentIndex !== -1) {
         const agent = state.agents[agentIndex];
         agent.status = succeeded ? "completed" : "failed";
-        agent.completed_at = (/* @__PURE__ */ new Date()).toISOString();
+        agent.completed_at = nowIso;
         const startTime = new Date(agent.started_at).getTime();
-        const endTime = new Date(agent.completed_at).getTime();
-        agent.duration_ms = endTime - startTime;
+        agent.duration_ms = new Date(nowIso).getTime() - startTime;
         if (input.output) {
           agent.output_summary = input.output.substring(0, 500);
         }
@@ -16557,7 +16588,27 @@ function processSubagentStop(input) {
         } else {
           state.total_failed++;
         }
+      } else if (input.agent_id) {
+        reapStaleRunningAgents(state, nowIso);
+        const synthetic = {
+          agent_id: input.agent_id,
+          agent_type: input.agent_type || "unknown",
+          started_at: nowIso,
+          parent_mode: detectParentMode(input.cwd),
+          status: succeeded ? "completed" : "failed",
+          completed_at: nowIso,
+          duration_ms: 0,
+          output_summary: input.output ? input.output.substring(0, 500) : void 0
+        };
+        state.agents.push(synthetic);
+        agentIndex = state.agents.length - 1;
+        if (succeeded) {
+          state.total_completed++;
+        } else {
+          state.total_failed++;
+        }
       }
+      const stoppedAgent = agentIndex !== -1 ? state.agents[agentIndex] : void 0;
       const completedAgents = state.agents.filter(
         (a) => a.status === "completed" || a.status === "failed"
       );
@@ -16575,9 +16626,8 @@ function processSubagentStop(input) {
       writeTrackingState(input.cwd, state, sessionId);
       if (input.agent_id) {
         try {
-          const trackedAgent = agentIndex !== -1 ? state.agents[agentIndex] : void 0;
-          const agentType = trackedAgent?.agent_type || input.agent_type || "unknown";
-          recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, trackedAgent?.duration_ms);
+          const agentType = stoppedAgent?.agent_type || input.agent_type || "unknown";
+          recordAgentStop(input.cwd, input.session_id, input.agent_id, agentType, succeeded, stoppedAgent?.duration_ms);
         } catch {
         }
         try {
@@ -16585,8 +16635,8 @@ function processSubagentStop(input) {
             sessionId: input.session_id,
             agentId: input.agent_id,
             success: succeeded,
-            outputSummary: agentIndex !== -1 ? state.agents[agentIndex]?.output_summary : input.output,
-            at: agentIndex !== -1 ? state.agents[agentIndex]?.completed_at : (/* @__PURE__ */ new Date()).toISOString()
+            outputSummary: stoppedAgent?.output_summary ?? input.output,
+            at: stoppedAgent?.completed_at ?? nowIso
           }, sessionId);
         } catch {
         }
@@ -29686,7 +29736,8 @@ var init_delegation_enforcer = __esm({
     FAMILY_TO_ALIAS = {
       SONNET: "sonnet",
       OPUS: "opus",
-      HAIKU: "haiku"
+      HAIKU: "haiku",
+      FABLE: "fable"
     };
   }
 });
@@ -29977,6 +30028,22 @@ var init_model_contract = __esm({
         // Keep supportsPromptMode false so the verdict-file contract path
         // (CONTRACT_ROLES + shouldInjectContract) skips this provider; cursor
         // workers participate as executors only.
+        supportsPromptMode: false,
+        buildLaunchArgs(_model, extraFlags = []) {
+          return [...extraFlags];
+        },
+        parseOutput(rawOutput) {
+          return rawOutput.trim();
+        }
+      },
+      gjc: {
+        agentType: "gjc",
+        binary: "gjc",
+        installInstructions: "Install Gajae-Code CLI: bun install -g gajae-code (see https://github.com/Yeachan-Heo/gajae-code)",
+        // gjc (gajae-code) runs as an interactive coding-agent harness — no
+        // exit-on-complete prompt mode. Keep supportsPromptMode false so the
+        // verdict-file contract path (CONTRACT_ROLES + shouldInjectContract)
+        // skips this provider; gjc workers participate as executors only.
         supportsPromptMode: false,
         buildLaunchArgs(_model, extraFlags = []) {
           return [...extraFlags];
@@ -31195,6 +31262,13 @@ function agentTypeGuidance(agentType) {
         "- You are an interactive REPL (cursor-agent), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.",
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT type \`/exit\` unless the leader sends an explicit shutdown.`,
         "- Reviewer/critic/security-review roles are NOT supported for cursor workers \u2014 those require a verdict-file write-and-exit which the REPL does not perform. Take only executor-style tasks."
+      ].join("\n");
+    case "gjc":
+      return [
+        "### Agent-Type Guidance (gjc)",
+        "- You are an interactive coding-agent harness (gajae-code), not a one-shot CLI. Stay in the session; the leader will continue to send prompts via mailbox.",
+        `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Then keep waiting for the next mailbox message; do NOT exit unless the leader sends an explicit shutdown.`,
+        "- Reviewer/critic/security-review roles are NOT supported for gjc workers \u2014 those require a verdict-file write-and-exit which the harness does not perform. Take only executor-style tasks."
       ].join("\n");
     case "grok":
       return [
@@ -32484,6 +32558,9 @@ function resolveExternalModel(provider, raw, cfg) {
   if (provider === "cursor") {
     return "";
   }
+  if (provider === "gjc") {
+    return "";
+  }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 function resolveRoleAssignment(role, cfg) {
@@ -32750,7 +32827,7 @@ var init_role_router = __esm({
 // src/team/cli-worker-contract.ts
 function shouldInjectContract(role, provider) {
   if (!role || !provider) return false;
-  if (provider === "claude" || provider === "cursor") return false;
+  if (provider === "claude" || provider === "cursor" || provider === "gjc") return false;
   return CONTRACT_ROLES.has(role);
 }
 function renderCliWorkerOutputContract(role, output_file) {
@@ -34170,6 +34247,9 @@ async function spawnV2Worker(opts) {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
     }
     if (opts.agentType === "cursor") {
+      return void 0;
+    }
+    if (opts.agentType === "gjc") {
       return void 0;
     }
     return resolveClaudeWorkerModel();
@@ -36077,6 +36157,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     if (agentType === "cursor") {
       return void 0;
     }
+    if (agentType === "gjc") {
+      return void 0;
+    }
     return resolveClaudeWorkerModel();
   })();
   const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
@@ -36203,7 +36286,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
     teamName
   });
   const configData = await readJsonSafe5((0, import_path93.join)(root2, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "gjc"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
@@ -43997,6 +44080,7 @@ function readKeychainCredential(serviceName, account) {
       expiresAt: creds.expiresAt,
       refreshToken: creds.refreshToken,
       source: "keychain",
+      keychainAccount: account ?? null,
       subscriptionType: creds.subscriptionType,
       rateLimitTier: creds.rateLimitTier
     };
@@ -44232,7 +44316,50 @@ function fetchUsageFromZai() {
     }
   });
 }
+function writeKeychainCredentials(creds) {
+  if (process.platform !== "darwin") return;
+  try {
+    const serviceName = getKeychainServiceName();
+    const account = creds.keychainAccount ?? void 0;
+    const readArgs = account ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"] : ["find-generic-password", "-s", serviceName, "-w"];
+    let existing = {};
+    try {
+      const raw = (0, import_child_process30.execFileSync)("/usr/bin/security", readArgs, {
+        encoding: "utf-8",
+        timeout: 2e3,
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      if (raw) existing = JSON.parse(raw);
+    } catch {
+    }
+    if (existing.claudeAiOauth && typeof existing.claudeAiOauth === "object") {
+      const inner = existing.claudeAiOauth;
+      inner.accessToken = creds.accessToken;
+      if (creds.expiresAt != null) inner.expiresAt = creds.expiresAt;
+      if (creds.refreshToken) inner.refreshToken = creds.refreshToken;
+    } else {
+      existing.accessToken = creds.accessToken;
+      if (creds.expiresAt != null) existing.expiresAt = creds.expiresAt;
+      if (creds.refreshToken) existing.refreshToken = creds.refreshToken;
+    }
+    const newJson = JSON.stringify(existing);
+    const writeArgs = account ? ["add-generic-password", "-s", serviceName, "-a", account, "-w", newJson, "-U"] : ["add-generic-password", "-s", serviceName, "-w", newJson, "-U"];
+    (0, import_child_process30.execFileSync)("/usr/bin/security", writeArgs, {
+      encoding: "utf-8",
+      timeout: 2e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+  } catch {
+    if (process.env.OMC_DEBUG) {
+      console.error("[usage-api] Failed to write back refreshed credentials to Keychain");
+    }
+  }
+}
 function writeBackCredentials(creds) {
+  if (creds.source === "keychain") {
+    writeKeychainCredentials(creds);
+    return;
+  }
   try {
     const credPath = (0, import_path115.join)(getClaudeConfigDir(), ".credentials.json");
     if (!(0, import_fs96.existsSync)(credPath)) return;
@@ -82445,7 +82572,8 @@ var KEYWORD_PATTERNS = {
   ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
-  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i
+  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
+  gjc: /\b(ask|use|delegate\s+to)\s+gjc\b/i
 };
 var OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
 var KEYWORD_SKIP_PREDICATES = {
@@ -82468,7 +82596,8 @@ var KEYWORD_PRIORITY = [
   "deep-interview",
   "codex",
   "gemini",
-  "cursor"
+  "cursor",
+  "gjc"
 ];
 var CANONICAL_WORKFLOW_SLASH_SKILLS = [
   "autopilot",
@@ -84907,7 +85036,7 @@ function getPromptText(input) {
   return "";
 }
 function isExplicitAskSlashInvocation(promptText) {
-  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|grok|cursor)\b/i.test(promptText);
+  return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|grok|cursor|gjc)\b/i.test(promptText);
 }
 function activateRalplanStartupState(directory, sessionId) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -85216,7 +85345,8 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
         break;
       case "codex":
       case "gemini":
-      case "cursor": {
+      case "cursor":
+      case "gjc": {
         const teamStartCommand = formatOmcCliInvocation(`team start --agent ${keywordType} --count N --task "<task from user message>"`);
         messages.push(
           `[MAGIC KEYWORD: team]
@@ -85541,7 +85671,7 @@ Please continue working on these tasks.
 This environment uses a non-standard model provider (AWS Bedrock, Google Vertex AI, or a proxy such as CC Switch / LiteLLM).
 
 How to pass \`model\` on Task/Agent calls:
-- Prefer a tier alias: \`model: "sonnet"\`, \`model: "opus"\`, or \`model: "haiku"\`. OMC's pre-tool enforcer resolves these to provider-safe IDs when one of these env vars is set: \`ANTHROPIC_DEFAULT_SONNET_MODEL\` (and sibling \`ANTHROPIC_DEFAULT_OPUS_MODEL\` / \`ANTHROPIC_DEFAULT_HAIKU_MODEL\`), \`CLAUDE_CODE_BEDROCK_SONNET_MODEL\` (and sibling \`CLAUDE_CODE_BEDROCK_OPUS_MODEL\` / \`CLAUDE_CODE_BEDROCK_HAIKU_MODEL\`), or \`OMC_SUBAGENT_MODEL\`.
+- Prefer a tier alias: \`model: "sonnet"\`, \`model: "opus"\`, \`model: "haiku"\`, or \`model: "fable"\` (Claude Fable 5, above Opus). OMC's pre-tool enforcer resolves these to provider-safe IDs when one of these env vars is set: \`ANTHROPIC_DEFAULT_SONNET_MODEL\` (and siblings \`ANTHROPIC_DEFAULT_OPUS_MODEL\` / \`ANTHROPIC_DEFAULT_HAIKU_MODEL\` / \`ANTHROPIC_DEFAULT_FABLE_MODEL\`), \`CLAUDE_CODE_BEDROCK_SONNET_MODEL\` (and siblings \`CLAUDE_CODE_BEDROCK_OPUS_MODEL\` / \`CLAUDE_CODE_BEDROCK_HAIKU_MODEL\` / \`CLAUDE_CODE_BEDROCK_FABLE_MODEL\`), or \`OMC_SUBAGENT_MODEL\`.
 - If none of those env vars are configured, the enforcer will deny the tier alias with an env-var configuration hint \u2014 set one of them in your \`settings.json\` env or shell profile.
 - The enforcer denies tier aliases it cannot resolve. It also denies provider-specific IDs that carry a \`[1m]\` context-window suffix or otherwise fail subagent-safe validation (sub-agents cannot inherit \`[1m]\`). Valid provider-specific IDs without extended-context suffixes are allowed.
 
@@ -88643,7 +88773,8 @@ var PROVIDER_BINARY = {
   codex: "codex",
   gemini: "gemini",
   grok: "grok",
-  cursor: "cursor-agent"
+  cursor: "cursor-agent",
+  gjc: "gjc"
 };
 function probeProvider(provider) {
   const binary = PROVIDER_BINARY[provider];
@@ -88671,7 +88802,7 @@ function collectConfiguredProviders() {
   const roleRouting = cfg.team?.roleRouting ?? {};
   for (const spec of Object.values(roleRouting)) {
     const provider = spec?.provider;
-    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok" || provider === "cursor") {
+    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok" || provider === "cursor" || provider === "gjc") {
       providers.add(provider);
     }
   }
@@ -89644,7 +89775,7 @@ init_worktree_paths();
 var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
 var MIN_WORKER_COUNT = 1;
 var MAX_WORKER_COUNT = 20;
-var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "gjc"]);
 var DEFAULT_TEAM_CLI_AGENT_TYPE = "claude";
 var TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
@@ -89659,6 +89790,7 @@ Examples:
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
   omc team 1:cursor:executor "apply the implementation"
+  omc team 1:gjc:executor "apply the implementation"
   omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
@@ -93454,14 +93586,14 @@ var import_path122 = require("path");
 var import_url16 = require("url");
 init_security_config();
 var ASK_USAGE = [
-  "Usage: omc ask <claude|codex|gemini|grok|cursor> <question or task>",
-  '   or: omc ask <claude|codex|gemini|grok|cursor> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"'
+  "Usage: omc ask <claude|codex|gemini|grok|cursor|gjc> <question or task>",
+  '   or: omc ask <claude|codex|gemini|grok|cursor|gjc> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor|gjc> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor|gjc> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor|gjc> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|grok|cursor|gjc> --agent-prompt=<role> --prompt "<prompt>"'
 ].join("\n");
-var ASK_PROVIDERS = ["claude", "codex", "gemini", "grok", "cursor"];
+var ASK_PROVIDERS = ["claude", "codex", "gemini", "grok", "cursor", "gjc"];
 var ASK_PROVIDER_SET = new Set(ASK_PROVIDERS);
 var ASK_AGENT_PROMPT_FLAG = "--agent-prompt";
 var SAFE_ROLE_PATTERN = /^[a-z][a-z0-9-]*$/;
