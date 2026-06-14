@@ -300,7 +300,7 @@ export function createOmcSession(options?: OmcOptions): OmcSession {
   }
 
   // Get agent definitions
-  const agents = getAgentDefinitions({ config });
+  const agents = getAgentDefinitions({ config, cwd: options?.workingDirectory });
   systemPrompt += buildCustomAgentSystemPromptAddition(agents);
 
   // Build MCP servers configuration

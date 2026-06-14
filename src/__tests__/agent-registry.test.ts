@@ -7,6 +7,7 @@ import { getAgentDefinitions } from '../agents/definitions.js';
 import { loadAgentPrompt } from '../agents/utils.js';
 import { loadConfig } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
+import { clearWorktreeCache, getOmcRoot } from '../lib/worktree-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +29,7 @@ const MODEL_ENV_KEYS = [
   'OMC_MODEL_LOW',
   'OMC_ROUTING_FORCE_INHERIT',
   'XDG_CONFIG_HOME',
+  'OMC_STATE_DIR',
 ] as const;
 
 describe('Agent Registry Validation', () => {
@@ -46,6 +48,7 @@ describe('Agent Registry Validation', () => {
       delete process.env[key];
     }
     process.env.XDG_CONFIG_HOME = path.join(tempDir, 'config');
+    clearWorktreeCache();
   });
 
   afterEach(() => {
@@ -57,6 +60,7 @@ describe('Agent Registry Validation', () => {
         process.env[key] = savedEnv[key];
       }
     }
+    clearWorktreeCache();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
   test('agent count matches documentation', () => {
@@ -378,6 +382,104 @@ Check release notes and versioning.
     });
 
     expect(agents['release-checker']?.description).toBe('Reviews release readiness');
+  });
+
+  test('scans project custom agents through the resolved OMC root', () => {
+    const projectDir = path.join(tempDir, 'project');
+    const stateDir = path.join(tempDir, 'central-state');
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.env.OMC_STATE_DIR = stateDir;
+    clearWorktreeCache();
+
+    const customAgentsDir = path.join(getOmcRoot(projectDir), 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'state-root-agent.md'), `---
+name: state-root-agent
+description: Uses centralized state root
+---
+
+Read from the resolved OMC root.
+`);
+
+    const agents = getAgentDefinitions({ cwd: projectDir });
+
+    expect(customAgentsDir).toContain(stateDir);
+    expect(agents['state-root-agent']?.prompt).toBe('Read from the resolved OMC root.');
+  });
+
+  test('createOmcSession scans custom agents from the provided workingDirectory', () => {
+    const projectDir = path.join(tempDir, 'project-session');
+    const customAgentsDir = path.join(getOmcRoot(projectDir), 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'session-agent.md'), `---
+name: session-agent
+description: Loaded from session working directory
+omc:
+  category: specialist
+  cost: CHEAP
+  promptAlias: session
+  triggers:
+    - domain: session projects
+      trigger: "session workingDirectory is provided"
+---
+
+Use the session project context.
+`);
+
+    const session = createOmcSession({ workingDirectory: projectDir });
+
+    expect(session.queryOptions.options.agents['session-agent']?.description)
+      .toBe('Loaded from session working directory');
+    expect(session.queryOptions.options.systemPrompt).toContain('**session-agent**');
+  });
+
+  test('same-name project overrides are allowed after customAgents.maxAgents is reached', () => {
+    const userAgentsDir = path.join(process.env.XDG_CONFIG_HOME!, 'claude-omc', 'agents');
+    const projectAgentsDir = path.join(getOmcRoot(tempDir), 'agents');
+    fs.mkdirSync(userAgentsDir, { recursive: true });
+    fs.mkdirSync(projectAgentsDir, { recursive: true });
+
+    fs.writeFileSync(path.join(userAgentsDir, 'domain-agent.md'), `---
+name: domain-agent
+description: User version
+---
+
+user prompt
+`);
+    fs.writeFileSync(path.join(projectAgentsDir, 'domain-agent.md'), `---
+name: domain-agent
+description: Project version
+---
+
+project prompt
+`);
+
+    const agents = getAgentDefinitions({
+      config: {
+        customAgents: {
+          enabled: true,
+          maxAgents: 1,
+        },
+      },
+    });
+
+    expect(agents['domain-agent']?.description).toBe('Project version');
+  });
+
+  test('keeps comma-containing scalar frontmatter descriptions as strings', () => {
+    const customAgentsDir = path.join(getOmcRoot(tempDir), 'agents');
+    fs.mkdirSync(customAgentsDir, { recursive: true });
+    fs.writeFileSync(path.join(customAgentsDir, 'api-reviewer.md'), `---
+name: api-reviewer
+description: Reviews APIs, schemas, and contracts
+---
+
+Review API boundaries.
+`);
+
+    const agents = getAgentDefinitions();
+
+    expect(agents['api-reviewer']?.description).toBe('Reviews APIs, schemas, and contracts');
   });
 
   test('allows custom agents to override built-ins only with omc.overrideBuiltin', () => {

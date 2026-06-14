@@ -249,11 +249,13 @@ export const BUILT_IN_AGENT_NAMES = Object.keys(getBuiltInAgentDefinitions()).so
 export function getAgentDefinitions(options?: {
   overrides?: Partial<Record<string, Partial<AgentConfig>>>;
   config?: PluginConfig;
+  cwd?: string;
 }): Record<string, AgentConfig> {
   const resolvedConfig = options?.config ?? loadConfig();
   const builtInAgents = getBuiltInAgentDefinitions();
   const discovered = discoverCustomAgents(resolvedConfig, {
     builtInNames: Object.keys(builtInAgents),
+    cwd: options?.cwd,
   });
   for (const warning of discovered.warnings) {
     console.warn(`[custom-agents] ${warning}`);

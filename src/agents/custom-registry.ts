@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { basename, join, resolve } from 'path';
 
 import type { PluginConfig } from '../shared/types.js';
+import { getOmcRoot } from '../lib/worktree-paths.js';
 import { getConfigDir } from '../utils/paths.js';
 import type {
   AgentCategory,
@@ -41,7 +42,7 @@ export function getCustomAgentDirs(config?: PluginConfig, cwd: string = process.
   const dirs = [
     join(getConfigDir(), 'claude-omc', 'agents'),
     ...(customConfig?.dirs ?? []).map(dir => resolve(cwd, dir)),
-    join(cwd, '.omc', 'agents'),
+    join(getOmcRoot(cwd), 'agents'),
   ];
 
   return [...new Set(dirs.map(dir => resolve(dir)))];
@@ -76,11 +77,6 @@ export function discoverCustomAgents(
     }
 
     for (const file of files) {
-      if (acceptedCount >= maxAgents) {
-        warnings.push(`Skipping ${join(dir, file)}: customAgents.maxAgents limit (${maxAgents}) reached`);
-        continue;
-      }
-
       const filePath = join(dir, file);
       const parsed = parseCustomAgentFile(filePath);
       if (!parsed.agent) {
@@ -95,6 +91,11 @@ export function discoverCustomAgents(
       }
 
       const isReplacement = agents[parsed.agent.name] !== undefined;
+      if (!isReplacement && acceptedCount >= maxAgents) {
+        warnings.push(`Skipping ${filePath}: customAgents.maxAgents limit (${maxAgents}) reached`);
+        continue;
+      }
+
       agents[parsed.agent.name] = parsed.agent;
       warnings.push(...parsed.warnings);
       if (!isReplacement) acceptedCount++;
@@ -154,8 +155,8 @@ function parseCustomAgentFile(filePath: string): {
     prompt: body.trim(),
     model: asString(frontmatter.model),
     defaultModel: asString(frontmatter.defaultModel) ?? asString(frontmatter.model),
-    tools: asStringList(frontmatter.tools),
-    disallowedTools: asStringList(frontmatter.disallowedTools),
+    tools: asStringList(frontmatter.tools, { splitComma: true }),
+    disallowedTools: asStringList(frontmatter.disallowedTools, { splitComma: true }),
     metadata,
   };
 
@@ -310,9 +311,6 @@ function parseScalarOrInlineList(value: string): string | string[] {
     if (!inner) return [];
     return inner.split(',').map(item => stripOptionalQuotes(item)).filter(Boolean);
   }
-  if (trimmed.includes(',') && /^[A-Za-z0-9_, -]+$/.test(trimmed)) {
-    return trimmed.split(',').map(item => stripOptionalQuotes(item)).filter(Boolean);
-  }
   return trimmed;
 }
 
@@ -354,7 +352,7 @@ function parseOmcMetadata(value: FrontmatterValue | undefined, warnings: string[
     useWhen: asStringList(value.useWhen),
     avoidWhen: asStringList(value.avoidWhen),
     promptDescription: asString(value.promptDescription),
-    tools: asStringList(value.tools),
+    tools: asStringList(value.tools, { splitComma: true }),
   };
 }
 
@@ -372,13 +370,18 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function asStringList(value: unknown): string[] | undefined {
+function asStringList(value: unknown, options?: { splitComma?: boolean }): string[] | undefined {
   if (Array.isArray(value)) {
     const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
     return items.length > 0 ? items : undefined;
   }
   const single = asString(value);
-  return single ? [single] : undefined;
+  if (!single) return undefined;
+  if (options?.splitComma && single.includes(',')) {
+    const items = single.split(',').map(item => stripOptionalQuotes(item)).filter(Boolean);
+    return items.length > 0 ? items : undefined;
+  }
+  return [single];
 }
 
 function asBoolean(value: unknown): boolean | undefined {
