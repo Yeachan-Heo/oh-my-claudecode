@@ -13,6 +13,7 @@ export const ASK_USAGE = [
   '   or: omc ask <claude|codex|gemini|grok|cursor> --prompt "<prompt>"',
   '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt <role> "<prompt>"',
   '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"',
+  '   or: omc ask gemini -m <model> -p "<prompt>"   (gemini only; pins GEMINI_MODEL, e.g. gemini-2.5-pro)',
 ].join('\n');
 
 const ASK_PROVIDERS = ['claude', 'codex', 'gemini', 'grok', 'cursor'] as const;
@@ -29,6 +30,7 @@ export interface ParsedAskArgs {
   provider: AskProvider;
   prompt: string;
   agentPromptRole?: string;
+  model?: string;
 }
 
 function askUsageError(reason: string): Error {
@@ -131,10 +133,30 @@ export function parseAskArgs(args: readonly string[]): ParsedAskArgs {
   }
 
   let agentPromptRole: string | undefined;
+  let modelOverride: string | undefined;
   let prompt = '';
 
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
+    if (token === '-m' || token === '--model') {
+      const model = rest[i + 1]?.trim();
+      if (!model || model.startsWith('-')) {
+        throw askUsageError('Missing model after -m/--model.');
+      }
+      modelOverride = model;
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith('--model=') || token.startsWith('-m=')) {
+      const model = token.slice(token.indexOf('=') + 1).trim();
+      if (!model) {
+        throw askUsageError('Missing model after --model=.');
+      }
+      modelOverride = model;
+      continue;
+    }
+
     if (token === ASK_AGENT_PROMPT_FLAG) {
       const role = rest[i + 1]?.trim();
       if (!role || role.startsWith('-')) {
@@ -177,6 +199,7 @@ export function parseAskArgs(args: readonly string[]): ParsedAskArgs {
     provider: provider as AskProvider,
     prompt,
     ...(agentPromptRole ? { agentPromptRole } : {}),
+    ...(modelOverride ? { model: modelOverride } : {}),
   };
 }
 
@@ -241,6 +264,12 @@ export async function askCommand(args: string[]): Promise<void> {
       env: {
         ...process.env,
         [ASK_ORIGINAL_TASK_ENV]: parsed.prompt,
+        // -m/--model passthrough: the gemini CLI reads GEMINI_MODEL natively, so injecting it
+        // here propagates ask -> advisor -> gemini with no advisor change. Gemini-only for now
+        // (codex/claude/grok/cursor have their own model routing); the parser accepts it generically.
+        ...(parsed.model && parsed.provider === 'gemini'
+          ? { GEMINI_MODEL: parsed.model }
+          : {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
