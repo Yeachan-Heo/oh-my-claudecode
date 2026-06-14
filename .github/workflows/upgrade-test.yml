@@ -43,9 +43,55 @@ jobs:
       # hook verification. Step 6 validates the installed SessionStart hook
       # directly from repo-owned artifacts and therefore runs on push + PR.
 
+      # ENOTEMPTY hardening: the toolcache global lib/node_modules dir is reused
+      # across runs on self-hosted runners (and inside the GitHub-hosted tool
+      # cache). A previously interrupted `npm install -g` can leave the resolved
+      # scoped package dir and/or npm's staging temp dirs behind, so the next
+      # install fails with
+      #   npm error ENOTEMPTY: directory not empty, rename
+      #     '.../@anthropic-ai/claude-code' -> '.../@anthropic-ai/.claude-code-XXXX'
+      # (observed in run 27492794574). Install Claude Code into an isolated npm
+      # global prefix under RUNNER_TEMP so the install never depends on or
+      # mutates the shared toolcache global dir, and retry with a fresh prefix to
+      # absorb any residual rename race. A persistent failure still exits
+      # non-zero (we never swallow the final failure).
       - name: Install Claude Code
         run: |
-          npm install -g @anthropic-ai/claude-code
+          set -euo pipefail
+
+          CLAUDE_CODE_PREFIX="$RUNNER_TEMP/claude-code-global"
+
+          reset_prefix() {
+            rm -rf "${CLAUDE_CODE_PREFIX:?}" 2>/dev/null || true
+            mkdir -p "$CLAUDE_CODE_PREFIX"
+          }
+
+          reset_prefix
+
+          ATTEMPTS=3
+          INSTALLED=false
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            echo "Installing @anthropic-ai/claude-code (attempt $attempt/$ATTEMPTS)"
+            if npm install -g --prefix "$CLAUDE_CODE_PREFIX" \
+                @anthropic-ai/claude-code --no-audit --no-fund; then
+              INSTALLED=true
+              break
+            fi
+            echo "Install attempt $attempt failed; recreating isolated prefix and retrying."
+            reset_prefix
+            sleep 2
+          done
+
+          if [ "$INSTALLED" != "true" ]; then
+            echo "FAIL: npm install -g @anthropic-ai/claude-code failed after $ATTEMPTS attempts"
+            exit 1
+          fi
+
+          # Expose the isolated prefix bin dir to this and subsequent steps so
+          # `claude` resolves on PATH (e.g. the "Verify Claude Code is on PATH"
+          # step's `which claude`).
+          echo "$CLAUDE_CODE_PREFIX/bin" >> "$GITHUB_PATH"
+          export PATH="$CLAUDE_CODE_PREFIX/bin:$PATH"
           claude --version
 
       - name: Verify Claude Code is on PATH
