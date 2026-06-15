@@ -1318,10 +1318,27 @@ const THINKING_ONLY_STREAK_BAILOUT_MESSAGE =
 type ThinkingOnlyClassification = 'tool_use' | 'thinking_only' | 'indeterminate';
 
 /**
- * Classify the last assistant turn in a transcript as making tool progress,
- * being thinking-only, or indeterminate. Reads only the bounded transcript
- * tail (never the whole file) and treats any unreadable/ambiguous shape as
- * indeterminate so callers fail open.
+ * Does a user-role transcript record carry a tool_result block? A tool_result
+ * only exists because the assistant invoked a tool earlier in the same turn, so
+ * its presence proves the most recent assistant turn made tool progress.
+ */
+function userRecordHasToolResult(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (block) => (block as { type?: unknown } | null)?.type === 'tool_result',
+  );
+}
+
+/**
+ * Classify the most recent assistant *turn* in a transcript as making tool
+ * progress, being thinking-only, or indeterminate. A turn spans every assistant
+ * record (and interleaved tool_result records) back to the preceding real user
+ * message, so a productive turn whose final record is plain text — tool_use
+ * earlier, trailing text before stop — still classifies as tool_use rather than
+ * leaking through as indeterminate.
+ *
+ * Reads only the bounded transcript tail (never the whole file) and treats any
+ * unreadable/ambiguous shape as indeterminate so callers fail open.
  */
 function classifyLastAssistantTurn(transcriptPath: string): ThinkingOnlyClassification {
   let lines: string[];
@@ -1330,6 +1347,9 @@ function classifyLastAssistantTurn(transcriptPath: string): ThinkingOnlyClassifi
   } catch {
     return 'indeterminate';
   }
+
+  let sawAssistant = false;
+  let hasThinking = false;
 
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index]?.trim();
@@ -1343,33 +1363,43 @@ function classifyLastAssistantTurn(transcriptPath: string): ThinkingOnlyClassifi
       continue;
     }
 
-    const isAssistant =
-      parsed?.type === 'assistant' || parsed?.message?.role === 'assistant';
-    if (!isAssistant) continue;
-
-    const content = parsed.message?.content;
-    if (!Array.isArray(content)) {
-      // String or missing content carries no thinking/tool_use structure.
-      return 'indeterminate';
-    }
-
-    let hasThinking = false;
-    let hasToolUse = false;
-    for (const block of content) {
-      const blockType = (block as { type?: unknown } | null)?.type;
-      if (blockType === 'tool_use') {
-        hasToolUse = true;
-      } else if (blockType === 'thinking' || blockType === 'redacted_thinking') {
-        hasThinking = true;
+    const role = parsed?.message?.role;
+    const isAssistant = parsed?.type === 'assistant' || role === 'assistant';
+    if (isAssistant) {
+      sawAssistant = true;
+      const content = parsed.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const blockType = (block as { type?: unknown } | null)?.type;
+          if (blockType === 'tool_use') {
+            // Any tool_use anywhere in the most recent turn is real progress.
+            return 'tool_use';
+          }
+          if (blockType === 'thinking' || blockType === 'redacted_thinking') {
+            hasThinking = true;
+          }
+        }
       }
+      // Non-array (string/missing) content carries no structured block; keep
+      // scanning the rest of the turn rather than bailing out early.
+      continue;
     }
 
-    if (hasToolUse) return 'tool_use';
-    if (hasThinking) return 'thinking_only';
-    return 'indeterminate';
+    const isUser = parsed?.type === 'user' || role === 'user';
+    if (isUser) {
+      // A tool_result confirms the turn invoked a tool, so it made progress.
+      if (userRecordHasToolResult(parsed.message?.content)) {
+        return 'tool_use';
+      }
+      // A real user message marks the start of the most recent assistant turn.
+      break;
+    }
+
+    // Other record types (system/summary/…) are turn-neutral; keep scanning.
   }
 
-  return 'indeterminate';
+  if (!sawAssistant) return 'indeterminate';
+  return hasThinking ? 'thinking_only' : 'indeterminate';
 }
 
 /**

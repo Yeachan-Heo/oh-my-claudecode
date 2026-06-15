@@ -45,6 +45,27 @@ function writeAssistantTurn(transcriptPath: string, content: ContentBlock[] | st
   );
 }
 
+type TranscriptRecord = { type: string; message: { role: string; content: unknown } };
+
+const userRecord = (content: unknown): TranscriptRecord => ({
+  type: 'user',
+  message: { role: 'user', content },
+});
+const assistantRecord = (content: unknown): TranscriptRecord => ({
+  type: 'assistant',
+  message: { role: 'assistant', content },
+});
+
+// Write an explicit list of transcript records (one JSON object per line) so a
+// test can model a multi-record assistant turn (e.g. tool_use, tool_result, then
+// trailing text) instead of the single-record turn writeAssistantTurn emits.
+function writeRecords(transcriptPath: string, records: TranscriptRecord[]): void {
+  writeFileSync(
+    transcriptPath,
+    records.map((record) => JSON.stringify(record)).join('\n') + '\n',
+  );
+}
+
 const THINKING_ONLY: ContentBlock[] = [
   { type: 'thinking', thinking: 'Let me reason about this some more before acting.' },
 ];
@@ -127,6 +148,84 @@ describe('thinking-only streak guard (issue #3280)', () => {
       const t2 = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
       expect(t2.shouldBlock).toBe(true);
       expect(t2.mode).toBe('ralph');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resets the streak when a productive turn ends in trailing text after tool_use', async () => {
+    const sessionId = 'streak-reset-trailing-text';
+    const tempDir = makeRalphWorktree(sessionId);
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+
+    try {
+      // Two thinking-only turns: streak climbs to 2.
+      writeAssistantTurn(transcriptPath, THINKING_ONLY);
+      await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+
+      // A productive turn whose FINAL assistant record is plain text: the
+      // tool_use lives in an earlier record, with its tool_result in between.
+      // The whole-turn classifier must still see the progress and reset.
+      writeRecords(transcriptPath, [
+        userRecord('do the task'),
+        assistantRecord([
+          { type: 'thinking', thinking: 'I will run a command.' },
+          { type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'ls' } },
+        ]),
+        userRecord([{ type: 'tool_result', tool_use_id: 'tu-1', content: 'a\nb' }]),
+        assistantRecord([{ type: 'text', text: 'Done — listed the directory.' }]),
+      ]);
+      const afterTool = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(afterTool.shouldBlock).toBe(true);
+      expect(afterTool.mode).toBe('ralph');
+
+      // Streak restarted from zero, so two more thinking-only turns still block
+      // rather than bailing out on the second one.
+      writeAssistantTurn(transcriptPath, THINKING_ONLY);
+      const t1 = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(t1.shouldBlock).toBe(true);
+      expect(t1.mode).toBe('ralph');
+
+      const t2 = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(t2.shouldBlock).toBe(true);
+      expect(t2.mode).toBe('ralph');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies only the most recent turn (a prior turn\'s tool_use never leaks across the user boundary)', async () => {
+    const sessionId = 'streak-turn-boundary';
+    const tempDir = makeRalphWorktree(sessionId);
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+
+    try {
+      // A completed productive turn, then a fresh continuation prompt that
+      // begins the most-recent (thinking-only) turn. Classification must stop at
+      // the continuation boundary and not reach back into the productive turn.
+      writeRecords(transcriptPath, [
+        userRecord('do the task'),
+        assistantRecord([
+          { type: 'thinking', thinking: 'running a tool' },
+          { type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'ls' } },
+        ]),
+        userRecord([{ type: 'tool_result', tool_use_id: 'tu-1', content: 'ok' }]),
+        assistantRecord([{ type: 'text', text: 'finished the productive turn' }]),
+        userRecord('continue'),
+        assistantRecord(THINKING_ONLY),
+      ]);
+
+      // Same transcript each call: only the trailing thinking-only turn counts,
+      // so the streak climbs and bails on the third stop.
+      const first = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(first.shouldBlock).toBe(true);
+      const second = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(second.shouldBlock).toBe(true);
+      const third = await checkPersistentModes(sessionId, tempDir, ctx(transcriptPath));
+      expect(third.shouldBlock).toBe(false);
+      expect(third.mode).toBe('none');
+      expect(third.message).toContain('NO TOOL PROGRESS');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
