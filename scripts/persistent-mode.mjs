@@ -938,6 +938,61 @@ function isScheduledWakeupStop(data) {
   return reasons.some((reason) => stopPatterns.some((pattern) => reason.includes(pattern)));
 }
 
+/**
+ * Detect if the last assistant turn was thinking-only (no tool calls).
+ * Reads only the tail of the transcript JSONL to find the last assistant message
+ * and checks for tool_use content blocks.
+ *
+ * Returns true if the last turn had NO tool calls (thinking-only or text-only).
+ * Returns false if tool_use was detected or if detection fails (fail-open).
+ */
+function isThinkingOnlyTurn(transcriptPath) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return false;
+  let fd = -1;
+  try {
+    const size = statSync(transcriptPath).size;
+    if (size === 0) return false;
+    // Read the last 16KB — enough to capture the last assistant message
+    const readSize = Math.min(16384, size);
+    const buf = Buffer.alloc(readSize);
+    fd = openSync(transcriptPath, "r");
+    readSync(fd, buf, 0, readSize, size - readSize);
+    closeSync(fd);
+    fd = -1;
+
+    const content = buf.toString("utf-8");
+    const lines = content.split("\n").filter((l) => l.trim());
+
+    // Walk backwards to find the last assistant message
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
+      const line = lines[i];
+      if (
+        !line.includes('"type":"assistant"') &&
+        !line.includes('"type": "assistant"')
+      )
+        continue;
+      // Found last assistant message — check if it contains tool_use
+      if (
+        line.includes('"type":"tool_use"') ||
+        line.includes('"type": "tool_use"')
+      )
+        return false;
+      // Has assistant message but no tool_use → thinking-only
+      return true;
+    }
+    // No assistant message found in tail — can't determine, fail-open
+    return false;
+  } catch {
+    if (fd !== -1)
+      try {
+        closeSync(fd);
+      } catch {
+        /* best-effort */
+      }
+    return false; // fail-open: don't block on detection errors
+  }
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -996,6 +1051,52 @@ async function main() {
     if (hasPendingOwnedAsyncWork(stateDir, sessionId)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
+    }
+
+    // --- Thinking-only streak bail-out ---
+    // If the model keeps producing thinking without any tool calls across
+    // consecutive Stop hook invocations, blocking the stop is pointless —
+    // the model is degraded (e.g., proxy model routing failure) and
+    // repeatedly blocking just burns tokens in a loop.
+    const THINKING_ONLY_STREAK_LIMIT = 3;
+    const thinkingOnlyStatePath = sessionId
+      ? join(stateDir, "sessions", sessionId, "thinking-only-streak.json")
+      : null;
+
+    if (thinkingOnlyStatePath) {
+      const isThinkingOnly = isThinkingOnlyTurn(criticalTranscriptPath);
+
+      if (isThinkingOnly) {
+        const streakState = readJsonFile(thinkingOnlyStatePath) || {
+          streak: 0,
+        };
+        const newStreak = (streakState.streak || 0) + 1;
+
+        writeJsonFile(thinkingOnlyStatePath, {
+          streak: newStreak,
+          last_checked_at: new Date().toISOString(),
+          session_id: sessionId,
+        });
+
+        if (newStreak >= THINKING_ONLY_STREAK_LIMIT) {
+          // Clear streak to avoid persisting across restarts
+          try {
+            unlinkSync(thinkingOnlyStatePath);
+          } catch {}
+          console.log(
+            JSON.stringify({ continue: true, suppressOutput: true }),
+          );
+          return;
+        }
+      } else {
+        // Tool use detected — reset streak
+        if (existsSync(thinkingOnlyStatePath)) {
+          writeJsonFile(thinkingOnlyStatePath, {
+            streak: 0,
+            last_checked_at: new Date().toISOString(),
+          });
+        }
+      }
     }
 
     // Read all mode states (session-scoped when sessionId provided)
