@@ -1294,6 +1294,147 @@ function writeStopBreaker(directory: string, name: string, count: number, sessio
 }
 
 // ---------------------------------------------------------------------------
+// Thinking-only streak guard (issue #3280)
+//
+// A persistent mode (ralph/autopilot/team/ralplan/ultrawork/…) re-injects a
+// continuation prompt on every Stop while the mode is active. If the agent
+// answers each continuation with only thinking blocks and never a tool_use,
+// no work happens but tokens keep burning. Bound that failure: count
+// consecutive thinking-only assistant turns and release the stop once the
+// streak hits a conservative threshold. Any tool_use turn resets the streak,
+// and every read/parse path fails open (keep enforcing) so a flaky transcript
+// never short-circuits a healthy persistent mode.
+// ---------------------------------------------------------------------------
+
+const THINKING_ONLY_STREAK_BREAKER = 'thinking-only-streak';
+const THINKING_ONLY_STREAK_MAX = 3;
+const THINKING_ONLY_STREAK_TTL_MS = 5 * 60 * 1000; // 5 min
+const THINKING_ONLY_STREAK_BAILOUT_MESSAGE =
+  `[PERSISTENT MODE PAUSED - NO TOOL PROGRESS] The last ${THINKING_ONLY_STREAK_MAX} assistant turns ` +
+  'produced only thinking with no tool calls, so the persistent-mode stop guard is releasing this ' +
+  'stop to avoid an infinite loop. Resume manually with a concrete next action (run a tool/command) ' +
+  'or /cancel the active mode.';
+
+type ThinkingOnlyClassification = 'tool_use' | 'thinking_only' | 'indeterminate';
+
+/**
+ * Classify the last assistant turn in a transcript as making tool progress,
+ * being thinking-only, or indeterminate. Reads only the bounded transcript
+ * tail (never the whole file) and treats any unreadable/ambiguous shape as
+ * indeterminate so callers fail open.
+ */
+function classifyLastAssistantTurn(transcriptPath: string): ThinkingOnlyClassification {
+  let lines: string[];
+  try {
+    lines = readTranscriptTailLines(transcriptPath);
+  } catch {
+    return 'indeterminate';
+  }
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim();
+    if (!line) continue;
+
+    let parsed: { type?: string; message?: { role?: string; content?: unknown } };
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      // Skip non-JSON/truncated lines and keep scanning backward.
+      continue;
+    }
+
+    const isAssistant =
+      parsed?.type === 'assistant' || parsed?.message?.role === 'assistant';
+    if (!isAssistant) continue;
+
+    const content = parsed.message?.content;
+    if (!Array.isArray(content)) {
+      // String or missing content carries no thinking/tool_use structure.
+      return 'indeterminate';
+    }
+
+    let hasThinking = false;
+    let hasToolUse = false;
+    for (const block of content) {
+      const blockType = (block as { type?: unknown } | null)?.type;
+      if (blockType === 'tool_use') {
+        hasToolUse = true;
+      } else if (blockType === 'thinking' || blockType === 'redacted_thinking') {
+        hasThinking = true;
+      }
+    }
+
+    if (hasToolUse) return 'tool_use';
+    if (hasThinking) return 'thinking_only';
+    return 'indeterminate';
+  }
+
+  return 'indeterminate';
+}
+
+/**
+ * Bound persistent-mode continuation loops that make no tool progress.
+ *
+ * Only acts when a mode would otherwise block the stop. A tool_use turn resets
+ * the streak; a thinking-only turn increments it and, once it reaches
+ * THINKING_ONLY_STREAK_MAX, releases the stop (and clears the counter) instead
+ * of re-injecting another continuation prompt. Indeterminate/unreadable
+ * transcripts leave the streak untouched and keep the original blocking result.
+ */
+function applyThinkingOnlyStreakGuard(
+  result: PersistentModeResult,
+  workingDir: string,
+  sessionId?: string,
+  stopContext?: StopContext,
+): PersistentModeResult {
+  // Non-blocking results already let the session stop — no loop to bound.
+  if (!result.shouldBlock) return result;
+
+  const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+  if (!transcriptPath || !existsSync(transcriptPath)) {
+    return result; // fail open: cannot classify without a transcript
+  }
+
+  let classification: ThinkingOnlyClassification;
+  try {
+    classification = classifyLastAssistantTurn(transcriptPath);
+  } catch {
+    return result; // fail open on any unexpected read/parse error
+  }
+
+  if (classification === 'tool_use') {
+    // Real progress — reset the streak and keep enforcing.
+    writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+    return result;
+  }
+
+  if (classification === 'indeterminate') {
+    // Cannot confirm a thinking-only stall — keep enforcing, leave streak as is.
+    return result;
+  }
+
+  const streak = readStopBreaker(
+    workingDir,
+    THINKING_ONLY_STREAK_BREAKER,
+    sessionId,
+    THINKING_ONLY_STREAK_TTL_MS,
+  ) + 1;
+
+  if (streak >= THINKING_ONLY_STREAK_MAX) {
+    // Bail out: release the stop and clear the counter for a clean restart.
+    writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: THINKING_ONLY_STREAK_BAILOUT_MESSAGE,
+      mode: 'none',
+    };
+  }
+
+  writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, streak, sessionId);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Team Pipeline enforcement (standalone team mode)
 // ---------------------------------------------------------------------------
 
@@ -1868,10 +2009,30 @@ ${TODO_CONTINUATION_PROMPT}
 }
 
 /**
- * Main persistent mode checker
- * Checks all persistent modes in priority order and returns appropriate action
+ * Main persistent mode checker.
+ * Resolves which mode (if any) should block, then applies the thinking-only
+ * streak guard so an active mode cannot loop forever re-injecting continuation
+ * prompts while the agent only emits thinking blocks and never tool_use (#3280).
  */
 export async function checkPersistentModes(
+  sessionId?: string,
+  directory?: string,
+  stopContext?: StopContext  // NEW: from todo-continuation types
+): Promise<PersistentModeResult> {
+  const result = await resolvePersistentModeBlock(sessionId, directory, stopContext);
+  return applyThinkingOnlyStreakGuard(
+    result,
+    resolveToWorktreeRoot(directory),
+    sessionId,
+    stopContext,
+  );
+}
+
+/**
+ * Resolve which persistent mode (if any) should block this stop event.
+ * Checks all persistent modes in priority order and returns appropriate action.
+ */
+async function resolvePersistentModeBlock(
   sessionId?: string,
   directory?: string,
   stopContext?: StopContext  // NEW: from todo-continuation types
