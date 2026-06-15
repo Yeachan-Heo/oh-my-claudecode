@@ -9,6 +9,7 @@ import {
   getOmcRoot,
 } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { encodeProjectPath } from '../../utils/encode-project-path.js';
 import type {
   SessionHistoryMatch,
   SessionHistorySearchOptions,
@@ -64,16 +65,6 @@ function parseSinceSpec(since?: string): number | undefined {
 
   const parsed = Date.parse(trimmed);
   return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function encodeProjectPath(projectPath: string): string {
-  // Mirror Claude Code's project-dir naming. On Windows an absolute path carries a
-  // drive colon (e.g. C:\Users\x) and Claude Code stores transcripts under
-  // ~/.claude/projects/C--Users-x — i.e. the colon is replaced with "-" just like
-  // the separators. Omitting ":" here produced "C:-Users-x", which never matches the
-  // real directory, so "current"-scope search discovered zero project transcripts on
-  // Windows. POSIX paths contain no colon, so this is a no-op there.
-  return projectPath.replace(/[/\\.:]/g, '-');
 }
 
 function getMainRepoRoot(projectRoot: string): string | null {

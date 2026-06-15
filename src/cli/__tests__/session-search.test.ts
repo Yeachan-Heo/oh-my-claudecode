@@ -6,10 +6,7 @@ import {
   formatSessionSearchReport,
   sessionSearchCommand,
 } from '../commands/session-search.js';
-
-function encodeProjectPath(projectPath: string): string {
-  return projectPath.replace(/[/\\.]/g, '-');
-}
+import { encodeProjectPath } from '../../utils/encode-project-path.js';
 
 function writeTranscript(filePath: string, entries: Array<Record<string, unknown>>): void {
   mkdirSync(join(filePath, '..'), { recursive: true });
