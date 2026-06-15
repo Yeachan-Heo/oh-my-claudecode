@@ -67,7 +67,13 @@ function parseSinceSpec(since?: string): number | undefined {
 }
 
 function encodeProjectPath(projectPath: string): string {
-  return projectPath.replace(/[/\\.]/g, '-');
+  // Mirror Claude Code's project-dir naming. On Windows an absolute path carries a
+  // drive colon (e.g. C:\Users\x) and Claude Code stores transcripts under
+  // ~/.claude/projects/C--Users-x — i.e. the colon is replaced with "-" just like
+  // the separators. Omitting ":" here produced "C:-Users-x", which never matches the
+  // real directory, so "current"-scope search discovered zero project transcripts on
+  // Windows. POSIX paths contain no colon, so this is a no-op there.
+  return projectPath.replace(/[/\\.:]/g, '-');
 }
 
 function getMainRepoRoot(projectRoot: string): string | null {
@@ -560,7 +566,7 @@ export async function searchSessionHistory(
   };
 }
 
-export { parseSinceSpec };
+export { encodeProjectPath, parseSinceSpec };
 export type {
   SessionHistoryMatch,
   SessionHistorySearchOptions,

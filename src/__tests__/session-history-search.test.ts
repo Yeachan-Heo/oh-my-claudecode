@@ -3,13 +3,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import {
+  encodeProjectPath,
   parseSinceSpec,
   searchSessionHistory,
 } from '../features/session-history-search/index.js';
-
-function encodeProjectPath(projectPath: string): string {
-  return projectPath.replace(/[/\\.]/g, '-');
-}
 
 function writeTranscript(filePath: string, entries: Array<Record<string, unknown>>): void {
   mkdirSync(join(filePath, '..'), { recursive: true });
@@ -153,6 +150,17 @@ describe('session history search', () => {
 
     expect(report.totalMatches).toBe(1);
     expect(report.results[0].sessionId).toBe('session-tilde');
+  });
+
+  it('encodes a Windows drive path the same way Claude Code names its project dir', () => {
+    // Regression: the drive colon must be replaced with "-" so the encoded directory
+    // matches Claude Code's actual project dir (e.g. ~/.claude/projects/C--Users-me-proj).
+    // Before the fix this returned "C:-Users-me-proj", which never matched on Windows and
+    // made current-scope search find zero project transcripts. Platform-independent: this
+    // asserts the encoding of a literal Windows-style string regardless of host OS.
+    expect(encodeProjectPath('C:\\Users\\me\\proj')).toBe('C--Users-me-proj');
+    // POSIX paths are unaffected (no colon to replace).
+    expect(encodeProjectPath('/home/me/proj')).toBe('-home-me-proj');
   });
 
   it('parses relative and absolute since values', () => {
