@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderRateLimitsError } from '../../hud/elements/limits.js';
+import { renderRateLimitsError, renderApiKeyUsageHint } from '../../hud/elements/limits.js';
 import type { UsageResult } from '../../hud/types.js';
 
 describe('renderRateLimitsError', () => {
@@ -95,5 +95,37 @@ describe('renderRateLimitsError', () => {
     };
     const result = renderRateLimitsError(usageResult);
     expect(result).toBeNull();
+  });
+});
+
+describe('renderApiKeyUsageHint (Issue #3277)', () => {
+  const noCreds: UsageResult = { rateLimits: null, error: 'no_credentials' };
+
+  it('shows a custom-provider hint for API-key users with no built-in usage', () => {
+    const result = renderApiKeyUsageHint(noCreds, true, false);
+    expect(result).toContain('omcHud.rateLimitsProvider');
+    expect(result).toContain('\x1b[2m'); // Dim ANSI code (unobtrusive)
+  });
+
+  it('returns null when not in API-key mode (OAuth users unaffected)', () => {
+    expect(renderApiKeyUsageHint(noCreds, false, false)).toBeNull();
+  });
+
+  it('returns null when a custom rate limits provider is already configured', () => {
+    expect(renderApiKeyUsageHint(noCreds, true, true)).toBeNull();
+  });
+
+  it('returns null when the error is not no_credentials', () => {
+    expect(renderApiKeyUsageHint({ rateLimits: null, error: 'network' }, true, false)).toBeNull();
+    expect(renderApiKeyUsageHint({ rateLimits: null, error: 'auth' }, true, false)).toBeNull();
+  });
+
+  it('returns null when usage data is present (no error)', () => {
+    const ok: UsageResult = { rateLimits: { fiveHourPercent: 10, weeklyPercent: 5 } };
+    expect(renderApiKeyUsageHint(ok, true, false)).toBeNull();
+  });
+
+  it('returns null when result is null', () => {
+    expect(renderApiKeyUsageHint(null, true, false)).toBeNull();
   });
 });
