@@ -45,6 +45,11 @@ grok --version
 cursor-agent --version
 ```
 
+> **gemini provider runtime selection** (macOS/Linux only): When `agy` (Antigravity CLI)
+> is installed, `omc ask gemini` prefers `agy --print` over legacy `gemini -p --yolo`.
+> On Windows, only the legacy `gemini` CLI is used.
+> Install agy: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+
 ## Artifacts
 
 `omc ask` writes artifacts to:

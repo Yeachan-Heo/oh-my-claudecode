@@ -19,16 +19,19 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 /**
  * Resolve the binary to use for the `gemini` provider.
  *
- * Google Antigravity CLI (`agy`) supersedes the legacy Gemini CLI (`gemini`).
- * Both support a non-interactive print mode:
- *   - agy:    `agy --print <prompt>`
+ * On macOS/Linux: tries `agy` (Antigravity CLI) first, falls back to `gemini` CLI.
+ * On Windows: always uses legacy `gemini` CLI (`agy --print` is unsafe on win32).
+ *
+ *   - agy:    `agy --print <prompt>`     (macOS/Linux only)
  *   - gemini: `gemini -p <prompt> --yolo`
  *
- * Resolution order: agy → gemini. If neither is available, returns 'agy' so
- * ensureBinary() produces a clear installation error.
+ * Returns `null` if no suitable binary is found.
  */
 function resolveGeminiBinary(env) {
-  for (const bin of ['agy', 'gemini']) {
+  // On Windows, agy --print is unsafe (shell:true + empty-stdout failure mode).
+  // Only attempt the legacy gemini CLI on win32.
+  const candidates = SHOULD_USE_WINDOWS_SHELL ? ['gemini'] : ['agy', 'gemini'];
+  for (const bin of candidates) {
     const probe = spawnSync(bin, ['--version'], {
       stdio: 'ignore',
       encoding: 'utf8',
@@ -245,7 +248,7 @@ function resolveOriginalTask(prompt) {
   return prompt;
 }
 
-async function writeArtifact({ provider, resolvedBinary, originalTask, finalPrompt, rawOutput, exitCode }) {
+async function writeArtifact({ provider, resolvedBinary, promptTransport, originalTask, finalPrompt, rawOutput, exitCode }) {
   const root = process.cwd();
   const artifactDir = join(await resolveOmcStateRoot(root), 'artifacts', 'ask');
   const slug = slugify(originalTask);
@@ -260,6 +263,7 @@ async function writeArtifact({ provider, resolvedBinary, originalTask, finalProm
     '',
     `- Provider: ${provider}`,
     `- Resolved binary: ${resolvedBinary || provider}`,
+    `- Prompt transport: ${promptTransport}`,
     `- Exit code: ${exitCode}`,
     `- Created at: ${new Date().toISOString()}`,
     '',
@@ -327,9 +331,11 @@ async function main() {
   const rawOutput = [stdout, stderr].filter(Boolean).join(stdout && stderr ? '\n\n' : '');
   const exitCode = typeof run.status === 'number' ? run.status : 1;
 
+  const promptTransport = pipePromptViaStdin ? 'stdin' : 'argv';
   const artifactPath = await writeArtifact({
     provider,
     resolvedBinary: binary,
+    promptTransport,
     originalTask: resolveOriginalTask(prompt),
     finalPrompt: prompt,
     rawOutput,

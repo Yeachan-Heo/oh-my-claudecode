@@ -218,6 +218,7 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       '',
       '// No platform override — tests native (non-Windows) behavior',
       'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
+      "const agyMode = process.env.SPAWN_CAPTURE_AGY_MODE || 'present';",
       'const calls = [];',
       'childProcess.spawnSync = (command, args = [], options = {}) => {',
       '  calls.push({',
@@ -230,6 +231,11 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       "      input: options.input ?? null,",
       '    },',
       '  });',
+      "  if (command === 'agy' && Array.isArray(args) && args[0] === '--version') {",
+      "    if (agyMode === 'absent') {",
+      "      return { status: 1, stdout: '', stderr: 'agy: command not found', pid: 0, output: [], signal: null };",
+      "    }",
+      "  }",
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
       '  return {',
       '    status: 0,',
@@ -494,6 +500,8 @@ describe('run-provider-advisor script contract', () => {
 
       const artifact = readFileSync(artifactPath, 'utf8');
       expect(artifact).toContain('FAKE_PROVIDER_OK:artifact path contract');
+      expect(artifact).toContain('- Resolved binary: claude');
+      expect(artifact).toContain('- Prompt transport: argv');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
@@ -565,9 +573,8 @@ describe('run-provider-advisor script contract', () => {
         };
       }>;
 
-      // gemini: agy probe (fails) + gemini probe + gemini launch = 3 calls
-      // all other providers: version probe + launch = 2 calls
-      const expectedLength = provider === 'gemini' ? 3 : 2;
+      // On Windows, agy is skipped for gemini; all providers: version probe + launch = 2 calls
+      const expectedLength = 2;
       expect(calls).toHaveLength(expectedLength);
       for (const call of calls) {
         expect(call.options.env).toMatchObject({
@@ -744,19 +751,14 @@ describe('run-provider-advisor script contract', () => {
         options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
       }>;
 
-      // agy probe (fails) + gemini probe + gemini launch = 3 calls
-      expect(calls).toHaveLength(3);
+      // On Windows, agy is skipped entirely: gemini probe + gemini launch = 2 calls
+      expect(calls).toHaveLength(2);
       expect(calls[0]).toMatchObject({
-        command: 'agy',
-        args: ['--version'],
-        options: { shell: true, encoding: 'utf8', stdio: 'ignore', input: null },
-      });
-      expect(calls[1]).toMatchObject({
         command: 'gemini',
         args: ['--version'],
         options: { shell: true, encoding: 'utf8', stdio: 'ignore', input: null },
       });
-      expect(calls[2]).toMatchObject({
+      expect(calls[1]).toMatchObject({
         command: 'gemini',
         args: ['--yolo'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
@@ -804,12 +806,12 @@ describe('run-provider-advisor script contract', () => {
     const longPrompt = `prefix ${'x'.repeat(520)}`;
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
-      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         ['gemini', '--prompt', longPrompt],
         wd,
-        { SPAWN_CAPTURE_PATH: capturePath },
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_AGY_MODE: 'absent' },
       );
 
       expect(result.error).toBeUndefined();
@@ -826,7 +828,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls[2]).toMatchObject({
         command: 'gemini',
         args: ['--yolo'],
-        options: { shell: true, encoding: 'utf8', stdio: null, input: longPrompt },
+        options: { shell: false, encoding: 'utf8', stdio: null, input: longPrompt },
       });
     } finally {
       rmSync(wd, { recursive: true, force: true });
@@ -1050,7 +1052,7 @@ describe('run-provider-advisor script contract', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-agy-preferred-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
-      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         ['gemini', '--prompt', 'hello agy'],
@@ -1081,14 +1083,14 @@ describe('run-provider-advisor script contract', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-gemini-fallback-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
-      // Windows prelude (platform=win32): agy absent by default, gemini found on fallback.
-      // On win32 the prompt is piped via stdin so args are ['--yolo'].
-      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // Native prelude (non-Windows): agy absent, gemini found on fallback.
+      // On non-Windows the short prompt is passed as argv so args are ['-p', prompt, '--yolo'].
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         ['gemini', '--prompt', 'hello gemini'],
         wd,
-        { SPAWN_CAPTURE_PATH: capturePath },
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_AGY_MODE: 'absent' },
       );
 
       expect(result.error).toBeUndefined();
@@ -1104,8 +1106,9 @@ describe('run-provider-advisor script contract', () => {
       expect(calls[1]).toMatchObject({ command: 'gemini', args: ['--version'] });
       const launch = calls[2];
       expect(launch.command).toBe('gemini');
-      // On win32 prompt is piped via stdin, so args are ['--yolo'] (no prompt arg)
-      expect(launch.args).toEqual(['--yolo']);
+      // On non-Windows short prompt is passed as argv
+      expect(launch.args).toEqual(['-p', 'hello gemini', '--yolo']);
+      expect(launch.options.input).toBeNull();
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
