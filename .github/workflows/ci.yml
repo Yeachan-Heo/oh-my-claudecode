@@ -58,6 +58,40 @@ jobs:
       - name: Run tests
         run: npm test -- --run
 
+  test-windows:
+    name: Test (Windows path suite)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Scoped to the cross-platform path/encoding suites on a real Windows
+      # runner. The ubuntu-only `test` job exercises POSIX separators, so
+      # forward-slash assumptions in project-dir encoding and worktree
+      # transcript resolution (see #3274, #3276) can slip through it. Running
+      # the full `npm test` suite here is not yet possible: it has pre-existing
+      # platform-specific failures on Windows (e.g. python-repl sandbox, lsp
+      # devcontainer, session-end path interpolation) that are out of scope for
+      # this gate. Keep this list in sync with the path-handling test files.
+      - name: Run Windows path-handling tests
+        run: >-
+          npx vitest run
+          src/utils/__tests__/encode-project-path.test.ts
+          src/__tests__/resolve-transcript-path.test.ts
+          src/__tests__/session-history-search.test.ts
+          src/cli/__tests__/session-search.test.ts
+          src/lib/__tests__/worktree-paths.test.ts
+
   build:
     name: Build
     runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["self-hosted","Linux","X64","gajae-layofflabs-2"]') }}

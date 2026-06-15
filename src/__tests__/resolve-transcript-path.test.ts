@@ -23,6 +23,12 @@ describe('resolveTranscriptPath', () => {
   beforeEach(() => {
     tempDir = join(tmpdir(), `omc-test-transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tempDir, { recursive: true });
+    // Canonicalize once so every derived path shares a single form. On Windows
+    // CI the runner home is an 8.3 short name (e.g. RUNNER~1); mixing a raw
+    // tmpdir() path with a realpathSync'd one yielded short/long variants that
+    // encodeProjectPath turned into different project-dir names, so the
+    // native-worktree resolution assertion failed only on the runner.
+    tempDir = realpathSync(tempDir);
   });
 
   afterEach(() => {
