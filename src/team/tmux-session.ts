@@ -353,7 +353,7 @@ function workerPaneShellCommand(): string[] {
 }
 
 function escapeForCmdSet(value: string): string {
-  return value.replace(/"/g, '""');
+  return value.replace(/(["%])/g, '$1$1');
 }
 
 

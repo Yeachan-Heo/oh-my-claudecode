@@ -181,6 +181,49 @@ describe('buildWorkerStartCommand', () => {
     expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
   });
 
+  it('escapes literal percent signs in native Windows cmd env values and launch args', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: {
+        OMC_TEAM_WORKER: 'team/worker-1',
+        OMC_TOKEN: 'literal%USERPROFILE%token%25',
+      },
+      launchBinary: 'C:\\Program Files\\Claude Code\\claude.exe',
+      launchArgs: ['--label', '100% ready %USERPROFILE%', '--token=abc%25'],
+      cwd: 'C:\\repo'
+    });
+
+    expect(cmd).toContain('set "OMC_TOKEN=literal%%USERPROFILE%%token%%25"');
+    expect(cmd).toContain('"100%% ready %%USERPROFILE%%"');
+    expect(cmd).toContain('"--token=abc%%25"');
+    expect(cmd).not.toContain('literal%USERPROFILE%token%25');
+  });
+
+  it('does not cmd-escape percent signs on MSYS Windows worker startup', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+    vi.stubEnv('MSYSTEM', 'MINGW64');
+    vi.stubEnv('SHELL', '/usr/bin/bash');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TOKEN: 'literal%USERPROFILE%token%25' },
+      launchBinary: '/c/Program Files/Git/bin/bash.exe',
+      launchArgs: ['--label=100% ready'],
+      cwd: '/c/repo'
+    });
+
+    expect(cmd).toContain("OMC_TOKEN='literal%USERPROFILE%token%25'");
+    expect(cmd).toContain("'--label=100% ready'");
+    expect(cmd).not.toContain('%%USERPROFILE%%');
+  });
+
 
   it('keeps cmd.exe worker startup syntax for native Windows without psmux', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
