@@ -133,7 +133,7 @@ export async function tmuxCmdAsync(
   args: string[],
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
-  if (args.some(a => a.includes('#{'))) {
+  if (args.some(a => a.includes('#{')) && !isNativeWindowsShell()) {
     const escaped = args.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
     return tmuxShellAsync(escaped, opts);
   }

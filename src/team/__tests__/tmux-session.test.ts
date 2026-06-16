@@ -131,7 +131,7 @@ describe('buildWorkerStartCommand', () => {
     })).not.toThrow();
   });
 
-  it('uses PowerShell syntax for native Windows psmux worker panes', () => {
+  it('uses cmd.exe syntax for native Windows psmux worker start commands', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
     vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
@@ -146,15 +146,13 @@ describe('buildWorkerStartCommand', () => {
     });
 
     expect(cmd).toBe(
-      "$env:OMC_TEAM_WORKER='team/worker-1'; " +
-      "& 'C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe' '--agent-id' 'worker-1'"
+      'C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
+      '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1""'
     );
-    expect(cmd).not.toContain('cmd.exe');
-    expect(cmd).not.toContain('/d /s /c');
-    expect(cmd).not.toContain('set "');
+    expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
   });
 
-  it('escapes psmux PowerShell env vars and quoted launch args without cmd.exe set syntax', () => {
+  it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
     vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
@@ -176,14 +174,13 @@ describe('buildWorkerStartCommand', () => {
       cwd: 'C:\\repo'
     });
 
-    expect(cmd).toContain("$env:OMC_TEAM_WORKER='team name/worker ''one'''");
-    expect(cmd).toContain("$env:OMC_TEAM_STATE_ROOT='C:\\Users\\Test User\\AppData\\Local\\omc state'");
-    expect(cmd).toContain("$env:CLAUDE_CODE_USE_BEDROCK='value with spaces & [brackets] \"quotes\"'");
-    expect(cmd).toContain("& 'C:\\Program Files\\Claude Code\\claude.exe' '--model' 'sonnet \"quoted\"' '--label=worker ''one'''");
-    expect(cmd).not.toContain('cmd.exe');
-    expect(cmd).not.toContain('/d /s /c');
-    expect(cmd).not.toContain('set "');
+    expect(cmd).toContain('set "OMC_TEAM_WORKER=team name/worker \'one\'"');
+    expect(cmd).toContain('set "OMC_TEAM_STATE_ROOT=C:\\Users\\Test User\\AppData\\Local\\omc state"');
+    expect(cmd).toContain('set "CLAUDE_CODE_USE_BEDROCK=value with spaces & [brackets] ""quotes"""');
+    expect(cmd).toContain('"C:\\Program Files\\Claude Code\\claude.exe" "--model" "sonnet ""quoted""" "--label=worker \'one\'"');
+    expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
   });
+
 
   it('keeps cmd.exe worker startup syntax for native Windows without psmux', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');

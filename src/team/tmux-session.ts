@@ -330,9 +330,14 @@ async function waitForShellReady(paneId: string, opts: WaitForShellReadyOptions 
 async function verifyWorkerStartCommandDelivered(paneId: string, startCmd: string): Promise<boolean> {
   if (isCmuxSurfaceTarget(paneId)) return true;
   const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
   for (let attempt = 1; attempt <= 5; attempt++) {
     const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
-    if (normalizeTmuxCapture(captured).includes(expected)) {
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    if (normalizedCaptured.includes(expected)) {
+      return true;
+    }
+    if (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected)) {
       return true;
     }
     await sleep(50);
@@ -340,21 +345,17 @@ async function verifyWorkerStartCommandDelivered(paneId: string, startCmd: strin
   return false;
 }
 
+function workerPaneShellCommand(): string[] {
+  if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
+    return [getDefaultShell()];
+  }
+  return [];
+}
+
 function escapeForCmdSet(value: string): string {
   return value.replace(/"/g, '""');
 }
 
-function escapeForPowerShellSingleQuotedString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function isNativeWindowsPsmuxPowerShellPane(): boolean {
-  // psmux sets PSMUX_SESSION in panes. Native psmux defaults to PowerShell,
-  // while MSYS/Git Bash psmux panes still need the POSIX branch below.
-  return process.platform === 'win32' &&
-    !isUnixLikeOnWindows() &&
-    !!process.env.PSMUX_SESSION;
-}
 
 function shellNameFromPath(shellPath: string): string {
   const shellName = basename(shellPath.replace(/\\/g, '/'));
@@ -411,18 +412,6 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
   const launchWords = getLaunchWords(config);
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
 
-  if (isNativeWindowsPsmuxPowerShellPane()) {
-    const envStatements = Object.entries(config.envVars)
-      .map(([k, v]) => {
-        assertSafeEnvKey(k);
-        return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
-      });
-    const launch = [
-      '&',
-      ...launchWords.map(escapeForPowerShellSingleQuotedString),
-    ].join(' ');
-    return [...envStatements, launch].join('; ');
-  }
 
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     const envPrefix = Object.entries(config.envVars)
@@ -564,6 +553,7 @@ export function createSession(teamName: string, workerName: string, workingDirec
   if (workingDirectory) {
     args.push('-c', workingDirectory);
   }
+  args.push(...workerPaneShellCommand());
   tmuxExec(args, { stripTmux: true, stdio: 'pipe', timeout: 5000 });
   try {
     configureTmuxClipboardForSession(name, { stripTmux: true, stdio: 'pipe', timeout: 5000 });
@@ -673,6 +663,7 @@ export async function splitTeamWorkerPane(
     'split-window', splitType, '-t', splitTarget,
     '-d', '-P', '-F', '#{pane_id}',
     '-c', cwd,
+    ...workerPaneShellCommand(),
   ]);
   return splitResult.stdout.split('\n')[0]?.trim() || null;
 }
@@ -715,6 +706,7 @@ export async function createTeamSession(
       'new-session', '-d', '-P', '-F', '#S:0 #{pane_id}',
       '-s', detachedSessionName,
       '-c', cwd,
+      ...workerPaneShellCommand(),
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
     const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
@@ -811,6 +803,7 @@ export async function createTeamSession(
       'split-window', splitType, '-t', splitTarget,
       '-d', '-P', '-F', '#{pane_id}',
       '-c', cwd,
+      ...workerPaneShellCommand(),
     ]);
     const paneId = splitResult.stdout.split('\n')[0]?.trim();
     if (paneId) {
@@ -928,6 +921,10 @@ export async function spawnWorkerInPane(
 
 function normalizeTmuxCapture(value: string): string {
   return value.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTmuxCaptureForDelivery(value: string): string {
+  return value.replace(/\r/g, '').replace(/\s+/g, '');
 }
 
 async function capturePaneAsync(paneId: string, opts: { joinWrappedLines?: boolean } = {}): Promise<string> {

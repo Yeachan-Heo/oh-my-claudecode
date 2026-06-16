@@ -7,6 +7,7 @@ const mockedCalls = vi.hoisted(() => ({
   paneStatus: '0 zsh\n',
   echoOnLiteralSend: true,
   wrapLiteralCapture: false,
+  insertWrapSpaces: false,
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -40,7 +41,7 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
       mockedCalls.tmuxArgs.push(args);
       if (args[0] === 'capture-pane') {
         const stdout = args.includes('-J')
-          ? mockedCalls.paneCapture.replace(/\n/g, '')
+          ? mockedCalls.paneCapture.replace(/\n/g, mockedCalls.insertWrapSpaces ? ' ' : '')
           : mockedCalls.paneCapture;
         return { stdout, stderr: '' };
       }
@@ -72,6 +73,7 @@ describe('spawnWorkerInPane', () => {
     mockedCalls.paneStatus = '0 zsh\n';
     mockedCalls.echoOnLiteralSend = true;
     mockedCalls.wrapLiteralCapture = false;
+    mockedCalls.insertWrapSpaces = false;
     vi.unstubAllEnvs();
   });
 
@@ -177,6 +179,28 @@ describe('spawnWorkerInPane', () => {
 
   it('verifies wrapped worker start commands with joined tmux capture before Enter', async () => {
     mockedCalls.wrapLiteralCapture = true;
+
+    await spawnWorkerInPane('session:0', '%2', {
+      teamName: 'safe-team',
+      workerName: 'worker-1',
+      envVars: {
+        OMC_TEAM_NAME: 'safe-team',
+        OMC_TEAM_WORKER: 'safe-team/worker-1',
+        OMC_TEAM_LONG_VALUE: 'x'.repeat(160),
+      },
+      launchBinary: 'codex',
+      launchArgs: ['--full-auto', '--model', 'gpt-5.5', '--reasoning-effort', 'high'],
+      cwd: '/tmp',
+    });
+
+    expect(mockedCalls.tmuxArgs).toContainEqual(['capture-pane', '-J', '-t', '%2', '-p', '-S', '-80']);
+    const enterSend = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys' && args.at(-1) === 'Enter');
+    expect(enterSend).toBeDefined();
+  });
+
+  it('tolerates psmux capture-pane join spaces inserted at wrap boundaries before Enter', async () => {
+    mockedCalls.wrapLiteralCapture = true;
+    mockedCalls.insertWrapSpaces = true;
 
     await spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
