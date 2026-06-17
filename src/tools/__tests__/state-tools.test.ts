@@ -226,6 +226,72 @@ describe('state-tools', () => {
       expect(existsSync(sessionPath)).toBe(false);
     });
 
+    it('lists and clears active legacy global ralph state without touching unrelated state', async () => {
+      const homeRoot = mkdtempSync(join(tmpdir(), 'state-tools-home-'));
+      vi.stubEnv('HOME', homeRoot);
+      vi.stubEnv('USERPROFILE', homeRoot);
+      try {
+        const legacyGlobalStateDir = join(homeRoot, '.omc', 'state');
+        mkdirSync(legacyGlobalStateDir, { recursive: true });
+        const ralphPath = join(legacyGlobalStateDir, 'ralph-state.json');
+        const unrelatedPath = join(legacyGlobalStateDir, 'ultrawork-state.json');
+        writeFileSync(ralphPath, JSON.stringify({ active: true, legacy: true }));
+        writeFileSync(unrelatedPath, JSON.stringify({ active: true, unrelated: true }));
+
+        const listResult = await stateListActiveTool.handler({
+          all: true,
+          workingDirectory: TEST_DIR,
+        });
+        expect(listResult.content[0].text).toContain('ralph');
+
+        const clearResult = await stateClearTool.handler({
+          mode: 'ralph',
+          workingDirectory: TEST_DIR,
+        });
+        expect(clearResult.content[0].text).toMatch(/Cleared|Successfully/i);
+        expect(existsSync(ralphPath)).toBe(false);
+        expect(existsSync(unrelatedPath)).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(homeRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('lists and clears worktree-local session ralph state with session cwd context only', async () => {
+      const centralizedRoot = mkdtempSync(join(tmpdir(), 'state-tools-central-'));
+      vi.stubEnv('OMC_STATE_DIR', centralizedRoot);
+      try {
+        const sessionId = 'local-ralph-session';
+        const unrelatedSessionId = 'unrelated-session';
+        const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
+        const unrelatedSessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', unrelatedSessionId);
+        mkdirSync(sessionDir, { recursive: true });
+        mkdirSync(unrelatedSessionDir, { recursive: true });
+        const localRalphPath = join(sessionDir, 'ralph-state.json');
+        const unrelatedRalphPath = join(unrelatedSessionDir, 'ralph-state.json');
+        writeFileSync(localRalphPath, JSON.stringify({ active: true, session_id: sessionId }));
+        writeFileSync(unrelatedRalphPath, JSON.stringify({ active: true, session_id: unrelatedSessionId }));
+
+        const listResult = await stateListActiveTool.handler({
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+        expect(listResult.content[0].text).toContain('ralph');
+
+        const clearResult = await stateClearTool.handler({
+          mode: 'ralph',
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+        expect(clearResult.content[0].text).toContain('cleared');
+        expect(existsSync(localRalphPath)).toBe(false);
+        expect(existsSync(unrelatedRalphPath)).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(centralizedRoot, { recursive: true, force: true });
+      }
+    });
+
     it('should not report false errors for sessions with no state file during broad clear', async () => {
       // Create a session directory but no state file for ralph mode
       const sessionId = 'empty-session';

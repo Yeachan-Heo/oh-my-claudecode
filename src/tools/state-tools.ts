@@ -6,7 +6,8 @@
  */
 
 import { z } from 'zod';
-import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import {
   resolveStatePath,
@@ -26,6 +27,7 @@ import {
   canClearStateForSession,
   findCompletedSessionStateFiles,
   findSessionOwnedStateFiles,
+  getStateSessionOwner,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -57,6 +59,126 @@ const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active'] as const
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
 const OWNER_SESSION_FALLBACK_MODES = new Set<StateToolMode>(['ralph']);
+const CONVERGED_STATE_PATH_MODES = new Set<StateToolMode>(['ralph', 'ultrawork']);
+
+function getStateFileName(mode: StateToolMode): string {
+  const normalizedName = mode.endsWith('-state') ? mode : `${mode}-state`;
+  return `${normalizedName}.json`;
+}
+
+function readJsonRecord(filePath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
+  const sessionsDir = join(omcRoot, 'state', 'sessions');
+  if (!existsSync(sessionsDir)) {
+    return [];
+  }
+
+  try {
+    return readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(name));
+  } catch {
+    return [];
+  }
+}
+
+function getConvergedOmcRoots(root: string): string[] {
+  const roots = new Set<string>([getOmcRoot(root)]);
+  roots.add(join(root, OmcPaths.ROOT));
+  roots.add(join(homedir(), OmcPaths.ROOT));
+  return [...roots];
+}
+
+function getConvergedStateCandidates(
+  mode: StateToolMode,
+  root: string,
+  sessionId?: string,
+): string[] {
+  if (!CONVERGED_STATE_PATH_MODES.has(mode)) {
+    return [];
+  }
+
+  const filename = getStateFileName(mode);
+  const paths = new Set<string>();
+
+  for (const omcRoot of getConvergedOmcRoots(root)) {
+    const stateDir = join(omcRoot, 'state');
+    if (sessionId) {
+      paths.add(join(stateDir, 'sessions', sessionId, filename));
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        const candidatePath = join(stateDir, 'sessions', sid, filename);
+        const raw = readJsonRecord(candidatePath);
+        if (raw && getStateSessionOwner(raw) === sessionId) {
+          paths.add(candidatePath);
+        }
+      }
+    } else {
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        paths.add(join(stateDir, 'sessions', sid, filename));
+      }
+    }
+
+    paths.add(join(stateDir, filename));
+    paths.add(join(omcRoot, filename));
+  }
+
+  return [...paths];
+}
+
+function isConvergedCandidateActiveForSession(statePath: string, sessionId?: string): boolean {
+  const raw = readJsonRecord(statePath);
+  if (!raw || raw.active !== true) {
+    return false;
+  }
+  if (!sessionId) {
+    return true;
+  }
+  return canClearStateForSession(raw, sessionId);
+}
+
+function clearConvergedStateCandidates(
+  mode: StateToolMode,
+  root: string,
+  sessionId?: string,
+): { cleared: number; hadFailure: boolean; paths: string[] } {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = getConvergedStateCandidates(mode, root, sessionId);
+
+  for (const statePath of paths) {
+    if (!existsSync(statePath)) {
+      continue;
+    }
+
+    try {
+      if (sessionId) {
+        const raw = readJsonRecord(statePath);
+        if (!canClearStateForSession(raw, sessionId)) {
+          continue;
+        }
+      }
+      unlinkSync(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+
+  return { cleared, hadFailure, paths };
+}
+
+function hasActiveConvergedState(mode: StateToolMode, root: string, sessionId?: string): boolean {
+  return getConvergedStateCandidates(mode, root, sessionId)
+    .some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
+}
 
 function readTeamNamesFromStateFile(statePath: string): string[] {
   if (!existsSync(statePath)) return [];
@@ -791,6 +913,7 @@ export const stateClearTool: ToolDefinition<{
         }
         const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId);
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
+        let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         writeSessionCancelSignal(root, sessionId, mode);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
@@ -804,6 +927,7 @@ export const stateClearTool: ToolDefinition<{
           const workingDirectoryLocalCleanup = shouldUseLocalFallback
             ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
             : { cleared: 0, hadFailure: false, paths: [] as string[] };
+          convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
           let ownerSessionId: string | undefined;
           let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
           let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -814,6 +938,7 @@ export const stateClearTool: ToolDefinition<{
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
             legacyCleanup.cleared === 0 &&
+            convergedCleanup.cleared === 0 &&
             workingDirectoryLocalCleanup.cleared === 0
           ) {
             ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
@@ -846,6 +971,9 @@ export const stateClearTool: ToolDefinition<{
           if (workingDirectoryLocalCleanup.cleared > 0) {
             ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? '' : 's'}`);
           }
+          if (convergedCleanup.cleared > 0) {
+            ghostNoteParts.push(`removed ${convergedCleanup.cleared} converged state file${convergedCleanup.cleared === 1 ? '' : 's'}`);
+          }
           if (runtimeCleanup.cleared > 0) {
             ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
           }
@@ -867,6 +995,7 @@ export const stateClearTool: ToolDefinition<{
             completedSessionCleanup.cleared +
             sessionCleanup.cleared +
             legacyCleanup.cleared +
+            convergedCleanup.cleared +
             workingDirectoryLocalCleanup.cleared +
             ownerSessionCleanup.cleared +
             ownerLegacyCleanup.cleared +
@@ -875,6 +1004,7 @@ export const stateClearTool: ToolDefinition<{
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
             !workingDirectoryLocalCleanup.hadFailure &&
+            !convergedCleanup.hadFailure &&
             !completedSessionCleanup.hadFailure &&
             !ownerSessionCleanup.hadFailure &&
             !ownerLegacyCleanup.hadFailure &&
@@ -892,6 +1022,7 @@ export const stateClearTool: ToolDefinition<{
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
             !workingDirectoryLocalCleanup.hadFailure &&
+            !convergedCleanup.hadFailure &&
             !completedSessionCleanup.hadFailure &&
             !ownerSessionCleanup.hadFailure &&
             !ownerLegacyCleanup.hadFailure &&
@@ -923,6 +1054,7 @@ export const stateClearTool: ToolDefinition<{
         const workingDirectoryLocalCleanup = shouldUseLocalFallback
           ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
           : { cleared: 0, hadFailure: false, paths: [] as string[] };
+        convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
         let ownerSessionId: string | undefined;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -933,6 +1065,7 @@ export const stateClearTool: ToolDefinition<{
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
           legacyCleanup.cleared === 0 &&
+          convergedCleanup.cleared === 0 &&
           workingDirectoryLocalCleanup.cleared === 0
         ) {
           ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
@@ -964,6 +1097,9 @@ export const stateClearTool: ToolDefinition<{
         if (workingDirectoryLocalCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? '' : 's'}`);
         }
+        if (convergedCleanup.cleared > 0) {
+          ghostNoteParts.push(`removed ${convergedCleanup.cleared} converged state file${convergedCleanup.cleared === 1 ? '' : 's'}`);
+        }
         if (runtimeCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${runtimeCleanup.cleared} runtime artifact${runtimeCleanup.cleared === 1 ? '' : 's'}`);
         }
@@ -985,12 +1121,14 @@ export const stateClearTool: ToolDefinition<{
           completedSessionCleanup.cleared +
           sessionCleanup.cleared +
           legacyCleanup.cleared +
+          convergedCleanup.cleared +
           workingDirectoryLocalCleanup.cleared +
           ownerSessionCleanup.cleared +
           ownerLegacyCleanup.cleared +
           runtimeCleanup.cleared;
         const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
-          workingDirectoryLocalCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
+          workingDirectoryLocalCleanup.hadFailure || convergedCleanup.hadFailure ||
+          completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
           ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure;
         if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
           return {
@@ -1055,6 +1193,11 @@ export const stateClearTool: ToolDefinition<{
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push('legacy path');
+      }
+      const convergedCleanup = clearConvergedStateCandidates(mode, root);
+      clearedCount += convergedCleanup.cleared;
+      if (convergedCleanup.hadFailure) {
+        errors.push('converged paths');
       }
       clearedCount += runtimeCleanup.cleared;
       if (runtimeCleanup.hadFailure) {
@@ -1194,6 +1337,12 @@ export const stateListActiveTool: ToolDefinition<{
           }
         }
 
+        for (const mode of CONVERGED_STATE_PATH_MODES) {
+          if (!activeModes.includes(mode) && hasActiveConvergedState(mode, root, sessionId)) {
+            activeModes.push(mode);
+          }
+        }
+
         if (activeModes.length === 0) {
           return {
             content: [{
@@ -1230,6 +1379,12 @@ export const stateListActiveTool: ToolDefinition<{
           } catch {
             // Ignore parse errors
           }
+        }
+      }
+
+      for (const mode of CONVERGED_STATE_PATH_MODES) {
+        if (!legacyActiveModes.includes(mode) && hasActiveConvergedState(mode, root)) {
+          legacyActiveModes.push(mode);
         }
       }
 
