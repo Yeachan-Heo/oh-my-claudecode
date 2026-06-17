@@ -13,7 +13,7 @@ jobs:
   release:
     name: Create GitHub Release
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, gajae-layofflabs-2]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 

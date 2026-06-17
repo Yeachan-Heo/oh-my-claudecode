@@ -12,7 +12,7 @@ permissions:
 jobs:
   size-check:
     name: Size Check
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["self-hosted","Linux","X64","gajae-layofflabs-2"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,7 +66,7 @@ jobs:
 
   base-branch-check:
     name: Base Branch Check
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["self-hosted","Linux","X64","gajae-layofflabs-2"]') }}
+    runs-on: ubuntu-latest
     steps:
       - name: Require allowed base branch
         uses: actions/github-script@v7
@@ -92,7 +92,7 @@ jobs:
 
   draft-check:
     name: Draft PR Check
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["self-hosted","Linux","X64","gajae-layofflabs-2"]') }}
+    runs-on: ubuntu-latest
     steps:
       - name: Check if PR is draft
         uses: actions/github-script@v7

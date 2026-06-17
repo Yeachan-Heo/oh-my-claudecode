@@ -17,7 +17,7 @@ permissions:
 jobs:
   upgrade-test:
     name: omc update + session-start hook
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["self-hosted","Linux","X64","gajae-layofflabs-2"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -44,7 +44,7 @@ jobs:
       # directly from repo-owned artifacts and therefore runs on push + PR.
 
       # ENOTEMPTY hardening: the toolcache global lib/node_modules dir is reused
-      # across runs on self-hosted runners (and inside the GitHub-hosted tool
+      # across runs on GitHub-hosted runners (and inside the GitHub-hosted tool
       # cache). A previously interrupted `npm install -g` can leave the resolved
       # scoped package dir and/or npm's staging temp dirs behind, so the next
       # install fails with
@@ -101,7 +101,7 @@ jobs:
       # Establishes the "old version" baseline before `omc update` is run.
       #
       # ENOTEMPTY hardening: the global node_modules dir is reused across runs on
-      # self-hosted runners (and within the GitHub-hosted tool cache). A
+      # GitHub-hosted runners (and within the GitHub-hosted tool cache). A
       # previously interrupted `npm install -g` can leave behind the resolved
       # package dir and/or npm's staging temp dirs (`.oh-my-claude-sisyphus-*`),
       # which makes the next install fail with
