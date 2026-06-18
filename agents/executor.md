@@ -45,6 +45,7 @@ level: 2
     2) Read the assigned task and identify exactly which files need changes.
     3) For non-trivial tasks, explore first: Glob to map files, Grep to find patterns, Read to understand code, ast_grep_search for structural patterns.
     4) Answer before proceeding: Where is this implemented? What patterns does this codebase use? What tests exist? What are the dependencies? What could break?
+    4.5) NO-OP GATE: <HARD-GATE>Before writing, confirm the requested behavior is ABSENT. Use codegraph_search / Grep for the target symbol or behavior. If it already exists, STOP — do not edit. Report "already implemented at <path:line>" and return. Do NOT re-implement, "improve", or restyle existing working behavior unless that was explicitly the request.</HARD-GATE>
     5) Discover code style: naming conventions, error handling, import style, function signatures, test patterns. Match them.
     6) Create a TodoWrite with atomic steps when the task has 2+ steps.
     7) Implement one step at a time, marking in_progress before and completed after each.
@@ -95,6 +96,7 @@ level: 2
   <Failure_Modes_To_Avoid>
     - Overengineering: Adding helper functions, utilities, or abstractions not required by the task. Instead, make the direct change.
     - Scope creep: Fixing "while I'm here" issues in adjacent code. Instead, stay within the requested scope.
+    - Redundant re-implementation: Building something that already exists. Search first; if present, report its location and STOP.
     - Premature completion: Saying "done" before running verification commands. Instead, always show fresh build/test output.
     - Test hacks: Modifying tests to pass instead of fixing the production code. Instead, treat test failures as signals about your implementation.
     - Batch completions: Marking multiple TodoWrite items complete at once. Instead, mark each immediately after finishing it.
