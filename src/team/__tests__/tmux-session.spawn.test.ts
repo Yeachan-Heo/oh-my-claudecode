@@ -8,6 +8,7 @@ const mockedCalls = vi.hoisted(() => ({
   echoOnLiteralSend: true,
   wrapLiteralCapture: false,
   insertWrapSpaces: false,
+  enterSubmitsCommand: true,
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -51,6 +52,11 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
           ? `${literal.slice(0, 80)}\n${literal.slice(80)}`
           : literal;
       }
+      if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.enterSubmitsCommand) {
+        mockedCalls.paneCapture = mockedCalls.paneCapture.includes('cursor-agent')
+          ? 'cursor-agent ready\n'
+          : '';
+      }
       return { stdout: '', stderr: '' };
     }),
     tmuxCmdAsync: vi.fn(async (args: string[]) => {
@@ -75,6 +81,7 @@ describe('spawnWorkerInPane', () => {
     mockedCalls.wrapLiteralCapture = false;
     mockedCalls.insertWrapSpaces = false;
     vi.unstubAllEnvs();
+    mockedCalls.enterSubmitsCommand = true;
   });
 
   it('uses argv-style launch with literal tmux send-keys', async () => {
@@ -218,6 +225,40 @@ describe('spawnWorkerInPane', () => {
     expect(mockedCalls.tmuxArgs).toContainEqual(['capture-pane', '-J', '-t', '%2', '-p', '-S', '-80']);
     const enterSend = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys' && args.at(-1) === 'Enter');
     expect(enterSend).toBeDefined();
+  });
+
+  it('verifies a single Cursor worker start command submits after Enter', async () => {
+    await spawnWorkerInPane('session:0', '%2', {
+      teamName: 'safe-team',
+      workerName: 'worker-1',
+      envVars: {
+        OMC_TEAM_NAME: 'safe-team',
+        OMC_TEAM_WORKER: 'safe-team/worker-1',
+      },
+      launchBinary: 'cursor-agent',
+      cwd: '/tmp',
+    });
+
+    const enterSend = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys' && args.at(-1) === 'Enter');
+    expect(enterSend).toBeDefined();
+    expect(mockedCalls.paneCapture).toBe('cursor-agent ready\n');
+  });
+
+  it('fails loudly when a single Cursor worker start command remains unsubmitted after Enter', async () => {
+    mockedCalls.enterSubmitsCommand = false;
+
+    await expect(
+      spawnWorkerInPane('session:0', '%2', {
+        teamName: 'safe-team',
+        workerName: 'worker-1',
+        envVars: {
+          OMC_TEAM_NAME: 'safe-team',
+          OMC_TEAM_WORKER: 'safe-team/worker-1',
+        },
+        launchBinary: 'cursor-agent',
+        cwd: '/tmp',
+      })
+    ).rejects.toThrow(/worker_start_submit_unverified:worker-1:%2:/);
   });
 
   it('fails before send-keys when the target pane shell never becomes ready', async () => {

@@ -345,6 +345,23 @@ async function verifyWorkerStartCommandDelivered(paneId: string, startCmd: strin
   return false;
 }
 
+async function verifyWorkerStartCommandSubmitted(paneId: string, startCmd: string): Promise<boolean> {
+  if (isCmuxSurfaceTarget(paneId)) return true;
+  const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    const commandStillBuffered = normalizedCaptured.includes(expected)
+      || (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected));
+    if (!commandStillBuffered) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return false;
+}
+
 function workerPaneShellCommand(): string[] {
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     return [getDefaultShell()];
@@ -907,9 +924,18 @@ export async function spawnWorkerInPane(
   try {
     const enterResult = await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter'], { timeout: 5000 });
     logWorkerSpawnDiagnostic(
-      `worker start submit sent session=${sessionName} pane=${paneId} ` +
+      `worker start submit key sent session=${sessionName} pane=${paneId} ` +
       `worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`,
     );
+    const submitted = await verifyWorkerStartCommandSubmitted(paneId, startCmd);
+    if (!submitted) {
+      const reason = `worker_start_submit_unverified:${config.workerName}:${paneId}:${fingerprint}`;
+      logWorkerSpawnDiagnostic(
+        `worker start submit verification failed session=${sessionName} pane=${paneId} ` +
+        `worker=${config.workerName} cmdSha=${fingerprint} cmdPreview=${JSON.stringify(preview)}`,
+      );
+      throw new Error(reason);
+    }
   } catch (error) {
     logWorkerSpawnDiagnostic(
       `worker start submit failed session=${sessionName} pane=${paneId} ` +
