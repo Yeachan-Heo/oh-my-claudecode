@@ -95,6 +95,14 @@ In review mode:
    - **Missing tests** — behavior not locked, weak regression coverage, edge-case gaps
    - **UI/design defaults** — generic visual patterns that make an AI-built interface feel unreviewed
 
+3a. **Scrub verbatim AI-prose slop (regex set)**
+   Delete or rewrite these in comments, docstrings, and prose output. They are filler, not information:
+   - Opener/closer filler: `Great!`, `Sure!`, `Of course!`, `Certainly!`, `That's a tough one`, `I hope this helps`, `Let me know if…`
+   - Hedge/throat-clearing: `It's important to note`, `It's worth noting`, `It's crucial to`, `It's essential to`, `Remember,`, `Keep in mind,`, `As you can see`, `In conclusion`, `Overall,`
+   - Empty intensifier adjectives as the first word of a sentence: `good`, `great`, `fascinating`, `profound`, `excellent`, `powerful`, `robust`, `seamless`, `cutting-edge`
+   - On error: do NOT apologize ("Sorry", "Apologies", "My mistake") — state the circumstance + the next action instead.
+   Regex seed (case-insensitive): `\b(it'?s (important|worth|crucial|essential) to|remember,|keep in mind,|as you can see|in conclusion|i hope this helps|let me know if)\b` and `^(great|sure|certainly|of course)!`
+
 ### UI/Design Reviewer Checklist
 
 Use these as review prompts, not absolute bans. Keep intentional brand, accessibility, product-density, or design-system choices when they have a clear rationale.
