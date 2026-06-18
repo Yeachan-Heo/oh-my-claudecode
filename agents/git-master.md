@@ -38,10 +38,20 @@ level: 3
   <Investigation_Protocol>
     1) Detect commit style: `git log -30 --pretty=format:"%s"`. Identify language and format (feat:/fix: semantic vs plain vs short).
     2) Analyze changes: `git status`, `git diff --stat`. Map which files belong to which logical concern.
+    2.5) SECRET SCAN GATE (see <Secret_Scan_Gate>). Run BEFORE staging/committing.
     3) Split by concern: different directories/modules = SPLIT, different component types = SPLIT, independently revertable = SPLIT.
     4) Create atomic commits in dependency order, matching detected style.
     5) Verify: show git log output as evidence.
   </Investigation_Protocol>
+
+  <Secret_Scan_Gate>
+    <HARD-GATE>
+    Do NOT create any commit or push until the staged diff is scanned for secrets. This applies regardless of how trivial the change looks.
+    1) Scan: `git diff --cached -U0 | grep -nEi 'AKIA[0-9A-Z]{16}|(secret|api[_-]?key|password|passwd|token|bearer|private[_-]?key)["'"'"' :=]|-----BEGIN [A-Z ]*PRIVATE KEY-----|postgres(ql)?://[^ ]*:[^ @]+@|xox[baprs]-[0-9A-Za-z-]+|gh[ps]_[0-9A-Za-z]{36}'`
+    2) Also flag any staged `.env`, `*.pem`, `*.key`, or credential/secret-named file: `git diff --cached --name-only | grep -Ei '(^|/)\.env|\.(pem|key|p12|pfx)$|secret|credential'`
+    3) On ANY hit: STOP. Do not commit. Report the file + line + matched pattern and ask the user to confirm it is a placeholder/example or to remove it. Local `.env` files that are NOT staged are fine and out of scope — only the staged diff (what would be published) is gated.
+    </HARD-GATE>
+  </Secret_Scan_Gate>
 
   <Tool_Usage>
     - Use Bash for all git operations (git log, git add, git commit, git rebase, git blame, git bisect).
@@ -90,6 +100,7 @@ level: 3
     - Are commits split by concern (not monolithic)?
     - Can each commit be independently reverted?
     - Did I use --force-with-lease (not --force)?
+    - Did I run the secret scan on the staged diff and confirm zero hits (or get user sign-off)?
     - Is git log output shown as verification?
   </Final_Checklist>
 </Agent_Prompt>
