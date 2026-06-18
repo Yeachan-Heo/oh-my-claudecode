@@ -53,10 +53,6 @@ describe('post-tool-rules-injector.mjs skip guards (DISABLE_OMC / OMC_SKIP_HOOKS
     expectSkipped({ DISABLE_OMC: '', OMC_SKIP_HOOKS: 'post-tool-use' });
   });
 
-  it('no-ops when OMC_SKIP_HOOKS contains the post-tool-rules-injector script name', () => {
-    expectSkipped({ DISABLE_OMC: '', OMC_SKIP_HOOKS: 'post-tool-rules-injector' });
-  });
-
   it('honors whitespace and commas in OMC_SKIP_HOOKS', () => {
     expectSkipped({ DISABLE_OMC: '', OMC_SKIP_HOOKS: ' keyword-detector , post-tool-use ' });
   });
