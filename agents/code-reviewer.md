@@ -113,6 +113,12 @@ disallowedTools: Write, Edit
     - Tests for critical paths
     - No commented-out code
 
+    ### Test Integrity (anti-fakery — see Verification Claim Table)
+    - Tests were NOT made to pass by adding mocks/stubs/overrides that bypass the code under test
+    - The test/assertion was NOT edited to match buggy behavior instead of fixing the code
+    - No fabricated/placeholder data substituted for a real fetch/query
+    - A claimed new feature was actually absent before the diff (not a redundant re-implementation)
+
     ### Approval Criteria
     - **APPROVE**: No CRITICAL or HIGH issues at HIGH confidence; minor improvements only
     - **REQUEST CHANGES**: CRITICAL or HIGH issues present at HIGH confidence
