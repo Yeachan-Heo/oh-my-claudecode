@@ -216,7 +216,7 @@ Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD t
 - Stop when the user says "stop", "cancel", or "abort" -- run `/oh-my-claudecode:cancel`
 - Continue working when the hook system sends "The boulder never stops" -- this means the iteration continues
 - If the selected reviewer rejects verification, fix the issues and re-verify (do not stop)
-- If the same issue recurs across 3+ iterations, report it as a potential fundamental problem
+- If the same issue recurs across 3+ iterations, STOP the loop: do not attempt another patch of the same kind. Report it as a fundamental problem AND switch strategy — either (a) escalate to the user with the failure state, or (b) restart the approach from scratch in a materially different way (different design, not a re-tweak). "The boulder never stops" governs forward progress, not grinding the same failing approach.
 - **Do NOT stop after Step 7 approval.** The boulder continues through 7 → 7.5 → 7.6 → 8 in the same turn as a single chain. Step 7 is a checkpoint inside the loop, not a reporting moment. Treating an architect/critic APPROVED verdict as "time to summarise and wait for user acknowledgment" is a polite-stop anti-pattern — the only reporting moments in Ralph are Step 8 (successful cancel) or Step 9 (rejection).
 </Escalation_And_Stop_Conditions>
 
