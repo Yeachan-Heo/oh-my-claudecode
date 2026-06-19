@@ -360,7 +360,7 @@ Follow these steps to migrate your existing setup:
 npm uninstall -g oh-my-claudecode
 ```
 
-#### 2. Install via Plugin System (Required)
+#### 2. Install via Plugin System
 
 ```bash
 # In Claude Code:
@@ -368,7 +368,7 @@ npm uninstall -g oh-my-claudecode
 /plugin install oh-my-claudecode
 ```
 
-> **Note**: npm/bun global installs are no longer supported. Use the plugin system.
+> **Note**: npm/bun global installs no longer provide the in-session plugin surface by themselves. Use the plugin system for slash commands, hooks, and skills; use the published npm package `oh-my-claude-sisyphus` when you need the terminal `omc` CLI.
 
 #### 3. Rename Local Project Directories
 
@@ -428,10 +428,10 @@ This:
 
 After migration, verify your setup:
 
-1. **Check installation**:
+1. **Check CLI installation, if you use the npm CLI surface**:
 
    ```bash
-   npm list -g oh-my-claudecode
+   npm list -g oh-my-claude-sisyphus
    ```
 
 2. **Verify directories exist**:
@@ -793,10 +793,10 @@ Once upgraded, you automatically gain access to:
 
 After upgrading, verify new features:
 
-1. **Check installation**:
+1. **Check CLI installation, if you use the npm CLI surface**:
 
    ```bash
-   npm list -g oh-my-claudecode
+   npm list -g oh-my-claude-sisyphus
    ```
 
 2. **Test unified cancel**:

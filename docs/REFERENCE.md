@@ -28,9 +28,9 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 ## Installation
 
-**Only the Claude Code Plugin method is supported.** Other installation methods (npm, bun, curl) are deprecated and may not work correctly.
+OMC has two supported public surfaces. Use the Claude Code plugin for in-session slash commands, hooks, agents, skills, and statusline behavior. Use the npm-installed `omc` CLI for terminal commands, setup/update automation, and CI-safe checks.
 
-### Claude Code Plugin (Required)
+### Claude Code Plugin
 
 ```bash
 # Step 1: Add the marketplace
@@ -42,7 +42,14 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 This integrates directly with Claude Code's plugin system and uses Node.js hooks.
 
-> **Note**: Direct npm/bun global installs are **not supported** for the plugin install flow. When you only need the packaged CLI surface, the npm package exposes both `oh-my-claudecode` and `omc`; use `omc` in examples unless troubleshooting needs the long alias.
+### Terminal CLI
+
+```bash
+npm i -g oh-my-claude-sisyphus@latest
+omc setup
+```
+
+The npm package exposes both `oh-my-claudecode` and `omc`; examples prefer `omc` unless troubleshooting needs the long alias. The CLI does not make in-session slash skills available by itself; install the plugin for `/autopilot`, `/ralph`, `/team`, and other interactive skills.
 
 ### Requirements
 
@@ -536,6 +543,17 @@ omc session search provider-routing --project all --json
 - Use `--project all` to search across all local Claude project transcripts
 - Supports `--limit`, `--session`, `--since`, `--context`, `--case-sensitive`, and `--json`
 - MCP/tool surface: `session_search` returns structured JSON for agents and automations
+
+### Non-interactive automation and CI/CD
+
+Use OMC's terminal and library surfaces in non-interactive environments:
+
+- Run CLI commands that have deterministic exit codes, for example `omc setup`, `omc ask ...`, `omc session search ... --json`, or repo-owned verification scripts such as `npm run sync-metadata:verify`.
+- Provide authentication through runner environment variables (`ANTHROPIC_API_KEY`) or pre-authenticated provider CLIs for `codex`, `gemini`, `grok`, or `cursor` when using `omc ask` / `omc team`.
+- Keep state explicit for ephemeral runners by setting `OMC_STATE_DIR` when state must survive worktree deletion or checkout replacement.
+- Avoid interactive slash skills (`/autopilot`, `/ralph`, `/ultrawork`, `/deep-interview`, `/team`) in CI jobs; they require an active Claude Code session and user-visible conversation loop.
+- OMC does not currently provide a VS Code extension or VS Code-specific automation contract. The documented IDE path is to use Claude Code's own integrations, then install OMC through the Claude Code plugin surface.
+- Programmatic Agent SDK usage is supported through the exported TypeScript helpers and the in-process MCP server helpers in this package; it is a Node.js library surface, not an interactive plugin installer.
 
 ---
 
