@@ -1,30 +1,27 @@
 #!/usr/bin/env node
 
 /**
- * OMC Orphan Agent Cleanup
+ * OMC Stale Worker Cleanup
  *
- * Detects and terminates orphan agent processes — agents whose team
- * config has been deleted (via TeamDelete) but whose OS processes
- * are still running. This happens when TeamDelete fires before all
- * teammates confirm shutdown.
+ * Detects and terminates stale OMC tmux/CLI worker processes that still
+ * carry team identity after the team cancellation path has completed. This is
+ * a post-cancellation cleanup tool; Claude Code 2.1.178+ has no native
+ * TeamDelete or per-team config to use as an orphan signal.
  *
  * Usage:
  *   node cleanup-orphans.mjs [--team-name <name>] [--dry-run]
  *
- * When --team-name is provided, only checks for orphans from that team.
- * When omitted, scans for ALL orphan claude agent processes.
+ * When --team-name is provided, only checks stale workers from that team.
+ * When omitted, scans for ALL matching OMC worker processes.
  *
- * --dry-run: Report orphans without killing them.
+ * --dry-run: Report matching workers without killing them.
  *
  * Exit codes:
- *   0 - Success (orphans cleaned or none found)
+ *   0 - Success (workers cleaned or none found)
  *   1 - Error during cleanup
  */
 
-import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
-import { getClaudeConfigDir } from './lib/config-dir.mjs';
 
 const args = process.argv.slice(2);
 const teamNameIdx = args.indexOf('--team-name');
@@ -40,16 +37,16 @@ if (rawTeamName && !teamName) {
 }
 
 /**
- * Find claude agent processes that match team patterns.
+ * Find OMC tmux/CLI worker processes that match team patterns.
  * Cross-platform: uses ps on Unix, tasklist on Windows.
  */
 function findOrphanProcesses(filterTeam) {
-  const orphans = [];
+  const workers = [];
 
   try {
     if (process.platform === 'win32') {
       const output = getWindowsProcessListOutput();
-      if (!output) return orphans;
+      if (!output) return workers;
 
       for (const line of output.split('\n')) {
         if (line.includes('--team-name') || line.includes('team_name')) {
@@ -61,7 +58,7 @@ function findOrphanProcesses(filterTeam) {
 
             const pidMatch = line.match(/,(\d+)\s*$/);
             if (pidMatch) {
-              orphans.push({ pid: parseInt(pidMatch[1], 10), team: procTeam, cmd: line.trim() });
+              workers.push({ pid: parseInt(pidMatch[1], 10), team: procTeam, cmd: line.trim() });
             }
           }
         }
@@ -71,10 +68,10 @@ function findOrphanProcesses(filterTeam) {
       const output = execSync('ps aux', { encoding: 'utf-8', timeout: 10000 });
 
       for (const line of output.split('\n')) {
-        // Match OMC agent processes with team context (exclude bare 'node' to avoid over-matching)
+        // Match OMC worker processes with team context (exclude bare 'node' to avoid over-matching).
         if ((line.includes('claude') || line.includes('codex') || line.includes('gemini') || line.includes('omc') || line.includes('oh-my-claude'))) {
           // Restrict team name match to valid slug characters.
-          // Support both native TeamDelete-style args and tmux worker env assignments.
+          // Support both legacy args and tmux worker env assignments.
           const match =
             line.match(/--team-name[=\s]+([\w][\w-]{0,63})/i)
             || line.match(/team_name[=:]\s*"?([\w][\w-]{0,63})"?/i)
@@ -87,17 +84,17 @@ function findOrphanProcesses(filterTeam) {
             const parts = line.trim().split(/\s+/);
             const pid = parseInt(parts[1], 10);
             if (pid && pid !== process.pid && pid !== process.ppid) {
-              orphans.push({ pid, team: procTeam, cmd: '(redacted)' });
+              workers.push({ pid, team: procTeam, cmd: '(redacted)' });
             }
           }
         }
       }
     }
   } catch {
-    // ps/wmic failed — can't detect orphans
+    // ps/wmic failed — can't detect stale workers
   }
 
-  return orphans;
+  return workers;
 }
 
 function getWindowsProcessListOutput() {
@@ -120,14 +117,6 @@ function getWindowsProcessListOutput() {
   }
 }
 
-/**
- * Check if a team's config still exists (i.e., team is still active).
- */
-function teamConfigExists(name) {
-  const configDir = getClaudeConfigDir();
-  const configPath = join(configDir, 'teams', name, 'config.json');
-  return existsSync(configPath);
-}
 
 /**
  * Kill a process.
@@ -160,7 +149,7 @@ function killProcess(pid) {
       // Schedule a best-effort SIGKILL escalation after 5s.
       // .unref() ensures this pending timer does not keep the Node event
       // loop alive — without it, main() would appear to "hang" for 5s per
-      // orphan after printing the JSON result.
+      // stale worker after printing the JSON result.
       setTimeout(() => {
         try {
           process.kill(pid, 0); // Check if still running
@@ -181,51 +170,41 @@ function main() {
 
   if (processes.length === 0) {
     console.log(JSON.stringify({
-      orphans: 0,
+      cleaned: 0,
       message: teamName
-        ? `No orphan processes found for team "${teamName}".`
-        : 'No orphan agent processes found.',
+        ? `No stale OMC worker processes found for team "${teamName}".`
+        : 'No stale OMC worker processes found.',
     }));
     process.exit(0);
   }
 
-  // Filter to actual orphans: processes whose team config no longer exists
-  const orphans = processes.filter(p => !teamConfigExists(p.team));
-
-  if (orphans.length === 0) {
-    console.log(JSON.stringify({
-      orphans: 0,
-      message: `Found ${processes.length} team process(es) but all have active team configs.`,
-    }));
-    process.exit(0);
-  }
 
   const results = [];
 
-  for (const orphan of orphans) {
+  for (const worker of processes) {
     if (dryRun) {
-      results.push({ pid: orphan.pid, team: orphan.team, action: 'would_kill' });
-      console.error(`[dry-run] Would kill PID ${orphan.pid} (team: ${orphan.team})`);
+      results.push({ pid: worker.pid, team: worker.team, action: 'would_kill' });
+      console.error(`[dry-run] Would kill PID ${worker.pid} (team: ${worker.team})`);
     } else {
-      const killed = killProcess(orphan.pid);
-      results.push({ pid: orphan.pid, team: orphan.team, action: killed ? 'killed' : 'failed' });
-      console.error(`[cleanup] ${killed ? 'Killed' : 'Failed to kill'} PID ${orphan.pid} (team: ${orphan.team})`);
+      const killed = killProcess(worker.pid);
+      results.push({ pid: worker.pid, team: worker.team, action: killed ? 'killed' : 'failed' });
+      console.error(`[cleanup] ${killed ? 'Killed' : 'Failed to kill'} PID ${worker.pid} (team: ${worker.team})`);
     }
   }
 
   console.log(JSON.stringify({
-    orphans: orphans.length,
+    cleaned: processes.length,
     dryRun,
     results,
     message: dryRun
-      ? `Found ${orphans.length} orphan(s). Re-run without --dry-run to clean up.`
-      : `Cleaned up ${results.filter(r => r.action === 'killed').length}/${orphans.length} orphan(s).`,
+      ? `Found ${processes.length} stale worker(s). Re-run without --dry-run to clean up.`
+      : `Cleaned up ${results.filter(r => r.action === 'killed').length}/${processes.length} stale worker(s).`,
   }));
 
   // Exit explicitly so we don't depend on timer/handle lifetime to end the
   // process. The SIGKILL escalation timers scheduled in killProcess() are
   // .unref()ed and therefore do not block exit; this line makes the intent
-  // symmetric with the earlier no-orphan return paths (which already call
+  // symmetric with the earlier no-worker return paths (which already call
   // process.exit(0)).
   process.exit(0);
 }
