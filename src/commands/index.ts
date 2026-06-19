@@ -6,9 +6,11 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 
+const PACKAGED_COMMANDS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'commands');
 export interface CommandInfo {
   name: string;
   description: string;
@@ -49,14 +51,23 @@ function parseCommandFile(content: string): { description: string; template: str
   return { description, template };
 }
 
+function getCommandFilePath(name: string): string | null {
+  const configPath = join(getCommandsDir(), `${name}.md`);
+  if (existsSync(configPath)) {
+    return configPath;
+  }
+
+  const packagedPath = join(PACKAGED_COMMANDS_DIR, `${name}.md`);
+  return existsSync(packagedPath) ? packagedPath : null;
+}
+
 /**
  * Get a specific command by name
  */
 export function getCommand(name: string): CommandInfo | null {
-  const commandsDir = getCommandsDir();
-  const filePath = join(commandsDir, `${name}.md`);
+  const filePath = getCommandFilePath(name);
 
-  if (!existsSync(filePath)) {
+  if (!filePath) {
     return null;
   }
 
@@ -80,29 +91,25 @@ export function getCommand(name: string): CommandInfo | null {
  * Get all available commands
  */
 export function getAllCommands(): CommandInfo[] {
-  const commandsDir = getCommandsDir();
+  const commandNames = new Set<string>();
 
-  if (!existsSync(commandsDir)) {
-    return [];
-  }
-
-  try {
-    const files = readdirSync(commandsDir).filter(f => f.endsWith('.md'));
-    const commands: CommandInfo[] = [];
-
-    for (const file of files) {
-      const name = file.replace('.md', '');
-      const command = getCommand(name);
-      if (command) {
-        commands.push(command);
-      }
+  for (const commandsDir of [PACKAGED_COMMANDS_DIR, getCommandsDir()]) {
+    if (!existsSync(commandsDir)) {
+      continue;
     }
 
-    return commands;
-  } catch (error) {
-    console.error('Error listing commands:', error);
-    return [];
+    try {
+      for (const file of readdirSync(commandsDir).filter(f => f.endsWith('.md'))) {
+        commandNames.add(file.replace('.md', ''));
+      }
+    } catch (error) {
+      console.error(`Error listing commands in ${commandsDir}:`, error);
+    }
   }
+
+  return Array.from(commandNames)
+    .map(name => getCommand(name))
+    .filter((c): c is CommandInfo => c !== null);
 }
 
 /**

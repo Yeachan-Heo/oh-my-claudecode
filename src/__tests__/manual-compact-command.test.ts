@@ -71,4 +71,17 @@ describe('manual compact command', () => {
     expect(expanded?.prompt).toContain('preserve current issue and PR state');
     expect(expanded?.prompt).toContain('Do not create a separate OMC summarizer');
   });
+
+  it('falls back to packaged commands when Claude config has no command templates', async () => {
+    rmSync(join(tempConfigDir, 'commands'), { recursive: true, force: true });
+
+    const { expandCommand, getCommand, listCommands } = await loadCommandsModule();
+    const command = getCommand('compact');
+    const expanded = expandCommand('compact', 'preserve current issue and PR state');
+
+    expect(command).not.toBeNull();
+    expect(command?.filePath).toBe(COMMAND_PATH);
+    expect(expanded?.prompt).toContain('/compact preserve current issue and PR state');
+    expect(listCommands()).toContain('compact');
+  });
 });
