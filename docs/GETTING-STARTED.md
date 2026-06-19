@@ -147,7 +147,7 @@ This loads agents, skills, and commands directly from your checkout without copy
 | Linux | Claude Code Plugin | Bash (.sh) |
 | Windows | WSL2 recommended | Node.js (.mjs) |
 
-> ℹ️ **Note:** Native Windows support is experimental. OMC requires tmux, which is not available on native Windows. Use WSL2 instead.
+> ℹ️ **Note:** Native Windows support is experimental. For tmux-backed Team workers, OMC checks for a tmux-compatible binary first; native [psmux](https://github.com/psmux/psmux) is supported, and WSL2 remains the fallback when no compatible tmux is available.
 
 ### Updates
 
