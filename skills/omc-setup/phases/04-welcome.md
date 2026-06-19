@@ -42,7 +42,7 @@ TEAMS:
 Spawn coordinated agents with shared task lists and real-time messaging:
 - /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
 - /oh-my-claudecode:team 5:debugger "fix build errors in src/"
-Teams use Claude Code native tools (TeamCreate/SendMessage/TaskCreate).
+Teams use Claude Code's implicit agent team (spawn teammates directly with distinct `name` values; no TeamCreate/TeamDelete in Claude Code 2.1.178+).
 
 MCP SERVERS:
 Run /oh-my-claudecode:mcp-setup to add tools like web search, GitHub, etc.
@@ -86,7 +86,7 @@ MAGIC KEYWORDS (power-user shortcuts):
 TEAMS (NEW!):
 Spawn coordinated agents with shared task lists and real-time messaging:
 - /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
-- Uses Claude Code native tools (TeamCreate/SendMessage/TaskCreate)
+- Uses Claude Code's implicit agent team (spawn teammates directly with distinct `name` values; no TeamCreate/TeamDelete in Claude Code 2.1.178+)
 
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.

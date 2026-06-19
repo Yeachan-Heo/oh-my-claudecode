@@ -91,7 +91,7 @@ export const executionAdapter: PipelineStageAdapter = {
     if (isTeam) {
       const teamRuntimeGuidance = useCliTeamRuntime
         ? getCliTeamRuntimeGuidance(requestedAgentTypes, planPath)
-        : `Use the Team orchestrator to execute tasks in parallel:`;
+        : `Use Claude Code's implicit agent team to execute tasks in parallel:`;
       return `## PIPELINE STAGE: EXECUTION (Team Mode)
 
 Execute the implementation plan using multi-worker team execution.
@@ -108,10 +108,10 @@ ${useCliTeamRuntime ? `1. **Launch CLI executor workers** with \`omc team\` or \
 2. **Decompose executor-style implementation tasks** from the implementation plan and pass them to CLI workers.
 3. **Monitor tmux/team output** and integrate completed implementation changes.
 4. **Keep review/critic/security/verdict work native**; do not assign those roles to Cursor/CLI workers.
-5. **Coordinate** dependencies between tasks.` : `1. **Create team** with TeamCreate
-2. **Create tasks** from the implementation plan using TaskCreate
-3. **Spawn executor teammates** using Task with \`team_name\` parameter
-4. **Monitor progress** as teammates complete tasks
+5. **Coordinate** dependencies between tasks.` : `1. **Use the implicit team** provided by Claude Code when \`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1\` is enabled; do not call removed \`TeamCreate\`/\`TeamDelete\` tools.
+2. **Track work in TodoWrite or the active task list** from the implementation plan.
+3. **Spawn executor teammates directly** with the Agent/Task tool using distinct \`name\` values (for example, \`name="worker-1"\`). Do not rely on \`team_name\`; Claude Code 2.1.178+ accepts it only as ignored legacy metadata.
+4. **Monitor progress** as teammates complete tasks.
 5. **Coordinate** dependencies between tasks.`}
 
 ### Output Contract

@@ -131,7 +131,11 @@ describe('Stage Adapters', () => {
         config: { ...DEFAULT_PIPELINE_CONFIG, execution: 'team' },
       });
       expect(prompt).toContain('Team Mode');
-      expect(prompt).toContain('TeamCreate');
+      expect(prompt).toContain('implicit agent team');
+      expect(prompt).toContain('name="worker-1"');
+      expect(prompt).not.toContain('with TeamCreate');
+      expect(prompt).not.toContain('TaskCreate');
+      expect(prompt).not.toContain('Task with `team_name`');
       expect(prompt).toContain(EXECUTION_COMPLETION_SIGNAL);
       expect(prompt).toContain('short execution summary under 100 words');
     });
@@ -519,7 +523,7 @@ describe('autopilot team CLI worker configuration', () => {
     expect(prompt).not.toContain('test-engineer` with');
   });
 
-  it('keeps native TeamCreate guidance for Claude-only team execution', () => {
+  it('uses implicit-team guidance for Claude-only team execution', () => {
     const prompt = executionAdapter.getPrompt({
       idea: 'test',
       directory: '/tmp',
@@ -530,8 +534,12 @@ describe('autopilot team CLI worker configuration', () => {
       },
     });
 
-    expect(prompt).toContain('TeamCreate');
-    expect(prompt).toContain('team_name');
+    expect(prompt).toContain('implicit team');
+    expect(prompt).toContain('name="worker-1"');
+    expect(prompt).toContain('ignored legacy metadata');
+    expect(prompt).not.toContain('with TeamCreate');
+    expect(prompt).not.toContain('TaskCreate');
+    expect(prompt).not.toContain('Task with `team_name`');
     expect(prompt).not.toContain('CLI Team Runtime Required');
   });
 });

@@ -928,18 +928,19 @@ function generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId) {
   const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
   const tracking = getAgentTrackingInfo(stateDir);
 
-  // Team-routing enforcement (issue #1006):
-  // When team state is active and Task is called WITHOUT team_name,
-  // inject a redirect message to use team agents instead of subagents.
+  // Team-routing guidance:
+  // Claude Code 2.1.178+ removed TeamCreate/TeamDelete. When OMC team state is
+  // active, teammates should be spawned into the session's implicit agent team by
+  // giving each Agent/Task call a distinct name. team_name is ignored by native
+  // Claude Code and should only be treated as legacy metadata.
   const teamState = getActiveTeamState(stateDir, sessionId);
-  if (teamState && !toolInput.team_name) {
+  if (teamState && !toolInput.name) {
     const teamName = teamState.team_name || teamState.teamName || 'team';
-    return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning a regular subagent ` +
-      `without team_name. You MUST use TeamCreate first (if not already created), then spawn teammates with ` +
-      `Task(team_name="${teamName}", name="worker-N", subagent_type="${agentType}"). ` +
-      `Do NOT use Task without team_name during an active team session. ` +
-      `If TeamCreate is not available in your tools, tell the user to verify ` +
-      'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 is set in [$CLAUDE_CONFIG_DIR|~/.claude]/settings.json. Restart Claude Code.';
+    return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning an unnamed subagent. ` +
+      `Claude Code 2.1.178+ uses one implicit team per session when ` +
+      `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 is enabled; TeamCreate and TeamDelete are removed. ` +
+      `Spawn teammates directly with Agent/Task name="worker-N" and subagent_type="${agentType}". ` +
+      `Do NOT rely on team_name for routing; native Claude Code accepts it only as ignored legacy metadata.`;
   }
 
   if (QUIET_LEVEL >= 2) return '';

@@ -317,7 +317,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
 
   // === Team-routing enforcement tests (issue #1006) ===
 
-  it('injects team-routing redirect when Task called without team_name during active team session', () => {
+  it('injects team-routing redirect when Task called without teammate name during active team session', () => {
     const sessionId = 'session-1006';
     writeJson(
       join(tempDir, '.omc', 'state', 'sessions', sessionId, 'team-state.json'),
@@ -343,10 +343,13 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(output.continue).toBe(true);
     expect(hookSpecificOutput.additionalContext).toContain('TEAM ROUTING REQUIRED');
     expect(hookSpecificOutput.additionalContext).toContain('fix-ts-errors');
-    expect(hookSpecificOutput.additionalContext).toContain('team_name=');
+    expect(hookSpecificOutput.additionalContext).toContain('name="worker-N"');
+    expect(hookSpecificOutput.additionalContext).toContain('TeamCreate and TeamDelete are removed');
+    expect(hookSpecificOutput.additionalContext).toContain('team_name for routing');
+    expect(hookSpecificOutput.additionalContext).toContain('ignored legacy metadata');
   });
 
-  it('does NOT inject team-routing redirect when Task called WITH team_name', () => {
+  it('does NOT inject team-routing redirect when Task called WITH teammate name', () => {
     const sessionId = 'session-1006b';
     writeJson(
       join(tempDir, '.omc', 'state', 'sessions', sessionId, 'team-state.json'),
@@ -361,7 +364,6 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       tool_name: 'Task',
       toolInput: {
         subagent_type: 'oh-my-claudecode:executor',
-        team_name: 'fix-ts-errors',
         name: 'worker-1',
         description: 'Fix type errors',
         prompt: 'Fix all type errors in src/auth/',

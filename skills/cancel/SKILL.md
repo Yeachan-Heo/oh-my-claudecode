@@ -26,7 +26,7 @@ Automatically detects which mode is active and cancels it:
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
 - **Pipeline**: Stops sequential agent pipeline
-- **Team**: Sends shutdown_request to all teammates, waits for responses, calls TeamDelete, clears linked ralph if present
+- **Team**: Sends shutdown_request to all teammates, waits for responses/timeouts, clears OMC team state, clears linked ralph if present. Claude Code 2.1.178+ has no TeamDelete.
 - **Team+Ralph (linked)**: Cancels team first (graceful shutdown), then clears ralph state. Cancelling ralph when linked also cancels team first.
 
 ## Usage
@@ -197,25 +197,25 @@ Use force mode to clear every session plus legacy artifacts via `state_clear`. D
 
 ### 3B. Smart Cancellation (default)
 
-#### If Team Active (Claude Code native)
+#### If Team Active (Claude Code implicit team)
 
-Teams are detected by checking for config files in `${CLAUDE_CONFIG_DIR:-~/.claude}/teams/`:
+Teams are detected through OMC team state, not removed Claude Code `~/.claude/teams` config directories:
 
 ```bash
-# Check for active teams
-TEAM_CONFIGS=$(find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/teams -name config.json -maxdepth 2 2>/dev/null)
+# Check for active OMC team state
+state_read(mode="team")
 ```
 
 **Two-pass cancellation protocol:**
 
 **Pass 1: Graceful Shutdown**
 ```
-For each team found in ${CLAUDE_CONFIG_DIR:-~/.claude}/teams/:
-  1. Read config.json to get team_name and members list
-  2. For each non-lead member:
+For the active OMC team state:
+  1. Read team_name and worker labels from OMC state/handoffs/task bookkeeping
+  2. For each active teammate:
      a. Send shutdown_request via SendMessage
      b. Wait up to 15 seconds for shutdown_response
-     c. If response received: member terminates and is auto-removed
+     c. If response received: mark member acknowledged
      d. If timeout: mark member as unresponsive, continue to next
   3. Log: "Graceful pass: X/Y members responded"
 ```
@@ -223,36 +223,31 @@ For each team found in ${CLAUDE_CONFIG_DIR:-~/.claude}/teams/:
 **Pass 2: Reconciliation**
 ```
 After graceful pass:
-  1. Re-read config.json to check remaining members
-  2. If only lead remains (or config is empty): proceed to TeamDelete
-  3. If unresponsive members remain:
-     a. Wait 5 more seconds (they may still be processing)
-     b. Re-read config.json again
-     c. If still stuck: attempt TeamDelete anyway
-     d. If TeamDelete fails: report manual cleanup path
+  1. Wait 5 more seconds for unresponsive teammates that may still be processing
+  2. Record any remaining unresponsive teammates in the cancellation report
+  3. Do not call TeamDelete; Claude Code 2.1.178+ removed per-team native cleanup
 ```
 
-**TeamDelete + Cleanup:**
+**OMC State Cleanup:**
 ```
-  1. Call TeamDelete() — removes ~/.claude/teams/{name}/ and ~/.claude/tasks/{name}/
-  2. Clear team state: state_clear(mode="team")
-  3. Check for linked ralph: state_read(mode="ralph") — if linked_team is true:
+  1. Clear team state: state_clear(mode="team")
+  2. Check for linked ralph: state_read(mode="ralph") — if linked_team is true:
      a. Clear ralph state: state_clear(mode="ralph")
      b. Clear linked ultrawork if present: state_clear(mode="ultrawork")
-  4. Run orphan scan (see below)
-  5. Emit structured cancel report
+  3. Run OMC tmux/CLI orphan scan only for legacy `omc team` / `/omc-teams` workers (see below)
+  4. Emit structured cancel report
 ```
 
 **Orphan Detection (Post-Cleanup):**
 
-After TeamDelete, verify no agent processes remain:
+For legacy OMC tmux/CLI worker runs, verify no worker processes remain:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" --team-name "{team_name}"
 ```
 
 The orphan scanner:
-1. Checks `ps aux` (Unix) or `tasklist` (Windows) for processes with `--team-name` matching the deleted team
-2. For each orphan whose team config no longer exists: sends SIGTERM, waits 5s, sends SIGKILL if still alive
+1. Checks `ps aux` (Unix) or `tasklist` (Windows) for OMC worker processes with `--team-name` matching the cleaned-up team
+2. Sends SIGTERM, waits 5s, sends SIGKILL if still alive
 3. Reports cleanup results as JSON
 
 Use `--dry-run` to inspect without killing. The scanner is safe to run multiple times.
@@ -263,20 +258,19 @@ Team "{team_name}" cancelled:
   - Members signaled: N
   - Responses received: M
   - Unresponsive: K (list names if any)
-  - TeamDelete: success/failed
+  - OMC state cleared: yes/no
   - Manual cleanup needed: yes/no
-    Path: ~/.claude/teams/{name}/ and ~/.claude/tasks/{name}/
+    Path: OMC team state / tmux worker processes, if any
 ```
 
 **Implementation note:** The cancel skill is executed by the LLM, not as a bash script. When you detect an active team:
-1. Read `${CLAUDE_CONFIG_DIR:-~/.claude}/teams/*/config.json` to find active teams
-2. If multiple teams exist, cancel oldest first (by `createdAt`)
-3. For each non-lead member, call `SendMessage(type: "shutdown_request", recipient: member-name, content: "Cancelling")`
+1. Read `state_read(mode="team")` to find the active OMC team
+2. Identify active named teammates from state, handoffs, or task bookkeeping
+3. For each teammate, call `SendMessage(type: "shutdown_request", recipient: member-name, content: "Cancelling")`
 4. Wait briefly for shutdown responses (15s per member timeout)
-5. Re-read config.json to check for remaining members (reconciliation pass)
-6. Call `TeamDelete()` to clean up
-7. Clear team state: `state_clear(mode="team", session_id)`
-8. Report structured summary to user
+5. Record unresponsive teammates after a reconciliation wait
+6. Clear team state: `state_clear(mode="team", session_id)`
+7. Report structured summary to user
 
 #### If Autopilot Active
 

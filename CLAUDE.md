@@ -33,7 +33,7 @@ explore (haiku), analyst (opus), planner (opus), architect (opus), debugger (son
 <tools>
 External AI: `/team N:executor "task"`, `omc team N:codex|gemini "..."`, `omc ask <claude|codex|gemini>`, `/ccg`
 OMC State: `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
-Teams: `TeamCreate`, `TeamDelete`, `SendMessage`, `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`
+Teams: Claude Code implicit agent team via Agent/Task `name`; OMC tmux/CLI workers via `/team` or `omc team`; task tracking via TodoWrite/TaskList/TaskGet/TaskUpdate when available
 Notepad: `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`
 Project Memory: `project_memory_read`, `project_memory_write`, `project_memory_add_note`, `project_memory_add_directive`
 Code Intel: LSP (`lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`, etc.), AST (`ast_grep_search`, `ast_grep_replace`), `python_repl`

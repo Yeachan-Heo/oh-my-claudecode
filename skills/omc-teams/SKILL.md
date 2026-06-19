@@ -190,9 +190,9 @@ If encountered, switch to `omc team ...` CLI commands.
 
 ## Relationship to `/team`
 
-| Aspect       | `/team`                                   | `/omc-teams`                                         |
-| ------------ | ----------------------------------------- | ---------------------------------------------------- |
-| Worker type  | Claude Code native team agents            | claude / codex / gemini CLI processes in tmux        |
-| Invocation   | `TeamCreate` / `Task` / `SendMessage`     | `omc team [N:agent]` + `status` + `shutdown` + `api` |
-| Coordination | Native team messaging and staged pipeline | tmux worker runtime + CLI API state files            |
-| Use when     | You want Claude-native team orchestration | You want external CLI worker execution               |
+| Aspect       | `/team`                                                       | `/omc-teams`                                         |
+| ------------ | ------------------------------------------------------------- | ---------------------------------------------------- |
+| Worker type  | Claude Code implicit agent-team teammates                     | claude / codex / gemini CLI processes in tmux        |
+| Invocation   | Agent/Task spawn with distinct `name` values; no TeamCreate/TeamDelete in Claude Code 2.1.178+ | `omc team [N:agent]` + `status` + `shutdown` + `api` |
+| Coordination | Native implicit-team messaging and staged pipeline            | tmux worker runtime + CLI API state files            |
+| Use when     | You want Claude-native in-session agent orchestration         | You want external CLI worker execution               |
