@@ -20,10 +20,11 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
 const THRESHOLD = parseInt(process.env.OMC_CONTEXT_GUARD_THRESHOLD || '75', 10);
@@ -122,13 +123,12 @@ function resolveTranscriptPath(transcriptPath, cwd) {
     const worktreeTop = runGitRevParse(['--show-toplevel'], effectiveCwd);
 
     if (mainRepoRoot !== worktreeTop) {
-      const lastSep = transcriptPath.lastIndexOf('/');
-      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+      const sessionFile = basename(transcriptPath);
       if (sessionFile) {
         const configDir = getClaudeConfigDir();
         const projectsDir = join(configDir, 'projects');
         if (existsSync(projectsDir)) {
-          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const encodedMain = encodeProjectPath(mainRepoRoot);
           const resolvedPath = join(projectsDir, encodedMain, sessionFile);
           try {
             if (existsSync(resolvedPath)) return resolvedPath;

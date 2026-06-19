@@ -14,6 +14,7 @@ import { basename, join, dirname, resolve } from 'path';
 import { homedir, tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 
@@ -397,7 +398,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       if (sessionFile) {
         const projectsDir = join(getClaudeConfigDir(), 'projects');
         if (existsSync(projectsDir)) {
-          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const encodedMain = encodeProjectPath(mainRepoRoot);
           const resolvedPath = join(projectsDir, encodedMain, sessionFile);
           if (existsSync(resolvedPath)) return resolvedPath;
         }

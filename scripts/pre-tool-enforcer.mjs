@@ -8,11 +8,12 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
 import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
@@ -527,13 +528,12 @@ function resolveTranscriptPath(transcriptPath, cwd) {
     }).trim();
 
     if (mainRepoRoot !== worktreeTop) {
-      const lastSep = transcriptPath.lastIndexOf('/');
-      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+      const sessionFile = basename(transcriptPath);
       if (sessionFile) {
         const configDir = getClaudeConfigDir();
         const projectsDir = join(configDir, 'projects');
         if (existsSync(projectsDir)) {
-          const encodedMain = mainRepoRoot.replace(/[/\\]/g, '-');
+          const encodedMain = encodeProjectPath(mainRepoRoot);
           const resolvedPath = join(projectsDir, encodedMain, sessionFile);
           try {
             if (existsSync(resolvedPath)) return resolvedPath;
