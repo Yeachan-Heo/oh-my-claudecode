@@ -289,9 +289,9 @@ describe("Presets", () => {
       expect(CUSTOM_INTEGRATION_PRESETS.n8n.type).toBe("webhook");
     });
 
-    it("contains clawdbot preset", () => {
-      expect(CUSTOM_INTEGRATION_PRESETS.clawdbot).toBeDefined();
-      expect(CUSTOM_INTEGRATION_PRESETS.clawdbot.type).toBe("webhook");
+    it("contains custom agent gateway preset", () => {
+      expect(CUSTOM_INTEGRATION_PRESETS.customAgentGateway).toBeDefined();
+      expect(CUSTOM_INTEGRATION_PRESETS.customAgentGateway.type).toBe("webhook");
     });
 
     it("contains generic webhook preset", () => {

@@ -41,7 +41,7 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 
 - **tmux binary** must be installed and discoverable (`command -v tmux`) when running from a plain terminal; classic tmux sessions reuse the current tmux surface.
 - **cmux surface optional** for in-place native splits (`CMUX_SURFACE_ID` set without `$TMUX`). Plain terminals still use the detached tmux fallback.
-- **claude** CLI: `npm install -g @anthropic-ai/claude-code`
+- **claude** CLI: install and authenticate Claude Code using the [official setup instructions](https://code.claude.com/docs/en/setup); the legacy Anthropic npm package install path is deprecated for normal user installs.
 - **codex** CLI: `npm install -g @openai/codex`
 - **gemini** CLI: `npm install -g @google/gemini-cli`
 - **grok** CLI: install and authenticate the Grok CLI used by your environment

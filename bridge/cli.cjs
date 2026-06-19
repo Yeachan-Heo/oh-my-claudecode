@@ -93400,7 +93400,7 @@ async function launchCommand(args) {
   }
   if (!isClaudeAvailable()) {
     console.error("[omc] Error: claude CLI not found. Install Claude Code first:");
-    console.error("  npm install -g @anthropic-ai/claude-code");
+    console.error("  https://code.claude.com/docs/en/setup");
     process.exit(1);
   }
   const launchConfigDir = prepareOmcLaunchConfigDir();

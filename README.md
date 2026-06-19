@@ -526,7 +526,7 @@ Forward Claude Code session events to an [OpenClaw](https://openclaw.ai/) gatewa
 | `OPENCLAW_REPLY_TARGET`  | Channel ID                     |
 | `OPENCLAW_REPLY_THREAD`  | Thread ID                      |
 
-See `scripts/openclaw-gateway-demo.mjs` for a reference gateway that relays OpenClaw payloads to Discord via ClawdBot.
+See `scripts/openclaw-gateway-demo.mjs` for a reference gateway that relays OpenClaw payloads to a custom HTTPS automation endpoint.
 
 ---
 

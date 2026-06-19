@@ -284,7 +284,7 @@ https://github.com/anthropics/claude-code/pull/123
                               ▼
     ┌─────────────────────────────────────────────────────────┐
     │                    Integration Layer                     │
-    │  (gh CLI, git, tmux, claude, omc skills, Clawdbot)       │
+    │  (gh CLI, git, tmux, claude, omc skills, webhooks)        │
     └─────────────────────────────────────────────────────────┘
 ```
 
@@ -742,21 +742,21 @@ def cleanup(options):
 | `git-master` | Aware of worktree context |
 | `deepsearch` | Scoped to session worktree |
 
-### 10.2 Clawdbot Integration
+### 10.2 Custom Agent Gateway Integration
 
 ```typescript
-// Clawdbot can manage PSM sessions
-interface ClawdbotPSMIntegration {
-  // List sessions via Clawdbot UI
+// A custom webhook can manage PSM sessions through your own gateway.
+interface CustomAgentGatewayIntegration {
+  // List sessions via your gateway UI
   listSessions(): Promise<Session[]>;
 
-  // Create session from Clawdbot
+  // Create session from your gateway
   createSession(options: SessionOptions): Promise<Session>;
 
-  // Attach to session in new terminal
+  // Attach to session in a new terminal
   attachSession(sessionId: string): Promise<void>;
 
-  // Session status in Clawdbot dashboard
+  // Session status in your gateway dashboard
   getSessionStatus(sessionId: string): Promise<SessionStatus>;
 }
 ```

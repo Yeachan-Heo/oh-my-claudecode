@@ -993,11 +993,11 @@ If migrate:
 **Options:**
 1. **OpenClaw Gateway** - Wake external automations and AI agents
 2. **n8n Webhook** - Trigger n8n workflows
-3. **ClawdBot** - Send notifications to ClawdBot
+3. **Custom Agent Gateway** - Send notifications to a custom agent webhook
 4. **Generic Webhook** - Custom HTTPS webhook
 5. **Generic CLI Command** - Execute shell command on events
 
-### OpenClaw/n8n/ClawdBot Preset Flow
+### OpenClaw/n8n/Custom Agent Gateway Preset Flow
 
 **Step 2: Gateway URL**
 
