@@ -147,7 +147,7 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
     }
   });
 
-  it('Windows default config: avoids CMD-only %USERPROFILE% and keeps portable bash-style expansion', async () => {
+  it('Windows default config: emits concrete hook paths without POSIX shell expansion', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     delete process.env.CLAUDE_CONFIG_DIR;
     vi.resetModules();
@@ -166,7 +166,8 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
 
     expect(commands.length).toBeGreaterThan(0);
     for (const cmd of commands) {
-      expect(cmd).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
+      expect(cmd).toContain('/.claude/hooks/');
+      expect(cmd).not.toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
       expect(cmd).not.toContain('%USERPROFILE%');
     }
   });
