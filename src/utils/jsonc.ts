@@ -1,8 +1,8 @@
 /**
  * Simple JSONC (JSON with Comments) parser
  *
- * Strips single-line (//) and multi-line (slash-star) comments from JSONC
- * before parsing with standard JSON.parse.
+ * Strips single-line (//) and multi-line (slash-star) comments and trailing
+ * commas from JSONC before parsing with standard JSON.parse.
  */
 
 /**
@@ -14,10 +14,20 @@ export function parseJsonc(content: string): unknown {
 }
 
 /**
- * Strip comments from JSONC content
- * Handles single-line (//) and multi-line comments
+ * Strip comments and trailing commas from JSONC content
+ * Handles single-line (//) and multi-line comments, and trailing commas
+ * before a closing brace or bracket. Commas inside string literals are
+ * preserved because string contents are copied verbatim.
  */
 export function stripJsoncComments(content: string): string {
+  return stripTrailingCommas(stripComments(content));
+}
+
+/**
+ * Strip single-line (//) and multi-line comments, leaving string literals
+ * (including any comment-like or comma characters inside them) untouched.
+ */
+function stripComments(content: string): string {
   let result = '';
   let i = 0;
 
@@ -64,6 +74,59 @@ export function stripJsoncComments(content: string): string {
         i++;
       }
       continue;
+    }
+
+    result += content[i];
+    i++;
+  }
+
+  return result;
+}
+
+/**
+ * Remove trailing commas that appear before a closing brace or bracket.
+ * Runs on comment-free input. String literals are copied verbatim so commas
+ * inside strings are never removed.
+ */
+function stripTrailingCommas(content: string): string {
+  let result = '';
+  let i = 0;
+
+  while (i < content.length) {
+    // Copy string literals verbatim so their contents are never altered.
+    if (content[i] === '"') {
+      result += content[i];
+      i++;
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i];
+          i++;
+          if (i < content.length) {
+            result += content[i];
+            i++;
+          }
+          continue;
+        }
+        result += content[i];
+        i++;
+      }
+      if (i < content.length) {
+        result += content[i];
+        i++;
+      }
+      continue;
+    }
+
+    // Drop a comma followed only by whitespace before a closing brace/bracket.
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) {
+        j++;
+      }
+      if (content[j] === '}' || content[j] === ']') {
+        i++; // skip the comma; whitespace is preserved by the next iteration
+        continue;
+      }
     }
 
     result += content[i];
