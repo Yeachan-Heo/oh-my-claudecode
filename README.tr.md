@@ -288,7 +288,7 @@ Claude Code oturum olaylarını bir [OpenClaw](https://openclaw.ai/) ağ geçidi
 | `OPENCLAW_REPLY_TARGET` | Kanal ID'si |
 | `OPENCLAW_REPLY_THREAD` | Thread ID'si |
 
-OpenClaw yüklerini ClawdBot aracılığıyla Discord'a ileten bir referans gateway için `scripts/openclaw-gateway-demo.mjs` dosyasına bakın.
+OpenClaw yüklerini özel bir HTTPS otomasyon uç noktasına ileten bir referans gateway için `scripts/openclaw-gateway-demo.mjs` dosyasına bakın.
 
 ---
 

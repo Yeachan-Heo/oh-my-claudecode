@@ -328,7 +328,7 @@ omc config-stop-callback discord --clear-tags
 | `OPENCLAW_REPLY_TARGET` | 频道 ID |
 | `OPENCLAW_REPLY_THREAD` | 线程 ID |
 
-参见 `scripts/openclaw-gateway-demo.mjs`，这是一个通过 ClawdBot 将 OpenClaw 有效载荷转发到 Discord 的参考网关。
+参见 `scripts/openclaw-gateway-demo.mjs`，这是一个将 OpenClaw 有效载荷转发到自定义 HTTPS 自动化端点的参考网关。
 
 ---
 

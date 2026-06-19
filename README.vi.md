@@ -326,7 +326,7 @@ Chuyển tiếp các sự kiện phiên Claude Code đến gateway [OpenClaw](ht
 | `OPENCLAW_REPLY_TARGET` | ID kênh |
 | `OPENCLAW_REPLY_THREAD` | ID thread |
 
-Xem `scripts/openclaw-gateway-demo.mjs` để tham khảo gateway chuyển tiếp payload OpenClaw đến Discord qua ClawdBot.
+Xem `scripts/openclaw-gateway-demo.mjs` để tham khảo gateway chuyển tiếp payload OpenClaw đến endpoint tự động hóa HTTPS tùy chỉnh.
 
 ---
 

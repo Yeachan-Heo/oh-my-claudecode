@@ -319,7 +319,7 @@ Reenvía eventos de sesión de Claude Code a un gateway de [OpenClaw](https://op
 | `OPENCLAW_REPLY_TARGET` | ID del canal |
 | `OPENCLAW_REPLY_THREAD` | ID del hilo |
 
-Consulta `scripts/openclaw-gateway-demo.mjs` para un gateway de referencia que retransmite payloads de OpenClaw a Discord a través de ClawdBot.
+Consulta `scripts/openclaw-gateway-demo.mjs` para un gateway de referencia que retransmite payloads de OpenClaw a un endpoint de automatización HTTPS personalizado.
 
 ---
 

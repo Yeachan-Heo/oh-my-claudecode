@@ -3065,7 +3065,7 @@ var init_config_dir = __esm({
 });
 
 // src/shared/types.ts
-var CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES;
+var CANONICAL_TEAM_ROLES, CURSOR_EXECUTOR_TEAM_ROLES, KNOWN_AGENT_NAMES;
 var init_types = __esm({
   "src/shared/types.ts"() {
     "use strict";
@@ -3086,6 +3086,7 @@ var init_types = __esm({
       "explore",
       "document-specialist"
     ];
+    CURSOR_EXECUTOR_TEAM_ROLES = ["executor"];
     KNOWN_AGENT_NAMES = [
       "omc",
       "explore",
@@ -3341,6 +3342,9 @@ function parseJsonc(content) {
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+function stripComments(content) {
   let result = "";
   let i = 0;
   while (i < content.length) {
@@ -3379,6 +3383,47 @@ function stripJsoncComments(content) {
         i++;
       }
       continue;
+    }
+    result += content[i];
+    i++;
+  }
+  return result;
+}
+function stripTrailingCommas(content) {
+  let result = "";
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i];
+      i++;
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === "\\") {
+          result += content[i];
+          i++;
+          if (i < content.length) {
+            result += content[i];
+            i++;
+          }
+          continue;
+        }
+        result += content[i];
+        i++;
+      }
+      if (i < content.length) {
+        result += content[i];
+        i++;
+      }
+      continue;
+    }
+    if (content[i] === ",") {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) {
+        j++;
+      }
+      if (content[j] === "}" || content[j] === "]") {
+        i++;
+        continue;
+      }
     }
     result += content[i];
     i++;
@@ -3884,6 +3929,9 @@ function buildDefaultConfig() {
       ops: {},
       roleRouting: {}
     },
+    autopilot: {
+      execution: "solo"
+    },
     planOutput: {
       directory: ".omc/plans",
       filenameTemplate: "{{name}}.md"
@@ -4166,6 +4214,11 @@ function validateTeamConfig(config2) {
           `[OMC] team.roleRouting.${rawRoleKey}.provider: invalid value "${String(spec.provider)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`
         );
       }
+      if (spec.provider === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLE_SET.has(normalized)) {
+        throw new Error(
+          `[OMC] team.roleRouting.${rawRoleKey}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET].join(", ")})`
+        );
+      }
     }
     if (spec.model !== void 0 && !isValidModelValue(spec.model)) {
       throw new Error(
@@ -4176,6 +4229,34 @@ function validateTeamConfig(config2) {
       if (typeof spec.agent !== "string" || !KNOWN_AGENT_NAME_SET.has(spec.agent)) {
         throw new Error(
           `[OMC] team.roleRouting.${rawRoleKey}.agent: unknown agent "${String(spec.agent)}". Allowed: ${[...KNOWN_AGENT_NAME_SET].join(", ")}`
+        );
+      }
+    }
+  }
+}
+function validateAutopilotConfig(config2) {
+  const autopilot = config2.autopilot;
+  if (!autopilot || typeof autopilot !== "object") return;
+  if (autopilot.execution !== void 0 && (typeof autopilot.execution !== "string" || !AUTOPILOT_EXECUTION_BACKENDS.has(autopilot.execution))) {
+    throw new Error(
+      `[OMC] autopilot.execution: invalid value "${String(autopilot.execution)}". Allowed: ${[...AUTOPILOT_EXECUTION_BACKENDS].join(", ")}`
+    );
+  }
+  if (autopilot.planning !== void 0 && autopilot.planning !== false && (typeof autopilot.planning !== "string" || !AUTOPILOT_PLANNING_MODES.has(autopilot.planning))) {
+    throw new Error(
+      `[OMC] autopilot.planning: invalid value "${String(autopilot.planning)}". Allowed: ralplan, direct, false`
+    );
+  }
+  const team = autopilot.team;
+  if (!team || typeof team !== "object") return;
+  if (team.agentTypes !== void 0) {
+    if (!Array.isArray(team.agentTypes)) {
+      throw new Error("[OMC] autopilot.team.agentTypes: must be an array");
+    }
+    for (const agentType of team.agentTypes) {
+      if (typeof agentType !== "string" || !AUTOPILOT_TEAM_AGENT_TYPES.has(agentType)) {
+        throw new Error(
+          `[OMC] autopilot.team.agentTypes: invalid value "${String(agentType)}". Allowed: ${[...AUTOPILOT_TEAM_AGENT_TYPES].join(", ")}`
         );
       }
     }
@@ -4226,6 +4307,7 @@ function loadConfig() {
   }
   warnOnDeprecatedDelegationRouting(config2);
   validateTeamConfig(config2);
+  validateAutopilotConfig(config2);
   return config2;
 }
 function compactBudgetedText(text, maxChars) {
@@ -4314,7 +4396,7 @@ ${content}`;
   }
   return contexts.join(separator);
 }
-var import_fs2, import_path3, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, OMC_STARTUP_COMPACTABLE_SECTIONS, OMC_STARTUP_GUIDANCE_MAX_CHARS, OMC_CONTEXT_FILES_MAX_CHARS;
+var import_fs2, import_path3, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, CURSOR_EXECUTOR_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, AUTOPILOT_EXECUTION_BACKENDS, AUTOPILOT_PLANNING_MODES, AUTOPILOT_TEAM_AGENT_TYPES, OMC_STARTUP_COMPACTABLE_SECTIONS, OMC_STARTUP_GUIDANCE_MAX_CHARS, OMC_CONTEXT_FILES_MAX_CHARS;
 var init_loader = __esm({
   "src/config/loader.ts"() {
     "use strict";
@@ -4328,9 +4410,19 @@ var init_loader = __esm({
     init_delegation_routing();
     DEFAULT_CONFIG = buildDefaultConfig();
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
+    CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
     TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
     TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
+    AUTOPILOT_EXECUTION_BACKENDS = /* @__PURE__ */ new Set(["team", "solo"]);
+    AUTOPILOT_PLANNING_MODES = /* @__PURE__ */ new Set(["ralplan", "direct"]);
+    AUTOPILOT_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set([
+      "claude",
+      "codex",
+      "gemini",
+      "grok",
+      "cursor"
+    ]);
     OMC_STARTUP_COMPACTABLE_SECTIONS = [
       "agent_catalog",
       "skills",
@@ -5421,6 +5513,16 @@ If ANY checkbox is unchecked, YOU ARE NOT DONE. Continue working.`;
   }
 });
 
+// src/utils/encode-project-path.ts
+function encodeProjectPath(projectPath) {
+  return projectPath.replace(/[/\\.:]/g, "-");
+}
+var init_encode_project_path = __esm({
+  "src/utils/encode-project-path.ts"() {
+    "use strict";
+  }
+});
+
 // src/lib/worktree-paths.ts
 function findWorkspaceRoot(startDir) {
   if (process.env.OMC_DISABLE_MULTIREPO === "1") return null;
@@ -5737,19 +5839,16 @@ function resolveTranscriptPath(transcriptPath, cwd2) {
     if ((0, import_fs12.existsSync)(resolved)) return resolved;
   }
   const effectiveCwd = cwd2 || process.cwd();
-  const worktreeMarker = ".claude/worktrees/";
-  const markerIdx = effectiveCwd.indexOf(worktreeMarker);
+  const normalizedCwd = (0, import_path17.normalize)(effectiveCwd);
+  const worktreeMarker = (0, import_path17.normalize)("/.claude/worktrees/");
+  const markerIdx = normalizedCwd.indexOf(worktreeMarker);
   if (markerIdx !== -1) {
-    const mainProjectRoot = effectiveCwd.substring(
-      0,
-      markerIdx > 0 && effectiveCwd[markerIdx - 1] === import_path17.sep ? markerIdx - 1 : markerIdx
-    );
-    const lastSep = transcriptPath.lastIndexOf("/");
-    const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : "";
+    const mainProjectRoot = normalizedCwd.substring(0, markerIdx);
+    const sessionFile = (0, import_path17.basename)(transcriptPath);
     if (sessionFile) {
       const projectsDir = (0, import_path17.join)(getClaudeConfigDir(), "projects");
       if ((0, import_fs12.existsSync)(projectsDir)) {
-        const encodedMain = mainProjectRoot.replace(/[/\\.]/g, "-");
+        const encodedMain = encodeProjectPath(mainProjectRoot);
         const resolvedPath = (0, import_path17.join)(projectsDir, encodedMain, sessionFile);
         if ((0, import_fs12.existsSync)(resolvedPath)) return resolvedPath;
       }
@@ -5776,12 +5875,11 @@ function resolveTranscriptPath(transcriptPath, cwd2) {
       stdio: ["pipe", "pipe", "pipe"]
     }).trim();
     if (mainRepoRoot !== worktreeTop) {
-      const lastSep = transcriptPath.lastIndexOf("/");
-      const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : "";
+      const sessionFile = (0, import_path17.basename)(transcriptPath);
       if (sessionFile) {
         const projectsDir = (0, import_path17.join)(getClaudeConfigDir(), "projects");
         if ((0, import_fs12.existsSync)(projectsDir)) {
-          const encodedMain = mainRepoRoot.replace(/[/\\.]/g, "-");
+          const encodedMain = encodeProjectPath(mainRepoRoot);
           const resolvedPath = (0, import_path17.join)(projectsDir, encodedMain, sessionFile);
           if ((0, import_fs12.existsSync)(resolvedPath)) return resolvedPath;
         }
@@ -5903,6 +6001,7 @@ var init_worktree_paths = __esm({
     import_os4 = require("os");
     import_path17 = require("path");
     init_config_dir();
+    init_encode_project_path();
     WORKSPACE_MARKER = ".omc-workspace";
     OmcPaths = {
       ROOT: ".omc",
@@ -8620,16 +8719,13 @@ function normalizePath(value) {
   return value.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 function isDefaultClaudeConfigDir() {
-  return normalizePath(getClaudeConfigDir()) === normalizePath((0, import_path44.join)((0, import_os8.homedir)(), ".claude"));
+  return normalizePath(getClaudeConfigDir()) === normalizePath((0, import_path44.join)((0, import_os9.homedir)(), ".claude"));
 }
 function quoteCommandPath(path22) {
   return `"${path22.replace(/"/g, '\\"')}"`;
 }
 function buildHookCommand(filename) {
   if (isWindows()) {
-    if (isDefaultClaudeConfigDir()) {
-      return `node "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/${filename}"`;
-    }
     return `node ${quoteCommandPath((0, import_path44.join)(getClaudeConfigDir(), "hooks", filename).replace(/\\/g, "/"))}`;
   }
   if (isDefaultClaudeConfigDir()) {
@@ -8640,14 +8736,14 @@ function buildHookCommand(filename) {
 function getHooksSettingsConfig() {
   return HOOKS_SETTINGS_CONFIG_NODE;
 }
-var import_path44, import_fs32, import_url7, import_os8, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
+var import_path44, import_fs32, import_url7, import_os9, MIN_NODE_VERSION, ULTRAWORK_MESSAGE, ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, TDD_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, KEYWORD_DETECTOR_SCRIPT_NODE, STOP_CONTINUATION_SCRIPT_NODE, PERSISTENT_MODE_SCRIPT_NODE, CODE_SIMPLIFIER_SCRIPT_NODE, SESSION_START_SCRIPT_NODE, POST_TOOL_USE_SCRIPT_NODE, HOOKS_SETTINGS_CONFIG_NODE;
 var init_hooks = __esm({
   "src/installer/hooks.ts"() {
     "use strict";
     import_path44 = require("path");
     import_fs32 = require("fs");
     import_url7 = require("url");
-    import_os8 = require("os");
+    import_os9 = require("os");
     init_config_dir();
     init_ultrawork();
     MIN_NODE_VERSION = 20;
@@ -8944,7 +9040,7 @@ function resolveNodeBinary() {
   if (process.platform === "win32") {
     return "node";
   }
-  const home = (0, import_os9.homedir)();
+  const home = (0, import_os10.homedir)();
   const nvmNode = resolveLatestVersionedNode((0, import_path46.join)(home, ".nvm", "versions", "node"), ["bin", "node"]);
   if (nvmNode) return nvmNode;
   const fnmBases = [
@@ -8973,14 +9069,14 @@ function pickLatestVersion(versions) {
     return 0;
   })[0];
 }
-var import_fs34, import_child_process12, import_path46, import_os9, EPHEMERAL_NODE_PATH_MARKERS, SYSTEM_NODE_PATHS;
+var import_fs34, import_child_process12, import_path46, import_os10, EPHEMERAL_NODE_PATH_MARKERS, SYSTEM_NODE_PATHS;
 var init_resolve_node = __esm({
   "src/utils/resolve-node.ts"() {
     "use strict";
     import_fs34 = require("fs");
     import_child_process12 = require("child_process");
     import_path46 = require("path");
-    import_os9 = require("os");
+    import_os10 = require("os");
     EPHEMERAL_NODE_PATH_MARKERS = ["hostedtoolcache", "/runner/", "\\runner\\"];
     SYSTEM_NODE_PATHS = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
   }
@@ -9055,7 +9151,7 @@ function getClaudeMcpConfigPath() {
   return (0, import_path47.join)((0, import_path47.dirname)(getClaudeConfigDir()), ".claude.json");
 }
 function getCodexConfigPath() {
-  const codexHome = process.env.CODEX_HOME?.trim() || (0, import_path47.join)((0, import_os10.homedir)(), ".codex");
+  const codexHome = process.env.CODEX_HOME?.trim() || (0, import_path47.join)((0, import_os11.homedir)(), ".codex");
   return (0, import_path47.join)(codexHome, "config.toml");
 }
 function isStringRecord(value) {
@@ -9566,12 +9662,12 @@ function inspectUnifiedMcpRegistrySync() {
     codexMismatched
   };
 }
-var import_fs35, import_os10, import_path47, MANAGED_START, MANAGED_END, DEFAULT_LAUNCHER_MCP_STARTUP_TIMEOUT_SEC, CODEX_MCP_SERVER_NAME_PATTERN, RETIRED_TEAM_MCP_PATH_PATTERN;
+var import_fs35, import_os11, import_path47, MANAGED_START, MANAGED_END, DEFAULT_LAUNCHER_MCP_STARTUP_TIMEOUT_SEC, CODEX_MCP_SERVER_NAME_PATTERN, RETIRED_TEAM_MCP_PATH_PATTERN;
 var init_mcp_registry = __esm({
   "src/installer/mcp-registry.ts"() {
     "use strict";
     import_fs35 = require("fs");
-    import_os10 = require("os");
+    import_os11 = require("os");
     import_path47 = require("path");
     init_config_dir();
     init_paths();
@@ -9754,7 +9850,7 @@ function getNewestInstalledVersionHint() {
   }
   const claudeCandidates = [
     (0, import_path49.join)(CLAUDE_CONFIG_DIR, "CLAUDE.md"),
-    (0, import_path49.join)((0, import_os11.homedir)(), "CLAUDE.md")
+    (0, import_path49.join)((0, import_os12.homedir)(), "CLAUDE.md")
   ];
   for (const candidatePath of claudeCandidates) {
     if (!(0, import_fs37.existsSync)(candidatePath)) continue;
@@ -9802,7 +9898,7 @@ function canonicalizeExistingPath(value) {
   }
 }
 function isDefaultClaudeConfigDirPath(configDir) {
-  return normalizePath2(configDir) === normalizePath2((0, import_path49.join)((0, import_os11.homedir)(), ".claude"));
+  return normalizePath2(configDir) === normalizePath2((0, import_path49.join)((0, import_os12.homedir)(), ".claude"));
 }
 function quoteShellArg(value) {
   return `"${value.replace(/"/g, '\\"')}"`;
@@ -11289,14 +11385,14 @@ function getInstallInfo() {
     return null;
   }
 }
-var import_fs37, import_path49, import_url9, import_os11, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, OMC_HOOK_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
+var import_fs37, import_path49, import_url9, import_os12, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, OMC_HOOK_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
 var init_installer = __esm({
   "src/installer/index.ts"() {
     "use strict";
     import_fs37 = require("fs");
     import_path49 = require("path");
     import_url9 = require("url");
-    import_os11 = require("os");
+    import_os12 = require("os");
     import_child_process13 = require("child_process");
     init_hooks();
     init_version();
@@ -20152,6 +20248,95 @@ function writeStopBreaker(directory, name, count, sessionId) {
   } catch {
   }
 }
+function userRecordHasToolResult(content) {
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (block) => block?.type === "tool_result"
+  );
+}
+function classifyLastAssistantTurn(transcriptPath) {
+  let lines;
+  try {
+    lines = readTranscriptTailLines(transcriptPath);
+  } catch {
+    return "indeterminate";
+  }
+  let sawAssistant = false;
+  let hasThinking = false;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim();
+    if (!line) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const role = parsed?.message?.role;
+    const isAssistant = parsed?.type === "assistant" || role === "assistant";
+    if (isAssistant) {
+      sawAssistant = true;
+      const content = parsed.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const blockType = block?.type;
+          if (blockType === "tool_use") {
+            return "tool_use";
+          }
+          if (blockType === "thinking" || blockType === "redacted_thinking") {
+            hasThinking = true;
+          }
+        }
+      }
+      continue;
+    }
+    const isUser = parsed?.type === "user" || role === "user";
+    if (isUser) {
+      if (userRecordHasToolResult(parsed.message?.content)) {
+        return "tool_use";
+      }
+      break;
+    }
+  }
+  if (!sawAssistant) return "indeterminate";
+  return hasThinking ? "thinking_only" : "indeterminate";
+}
+function applyThinkingOnlyStreakGuard(result, workingDir, sessionId, stopContext) {
+  if (!result.shouldBlock) return result;
+  const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+  if (!transcriptPath || !(0, import_fs55.existsSync)(transcriptPath)) {
+    return result;
+  }
+  let classification;
+  try {
+    classification = classifyLastAssistantTurn(transcriptPath);
+  } catch {
+    return result;
+  }
+  if (classification === "tool_use") {
+    writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+    return result;
+  }
+  if (classification === "indeterminate") {
+    return result;
+  }
+  const streak = readStopBreaker(
+    workingDir,
+    THINKING_ONLY_STREAK_BREAKER,
+    sessionId,
+    THINKING_ONLY_STREAK_TTL_MS
+  ) + 1;
+  if (streak >= THINKING_ONLY_STREAK_MAX) {
+    writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+    return {
+      shouldBlock: false,
+      message: THINKING_ONLY_STREAK_BAILOUT_MESSAGE,
+      mode: "none"
+    };
+  }
+  writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, streak, sessionId);
+  return result;
+}
 async function checkTeamPipeline(sessionId, directory, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
   const teamState = readTeamPipelineState(workingDir, sessionId);
@@ -20479,6 +20664,15 @@ async function checkUltrawork(sessionId, directory, _hasIncompleteTodos, cancelI
   };
 }
 async function checkPersistentModes(sessionId, directory, stopContext) {
+  const result = await resolvePersistentModeBlock(sessionId, directory, stopContext);
+  return applyThinkingOnlyStreakGuard(
+    result,
+    resolveToWorktreeRoot(directory),
+    sessionId,
+    stopContext
+  );
+}
+async function resolvePersistentModeBlock(sessionId, directory, stopContext) {
   const workingDir = resolveToWorktreeRoot(directory);
   if (process.env.DISABLE_OMC === "1" || process.env.DISABLE_OMC === "true" || process.env.OMC_TEAM_WORKER) {
     return { shouldBlock: false, message: "", mode: "none" };
@@ -20663,7 +20857,7 @@ function createHookOutput(result) {
     message: result.message || void 0
   };
 }
-var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+var import_fs55, import_path64, CANCEL_SIGNAL_TTL_MS2, STALE_STATE_THRESHOLD_MS, PENDING_ASYNC_STATE_STALE_MS, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX, OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS, TERMINAL_WORKFLOW_SLOT_MODES, TERMINAL_WORKFLOW_PHASES, todoContinuationAttempts, TRANSCRIPT_TAIL_BYTES, CRITICAL_CONTEXT_STOP_PERCENT, RALPLAN_TERMINAL_PHASES, REVIEWER_TASK_TOOL_NAMES, REVIEWER_COMMAND_TOOL_NAMES, AWAITING_CONFIRMATION_TTL_MS, THINKING_ONLY_STREAK_BREAKER, THINKING_ONLY_STREAK_MAX, THINKING_ONLY_STREAK_TTL_MS, THINKING_ONLY_STREAK_BAILOUT_MESSAGE, TEAM_PIPELINE_STOP_BLOCKER_MAX, TEAM_PIPELINE_STOP_BLOCKER_TTL_MS, RALPLAN_STOP_BLOCKER_MAX, RALPLAN_STOP_BLOCKER_TTL_MS, RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
 var init_persistent_mode = __esm({
   "src/hooks/persistent-mode/index.ts"() {
     "use strict";
@@ -20726,6 +20920,10 @@ var init_persistent_mode = __esm({
     REVIEWER_TASK_TOOL_NAMES = /* @__PURE__ */ new Set(["Task", "proxy_Task", "Agent"]);
     REVIEWER_COMMAND_TOOL_NAMES = /* @__PURE__ */ new Set(["Bash", "proxy_Bash"]);
     AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1e3;
+    THINKING_ONLY_STREAK_BREAKER = "thinking-only-streak";
+    THINKING_ONLY_STREAK_MAX = 3;
+    THINKING_ONLY_STREAK_TTL_MS = 5 * 60 * 1e3;
+    THINKING_ONLY_STREAK_BAILOUT_MESSAGE = `[PERSISTENT MODE PAUSED - NO TOOL PROGRESS] The last ${THINKING_ONLY_STREAK_MAX} assistant turns produced only thinking with no tool calls, so the persistent-mode stop guard is releasing this stop to avoid an infinite loop. Resume manually with a concrete next action (run a tool/command) or /cancel the active mode.`;
     TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
     TEAM_PIPELINE_STOP_BLOCKER_TTL_MS = 5 * 60 * 1e3;
     RALPLAN_STOP_BLOCKER_MAX = 30;
@@ -20846,12 +21044,52 @@ Signal: ${RALPLAN_COMPLETION_SIGNAL}
 });
 
 // src/hooks/autopilot/adapters/execution-adapter.ts
-var EXECUTION_COMPLETION_SIGNAL, executionAdapter;
+function uniqueRequestedAgentTypes(agentTypes) {
+  return [...new Set((agentTypes ?? []).filter(Boolean))];
+}
+function hasCliTeamAgentTypes(agentTypes) {
+  return agentTypes.some((agentType) => CLI_TEAM_AGENT_TYPES.has(agentType));
+}
+function formatCliTeamAgentSpec(agentTypes) {
+  const cliTypes = agentTypes.filter(
+    (agentType) => CLI_TEAM_AGENT_TYPES.has(agentType)
+  );
+  const preferred = cliTypes.length > 0 ? cliTypes[0] : "cursor";
+  return `1:${preferred}`;
+}
+function getCliTeamRuntimeGuidance(agentTypes, planPath) {
+  const requested = agentTypes.join(", ");
+  const agentSpec = formatCliTeamAgentSpec(agentTypes);
+  const cursorGuidance = agentTypes.includes("cursor") ? `
+
+### Cursor Availability
+
+Before launching Cursor workers, verify \`cursor-agent\` is installed and authenticated. If it is unavailable, stop and report: install/authenticate \`cursor-agent\` for Cursor worker support. Do not silently fall back to Claude-only execution in a way that hides the missing Cursor dependency.` : "";
+  return `### CLI Team Runtime Required
+
+Configured autopilot team worker types include CLI-backed workers: ${requested}. For executor-style implementation work, use the tmux CLI team runtime instead of in-process Claude-only Task subagents.
+
+Use one of these equivalent surfaces from the lead session:
+
+\`\`\`sh
+omc team ${agentSpec} "<implementation task from ${planPath}>"
+\`\`\`
+
+Or from Claude Code slash commands:
+
+\`\`\`text
+/omc-teams ${agentSpec} "<implementation task from ${planPath}>"
+\`\`\`
+
+Requested worker types: ${requested}. Keep these CLI workers executor-style only: implementation, file edits, build/test fixes, and other plan execution tasks. Keep reviewer, critic, security-review, validation verdict, and final approval roles on the native Claude/OMC reviewer agents unless this repository explicitly adds safe role support for that CLI worker type.${cursorGuidance}`;
+}
+var EXECUTION_COMPLETION_SIGNAL, CLI_TEAM_AGENT_TYPES, executionAdapter;
 var init_execution_adapter = __esm({
   "src/hooks/autopilot/adapters/execution-adapter.ts"() {
     "use strict";
     init_plan_output();
     EXECUTION_COMPLETION_SIGNAL = "PIPELINE_EXECUTION_COMPLETE";
+    CLI_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set(["codex", "gemini", "grok", "cursor"]);
     executionAdapter = {
       id: "execution",
       name: "Execution",
@@ -20862,7 +21100,12 @@ var init_execution_adapter = __esm({
       getPrompt(context) {
         const planPath = context.planPath || resolveAutopilotPlanPath();
         const isTeam = context.config.execution === "team";
+        const requestedAgentTypes = uniqueRequestedAgentTypes(
+          context.config.team?.agentTypes
+        );
+        const useCliTeamRuntime = isTeam && hasCliTeamAgentTypes(requestedAgentTypes);
         if (isTeam) {
+          const teamRuntimeGuidance = useCliTeamRuntime ? getCliTeamRuntimeGuidance(requestedAgentTypes, planPath) : `Use Claude Code's implicit agent team to execute tasks in parallel:`;
           return `## PIPELINE STAGE: EXECUTION (Team Mode)
 
 Execute the implementation plan using multi-worker team execution.
@@ -20873,13 +21116,17 @@ Read the implementation plan at: \`${planPath}\`
 
 ### Team Execution
 
-Use the Team orchestrator to execute tasks in parallel:
+${teamRuntimeGuidance}
 
-1. **Create team** with TeamCreate
-2. **Create tasks** from the implementation plan using TaskCreate
-3. **Spawn executor teammates** using Task with \`team_name\` parameter
-4. **Monitor progress** as teammates complete tasks
-5. **Coordinate** dependencies between tasks
+${useCliTeamRuntime ? `1. **Launch CLI executor workers** with \`omc team\` or \`/omc-teams\` using the requested agent types.
+2. **Decompose executor-style implementation tasks** from the implementation plan and pass them to CLI workers.
+3. **Monitor tmux/team output** and integrate completed implementation changes.
+4. **Keep review/critic/security/verdict work native**; do not assign those roles to Cursor/CLI workers.
+5. **Coordinate** dependencies between tasks.` : `1. **Use the implicit team** provided by Claude Code when \`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1\` is enabled; do not call removed \`TeamCreate\`/\`TeamDelete\` tools.
+2. **Track work in TodoWrite or the active task list** from the implementation plan.
+3. **Spawn executor teammates directly** with the Agent/Task tool using distinct \`name\` values (for example, \`name="worker-1"\`). Do not rely on \`team_name\`; Claude Code 2.1.178+ accepts it only as ignored legacy metadata.
+4. **Monitor progress** as teammates complete tasks.
+5. **Coordinate** dependencies between tasks.`}
 
 ### Output Contract
 
@@ -20887,13 +21134,13 @@ Every teammate response must stay concise: return ONLY a short execution summary
 
 ### Agent Selection
 
-Match agent types to task complexity:
+${useCliTeamRuntime ? `Use the requested CLI worker spec for executor-style implementation tasks only. Keep task prompts framed as implementation/build/test-fix work; do not ask Cursor/CLI workers to act as reviewers, critics, security reviewers, or final verdict agents.` : `Match agent types to task complexity:
 - Simple tasks (single file, config): \`executor\` with \`model="haiku"\`
 - Standard implementation: \`executor\` with \`model="sonnet"\`
 - Complex work (architecture, refactoring): \`executor\` with \`model="opus"\`
 - Build issues: \`debugger\` with \`model="sonnet"\`
 - Test creation: \`test-engineer\` with \`model="sonnet"\`
-- UI work: \`designer\` with \`model="sonnet"\`
+- UI work: \`designer\` with \`model="sonnet"\``}
 
 ### Progress Tracking
 
@@ -21131,6 +21378,9 @@ function resolvePipelineConfig(userConfig, deprecatedMode) {
     if (userConfig.verification !== void 0)
       config2.verification = userConfig.verification;
     if (userConfig.qa !== void 0) config2.qa = userConfig.qa;
+    if (userConfig.team !== void 0) {
+      config2.team = { ...config2.team ?? {}, ...userConfig.team };
+    }
   }
   return config2;
 }
@@ -22932,7 +23182,7 @@ function tmuxSpawn(args, opts) {
   return (0, import_child_process19.spawnSync)(invocation.command, invocation.args, { encoding: "utf-8", ...spawnOpts, env: resolveEnv(opts) });
 }
 async function tmuxCmdAsync(args, opts) {
-  if (args.some((a) => a.includes("#{"))) {
+  if (args.some((a) => a.includes("#{")) && !isNativeWindowsShell()) {
     const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ");
     return tmuxShellAsync(escaped, opts);
   }
@@ -27052,7 +27302,7 @@ function interpolatePath(pathTemplate, sessionId) {
   const date3 = now.toISOString().split("T")[0];
   const time3 = now.toISOString().split("T")[1].split(".")[0].replace(/:/g, "-");
   const safeSessionId = sessionId.replace(/[/\\..]/g, "_");
-  return (0, import_path77.normalize)(pathTemplate.replace(/~/g, (0, import_os12.homedir)()).replace(/\{session_id\}/g, safeSessionId).replace(/\{date\}/g, date3).replace(/\{time\}/g, time3));
+  return (0, import_path77.normalize)(pathTemplate.replace(/~/g, (0, import_os13.homedir)()).replace(/\{session_id\}/g, safeSessionId).replace(/\{date\}/g, date3).replace(/\{time\}/g, time3));
 }
 async function writeToFile(config2, content, sessionId) {
   try {
@@ -27168,13 +27418,13 @@ async function triggerStopCallbacks(metrics, _input, options = {}) {
     console.error("[stop-callback] Callback execution error:", error2);
   }
 }
-var import_fs64, import_path77, import_os12;
+var import_fs64, import_path77, import_os13;
 var init_callbacks = __esm({
   "src/hooks/session-end/callbacks.ts"() {
     "use strict";
     import_fs64 = require("fs");
     import_path77 = require("path");
-    import_os12 = require("os");
+    import_os13 = require("os");
     init_auto_update();
   }
 });
@@ -27968,9 +28218,9 @@ var init_presets = __esm({
         suggestedEvents: ["session-end", "ask-user-question"],
         documentationUrl: "https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/"
       },
-      clawdbot: {
-        name: "ClawdBot",
-        description: "Send notifications to ClawdBot webhook",
+      customAgentGateway: {
+        name: "Custom Agent Gateway",
+        description: "Send notifications to a custom agent webhook",
         type: "webhook",
         defaultConfig: {
           method: "POST",
@@ -27984,7 +28234,7 @@ var init_presets = __esm({
           timeout: 5e3
         },
         suggestedEvents: ["session-end", "session-start"],
-        documentationUrl: "https://github.com/your-org/clawdbot"
+        documentationUrl: "https://code.claude.com/docs/en/hooks"
       },
       "generic-webhook": {
         name: "Generic Webhook",
@@ -30335,23 +30585,43 @@ async function waitForShellReady(paneId, opts = {}) {
 async function verifyWorkerStartCommandDelivered(paneId, startCmd) {
   if (isCmuxSurfaceTarget(paneId)) return true;
   const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
   for (let attempt = 1; attempt <= 5; attempt++) {
     const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
-    if (normalizeTmuxCapture(captured).includes(expected)) {
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    if (normalizedCaptured.includes(expected)) {
+      return true;
+    }
+    if (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected)) {
       return true;
     }
     await sleep4(50);
   }
   return false;
 }
+async function verifyWorkerStartCommandSubmitted(paneId, startCmd) {
+  if (isCmuxSurfaceTarget(paneId)) return true;
+  const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    const commandStillBuffered = normalizedCaptured.includes(expected) || compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected);
+    if (!commandStillBuffered) {
+      return true;
+    }
+    await sleep4(50);
+  }
+  return false;
+}
+function workerPaneShellCommand() {
+  if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
+    return [getDefaultShell()];
+  }
+  return [];
+}
 function escapeForCmdSet2(value) {
-  return value.replace(/"/g, '""');
-}
-function escapeForPowerShellSingleQuotedString(value) {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-function isNativeWindowsPsmuxPowerShellPane() {
-  return process.platform === "win32" && !isUnixLikeOnWindows2() && !!process.env.PSMUX_SESSION;
+  return value.replace(/(["%])/g, "$1$1");
 }
 function shellNameFromPath(shellPath) {
   const shellName = (0, import_path85.basename)(shellPath.replace(/\\/g, "/"));
@@ -30399,17 +30669,6 @@ function buildWorkerStartCommand(config2) {
   const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
   const launchWords = getLaunchWords(config2);
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== "1";
-  if (isNativeWindowsPsmuxPowerShellPane()) {
-    const envStatements = Object.entries(config2.envVars).map(([k, v]) => {
-      assertSafeEnvKey(k);
-      return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
-    });
-    const launch = [
-      "&",
-      ...launchWords.map(escapeForPowerShellSingleQuotedString)
-    ].join(" ");
-    return [...envStatements, launch].join("; ");
-  }
   if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
     const envPrefix = Object.entries(config2.envVars).map(([k, v]) => {
       assertSafeEnvKey(k);
@@ -30495,6 +30754,7 @@ function createSession(teamName, workerName2, workingDirectory) {
   if (workingDirectory) {
     args.push("-c", workingDirectory);
   }
+  args.push(...workerPaneShellCommand());
   tmuxExec(args, { stripTmux: true, stdio: "pipe", timeout: 5e3 });
   try {
     configureTmuxClipboardForSession(name, { stripTmux: true, stdio: "pipe", timeout: 5e3 });
@@ -30552,7 +30812,8 @@ async function splitTeamWorkerPane(splitTarget, direction, cwd2) {
     "-F",
     "#{pane_id}",
     "-c",
-    cwd2
+    cwd2,
+    ...workerPaneShellCommand()
   ]);
   return splitResult.stdout.split("\n")[0]?.trim() || null;
 }
@@ -30588,7 +30849,8 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       "-s",
       detachedSessionName,
       "-c",
-      cwd2
+      cwd2,
+      ...workerPaneShellCommand()
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
     const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
@@ -30694,7 +30956,8 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       "-F",
       "#{pane_id}",
       "-c",
-      cwd2
+      cwd2,
+      ...workerPaneShellCommand()
     ]);
     const paneId = splitResult.stdout.split("\n")[0]?.trim();
     if (paneId) {
@@ -30776,8 +31039,16 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
   try {
     const enterResult = await tmuxExecAsync(["send-keys", "-t", paneId, "Enter"], { timeout: 5e3 });
     logWorkerSpawnDiagnostic(
-      `worker start submit sent session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`
+      `worker start submit key sent session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`
     );
+    const submitted = await verifyWorkerStartCommandSubmitted(paneId, startCmd);
+    if (!submitted) {
+      const reason = `worker_start_submit_unverified:${config2.workerName}:${paneId}:${fingerprint}`;
+      logWorkerSpawnDiagnostic(
+        `worker start submit verification failed session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} cmdPreview=${JSON.stringify(preview)}`
+      );
+      throw new Error(reason);
+    }
   } catch (error2) {
     logWorkerSpawnDiagnostic(
       `worker start submit failed session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} sendStatus=1 error=${JSON.stringify(error2 instanceof Error ? error2.message : String(error2))}`
@@ -30787,6 +31058,9 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
 }
 function normalizeTmuxCapture(value) {
   return value.replace(/\r/g, "").replace(/\s+/g, " ").trim();
+}
+function normalizeTmuxCaptureForDelivery(value) {
+  return value.replace(/\r/g, "").replace(/\s+/g, "");
 }
 async function capturePaneAsync(paneId, opts = {}) {
   try {
@@ -32564,6 +32838,11 @@ function resolveRoleAssignment(role, cfg) {
   const spec = getRoleRoutingSpec(roleRouting, canonical);
   const isOrchestrator = canonical === "orchestrator";
   const provider = isOrchestrator ? "claude" : spec?.provider ?? "claude";
+  if (provider === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLE_SET2.has(canonical)) {
+    throw new Error(
+      `team.roleRouting.${canonical}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET2].join(", ")})`
+    );
+  }
   const model = provider === "claude" ? resolveClaudeModel(canonical, spec?.model, cfg) : resolveExternalModel(provider, spec?.model, cfg);
   const agent = spec?.agent ?? ROLE_TO_AGENT[canonical];
   return { provider, model, agent };
@@ -32588,7 +32867,7 @@ function buildResolvedRoutingSnapshot(cfg) {
   }
   return out;
 }
-var ROLE_TO_AGENT, ROLE_DEFAULT_TIER, TIER_SET;
+var ROLE_TO_AGENT, ROLE_DEFAULT_TIER, TIER_SET, CURSOR_EXECUTOR_TEAM_ROLE_SET2;
 var init_stage_router = __esm({
   "src/team/stage-router.ts"() {
     "use strict";
@@ -32630,6 +32909,7 @@ var init_stage_router = __esm({
       "document-specialist": "MEDIUM"
     };
     TIER_SET = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
+    CURSOR_EXECUTOR_TEAM_ROLE_SET2 = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
   }
 });
 
@@ -33965,11 +34245,18 @@ __export(runtime_v2_exports, {
   monitorTeamV2: () => monitorTeamV2,
   processCliWorkerVerdicts: () => processCliWorkerVerdicts,
   requeueDeadWorkerTasks: () => requeueDeadWorkerTasks,
+  resolveTaskAssignment: () => resolveTaskAssignment,
   resumeTeamV2: () => resumeTeamV2,
   shutdownTeamV2: () => shutdownTeamV2,
   startTeamV2: () => startTeamV2,
   writeWatchdogFailedMarker: () => writeWatchdogFailedMarker
 });
+function isCursorExecutorContextTask(task) {
+  const text = `${task.subject} ${task.description}`.trim();
+  if (!text || CURSOR_UNSUPPORTED_REVIEW_INTENT_RE.test(text)) return false;
+  if (!CURSOR_EXECUTOR_CONTEXT_RE.test(text)) return false;
+  return CURSOR_EXECUTOR_CONTEXT_INTENTS.has(inferLaneIntent(text));
+}
 function registerTeamOrchestrator(teamName, handle) {
   orchestratorByTeam.set(teamName, handle);
 }
@@ -34026,7 +34313,20 @@ function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolve
     roleRoutingConfig,
     canonical
   );
+  if (fallbackAgent === "cursor") {
+    if (CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
+      return { agentType: fallbackAgent, model: "", role: canonical };
+    }
+    if (!hasExplicitRole && !hasConfigForRole && isCursorExecutorContextTask(task)) {
+      return { agentType: fallbackAgent, model: "", role: "executor" };
+    }
+  }
   if (!hasExplicitRole && !hasConfigForRole) {
+    if (fallbackAgent === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
+      throw new Error(
+        `Cursor workers are executor-style only; inferred role "${canonical}" for task "${task.subject}" must run on a native Claude/OMC reviewer agent or another supported CLI worker.`
+      );
+    }
     return { agentType: fallbackAgent, model: "", role: canonical };
   }
   const pair = resolvedRouting[canonical];
@@ -35441,7 +35741,7 @@ async function findActiveTeamsV2(cwd2) {
   }
   return active;
 }
-var import_path91, import_fs73, import_promises16, import_perf_hooks2, import_node_child_process9, orchestratorByTeam, cadenceByTeam, MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
+var import_path91, import_fs73, import_promises16, import_perf_hooks2, import_node_child_process9, orchestratorByTeam, CURSOR_UNSUPPORTED_REVIEW_INTENT_RE, CURSOR_EXECUTOR_CONTEXT_RE, CURSOR_EXECUTOR_CONTEXT_INTENTS, cadenceByTeam, MONITOR_SIGNAL_STALE_MS, CIRCUIT_BREAKER_THRESHOLD, CircuitBreakerV2;
 var init_runtime_v2 = __esm({
   "src/team/runtime-v2.ts"() {
     "use strict";
@@ -35478,6 +35778,15 @@ var init_runtime_v2 = __esm({
     init_worker_commit_cadence();
     init_runtime_flags();
     orchestratorByTeam = /* @__PURE__ */ new Map();
+    CURSOR_UNSUPPORTED_REVIEW_INTENT_RE = /\b(?:review|audit|critic|critique|security|vulnerabilit|cve|owasp|xss|csrf|sqli|verdict|approval|approve|final\s+decision)\b/i;
+    CURSOR_EXECUTOR_CONTEXT_RE = /\b(?:implement|implementation|apply|edit|patch|fix|build|ci|lint|compile|tsc|type.?check|test|tests|debug|troubleshoot|investigate|root.?cause|diagnos|refactor|clean\s*up|simplif)\b/i;
+    CURSOR_EXECUTOR_CONTEXT_INTENTS = /* @__PURE__ */ new Set([
+      "implementation",
+      "build-fix",
+      "debug",
+      "cleanup",
+      "verification"
+    ]);
     cadenceByTeam = /* @__PURE__ */ new Map();
     MONITOR_SIGNAL_STALE_MS = 3e4;
     CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -44057,7 +44366,7 @@ function readKeychainCredentials() {
   const serviceName = getKeychainServiceName();
   const candidateAccounts = [];
   try {
-    const username = (0, import_os18.userInfo)().username?.trim();
+    const username = (0, import_os19.userInfo)().username?.trim();
     if (username) {
       candidateAccounts.push(username);
     }
@@ -44710,7 +45019,7 @@ async function getUsage() {
     return { rateLimits: null, error: "network" };
   }
 }
-var import_fs96, import_path115, import_child_process30, import_crypto19, import_os18, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK;
+var import_fs96, import_path115, import_child_process30, import_crypto19, import_os19, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
@@ -44719,7 +45028,7 @@ var init_usage_api = __esm({
     import_path115 = require("path");
     import_child_process30 = require("child_process");
     import_crypto19 = require("crypto");
-    import_os18 = require("os");
+    import_os19 = require("os");
     import_https3 = __toESM(require("https"), 1);
     init_ssrf_guard();
     init_types4();
@@ -46622,6 +46931,12 @@ function renderRateLimitsError(result) {
   if (result.error === "auth") return `${YELLOW6}[API auth]${RESET}`;
   return `${YELLOW6}[API err]${RESET}`;
 }
+function renderApiKeyUsageHint(result, apiKeyMode, hasCustomProvider) {
+  if (!apiKeyMode) return null;
+  if (hasCustomProvider) return null;
+  if (result?.error !== "no_credentials") return null;
+  return `${DIM4}[usage: set omcHud.rateLimitsProvider]${RESET}`;
+}
 function bucketUsagePercent(usage) {
   if (usage.type === "percent") return usage.value;
   if (usage.type === "credit" && usage.limit > 0) return usage.used / usage.limit * 100;
@@ -47581,7 +47896,16 @@ async function render(context, config2) {
       if (limits) rendered.set("rateLimits", limits);
     } else {
       const errorIndicator = renderRateLimitsError(context.rateLimitsResult);
-      if (errorIndicator) rendered.set("rateLimits", errorIndicator);
+      if (errorIndicator) {
+        rendered.set("rateLimits", errorIndicator);
+      } else {
+        const hint = renderApiKeyUsageHint(
+          context.rateLimitsResult,
+          context.apiKeyMode ?? false,
+          config2.rateLimitsProvider?.type === "custom"
+        );
+        if (hint) rendered.set("rateLimits", hint);
+      }
     }
   }
   if (context.customBuckets) {
@@ -47960,7 +48284,7 @@ function spawnSessionSummaryScript(transcriptPath, stateDir, sessionId) {
     return;
   }
   lastSummarySpawnTimestamp = now;
-  const thisDir = (0, import_path128.dirname)((0, import_url17.fileURLToPath)(importMetaUrl));
+  const thisDir = (0, import_path128.dirname)((0, import_url18.fileURLToPath)(importMetaUrl));
   const scriptPath = (0, import_path128.join)(
     thisDir,
     "..",
@@ -48187,6 +48511,7 @@ async function main2(watchMode = false, skipInit = false) {
       skillCallCount: transcriptData.skillCallCount,
       promptTime: hudState?.lastPromptTimestamp ? new Date(hudState.lastPromptTimestamp) : null,
       apiKeySource: config2.elements.apiKeySource ? detectApiKeySource(cwd2) : null,
+      apiKeyMode: detectApiKeySource(cwd2) !== null,
       subscriptionType: subscriptionInfo.subscriptionType,
       rateLimitTier: subscriptionInfo.rateLimitTier,
       profileName: process.env.CLAUDE_CONFIG_DIR ? (0, import_path128.basename)(process.env.CLAUDE_CONFIG_DIR).replace(/^\./, "") : null,
@@ -48248,7 +48573,7 @@ async function main2(watchMode = false, skipInit = false) {
     }
   }
 }
-var import_fs110, import_promises22, import_path128, import_child_process38, import_url17, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs110, import_promises22, import_path128, import_child_process38, import_url18, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -48270,7 +48595,7 @@ var init_hud = __esm({
     import_promises22 = require("fs/promises");
     import_path128 = require("path");
     import_child_process38 = require("child_process");
-    import_url17 = require("url");
+    import_url18 = require("url");
     init_worktree_paths();
     init_config_dir();
     lastSummarySpawnTimestamp = 0;
@@ -76135,6 +76460,7 @@ var skillsTools = [loadLocalTool, loadGlobalTool, listSkillsTool];
 
 // src/tools/state-tools.ts
 var import_fs20 = require("fs");
+var import_os7 = require("os");
 var import_path26 = require("path");
 init_worktree_paths();
 init_session_id();
@@ -76219,6 +76545,98 @@ var STATE_TOOL_MODES = [
 var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "skill-active"];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
 var OWNER_SESSION_FALLBACK_MODES = /* @__PURE__ */ new Set(["ralph"]);
+var CONVERGED_STATE_PATH_MODES = /* @__PURE__ */ new Set(["ralph", "ultrawork"]);
+function getStateFileName(mode) {
+  const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
+  return `${normalizedName}.json`;
+}
+function readJsonRecord(filePath) {
+  try {
+    return JSON.parse((0, import_fs20.readFileSync)(filePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function listSessionIdsUnderOmcRoot(omcRoot) {
+  const sessionsDir = (0, import_path26.join)(omcRoot, "state", "sessions");
+  if (!(0, import_fs20.existsSync)(sessionsDir)) {
+    return [];
+  }
+  try {
+    return (0, import_fs20.readdirSync)(sessionsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((name) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(name));
+  } catch {
+    return [];
+  }
+}
+function getConvergedOmcRoots(root2) {
+  const roots = /* @__PURE__ */ new Set([getOmcRoot(root2)]);
+  roots.add((0, import_path26.join)(root2, OmcPaths.ROOT));
+  roots.add((0, import_path26.join)((0, import_os7.homedir)(), OmcPaths.ROOT));
+  return [...roots];
+}
+function getConvergedStateCandidates(mode, root2, sessionId) {
+  if (!CONVERGED_STATE_PATH_MODES.has(mode)) {
+    return [];
+  }
+  const filename = getStateFileName(mode);
+  const paths = /* @__PURE__ */ new Set();
+  for (const omcRoot of getConvergedOmcRoots(root2)) {
+    const stateDir = (0, import_path26.join)(omcRoot, "state");
+    if (sessionId) {
+      paths.add((0, import_path26.join)(stateDir, "sessions", sessionId, filename));
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        const candidatePath = (0, import_path26.join)(stateDir, "sessions", sid, filename);
+        const raw = readJsonRecord(candidatePath);
+        if (raw && getStateSessionOwner(raw) === sessionId) {
+          paths.add(candidatePath);
+        }
+      }
+    } else {
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        paths.add((0, import_path26.join)(stateDir, "sessions", sid, filename));
+      }
+    }
+    paths.add((0, import_path26.join)(stateDir, filename));
+    paths.add((0, import_path26.join)(omcRoot, filename));
+  }
+  return [...paths];
+}
+function isConvergedCandidateActiveForSession(statePath, sessionId) {
+  const raw = readJsonRecord(statePath);
+  if (!raw || raw.active !== true) {
+    return false;
+  }
+  if (!sessionId) {
+    return true;
+  }
+  return canClearStateForSession(raw, sessionId);
+}
+function clearConvergedStateCandidates(mode, root2, sessionId) {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = getConvergedStateCandidates(mode, root2, sessionId);
+  for (const statePath of paths) {
+    if (!(0, import_fs20.existsSync)(statePath)) {
+      continue;
+    }
+    try {
+      if (sessionId) {
+        const raw = readJsonRecord(statePath);
+        if (!canClearStateForSession(raw, sessionId)) {
+          continue;
+        }
+      }
+      (0, import_fs20.unlinkSync)(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+  return { cleared, hadFailure, paths };
+}
+function hasActiveConvergedState(mode, root2, sessionId) {
+  return getConvergedStateCandidates(mode, root2, sessionId).some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
+}
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs20.existsSync)(statePath)) return [];
   try {
@@ -76788,6 +77206,7 @@ var stateClearTool = {
         }
         const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root2, sessionId);
         const runtimeCleanup2 = clearModeRuntimeArtifacts(mode, root2, sessionId);
+        let convergedCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
         writeSessionCancelSignal(root2, sessionId, mode);
         if (MODE_CONFIGS[mode]) {
           const success = clearModeState(mode, root2, sessionId);
@@ -76795,10 +77214,11 @@ var stateClearTool = {
           const legacyCleanup2 = clearLegacyStateCandidates(mode, root2, sessionId);
           const shouldUseLocalFallback2 = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0;
           const workingDirectoryLocalCleanup2 = shouldUseLocalFallback2 ? clearWorkingDirectoryLocalStateCandidates(mode, root2, sessionId) : { cleared: 0, hadFailure: false, paths: [] };
+          convergedCleanup2 = clearConvergedStateCandidates(mode, root2, sessionId);
           let ownerSessionId2;
           let ownerSessionCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
           let ownerLegacyCleanup2 = { cleared: 0, hadFailure: false };
-          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
+          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
             ownerSessionId2 = findSingleOwningSessionForMode(mode, root2, sessionId);
             if (ownerSessionId2) {
               if (mode === "team") {
@@ -76828,6 +77248,9 @@ var stateClearTool = {
           if (workingDirectoryLocalCleanup2.cleared > 0) {
             ghostNoteParts2.push(`removed ${workingDirectoryLocalCleanup2.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup2.cleared === 1 ? "" : "s"}`);
           }
+          if (convergedCleanup2.cleared > 0) {
+            ghostNoteParts2.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+          }
           if (runtimeCleanup2.cleared > 0) {
             ghostNoteParts2.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
           }
@@ -76845,8 +77268,8 @@ var stateClearTool = {
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
-          const clearedStateOrArtifacts2 = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
-          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          const clearedStateOrArtifacts2 = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
+          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -76854,7 +77277,7 @@ var stateClearTool = {
               }]
             };
           }
-          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -76874,10 +77297,11 @@ var stateClearTool = {
         const legacyCleanup = clearLegacyStateCandidates(mode, root2, sessionId);
         const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0;
         const workingDirectoryLocalCleanup = shouldUseLocalFallback ? clearWorkingDirectoryLocalStateCandidates(mode, root2, sessionId) : { cleared: 0, hadFailure: false, paths: [] };
+        convergedCleanup2 = clearConvergedStateCandidates(mode, root2, sessionId);
         let ownerSessionId;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
+        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
           ownerSessionId = findSingleOwningSessionForMode(mode, root2, sessionId);
           if (ownerSessionId) {
             if (mode === "team") {
@@ -76906,6 +77330,9 @@ var stateClearTool = {
         if (workingDirectoryLocalCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? "" : "s"}`);
         }
+        if (convergedCleanup2.cleared > 0) {
+          ghostNoteParts.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+        }
         if (runtimeCleanup2.cleared > 0) {
           ghostNoteParts.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
         }
@@ -76923,8 +77350,8 @@ var stateClearTool = {
           if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(", ")})` : "";
         })();
-        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
-        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
+        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
+        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || convergedCleanup2.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
         if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
           return {
             content: [{
@@ -76982,6 +77409,11 @@ var stateClearTool = {
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push("legacy path");
+      }
+      const convergedCleanup = clearConvergedStateCandidates(mode, root2);
+      clearedCount += convergedCleanup.cleared;
+      if (convergedCleanup.hadFailure) {
+        errors.push("converged paths");
       }
       clearedCount += runtimeCleanup.cleared;
       if (runtimeCleanup.hadFailure) {
@@ -77095,6 +77527,11 @@ var stateListActiveTool = {
           } catch {
           }
         }
+        for (const mode of CONVERGED_STATE_PATH_MODES) {
+          if (!activeModes.includes(mode) && hasActiveConvergedState(mode, root2, sessionId)) {
+            activeModes.push(mode);
+          }
+        }
         if (activeModes.length === 0) {
           return {
             content: [{
@@ -77128,6 +77565,11 @@ ${modeList}`
             }
           } catch {
           }
+        }
+      }
+      for (const mode of CONVERGED_STATE_PATH_MODES) {
+        if (!legacyActiveModes.includes(mode) && hasActiveConvergedState(mode, root2)) {
+          legacyActiveModes.push(mode);
         }
       }
       for (const mode of legacyActiveModes) {
@@ -77914,8 +78356,8 @@ var import_path29 = require("path");
 
 // src/hooks/rules-injector/constants.ts
 var import_path28 = require("path");
-var import_os7 = require("os");
-var OMC_STORAGE_DIR = (0, import_path28.join)((0, import_os7.homedir)(), ".omc");
+var import_os8 = require("os");
+var OMC_STORAGE_DIR = (0, import_path28.join)((0, import_os8.homedir)(), ".omc");
 var RULES_INJECTOR_STORAGE = (0, import_path28.join)(OMC_STORAGE_DIR, "rules-injector");
 
 // src/hooks/rules-injector/finder.ts
@@ -78379,6 +78821,7 @@ var import_path37 = require("path");
 var import_readline2 = require("readline");
 init_worktree_paths();
 init_config_dir();
+init_encode_project_path();
 var DEFAULT_LIMIT = 10;
 var DEFAULT_CONTEXT_CHARS = 120;
 function compactWhitespace(text) {
@@ -78407,9 +78850,6 @@ function parseSinceSpec(since) {
   }
   const parsed = Date.parse(trimmed);
   return Number.isNaN(parsed) ? void 0 : parsed;
-}
-function encodeProjectPath(projectPath) {
-  return projectPath.replace(/[/\\.]/g, "-");
 }
 function getMainRepoRoot(projectRoot) {
   try {
@@ -81932,11 +82372,6 @@ var searchEnhancement = {
   triggers: ["search", "find", "locate", "lookup", "explore", "discover", "scan", "grep", "query", "browse", "detect", "trace", "seek", "track", "pinpoint", "hunt"],
   description: "Maximizes search effort and thoroughness",
   action: (prompt) => {
-    const searchPattern = /\b(search|find|locate|lookup|look\s*up|explore|discover|scan|grep|query|browse|detect|trace|seek|track|pinpoint|hunt)\b|where\s+is|show\s+me|list\s+all|검색|찾아|탐색|조회|스캔|서치|뒤져|찾기|어디|추적|탐지|찾아봐|찾아내|보여줘|목록|検索|探して|見つけて|サーチ|探索|スキャン|どこ|発見|捜索|見つけ出す|一覧|搜索|查找|寻找|查询|检索|定位|扫描|发现|在哪里|找出来|列出|tìm kiếm|tra cứu|định vị|quét|phát hiện|truy tìm|tìm ra|ở đâu|liệt kê/i;
-    const hasSearchCommand = searchPattern.test(removeCodeBlocks(prompt));
-    if (!hasSearchCommand) {
-      return prompt;
-    }
     return `${prompt}
 
 [search-mode]
@@ -81951,11 +82386,6 @@ var analyzeEnhancement = {
   triggers: ["analyze", "analyse", "investigate", "examine", "study", "deep-dive", "inspect", "audit", "evaluate", "assess", "review", "diagnose", "scrutinize", "dissect", "debug", "comprehend", "interpret", "breakdown", "understand"],
   description: "Activates deep analysis and investigation mode",
   action: (prompt) => {
-    const analyzePattern = /\b(analyze|analyse|investigate|examine|study|deep[\s-]?dive|inspect|audit|evaluate|assess|review|diagnose|scrutinize|dissect|debug|comprehend|interpret|breakdown|understand)\b|why\s+is|how\s+does|how\s+to|분석|조사|파악|연구|검토|진단|이해|설명|원인|이유|뜯어봐|따져봐|평가|해석|디버깅|디버그|어떻게|왜|살펴|分析|調査|解析|検討|研究|診断|理解|説明|検証|精査|究明|デバッグ|なぜ|どう|仕組み|调查|检查|剖析|深入|诊断|解释|调试|为什么|原理|搞清楚|弄明白|phân tích|điều tra|nghiên cứu|kiểm tra|xem xét|chẩn đoán|giải thích|tìm hiểu|gỡ lỗi|tại sao/i;
-    const hasAnalyzeCommand = analyzePattern.test(removeCodeBlocks(prompt));
-    if (!hasAnalyzeCommand) {
-      return prompt;
-    }
     return `${prompt}
 
 [analyze-mode]
@@ -81976,11 +82406,7 @@ var ultrathinkEnhancement = {
   triggers: ["ultrathink", "think", "reason", "ponder"],
   description: "Activates extended thinking mode for deep reasoning",
   action: (prompt) => {
-    const hasThinkCommand = /\b(ultrathink|think|reason|ponder)\b/i.test(removeCodeBlocks(prompt));
-    if (!hasThinkCommand) {
-      return prompt;
-    }
-    const cleanPrompt = removeTriggerWords(prompt, ["ultrathink", "think", "reason", "ponder"]);
+    const cleanPrompt = removeTriggerWords(prompt, ultrathinkEnhancement.triggers);
     return `[ULTRATHINK MODE - EXTENDED REASONING ACTIVATED]
 
 ${cleanPrompt}
@@ -84706,7 +85132,13 @@ function seedRalplanStartupState(directory, sessionId) {
   markModeAwaitingConfirmation(directory, sessionId, "ralplan");
 }
 async function seedAutopilotStartupState(directory, prompt, sessionId) {
-  const { readAutopilotState: readAutopilotState2, writeAutopilotState: writeAutopilotState2, DEFAULT_CONFIG: DEFAULT_CONFIG6 } = await Promise.resolve().then(() => (init_autopilot(), autopilot_exports));
+  const {
+    readAutopilotState: readAutopilotState2,
+    writeAutopilotState: writeAutopilotState2,
+    DEFAULT_CONFIG: DEFAULT_CONFIG6,
+    resolvePipelineConfig: resolvePipelineConfig2,
+    buildPipelineTracking: buildPipelineTracking2
+  } = await Promise.resolve().then(() => (init_autopilot(), autopilot_exports));
   const existingState = readAutopilotState2(directory, sessionId);
   const existingAutopilotRecord = existingState;
   if (existingState?.active === true) {
@@ -84715,58 +85147,62 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
     }
     return;
   }
+  const config2 = loadConfig();
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const wrote = writeAutopilotState2(
-    directory,
-    {
-      active: true,
-      phase: "expansion",
-      current_phase: "expansion",
-      iteration: 1,
-      max_iterations: DEFAULT_CONFIG6.maxIterations ?? 10,
-      originalIdea: prompt,
-      expansion: {
-        analyst_complete: false,
-        architect_complete: false,
-        spec_path: null,
-        requirements_summary: "",
-        tech_stack: []
-      },
-      planning: {
-        plan_path: null,
-        architect_iterations: 0,
-        approved: false
-      },
-      execution: {
-        ralph_iterations: 0,
-        ultrawork_active: false,
-        tasks_completed: 0,
-        tasks_total: 0,
-        files_created: [],
-        files_modified: []
-      },
-      qa: {
-        ultraqa_cycles: 0,
-        build_status: "pending",
-        lint_status: "pending",
-        test_status: "pending"
-      },
-      validation: {
-        architects_spawned: 0,
-        verdicts: [],
-        all_approved: false,
-        validation_rounds: 0
-      },
-      started_at: now,
-      completed_at: null,
-      phase_durations: {},
-      total_agents_spawned: 0,
-      wisdom_entries: 0,
-      session_id: sessionId,
-      project_path: directory
+  const state = {
+    active: true,
+    phase: "expansion",
+    current_phase: "expansion",
+    iteration: 1,
+    max_iterations: DEFAULT_CONFIG6.maxIterations ?? 10,
+    originalIdea: prompt,
+    expansion: {
+      analyst_complete: false,
+      architect_complete: false,
+      spec_path: null,
+      requirements_summary: "",
+      tech_stack: []
     },
-    sessionId
-  );
+    planning: {
+      plan_path: null,
+      architect_iterations: 0,
+      approved: false
+    },
+    execution: {
+      ralph_iterations: 0,
+      ultrawork_active: false,
+      tasks_completed: 0,
+      tasks_total: 0,
+      files_created: [],
+      files_modified: []
+    },
+    qa: {
+      ultraqa_cycles: 0,
+      build_status: "pending",
+      lint_status: "pending",
+      test_status: "pending"
+    },
+    validation: {
+      architects_spawned: 0,
+      verdicts: [],
+      all_approved: false,
+      validation_rounds: 0
+    },
+    started_at: now,
+    completed_at: null,
+    phase_durations: {},
+    total_agents_spawned: 0,
+    wisdom_entries: 0,
+    session_id: sessionId,
+    project_path: directory
+  };
+  const autopilotConfig = config2.autopilot;
+  const shouldUsePipeline = autopilotConfig?.execution === "team";
+  if (shouldUsePipeline) {
+    const pipelineConfig = resolvePipelineConfig2(autopilotConfig);
+    state.pipeline = buildPipelineTracking2(pipelineConfig);
+  }
+  const wrote = writeAutopilotState2(directory, state, sessionId);
   if (wrote) {
     markModeAwaitingConfirmation(directory, sessionId, "autopilot");
   }
@@ -86153,12 +86589,31 @@ async function processPostToolUse(input) {
 }
 async function processAutopilot(input) {
   const directory = resolveToWorktreeRoot(input.directory);
-  const { readAutopilotState: readAutopilotState2, getPhasePrompt: getPhasePrompt2 } = await Promise.resolve().then(() => (init_autopilot(), autopilot_exports));
+  const {
+    readAutopilotState: readAutopilotState2,
+    getPhasePrompt: getPhasePrompt2,
+    hasPipelineTracking: hasPipelineTracking2,
+    generatePipelinePrompt: generatePipelinePrompt2
+  } = await Promise.resolve().then(() => (init_autopilot(), autopilot_exports));
   const state = readAutopilotState2(directory, input.sessionId);
   if (!state || !state.active) {
     return { continue: true };
   }
   const config2 = loadConfig();
+  if (hasPipelineTracking2(state)) {
+    const pipelinePrompt = generatePipelinePrompt2(directory, input.sessionId);
+    const runtimeInsight2 = formatAutopilotRuntimeInsight(directory, input.sessionId);
+    if (pipelinePrompt || runtimeInsight2) {
+      const detailParts = [runtimeInsight2, pipelinePrompt].filter(Boolean);
+      return {
+        continue: true,
+        message: `[AUTOPILOT - Pipeline]
+
+${detailParts.join("\n\n")}`
+      };
+    }
+    return { continue: true };
+  }
   const context = {
     idea: state.originalIdea,
     specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
@@ -87043,9 +87498,9 @@ var CLAUDE_CONFIG_DIR3 = getClaudeConfigDir();
 // src/hooks/comment-checker/index.ts
 var fs13 = __toESM(require("fs"), 1);
 var path17 = __toESM(require("path"), 1);
-var import_os13 = require("os");
+var import_os14 = require("os");
 var DEBUG2 = process.env.COMMENT_CHECKER_DEBUG === "1";
-var DEBUG_FILE = path17.join((0, import_os13.tmpdir)(), "comment-checker-debug.log");
+var DEBUG_FILE = path17.join((0, import_os14.tmpdir)(), "comment-checker-debug.log");
 
 // src/hooks/recovery/context-window.ts
 var fs14 = __toESM(require("fs"), 1);
@@ -87066,14 +87521,14 @@ var DEBUG_FILE2 = (0, import_node_path11.join)((0, import_node_os3.tmpdir)(), "r
 // src/hooks/preemptive-compaction/index.ts
 var fs15 = __toESM(require("fs"), 1);
 var path18 = __toESM(require("path"), 1);
-var import_os14 = require("os");
+var import_os15 = require("os");
 
 // src/hooks/preemptive-compaction/constants.ts
 var CLAUDE_DEFAULT_CONTEXT_LIMIT = process.env.ANTHROPIC_1M_CONTEXT === "true" || process.env.VERTEX_ANTHROPIC_1M_CONTEXT === "true" ? 1e6 : 2e5;
 
 // src/hooks/preemptive-compaction/index.ts
 var DEBUG4 = process.env.PREEMPTIVE_COMPACTION_DEBUG === "1";
-var DEBUG_FILE3 = path18.join((0, import_os14.tmpdir)(), "preemptive-compaction-debug.log");
+var DEBUG_FILE3 = path18.join((0, import_os15.tmpdir)(), "preemptive-compaction-debug.log");
 
 // src/features/background-agent/manager.ts
 var import_fs88 = require("fs");
@@ -87094,9 +87549,9 @@ var README_INJECTOR_STORAGE = (0, import_node_path12.join)(
 // src/hooks/empty-message-sanitizer/index.ts
 var fs16 = __toESM(require("fs"), 1);
 var path19 = __toESM(require("path"), 1);
-var import_os15 = require("os");
+var import_os16 = require("os");
 var DEBUG5 = process.env.EMPTY_MESSAGE_SANITIZER_DEBUG === "1";
-var DEBUG_FILE4 = path19.join((0, import_os15.tmpdir)(), "empty-message-sanitizer-debug.log");
+var DEBUG_FILE4 = path19.join((0, import_os16.tmpdir)(), "empty-message-sanitizer-debug.log");
 
 // src/hooks/non-interactive-env/constants.ts
 var SHELL_COMMAND_PATTERNS = {
@@ -87161,8 +87616,8 @@ var import_path108 = require("path");
 
 // src/hooks/agent-usage-reminder/constants.ts
 var import_path107 = require("path");
-var import_os16 = require("os");
-var OMC_STORAGE_DIR3 = (0, import_path107.join)((0, import_os16.homedir)(), ".omc");
+var import_os17 = require("os");
+var OMC_STORAGE_DIR3 = (0, import_path107.join)((0, import_os17.homedir)(), ".omc");
 var AGENT_USAGE_REMINDER_STORAGE = (0, import_path107.join)(
   OMC_STORAGE_DIR3,
   "agent-usage-reminder"
@@ -87215,7 +87670,7 @@ init_ralph();
 // src/hooks/learner/auto-invoke.ts
 var import_fs93 = __toESM(require("fs"), 1);
 var import_path112 = __toESM(require("path"), 1);
-var import_os17 = __toESM(require("os"), 1);
+var import_os18 = __toESM(require("os"), 1);
 init_config_dir();
 init_atomic_write();
 
@@ -87291,7 +87746,9 @@ init_document_specialist();
 // src/commands/index.ts
 var import_fs95 = require("fs");
 var import_path114 = require("path");
+var import_url15 = require("url");
 init_config_dir();
+var PACKAGED_COMMANDS_DIR = (0, import_path114.join)((0, import_path114.dirname)((0, import_url15.fileURLToPath)(importMetaUrl)), "..", "..", "commands");
 
 // src/index.ts
 init_installer();
@@ -87520,13 +87977,13 @@ init_tmux_detector();
 // src/features/rate-limit-wait/daemon.ts
 var import_fs97 = require("fs");
 var import_path116 = require("path");
-var import_url15 = require("url");
+var import_url16 = require("url");
 var import_child_process31 = require("child_process");
 init_daemon_module_path();
 init_paths();
 init_tmux_detector();
 init_platform();
-var __filename3 = (0, import_url15.fileURLToPath)(importMetaUrl);
+var __filename3 = (0, import_url16.fileURLToPath)(importMetaUrl);
 var DEFAULT_CONFIG5 = {
   pollIntervalMs: 60 * 1e3,
   // 1 minute
@@ -87839,7 +88296,7 @@ function startDaemon(config2) {
   }
   ensureStateDir7(cfg);
   const modulePath = resolveDaemonModulePath(__filename3, ["features", "rate-limit-wait", "daemon.js"]);
-  const moduleUrl = (0, import_url15.pathToFileURL)(modulePath).href;
+  const moduleUrl = (0, import_url16.pathToFileURL)(modulePath).href;
   const configId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   const configPath = (0, import_path116.join)((0, import_path116.dirname)(cfg.stateFilePath), `.daemon-config-${configId}.json`);
   try {
@@ -89736,6 +90193,7 @@ var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
 var MIN_WORKER_COUNT = 1;
 var MAX_WORKER_COUNT = 20;
 var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+var CURSOR_ALLOWED_TEAM_ROLES = /* @__PURE__ */ new Set(["executor"]);
 var DEFAULT_TEAM_CLI_AGENT_TYPE = "claude";
 var TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
@@ -89767,6 +90225,8 @@ Auto-merge (v2-only):
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
+
+Cursor workers are executor-style only; use 1:cursor or 1:cursor:executor, not reviewer/critic/security/verdict roles.
 `;
 var TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]
@@ -89964,6 +90424,11 @@ function normalizeWorkerSpecSegment(match) {
     if (!VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
       throw new Error(
         `Invalid agent type "${token}" in worker spec "${match[0]}". Expected one of: ${[...VALID_TEAM_CLI_AGENT_TYPES].join(", ")}. For a role-only shorthand on the default agent, use "${count}:${explicitRole}".`
+      );
+    }
+    if (token === "cursor" && !CURSOR_ALLOWED_TEAM_ROLES.has(explicitRole)) {
+      throw new Error(
+        `Invalid Cursor worker role "${explicitRole}" in worker spec "${match[0]}". Cursor workers are executor-style only; use "${count}:cursor" or "${count}:cursor:executor".`
       );
     }
     return { count, agentType: token, role: explicitRole };
@@ -92335,12 +92800,12 @@ ${ULTRAGOAL_HELP}`);
 // src/cli/commands/teleport.ts
 var import_child_process33 = require("child_process");
 var import_fs101 = require("fs");
-var import_os19 = require("os");
+var import_os20 = require("os");
 var import_path119 = require("path");
 init_loader();
 init_providers();
 init_worktree_cleanup_safety();
-var DEFAULT_WORKTREE_ROOT = (0, import_path119.join)((0, import_os19.homedir)(), "Workspace", "omc-worktrees");
+var DEFAULT_WORKTREE_ROOT = (0, import_path119.join)((0, import_os20.homedir)(), "Workspace", "omc-worktrees");
 var PACKAGE_JSON_NAME = "package.json";
 var PACKAGE_MANAGER_LOCKFILES = {
   pnpm: "pnpm-lock.yaml",
@@ -92914,7 +93379,7 @@ function resolvePluginDirArg(rawPath) {
 // src/cli/launch.ts
 var import_child_process34 = require("child_process");
 var import_fs102 = require("fs");
-var import_os20 = require("os");
+var import_os21 = require("os");
 var import_path121 = require("path");
 init_mcp_registry();
 init_config_dir();
@@ -93043,7 +93508,7 @@ function prepareOmcLaunchConfigDir(baseConfigDir = getClaudeConfigDir()) {
   return runtimeConfigDir;
 }
 function isDefaultClaudeConfigDirPath2(configDir) {
-  return configDir === (0, import_path121.join)((0, import_os20.homedir)(), ".claude");
+  return configDir === (0, import_path121.join)((0, import_os21.homedir)(), ".claude");
 }
 function extractNotifyFlag(args) {
   let notifyEnabled = true;
@@ -93541,9 +94006,9 @@ function interopCommand(options = {}) {
 var import_child_process36 = require("child_process");
 var import_fs103 = require("fs");
 var import_promises21 = require("fs/promises");
-var import_os21 = require("os");
+var import_os22 = require("os");
 var import_path122 = require("path");
-var import_url16 = require("url");
+var import_url17 = require("url");
 init_security_config();
 var ASK_USAGE = [
   "Usage: omc ask <claude|codex|gemini|grok|cursor> <question or task>",
@@ -93580,7 +94045,7 @@ function getPackageRoot() {
     }
   }
   try {
-    const __filename4 = (0, import_url16.fileURLToPath)(importMetaUrl);
+    const __filename4 = (0, import_url17.fileURLToPath)(importMetaUrl);
     const __dirname2 = (0, import_path122.dirname)(__filename4);
     return (0, import_path122.join)(__dirname2, "..", "..");
   } catch {
@@ -93690,7 +94155,7 @@ function resolveAskAdvisorScriptPath(packageRoot = getPackageRoot(), env2 = proc
 }
 function resolveSignalExitCode(signal) {
   if (!signal) return 1;
-  const signalNumber = import_os21.constants.signals[signal];
+  const signalNumber = import_os22.constants.signals[signal];
   if (typeof signalNumber === "number" && Number.isFinite(signalNumber)) {
     return 128 + signalNumber;
   }

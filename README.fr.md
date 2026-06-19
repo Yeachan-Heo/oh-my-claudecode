@@ -288,7 +288,7 @@ Transmettez les événements de session Claude Code vers une passerelle [OpenCla
 | `OPENCLAW_REPLY_TARGET` | ID du canal |
 | `OPENCLAW_REPLY_THREAD` | ID du thread |
 
-Voir `scripts/openclaw-gateway-demo.mjs` pour un gateway de référence qui relaie les payloads OpenClaw vers Discord via ClawdBot.
+Voir `scripts/openclaw-gateway-demo.mjs` pour un gateway de référence qui relaie les payloads OpenClaw vers un endpoint d'automatisation HTTPS personnalisé.
 
 ---
 

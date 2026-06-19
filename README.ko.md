@@ -333,7 +333,7 @@ Claude Code 세션 이벤트를 [OpenClaw](https://openclaw.ai/) 게이트웨이
 | `OPENCLAW_REPLY_TARGET` | 채널 ID |
 | `OPENCLAW_REPLY_THREAD` | 스레드 ID |
 
-OpenClaw 페이로드를 ClawdBot을 통해 Discord에 전달하는 레퍼런스 게이트웨이는 `scripts/openclaw-gateway-demo.mjs`를 참고하세요.
+OpenClaw 페이로드를 사용자 지정 HTTPS 자동화 엔드포인트로 전달하는 레퍼런스 게이트웨이는 `scripts/openclaw-gateway-demo.mjs`를 참고하세요.
 
 ---
 

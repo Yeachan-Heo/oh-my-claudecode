@@ -279,7 +279,7 @@ Inoltra gli eventi di sessione di Claude Code a un gateway [OpenClaw](https://op
 | `OPENCLAW_REPLY_TARGET` | ID del canale |
 | `OPENCLAW_REPLY_THREAD` | ID del thread |
 
-Vedi `scripts/openclaw-gateway-demo.mjs` per un gateway di riferimento che inoltra i payload OpenClaw a Discord tramite ClawdBot.
+Vedi `scripts/openclaw-gateway-demo.mjs` per un gateway di riferimento che inoltra i payload OpenClaw a un endpoint di automazione HTTPS personalizzato.
 
 ---
 

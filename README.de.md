@@ -288,7 +288,7 @@ Leiten Sie Claude Code Session-Ereignisse an ein [OpenClaw](https://openclaw.ai/
 | `OPENCLAW_REPLY_TARGET` | Kanal-ID |
 | `OPENCLAW_REPLY_THREAD` | Thread-ID |
 
-Siehe `scripts/openclaw-gateway-demo.mjs` für ein Referenz-Gateway, das OpenClaw-Payloads über ClawdBot an Discord weiterleitet.
+Siehe `scripts/openclaw-gateway-demo.mjs` für ein Referenz-Gateway, das OpenClaw-Payloads an einen benutzerdefinierten HTTPS-Automatisierungsendpunkt weiterleitet.
 
 ---
 

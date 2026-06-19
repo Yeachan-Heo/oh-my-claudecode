@@ -288,7 +288,7 @@ omc config-stop-callback discord --clear-tags
 | `OPENCLAW_REPLY_TARGET` | ID канала |
 | `OPENCLAW_REPLY_THREAD` | ID потока |
 
-См. `scripts/openclaw-gateway-demo.mjs` — эталонный шлюз, который пересылает полезные данные OpenClaw в Discord через ClawdBot.
+См. `scripts/openclaw-gateway-demo.mjs` — эталонный шлюз, который пересылает полезные данные OpenClaw в пользовательский HTTPS-эндпоинт автоматизации.
 
 ---
 
