@@ -59,20 +59,20 @@ User: "/team 3:executor fix all TypeScript errors"
               +-- Create task list entries from the implementation plan
               |       -> TODO/task entries #1, #2, #3 with dependencies
               |
-              +-- TaskUpdate x N (pre-assign owners)
+              +-- Update task-list entries (pre-assign owners)
               |       -> task #1 owner=worker-1, etc.
               |
               +-- Task(name="worker-1") x 3
               |       -> spawns teammates into the team
               |
               +-- Monitor loop
-              |       <- SendMessage from teammates (auto-delivered)
-              |       -> TaskList polling for progress
-              |       -> SendMessage to unblock/coordinate
+              |       <- teammate messages (auto-delivered by the active team surface)
+              |       -> task-list/TodoWrite review for progress
+              |       -> message teammates through the active team surface to unblock/coordinate
               |
               +-- Completion
-                      -> SendMessage(shutdown_request) to each teammate
-                      <- SendMessage(shutdown_response, approve: true)
+                      -> request shutdown from each teammate through the active team surface
+                      <- shutdown acknowledgement from teammates
                       -> clear OMC team state (no TeamDelete call)
                       -> rm .omc/state/team-state.json
 ```
@@ -277,7 +277,7 @@ If `active=true` and `current_phase` is non-terminal, resume from the last incom
 
 ### Phase 4: Create Tasks
 
-Create task list entries for each subtask using the active TodoWrite/task-list surface. If Claude Code exposes `TaskCreate`/`TaskUpdate` task-list tools, they may be used for task tracking only; they do not create native teams.
+Create task list entries for each subtask using TodoWrite or the active task-list surface. Task-list tools are for tracking only; they do not create native teams.
 
 ```json
 // Task-list entry for subtask 1
@@ -303,7 +303,7 @@ Create task list entries for each subtask using the active TodoWrite/task-list s
 }
 ```
 
-For tasks with dependencies, use `TaskUpdate` after creation:
+For tasks with dependencies, update the active task-list entries after creation:
 
 ```json
 // Task #3 depends on task #1 (shared types must be fixed first)
@@ -348,7 +348,7 @@ Spawn N teammates directly using the Agent/Task tool with distinct `name` values
 
 - Teammate is spawned into the session's implicit Claude Code team
 - An **internal task** is auto-created (with `metadata._internal: true`) tracking the agent lifecycle
-- Internal tasks appear in `TaskList` output -- filter them when counting real tasks
+- Internal tasks may appear in task-list output -- filter them when counting real tasks
 
 **IMPORTANT:** Spawn all teammates in parallel (they are background agents). Do NOT wait for one to finish before spawning the next.
 
@@ -356,9 +356,9 @@ Spawn N teammates directly using the Agent/Task tool with distinct `name` values
 
 The lead orchestrator monitors progress through two channels:
 
-1. **Inbound messages** -- Teammates send `SendMessage` to `team-lead` when they complete tasks or need help. These arrive automatically as new conversation turns (no polling needed).
+1. **Inbound messages** -- Teammates message `team-lead` when they complete tasks or need help. These arrive through the active team/conversation surface.
 
-2. **TaskList polling** -- Periodically call `TaskList` to check overall progress:
+2. **Task-list polling/review** -- Periodically check TodoWrite or the active task-list surface for overall progress:
    ```
    #1 [completed] Fix type errors in src/auth/ (worker-1)
    #3 [in_progress] Fix type errors in src/api/ (worker-2)
@@ -368,8 +368,8 @@ The lead orchestrator monitors progress through two channels:
 
 **Coordination actions the lead can take:**
 
-- **Unblock a teammate:** Send a `message` with guidance or missing context
-- **Reassign work:** If a teammate finishes early, use `TaskUpdate` to assign pending tasks to them and notify via `SendMessage`
+- **Unblock a teammate:** Send a message with guidance or missing context through the active team surface
+- **Reassign work:** If a teammate finishes early, update the task-list entry to assign pending work to them and notify through the active team surface
 - **Handle failures:** If a teammate reports failure, reassign the task or spawn a replacement
 
 #### Task Watchdog Policy
@@ -409,8 +409,8 @@ This enables:
 
 When all real tasks (non-internal) are completed or failed:
 
-1. **Verify results** -- Check that all subtasks are marked `completed` via `TaskList`
-2. **Shutdown teammates** -- Send `shutdown_request` to each active teammate:
+1. **Verify results** -- Check that all real tasks (non-internal) are marked `completed` in TodoWrite or the active task-list surface
+2. **Shutdown teammates** -- Send `shutdown_request` to each active teammate through the active team surface:
    ```json
    {
      "type": "shutdown_request",
@@ -434,9 +434,9 @@ You are not the leader and must not perform leader orchestration actions.
 
 == WORK PROTOCOL ==
 
-1. CLAIM: Call TaskList to see your assigned tasks (owner = "{worker_name}").
+1. CLAIM: Check TodoWrite or the active task-list surface for tasks assigned to you (owner = "{worker_name}").
    Pick the first task with status "pending" that is assigned to you.
-   Call TaskUpdate to set status "in_progress":
+   Mark it `in_progress` using the active task-list surface:
    {"taskId": "ID", "status": "in_progress", "owner": "{worker_name}"}
 
 2. WORK: Execute the task using your tools (Read, Write, Edit, Bash).
@@ -445,11 +445,11 @@ You are not the leader and must not perform leader orchestration actions.
 3. COMPLETE: When done, mark the task completed:
    {"taskId": "ID", "status": "completed"}
 
-4. REPORT: Notify the lead via SendMessage:
+4. REPORT: Notify the lead through the active team/conversation surface:
    {"type": "message", "recipient": "team-lead", "content": "Completed task #ID: <summary of what was done>", "summary": "Task #ID complete"}
 
-5. NEXT: Check TaskList for more assigned tasks. If you have more pending tasks, go to step 1.
-   If no more tasks are assigned to you, notify the lead:
+5. NEXT: Check TodoWrite or the active task-list surface for more assigned tasks. If you have more pending tasks, go to step 1.
+   If no more tasks are assigned to you, notify the lead through the active team/conversation surface:
    {"type": "message", "recipient": "team-lead", "content": "All assigned tasks complete. Standing by.", "summary": "All tasks done, standing by"}
 
 6. SHUTDOWN: When you receive a shutdown_request, respond with:
@@ -457,7 +457,7 @@ You are not the leader and must not perform leader orchestration actions.
 
 == BLOCKED TASKS ==
 If a task has blockedBy dependencies, skip it until those tasks are completed.
-Check TaskList periodically to see if blockers have been resolved.
+Check TodoWrite or the active task-list surface periodically to see if blockers have been resolved.
 
 == ERRORS ==
 If you cannot complete a task, report the failure to the lead:
@@ -469,15 +469,15 @@ Do NOT mark the task as completed. Leave it in_progress so the lead can reassign
 - NEVER run tmux pane/session orchestration commands (for example `tmux split-window`, `tmux new-session`)
 - NEVER run team spawning/orchestration skills or commands (for example `$team`, `$ultrawork`, `$autopilot`, `$ralph`, `omc team ...`, `omx team ...`)
 - ALWAYS use absolute file paths
-- ALWAYS report progress via SendMessage to "team-lead"
-- Use SendMessage with type "message" only -- never "broadcast"
+- ALWAYS report progress to "team-lead" through the active team/conversation surface
+- Use direct team/conversation messages with type "message" only -- never "broadcast"
 ```
 
 ### Agent-Type Prompt Injection (Worker-Specific Addendum)
 
 When composing teammate prompts, append a short addendum based on worker type:
 
-- `claude_worker`: Emphasize strict TaskList/TaskUpdate/SendMessage loop and no orchestration commands.
+- `claude_worker`: Emphasize strict TodoWrite/task-list updates, active team/conversation messages, and no orchestration commands.
 - `codex_worker`: Emphasize CLI API lifecycle (`omc team api ... --json`) and explicit failure ACKs with stderr.
 - `gemini_worker`: Emphasize bounded file ownership and milestone ACKs after each completed sub-step.
 
@@ -524,7 +524,7 @@ This addendum must preserve the core rule: **worker = executor only, never leade
 **Step 1: Verify completion**
 
 ```
-Call TaskList — verify all real tasks (non-internal) are completed or failed.
+Verify via TodoWrite or the active task-list surface — all real tasks (non-internal) are completed or failed.
 ```
 
 **Step 2: Request shutdown from each teammate**
@@ -605,7 +605,7 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 **Key difference from Claude teammates:**
 
 - CLI workers operate via tmux, not Claude Code's tool system
-- They cannot use TaskList/TaskUpdate/SendMessage (no team awareness)
+- They cannot use Claude Code's native task-list or team messaging surfaces
 - They run as one-shot autonomous jobs, not persistent teammates
 - The lead manages their lifecycle (spawn, monitor, collect results)
 
@@ -620,7 +620,7 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 | UI/frontend implementation       | designer Claude agent          | Design expertise, framework idioms                  |
 | Large-scale documentation        | writer Claude agent            | Writing expertise + large context for consistency   |
 | Build/test iteration loops       | Claude teammate                | Needs Bash tool + iterative fix cycles              |
-| Tasks needing team coordination  | Claude teammate                | Needs SendMessage for status updates                |
+| Tasks needing team coordination  | Claude teammate                | Needs team/conversation status updates              |
 
 ### Example: Hybrid Team with CLI Workers
 
@@ -649,7 +649,7 @@ This is especially useful when the task scope is unclear and benefits from exter
 
 ## Monitor Enhancement: Outbox Auto-Ingestion
 
-The lead can proactively ingest outbox messages from CLI workers using the outbox reader utilities, enabling event-driven monitoring without relying solely on `SendMessage` delivery.
+The lead can proactively ingest outbox messages from CLI workers using the outbox reader utilities, enabling event-driven monitoring alongside native team/conversation delivery.
 
 ### Outbox Reader Functions
 
@@ -705,30 +705,30 @@ if (status.taskSummary.pending === 0 && status.taskSummary.inProgress === 0) {
 | `shutdown_ack`  | Worker acknowledged shutdown -- safe to remove from team                                    |
 | `heartbeat`     | Update liveness tracking (redundant with heartbeat files but useful for latency monitoring) |
 
-This approach complements the existing `SendMessage`-based communication by providing a pull-based mechanism for MCP workers that cannot use Claude Code's team messaging tools.
+This approach complements native team/conversation messaging by providing a pull-based mechanism for MCP workers that cannot use Claude Code's team messaging tools.
 
 ## Error Handling
 
 ### Teammate Fails a Task
 
-1. Teammate sends `SendMessage` to lead reporting the failure
+1. Teammate reports the failure to the lead through the active team/conversation surface
 2. Lead decides: retry (reassign same task to same or different worker) or skip
-3. To reassign: `TaskUpdate` to set new owner, then `SendMessage` to the new owner
+3. To reassign: update the active task-list entry with the new owner, then message the new owner through the active team surface
 
 ### Teammate Gets Stuck (No Messages)
 
-1. Lead detects via `TaskList` -- task stuck in `in_progress` for too long
-2. Lead sends `SendMessage` to the teammate asking for status
+1. Lead detects via TodoWrite or the active task-list surface -- task stuck in `in_progress` for too long
+2. Lead messages the teammate asking for status through the active team surface
 3. If no response, consider the teammate dead
-4. Reassign the task to another worker via `TaskUpdate`
+4. Reassign the task to another worker through the active task-list surface
 
 ### Dependency Blocked
 
 1. If a blocking task fails, the lead must decide whether to:
    - Retry the blocker
-   - Remove the dependency (`TaskUpdate` with modified blockedBy)
+   - Remove the dependency by updating the active task-list entry's `blockedBy` metadata
    - Skip the blocked task entirely
-2. Communicate decisions to affected teammates via `SendMessage`
+2. Communicate decisions to affected teammates through the active team surface
 
 ### Teammate Crashes
 
@@ -825,7 +825,7 @@ This prevents duplicate worker spawns and allows graceful recovery from lead fai
 The `/oh-my-claudecode:cancel` skill handles team cleanup:
 
 1. Read team state via `state_read(mode="team")` to get `team_name` and `linked_ralph`
-2. Send `shutdown_request` to all active named teammates
+2. Request shutdown from all active named teammates through the active team surface
 3. Wait for `shutdown_response` from each (15s timeout per member)
 4. Clear state via `state_clear(mode="team")`
 5. If `linked_ralph` is true, also clear ralph: `state_clear(mode="ralph")`
@@ -880,7 +880,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
 
 - **ops.maxAgents** - Maximum teammates (default: 20)
 - **ops.defaultAgentType** - CLI provider when a `/team` invocation does not specify one (`claude` | `codex` | `gemini` | `grok` | `cursor`, default: `claude`)
-- **ops.monitorIntervalMs** - How often to poll `TaskList` (default: 30s)
+- **ops.monitorIntervalMs** - How often to review TodoWrite or the active task-list surface (default: 30s)
 - **ops.shutdownTimeoutMs** - How long to wait for shutdown responses (default: 15s)
 
 > **Note:** Team members do not have a hardcoded model default. Each teammate is a separate Claude Code session that inherits the user's configured model. Since teammates can spawn their own subagents, the session model acts as the orchestration layer while subagents can use any model tier.
@@ -948,7 +948,7 @@ Precedence: `OMC_TEAM_ROLE_OVERRIDES` > `.claude/omc.jsonc` (project) > `~/.conf
 
 ### Fallback when a CLI is missing
 
-If the CLI for a configured provider is absent from `PATH` at spawn time, `buildLaunchArgs()` throws, the team lead emits a visible `SendMessage` warning, and the runtime falls back to a deterministic Claude assignment pre-computed by `buildResolvedRoutingSnapshot` (same tier + same agent, `provider: "claude"`). Fallback is loud by design — silent fallback is a test failure. Probe provider availability with `omc doctor --team-routing`.
+If the CLI for a configured provider is absent from `PATH` at spawn time, `buildLaunchArgs()` throws, the team lead emits a visible team/conversation warning, and the runtime falls back to a deterministic Claude assignment pre-computed by `buildResolvedRoutingSnapshot` (same tier + same agent, `provider: "claude"`). Fallback is loud by design — silent fallback is a test failure. Probe provider availability with `omc doctor --team-routing`.
 
 ### Stickiness — resolved once, reused everywhere
 
@@ -1010,7 +1010,7 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 
 ## Gotchas
 
-1. **Internal/lifecycle task entries may pollute TaskList** -- If Claude Code reports internal lifecycle entries for spawned teammates, filter them when counting real task progress. The subject of an internal task is often the teammate's name.
+1. **Internal/lifecycle task entries may pollute task-list output** -- If Claude Code reports internal lifecycle entries for spawned teammates, filter them when counting real task progress. The subject of an internal task is often the teammate's name.
 
 2. **No atomic claiming** -- Unlike SQLite swarm, native task-list/TodoWrite state does not provide transactional claiming. Two teammates could race to claim the same task. **Mitigation:** The lead should pre-assign owners before spawning teammates. Teammates should only work on tasks assigned to them.
 
@@ -1030,7 +1030,7 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 
 10. **Broadcast is expensive** -- Each broadcast sends a separate message to every teammate. Use `message` (DM) by default. Only broadcast for truly team-wide critical alerts.
 
-11. **CLI workers are one-shot, not persistent** -- Tmux CLI workers have full filesystem access and CAN make code changes. However, they run as autonomous one-shot jobs -- they cannot use TaskList/TaskUpdate/SendMessage. The lead must manage their lifecycle: write prompt_file, spawn CLI worker, read output_file, mark task complete. They don't participate in team communication like Claude teammates do.
+11. **CLI workers are one-shot, not persistent** -- Tmux CLI workers have full filesystem access and CAN make code changes. However, they run as autonomous one-shot jobs -- they cannot use Claude Code's native task-list or team messaging surfaces. The lead must manage their lifecycle: write prompt_file, spawn CLI worker, read output_file, mark task complete. They don't participate in team communication like Claude teammates do.
 
 ## Parallel session caveats
 

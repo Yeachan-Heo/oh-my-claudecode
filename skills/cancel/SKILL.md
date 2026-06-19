@@ -26,7 +26,7 @@ Automatically detects which mode is active and cancels it:
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
 - **Pipeline**: Stops sequential agent pipeline
-- **Team**: Sends shutdown_request to all teammates, waits for responses/timeouts, clears OMC team state, clears linked ralph if present. Claude Code 2.1.178+ has no TeamDelete.
+- **Team**: Requests shutdown from all teammates through the active team/conversation surface, waits for responses/timeouts, clears OMC team state, clears linked ralph if present. Claude Code 2.1.178+ has no TeamDelete.
 - **Team+Ralph (linked)**: Cancels team first (graceful shutdown), then clears ralph state. Cancelling ralph when linked also cancels team first.
 
 ## Usage
@@ -213,7 +213,7 @@ state_read(mode="team")
 For the active OMC team state:
   1. Read team_name and worker labels from OMC state/handoffs/task bookkeeping
   2. For each active teammate:
-     a. Send shutdown_request via SendMessage
+     a. Ask or notify the named teammate through the active conversation/team messaging surface
      b. Wait up to 15 seconds for shutdown_response
      c. If response received: mark member acknowledged
      d. If timeout: mark member as unresponsive, continue to next
@@ -266,7 +266,7 @@ Team "{team_name}" cancelled:
 **Implementation note:** The cancel skill is executed by the LLM, not as a bash script. When you detect an active team:
 1. Read `state_read(mode="team")` to find the active OMC team
 2. Identify active named teammates from state, handoffs, or task bookkeeping
-3. For each teammate, call `SendMessage(type: "shutdown_request", recipient: member-name, content: "Cancelling")`
+3. For each teammate, ask or notify the named teammate through the active conversation/team messaging surface
 4. Wait briefly for shutdown responses (15s per member timeout)
 5. Record unresponsive teammates after a reconciliation wait
 6. Clear team state: `state_clear(mode="team", session_id)`

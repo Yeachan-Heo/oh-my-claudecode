@@ -211,7 +211,7 @@ If beads or beads-rust is detected, use AskUserQuestion:
 **Question:** "Which task management tool should I use for tracking work?"
 
 **Options:**
-1. **Built-in Tasks (default)** - Use Claude Code's native TaskCreate/TodoWrite. Tasks are session-only.
+1. **Built-in Tasks (default)** - Use Claude Code's native TodoWrite or available task-list surface. Tasks are session-only.
 2. **Beads (bd)** - Git-backed persistent tasks. Survives across sessions. [Only if detected]
 3. **Beads-Rust (br)** - Lightweight Rust port of beads. [Only if detected]
 
