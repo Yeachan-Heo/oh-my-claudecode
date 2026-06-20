@@ -50,6 +50,8 @@ export declare function expandCommand(name: string, args?: string): ExpandedComm
 /**
  * Expand a command and return just the prompt string
  * Convenience function for direct use with SDK query
+ * This is a Node.js library helper for programmatic Agent SDK usage;
+ * it does not invoke Claude Code slash commands or require the VS Code extension.
  *
  * @example
  * ```typescript

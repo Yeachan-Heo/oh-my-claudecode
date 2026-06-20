@@ -18,6 +18,7 @@ const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
 const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor']);
+const CURSOR_ALLOWED_TEAM_ROLES = new Set(['executor']);
 const DEFAULT_TEAM_CLI_AGENT_TYPE = 'claude';
 const TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
@@ -49,6 +50,8 @@ Auto-merge (v2-only):
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
+
+Cursor workers are executor-style only; use 1:cursor or 1:cursor:executor, not reviewer/critic/security/verdict roles.
 `;
 const TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]
@@ -282,6 +285,10 @@ function normalizeWorkerSpecSegment(match) {
             throw new Error(`Invalid agent type "${token}" in worker spec "${match[0]}". ` +
                 `Expected one of: ${[...VALID_TEAM_CLI_AGENT_TYPES].join(', ')}. ` +
                 `For a role-only shorthand on the default agent, use "${count}:${explicitRole}".`);
+        }
+        if (token === 'cursor' && !CURSOR_ALLOWED_TEAM_ROLES.has(explicitRole)) {
+            throw new Error(`Invalid Cursor worker role "${explicitRole}" in worker spec "${match[0]}". ` +
+                `Cursor workers are executor-style only; use "${count}:cursor" or "${count}:cursor:executor".`);
         }
         return { count, agentType: token, role: explicitRole };
     }

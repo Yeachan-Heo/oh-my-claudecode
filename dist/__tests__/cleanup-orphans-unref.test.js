@@ -33,6 +33,16 @@ describe('scripts/cleanup-orphans.mjs — SIGKILL escalation timer must not bloc
         const pattern = /setTimeout\(\s*\(\)\s*=>\s*\{[\s\S]*?\},\s*5000\)\.unref\(\)/;
         expect(src).toMatch(pattern);
     });
+    it('does not use removed native team config as an orphan signal', () => {
+        expect(src).not.toContain('teamConfigExists');
+        expect(src).not.toContain('getClaudeConfigDir');
+        expect(src).not.toContain("teams', name, 'config.json");
+    });
+    it('frames output around stale workers instead of deleted TeamDelete configs', () => {
+        expect(src).toContain('No stale OMC worker processes found');
+        expect(src).toContain('stale worker(s)');
+        expect(src).not.toContain('active team configs');
+    });
     it('main() ends with an explicit process.exit(0)', () => {
         // The last line of main() before the closing brace must be process.exit(0);
         // We check that the success-path JSON print is followed by process.exit(0)

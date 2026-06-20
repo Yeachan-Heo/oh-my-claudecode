@@ -558,7 +558,7 @@ function seedRalplanStartupState(directory, sessionId) {
     markModeAwaitingConfirmation(directory, sessionId, "ralplan");
 }
 async function seedAutopilotStartupState(directory, prompt, sessionId) {
-    const { readAutopilotState, writeAutopilotState, DEFAULT_CONFIG } = await import("./autopilot/index.js");
+    const { readAutopilotState, writeAutopilotState, DEFAULT_CONFIG, resolvePipelineConfig, buildPipelineTracking, } = await import("./autopilot/index.js");
     const existingState = readAutopilotState(directory, sessionId);
     const existingAutopilotRecord = existingState;
     if (existingState?.active === true) {
@@ -567,8 +567,9 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
         }
         return;
     }
+    const config = loadConfig();
     const now = new Date().toISOString();
-    const wrote = writeAutopilotState(directory, {
+    const state = {
         active: true,
         phase: "expansion",
         current_phase: "expansion",
@@ -614,7 +615,15 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
         wisdom_entries: 0,
         session_id: sessionId,
         project_path: directory,
-    }, sessionId);
+    };
+    const autopilotConfig = config.autopilot;
+    const shouldUsePipeline = autopilotConfig?.execution === "team";
+    if (shouldUsePipeline) {
+        const pipelineConfig = resolvePipelineConfig(autopilotConfig);
+        state.pipeline =
+            buildPipelineTracking(pipelineConfig);
+    }
+    const wrote = writeAutopilotState(directory, state, sessionId);
     if (wrote) {
         markModeAwaitingConfirmation(directory, sessionId, "autopilot");
     }
@@ -2205,13 +2214,25 @@ async function processPostToolUse(input) {
 async function processAutopilot(input) {
     const directory = resolveToWorktreeRoot(input.directory);
     // Lazy-load autopilot module
-    const { readAutopilotState, getPhasePrompt } = await import("./autopilot/index.js");
+    const { readAutopilotState, getPhasePrompt, hasPipelineTracking, generatePipelinePrompt, } = await import("./autopilot/index.js");
     const state = readAutopilotState(directory, input.sessionId);
     if (!state || !state.active) {
         return { continue: true };
     }
-    // Check phase and inject appropriate prompt
     const config = loadConfig();
+    if (hasPipelineTracking(state)) {
+        const pipelinePrompt = generatePipelinePrompt(directory, input.sessionId);
+        const runtimeInsight = formatAutopilotRuntimeInsight(directory, input.sessionId);
+        if (pipelinePrompt || runtimeInsight) {
+            const detailParts = [runtimeInsight, pipelinePrompt].filter(Boolean);
+            return {
+                continue: true,
+                message: `[AUTOPILOT - Pipeline]\n\n${detailParts.join("\n\n")}`,
+            };
+        }
+        return { continue: true };
+    }
+    // Check phase and inject appropriate prompt
     const context = {
         idea: state.originalIdea,
         specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",

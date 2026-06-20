@@ -18050,6 +18050,9 @@ function parseJsonc(content) {
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+function stripComments(content) {
   let result = "";
   let i = 0;
   while (i < content.length) {
@@ -18088,6 +18091,47 @@ function stripJsoncComments(content) {
         i++;
       }
       continue;
+    }
+    result += content[i];
+    i++;
+  }
+  return result;
+}
+function stripTrailingCommas(content) {
+  let result = "";
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i];
+      i++;
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === "\\") {
+          result += content[i];
+          i++;
+          if (i < content.length) {
+            result += content[i];
+            i++;
+          }
+          continue;
+        }
+        result += content[i];
+        i++;
+      }
+      if (i < content.length) {
+        result += content[i];
+        i++;
+      }
+      continue;
+    }
+    if (content[i] === ",") {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) {
+        j++;
+      }
+      if (content[j] === "}" || content[j] === "]") {
+        i++;
+        continue;
+      }
     }
     result += content[i];
     i++;
@@ -20953,6 +20997,13 @@ var import_child_process8 = require("child_process");
 var import_fs10 = require("fs");
 var import_os3 = require("os");
 var import_path11 = require("path");
+
+// src/utils/encode-project-path.ts
+function encodeProjectPath(projectPath) {
+  return projectPath.replace(/[/\\.:]/g, "-");
+}
+
+// src/lib/worktree-paths.ts
 var WORKSPACE_MARKER = ".omc-workspace";
 var OmcPaths = {
   ROOT: ".omc",
@@ -22699,6 +22750,7 @@ var pythonReplTool = {
 
 // src/tools/state-tools.ts
 var import_fs14 = require("fs");
+var import_os4 = require("os");
 var import_path15 = require("path");
 
 // src/lib/session-id.ts
@@ -23177,6 +23229,98 @@ var STATE_TOOL_MODES = [
 var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "skill-active"];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
 var OWNER_SESSION_FALLBACK_MODES = /* @__PURE__ */ new Set(["ralph"]);
+var CONVERGED_STATE_PATH_MODES = /* @__PURE__ */ new Set(["ralph", "ultrawork"]);
+function getStateFileName(mode) {
+  const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
+  return `${normalizedName}.json`;
+}
+function readJsonRecord(filePath) {
+  try {
+    return JSON.parse((0, import_fs14.readFileSync)(filePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function listSessionIdsUnderOmcRoot(omcRoot) {
+  const sessionsDir = (0, import_path15.join)(omcRoot, "state", "sessions");
+  if (!(0, import_fs14.existsSync)(sessionsDir)) {
+    return [];
+  }
+  try {
+    return (0, import_fs14.readdirSync)(sessionsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((name) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(name));
+  } catch {
+    return [];
+  }
+}
+function getConvergedOmcRoots(root) {
+  const roots = /* @__PURE__ */ new Set([getOmcRoot(root)]);
+  roots.add((0, import_path15.join)(root, OmcPaths.ROOT));
+  roots.add((0, import_path15.join)((0, import_os4.homedir)(), OmcPaths.ROOT));
+  return [...roots];
+}
+function getConvergedStateCandidates(mode, root, sessionId) {
+  if (!CONVERGED_STATE_PATH_MODES.has(mode)) {
+    return [];
+  }
+  const filename = getStateFileName(mode);
+  const paths = /* @__PURE__ */ new Set();
+  for (const omcRoot of getConvergedOmcRoots(root)) {
+    const stateDir = (0, import_path15.join)(omcRoot, "state");
+    if (sessionId) {
+      paths.add((0, import_path15.join)(stateDir, "sessions", sessionId, filename));
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        const candidatePath = (0, import_path15.join)(stateDir, "sessions", sid, filename);
+        const raw = readJsonRecord(candidatePath);
+        if (raw && getStateSessionOwner(raw) === sessionId) {
+          paths.add(candidatePath);
+        }
+      }
+    } else {
+      for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+        paths.add((0, import_path15.join)(stateDir, "sessions", sid, filename));
+      }
+    }
+    paths.add((0, import_path15.join)(stateDir, filename));
+    paths.add((0, import_path15.join)(omcRoot, filename));
+  }
+  return [...paths];
+}
+function isConvergedCandidateActiveForSession(statePath, sessionId) {
+  const raw = readJsonRecord(statePath);
+  if (!raw || raw.active !== true) {
+    return false;
+  }
+  if (!sessionId) {
+    return true;
+  }
+  return canClearStateForSession(raw, sessionId);
+}
+function clearConvergedStateCandidates(mode, root, sessionId) {
+  let cleared = 0;
+  let hadFailure = false;
+  const paths = getConvergedStateCandidates(mode, root, sessionId);
+  for (const statePath of paths) {
+    if (!(0, import_fs14.existsSync)(statePath)) {
+      continue;
+    }
+    try {
+      if (sessionId) {
+        const raw = readJsonRecord(statePath);
+        if (!canClearStateForSession(raw, sessionId)) {
+          continue;
+        }
+      }
+      (0, import_fs14.unlinkSync)(statePath);
+      cleared++;
+    } catch {
+      hadFailure = true;
+    }
+  }
+  return { cleared, hadFailure, paths };
+}
+function hasActiveConvergedState(mode, root, sessionId) {
+  return getConvergedStateCandidates(mode, root, sessionId).some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
+}
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs14.existsSync)(statePath)) return [];
   try {
@@ -23746,6 +23890,7 @@ var stateClearTool = {
         }
         const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId);
         const runtimeCleanup2 = clearModeRuntimeArtifacts(mode, root, sessionId);
+        let convergedCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
         writeSessionCancelSignal(root, sessionId, mode);
         if (MODE_CONFIGS[mode]) {
           const success = clearModeState(mode, root, sessionId);
@@ -23753,10 +23898,11 @@ var stateClearTool = {
           const legacyCleanup2 = clearLegacyStateCandidates(mode, root, sessionId);
           const shouldUseLocalFallback2 = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0;
           const workingDirectoryLocalCleanup2 = shouldUseLocalFallback2 ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId) : { cleared: 0, hadFailure: false, paths: [] };
+          convergedCleanup2 = clearConvergedStateCandidates(mode, root, sessionId);
           let ownerSessionId2;
           let ownerSessionCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
           let ownerLegacyCleanup2 = { cleared: 0, hadFailure: false };
-          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
+          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
             ownerSessionId2 = findSingleOwningSessionForMode(mode, root, sessionId);
             if (ownerSessionId2) {
               if (mode === "team") {
@@ -23786,6 +23932,9 @@ var stateClearTool = {
           if (workingDirectoryLocalCleanup2.cleared > 0) {
             ghostNoteParts2.push(`removed ${workingDirectoryLocalCleanup2.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup2.cleared === 1 ? "" : "s"}`);
           }
+          if (convergedCleanup2.cleared > 0) {
+            ghostNoteParts2.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+          }
           if (runtimeCleanup2.cleared > 0) {
             ghostNoteParts2.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
           }
@@ -23803,8 +23952,8 @@ var stateClearTool = {
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
-          const clearedStateOrArtifacts2 = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
-          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          const clearedStateOrArtifacts2 = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
+          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -23812,7 +23961,7 @@ var stateClearTool = {
               }]
             };
           }
-          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          if (success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
               content: [{
                 type: "text",
@@ -23832,10 +23981,11 @@ var stateClearTool = {
         const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
         const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0;
         const workingDirectoryLocalCleanup = shouldUseLocalFallback ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId) : { cleared: 0, hadFailure: false, paths: [] };
+        convergedCleanup2 = clearConvergedStateCandidates(mode, root, sessionId);
         let ownerSessionId;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
+        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
           ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
           if (ownerSessionId) {
             if (mode === "team") {
@@ -23864,6 +24014,9 @@ var stateClearTool = {
         if (workingDirectoryLocalCleanup.cleared > 0) {
           ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? "" : "s"}`);
         }
+        if (convergedCleanup2.cleared > 0) {
+          ghostNoteParts.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+        }
         if (runtimeCleanup2.cleared > 0) {
           ghostNoteParts.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
         }
@@ -23881,8 +24034,8 @@ var stateClearTool = {
           if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(", ")})` : "";
         })();
-        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
-        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
+        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
+        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || convergedCleanup2.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
         if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
           return {
             content: [{
@@ -23940,6 +24093,11 @@ var stateClearTool = {
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push("legacy path");
+      }
+      const convergedCleanup = clearConvergedStateCandidates(mode, root);
+      clearedCount += convergedCleanup.cleared;
+      if (convergedCleanup.hadFailure) {
+        errors.push("converged paths");
       }
       clearedCount += runtimeCleanup.cleared;
       if (runtimeCleanup.hadFailure) {
@@ -24053,6 +24211,11 @@ var stateListActiveTool = {
           } catch {
           }
         }
+        for (const mode of CONVERGED_STATE_PATH_MODES) {
+          if (!activeModes.includes(mode) && hasActiveConvergedState(mode, root, sessionId)) {
+            activeModes.push(mode);
+          }
+        }
         if (activeModes.length === 0) {
           return {
             content: [{
@@ -24086,6 +24249,11 @@ ${modeList}`
             }
           } catch {
           }
+        }
+      }
+      for (const mode of CONVERGED_STATE_PATH_MODES) {
+        if (!legacyActiveModes.includes(mode) && hasActiveConvergedState(mode, root)) {
+          legacyActiveModes.push(mode);
         }
       }
       for (const mode of legacyActiveModes) {
@@ -25131,8 +25299,8 @@ var import_path18 = require("path");
 
 // src/hooks/rules-injector/constants.ts
 var import_path17 = require("path");
-var import_os4 = require("os");
-var OMC_STORAGE_DIR = (0, import_path17.join)((0, import_os4.homedir)(), ".omc");
+var import_os5 = require("os");
+var OMC_STORAGE_DIR = (0, import_path17.join)((0, import_os5.homedir)(), ".omc");
 var RULES_INJECTOR_STORAGE = (0, import_path17.join)(OMC_STORAGE_DIR, "rules-injector");
 
 // src/hooks/project-memory/storage.ts
@@ -25801,9 +25969,6 @@ function parseSinceSpec(since) {
   }
   const parsed = Date.parse(trimmed);
   return Number.isNaN(parsed) ? void 0 : parsed;
-}
-function encodeProjectPath(projectPath) {
-  return projectPath.replace(/[/\\.]/g, "-");
 }
 function getMainRepoRoot(projectRoot) {
   try {
@@ -28215,7 +28380,7 @@ var wikiTools = [
 
 // src/tools/skills-tools.ts
 var import_path33 = require("path");
-var import_os6 = require("os");
+var import_os7 = require("os");
 
 // src/hooks/learner/loader.ts
 var import_fs24 = require("fs");
@@ -28228,9 +28393,9 @@ var import_path31 = require("path");
 
 // src/hooks/learner/constants.ts
 var import_path30 = require("path");
-var import_os5 = require("os");
+var import_os6 = require("os");
 var USER_SKILLS_DIR = (0, import_path30.join)(getClaudeConfigDir(), "skills", "omc-learned");
-var GLOBAL_SKILLS_DIR = (0, import_path30.join)((0, import_os5.homedir)(), ".omc", "skills");
+var GLOBAL_SKILLS_DIR = (0, import_path30.join)((0, import_os6.homedir)(), ".omc", "skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
 var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path30.join)(".agents", "skills");
 var MAX_RECURSION_DEPTH = 10;
@@ -28518,7 +28683,7 @@ function loadAllSkills(projectRoot) {
 }
 
 // src/tools/skills-tools.ts
-var ALLOWED_BOUNDARIES = [process.cwd(), (0, import_os6.homedir)()];
+var ALLOWED_BOUNDARIES = [process.cwd(), (0, import_os7.homedir)()];
 function validateProjectRoot(input) {
   const normalized = (0, import_path33.normalize)((0, import_path33.resolve)(input));
   if (input.includes("..")) {

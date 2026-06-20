@@ -32,6 +32,21 @@ export declare function renderRateLimitsWithBar(limits: RateLimits | null, barWi
  */
 export declare function renderRateLimitsError(result: UsageResult | null): string | null;
 /**
+ * Render a usage hint for Anthropic API-key users.
+ *
+ * Built-in usage/rate-limit data is only available for OAuth subscribers
+ * (and z.ai/MiniMax tokens). Plain Anthropic API-key users get a
+ * 'no_credentials' result, which would otherwise render nothing, leaving
+ * them with no explanation for the missing usage display. Anthropic does
+ * not expose a usage endpoint for regular x-api-key callers (only the
+ * org-scoped Admin API, which needs a separate admin key), so we point
+ * users at the custom rateLimitsProvider hook (#794) instead.
+ *
+ * Returns null unless the user is in API-key mode, the built-in fetch
+ * failed with 'no_credentials', and no custom provider is configured.
+ */
+export declare function renderApiKeyUsageHint(result: UsageResult | null, apiKeyMode: boolean, hasCustomProvider: boolean): string | null;
+/**
  * Render custom rate limit buckets from the rateLimitsProvider command.
  *
  * Format (normal):  label:32%  label2:250/300  label3:as-is

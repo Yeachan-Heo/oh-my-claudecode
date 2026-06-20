@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFi
 import { homedir, tmpdir } from 'os';
 import { resolve, normalize, relative, sep, join, isAbsolute, basename, dirname } from 'path';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
+import { encodeProjectPath } from '../utils/encode-project-path.js';
 /**
  * Workspace marker filename. A directory containing this file is treated as
  * the OMC anchor regardless of git status — enables multi-repo workspaces
@@ -822,24 +823,27 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
             return resolved;
     }
     // Strategy 2: Use CWD to detect worktree and reconstruct the path.
-    // When the CWD contains `/.claude/worktrees/`, we can derive the main
-    // project root and look for the transcript there.
+    // When the CWD contains `<sep>.claude<sep>worktrees<sep>`, we can derive the
+    // main project root and look for the transcript there. The marker is
+    // normalized so it matches the OS-native separator — on Windows the CWD uses
+    // `\`, so a hard-coded `/.claude/worktrees/` would never match.
     const effectiveCwd = cwd || process.cwd();
-    const worktreeMarker = '.claude/worktrees/';
-    const markerIdx = effectiveCwd.indexOf(worktreeMarker);
+    const normalizedCwd = normalize(effectiveCwd);
+    const worktreeMarker = normalize('/.claude/worktrees/');
+    const markerIdx = normalizedCwd.indexOf(worktreeMarker);
     if (markerIdx !== -1) {
-        // Adjust index to exclude the preceding path separator
-        const mainProjectRoot = effectiveCwd.substring(0, markerIdx > 0 && effectiveCwd[markerIdx - 1] === sep ? markerIdx - 1 : markerIdx);
-        // Extract session filename from the original path
-        const lastSep = transcriptPath.lastIndexOf('/');
-        const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+        // The marker includes its leading separator, so everything before it is
+        // the main project root.
+        const mainProjectRoot = normalizedCwd.substring(0, markerIdx);
+        // Extract the session filename. basename handles both separators on
+        // Windows (transcript_path arrives with `\`) and `/` on POSIX.
+        const sessionFile = basename(transcriptPath);
         if (sessionFile) {
             // The projects directory is under the Claude config dir
             const projectsDir = join(getClaudeConfigDir(), 'projects');
             if (existsSync(projectsDir)) {
-                // Encode the main project root the same way Claude Code does:
-                // replace path separators with `-`, replace dots with `-`.
-                const encodedMain = mainProjectRoot.replace(/[/\\.]/g, '-');
+                // Encode the main project root the same way Claude Code does.
+                const encodedMain = encodeProjectPath(mainProjectRoot);
                 const resolvedPath = join(projectsDir, encodedMain, sessionFile);
                 if (existsSync(resolvedPath))
                     return resolvedPath;
@@ -876,12 +880,12 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
             stdio: ['pipe', 'pipe', 'pipe'],
         }).trim();
         if (mainRepoRoot !== worktreeTop) {
-            const lastSep = transcriptPath.lastIndexOf('/');
-            const sessionFile = lastSep !== -1 ? transcriptPath.substring(lastSep + 1) : '';
+            // basename handles `\` (Windows transcript_path) and `/` (POSIX).
+            const sessionFile = basename(transcriptPath);
             if (sessionFile) {
                 const projectsDir = join(getClaudeConfigDir(), 'projects');
                 if (existsSync(projectsDir)) {
-                    const encodedMain = mainRepoRoot.replace(/[/\\.]/g, '-');
+                    const encodedMain = encodeProjectPath(mainRepoRoot);
                     const resolvedPath = join(projectsDir, encodedMain, sessionFile);
                     if (existsSync(resolvedPath))
                         return resolvedPath;

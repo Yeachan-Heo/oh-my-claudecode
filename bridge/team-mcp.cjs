@@ -18085,6 +18085,12 @@ function tmuxEnv() {
 function resolveEnv(opts) {
   return opts?.stripTmux ? tmuxEnv() : process.env;
 }
+function isUnixLikeOnWindows() {
+  return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
+}
+function isNativeWindowsShell() {
+  return process.platform === "win32" && !isUnixLikeOnWindows();
+}
 function quoteForCmd(arg) {
   if (arg.length === 0) return '""';
   if (!/[\s"%^&|<>()]/.test(arg)) return arg;
@@ -18125,7 +18131,7 @@ async function tmuxShellAsync(command, opts) {
   });
 }
 async function tmuxCmdAsync(args, opts) {
-  if (args.some((a) => a.includes("#{"))) {
+  if (args.some((a) => a.includes("#{")) && !isNativeWindowsShell()) {
     const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ");
     return tmuxShellAsync(escaped, opts);
   }

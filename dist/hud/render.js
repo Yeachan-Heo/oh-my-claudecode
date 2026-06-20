@@ -14,7 +14,7 @@ import { renderSkills, renderLastSkill } from "./elements/skills.js";
 import { renderContext, renderContextWithBar } from "./elements/context.js";
 import { renderBackground } from "./elements/background.js";
 import { renderPrd } from "./elements/prd.js";
-import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderCustomBuckets, } from "./elements/limits.js";
+import { renderRateLimits, renderRateLimitsWithBar, renderRateLimitsError, renderApiKeyUsageHint, renderCustomBuckets, } from "./elements/limits.js";
 import { renderPermission } from "./elements/permission.js";
 import { renderThinking } from "./elements/thinking.js";
 import { renderSession } from "./elements/session.js";
@@ -281,8 +281,14 @@ export async function render(context, config) {
         }
         else {
             const errorIndicator = renderRateLimitsError(context.rateLimitsResult);
-            if (errorIndicator)
+            if (errorIndicator) {
                 rendered.set("rateLimits", errorIndicator);
+            }
+            else {
+                const hint = renderApiKeyUsageHint(context.rateLimitsResult, context.apiKeyMode ?? false, config.rateLimitsProvider?.type === "custom");
+                if (hint)
+                    rendered.set("rateLimits", hint);
+            }
         }
     }
     if (context.customBuckets) {

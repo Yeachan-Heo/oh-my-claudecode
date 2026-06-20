@@ -425,6 +425,10 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
         ]);
         expect(parsed.task).toBe('compare edits');
     });
+    it('rejects cursor with non-executor explicit roles', () => {
+        expect(() => parseTeamArgs(['1:cursor:architect', 'design auth'])).toThrow(/Cursor workers are executor-style only/);
+        expect(() => parseTeamArgs(['1:cursor:security-reviewer', 'review auth'])).toThrow(/Cursor workers are executor-style only/);
+    });
     it('defaults to 3 claude workers when no spec is given', () => {
         const parsed = parseTeamArgs(['run all tests']);
         expect(parsed.workerCount).toBe(3);

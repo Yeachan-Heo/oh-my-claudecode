@@ -262,27 +262,45 @@ async function verifyWorkerStartCommandDelivered(paneId, startCmd) {
     if (isCmuxSurfaceTarget(paneId))
         return true;
     const expected = normalizeTmuxCapture(startCmd);
+    const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
     for (let attempt = 1; attempt <= 5; attempt++) {
         const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
-        if (normalizeTmuxCapture(captured).includes(expected)) {
+        const normalizedCaptured = normalizeTmuxCapture(captured);
+        if (normalizedCaptured.includes(expected)) {
+            return true;
+        }
+        if (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected)) {
             return true;
         }
         await sleep(50);
     }
     return false;
 }
+async function verifyWorkerStartCommandSubmitted(paneId, startCmd) {
+    if (isCmuxSurfaceTarget(paneId))
+        return true;
+    const expected = normalizeTmuxCapture(startCmd);
+    const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
+        const normalizedCaptured = normalizeTmuxCapture(captured);
+        const commandStillBuffered = normalizedCaptured.includes(expected)
+            || (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected));
+        if (!commandStillBuffered) {
+            return true;
+        }
+        await sleep(50);
+    }
+    return false;
+}
+function workerPaneShellCommand() {
+    if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
+        return [getDefaultShell()];
+    }
+    return [];
+}
 function escapeForCmdSet(value) {
-    return value.replace(/"/g, '""');
-}
-function escapeForPowerShellSingleQuotedString(value) {
-    return `'${value.replace(/'/g, "''")}'`;
-}
-function isNativeWindowsPsmuxPowerShellPane() {
-    // psmux sets PSMUX_SESSION in panes. Native psmux defaults to PowerShell,
-    // while MSYS/Git Bash psmux panes still need the POSIX branch below.
-    return process.platform === 'win32' &&
-        !isUnixLikeOnWindows() &&
-        !!process.env.PSMUX_SESSION;
+    return value.replace(/(["%])/g, '$1$1');
 }
 function shellNameFromPath(shellPath) {
     const shellName = basename(shellPath.replace(/\\/g, '/'));
@@ -330,18 +348,6 @@ export function buildWorkerStartCommand(config) {
     const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
     const launchWords = getLaunchWords(config);
     const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
-    if (isNativeWindowsPsmuxPowerShellPane()) {
-        const envStatements = Object.entries(config.envVars)
-            .map(([k, v]) => {
-            assertSafeEnvKey(k);
-            return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
-        });
-        const launch = [
-            '&',
-            ...launchWords.map(escapeForPowerShellSingleQuotedString),
-        ].join(' ');
-        return [...envStatements, launch].join('; ');
-    }
     if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
         const envPrefix = Object.entries(config.envVars)
             .map(([k, v]) => {
@@ -465,6 +471,7 @@ export function createSession(teamName, workerName, workingDirectory) {
     if (workingDirectory) {
         args.push('-c', workingDirectory);
     }
+    args.push(...workerPaneShellCommand());
     tmuxExec(args, { stripTmux: true, stdio: 'pipe', timeout: 5000 });
     try {
         configureTmuxClipboardForSession(name, { stripTmux: true, stdio: 'pipe', timeout: 5000 });
@@ -562,6 +569,7 @@ export async function splitTeamWorkerPane(splitTarget, direction, cwd) {
         'split-window', splitType, '-t', splitTarget,
         '-d', '-P', '-F', '#{pane_id}',
         '-c', cwd,
+        ...workerPaneShellCommand(),
     ]);
     return splitResult.stdout.split('\n')[0]?.trim() || null;
 }
@@ -597,6 +605,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
             'new-session', '-d', '-P', '-F', '#S:0 #{pane_id}',
             '-s', detachedSessionName,
             '-c', cwd,
+            ...workerPaneShellCommand(),
         ], { stripTmux: true });
         const detachedLine = detachedResult.stdout.trim();
         const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
@@ -688,6 +697,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
             'split-window', splitType, '-t', splitTarget,
             '-d', '-P', '-F', '#{pane_id}',
             '-c', cwd,
+            ...workerPaneShellCommand(),
         ]);
         const paneId = splitResult.stdout.split('\n')[0]?.trim();
         if (paneId) {
@@ -765,8 +775,15 @@ export async function spawnWorkerInPane(sessionName, paneId, config) {
     }
     try {
         const enterResult = await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter'], { timeout: 5000 });
-        logWorkerSpawnDiagnostic(`worker start submit sent session=${sessionName} pane=${paneId} ` +
+        logWorkerSpawnDiagnostic(`worker start submit key sent session=${sessionName} pane=${paneId} ` +
             `worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`);
+        const submitted = await verifyWorkerStartCommandSubmitted(paneId, startCmd);
+        if (!submitted) {
+            const reason = `worker_start_submit_unverified:${config.workerName}:${paneId}:${fingerprint}`;
+            logWorkerSpawnDiagnostic(`worker start submit verification failed session=${sessionName} pane=${paneId} ` +
+                `worker=${config.workerName} cmdSha=${fingerprint} cmdPreview=${JSON.stringify(preview)}`);
+            throw new Error(reason);
+        }
     }
     catch (error) {
         logWorkerSpawnDiagnostic(`worker start submit failed session=${sessionName} pane=${paneId} ` +
@@ -776,6 +793,9 @@ export async function spawnWorkerInPane(sessionName, paneId, config) {
 }
 function normalizeTmuxCapture(value) {
     return value.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
+}
+function normalizeTmuxCaptureForDelivery(value) {
+    return value.replace(/\r/g, '').replace(/\s+/g, '');
 }
 async function capturePaneAsync(paneId, opts = {}) {
     try {

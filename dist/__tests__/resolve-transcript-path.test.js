@@ -14,11 +14,19 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveTranscriptPath } from '../lib/worktree-paths.js';
+import { encodeProjectPath } from '../utils/encode-project-path.js';
 describe('resolveTranscriptPath', () => {
     let tempDir;
     beforeEach(() => {
         tempDir = join(tmpdir(), `omc-test-transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         mkdirSync(tempDir, { recursive: true });
+        // Canonicalize once so every derived path shares a single form. Use the
+        // native realpath: on Windows CI the runner home is an 8.3 short name
+        // (e.g. RUNNER~1) because tmpdir() reads %TEMP% in short form, while git
+        // rev-parse returns the long name. realpathSync.native() resolves to the
+        // OS-canonical long form, matching what production derives via git, so the
+        // native-worktree resolution assertion compares like with like.
+        tempDir = realpathSync.native(tempDir);
     });
     afterEach(() => {
         try {
@@ -85,6 +93,38 @@ describe('resolveTranscriptPath', () => {
         const normalPath = join(tempDir, 'projects', '-Users-user-project', 'missing.jsonl');
         expect(resolveTranscriptPath(normalPath)).toBe(normalPath);
     });
+    it('resolves via a .claude/worktrees CWD using the OS-native separator (Strategy 2)', () => {
+        // Regression: the worktree marker and the session-filename extraction must
+        // be separator-agnostic. On Windows the CWD arrives with `\`, so a
+        // hard-coded `.claude/worktrees/` marker (and lastIndexOf('/')) never
+        // matched and Strategy 2 was dead. Uses join() so the CWD carries whatever
+        // separator the host OS produces, exercising the fix on that OS.
+        const origClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        const fakeClaudeDir = join(tempDir, 'fake-claude');
+        process.env.CLAUDE_CONFIG_DIR = fakeClaudeDir;
+        try {
+            const projectRoot = join(tempDir, 'myproject');
+            const realDir = join(fakeClaudeDir, 'projects', encodeProjectPath(projectRoot));
+            mkdirSync(realDir, { recursive: true });
+            const realTranscript = join(realDir, 'sess.jsonl');
+            writeFileSync(realTranscript, '{}');
+            // CWD inside a Claude internal worktree (separator is OS-native here).
+            const worktreeCwd = join(projectRoot, '.claude', 'worktrees', 'wt');
+            // Worktree-encoded transcript path that does not exist and does NOT carry
+            // the `--claude-worktrees-` substring, so Strategy 1 is skipped and the
+            // CWD-based Strategy 2 is what resolves it.
+            const worktreePath = join(fakeClaudeDir, 'projects', '-missing-worktree-dir', 'sess.jsonl');
+            expect(resolveTranscriptPath(worktreePath, worktreeCwd)).toBe(realTranscript);
+        }
+        finally {
+            if (origClaudeConfigDir === undefined) {
+                delete process.env.CLAUDE_CONFIG_DIR;
+            }
+            else {
+                process.env.CLAUDE_CONFIG_DIR = origClaudeConfigDir;
+            }
+        }
+    });
     // --- Native git worktree tests (issue #1191) ---
     describe('native git worktree fallback', () => {
         let mainRepoDir;
@@ -116,7 +156,7 @@ describe('resolveTranscriptPath', () => {
             // Simulate ~/.claude/projects/ with a transcript at the main repo's encoded path
             fakeClaudeDir = join(tempDir, 'fake-claude');
             process.env.CLAUDE_CONFIG_DIR = fakeClaudeDir;
-            const encodedMain = mainRepoDir.replace(/[/\\.]/g, '-');
+            const encodedMain = encodeProjectPath(mainRepoDir);
             const projectDir = join(fakeClaudeDir, 'projects', encodedMain);
             mkdirSync(projectDir, { recursive: true });
             writeFileSync(join(projectDir, 'session-abc.jsonl'), '{}');
@@ -142,22 +182,22 @@ describe('resolveTranscriptPath', () => {
         });
         it('resolves transcript path from native git worktree to main repo (issue #1191)', () => {
             // The worktree-encoded transcript path (does not exist)
-            const encodedWorktree = worktreeDir.replace(/[/\\.]/g, '-');
+            const encodedWorktree = encodeProjectPath(worktreeDir);
             const worktreePath = join(fakeClaudeDir, 'projects', encodedWorktree, 'session-abc.jsonl');
             const resolved = resolveTranscriptPath(worktreePath, worktreeDir);
-            const encodedMain = mainRepoDir.replace(/[/\\.]/g, '-');
+            const encodedMain = encodeProjectPath(mainRepoDir);
             const expectedPath = join(fakeClaudeDir, 'projects', encodedMain, 'session-abc.jsonl');
             expect(resolved).toBe(expectedPath);
         });
         it('does not alter path when CWD is the main repo (not a worktree)', () => {
-            const encodedMain = mainRepoDir.replace(/[/\\.]/g, '-');
+            const encodedMain = encodeProjectPath(mainRepoDir);
             const mainPath = join(fakeClaudeDir, 'projects', encodedMain, 'session-abc.jsonl');
             // Path exists and CWD is the main repo — should return as-is
             const resolved = resolveTranscriptPath(mainPath, mainRepoDir);
             expect(resolved).toBe(mainPath);
         });
         it('returns original path when main repo transcript also missing', () => {
-            const encodedWorktree = worktreeDir.replace(/[/\\.]/g, '-');
+            const encodedWorktree = encodeProjectPath(worktreeDir);
             // Use a session file that doesn't exist at the main repo path either
             const worktreePath = join(fakeClaudeDir, 'projects', encodedWorktree, 'nonexistent.jsonl');
             const resolved = resolveTranscriptPath(worktreePath, worktreeDir);

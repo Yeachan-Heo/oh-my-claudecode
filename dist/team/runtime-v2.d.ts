@@ -17,8 +17,9 @@
  */
 import type { TeamConfig, TeamTask, TeamTaskDelegationPlan, WorkerStatus, WorkerHeartbeat } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
+import type { CliAgentType } from './model-contract.js';
 import { type WorkerPaneLiveness } from './tmux-session.js';
-import type { PluginConfig } from '../shared/types.js';
+import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
 import { type CliWorkerOutputPayload } from './cli-worker-contract.js';
 export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamRuntimeV2 {
@@ -73,6 +74,30 @@ export interface ShutdownOptionsV2 {
     ralph?: boolean;
     timeoutMs?: number;
 }
+/**
+ * Resolve a per-task routing assignment from the team's routing snapshot.
+ *
+ * Resolution order:
+ *   1. Explicit `task.role` (if present) → normalize alias → snapshot lookup.
+ *   2. `routeTaskToRole(subject, description, fallbackRole)` intent inference.
+ *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
+ *      fails (role outside canonical vocabulary or snapshot missing).
+ *
+ * Returns the primary assignment by default; callers swap to the Claude
+ * fallback if the primary provider's CLI binary is missing at spawn time.
+ */
+export declare function resolveTaskAssignment(task: {
+    subject: string;
+    description: string;
+    role?: string;
+}, resolvedRouting: Record<CanonicalTeamRole, {
+    primary: RoleAssignment;
+    fallback: RoleAssignment;
+}>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, resolvedBinaryPaths: Partial<Record<CliAgentType, string>>, fallbackAgent: CliAgentType): {
+    agentType: CliAgentType;
+    model: string;
+    role: CanonicalTeamRole | null;
+};
 export interface StartTeamV2Config {
     teamName: string;
     workerCount: number;

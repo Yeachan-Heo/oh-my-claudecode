@@ -99,7 +99,7 @@ describe('buildWorkerStartCommand', () => {
             cwd: 'C:\\repo'
         })).not.toThrow();
     });
-    it('uses PowerShell syntax for native Windows psmux worker panes', () => {
+    it('uses cmd.exe syntax for native Windows psmux worker start commands', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
         vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
         vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
@@ -111,13 +111,11 @@ describe('buildWorkerStartCommand', () => {
             launchArgs: ['--agent-id', 'worker-1'],
             cwd: 'C:\\repo'
         });
-        expect(cmd).toBe("$env:OMC_TEAM_WORKER='team/worker-1'; " +
-            "& 'C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe' '--agent-id' 'worker-1'");
-        expect(cmd).not.toContain('cmd.exe');
-        expect(cmd).not.toContain('/d /s /c');
-        expect(cmd).not.toContain('set "');
+        expect(cmd).toBe('C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
+            '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1""');
+        expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
     });
-    it('escapes psmux PowerShell env vars and quoted launch args without cmd.exe set syntax', () => {
+    it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
         vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
         vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
@@ -137,13 +135,48 @@ describe('buildWorkerStartCommand', () => {
             ],
             cwd: 'C:\\repo'
         });
-        expect(cmd).toContain("$env:OMC_TEAM_WORKER='team name/worker ''one'''");
-        expect(cmd).toContain("$env:OMC_TEAM_STATE_ROOT='C:\\Users\\Test User\\AppData\\Local\\omc state'");
-        expect(cmd).toContain("$env:CLAUDE_CODE_USE_BEDROCK='value with spaces & [brackets] \"quotes\"'");
-        expect(cmd).toContain("& 'C:\\Program Files\\Claude Code\\claude.exe' '--model' 'sonnet \"quoted\"' '--label=worker ''one'''");
-        expect(cmd).not.toContain('cmd.exe');
-        expect(cmd).not.toContain('/d /s /c');
-        expect(cmd).not.toContain('set "');
+        expect(cmd).toContain('set "OMC_TEAM_WORKER=team name/worker \'one\'"');
+        expect(cmd).toContain('set "OMC_TEAM_STATE_ROOT=C:\\Users\\Test User\\AppData\\Local\\omc state"');
+        expect(cmd).toContain('set "CLAUDE_CODE_USE_BEDROCK=value with spaces & [brackets] ""quotes"""');
+        expect(cmd).toContain('"C:\\Program Files\\Claude Code\\claude.exe" "--model" "sonnet ""quoted""" "--label=worker \'one\'"');
+        expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
+    });
+    it('escapes literal percent signs in native Windows cmd env values and launch args', () => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+        const cmd = buildWorkerStartCommand({
+            teamName: 't',
+            workerName: 'w',
+            envVars: {
+                OMC_TEAM_WORKER: 'team/worker-1',
+                OMC_TOKEN: 'literal%USERPROFILE%token%25',
+            },
+            launchBinary: 'C:\\Program Files\\Claude Code\\claude.exe',
+            launchArgs: ['--label', '100% ready %USERPROFILE%', '--token=abc%25'],
+            cwd: 'C:\\repo'
+        });
+        expect(cmd).toContain('set "OMC_TOKEN=literal%%USERPROFILE%%token%%25"');
+        expect(cmd).toContain('"100%% ready %%USERPROFILE%%"');
+        expect(cmd).toContain('"--token=abc%%25"');
+        expect(cmd).not.toContain('literal%USERPROFILE%token%25');
+    });
+    it('does not cmd-escape percent signs on MSYS Windows worker startup', () => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
+        vi.stubEnv('MSYSTEM', 'MINGW64');
+        vi.stubEnv('SHELL', '/usr/bin/bash');
+        vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+        const cmd = buildWorkerStartCommand({
+            teamName: 't',
+            workerName: 'w',
+            envVars: { OMC_TOKEN: 'literal%USERPROFILE%token%25' },
+            launchBinary: '/c/Program Files/Git/bin/bash.exe',
+            launchArgs: ['--label=100% ready'],
+            cwd: '/c/repo'
+        });
+        expect(cmd).toContain("OMC_TOKEN='literal%USERPROFILE%token%25'");
+        expect(cmd).toContain("'--label=100% ready'");
+        expect(cmd).not.toContain('%%USERPROFILE%%');
     });
     it('keeps cmd.exe worker startup syntax for native Windows without psmux', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');

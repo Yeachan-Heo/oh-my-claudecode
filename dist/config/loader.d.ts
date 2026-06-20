@@ -40,6 +40,7 @@ export declare function deepMerge<T extends object>(target: T, source: Partial<T
  */
 export declare function loadEnvConfig(): Partial<PluginConfig>;
 export declare function validateTeamConfig(config: PluginConfig): void;
+export declare function validateAutopilotConfig(config: PluginConfig): void;
 export declare function loadConfig(): PluginConfig;
 export declare function compactOmcStartupGuidance(content: string): string;
 /**

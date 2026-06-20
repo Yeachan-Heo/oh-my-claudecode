@@ -327,5 +327,39 @@ describe('render: rate limits display priority', () => {
         expect(output).not.toContain('[API');
         expect(output).not.toContain('%');
     });
+    it('shows a custom-provider usage hint for API-key users with no_credentials (Issue #3277)', async () => {
+        const context = makeContext({
+            apiKeyMode: true,
+            rateLimitsResult: {
+                rateLimits: null,
+                error: 'no_credentials',
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).toContain('omcHud.rateLimitsProvider');
+        expect(output).not.toContain('[API');
+    });
+    it('does not show the usage hint when a custom rate limits provider is configured', async () => {
+        const context = makeContext({
+            apiKeyMode: true,
+            rateLimitsResult: {
+                rateLimits: null,
+                error: 'no_credentials',
+            },
+        });
+        const output = await render(context, makeConfig({ rateLimitsProvider: { type: 'custom', command: 'echo {}' } }));
+        expect(output).not.toContain('omcHud.rateLimitsProvider');
+    });
+    it('does not show the usage hint for non-API-key users (OAuth path)', async () => {
+        const context = makeContext({
+            apiKeyMode: false,
+            rateLimitsResult: {
+                rateLimits: null,
+                error: 'no_credentials',
+            },
+        });
+        const output = await render(context, makeConfig());
+        expect(output).not.toContain('omcHud.rateLimitsProvider');
+    });
 });
 //# sourceMappingURL=render-rate-limits-priority.test.js.map

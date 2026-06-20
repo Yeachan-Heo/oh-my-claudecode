@@ -69,12 +69,6 @@ const searchEnhancement = {
     triggers: ['search', 'find', 'locate', 'lookup', 'explore', 'discover', 'scan', 'grep', 'query', 'browse', 'detect', 'trace', 'seek', 'track', 'pinpoint', 'hunt'],
     description: 'Maximizes search effort and thoroughness',
     action: (prompt) => {
-        // Multi-language search pattern
-        const searchPattern = /\b(search|find|locate|lookup|look\s*up|explore|discover|scan|grep|query|browse|detect|trace|seek|track|pinpoint|hunt)\b|where\s+is|show\s+me|list\s+all|검색|찾아|탐색|조회|스캔|서치|뒤져|찾기|어디|추적|탐지|찾아봐|찾아내|보여줘|목록|検索|探して|見つけて|サーチ|探索|スキャン|どこ|発見|捜索|見つけ出す|一覧|搜索|查找|寻找|查询|检索|定位|扫描|发现|在哪里|找出来|列出|tìm kiếm|tra cứu|định vị|quét|phát hiện|truy tìm|tìm ra|ở đâu|liệt kê/i;
-        const hasSearchCommand = searchPattern.test(removeCodeBlocks(prompt));
-        if (!hasSearchCommand) {
-            return prompt;
-        }
         return `${prompt}
 
 [search-mode]
@@ -93,12 +87,6 @@ const analyzeEnhancement = {
     triggers: ['analyze', 'analyse', 'investigate', 'examine', 'study', 'deep-dive', 'inspect', 'audit', 'evaluate', 'assess', 'review', 'diagnose', 'scrutinize', 'dissect', 'debug', 'comprehend', 'interpret', 'breakdown', 'understand'],
     description: 'Activates deep analysis and investigation mode',
     action: (prompt) => {
-        // Multi-language analyze pattern
-        const analyzePattern = /\b(analyze|analyse|investigate|examine|study|deep[\s-]?dive|inspect|audit|evaluate|assess|review|diagnose|scrutinize|dissect|debug|comprehend|interpret|breakdown|understand)\b|why\s+is|how\s+does|how\s+to|분석|조사|파악|연구|검토|진단|이해|설명|원인|이유|뜯어봐|따져봐|평가|해석|디버깅|디버그|어떻게|왜|살펴|分析|調査|解析|検討|研究|診断|理解|説明|検証|精査|究明|デバッグ|なぜ|どう|仕組み|调查|检查|剖析|深入|诊断|解释|调试|为什么|原理|搞清楚|弄明白|phân tích|điều tra|nghiên cứu|kiểm tra|xem xét|chẩn đoán|giải thích|tìm hiểu|gỡ lỗi|tại sao/i;
-        const hasAnalyzeCommand = analyzePattern.test(removeCodeBlocks(prompt));
-        if (!hasAnalyzeCommand) {
-            return prompt;
-        }
         return `${prompt}
 
 [analyze-mode]
@@ -123,12 +111,7 @@ const ultrathinkEnhancement = {
     triggers: ['ultrathink', 'think', 'reason', 'ponder'],
     description: 'Activates extended thinking mode for deep reasoning',
     action: (prompt) => {
-        // Check if ultrathink-related triggers are present
-        const hasThinkCommand = /\b(ultrathink|think|reason|ponder)\b/i.test(removeCodeBlocks(prompt));
-        if (!hasThinkCommand) {
-            return prompt;
-        }
-        const cleanPrompt = removeTriggerWords(prompt, ['ultrathink', 'think', 'reason', 'ponder']);
+        const cleanPrompt = removeTriggerWords(prompt, ultrathinkEnhancement.triggers);
         return `[ULTRATHINK MODE - EXTENDED REASONING ACTIVATED]
 
 ${cleanPrompt}

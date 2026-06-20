@@ -1020,6 +1020,150 @@ function writeStopBreaker(directory, name, count, sessionId) {
     }
 }
 // ---------------------------------------------------------------------------
+// Thinking-only streak guard (issue #3280)
+//
+// A persistent mode (ralph/autopilot/team/ralplan/ultrawork/…) re-injects a
+// continuation prompt on every Stop while the mode is active. If the agent
+// answers each continuation with only thinking blocks and never a tool_use,
+// no work happens but tokens keep burning. Bound that failure: count
+// consecutive thinking-only assistant turns and release the stop once the
+// streak hits a conservative threshold. Any tool_use turn resets the streak,
+// and every read/parse path fails open (keep enforcing) so a flaky transcript
+// never short-circuits a healthy persistent mode.
+// ---------------------------------------------------------------------------
+const THINKING_ONLY_STREAK_BREAKER = 'thinking-only-streak';
+const THINKING_ONLY_STREAK_MAX = 3;
+const THINKING_ONLY_STREAK_TTL_MS = 5 * 60 * 1000; // 5 min
+const THINKING_ONLY_STREAK_BAILOUT_MESSAGE = `[PERSISTENT MODE PAUSED - NO TOOL PROGRESS] The last ${THINKING_ONLY_STREAK_MAX} assistant turns ` +
+    'produced only thinking with no tool calls, so the persistent-mode stop guard is releasing this ' +
+    'stop to avoid an infinite loop. Resume manually with a concrete next action (run a tool/command) ' +
+    'or /cancel the active mode.';
+/**
+ * Does a user-role transcript record carry a tool_result block? A tool_result
+ * only exists because the assistant invoked a tool earlier in the same turn, so
+ * its presence proves the most recent assistant turn made tool progress.
+ */
+function userRecordHasToolResult(content) {
+    if (!Array.isArray(content))
+        return false;
+    return content.some((block) => block?.type === 'tool_result');
+}
+/**
+ * Classify the most recent assistant *turn* in a transcript as making tool
+ * progress, being thinking-only, or indeterminate. A turn spans every assistant
+ * record (and interleaved tool_result records) back to the preceding real user
+ * message, so a productive turn whose final record is plain text — tool_use
+ * earlier, trailing text before stop — still classifies as tool_use rather than
+ * leaking through as indeterminate.
+ *
+ * Reads only the bounded transcript tail (never the whole file) and treats any
+ * unreadable/ambiguous shape as indeterminate so callers fail open.
+ */
+function classifyLastAssistantTurn(transcriptPath) {
+    let lines;
+    try {
+        lines = readTranscriptTailLines(transcriptPath);
+    }
+    catch {
+        return 'indeterminate';
+    }
+    let sawAssistant = false;
+    let hasThinking = false;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index]?.trim();
+        if (!line)
+            continue;
+        let parsed;
+        try {
+            parsed = JSON.parse(line);
+        }
+        catch {
+            // Skip non-JSON/truncated lines and keep scanning backward.
+            continue;
+        }
+        const role = parsed?.message?.role;
+        const isAssistant = parsed?.type === 'assistant' || role === 'assistant';
+        if (isAssistant) {
+            sawAssistant = true;
+            const content = parsed.message?.content;
+            if (Array.isArray(content)) {
+                for (const block of content) {
+                    const blockType = block?.type;
+                    if (blockType === 'tool_use') {
+                        // Any tool_use anywhere in the most recent turn is real progress.
+                        return 'tool_use';
+                    }
+                    if (blockType === 'thinking' || blockType === 'redacted_thinking') {
+                        hasThinking = true;
+                    }
+                }
+            }
+            // Non-array (string/missing) content carries no structured block; keep
+            // scanning the rest of the turn rather than bailing out early.
+            continue;
+        }
+        const isUser = parsed?.type === 'user' || role === 'user';
+        if (isUser) {
+            // A tool_result confirms the turn invoked a tool, so it made progress.
+            if (userRecordHasToolResult(parsed.message?.content)) {
+                return 'tool_use';
+            }
+            // A real user message marks the start of the most recent assistant turn.
+            break;
+        }
+        // Other record types (system/summary/…) are turn-neutral; keep scanning.
+    }
+    if (!sawAssistant)
+        return 'indeterminate';
+    return hasThinking ? 'thinking_only' : 'indeterminate';
+}
+/**
+ * Bound persistent-mode continuation loops that make no tool progress.
+ *
+ * Only acts when a mode would otherwise block the stop. A tool_use turn resets
+ * the streak; a thinking-only turn increments it and, once it reaches
+ * THINKING_ONLY_STREAK_MAX, releases the stop (and clears the counter) instead
+ * of re-injecting another continuation prompt. Indeterminate/unreadable
+ * transcripts leave the streak untouched and keep the original blocking result.
+ */
+function applyThinkingOnlyStreakGuard(result, workingDir, sessionId, stopContext) {
+    // Non-blocking results already let the session stop — no loop to bound.
+    if (!result.shouldBlock)
+        return result;
+    const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+    if (!transcriptPath || !existsSync(transcriptPath)) {
+        return result; // fail open: cannot classify without a transcript
+    }
+    let classification;
+    try {
+        classification = classifyLastAssistantTurn(transcriptPath);
+    }
+    catch {
+        return result; // fail open on any unexpected read/parse error
+    }
+    if (classification === 'tool_use') {
+        // Real progress — reset the streak and keep enforcing.
+        writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+        return result;
+    }
+    if (classification === 'indeterminate') {
+        // Cannot confirm a thinking-only stall — keep enforcing, leave streak as is.
+        return result;
+    }
+    const streak = readStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, sessionId, THINKING_ONLY_STREAK_TTL_MS) + 1;
+    if (streak >= THINKING_ONLY_STREAK_MAX) {
+        // Bail out: release the stop and clear the counter for a clean restart.
+        writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, 0, sessionId);
+        return {
+            shouldBlock: false,
+            message: THINKING_ONLY_STREAK_BAILOUT_MESSAGE,
+            mode: 'none',
+        };
+    }
+    writeStopBreaker(workingDir, THINKING_ONLY_STREAK_BREAKER, streak, sessionId);
+    return result;
+}
+// ---------------------------------------------------------------------------
 // Team Pipeline enforcement (standalone team mode)
 // ---------------------------------------------------------------------------
 const TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
@@ -1475,10 +1619,21 @@ ${TODO_CONTINUATION_PROMPT}
     };
 }
 /**
- * Main persistent mode checker
- * Checks all persistent modes in priority order and returns appropriate action
+ * Main persistent mode checker.
+ * Resolves which mode (if any) should block, then applies the thinking-only
+ * streak guard so an active mode cannot loop forever re-injecting continuation
+ * prompts while the agent only emits thinking blocks and never tool_use (#3280).
  */
 export async function checkPersistentModes(sessionId, directory, stopContext // NEW: from todo-continuation types
+) {
+    const result = await resolvePersistentModeBlock(sessionId, directory, stopContext);
+    return applyThinkingOnlyStreakGuard(result, resolveToWorktreeRoot(directory), sessionId, stopContext);
+}
+/**
+ * Resolve which persistent mode (if any) should block this stop event.
+ * Checks all persistent modes in priority order and returns appropriate action.
+ */
+async function resolvePersistentModeBlock(sessionId, directory, stopContext // NEW: from todo-continuation types
 ) {
     const workingDir = resolveToWorktreeRoot(directory);
     // Hard bypass invariants: never enforce stop continuation under any of these

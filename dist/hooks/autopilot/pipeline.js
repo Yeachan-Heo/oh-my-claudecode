@@ -40,6 +40,9 @@ export function resolvePipelineConfig(userConfig, deprecatedMode) {
             config.verification = userConfig.verification;
         if (userConfig.qa !== undefined)
             config.qa = userConfig.qa;
+        if (userConfig.team !== undefined) {
+            config.team = { ...(config.team ?? {}), ...userConfig.team };
+        }
     }
     return config;
 }

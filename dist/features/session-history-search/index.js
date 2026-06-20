@@ -4,6 +4,7 @@ import { dirname, join, normalize, resolve } from 'path';
 import { createInterface } from 'readline';
 import { resolveToWorktreeRoot, validateSessionId, validateWorkingDirectory, getOmcRoot, } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { encodeProjectPath } from '../../utils/encode-project-path.js';
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CONTEXT_CHARS = 120;
 function compactWhitespace(text) {
@@ -34,9 +35,6 @@ function parseSinceSpec(since) {
     }
     const parsed = Date.parse(trimmed);
     return Number.isNaN(parsed) ? undefined : parsed;
-}
-function encodeProjectPath(projectPath) {
-    return projectPath.replace(/[/\\.]/g, '-');
 }
 function getMainRepoRoot(projectRoot) {
     try {
@@ -473,5 +471,5 @@ export async function searchSessionHistory(rawOptions) {
         results: allMatches.slice(0, limit),
     };
 }
-export { parseSinceSpec };
+export { encodeProjectPath, parseSinceSpec };
 //# sourceMappingURL=index.js.map

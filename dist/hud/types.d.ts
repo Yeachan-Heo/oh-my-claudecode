@@ -306,6 +306,8 @@ export interface HudRenderContext {
     promptTime: Date | null;
     /** API key source: 'project', 'global', or 'env' */
     apiKeySource: ApiKeySource | null;
+    /** True when an Anthropic API key is active (no OAuth subscription); used to surface a usage hint when built-in usage cannot be fetched */
+    apiKeyMode?: boolean;
     /** OAuth subscription type (e.g. 'enterprise'), null when unavailable */
     subscriptionType?: string | null;
     /** OAuth rate limit tier (e.g. 'default_claude_zero'), null when unavailable */

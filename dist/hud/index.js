@@ -383,6 +383,7 @@ async function main(watchMode = false, skipInit = false) {
             apiKeySource: config.elements.apiKeySource
                 ? detectApiKeySource(cwd)
                 : null,
+            apiKeyMode: detectApiKeySource(cwd) !== null,
             subscriptionType: subscriptionInfo.subscriptionType,
             rateLimitTier: subscriptionInfo.rateLimitTier,
             profileName: process.env.CLAUDE_CONFIG_DIR

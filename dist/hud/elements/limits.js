@@ -255,6 +255,29 @@ export function renderRateLimitsError(result) {
         return `${YELLOW}[API auth]${RESET}`;
     return `${YELLOW}[API err]${RESET}`;
 }
+/**
+ * Render a usage hint for Anthropic API-key users.
+ *
+ * Built-in usage/rate-limit data is only available for OAuth subscribers
+ * (and z.ai/MiniMax tokens). Plain Anthropic API-key users get a
+ * 'no_credentials' result, which would otherwise render nothing, leaving
+ * them with no explanation for the missing usage display. Anthropic does
+ * not expose a usage endpoint for regular x-api-key callers (only the
+ * org-scoped Admin API, which needs a separate admin key), so we point
+ * users at the custom rateLimitsProvider hook (#794) instead.
+ *
+ * Returns null unless the user is in API-key mode, the built-in fetch
+ * failed with 'no_credentials', and no custom provider is configured.
+ */
+export function renderApiKeyUsageHint(result, apiKeyMode, hasCustomProvider) {
+    if (!apiKeyMode)
+        return null;
+    if (hasCustomProvider)
+        return null;
+    if (result?.error !== 'no_credentials')
+        return null;
+    return `${DIM}[usage: set omcHud.rateLimitsProvider]${RESET}`;
+}
 // ============================================================================
 // Custom provider bucket rendering
 // ============================================================================

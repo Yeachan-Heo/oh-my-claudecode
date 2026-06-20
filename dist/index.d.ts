@@ -1,7 +1,7 @@
 /**
  * Oh-My-ClaudeCode
  *
- * A multi-agent orchestration system for the Claude Agent SDK.
+ * A multi-agent orchestration library and Claude Code plugin runtime with Agent SDK helpers.
  * Inspired by oh-my-opencode, reimagined for Claude Code.
  *
  * Main features:
@@ -87,8 +87,9 @@ export interface OmcSession {
 /**
  * Create a OMC orchestration session
  *
- * This prepares all the configuration and options needed
- * to run a query with the Claude Agent SDK.
+ * Prepare configuration and options needed to run a local Node.js query
+ * with the Claude Agent SDK. This helper does not install or drive the
+ * interactive Claude Code plugin UI.
  *
  * @example
  * ```typescript

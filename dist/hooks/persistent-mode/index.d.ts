@@ -84,8 +84,10 @@ export declare function shouldSendIdleNotification(stateDir: string, sessionId?:
  */
 export declare function recordIdleNotificationSent(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): void;
 /**
- * Main persistent mode checker
- * Checks all persistent modes in priority order and returns appropriate action
+ * Main persistent mode checker.
+ * Resolves which mode (if any) should block, then applies the thinking-only
+ * streak guard so an active mode cannot loop forever re-injecting continuation
+ * prompts while the agent only emits thinking blocks and never tool_use (#3280).
  */
 export declare function checkPersistentModes(sessionId?: string, directory?: string, stopContext?: StopContext): Promise<PersistentModeResult>;
 /**

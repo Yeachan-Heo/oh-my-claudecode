@@ -49,9 +49,9 @@ export const CUSTOM_INTEGRATION_PRESETS = {
         suggestedEvents: ['session-end', 'ask-user-question'],
         documentationUrl: 'https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/'
     },
-    clawdbot: {
-        name: 'ClawdBot',
-        description: 'Send notifications to ClawdBot webhook',
+    customAgentGateway: {
+        name: 'Custom Agent Gateway',
+        description: 'Send notifications to a custom agent webhook',
         type: 'webhook',
         defaultConfig: {
             method: 'POST',
@@ -65,7 +65,7 @@ export const CUSTOM_INTEGRATION_PRESETS = {
             timeout: 5000
         },
         suggestedEvents: ['session-end', 'session-start'],
-        documentationUrl: 'https://github.com/your-org/clawdbot'
+        documentationUrl: 'https://code.claude.com/docs/en/hooks'
     },
     'generic-webhook': {
         name: 'Generic Webhook',

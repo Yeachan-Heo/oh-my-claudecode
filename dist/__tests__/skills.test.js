@@ -694,9 +694,11 @@ describe('Builtin Skills', () => {
         it('should document allowed omc-teams agent types and native team fallback', () => {
             const skill = getBuiltinSkill('omc-teams');
             expect(skill).toBeDefined();
-            expect(skill?.template).toContain('/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**');
+            expect(skill?.template).toContain('/omc-teams` only supports **`claude`**, **`codex`**, **`gemini`**, **`grok`**, and **`cursor`**');
             expect(skill?.template).toContain('unsupported type such as `expert`');
             expect(skill?.template).toContain('/oh-my-claudecode:team');
+            expect(skill?.template).toContain('Cursor workers as executor-style only');
+            expect(skill?.template).toContain('cursor-agent');
         });
         it('should preserve the multi-repo omc-teams cwd and plan-path contract', () => {
             const skill = getBuiltinSkill('omc-teams');

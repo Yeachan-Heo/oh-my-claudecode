@@ -3,9 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { formatSessionSearchReport, sessionSearchCommand, } from '../commands/session-search.js';
-function encodeProjectPath(projectPath) {
-    return projectPath.replace(/[/\\.]/g, '-');
-}
+import { encodeProjectPath } from '../../utils/encode-project-path.js';
 function writeTranscript(filePath, entries) {
     mkdirSync(join(filePath, '..'), { recursive: true });
     writeFileSync(filePath, entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf-8');

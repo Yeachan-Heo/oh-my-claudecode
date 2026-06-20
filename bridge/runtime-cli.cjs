@@ -38,6 +38,12 @@ function tmuxEnv() {
 function resolveEnv(opts) {
   return opts?.stripTmux ? tmuxEnv() : process.env;
 }
+function isUnixLikeOnWindows() {
+  return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
+}
+function isNativeWindowsShell() {
+  return process.platform === "win32" && !isUnixLikeOnWindows();
+}
 function quoteForCmd(arg) {
   if (arg.length === 0) return '""';
   if (!/[\s"%^&|<>()]/.test(arg)) return arg;
@@ -87,7 +93,7 @@ async function tmuxShellAsync(command, opts) {
   });
 }
 async function tmuxCmdAsync(args, opts) {
-  if (args.some((a) => a.includes("#{"))) {
+  if (args.some((a) => a.includes("#{")) && !isNativeWindowsShell()) {
     const escaped = args.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ");
     return tmuxShellAsync(escaped, opts);
   }
@@ -166,6 +172,13 @@ var init_config_dir = __esm({
     "use strict";
     import_path3 = require("path");
     import_os = require("os");
+  }
+});
+
+// src/utils/encode-project-path.ts
+var init_encode_project_path = __esm({
+  "src/utils/encode-project-path.ts"() {
+    "use strict";
   }
 });
 
@@ -331,6 +344,7 @@ var init_worktree_paths = __esm({
     import_os3 = require("os");
     import_path8 = require("path");
     init_config_dir();
+    init_encode_project_path();
     WORKSPACE_MARKER = ".omc-workspace";
     OmcPaths = {
       ROOT: ".omc",
@@ -408,7 +422,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   isSessionAlive: () => isSessionAlive,
-  isUnixLikeOnWindows: () => isUnixLikeOnWindows,
+  isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
   isWorkerAlive: () => isWorkerAlive,
   killSession: () => killSession,
   killTeamPane: () => killTeamPane,
@@ -437,7 +451,7 @@ function detectTeamMultiplexerContext(env = process.env) {
   if (env.CMUX_SURFACE_ID) return "cmux";
   return "none";
 }
-function isUnixLikeOnWindows() {
+function isUnixLikeOnWindows2() {
   return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
 }
 async function applyMainVerticalLayout(teamTarget) {
@@ -504,7 +518,7 @@ async function cmuxCloseSurface(surfaceId) {
   await cmuxExecAsync(["close-surface", "--surface", surfaceId]);
 }
 function getDefaultShell() {
-  if (process.platform === "win32" && !isUnixLikeOnWindows()) {
+  if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
     return process.env.COMSPEC || "cmd.exe";
   }
   const shell = process.env.SHELL || "/bin/bash";
@@ -552,7 +566,7 @@ function resolveSupportedShellAffinity(shellPath) {
   return { shell: shellPath, rcFile };
 }
 function buildWorkerLaunchSpec(shellPath) {
-  if (isUnixLikeOnWindows()) {
+  if (isUnixLikeOnWindows2()) {
     return { shell: "/bin/sh", rcFile: null };
   }
   const preferred = resolveSupportedShellAffinity(shellPath);
@@ -623,23 +637,43 @@ async function waitForShellReady(paneId, opts = {}) {
 async function verifyWorkerStartCommandDelivered(paneId, startCmd) {
   if (isCmuxSurfaceTarget(paneId)) return true;
   const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
   for (let attempt = 1; attempt <= 5; attempt++) {
     const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
-    if (normalizeTmuxCapture(captured).includes(expected)) {
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    if (normalizedCaptured.includes(expected)) {
+      return true;
+    }
+    if (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected)) {
       return true;
     }
     await sleep(50);
   }
   return false;
 }
+async function verifyWorkerStartCommandSubmitted(paneId, startCmd) {
+  if (isCmuxSurfaceTarget(paneId)) return true;
+  const expected = normalizeTmuxCapture(startCmd);
+  const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
+    const normalizedCaptured = normalizeTmuxCapture(captured);
+    const commandStillBuffered = normalizedCaptured.includes(expected) || compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected);
+    if (!commandStillBuffered) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return false;
+}
+function workerPaneShellCommand() {
+  if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
+    return [getDefaultShell()];
+  }
+  return [];
+}
 function escapeForCmdSet(value) {
-  return value.replace(/"/g, '""');
-}
-function escapeForPowerShellSingleQuotedString(value) {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-function isNativeWindowsPsmuxPowerShellPane() {
-  return process.platform === "win32" && !isUnixLikeOnWindows() && !!process.env.PSMUX_SESSION;
+  return value.replace(/(["%])/g, "$1$1");
 }
 function shellNameFromPath(shellPath) {
   const shellName = (0, import_path9.basename)(shellPath.replace(/\\/g, "/"));
@@ -687,18 +721,7 @@ function buildWorkerStartCommand(config) {
   const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
   const launchWords = getLaunchWords(config);
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== "1";
-  if (isNativeWindowsPsmuxPowerShellPane()) {
-    const envStatements = Object.entries(config.envVars).map(([k, v]) => {
-      assertSafeEnvKey(k);
-      return `$env:${k}=${escapeForPowerShellSingleQuotedString(v)}`;
-    });
-    const launch = [
-      "&",
-      ...launchWords.map(escapeForPowerShellSingleQuotedString)
-    ].join(" ");
-    return [...envStatements, launch].join("; ");
-  }
-  if (process.platform === "win32" && !isUnixLikeOnWindows()) {
+  if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
     const envPrefix = Object.entries(config.envVars).map(([k, v]) => {
       assertSafeEnvKey(k);
       return `set "${k}=${escapeForCmdSet(v)}"`;
@@ -783,6 +806,7 @@ function createSession(teamName, workerName2, workingDirectory) {
   if (workingDirectory) {
     args.push("-c", workingDirectory);
   }
+  args.push(...workerPaneShellCommand());
   tmuxExec(args, { stripTmux: true, stdio: "pipe", timeout: 5e3 });
   try {
     configureTmuxClipboardForSession(name, { stripTmux: true, stdio: "pipe", timeout: 5e3 });
@@ -840,7 +864,8 @@ async function splitTeamWorkerPane(splitTarget, direction, cwd) {
     "-F",
     "#{pane_id}",
     "-c",
-    cwd
+    cwd,
+    ...workerPaneShellCommand()
   ]);
   return splitResult.stdout.split("\n")[0]?.trim() || null;
 }
@@ -876,7 +901,8 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       "-s",
       detachedSessionName,
       "-c",
-      cwd
+      cwd,
+      ...workerPaneShellCommand()
     ], { stripTmux: true });
     const detachedLine = detachedResult.stdout.trim();
     const detachedMatch = detachedLine.match(/^(\S+)\s+(%\d+)$/);
@@ -982,7 +1008,8 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       "-F",
       "#{pane_id}",
       "-c",
-      cwd
+      cwd,
+      ...workerPaneShellCommand()
     ]);
     const paneId = splitResult.stdout.split("\n")[0]?.trim();
     if (paneId) {
@@ -1064,8 +1091,16 @@ async function spawnWorkerInPane(sessionName2, paneId, config) {
   try {
     const enterResult = await tmuxExecAsync(["send-keys", "-t", paneId, "Enter"], { timeout: 5e3 });
     logWorkerSpawnDiagnostic(
-      `worker start submit sent session=${sessionName2} pane=${paneId} worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`
+      `worker start submit key sent session=${sessionName2} pane=${paneId} worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(enterResult.stderr.trim())}`
     );
+    const submitted = await verifyWorkerStartCommandSubmitted(paneId, startCmd);
+    if (!submitted) {
+      const reason = `worker_start_submit_unverified:${config.workerName}:${paneId}:${fingerprint}`;
+      logWorkerSpawnDiagnostic(
+        `worker start submit verification failed session=${sessionName2} pane=${paneId} worker=${config.workerName} cmdSha=${fingerprint} cmdPreview=${JSON.stringify(preview)}`
+      );
+      throw new Error(reason);
+    }
   } catch (error) {
     logWorkerSpawnDiagnostic(
       `worker start submit failed session=${sessionName2} pane=${paneId} worker=${config.workerName} cmdSha=${fingerprint} sendStatus=1 error=${JSON.stringify(error instanceof Error ? error.message : String(error))}`
@@ -1075,6 +1110,9 @@ async function spawnWorkerInPane(sessionName2, paneId, config) {
 }
 function normalizeTmuxCapture(value) {
   return value.replace(/\r/g, "").replace(/\s+/g, " ").trim();
+}
+function normalizeTmuxCaptureForDelivery(value) {
+  return value.replace(/\r/g, "").replace(/\s+/g, "");
 }
 async function capturePaneAsync(paneId, opts = {}) {
   try {
@@ -1805,6 +1843,7 @@ var CANONICAL_TEAM_ROLES = [
   "explore",
   "document-specialist"
 ];
+var CURSOR_EXECUTOR_TEAM_ROLES = ["executor"];
 var KNOWN_AGENT_NAMES = [
   "omc",
   "explore",
@@ -1847,6 +1886,9 @@ function parseJsonc(content) {
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+function stripComments(content) {
   let result = "";
   let i = 0;
   while (i < content.length) {
@@ -1885,6 +1927,47 @@ function stripJsoncComments(content) {
         i++;
       }
       continue;
+    }
+    result += content[i];
+    i++;
+  }
+  return result;
+}
+function stripTrailingCommas(content) {
+  let result = "";
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i];
+      i++;
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === "\\") {
+          result += content[i];
+          i++;
+          if (i < content.length) {
+            result += content[i];
+            i++;
+          }
+          continue;
+        }
+        result += content[i];
+        i++;
+      }
+      if (i < content.length) {
+        result += content[i];
+        i++;
+      }
+      continue;
+    }
+    if (content[i] === ",") {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) {
+        j++;
+      }
+      if (content[j] === "}" || content[j] === "]") {
+        i++;
+        continue;
+      }
     }
     result += content[i];
     i++;
@@ -2337,6 +2420,9 @@ function buildDefaultConfig() {
       ops: {},
       roleRouting: {}
     },
+    autopilot: {
+      execution: "solo"
+    },
     planOutput: {
       directory: ".omc/plans",
       filenameTemplate: "{{name}}.md"
@@ -2564,6 +2650,7 @@ function warnOnDeprecatedDelegationRouting(config) {
   );
 }
 var CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
+var CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 var KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
 var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
 var TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
@@ -2624,6 +2711,11 @@ function validateTeamConfig(config) {
           `[OMC] team.roleRouting.${rawRoleKey}.provider: invalid value "${String(spec.provider)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`
         );
       }
+      if (spec.provider === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLE_SET.has(normalized)) {
+        throw new Error(
+          `[OMC] team.roleRouting.${rawRoleKey}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET].join(", ")})`
+        );
+      }
     }
     if (spec.model !== void 0 && !isValidModelValue(spec.model)) {
       throw new Error(
@@ -2634,6 +2726,43 @@ function validateTeamConfig(config) {
       if (typeof spec.agent !== "string" || !KNOWN_AGENT_NAME_SET.has(spec.agent)) {
         throw new Error(
           `[OMC] team.roleRouting.${rawRoleKey}.agent: unknown agent "${String(spec.agent)}". Allowed: ${[...KNOWN_AGENT_NAME_SET].join(", ")}`
+        );
+      }
+    }
+  }
+}
+var AUTOPILOT_EXECUTION_BACKENDS = /* @__PURE__ */ new Set(["team", "solo"]);
+var AUTOPILOT_PLANNING_MODES = /* @__PURE__ */ new Set(["ralplan", "direct"]);
+var AUTOPILOT_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set([
+  "claude",
+  "codex",
+  "gemini",
+  "grok",
+  "cursor"
+]);
+function validateAutopilotConfig(config) {
+  const autopilot = config.autopilot;
+  if (!autopilot || typeof autopilot !== "object") return;
+  if (autopilot.execution !== void 0 && (typeof autopilot.execution !== "string" || !AUTOPILOT_EXECUTION_BACKENDS.has(autopilot.execution))) {
+    throw new Error(
+      `[OMC] autopilot.execution: invalid value "${String(autopilot.execution)}". Allowed: ${[...AUTOPILOT_EXECUTION_BACKENDS].join(", ")}`
+    );
+  }
+  if (autopilot.planning !== void 0 && autopilot.planning !== false && (typeof autopilot.planning !== "string" || !AUTOPILOT_PLANNING_MODES.has(autopilot.planning))) {
+    throw new Error(
+      `[OMC] autopilot.planning: invalid value "${String(autopilot.planning)}". Allowed: ralplan, direct, false`
+    );
+  }
+  const team = autopilot.team;
+  if (!team || typeof team !== "object") return;
+  if (team.agentTypes !== void 0) {
+    if (!Array.isArray(team.agentTypes)) {
+      throw new Error("[OMC] autopilot.team.agentTypes: must be an array");
+    }
+    for (const agentType of team.agentTypes) {
+      if (typeof agentType !== "string" || !AUTOPILOT_TEAM_AGENT_TYPES.has(agentType)) {
+        throw new Error(
+          `[OMC] autopilot.team.agentTypes: invalid value "${String(agentType)}". Allowed: ${[...AUTOPILOT_TEAM_AGENT_TYPES].join(", ")}`
         );
       }
     }
@@ -2684,6 +2813,7 @@ function loadConfig() {
   }
   warnOnDeprecatedDelegationRouting(config);
   validateTeamConfig(config);
+  validateAutopilotConfig(config);
   return config;
 }
 
@@ -6652,6 +6782,7 @@ var ROLE_DEFAULT_TIER = {
   "document-specialist": "MEDIUM"
 };
 var TIER_SET = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
+var CURSOR_EXECUTOR_TEAM_ROLE_SET2 = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 function isTier(value) {
   return TIER_SET.has(value);
 }
@@ -6701,6 +6832,11 @@ function resolveRoleAssignment(role, cfg) {
   const spec = getRoleRoutingSpec(roleRouting, canonical);
   const isOrchestrator = canonical === "orchestrator";
   const provider = isOrchestrator ? "claude" : spec?.provider ?? "claude";
+  if (provider === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLE_SET2.has(canonical)) {
+    throw new Error(
+      `team.roleRouting.${canonical}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET2].join(", ")})`
+    );
+  }
   const model = provider === "claude" ? resolveClaudeModel(canonical, spec?.model, cfg) : resolveExternalModel(provider, spec?.model, cfg);
   const agent = spec?.agent ?? ROLE_TO_AGENT[canonical];
   return { provider, model, agent };
@@ -7998,6 +8134,21 @@ Cadence resumes once the git rebase state is gone.`;
 // src/team/runtime-v2.ts
 var import_node_child_process4 = require("node:child_process");
 var orchestratorByTeam = /* @__PURE__ */ new Map();
+var CURSOR_UNSUPPORTED_REVIEW_INTENT_RE = /\b(?:review|audit|critic|critique|security|vulnerabilit|cve|owasp|xss|csrf|sqli|verdict|approval|approve|final\s+decision)\b/i;
+var CURSOR_EXECUTOR_CONTEXT_RE = /\b(?:implement|implementation|apply|edit|patch|fix|build|ci|lint|compile|tsc|type.?check|test|tests|debug|troubleshoot|investigate|root.?cause|diagnos|refactor|clean\s*up|simplif)\b/i;
+var CURSOR_EXECUTOR_CONTEXT_INTENTS = /* @__PURE__ */ new Set([
+  "implementation",
+  "build-fix",
+  "debug",
+  "cleanup",
+  "verification"
+]);
+function isCursorExecutorContextTask(task) {
+  const text = `${task.subject} ${task.description}`.trim();
+  if (!text || CURSOR_UNSUPPORTED_REVIEW_INTENT_RE.test(text)) return false;
+  if (!CURSOR_EXECUTOR_CONTEXT_RE.test(text)) return false;
+  return CURSOR_EXECUTOR_CONTEXT_INTENTS.has(inferLaneIntent(text));
+}
 var cadenceByTeam = /* @__PURE__ */ new Map();
 function registerTeamOrchestrator(teamName, handle) {
   orchestratorByTeam.set(teamName, handle);
@@ -8056,7 +8207,20 @@ function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolve
     roleRoutingConfig,
     canonical
   );
+  if (fallbackAgent === "cursor") {
+    if (CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
+      return { agentType: fallbackAgent, model: "", role: canonical };
+    }
+    if (!hasExplicitRole && !hasConfigForRole && isCursorExecutorContextTask(task)) {
+      return { agentType: fallbackAgent, model: "", role: "executor" };
+    }
+  }
   if (!hasExplicitRole && !hasConfigForRole) {
+    if (fallbackAgent === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
+      throw new Error(
+        `Cursor workers are executor-style only; inferred role "${canonical}" for task "${task.subject}" must run on a native Claude/OMC reviewer agent or another supported CLI worker.`
+      );
+    }
     return { agentType: fallbackAgent, model: "", role: canonical };
   }
   const pair = resolvedRouting[canonical];

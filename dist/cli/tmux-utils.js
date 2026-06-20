@@ -78,7 +78,7 @@ export function tmuxSpawn(args, opts) {
     return spawnSync(invocation.command, invocation.args, { encoding: 'utf-8', ...spawnOpts, env: resolveEnv(opts) });
 }
 export async function tmuxCmdAsync(args, opts) {
-    if (args.some(a => a.includes('#{'))) {
+    if (args.some(a => a.includes('#{')) && !isNativeWindowsShell()) {
         const escaped = args.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
         return tmuxShellAsync(escaped, opts);
     }
