@@ -6,6 +6,7 @@ import { dirname, join, normalize, relative } from 'node:path';
 const PACKAGE_ROOT = process.cwd();
 const HOOKS_JSON_PATH = join(PACKAGE_ROOT, 'hooks', 'hooks.json');
 const PLUGIN_JSON_PATH = join(PACKAGE_ROOT, '.claude-plugin', 'plugin.json');
+const MCP_JSON_PATH = join(PACKAGE_ROOT, '.mcp.json');
 const SCRIPTS_ROOT = join(PACKAGE_ROOT, 'scripts');
 
 type HookCommandConfig = {
@@ -28,6 +29,7 @@ type NpmPackDryRunResult = {
 
 type PluginJson = {
   hooks?: unknown;
+  mcpServers?: unknown;
 };
 
 function referencesStandardHooksManifest(value: unknown): boolean {
@@ -45,6 +47,62 @@ function referencesStandardHooksManifest(value: unknown): boolean {
   }
 
   return false;
+}
+
+function referencesRootMcpConfig(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\\/g, '/');
+    return normalized === './.mcp.json' || normalized === '.mcp.json';
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(referencesRootMcpConfig);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(referencesRootMcpConfig);
+  }
+
+  return false;
+}
+
+type McpServerConfig = {
+  command?: unknown;
+  args?: unknown;
+};
+
+type McpJson = {
+  mcpServers?: Record<string, McpServerConfig>;
+};
+
+function listPluginMcpRuntimeFiles(): string[] {
+  const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
+  expect(referencesRootMcpConfig(pluginJson.mcpServers)).toBe(true);
+
+  const mcpJson = JSON.parse(readFileSync(MCP_JSON_PATH, 'utf-8')) as McpJson;
+  const runtimeFiles = new Set<string>();
+
+  for (const server of Object.values(mcpJson.mcpServers ?? {})) {
+    expect(server.command).toBe('node');
+    expect(Array.isArray(server.args)).toBe(true);
+
+    if (!Array.isArray(server.args)) {
+      continue;
+    }
+
+    for (const arg of server.args) {
+      if (typeof arg !== 'string') {
+        continue;
+      }
+
+      const match = arg.match(/^\$\{CLAUDE_PLUGIN_ROOT\}\/(.+)$/);
+      if (match) {
+        runtimeFiles.add(match[1]);
+      }
+    }
+  }
+
+  return [...runtimeFiles].sort();
 }
 
 const LOCAL_IMPORT_RE = /(?:import\s+(?:[^'"()]+?\s+from\s+)?|import\s*\(|export\s+\*\s+from\s+|export\s+\{[^}]*\}\s+from\s+|require\s*\()\s*['"](\.[^'"]+)['"]/g;
@@ -144,6 +202,17 @@ describe('npm package hook surface regression', () => {
     expect(packedFiles.has('dist/hooks/skill-bridge.cjs')).toBe(true);
     expect(packedFiles.has('bridge/cli.cjs')).toBe(true);
     expect(packedFiles.has('.claude-plugin/plugin.json')).toBe(true);
+  });
+
+  it('packs the public plugin MCP config and referenced runtime files', () => {
+    const packedFiles = getPackedFiles();
+    const runtimeFiles = listPluginMcpRuntimeFiles();
+
+    expect(packedFiles.has('.mcp.json')).toBe(true);
+    expect(runtimeFiles).toEqual(['bridge/mcp-server.cjs']);
+
+    const missing = runtimeFiles.filter(file => !packedFiles.has(file));
+    expect(missing).toEqual([]);
   });
 
   it('packs hooks.json, hook entry scripts, and their local script dependencies', () => {
