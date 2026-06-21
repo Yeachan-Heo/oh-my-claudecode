@@ -332,6 +332,17 @@ export function resolveTaskAssignment(
     return { agentType: fallbackAgent, model: '', role: canonical };
   }
 
+  // Explicit provider + explicit role with NO per-role routing config: the user
+  // named the provider directly on the worker spec (e.g. `1:antigravity:executor`
+  // or `1:gemini:reviewer`), so honor that provider and treat the role as the
+  // prompt role, not a routing key. Without this, an explicit role would always
+  // opt into resolved_routing, whose default executor primary is Claude — silently
+  // launching Claude instead of the requested CLI provider. When `team.roleRouting`
+  // *is* configured for the role, that deliberate config still wins (below).
+  if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== 'claude') {
+    return { agentType: fallbackAgent, model: '', role: canonical };
+  }
+
   const pair = resolvedRouting[canonical];
   if (!pair) {
     return { agentType: fallbackAgent, model: '', role: canonical };
