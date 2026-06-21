@@ -51,6 +51,7 @@ vi.mock('../model-contract.js', () => ({
   resolveClaudeWorkerModel: modelContractMocks.resolveClaudeWorkerModel,
   // gemini is supported on all platforms, so the preflight headless guard is a no-op here.
   assertHeadlessSupported: () => {},
+  isHeadlessSupportedOnPlatform: () => true,
 }));
 
 vi.mock('../mcp-comm.js', () => ({

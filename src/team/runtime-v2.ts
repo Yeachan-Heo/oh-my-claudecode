@@ -60,7 +60,7 @@ import type { CliAgentType } from './model-contract.js';
 import {
   buildWorkerArgv, getContract, resolveValidatedBinaryPath,
   getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs,
-  resolveClaudeWorkerModel, assertHeadlessSupported,
+  resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform,
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession,
@@ -982,7 +982,22 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
   // AC-8: missing/untrusted binaries fall back to the snapshot's Claude tuple at
   // spawn time; emit a loud warning naming the binary so operators can fix it.
-  const agentTypes = config.agentTypes as CliAgentType[];
+  // Rewrite headless-unsupported direct workers (e.g. antigravity on Windows) to
+  // the Claude fallback up front, BEFORE any team state or tmux session is created.
+  // Direct launches like `omc team 1:antigravity` flow through `agentTypes` as the
+  // round-robin fallbackAgent for resolveTaskAssignment, so without this they would
+  // pass the unsupported provider through and only fail mid-spawn. (Role-routed
+  // primaries are handled separately by resolvePreflightBinaryPath's guard.)
+  const declaredAgentTypes = config.agentTypes as CliAgentType[];
+  const agentTypes = declaredAgentTypes.map((t): CliAgentType => {
+    if (!isHeadlessSupportedOnPlatform(t)) {
+      process.stderr.write(
+        `[team/runtime-v2] ${t} headless mode is unsupported on this platform — using claude fallback for direct workers\n`,
+      );
+      return 'claude';
+    }
+    return t;
+  });
   const resolvedBinaryPaths: Partial<Record<CliAgentType, string>> = {};
   const missingBinaryReasons: Array<{ agentType: CliAgentType; reason: string }> = [];
   for (const agentType of [...new Set(agentTypes)]) {

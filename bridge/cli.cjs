@@ -34857,7 +34857,17 @@ async function startTeamV2(config2) {
     }
   }
   const workspaceMode = worktreeMode === "disabled" ? "single" : "worktree";
-  const agentTypes = config2.agentTypes;
+  const declaredAgentTypes = config2.agentTypes;
+  const agentTypes = declaredAgentTypes.map((t) => {
+    if (!isHeadlessSupportedOnPlatform(t)) {
+      process.stderr.write(
+        `[team/runtime-v2] ${t} headless mode is unsupported on this platform \u2014 using claude fallback for direct workers
+`
+      );
+      return "claude";
+    }
+    return t;
+  });
   const resolvedBinaryPaths = {};
   const missingBinaryReasons = [];
   for (const agentType of [...new Set(agentTypes)]) {

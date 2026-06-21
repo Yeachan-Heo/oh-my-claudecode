@@ -21,6 +21,7 @@ vi.mock('../team/model-contract.js', () => ({
     getPromptModeArgs: vi.fn(() => []),
     resolveClaudeWorkerModel: vi.fn(() => undefined),
     assertHeadlessSupported: vi.fn(() => { }),
+    isHeadlessSupportedOnPlatform: vi.fn(() => true),
 }));
 vi.mock('../team/tmux-session.js', () => ({
     createTeamSession: vi.fn(),
