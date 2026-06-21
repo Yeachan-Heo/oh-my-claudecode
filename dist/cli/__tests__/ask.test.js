@@ -153,6 +153,7 @@ function writeSpawnSyncCapturePreludeNative(dir) {
         'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
         "const mode = process.env.SPAWN_CAPTURE_MODE || 'success';",
         'const calls = [];',
+        'let providerRunCount = 0;',
         'childProcess.spawnSync = (command, args = [], options = {}) => {',
         '  calls.push({',
         '    command,',
@@ -167,6 +168,14 @@ function writeSpawnSyncCapturePreludeNative(dir) {
         "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
         "  if (mode === 'empty-output' && !isVersionProbe) {",
         "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
+        '  }',
+        "  // Stateful: empty on the first provider run, real output afterwards — exercises retry-then-success.",
+        "  if (mode === 'empty-then-ok' && !isVersionProbe) {",
+        '    providerRunCount += 1;',
+        "    if (providerRunCount === 1) {",
+        "      return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
+        '    }',
+        "    return { status: 0, stdout: 'RECOVERED_AFTER_RETRY', stderr: '', pid: 0, output: [], signal: null };",
         '  }',
         '  return {',
         '    status: 0,',
@@ -727,6 +736,25 @@ describe('run-provider-advisor script contract', () => {
             expect(result.status).toBe(1);
             const stderr = `${result.stderr ?? ''}`;
             expect(stderr).toContain('no output');
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
+    it('retries an empty antigravity run and succeeds when output arrives on a later attempt (#76)', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-retry-'));
+        try {
+            const capturePath = join(wd, 'spawn-sync-calls.json');
+            const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+            const result = runAdvisorScriptWithPrelude(preludePath, ['antigravity', '--prompt', 'reply please'], wd, { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_MODE: 'empty-then-ok' });
+            // First provider run was empty → advisor retries → second run succeeds.
+            expect(result.status).toBe(0);
+            const artifact = readFileSync(result.stdout.trim(), 'utf8');
+            expect(artifact).toContain('RECOVERED_AFTER_RETRY');
+            const calls = JSON.parse(readFileSync(capturePath, 'utf8'));
+            // --version probe + 2 provider runs (1 empty, 1 recovered) = 3 agy spawns.
+            const agyRuns = calls.filter((c) => c.command === 'agy' && !c.args.includes('--version'));
+            expect(agyRuns.length).toBe(2);
         }
         finally {
             rmSync(wd, { recursive: true, force: true });

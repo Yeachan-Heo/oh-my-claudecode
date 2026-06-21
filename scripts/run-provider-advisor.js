@@ -295,28 +295,44 @@ async function main() {
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
   const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
-  const run = spawnSync(binary, providerArgs, {
+  const spawnOptions = {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
     ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
-  });
+  };
 
-  const stdout = run.stdout || '';
-  const stderr = run.stderr || '';
+  // Antigravity (#76): affected `agy --print` versions intermittently exit 0 with
+  // NO stdout/stderr when captured over a non-TTY pipe. The model response is
+  // produced but dropped on flush — it is not a timeout, so waiting longer does
+  // not help; re-issuing the request recovers it. Retry a zero-exit empty result
+  // up to `maxAttempts`, then fail loudly (below) rather than recording "(no
+  // output)" as a success. Other providers run exactly once.
+  const maxAttempts = provider === 'antigravity' ? 3 : 1;
+  let run;
+  let stdout = '';
+  let stderr = '';
+  let exitCode = 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    run = spawnSync(binary, providerArgs, spawnOptions);
+    stdout = run.stdout || '';
+    stderr = run.stderr || '';
+    exitCode = typeof run.status === 'number' ? run.status : 1;
+    const isEmpty = `${stdout}${stderr}`.trim() === '';
+    if (provider === 'antigravity' && exitCode === 0 && isEmpty && attempt < maxAttempts) {
+      console.error(`[ask-antigravity] empty output on attempt ${attempt}/${maxAttempts} (agy #76) — retrying…`);
+      continue;
+    }
+    break;
+  }
+
   const rawOutput = [stdout, stderr].filter(Boolean).join(stdout && stderr ? '\n\n' : '');
-  let exitCode = typeof run.status === 'number' ? run.status : 1;
 
-  // Antigravity (#76): affected `agy --print` versions can exit 0 with no
-  // stdout/stderr when captured over a non-TTY pipe (as spawnSync does here).
-  // Treat a zero-exit antigravity run with no output as a failure so the advisor
-  // does not record "(no output)" and silently report success. (Empirically agy
-  // 1.0.10 returns output under pipe capture; this guards the regression case
-  // and any empty/refused response.)
+  // Still empty after all retries → fail loudly instead of recording "(no output)"
+  // and reporting success.
   if (provider === 'antigravity' && exitCode === 0 && rawOutput.trim() === '') {
-    console.error('[ask-antigravity] agy exited 0 but produced no output under pipe capture.');
-    console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
+    console.error(`[ask-antigravity] agy exited 0 but produced no output after ${maxAttempts} attempts (see google-antigravity/antigravity-cli#76).`);
     console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
     exitCode = 1;
   }
