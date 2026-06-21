@@ -44,6 +44,7 @@ vi.mock('../../cli/tmux-utils.js', () => ({
 vi.mock('../model-contract.js', () => ({
     buildWorkerArgv: modelContractMocks.buildWorkerArgv,
     getWorkerEnv: modelContractMocks.getWorkerEnv,
+    assertHeadlessSupported: () => { },
 }));
 vi.mock('../team-ops.js', () => ({
     teamReadConfig: teamOpsMocks.teamReadConfig,
