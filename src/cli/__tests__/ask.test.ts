@@ -175,9 +175,9 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "  if (mode === 'empty-output' && !isVersionProbe) {",
       "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
       '  }',
-      "  // Simulate a spawnSync timeout kill (agy #76 hang): null status, SIGTERM, ETIMEDOUT.",
+      "  // Simulate a spawnSync timeout hard-kill (agy #76 hang): null status, SIGKILL, ETIMEDOUT.",
       "  if (mode === 'timeout' && !isVersionProbe) {",
-      "    return { status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
+      "    return { status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
       '  }',
       '  return {',
       '    status: 0,',
@@ -224,15 +224,17 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       "      encoding: options.encoding ?? null,",
       "      stdio: options.stdio ?? null,",
       "      input: options.input ?? null,",
+      "      timeout: options.timeout ?? null,",
+      "      killSignal: options.killSignal ?? null,",
       '    },',
       '  });',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
       "  if (mode === 'empty-output' && !isVersionProbe) {",
       "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
       '  }',
-      "  // Simulate a spawnSync timeout kill (agy #76 hang): null status, SIGTERM, ETIMEDOUT.",
+      "  // Simulate a spawnSync timeout hard-kill (agy #76 hang): null status, SIGKILL, ETIMEDOUT.",
       "  if (mode === 'timeout' && !isVersionProbe) {",
-      "    return { status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
+      "    return { status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
       '  }',
       '  return {',
       '    status: 0,',
@@ -1032,6 +1034,57 @@ describe('run-provider-advisor script contract', () => {
       expect(result.status).toBe(1);
       const stderr = `${result.stderr ?? ''}`;
       expect(stderr).toContain('timed out');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('spawns antigravity with a hard-kill timeout bound (SIGKILL) so a hung agy cannot block forever (#76)', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-killcfg-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['antigravity', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { timeout: number | null; killSignal: string | null };
+      }>;
+      const providerRun = calls.find((c) => c.command === 'agy' && !c.args.includes('--version'));
+      expect(providerRun).toBeDefined();
+      // The kill must be SIGKILL (terminal): a catchable SIGTERM would let a
+      // signal-trapping agy hang past the timeout and block spawnSync.
+      expect(providerRun!.options.killSignal).toBe('SIGKILL');
+      expect(providerRun!.options.timeout).toBe(300000);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores an invalid OMC_ANTIGRAVITY_TIMEOUT_MS override and falls back to the default bound', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-badtimeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['antigravity', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, OMC_ANTIGRAVITY_TIMEOUT_MS: '-5' },
+      );
+      expect(result.status).toBe(0);
+      expect(`${result.stderr ?? ''}`).toContain('Ignoring invalid OMC_ANTIGRAVITY_TIMEOUT_MS');
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { timeout: number | null };
+      }>;
+      const providerRun = calls.find((c) => c.command === 'agy' && !c.args.includes('--version'));
+      expect(providerRun!.options.timeout).toBe(300000);
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

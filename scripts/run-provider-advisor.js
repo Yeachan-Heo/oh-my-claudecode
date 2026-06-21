@@ -20,7 +20,24 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 // can hang indefinitely — and agy's own `--print-timeout` flag is non-functional.
 // Bound the subprocess ourselves so a hang fails cleanly instead of blocking the
 // whole `omc ask` / `/ccg` flow forever. Generous so it never trips a real answer.
-const ANTIGRAVITY_TIMEOUT_MS = Number(process.env.OMC_ANTIGRAVITY_TIMEOUT_MS) || 300000;
+// The kill MUST be SIGKILL: spawnSync does not return until the child exits, so a
+// catchable SIGTERM would let a signal-trapping agy hang past the timeout.
+const ANTIGRAVITY_TIMEOUT_DEFAULT_MS = 300000;
+const ANTIGRAVITY_TIMEOUT_KILL_SIGNAL = 'SIGKILL';
+const ANTIGRAVITY_TIMEOUT_MS = (() => {
+  const raw = process.env.OMC_ANTIGRAVITY_TIMEOUT_MS;
+  if (raw === undefined || raw === '') {
+    return ANTIGRAVITY_TIMEOUT_DEFAULT_MS;
+  }
+  const parsed = Number(raw);
+  // Require a finite, integer, >=1000ms value; clamp to <=1h. Otherwise warn and
+  // fall back to the default so a bad override can't disable or distort the bound.
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1000) {
+    console.error(`[ask-antigravity] Ignoring invalid OMC_ANTIGRAVITY_TIMEOUT_MS="${raw}" (need an integer >= 1000); using ${ANTIGRAVITY_TIMEOUT_DEFAULT_MS}ms.`);
+    return ANTIGRAVITY_TIMEOUT_DEFAULT_MS;
+  }
+  return Math.min(parsed, 3600000);
+})();
 
 /**
  * Build CLI args for a given provider.
@@ -308,8 +325,9 @@ async function main() {
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
     // Bound antigravity so an upstream non-TTY hang (#76) fails cleanly instead of
-    // blocking forever; agy's own --print-timeout does not work.
-    ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: 'SIGTERM' } : {}),
+    // blocking forever; agy's own --print-timeout does not work. SIGKILL (not a
+    // catchable SIGTERM) guarantees spawnSync returns even if agy traps signals.
+    ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: ANTIGRAVITY_TIMEOUT_KILL_SIGNAL } : {}),
     ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
   });
 
@@ -326,7 +344,7 @@ async function main() {
   // under pipe capture; this surfaces the regression/refusal cases instead of
   // masking them.) No silent success, no infinite wait — see #76 for why neither
   // a PTY wrapper nor agy's --print-timeout is a usable workaround.
-  if (provider === 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === 'SIGTERM')) {
+  if (provider === 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === ANTIGRAVITY_TIMEOUT_KILL_SIGNAL)) {
     console.error(`[ask-antigravity] agy timed out after ${ANTIGRAVITY_TIMEOUT_MS}ms with no completed response (see antigravity-cli#76).`);
     console.error('[ask-antigravity] agy headless print mode can hang on non-TTY; verify interactively with: agy -p "<prompt>"');
     exitCode = exitCode === 0 ? 1 : exitCode;
