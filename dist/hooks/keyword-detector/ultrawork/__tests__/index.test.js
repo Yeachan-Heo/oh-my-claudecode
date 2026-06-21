@@ -25,6 +25,18 @@ describe('ultrawork message routing', () => {
         expect(message).toContain('STEP 0: CLASSIFY INTENT');
         expect(message).toContain('ANTI-SKIP RULES');
     });
+    it('routes an Antigravity worker to the Antigravity variant by agent identity, even on a Gemini-family default model', () => {
+        // Antigravity's default model display name is "Gemini 3.1 Pro (High)" — by
+        // model string alone it is indistinguishable from real Gemini. Provider
+        // identity (agent name) must win so it is not shadowed as Gemini guidance.
+        expect(getUltraworkSource('antigravity', 'Gemini 3.1 Pro (High)')).toBe('antigravity');
+        expect(getUltraworkSource('agy-worker', 'Gemini 3.1 Pro (High)')).toBe('antigravity');
+        expect(getUltraworkMessage('antigravity', 'Gemini 3.1 Pro (High)')).toContain('STEP 0: CLASSIFY INTENT');
+        // Without provider identity, a plain Gemini model string honestly resolves to Gemini.
+        expect(getUltraworkSource(undefined, 'Gemini 3.1 Pro (High)')).toBe('gemini');
+        // Explicit antigravity/agy model strings still resolve to antigravity.
+        expect(getUltraworkSource(undefined, 'antigravity-default')).toBe('antigravity');
+    });
     it('falls back to the default variant and preserves concise-output guarantees', () => {
         expect(getUltraworkSource(undefined, 'claude-sonnet-4')).toBe('default');
         const message = getUltraworkMessage(undefined, 'claude-sonnet-4');

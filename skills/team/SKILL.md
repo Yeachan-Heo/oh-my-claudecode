@@ -23,7 +23,7 @@ The `swarm` compatibility alias was removed in #1131.
 ### Parameters
 
 - **N** - Number of teammate agents (1-20). Optional; defaults to auto-sizing based on task decomposition.
-- **agent-type** - OMC agent to spawn for the `team-exec` stage (e.g., executor, debugger, designer, codex, gemini, antigravity). Optional; defaults to stage-aware routing. Use `codex` to spawn Codex CLI workers, `gemini` for Gemini CLI workers (enterprise/API-key tier), or `antigravity` for Antigravity CLI (`agy`) workers (recommended Google option for free/Pro/Ultra tiers; requires respective CLIs installed). See Stage Agent Routing below.
+- **agent-type** - OMC agent to spawn for the `team-exec` stage (e.g., executor, debugger, designer, codex, gemini, antigravity). Optional; defaults to stage-aware routing. Use `codex` to spawn Codex CLI workers, `gemini` for Gemini CLI workers (enterprise/API-key tier), or `antigravity` for Antigravity CLI (`agy`) workers (Google's successor to the Gemini CLI; requires respective CLIs installed). See Stage Agent Routing below.
 - **task** - High-level task to decompose and distribute among teammates
 - **ralph** - Optional modifier. When present, wraps the team pipeline in Ralph's persistence loop (retry on failure, architect verification before completion). See Team + Ralph Composition below.
 
@@ -39,7 +39,7 @@ The `swarm` compatibility alias was removed in #1131.
 /team 2:codex "review architecture and suggest improvements"
 # With Gemini CLI workers (requires: npm install -g @google/gemini-cli)
 /team 2:gemini "redesign the UI components"
-# With Antigravity CLI workers (requires: curl -fsSL https://antigravity.google/cli/install.sh | bash)
+# With Antigravity CLI workers (requires: install per https://antigravity.google)
 /team 2:antigravity "redesign the UI components"
 # Mixed: Codex for backend analysis, Gemini/Antigravity for frontend (use /ccg instead for this)
 ```
@@ -594,7 +594,7 @@ Tasks are tagged with an execution mode during decomposition:
 | `claude_worker` | Claude agent           | Full Claude Code tool access (Read/Write/Edit/Bash/Task). Best for tasks needing Claude's reasoning + iterative tool use.                                                                  |
 | `codex_worker`  | Codex CLI (tmux pane)  | Full filesystem access in working_directory. Runs autonomously via tmux pane. Best for code review, security analysis, refactoring, architecture. Requires `npm install -g @openai/codex`. |
 | `gemini_worker`      | Gemini CLI (tmux pane)      | Full filesystem access in working_directory. Runs autonomously via tmux pane. Best for UI/design work, documentation, large-context tasks. Requires `npm install -g @google/gemini-cli` (enterprise/API-key tier). |
-| `antigravity_worker` | Antigravity CLI (tmux pane) | Full filesystem access in working_directory. Runs autonomously via tmux pane. Same strengths as gemini_worker; recommended Google option for free/Pro/Ultra tiers. Requires `curl -fsSL https://antigravity.google/cli/install.sh \| bash` (`agy` binary). |
+| `antigravity_worker` | Antigravity CLI (tmux pane) | Full filesystem access in working_directory. Runs autonomously via tmux pane. Same strengths as gemini_worker; Google's successor to the Gemini CLI. Install per the [official instructions](https://antigravity.google) (`agy` binary). |
 
 ### How CLI Workers Operate
 

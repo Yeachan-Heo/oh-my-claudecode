@@ -154,6 +154,22 @@ function buildProviderEnv(provider, env = process.env) {
   );
 }
 
+// Antigravity (`agy`) headless print mode requires the prompt as an argv value
+// (it cannot read the prompt from stdin) and has known upstream `-p`/`--print`
+// stdout issues on Windows. The stdin-pipe path that keeps codex/gemini safe on
+// Windows is therefore unavailable here, and passing a multiline/spaced prompt
+// as argv through cmd.exe (spawn `shell: true`) is not reliably quoted. Rather
+// than emit silently-broken output, guard Windows with a clear, actionable error.
+function guardProviderPlatform(provider) {
+  if (provider === 'antigravity' && SHOULD_USE_WINDOWS_SHELL) {
+    console.error('[ask-antigravity] Antigravity CLI (agy) headless mode is not supported on Windows yet:');
+    console.error('[ask-antigravity]   agy --print takes the prompt as an argv value (it cannot read stdin),');
+    console.error('[ask-antigravity]   and agy has known Windows -p/--print stdout limitations upstream.');
+    console.error('[ask-antigravity] Run `omc ask antigravity` on macOS/Linux, or use `omc ask gemini` on Windows.');
+    process.exit(1);
+  }
+}
+
 function ensureBinary(provider, binary) {
   const probe = spawnSync(binary, ['--version'], {
     stdio: 'ignore',
@@ -274,6 +290,7 @@ async function main() {
   const { provider, prompt } = parseArgs(process.argv.slice(2));
   const binary = PROVIDER_BINARIES[provider];
 
+  guardProviderPlatform(provider);
   ensureBinary(provider, binary);
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);

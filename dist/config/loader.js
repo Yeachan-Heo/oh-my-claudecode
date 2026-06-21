@@ -321,7 +321,7 @@ export function loadEnvConfig() {
     const externalModelsDefaults = {};
     if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
         const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
-        if (provider === "codex" || provider === "gemini") {
+        if (provider === "codex" || provider === "gemini" || provider === "antigravity") {
             externalModelsDefaults.provider = provider;
         }
     }
@@ -949,7 +949,7 @@ export function generateConfigSchema() {
                         additionalProperties: {
                             type: "object",
                             properties: {
-                                provider: { type: "string", enum: ["codex", "gemini"] },
+                                provider: { type: "string", enum: ["codex", "gemini", "antigravity"] },
                                 model: { type: "string" },
                             },
                             required: ["provider", "model"],
@@ -961,7 +961,7 @@ export function generateConfigSchema() {
                         additionalProperties: {
                             type: "object",
                             properties: {
-                                provider: { type: "string", enum: ["codex", "gemini"] },
+                                provider: { type: "string", enum: ["codex", "gemini", "antigravity"] },
                                 model: { type: "string" },
                             },
                             required: ["provider", "model"],

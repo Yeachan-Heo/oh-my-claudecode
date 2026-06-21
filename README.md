@@ -185,7 +185,7 @@ For mixed Codex + Gemini work in one command, use the **`/ccg`** skill (routes v
 | ------------------------------- | ----------------------------- | -------------------------------------------- |
 | `omc team N:codex "..."`        | N Codex CLI panes             | Code review, security analysis, architecture |
 | `omc team N:gemini "..."`       | N Gemini CLI panes            | UI/UX design, docs, large-context tasks (enterprise/API-key) |
-| `omc team N:antigravity "..."`  | N Antigravity (`agy`) panes   | UI/UX design, docs, large-context tasks (free/Pro/Ultra)     |
+| `omc team N:antigravity "..."`  | N Antigravity (`agy`) panes   | UI/UX design, docs, large-context tasks                      |
 | `omc team N:grok "..."`         | N Grok Build CLI panes        | Code review, analysis cross-check            |
 | `omc team N:cursor "..."`       | N Cursor agent panes          | Executor-style implementation tasks          |
 | `omc team N:claude "..."`       | N Claude CLI panes            | General tasks via Claude CLI in tmux         |
@@ -582,12 +582,12 @@ OMC can optionally orchestrate external AI providers for cross-validation and de
 
 | Provider                                                                | Install                                                      | What it enables                                                           |
 | ----------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [Antigravity CLI](https://antigravity.google) (`agy`)                   | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | Design review, UI consistency — **recommended Google option** for free/Pro/Ultra tiers |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)               | `npm install -g @google/gemini-cli`                          | Design review, UI consistency (1M token context) — enterprise/API-key tier only |
+| [Antigravity CLI](https://antigravity.google) (`agy`)                   | Install per the [official instructions](https://antigravity.google) (provides the `agy` binary) | Design review, UI consistency — Google's successor to the Gemini CLI |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli)               | `npm install -g @google/gemini-cli`                          | Design review, UI consistency (1M token context) — enterprise/API-key access unaffected |
 | [Codex CLI](https://github.com/openai/codex)                            | `npm install -g @openai/codex`                               | Architecture validation, code review cross-check                          |
 | [Grok Build](https://build.grok.com)                                    | Download from build.grok.com (`grok` at `~/.grok/bin/grok`) | Code review, analysis cross-check                                         |
 
-> **Migrating from Gemini CLI:** Google retired the free `gemini` CLI for free/AI-Pro/Ultra tiers on 2026-06-18. The successor is **Antigravity CLI** (`agy`), invoked as `agy`. Use `omc team N:antigravity` and `omc ask antigravity` wherever you previously used `gemini`. Enterprise users with an API key can continue using `gemini`. Windows headless support for `agy` is unknown/untested — report issues upstream.
+> **Migrating from Gemini CLI:** Per Google's announcement, the Gemini CLI is being superseded by the Antigravity CLI (`agy`); see the [official Antigravity docs](https://antigravity.google). Use `omc team N:antigravity` and `omc ask antigravity` wherever you previously used `gemini`. Windows headless support for `agy` is unknown/untested — report issues upstream.
 
 **Cost:** 3 Pro plans (Claude + Antigravity/Gemini + ChatGPT) cover everything for ~$60/month.
 

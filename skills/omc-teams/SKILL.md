@@ -25,7 +25,7 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 ### Parameters
 
 - **N** - Number of CLI workers (1-10)
-- **agent-type** - `claude` (Claude CLI), `codex` (OpenAI Codex CLI), `gemini` (Google Gemini CLI; enterprise/API-key tier), `antigravity` (Antigravity CLI `agy`; recommended Google option for free/Pro/Ultra tiers), `grok` (xAI Grok CLI), or `cursor` (Cursor agent CLI; executor-style tasks only)
+- **agent-type** - `claude` (Claude CLI), `codex` (OpenAI Codex CLI), `gemini` (Google Gemini CLI; enterprise/API-key tier), `antigravity` (Antigravity CLI `agy`; Google's successor to the Gemini CLI), `grok` (xAI Grok CLI), or `cursor` (Cursor agent CLI; executor-style tasks only)
 - **task** - Task description to distribute across all workers
 
 ### Examples
@@ -45,8 +45,8 @@ Spawn N CLI worker processes in tmux panes to execute tasks in parallel. Support
 - **cmux surface optional** for in-place native splits (`CMUX_SURFACE_ID` set without `$TMUX`). Plain terminals still use the detached tmux fallback.
 - **claude** CLI: install and authenticate Claude Code using the [official setup instructions](https://code.claude.com/docs/en/setup); the legacy Anthropic npm package install path is deprecated for normal user installs.
 - **codex** CLI: `npm install -g @openai/codex`
-- **gemini** CLI: `npm install -g @google/gemini-cli` (enterprise/API-key tier; retired for free/Pro/Ultra on 2026-06-18)
-- **antigravity** CLI: `curl -fsSL https://antigravity.google/cli/install.sh | bash` — verify with `agy --version`; invoked as `agy`; successor to Gemini CLI for free/Pro/Ultra tiers
+- **gemini** CLI: `npm install -g @google/gemini-cli` (enterprise/API-key tier)
+- **antigravity** CLI: Install per the [official instructions](https://antigravity.google) (provides the `agy` binary) — verify with `agy --version`; Google's successor to the Gemini CLI
 - **grok** CLI: install and authenticate the Grok CLI used by your environment
 - **cursor** CLI: install and authenticate `cursor-agent`; if unavailable, report this setup requirement instead of silently falling back to Claude-only execution
 
@@ -187,8 +187,8 @@ If encountered, switch to `omc team ...` CLI commands.
 | `cmux surface detected`      | Running inside cmux without `$TMUX` | Use the normal `omc team ...` flow; OMC will create native cmux worker splits      |
 | `Unsupported agent type`     | Requested agent is not claude/codex/gemini/antigravity/grok/cursor | Use `claude`, `codex`, `gemini`, `antigravity`, `grok`, or `cursor`; for native Claude Code agents use `/oh-my-claudecode:team` |
 | `codex: command not found`   | Codex CLI not installed             | `npm install -g @openai/codex`                                                      |
-| `gemini: command not found`  | Gemini CLI not installed            | `npm install -g @google/gemini-cli` (enterprise/API-key only; free/Pro/Ultra users should use `antigravity`) |
-| `agy: command not found`     | Antigravity CLI not installed       | `curl -fsSL https://antigravity.google/cli/install.sh \| bash`                     |
+| `gemini: command not found`  | Gemini CLI not installed            | `npm install -g @google/gemini-cli` (enterprise/API-key tier)                       |
+| `agy: command not found`     | Antigravity CLI not installed       | Install per the [official instructions](https://antigravity.google)                |
 | `Team <name> is not running` | stale or missing runtime state      | `omc team status <team-name>` then `omc team shutdown <team-name> --force` if stale |
 | `status: failed`             | Workers exited with incomplete work | inspect runtime output, narrow scope, rerun                                         |
 

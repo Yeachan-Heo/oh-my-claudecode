@@ -4092,7 +4092,7 @@ function loadEnvConfig() {
   const externalModelsDefaults = {};
   if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
-    if (provider === "codex" || provider === "gemini") {
+    if (provider === "codex" || provider === "gemini" || provider === "antigravity") {
       externalModelsDefaults.provider = provider;
     }
   }

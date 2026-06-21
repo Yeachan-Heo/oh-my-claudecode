@@ -380,7 +380,7 @@ These keywords invoke a skill and create a state file.
 | `ralph`, `don't stop`, `must complete`, `until done` | ralph | Persistent execution until verification completes |
 | `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `auto-pilot`, `full auto`, `fullsend`, `e2e this` | autopilot | Fully autonomous execution |
 | `ultrawork`, `ulw`, `uw` | ultrawork | Maximum parallel execution |
-| `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini tri-model orchestration (use `antigravity` workers for free/Pro/Ultra Google tiers) |
+| `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini tri-model orchestration (use `antigravity` workers when using the Antigravity CLI) |
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 

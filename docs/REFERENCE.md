@@ -947,7 +947,7 @@ Use these trigger phrases in natural language prompts to activate enhanced modes
 | `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Full autonomous execution                                                                     |
 | `deslop`, `anti-slop`, cleanup/refactor + slop smells                          | Anti-slop cleanup workflow (`ai-slop-cleaner`)                                                |
 | `ralph`, `don't stop`, `must complete`, `until done`                           | Persistence until verified complete                                                           |
-| `ccg`, `claude-codex-gemini`                                                   | Claude-Codex-Gemini orchestration (use `antigravity` for free/Pro/Ultra Google tiers)        |
+| `ccg`, `claude-codex-gemini`                                                   | Claude-Codex-Gemini orchestration (use `antigravity` when using the Antigravity CLI)         |
 | `ralplan`                                                                      | Iterative planning consensus with structured deliberation (`--deliberate` for high-risk mode) |
 | `deep interview`, `ouroboros`                                                  | Deep Socratic interview with mathematical clarity gating                                      |
 | `deepsearch`, `search the codebase`, `find in codebase`                        | Codebase-focused search mode                                                                  |

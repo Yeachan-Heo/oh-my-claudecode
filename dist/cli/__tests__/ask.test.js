@@ -423,7 +423,9 @@ describe('run-provider-advisor script contract', () => {
         ['claude', ['claude', '--prompt', 'nested claude prompt']],
         ['codex', ['codex', '--prompt', 'nested codex prompt']],
         ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
-        ['antigravity', ['antigravity', '--prompt', 'nested antigravity prompt']],
+        // antigravity is intentionally omitted here: this matrix runs under the win32
+        // capture prelude, and antigravity is guarded (exits early) on Windows. Its
+        // env-stripping on supported platforms is covered by the non-Windows tests.
         ['grok', ['grok', '--prompt', 'nested grok prompt']],
         ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
     ])('strips Claude session env vars for %s advisor spawns', (provider, args) => {
@@ -549,6 +551,26 @@ describe('run-provider-advisor script contract', () => {
                 args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
                 options: { shell: true, encoding: 'utf8', stdio: null, input: 'windows cmd support 你好' },
             });
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
+    it('guards antigravity on Windows with a clear error and never spawns agy', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-win32-guard-'));
+        try {
+            const capturePath = join(wd, 'spawn-sync-calls.json');
+            const preludePath = writeSpawnSyncCapturePrelude(wd); // sets process.platform = win32
+            const result = runAdvisorScriptWithPrelude(preludePath, ['antigravity', '--prompt', 'windows headless attempt'], wd, { SPAWN_CAPTURE_PATH: capturePath });
+            // Guard exits non-zero before any spawnSync, so agy is never launched.
+            expect(result.status).toBe(1);
+            const stderr = `${result.stderr ?? ''}`;
+            expect(stderr).toContain('not supported on Windows');
+            // The capture prelude writes the (empty) call list on exit; assert no agy spawn.
+            if (existsSync(capturePath)) {
+                const calls = JSON.parse(readFileSync(capturePath, 'utf8'));
+                expect(calls.some((c) => c.command === 'agy')).toBe(false);
+            }
         }
         finally {
             rmSync(wd, { recursive: true, force: true });

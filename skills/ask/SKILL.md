@@ -47,11 +47,11 @@ grok --version
 cursor-agent --version
 ```
 
-- **Antigravity CLI install** (recommended Google option for free/Pro/Ultra tiers; Gemini CLI was retired 2026-06-18):
-  ```bash
-  curl -fsSL https://antigravity.google/cli/install.sh | bash
-  ```
-- **Gemini CLI** remains supported for enterprise use cases.
+- **Antigravity CLI install** (Google's successor to the Gemini CLI; see the [official Antigravity docs](https://antigravity.google)):
+  Per Google's official docs: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+  Verify: `agy --version`
+  > **Platform note:** `omc ask antigravity` is supported on macOS/Linux. On Windows it is guarded with a clear error, because `agy --print` takes the prompt as an argv value (it cannot read stdin) and has known upstream Windows `-p` limitations; use `omc ask gemini` on Windows.
+- **Gemini CLI** remains supported for enterprise/API-key use cases.
 
 ## Artifacts
 

@@ -145,8 +145,8 @@ Use AskUserQuestion with multiple questions:
 **Options:**
 1. **claude (Recommended)** - Default provider with the widest compatibility
 2. **codex** - Use Codex CLI workers by default when installed
-3. **gemini** - Use Gemini CLI workers by default when installed (enterprise/API-key tier; retired for free/Pro/Ultra on 2026-06-18)
-4. **antigravity** - Use Antigravity CLI (`agy`) workers by default when installed; recommended Google option for free/Pro/Ultra tiers (`curl -fsSL https://antigravity.google/cli/install.sh | bash`)
+3. **gemini** - Use Gemini CLI workers by default when installed (enterprise/API-key tier)
+4. **antigravity** - Use Antigravity CLI (`agy`) workers by default when installed; Google's successor to the Gemini CLI (install per the [official instructions](https://antigravity.google))
 
 Store the team configuration in `~/.claude/.omc-config.json`:
 

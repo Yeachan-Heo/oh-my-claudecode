@@ -4078,7 +4078,7 @@ function loadEnvConfig() {
   const externalModelsDefaults = {};
   if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER) {
     const provider = process.env.OMC_EXTERNAL_MODELS_DEFAULT_PROVIDER;
-    if (provider === "codex" || provider === "gemini") {
+    if (provider === "codex" || provider === "gemini" || provider === "antigravity") {
       externalModelsDefaults.provider = provider;
     }
   }
@@ -8405,9 +8405,19 @@ function isAntigravityModel(modelId) {
   const normalized = normalizeToken(modelId);
   return normalized.includes("antigravity") || normalized.includes("agy");
 }
+function isAntigravityAgent(agentName) {
+  const normalized = normalizeToken(agentName).replace(/[_-]+/g, " ");
+  if (!normalized) {
+    return false;
+  }
+  return /\b(antigravity|agy)\b/.test(normalized);
+}
 function getUltraworkSource(agentName, modelId) {
   if (isPlannerAgent(agentName)) {
     return "planner";
+  }
+  if (isAntigravityAgent(agentName)) {
+    return "antigravity";
   }
   if (isGptModel(modelId)) {
     return "gpt";

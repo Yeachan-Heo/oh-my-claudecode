@@ -20,12 +20,10 @@ Use this when you want parallel external perspectives without launching tmux tea
 ## Requirements
 
 - **Codex CLI**: `npm install -g @openai/codex` (or `@openai/codex`)
-- **Antigravity CLI** (recommended Google option for free/Pro/Ultra tiers; Gemini CLI was retired 2026-06-18):
-  ```bash
-  curl -fsSL https://antigravity.google/cli/install.sh | bash
-  ```
+- **Antigravity CLI** (Google's successor to the Gemini CLI; see the [official Antigravity docs](https://antigravity.google)):
+  Per Google's official docs: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
   Verify: `agy --version`
-- **Gemini CLI** remains supported for enterprise use cases: `npm install -g @google/gemini-cli`
+- **Gemini CLI** remains supported for enterprise/API-key use cases: `npm install -g @google/gemini-cli`
 - `omc ask` command available
 - If either CLI is unavailable, continue with whichever provider is available and note the limitation
 
@@ -61,7 +59,7 @@ Split the user request into:
 
 > **Note:** Skill nesting (invoking a skill from within an active skill) is not supported in Claude Code. Always use the direct CLI path via Bash tool.
 
-Run both advisors (prefer antigravity for consumer tiers; use gemini for enterprise):
+Run both advisors (use antigravity or gemini depending on your setup):
 
 ```bash
 omc ask codex "<codex prompt>"
