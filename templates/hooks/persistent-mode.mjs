@@ -942,6 +942,18 @@ async function main() {
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
         const phase = autopilot.state.phase || "unspecified";
+        // Circuit breaker: a healthy autopilot always carries a real phase. A
+        // state still stuck in "unspecified" after several reinforcements is an
+        // orphaned / never-initialized run; self-deactivate instead of looping.
+        if (phase === "unspecified" && (autopilot.state.reinforcement_count || 0) >= 3) {
+          autopilot.state.active = false;
+          autopilot.state.phase = "complete";
+          autopilot.state.cleanup_reason = "auto-deactivated: stuck in unspecified phase";
+          autopilot.state.last_checked_at = new Date().toISOString();
+          try { writeJsonFile(autopilot.path, autopilot.state); } catch {}
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
         if (phase !== "complete") {
           const newCount = (autopilot.state.reinforcement_count || 0) + 1;
           if (newCount <= 20) {

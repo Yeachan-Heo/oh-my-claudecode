@@ -80,6 +80,37 @@ function shouldSuppressFilesystemScanPermissionNoise(toolName, toolInput, error)
   return nonNoiseLines.length === 0;
 }
 
+// Suppress benign, non-actionable command outcomes that should never be
+// amplified into "[TOOL ERROR - RETRY REQUIRED]" by the Stop hook:
+//   - intentional process termination (pkill/kill)
+//   - git "not a repository" probes (e.g. `git -C / rev-parse`)
+//   - search/probe misses where a path simply does not exist
+// These are normal control-flow exits, not failures the agent must retry.
+function shouldSuppressBenignToolOutcome(toolName, toolInput, error) {
+  if (String(toolName || '').toLowerCase() !== 'bash') {
+    return false;
+  }
+  const command = getToolInputCommand(toolInput).trim();
+  const err = String(error || '');
+
+  if (/\b(?:pkill|kill)\b/.test(command)) {
+    return true;
+  }
+
+  if (/\bgit\b/.test(command) && /not a git repository/i.test(err)) {
+    return true;
+  }
+
+  if (
+    /\b(?:grep|rg|ugrep|find|ls|cat|stat|test)\b/.test(command) &&
+    /no such file or directory/i.test(err)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 // Validate that targetPath is contained within basePath (prevent path traversal)
 function isPathContained(targetPath, basePath) {
   const normalizedTarget = resolve(targetPath);
@@ -215,6 +246,11 @@ async function main() {
     }
 
     if (shouldSuppressFilesystemScanPermissionNoise(toolName, toolInput, error)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    if (shouldSuppressBenignToolOutcome(toolName, toolInput, error)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
