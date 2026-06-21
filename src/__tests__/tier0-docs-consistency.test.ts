@@ -68,7 +68,7 @@ describe('Tier-0 contract docs consistency', () => {
     expect(claudeDoc).toContain('use AskUserQuestion instead of ending with a prose question');
     expect(claudeDoc).toContain('git status --short --branch');
     expect(claudeDoc).toContain('`.omc/state/` or `.omc/handoffs/`');
-    expect(claudeDoc).toContain('TODO/FIXME/HACK placeholders');
+    expect(claudeDoc).toContain('TODO-style placeholder notes');
     expect(claudeDoc).toContain('`test.skip`/`.only`, stub tests');
   });
 
