@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
-import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel } from './model-contract.js';
+import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane, splitTeamWorkerPane, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
@@ -515,6 +515,14 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     const task = runtime.config.tasks[taskIndex];
     if (!task)
         return '';
+    const workerIndex = parseWorkerIndex(workerNameValue);
+    const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length]
+        ?? runtime.config.agentTypes[0]
+        ?? 'claude';
+    // Guard headless-unsupported providers (e.g. antigravity on Windows) BEFORE any
+    // task-state mutation or pane split, so legacy v1 startup rejects cleanly instead
+    // of leaving a task stuck `in_progress` with a stray pane (parity with v2/scale-up).
+    assertHeadlessSupported(agentType);
     const marked = await markTaskInProgress(root, taskId, workerNameValue, runtime.teamName, runtime.cwd);
     if (!marked)
         return '';
@@ -532,10 +540,6 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
         }
         return '';
     }
-    const workerIndex = parseWorkerIndex(workerNameValue);
-    const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length]
-        ?? runtime.config.agentTypes[0]
-        ?? 'claude';
     const usePromptMode = isPromptModeAgent(agentType);
     // Build the initial task instruction and write inbox before spawn.
     // For prompt-mode agents the instruction is passed via CLI flag;
