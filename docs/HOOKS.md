@@ -1,10 +1,10 @@
 # Hooks System
 
-> OMC's 20 hooks intercept Claude Code lifecycle events to enable magic keywords, context injection, and quality enforcement.
+> OMC's 21 hooks intercept Claude Code lifecycle events to enable magic keywords, context injection, and quality enforcement.
 
 ## What Are Hooks?
 
-Hooks are scripts that execute automatically in response to Claude Code lifecycle events. oh-my-claudecode extends Claude Code's default behavior with 20 hooks.
+Hooks are scripts that execute automatically in response to Claude Code lifecycle events. oh-my-claudecode extends Claude Code's default behavior with 21 hooks.
 
 When a user submits a prompt, a tool runs, or a session starts/ends, hooks fire automatically to inject additional context, activate modes, and manage state.
 
@@ -68,6 +68,7 @@ Handle code quality, permissions, and subagent tracking.
 | permission-handler | Handles permission requests and validation |
 | subagent-tracker | Tracks subagent spawn and completion |
 | code-simplifier | Auto-simplifies recently modified files on Stop (opt-in) |
+| workflow-drift-guard | Blocks only deterministic Stop-hook workflow drift: structured-question drift and fake completion with changed-code TODO/stub/skipped-test blockers |
 
 ## Disabling Hooks
 
@@ -193,6 +194,7 @@ Fires when Claude finishes a response.
 | Script | Role | Timeout |
 |--------|------|---------|
 | `context-guard-stop.mjs` | Monitors context usage | 5s |
+| `workflow-drift-guard.mjs` | Blocks narrow structured-question and fake-completion drift | 3s |
 | `persistent-mode.cjs` | Maintains active mode state (ralph, ultrawork, etc.) | 10s |
 | `code-simplifier.mjs` | Auto-simplifies modified files (opt-in) | 5s |
 
@@ -224,6 +226,17 @@ Detects magic keywords in user prompts and invokes the corresponding skill.
 - **Safety**: Disabled inside team workers to prevent infinite spawning
 
 See the [Magic Keywords](#magic-keywords) section for the full keyword list.
+
+
+#### workflow-drift-guard
+
+Blocks only deterministic recurring workflow drift at the Claude Code `Stop` lifecycle point. The boundary follows the official Claude Code [hooks reference](https://code.claude.com/docs/en/hooks): Stop hooks receive `last_assistant_message`, may return `decision: "block"` with a `reason`, and must account for `stop_hook_active` to avoid self-reinforcing loops. Plugin/Hookify installs follow the official Claude Code [plugins reference](https://code.claude.com/docs/en/plugins-reference): plugin hooks can live in `hooks/hooks.json` at the plugin root and respond to the same lifecycle events as user hooks.
+
+- **Event**: Stop
+- **Behavior**: Blocks when the final assistant message ends with a narrow preference/approval question that should be asked via structured `AskUserQuestion`; the reason tells Claude to use 2-4 options and keep `allowOther` enabled unless free-form input is unsafe.
+- **Fake completion guard**: Blocks only when the final assistant message claims completion and changed code adds deterministic blockers (`test.skip`/`.only`, placeholder TODOs, unimplemented throws, placeholder returns, or explicit stub/placeholder implementations).
+- **Allowed cases**: Free-form/`Other` question wording is allowed; TODO/stub markers are allowed while the assistant is not claiming completion; `stop_hook_active` fails open to avoid hook loops.
+- **Minimal safe boundary**: Worktree/session continuity remains SessionStart guidance plus existing mode-state restoration because a generic Stop hook cannot safely infer that the assistant is in the wrong branch or has lost context without overblocking valid work.
 
 #### persistent-mode
 

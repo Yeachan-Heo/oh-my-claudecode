@@ -868,7 +868,7 @@ Key contract points:
 
 ## Hooks System
 
-OMC registers 20 hook scripts across 11 Claude Code lifecycle events. For detailed documentation, see [HOOKS.md](./HOOKS.md).
+OMC registers 21 hook scripts across 11 Claude Code lifecycle events. For detailed documentation, see [HOOKS.md](./HOOKS.md).
 
 ### Hooks by Lifecycle Event
 
@@ -883,7 +883,7 @@ OMC registers 20 hook scripts across 11 Claude Code lifecycle events. For detail
 | **SubagentStart**      | `subagent-tracker.mjs start`                                                                                      | 3s               |
 | **SubagentStop**       | `subagent-tracker.mjs stop`, `verify-deliverables.mjs`                                                            | 5s, 5s           |
 | **PreCompact**         | `pre-compact.mjs`, `project-memory-precompact.mjs`                                                                | 10s, 5s          |
-| **Stop**               | `context-guard-stop.mjs`, `persistent-mode.cjs`, `code-simplifier.mjs`                                            | 5s, 10s, 5s      |
+| **Stop**               | `context-guard-stop.mjs`, `workflow-drift-guard.mjs`, `persistent-mode.cjs`, `code-simplifier.mjs`                | 5s, 3s, 10s, 5s  |
 | **SessionEnd**         | `session-end.mjs`                                                                                                 | 30s              |
 
 > **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (activated via keyword-detector), not hooks. The `persistent-mode.cjs` hook enforces their continuation by blocking the Stop event.
