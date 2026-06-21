@@ -15,6 +15,13 @@ const PROVIDER_BINARIES = {
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
+// Antigravity (`agy`) headless print mode has a known upstream non-TTY bug
+// (google-antigravity/antigravity-cli#76) that, beyond the empty-exit-0 case,
+// can hang indefinitely — and agy's own `--print-timeout` flag is non-functional.
+// Bound the subprocess ourselves so a hang fails cleanly instead of blocking the
+// whole `omc ask` / `/ccg` flow forever. Generous so it never trips a real answer.
+const ANTIGRAVITY_TIMEOUT_MS = Number(process.env.OMC_ANTIGRAVITY_TIMEOUT_MS) || 300000;
+
 /**
  * Build CLI args for a given provider.
  * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
@@ -295,44 +302,37 @@ async function main() {
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
   const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
-  const spawnOptions = {
+  const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
+    // Bound antigravity so an upstream non-TTY hang (#76) fails cleanly instead of
+    // blocking forever; agy's own --print-timeout does not work.
+    ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: 'SIGTERM' } : {}),
     ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
-  };
+  });
 
-  // Antigravity (#76): affected `agy --print` versions intermittently exit 0 with
-  // NO stdout/stderr when captured over a non-TTY pipe. The model response is
-  // produced but dropped on flush — it is not a timeout, so waiting longer does
-  // not help; re-issuing the request recovers it. Retry a zero-exit empty result
-  // up to `maxAttempts`, then fail loudly (below) rather than recording "(no
-  // output)" as a success. Other providers run exactly once.
-  const maxAttempts = provider === 'antigravity' ? 3 : 1;
-  let run;
-  let stdout = '';
-  let stderr = '';
-  let exitCode = 1;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    run = spawnSync(binary, providerArgs, spawnOptions);
-    stdout = run.stdout || '';
-    stderr = run.stderr || '';
-    exitCode = typeof run.status === 'number' ? run.status : 1;
-    const isEmpty = `${stdout}${stderr}`.trim() === '';
-    if (provider === 'antigravity' && exitCode === 0 && isEmpty && attempt < maxAttempts) {
-      console.error(`[ask-antigravity] empty output on attempt ${attempt}/${maxAttempts} (agy #76) — retrying…`);
-      continue;
-    }
-    break;
-  }
-
+  const stdout = run.stdout || '';
+  const stderr = run.stderr || '';
   const rawOutput = [stdout, stderr].filter(Boolean).join(stdout && stderr ? '\n\n' : '');
+  let exitCode = typeof run.status === 'number' ? run.status : 1;
 
-  // Still empty after all retries → fail loudly instead of recording "(no output)"
-  // and reporting success.
-  if (provider === 'antigravity' && exitCode === 0 && rawOutput.trim() === '') {
-    console.error(`[ask-antigravity] agy exited 0 but produced no output after ${maxAttempts} attempts (see google-antigravity/antigravity-cli#76).`);
+  // Antigravity (#76): the headless non-TTY bug surfaces two ways — a clean
+  // zero-exit with NO output (output dropped on flush), or an indefinite hang.
+  // The timeout above turns a hang into a killed/non-zero run; here we also turn
+  // a zero-exit empty result into a failure, so the advisor never records
+  // "(no output)" and reports success. (Empirically agy 1.0.10 returns output
+  // under pipe capture; this surfaces the regression/refusal cases instead of
+  // masking them.) No silent success, no infinite wait — see #76 for why neither
+  // a PTY wrapper nor agy's --print-timeout is a usable workaround.
+  if (provider === 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === 'SIGTERM')) {
+    console.error(`[ask-antigravity] agy timed out after ${ANTIGRAVITY_TIMEOUT_MS}ms with no completed response (see antigravity-cli#76).`);
+    console.error('[ask-antigravity] agy headless print mode can hang on non-TTY; verify interactively with: agy -p "<prompt>"');
+    exitCode = exitCode === 0 ? 1 : exitCode;
+  } else if (provider === 'antigravity' && exitCode === 0 && rawOutput.trim() === '') {
+    console.error('[ask-antigravity] agy exited 0 but produced no output under pipe capture.');
+    console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
     console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
     exitCode = 1;
   }
