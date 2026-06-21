@@ -135,6 +135,29 @@ This resolves to `~/.claude/omc/{project-identifier}/` where the project identif
 
 If both a legacy `{worktree}/.omc/` directory and a centralized directory exist, OMC logs a notice and uses the centralized directory. You can then migrate data from the legacy directory and remove it.
 
+#### OMC state, gitignore, worktree, and workspace contract
+
+OMC's project-local state root is `.omc/` unless `OMC_STATE_DIR` or `.omc-workspace` changes the root resolution described below. The default root contains runtime and audit artifacts such as:
+
+- `.omc/state/` and `.omc/state/sessions/{sessionId}/` — mode state, session-scoped state, replay markers, and recovery metadata.
+- `.omc/notepad.md` and `.omc/project-memory.json` — local session notes and project memory.
+- `.omc/plans/`, `.omc/research/`, `.omc/logs/`, `.omc/artifacts/`, `.omc/handoffs/`, and `.omc/ultragoal/` — generated plans, research outputs, logs, advisor artifacts, team handoffs, and ultragoal ledgers.
+- `.omc/team/` — opt-in native team worker worktrees when team worktree mode creates them.
+- `.omc/skills/` — the only project-local `.omc` subtree intended to be committed when the team wants to share OMC-authored skills.
+
+Git handling is intentionally conservative. The repository `.gitignore` keeps `.omc/` itself visible, ignores `.omc/*`, and then re-includes `.omc/skills/` plus `.omc/skills/**`. That means generated state stays untracked by default, while project skills can be reviewed and committed explicitly. Do not force-add runtime `.omc` files unless you are deliberately attaching a sanitized artifact to an issue or test fixture; runtime state can include prompts, transcripts, absolute paths, machine identifiers, and workflow history.
+
+Worktree behavior follows the resolved state root:
+
+- **Default single repo / monorepo**: `getOmcRoot()` uses the git toplevel, so every package below one git root shares `{repo}/.omc/`.
+- **Linked git worktrees**: without `OMC_STATE_DIR`, each linked worktree has its own `{worktree}/.omc/`; removing that worktree removes its local OMC state. Re-run setup from the worktree you are actively using so installed hooks and generated instructions match that checkout.
+- **Persistent state across worktree deletion**: set `OMC_STATE_DIR`; OMC writes to `$OMC_STATE_DIR/{project-id}/`, where the project id is stable across linked worktrees when a remote or primary git dir is available.
+- **Multi-repo workspace**: add `.omc-workspace` to a non-git parent when independent sibling repos should share `{parent}/.omc/`. This is for multi-repo workspaces, not ordinary monorepos.
+
+Plan persistence follows the same rule. Default generated plans under `.omc/plans/` are local operational artifacts and are ignored. If a plan should become durable project documentation, move it to a tracked docs path or configure `planOutput.directory` to a reviewed directory such as `docs/plans`; keep machine-local session state in `.omc/`.
+
+Cleanup rule of thumb: after OMC sessions are stopped, it is safe to delete ignored runtime subtrees such as `.omc/state/`, `.omc/logs/`, `.omc/artifacts/`, `.omc/research/`, or `.omc/ultragoal/` if you no longer need their recovery/audit history. Do not delete `.omc/skills/` unless you intend to remove project-scoped skills.
+
 #### Multi-repo workspaces with `.omc-workspace`
 
 When you have several independent git repos under one parent directory and the parent itself is **not** a git repo, OMC cannot infer a shared root via `git rev-parse --show-toplevel`. Each sub-repo would get its own isolated `.omc/`. To anchor a single `.omc/` at the parent, drop a `.omc-workspace` marker file there:
