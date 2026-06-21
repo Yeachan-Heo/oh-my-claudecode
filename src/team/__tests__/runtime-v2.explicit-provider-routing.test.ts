@@ -9,7 +9,7 @@ const binaries: Partial<Record<CliAgentType, string>> = {
   claude: '/usr/bin/claude',
   gemini: '/usr/bin/gemini',
   codex: '/usr/bin/codex',
-  agy: '/usr/bin/agy',
+  antigravity: '/usr/bin/agy',
 };
 
 describe('runtime-v2 explicit provider + role preservation', () => {

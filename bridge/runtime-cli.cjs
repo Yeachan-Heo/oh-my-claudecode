@@ -8277,6 +8277,9 @@ function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolve
     }
     return { agentType: fallbackAgent, model: "", role: canonical };
   }
+  if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== "claude") {
+    return { agentType: fallbackAgent, model: "", role: canonical };
+  }
   const pair = resolvedRouting[canonical];
   if (!pair) {
     return { agentType: fallbackAgent, model: "", role: canonical };
