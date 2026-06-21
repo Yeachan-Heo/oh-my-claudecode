@@ -50,6 +50,14 @@ describe('Tier-0 contract docs consistency', () => {
         expect(claudeDoc).toContain('Team orchestration is explicit via `/team`.');
         expect(referenceDoc).not.toContain('| `team`, `coordinated team`');
     });
+    it('keeps issue #3316 failure-mode guardrails in the installed CLAUDE.md template', () => {
+        expect(claudeDoc).toContain('<failure_mode_guards>');
+        expect(claudeDoc).toContain('use AskUserQuestion instead of ending with a prose question');
+        expect(claudeDoc).toContain('git status --short --branch');
+        expect(claudeDoc).toContain('`.omc/state/` or `.omc/handoffs/`');
+        expect(claudeDoc).toContain('TODO/FIXME/HACK placeholders');
+        expect(claudeDoc).toContain('`test.skip`/`.only`, stub tests');
+    });
     it('keeps install and update guidance aligned on canonical setup entrypoints', () => {
         const localPluginDoc = readProjectFile('docs', 'LOCAL_PLUGIN_INSTALL.md');
         expect(claudeDoc).toContain('Say "setup omc" or run `/oh-my-claudecode:omc-setup`.');
