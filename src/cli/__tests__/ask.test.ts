@@ -172,6 +172,9 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "    return { status: 1, stdout: '', stderr: \"'\" + command + \"' is not recognized\", pid: 0, output: [], signal: null };",
       '  }',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
+      "  if (mode === 'empty-output' && !isVersionProbe) {",
+      "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
+      '  }',
       '  return {',
       '    status: 0,',
       "    stdout: isVersionProbe ? 'fake 1.0.0\\n' : 'FAKE_PROVIDER_OK',",
@@ -206,6 +209,7 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       '',
       '// No platform override — tests native (non-Windows) behavior',
       'const capturePath = process.env.SPAWN_CAPTURE_PATH;',
+      "const mode = process.env.SPAWN_CAPTURE_MODE || 'success';",
       'const calls = [];',
       'childProcess.spawnSync = (command, args = [], options = {}) => {',
       '  calls.push({',
@@ -219,6 +223,9 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       '    },',
       '  });',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
+      "  if (mode === 'empty-output' && !isVersionProbe) {",
+      "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
+      '  }',
       '  return {',
       '    status: 0,',
       "    stdout: isVersionProbe ? 'fake 1.0.0\\n' : 'FAKE_PROVIDER_OK',",
@@ -975,6 +982,27 @@ describe('run-provider-advisor script contract', () => {
         options: { input: null },
       });
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an empty-output antigravity run (exit 0, no stdout) as a failure (#76)', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-empty-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['antigravity', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_MODE: 'empty-output' },
+      );
+
+      // agy exited 0 with no output → advisor must fail rather than silently succeed.
+      expect(result.status).toBe(1);
+      const stderr = `${result.stderr ?? ''}`;
+      expect(stderr).toContain('no output');
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }

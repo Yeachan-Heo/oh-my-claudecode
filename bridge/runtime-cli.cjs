@@ -5006,6 +5006,7 @@ async function startTeam(config) {
   validateTeamName(teamName);
   const resolvedBinaryPaths = {};
   for (const agentType of [...new Set(agentTypes)]) {
+    assertHeadlessSupported(agentType);
     resolvedBinaryPaths[agentType] = resolveValidatedBinaryPath(agentType);
   }
   const root = stateRoot(cwd, teamName);

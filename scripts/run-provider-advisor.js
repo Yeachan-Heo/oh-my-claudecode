@@ -306,7 +306,20 @@ async function main() {
   const stdout = run.stdout || '';
   const stderr = run.stderr || '';
   const rawOutput = [stdout, stderr].filter(Boolean).join(stdout && stderr ? '\n\n' : '');
-  const exitCode = typeof run.status === 'number' ? run.status : 1;
+  let exitCode = typeof run.status === 'number' ? run.status : 1;
+
+  // Antigravity (#76): affected `agy --print` versions can exit 0 with no
+  // stdout/stderr when captured over a non-TTY pipe (as spawnSync does here).
+  // Treat a zero-exit antigravity run with no output as a failure so the advisor
+  // does not record "(no output)" and silently report success. (Empirically agy
+  // 1.0.10 returns output under pipe capture; this guards the regression case
+  // and any empty/refused response.)
+  if (provider === 'antigravity' && exitCode === 0 && rawOutput.trim() === '') {
+    console.error('[ask-antigravity] agy exited 0 but produced no output under pipe capture.');
+    console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
+    console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
+    exitCode = 1;
+  }
 
   const artifactPath = await writeArtifact({
     provider,

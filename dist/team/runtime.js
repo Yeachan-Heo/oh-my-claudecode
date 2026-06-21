@@ -224,8 +224,13 @@ export async function startTeam(config) {
     const { teamName, agentTypes, tasks, cwd } = config;
     validateTeamName(teamName);
     // Validate CLIs once and pin absolute binary paths for consistent spawn behavior.
+    // Reject headless-unsupported providers (e.g. antigravity on Windows) here in
+    // preflight — BEFORE writing any team state or creating the tmux session — so an
+    // unsupported provider can never leave stale `.omc/state/team` files or a leader
+    // session behind. (spawnWorkerForTask keeps its own guard for the watchdog path.)
     const resolvedBinaryPaths = {};
     for (const agentType of [...new Set(agentTypes)]) {
+        assertHeadlessSupported(agentType);
         resolvedBinaryPaths[agentType] = resolveValidatedBinaryPath(agentType);
     }
     const root = stateRoot(cwd, teamName);
