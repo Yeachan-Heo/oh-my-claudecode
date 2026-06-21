@@ -8382,6 +8382,7 @@ function shouldUseLaunchTimeCliResolution(reason) {
   return /untrusted location|relative path/i.test(reason);
 }
 function resolvePreflightBinaryPath(agentType) {
+  assertHeadlessSupported(agentType);
   try {
     return { path: resolveValidatedBinaryPath(agentType), degraded: false };
   } catch (err) {

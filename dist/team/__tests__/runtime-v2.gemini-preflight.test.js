@@ -45,6 +45,8 @@ vi.mock('../model-contract.js', () => ({
     isPromptModeAgent: modelContractMocks.isPromptModeAgent,
     getPromptModeArgs: modelContractMocks.getPromptModeArgs,
     resolveClaudeWorkerModel: modelContractMocks.resolveClaudeWorkerModel,
+    // gemini is supported on all platforms, so the preflight headless guard is a no-op here.
+    assertHeadlessSupported: () => { },
 }));
 vi.mock('../mcp-comm.js', () => ({
     queueInboxInstruction: mocks.queueInboxInstruction,

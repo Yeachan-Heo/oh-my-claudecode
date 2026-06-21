@@ -60,7 +60,7 @@ import type { CliAgentType } from './model-contract.js';
 import {
   buildWorkerArgv, getContract, resolveValidatedBinaryPath,
   getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs,
-  resolveClaudeWorkerModel,
+  resolveClaudeWorkerModel, assertHeadlessSupported,
 } from './model-contract.js';
 import {
   createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession,
@@ -359,6 +359,11 @@ function shouldUseLaunchTimeCliResolution(reason: string): boolean {
 }
 
 function resolvePreflightBinaryPath(agentType: CliAgentType): { path: string; degraded: boolean; reason?: string } {
+  // Treat a platform-unsupported headless provider (e.g. antigravity on Windows)
+  // as unavailable during preflight, so role routing falls back cleanly to Claude
+  // instead of recording the binary and failing mid-spawn. Throws here are caught
+  // by startTeamV2's preflight loop and recorded as missingBinaryReasons.
+  assertHeadlessSupported(agentType);
   try {
     return { path: resolveValidatedBinaryPath(agentType), degraded: false };
   } catch (err) {
