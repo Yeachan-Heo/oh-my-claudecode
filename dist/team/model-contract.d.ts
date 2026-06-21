@@ -92,6 +92,16 @@ export declare function resolveClaudeWorkerModel(env?: NodeJS.ProcessEnv): strin
  * Get the extra CLI args needed to pass an instruction in prompt mode.
  * Returns empty array if the agent does not support prompt mode.
  */
+/**
+ * Whether a CLI agent's headless/prompt mode is supported on the given platform.
+ * Antigravity (`agy`) `-p`/`--print` takes the prompt as an argv value and cannot
+ * read it from stdin; on Windows that argv path is unreliable and `agy` has known
+ * upstream Windows `-p` limitations. This centralizes the same platform support
+ * decision the advisor (`scripts/run-provider-advisor.js`) enforces for `omc ask`.
+ */
+export declare function isHeadlessSupportedOnPlatform(agentType: CliAgentType, platform?: NodeJS.Platform): boolean;
+/** Throw a clear, actionable error if the agent's headless mode is unsupported here. */
+export declare function assertHeadlessSupported(agentType: CliAgentType): void;
 export declare function getPromptModeArgs(agentType: CliAgentType, instruction: string): string[];
 export {};
 //# sourceMappingURL=model-contract.d.ts.map

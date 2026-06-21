@@ -269,7 +269,7 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
   antigravity: {
     agentType: 'antigravity',
     binary: 'agy',
-    installInstructions: 'Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    installInstructions: 'Install the Antigravity CLI (agy) per the official instructions at https://antigravity.google, then verify with `agy --version`.',
     supportsPromptMode: true,
     promptModeFlag: '-p',
     buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
@@ -369,6 +369,10 @@ export function isCliAvailable(agentType: CliAgentType): boolean {
 }
 
 export function validateCliAvailable(agentType: CliAgentType): void {
+  // Platform support first: a clear "unsupported on this OS" error is more useful
+  // than a binary-not-found message when the binary exists but headless mode is
+  // unsupported here (e.g. antigravity on Windows).
+  assertHeadlessSupported(agentType);
   if (!isCliAvailable(agentType)) {
     const contract = getContract(agentType);
     throw new Error(
@@ -523,11 +527,44 @@ export function resolveClaudeWorkerModel(
  * Get the extra CLI args needed to pass an instruction in prompt mode.
  * Returns empty array if the agent does not support prompt mode.
  */
+/**
+ * Whether a CLI agent's headless/prompt mode is supported on the given platform.
+ * Antigravity (`agy`) `-p`/`--print` takes the prompt as an argv value and cannot
+ * read it from stdin; on Windows that argv path is unreliable and `agy` has known
+ * upstream Windows `-p` limitations. This centralizes the same platform support
+ * decision the advisor (`scripts/run-provider-advisor.js`) enforces for `omc ask`.
+ */
+export function isHeadlessSupportedOnPlatform(
+  agentType: CliAgentType,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (agentType === 'antigravity' && platform === 'win32') {
+    return false;
+  }
+  return true;
+}
+
+/** Throw a clear, actionable error if the agent's headless mode is unsupported here. */
+export function assertHeadlessSupported(agentType: CliAgentType): void {
+  if (!isHeadlessSupportedOnPlatform(agentType)) {
+    throw new Error(
+      `CLI agent '${agentType}' headless/prompt mode is not supported on Windows: ` +
+      `\`agy --print\` takes the prompt as an argv value (it cannot read stdin) and has ` +
+      `known upstream Windows \`-p\` limitations. Run '${agentType}' team workers on ` +
+      `macOS/Linux, or use the 'gemini' provider on Windows.`,
+    );
+  }
+}
+
 export function getPromptModeArgs(agentType: CliAgentType, instruction: string): string[] {
   const contract = getContract(agentType);
   if (!contract.supportsPromptMode) {
     return [];
   }
+  // Centralized platform guard: refuse unsupported headless paths (e.g. antigravity
+  // on Windows) before building `-p <prompt>`, so the team path fails clearly here
+  // instead of attempting an unreliable argv spawn that fails/hangs opaquely.
+  assertHeadlessSupported(agentType);
   // If a flag is defined (e.g. gemini's '-p'), prepend it; otherwise the
   // instruction is passed as a positional argument (e.g. codex [PROMPT]).
   if (contract.promptModeFlag) {

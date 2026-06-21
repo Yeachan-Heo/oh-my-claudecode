@@ -5221,11 +5221,25 @@ function resolveClaudeWorkerModel(env = process.env) {
   }
   return void 0;
 }
+function isHeadlessSupportedOnPlatform(agentType, platform = process.platform) {
+  if (agentType === "antigravity" && platform === "win32") {
+    return false;
+  }
+  return true;
+}
+function assertHeadlessSupported(agentType) {
+  if (!isHeadlessSupportedOnPlatform(agentType)) {
+    throw new Error(
+      `CLI agent '${agentType}' headless/prompt mode is not supported on Windows: \`agy --print\` takes the prompt as an argv value (it cannot read stdin) and has known upstream Windows \`-p\` limitations. Run '${agentType}' team workers on macOS/Linux, or use the 'gemini' provider on Windows.`
+    );
+  }
+}
 function getPromptModeArgs(agentType, instruction) {
   const contract = getContract(agentType);
   if (!contract.supportsPromptMode) {
     return [];
   }
+  assertHeadlessSupported(agentType);
   if (contract.promptModeFlag) {
     return [contract.promptModeFlag, instruction];
   }
@@ -5328,7 +5342,7 @@ var init_model_contract = __esm({
       antigravity: {
         agentType: "antigravity",
         binary: "agy",
-        installInstructions: "Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        installInstructions: "Install the Antigravity CLI (agy) per the official instructions at https://antigravity.google, then verify with `agy --version`.",
         supportsPromptMode: true,
         promptModeFlag: "-p",
         buildLaunchArgs(model, extraFlags = []) {

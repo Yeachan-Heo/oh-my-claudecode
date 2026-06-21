@@ -8,6 +8,8 @@ import {
   parseCliOutput,
   isPromptModeAgent,
   getPromptModeArgs,
+  isHeadlessSupportedOnPlatform,
+  validateCliAvailable,
   isCliAvailable,
   shouldLoadShellRc,
   resolveCliBinaryPath,
@@ -173,10 +175,52 @@ describe('model-contract', () => {
       expect(c.binary).toBe('agy');
       expect(c.supportsPromptMode).toBe(true);
       expect(c.promptModeFlag).toBe('-p');
-      expect(c.installInstructions).toContain('antigravity.google/cli/install.sh');
+      // Points to official install instructions, not a raw pipe-to-shell command.
+      expect(c.installInstructions).toContain('antigravity.google');
+      expect(c.installInstructions).not.toContain('| bash');
     });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
+    });
+
+    describe('antigravity Windows headless guard (omc team)', () => {
+      it('reports antigravity headless unsupported on win32, supported elsewhere', () => {
+        expect(isHeadlessSupportedOnPlatform('antigravity', 'win32')).toBe(false);
+        expect(isHeadlessSupportedOnPlatform('antigravity', 'darwin')).toBe(true);
+        expect(isHeadlessSupportedOnPlatform('antigravity', 'linux')).toBe(true);
+        // Other prompt-mode providers stay supported on Windows.
+        expect(isHeadlessSupportedOnPlatform('gemini', 'win32')).toBe(true);
+        expect(isHeadlessSupportedOnPlatform('grok', 'win32')).toBe(true);
+      });
+
+      it('getPromptModeArgs throws for an antigravity team worker on Windows', () => {
+        const restore = setProcessPlatform('win32');
+        try {
+          expect(() => getPromptModeArgs('antigravity', '/path/to/inbox.md')).toThrow(/not supported on Windows/);
+          // Still works for gemini on Windows (uses its own stdin-safe handling elsewhere).
+          expect(getPromptModeArgs('gemini', '/path/to/inbox.md')).toEqual(['-p', '/path/to/inbox.md']);
+        } finally {
+          restore();
+        }
+      });
+
+      it('getPromptModeArgs builds antigravity args normally on non-Windows', () => {
+        const restore = setProcessPlatform('darwin');
+        try {
+          expect(getPromptModeArgs('antigravity', '/path/to/inbox.md')).toEqual(['-p', '/path/to/inbox.md']);
+        } finally {
+          restore();
+        }
+      });
+
+      it('validateCliAvailable refuses antigravity on Windows with a clear message', () => {
+        const restore = setProcessPlatform('win32');
+        try {
+          expect(() => validateCliAvailable('antigravity')).toThrow(/not supported on Windows/);
+        } finally {
+          restore();
+        }
+      });
     });
 
     it('blocks codex when external LLM is disabled', async () => {
