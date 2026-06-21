@@ -109,6 +109,13 @@ function agentTypeGuidance(agentType: CliAgentType): string {
         '- If a command fails, report the exact stderr to leader-fixed before retrying.',
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done.`,
       ].join('\n');
+    case 'antigravity':
+      return [
+        '### Agent-Type Guidance (antigravity)',
+        '- Execute task work in small, verifiable increments and report each milestone to leader-fixed.',
+        '- Keep commit-sized changes scoped to assigned files only; no broad refactors.',
+        `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`,
+      ].join('\n');
     case 'claude':
     default:
       return [

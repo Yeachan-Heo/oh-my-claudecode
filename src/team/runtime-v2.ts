@@ -703,6 +703,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
         || process.env.OMC_GEMINI_DEFAULT_MODEL
         || undefined;
     }
+    if (opts.agentType === 'antigravity') {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL
+        || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL
+        || undefined;
+    }
     if (opts.agentType === 'grok') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL
         || process.env.OMC_GROK_DEFAULT_MODEL
@@ -723,7 +728,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     model: modelForAgent,
   });
 
-  // For prompt-mode agents (currently gemini), keep the full instruction in
+  // For prompt-mode agents (gemini, antigravity), keep the full instruction in
   // inbox.md and pass only a short file-pointer prompt via CLI args. This
   // avoids echoing reviewer/seed prompt text into tmux scrollback.
   if (usePromptMode) {

@@ -205,6 +205,9 @@ describe('parseAskArgs', () => {
         expect(parseAskArgs(['gemini', '-p', 'brainstorm'])).toEqual({ provider: 'gemini', prompt: 'brainstorm' });
         expect(parseAskArgs(['claude', '--print', 'draft', 'summary'])).toEqual({ provider: 'claude', prompt: 'draft summary' });
         expect(parseAskArgs(['gemini', '--prompt=ship safely'])).toEqual({ provider: 'gemini', prompt: 'ship safely' });
+        expect(parseAskArgs(['antigravity', '-p', 'x'])).toEqual({ provider: 'antigravity', prompt: 'x' });
+        expect(parseAskArgs(['antigravity', '--prompt=ship safely'])).toEqual({ provider: 'antigravity', prompt: 'ship safely' });
+        expect(parseAskArgs(['antigravity', 'review', 'this'])).toEqual({ provider: 'antigravity', prompt: 'review this' });
         expect(parseAskArgs(['codex', 'review', 'this'])).toEqual({ provider: 'codex', prompt: 'review this' });
         expect(parseAskArgs(['grok', 'review', 'this'])).toEqual({ provider: 'grok', prompt: 'review this' });
         expect(parseAskArgs(['grok', '-p', 'brainstorm'])).toEqual({ provider: 'grok', prompt: 'brainstorm' });
@@ -219,6 +222,11 @@ describe('parseAskArgs', () => {
         });
         expect(parseAskArgs(['gemini', '--agent-prompt=planner', '--prompt', 'plan', 'it'])).toEqual({
             provider: 'gemini',
+            prompt: 'plan it',
+            agentPromptRole: 'planner',
+        });
+        expect(parseAskArgs(['antigravity', '--agent-prompt=planner', '--prompt', 'plan', 'it'])).toEqual({
+            provider: 'antigravity',
             prompt: 'plan it',
             agentPromptRole: 'planner',
         });
@@ -310,6 +318,27 @@ describe('omc ask command', () => {
             rmSync(wd, { recursive: true, force: true });
         }
     });
+    it('allows antigravity ask inside a Claude Code session', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-antigravity-nested-'));
+        try {
+            const stubPath = writeAdvisorStub(wd);
+            const result = runCli(['ask', 'antigravity', '--prompt', 'cli nested antigravity prompt'], wd, {
+                OMC_ASK_ADVISOR_SCRIPT: stubPath,
+                CLAUDECODE: '1',
+            }, { preserveClaudeSessionEnv: true });
+            expect(result.error).toBeUndefined();
+            expect(result.status).toBe(0);
+            expect(result.stderr).not.toContain('Nested launches are not supported');
+            const payload = JSON.parse(result.stdout);
+            expect(payload.provider).toBe('antigravity');
+            expect(payload.prompt).toBe('cli nested antigravity prompt');
+            expect(payload.originalTask).toBe('cli nested antigravity prompt');
+            expect(payload.passthrough).toBeNull();
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
     it('allows cursor ask inside a Claude Code session', () => {
         const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cli-cursor-nested-'));
         try {
@@ -394,6 +423,7 @@ describe('run-provider-advisor script contract', () => {
         ['claude', ['claude', '--prompt', 'nested claude prompt']],
         ['codex', ['codex', '--prompt', 'nested codex prompt']],
         ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
+        ['antigravity', ['antigravity', '--prompt', 'nested antigravity prompt']],
         ['grok', ['grok', '--prompt', 'nested grok prompt']],
         ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
     ])('strips Claude session env vars for %s advisor spawns', (provider, args) => {
@@ -591,6 +621,73 @@ describe('run-provider-advisor script contract', () => {
             rmSync(wd, { recursive: true, force: true });
         }
     });
+    it('passes multiline antigravity prompts as the -p arg value (agy cannot read the prompt from stdin)', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-multiline-argv-'));
+        const multilinePrompt = 'line one\nline two\nline three';
+        try {
+            const capturePath = join(wd, 'spawn-sync-calls.json');
+            const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+            const result = runAdvisorScriptWithPrelude(preludePath, ['antigravity', '--prompt', multilinePrompt], wd, { SPAWN_CAPTURE_PATH: capturePath });
+            expect(result.error).toBeUndefined();
+            expect(result.status).toBe(0);
+            const calls = JSON.parse(readFileSync(capturePath, 'utf8'));
+            expect(calls).toHaveLength(2);
+            // Even multiline prompts go via argv (safe: spawned without a shell); never stdin.
+            expect(calls[1]).toMatchObject({
+                command: 'agy',
+                args: ['--dangerously-skip-permissions', '-p', multilinePrompt],
+                options: { input: null },
+            });
+            expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
+    it('passes long antigravity prompts as the -p arg value (no stdin pipe path)', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-long-argv-'));
+        const longPrompt = `prefix ${'x'.repeat(520)}`;
+        try {
+            const capturePath = join(wd, 'spawn-sync-calls.json');
+            const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+            const result = runAdvisorScriptWithPrelude(preludePath, ['antigravity', '--prompt', longPrompt], wd, { SPAWN_CAPTURE_PATH: capturePath });
+            expect(result.error).toBeUndefined();
+            expect(result.status).toBe(0);
+            const calls = JSON.parse(readFileSync(capturePath, 'utf8'));
+            expect(calls).toHaveLength(2);
+            expect(calls[1]).toMatchObject({
+                command: 'agy',
+                args: ['--dangerously-skip-permissions', '-p', longPrompt],
+                options: { input: null },
+            });
+            expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
+    it('launches antigravity as `agy --dangerously-skip-permissions -p <prompt>` for short prompts', () => {
+        const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-short-argv-'));
+        const shortPrompt = 'review this change';
+        try {
+            const capturePath = join(wd, 'spawn-sync-calls.json');
+            const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+            const result = runAdvisorScriptWithPrelude(preludePath, ['antigravity', '--prompt', shortPrompt], wd, { SPAWN_CAPTURE_PATH: capturePath });
+            expect(result.error).toBeUndefined();
+            expect(result.status).toBe(0);
+            const calls = JSON.parse(readFileSync(capturePath, 'utf8'));
+            expect(calls).toHaveLength(2);
+            expect(calls[1]).toMatchObject({
+                command: 'agy',
+                args: ['--dangerously-skip-permissions', '-p', shortPrompt],
+                options: { input: null },
+            });
+            expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+        }
+        finally {
+            rmSync(wd, { recursive: true, force: true });
+        }
+    });
     it('pipes multiline claude prompts over stdin so the prompt is never a raw argv value (#3221)', () => {
         const wd = mkdtempSync(join(tmpdir(), 'omc-ask-claude-multiline-stdin-'));
         const multilinePrompt = 'line one\nline two\nline three';
@@ -709,6 +806,7 @@ describe('run-provider-advisor script contract', () => {
     it.each([
         ['codex', ['codex', '--prompt', 'short prompt']],
         ['gemini', ['gemini', '--prompt', 'short prompt']],
+        ['antigravity', ['antigravity', '--prompt', 'short prompt']],
         ['claude', ['claude', '--prompt', 'short prompt']],
     ])('closes stdin for %s on non-Windows to prevent hang in piped environments', (provider, args) => {
         const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-stdin-close-`));

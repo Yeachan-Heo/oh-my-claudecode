@@ -146,6 +146,14 @@ describe('model-contract', () => {
             expect(c.binary).toBe('grok');
             expect(c.supportsPromptMode).toBe(true);
         });
+        it('returns contract for antigravity', () => {
+            const c = getContract('antigravity');
+            expect(c.agentType).toBe('antigravity');
+            expect(c.binary).toBe('agy');
+            expect(c.supportsPromptMode).toBe(true);
+            expect(c.promptModeFlag).toBe('-p');
+            expect(c.installInstructions).toContain('antigravity.google/cli/install.sh');
+        });
         it('throws for unknown agent type', () => {
             expect(() => getContract('unknown')).toThrow('Unknown agent type');
         });
@@ -272,6 +280,23 @@ describe('model-contract', () => {
             expect(args).toContain('--approval-mode');
             expect(args).toContain('yolo');
             expect(args).not.toContain('-p');
+        });
+        it('antigravity leads with --dangerously-skip-permissions (no --print; -p is appended later by getPromptModeArgs)', () => {
+            const noModel = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+            expect(noModel).toEqual(['--dangerously-skip-permissions']);
+            expect(noModel).not.toContain('--model');
+            // -p is NOT in buildLaunchArgs: agy's -p takes the prompt as its value and
+            // is appended (with the instruction) by getPromptModeArgs.
+            expect(noModel).not.toContain('-p');
+            expect(noModel).not.toContain('--print');
+            const withModel = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'Gemini 3.1 Pro (High)' });
+            expect(withModel).toEqual(['--dangerously-skip-permissions', '--model', 'Gemini 3.1 Pro (High)']);
+            // approval flag precedes --model
+            expect(withModel.indexOf('--dangerously-skip-permissions')).toBeLessThan(withModel.indexOf('--model'));
+        });
+        it('antigravity appends extraFlags after the model flag', () => {
+            const args = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'm', extraFlags: ['--foo'] });
+            expect(args).toEqual(['--dangerously-skip-permissions', '--model', 'm', '--foo']);
         });
         it('grok includes --always-approve with no model and appends --model <m> when given', () => {
             const noModel = buildLaunchArgs('grok', { teamName: 't', workerName: 'w', cwd: '/tmp' });
@@ -477,6 +502,16 @@ describe('model-contract', () => {
             const c = getContract('grok');
             expect(c.supportsPromptMode).toBe(true);
             expect(c.promptModeFlag).toBe('-p');
+        });
+        it('antigravity supports prompt mode', () => {
+            expect(isPromptModeAgent('antigravity')).toBe(true);
+            const c = getContract('antigravity');
+            expect(c.supportsPromptMode).toBe(true);
+            expect(c.promptModeFlag).toBe('-p');
+        });
+        it('getPromptModeArgs returns flag + instruction for antigravity', () => {
+            const args = getPromptModeArgs('antigravity', 'Read inbox');
+            expect(args).toEqual(['-p', 'Read inbox']);
         });
         it('getPromptModeArgs returns flag + instruction for grok', () => {
             const args = getPromptModeArgs('grok', 'Read inbox');

@@ -210,6 +210,27 @@ const CONTRACTS = {
             return rawOutput.trim();
         },
     },
+    antigravity: {
+        agentType: 'antigravity',
+        binary: 'agy',
+        installInstructions: 'Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash',
+        supportsPromptMode: true,
+        promptModeFlag: '-p',
+        buildLaunchArgs(model, extraFlags = []) {
+            // agy's `-p`/`--print` is appended by getPromptModeArgs as `-p <instruction>`,
+            // where the prompt is the VALUE of `-p` (not a boolean). All other flags
+            // MUST precede that `-p`, so buildLaunchArgs returns only the leading flags
+            // (like grok). --dangerously-skip-permissions suppresses approval prompts,
+            // so no trust-confirm send-keys is needed (unlike gemini). Verified agy 1.0.10.
+            const args = ['--dangerously-skip-permissions'];
+            if (model)
+                args.push('--model', model);
+            return [...args, ...extraFlags];
+        },
+        parseOutput(rawOutput) {
+            return rawOutput.trim();
+        },
+    },
     cursor: {
         agentType: 'cursor',
         binary: 'cursor-agent',
@@ -338,6 +359,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
     'OMC_GEMINI_DEFAULT_MODEL',
     'OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL',
     'OMC_GROK_DEFAULT_MODEL',
+    'OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL',
+    'OMC_ANTIGRAVITY_DEFAULT_MODEL',
 ];
 export function getWorkerEnv(teamName, workerName, agentType, env = process.env) {
     validateTeamName(teamName);

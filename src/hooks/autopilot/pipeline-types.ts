@@ -53,7 +53,8 @@ export type AutopilotTeamAgentType =
   | "codex"
   | "gemini"
   | "grok"
-  | "cursor";
+  | "cursor"
+  | "antigravity";
 
 /** Team execution options for autopilot execution=team. */
 export interface AutopilotTeamConfig {

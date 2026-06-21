@@ -23,7 +23,7 @@ export declare const STAGE_ORDER: readonly PipelineStageId[];
 /** Execution backend for the execution stage */
 export type ExecutionBackend = "team" | "solo";
 /** CLI-backed worker types supported by the tmux team runtime. */
-export type AutopilotTeamAgentType = "claude" | "codex" | "gemini" | "grok" | "cursor";
+export type AutopilotTeamAgentType = "claude" | "codex" | "gemini" | "grok" | "cursor" | "antigravity";
 /** Team execution options for autopilot execution=team. */
 export interface AutopilotTeamConfig {
     /** Preferred CLI worker types for executor-style implementation tasks. */

@@ -16,7 +16,7 @@ import { readApprovedExecutionLaunchHintOutcome } from '../planning/artifacts.js
 import { getOmcRoot } from '../lib/worktree-paths.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
-const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor', 'grok']);
+const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity']);
 const SUBCOMMANDS = new Set(['start', 'status', 'wait', 'cleanup', 'resume', 'shutdown', 'api', 'help', '--help', '-h']);
 
 const SUPPORTED_API_OPERATIONS = new Set([
@@ -794,7 +794,7 @@ export async function teamCleanupCommand(
 
 export const TEAM_USAGE = `
 Usage:
-  omc team start --agent <claude|codex|gemini|cursor|grok>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--auto-merge] [--json]
+  omc team start --agent <claude|codex|gemini|cursor|grok|antigravity>[,<agent>...] --task "<task>" [--count N] [--name TEAM] [--cwd DIR] [--new-window] [--auto-merge] [--json]
   omc team status <job_id|team_name> [--json] [--cwd DIR]
   omc team wait <job_id> [--timeout-ms MS] [--json]
   omc team cleanup <job_id> [--grace-ms MS] [--json]

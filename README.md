@@ -112,7 +112,7 @@ OMC exposes two different surfaces:
 | Feature                                        | Terminal CLI                                  | In-session skill                                                        | Notes                                                                                                                                |
 | ---------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Setup                                          | `omc setup`                                   | `/setup` or `/omc-setup`                                                | Both are real entrypoints. `/setup` is the easiest plugin-first path.                                                                |
-| Ask providers                                  | `omc ask codex "review this patch"`           | `/ask codex "review this patch"`                                        | Both route through the same advisor flow. Providers: `claude`, `codex`, `gemini`, `grok`, `cursor`.                                            |
+| Ask providers                                  | `omc ask codex "review this patch"`           | `/ask codex "review this patch"`                                        | Both route through the same advisor flow. Providers: `claude`, `codex`, `gemini`, `antigravity`, `grok`, `cursor`.                                            |
 | Team orchestration                             | `omc team 2:codex "review auth flow"`         | `/team 3:executor "fix all TypeScript errors"`                          | Both exist, but they are different runtimes: `omc team` launches tmux CLI workers; `/team` runs the in-session native team workflow. |
 | Autopilot / Ralph / Ultrawork / Deep Interview | —                                             | `/autopilot ...`, `/ralph ...`, `/ultrawork ...`, `/deep-interview ...` | These are in-session skills. There is no `omc autopilot` / `omc ralph` / `omc ultrawork` CLI subcommand in this repo.                |
 | Autoresearch                                   | `omc autoresearch` (**hard-deprecated shim**) | `/deep-interview --autoresearch ...` + `/oh-my-claudecode:autoresearch` | Setup stays in deep-interview; execution now belongs to the stateful skill.                                                          |
@@ -159,13 +159,14 @@ Enable Claude Code native teams in `~/.claude/settings.json`:
 
 > If teams are disabled, OMC will warn you and fall back to non-team execution where possible.
 
-### tmux CLI Workers — Codex & Gemini (v4.4.0+)
+### tmux CLI Workers — Codex, Gemini & Antigravity (v4.4.0+)
 
 **v4.4.0 removes the Codex/Gemini MCP servers** (`x`, `g` providers). Use the CLI-first Team runtime (`omc team ...`) to spawn real tmux worker panes:
 
 ```bash
 omc team 2:codex "review auth module for security issues"
 omc team 2:gemini "redesign UI components for accessibility"
+omc team 2:antigravity "redesign UI components for accessibility"
 omc team 1:claude "implement the payment flow"
 omc team 1:cursor "implement the payment flow"
 omc team status auth-review
@@ -180,16 +181,17 @@ For mixed Codex + Gemini work in one command, use the **`/ccg`** skill (routes v
 /ccg Review this PR — architecture (Codex) and UI components (Gemini)
 ```
 
-| Surface                   | Workers                  | Best For                                     |
-| ------------------------- | ------------------------ | -------------------------------------------- |
-| `omc team N:codex "..."`  | N Codex CLI panes        | Code review, security analysis, architecture |
-| `omc team N:gemini "..."` | N Gemini CLI panes       | UI/UX design, docs, large-context tasks      |
-| `omc team N:grok "..."`   | N Grok Build CLI panes   | Code review, analysis cross-check            |
-| `omc team N:cursor "..."` | N Cursor agent panes     | Executor-style implementation tasks          |
-| `omc team N:claude "..."` | N Claude CLI panes       | General tasks via Claude CLI in tmux         |
-| `/ccg`                    | /ask codex + /ask gemini | Tri-model advisor synthesis                  |
+| Surface                         | Workers                       | Best For                                     |
+| ------------------------------- | ----------------------------- | -------------------------------------------- |
+| `omc team N:codex "..."`        | N Codex CLI panes             | Code review, security analysis, architecture |
+| `omc team N:gemini "..."`       | N Gemini CLI panes            | UI/UX design, docs, large-context tasks (enterprise/API-key) |
+| `omc team N:antigravity "..."`  | N Antigravity (`agy`) panes   | UI/UX design, docs, large-context tasks (free/Pro/Ultra)     |
+| `omc team N:grok "..."`         | N Grok Build CLI panes        | Code review, analysis cross-check            |
+| `omc team N:cursor "..."`       | N Cursor agent panes          | Executor-style implementation tasks          |
+| `omc team N:claude "..."`       | N Claude CLI panes            | General tasks via Claude CLI in tmux         |
+| `/ccg`                          | /ask codex + /ask gemini      | Tri-model advisor synthesis                  |
 
-Workers spawn on-demand and die when their task completes — no idle resource usage. Requires the selected CLI (`codex`, `gemini`, `grok`, or `cursor-agent`) installed/authenticated and an active tmux session.
+Workers spawn on-demand and die when their task completes — no idle resource usage. Requires the selected CLI (`codex`, `gemini`, `agy` (antigravity), `grok`, or `cursor-agent`) installed/authenticated and an active tmux session.
 
 Autopilot can prefer Cursor executor workers during team execution via `.claude/omc.jsonc`:
 
@@ -268,7 +270,7 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 | Mode                        | What it is                                                                              | Use For                                                                 |
 | --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | **Team (recommended)**      | Canonical staged pipeline (`team-plan → team-prd → team-exec → team-verify → team-fix`) | Coordinated Claude agents on a shared task list                         |
-| **omc team (CLI)**          | tmux CLI workers — real `claude`/`codex`/`gemini`/`grok`/`cursor-agent` processes in split-panes       | Codex/Gemini/Grok/Cursor CLI tasks; on-demand spawn, die when done             |
+| **omc team (CLI)**          | tmux CLI workers — real `claude`/`codex`/`gemini`/`antigravity`/`grok`/`cursor-agent` processes in split-panes       | Codex/Gemini/Antigravity/Grok/Cursor CLI tasks; on-demand spawn, die when done             |
 | **ccg**                     | Tri-model advisors via `/ask codex` + `/ask gemini`, Claude synthesizes                 | Mixed backend+UI work needing both Codex and Gemini                     |
 | **Autopilot**               | Autonomous execution (single lead agent)                                                | End-to-end feature work with minimal ceremony                           |
 | **Ultrawork**               | Maximum parallelism (non-team)                                                          | Burst parallel fixes/refactors where Team isn't needed                  |
@@ -390,6 +392,7 @@ Run local provider CLIs and save a markdown artifact under `.omc/artifacts/ask/`
 omc ask claude "review this migration plan"
 omc ask codex --prompt "identify architecture risks"
 omc ask gemini --prompt "propose UI polish ideas"
+omc ask antigravity --prompt "propose UI polish ideas"
 omc ask grok --prompt "cross-check this code review"
 omc ask cursor --prompt "apply this implementation plan"
 omc ask claude --agent-prompt executor --prompt "draft implementation steps"
@@ -397,6 +400,7 @@ omc ask claude --agent-prompt executor --prompt "draft implementation steps"
 # Inside a Claude Code / OMC session
 /ask claude "review this migration plan"
 /ask codex "identify architecture risks"
+/ask antigravity "propose UI polish ideas"
 /ask cursor "apply this implementation plan"
 ```
 
@@ -576,13 +580,16 @@ OMC features like `omc team` and rate-limit detection require **tmux**:
 
 OMC can optionally orchestrate external AI providers for cross-validation and design consistency. These are **not required** — OMC works fully without them.
 
-| Provider                                                  | Install                             | What it enables                                  |
-| --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------ |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | Design review, UI consistency (1M token context) |
-| [Codex CLI](https://github.com/openai/codex)              | `npm install -g @openai/codex`      | Architecture validation, code review cross-check |
-| [Grok Build](https://build.grok.com)                      | Download from build.grok.com (`grok` at `~/.grok/bin/grok`) | Code review, analysis cross-check                |
+| Provider                                                                | Install                                                      | What it enables                                                           |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [Antigravity CLI](https://antigravity.google) (`agy`)                   | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | Design review, UI consistency — **recommended Google option** for free/Pro/Ultra tiers |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli)               | `npm install -g @google/gemini-cli`                          | Design review, UI consistency (1M token context) — enterprise/API-key tier only |
+| [Codex CLI](https://github.com/openai/codex)                            | `npm install -g @openai/codex`                               | Architecture validation, code review cross-check                          |
+| [Grok Build](https://build.grok.com)                                    | Download from build.grok.com (`grok` at `~/.grok/bin/grok`) | Code review, analysis cross-check                                         |
 
-**Cost:** 3 Pro plans (Claude + Gemini + ChatGPT) cover everything for ~$60/month.
+> **Migrating from Gemini CLI:** Google retired the free `gemini` CLI for free/AI-Pro/Ultra tiers on 2026-06-18. The successor is **Antigravity CLI** (`agy`), invoked as `agy`. Use `omc team N:antigravity` and `omc ask antigravity` wherever you previously used `gemini`. Enterprise users with an API key can continue using `gemini`. Windows headless support for `agy` is unknown/untested — report issues upstream.
+
+**Cost:** 3 Pro plans (Claude + Antigravity/Gemini + ChatGPT) cover everything for ~$60/month.
 
 ---
 

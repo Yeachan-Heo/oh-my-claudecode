@@ -520,6 +520,34 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     );
   });
 
+  it('parses single-type spec 2:antigravity into uniform agentTypes', () => {
+    const parsed = parseTeamArgs(['2:antigravity', 'apply implementation']);
+    expect(parsed.workerCount).toBe(2);
+    expect(parsed.agentTypes).toEqual(['antigravity', 'antigravity']);
+    expect(parsed.workerSpecs).toEqual([
+      { agentType: 'antigravity' },
+      { agentType: 'antigravity' },
+    ]);
+    expect(parsed.task).toBe('apply implementation');
+  });
+
+  it('supports antigravity in mixed explicit cli specs', () => {
+    const parsed = parseTeamArgs(['1:antigravity,1:codex', 'compare edits']);
+    expect(parsed.workerCount).toBe(2);
+    expect(parsed.agentTypes).toEqual(['antigravity', 'codex']);
+    expect(parsed.task).toBe('compare edits');
+  });
+
+  it('parses antigravity with an explicit executor role', () => {
+    const parsed = parseTeamArgs(['1:antigravity:executor', 'apply the implementation']);
+    expect(parsed.agentTypes).toEqual(['antigravity']);
+  });
+
+  it('uses configured antigravity CLI provider default when supported', () => {
+    const parsed = parseTeamArgs(['run all tests'], 'antigravity');
+    expect(parsed.agentTypes).toEqual(['antigravity', 'antigravity', 'antigravity']);
+  });
+
   it('defaults to 3 claude workers when no spec is given', () => {
     const parsed = parseTeamArgs(['run all tests']);
     expect(parsed.workerCount).toBe(3);

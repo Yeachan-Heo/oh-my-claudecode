@@ -42,8 +42,8 @@ Prefix: `oh-my-claudecode:`. See `agents/*.md` for full prompts.
 
 ### External AI / orchestration
 - `/team N:executor "task"`
-- `omc team N:codex|gemini "..."`
-- `omc ask <claude|codex|gemini>`
+- `omc team N:codex|gemini|antigravity "..."`
+- `omc ask <claude|codex|gemini|antigravity>`
 - `/ccg`
 
 ### OMC state

@@ -53,6 +53,7 @@ export const DISABLE_TOOLS_GROUP_MAP: Record<string, ToolCategory> = {
   'interop': TOOL_CATEGORIES.INTEROP,
   'codex': TOOL_CATEGORIES.CODEX,
   'gemini': TOOL_CATEGORIES.GEMINI,
+  'antigravity': TOOL_CATEGORIES.ANTIGRAVITY,
   'shared-memory': TOOL_CATEGORIES.SHARED_MEMORY,
   'deepinit': TOOL_CATEGORIES.DEEPINIT,
   'deepinit-manifest': TOOL_CATEGORIES.DEEPINIT,

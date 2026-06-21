@@ -5,6 +5,7 @@ export interface SkillRuntimeAvailability {
   codex: boolean;
   gemini: boolean;
   grok: boolean;
+  antigravity: boolean;
 }
 
 export function detectSkillRuntimeAvailability(
@@ -22,6 +23,7 @@ export function detectSkillRuntimeAvailability(
     codex: safeDetect('codex'),
     gemini: safeDetect('gemini'),
     grok: safeDetect('grok'),
+    antigravity: safeDetect('antigravity'),
   };
 }
 

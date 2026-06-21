@@ -1,12 +1,12 @@
 ---
 name: ccg
-description: Claude-Codex-Gemini tri-model orchestration via /ask codex + /ask gemini, then Claude synthesizes results
+description: Claude-Codex-Gemini tri-model orchestration via /ask codex + /ask antigravity (or gemini), then Claude synthesizes results
 level: 5
 ---
 
 # CCG - Claude-Codex-Gemini Tri-Model Orchestration
 
-CCG routes through the canonical `/ask` skill (`/ask codex` + `/ask gemini`), then Claude synthesizes both outputs into one answer.
+CCG routes through the canonical `/ask` skill (`/ask codex` + `/ask antigravity`), then Claude synthesizes both outputs into one answer.
 
 Use this when you want parallel external perspectives without launching tmux team workers.
 
@@ -14,13 +14,18 @@ Use this when you want parallel external perspectives without launching tmux tea
 
 - Backend/analysis + frontend/UI work in one request
 - Code review from multiple perspectives (architecture + design/UX)
-- Cross-validation where Codex and Gemini may disagree
+- Cross-validation where Codex and Antigravity/Gemini may disagree
 - Fast advisor-style parallel input without team runtime orchestration
 
 ## Requirements
 
 - **Codex CLI**: `npm install -g @openai/codex` (or `@openai/codex`)
-- **Gemini CLI**: `npm install -g @google/gemini-cli`
+- **Antigravity CLI** (recommended Google option for free/Pro/Ultra tiers; Gemini CLI was retired 2026-06-18):
+  ```bash
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
+  ```
+  Verify: `agy --version`
+- **Gemini CLI** remains supported for enterprise use cases: `npm install -g @google/gemini-cli`
 - `omc ask` command available
 - If either CLI is unavailable, continue with whichever provider is available and note the limitation
 
@@ -29,11 +34,12 @@ Use this when you want parallel external perspectives without launching tmux tea
 ```text
 1. Claude decomposes the request into two advisor prompts:
    - Codex prompt (analysis/architecture/backend)
-   - Gemini prompt (UX/design/docs/alternatives)
+   - Antigravity prompt (UX/design/docs/alternatives) — use gemini for enterprise
 
 2. Claude runs via CLI (skill nesting not supported):
    - `omc ask codex "<codex prompt>"`
-   - `omc ask gemini "<gemini prompt>"`
+   - `omc ask antigravity "<antigravity prompt>"`
+     (or `omc ask gemini "<gemini prompt>"` for enterprise)
 
 3. Artifacts are written under `.omc/artifacts/ask/`
 
@@ -48,17 +54,23 @@ When invoked, Claude MUST follow this workflow:
 Split the user request into:
 
 - **Codex prompt:** architecture, correctness, backend, risks, test strategy
-- **Gemini prompt:** UX/content clarity, alternatives, edge-case usability, docs polish
+- **Antigravity prompt:** UX/content clarity, alternatives, edge-case usability, docs polish
 - **Synthesis plan:** how to reconcile conflicts
 
 ### 2. Invoke advisors via CLI
 
 > **Note:** Skill nesting (invoking a skill from within an active skill) is not supported in Claude Code. Always use the direct CLI path via Bash tool.
 
-Run both advisors:
+Run both advisors (prefer antigravity for consumer tiers; use gemini for enterprise):
 
 ```bash
 omc ask codex "<codex prompt>"
+omc ask antigravity "<antigravity prompt>"
+```
+
+Enterprise fallback:
+
+```bash
 omc ask gemini "<gemini prompt>"
 ```
 
@@ -68,6 +80,7 @@ Read latest ask artifacts from:
 
 ```text
 .omc/artifacts/ask/codex-*.md
+.omc/artifacts/ask/antigravity-*.md
 .omc/artifacts/ask/gemini-*.md
 ```
 
@@ -100,5 +113,5 @@ If both unavailable:
 Example:
 
 ```bash
-/oh-my-claudecode:ccg Review this PR - architecture/security via Codex and UX/readability via Gemini
+/oh-my-claudecode:ccg Review this PR - architecture/security via Codex and UX/readability via Antigravity
 ```

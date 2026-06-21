@@ -211,6 +211,37 @@ describe('team cli', () => {
         rmSync(cwd, { recursive: true, force: true });
         logSpy.mockRestore();
     });
+    it('teamCommand start --agent antigravity --count expands antigravity worker types', async () => {
+        const write = vi.fn();
+        const end = vi.fn();
+        const unref = vi.fn();
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-agy-'));
+        mocks.spawn.mockReturnValue({
+            pid: 9191,
+            stdin: { write, end },
+            unref,
+        });
+        const { teamCommand } = await import('../team.js');
+        await teamCommand([
+            'start', '--agent', 'antigravity', '--count', '2',
+            '--task', 'apply the implementation', '--name', 'agy-team', '--cwd', cwd, '--json',
+        ]);
+        const stdinPayload = JSON.parse(write.mock.calls[0][0]);
+        expect(stdinPayload.teamName).toBe('agy-team');
+        expect(stdinPayload.agentTypes).toEqual(['antigravity', 'antigravity']);
+        rmSync(cwd, { recursive: true, force: true });
+        logSpy.mockRestore();
+    });
+    it('teamCommand start rejects an unsupported --agent value', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-bad-agent-'));
+        const { teamCommand } = await import('../team.js');
+        await expect(teamCommand([
+            'start', '--agent', 'not-a-provider',
+            '--task', 'do work', '--name', 'bad-team', '--cwd', cwd, '--json',
+        ])).rejects.toThrow(/Unsupported agent type/);
+        rmSync(cwd, { recursive: true, force: true });
+    });
     it('legacy team alias reuses an approved short follow-up launch hint', async () => {
         const write = vi.fn();
         const end = vi.fn();

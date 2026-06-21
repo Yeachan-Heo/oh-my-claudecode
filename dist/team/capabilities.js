@@ -9,6 +9,7 @@ const DEFAULT_CAPABILITIES = {
     'tmux-gemini': ['ui-design', 'documentation', 'research', 'code-edit'],
     'tmux-cursor': ['code-edit', 'refactoring', 'general'],
     'tmux-grok': ['code-edit', 'code-review', 'refactoring', 'general'],
+    'tmux-antigravity': ['ui-design', 'documentation', 'research', 'code-edit'],
 };
 /**
  * Get default capabilities for a worker backend.

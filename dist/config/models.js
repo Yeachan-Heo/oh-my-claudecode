@@ -46,6 +46,7 @@ export const CLAUDE_FAMILY_HIGH_VARIANTS = {
 export const BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
     codexModel: 'gpt-5.3-codex',
     geminiModel: 'gemini-3.1-pro-preview',
+    antigravityModel: 'Gemini 3.1 Pro (High)',
 };
 /**
  * Centralized Model ID Constants
@@ -179,9 +180,11 @@ export function getClaudeHighVariantFromModel(modelId) {
 }
 /** Get built-in default model for an external provider */
 export function getBuiltinExternalDefaultModel(provider) {
-    return provider === 'codex'
-        ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel
-        : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+    if (provider === 'codex')
+        return BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+    if (provider === 'antigravity')
+        return BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
+    return BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 function hasBedrockModelId(modelIds) {
     for (const modelId of modelIds) {

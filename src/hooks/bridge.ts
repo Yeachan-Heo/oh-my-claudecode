@@ -1706,7 +1706,8 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
 
       case "codex":
       case "gemini":
-      case "cursor": {
+      case "cursor":
+      case "antigravity": {
         const teamStartCommand = formatOmcCliInvocation(`team start --agent ${keywordType} --count N --task "<task from user message>"`);
         messages.push(
           `[MAGIC KEYWORD: team]\n` +

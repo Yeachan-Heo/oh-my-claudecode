@@ -254,7 +254,7 @@ Coordinates N Claude agents with a 5-stage pipeline: `plan → prd → exec → 
 ```
 
 #### ccg (Claude-Codex-Gemini)
-Fans out to Codex and Gemini simultaneously; Claude synthesizes the results.
+Fans out to Codex and Gemini simultaneously; Claude synthesizes the results. Use `antigravity` workers in place of `gemini` for free/Pro/Ultra Google tiers.
 - Trigger: `ccg`, `claude-codex-gemini`
 ```bash
 ccg: review this authentication implementation
@@ -293,7 +293,7 @@ ralplan this feature
 | `ultrawork`, `ulw`, `uw` | Parallel agent orchestration |
 | `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Autonomous execution pipeline |
 | `ralph`, `don't stop`, `must complete`, `until done` | Loop until verified complete |
-| `ccg`, `claude-codex-gemini` | 3-model orchestration |
+| `ccg`, `claude-codex-gemini` | 3-model orchestration (use `antigravity` workers for free/Pro/Ultra Google tiers) |
 | `ralplan` | Consensus-based planning |
 | `deep interview`, `ouroboros` | Socratic deep interview |
 | `code review`, `review code` | Comprehensive code review mode |

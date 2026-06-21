@@ -9,6 +9,7 @@ const PROVIDER_BINARIES = {
   claude: 'claude',
   codex: 'codex',
   gemini: 'gemini',
+  antigravity: 'agy',
   grok: 'grok',
   cursor: 'cursor-agent',
 };
@@ -19,6 +20,9 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
  * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
  * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
  * - gemini: `gemini -p <prompt> --yolo`
+ * - antigravity: `agy --dangerously-skip-permissions -p <prompt>` (Antigravity CLI;
+ *   `-p` takes the prompt as its value and cannot read it from stdin, so the
+ *   prompt is always passed as an arg with approval flags first, like grok)
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
  * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
@@ -29,6 +33,14 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
   }
   if (provider === 'gemini') {
     return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+  }
+  if (provider === 'antigravity') {
+    // Antigravity (`agy`): `-p`/`--print` takes the prompt as its VALUE (next
+    // token), not as a boolean, and it does NOT read the prompt from stdin
+    // (`agy -p` with no value errors "flag needs an argument"). So always pass
+    // the prompt as the `-p` value with approval flags first, like grok.
+    // Verified on agy 1.0.10.
+    return ['--dangerously-skip-permissions', '-p', prompt];
   }
   if (provider === 'grok') {
     // Grok's headless mode always takes the prompt as a `-p` arg; its stdin is
@@ -53,6 +65,10 @@ function shouldPipePromptViaStdin(provider, prompt) {
     return SHOULD_USE_WINDOWS_SHELL;
   }
 
+  // antigravity (`agy`): `-p` requires its prompt as an arg value and errors if
+  // the prompt is piped via stdin, so it never uses the stdin pipe path. Long /
+  // multiline prompts are safe as a single argv value (spawn without a shell).
+
   // #3221: long/multiline/frontmatter prompts must not be passed to Claude as a
   // raw argv value. Claude's CLI parses a leading `-`/`--`/`---` (YAML
   // frontmatter) token as an option and either errors out or drops the prompt.
@@ -75,8 +91,8 @@ const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
 const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
-  console.error('Usage: omc ask <claude|codex|gemini|grok|cursor> "<prompt>"');
-  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|grok|cursor> <prompt...>');
+  console.error('Usage: omc ask <claude|codex|gemini|antigravity|grok|cursor> "<prompt>"');
+  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|antigravity|grok|cursor> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
 }

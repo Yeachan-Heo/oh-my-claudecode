@@ -148,6 +148,7 @@ export function buildDefaultConfig(): PluginConfig {
       defaults: {
         codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
         geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
+        antigravityModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel,
       },
       fallbackPolicy: {
         onModelFailure: "provider_chain",
@@ -393,6 +394,14 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     externalModelsDefaults.grokModel = process.env.OMC_GROK_DEFAULT_MODEL;
   }
 
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL) {
+    externalModelsDefaults.antigravityModel =
+      process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+  } else if (process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL) {
+    // Legacy fallback
+    externalModelsDefaults.antigravityModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+  }
+
   const externalModelsFallback: ExternalModelsConfig["fallbackPolicy"] = {
     onModelFailure: "provider_chain",
   };
@@ -490,7 +499,7 @@ const CANONICAL_TEAM_ROLE_SET = new Set<string>(CANONICAL_TEAM_ROLES);
 const CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set<string>(CURSOR_EXECUTOR_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set<string>(KNOWN_AGENT_NAMES);
 // /team CLI workers — codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
-const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
 
 export function validateTeamConfig(config: PluginConfig): void {
@@ -593,6 +602,7 @@ const AUTOPILOT_TEAM_AGENT_TYPES = new Set([
   "gemini",
   "grok",
   "cursor",
+  "antigravity",
 ]);
 
 export function validateAutopilotConfig(config: PluginConfig): void {
@@ -1051,7 +1061,7 @@ export function generateConfigSchema(): object {
       },
       externalModels: {
         type: "object",
-        description: "External model provider configuration (Codex, Gemini, Grok)",
+        description: "External model provider configuration (Codex, Gemini, Grok, Antigravity)",
         properties: {
           defaults: {
             type: "object",
@@ -1059,7 +1069,7 @@ export function generateConfigSchema(): object {
             properties: {
               provider: {
                 type: "string",
-                enum: ["codex", "gemini"],
+                enum: ["codex", "gemini", "antigravity"],
                 description: "Default external provider",
               },
               codexModel: {
@@ -1075,6 +1085,11 @@ export function generateConfigSchema(): object {
               grokModel: {
                 type: "string",
                 description: "Default Grok Build model",
+              },
+              antigravityModel: {
+                type: "string",
+                default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel,
+                description: "Default Antigravity model",
               },
             },
           },
@@ -1119,7 +1134,7 @@ export function generateConfigSchema(): object {
               },
               crossProviderOrder: {
                 type: "array",
-                items: { type: "string", enum: ["codex", "gemini"] },
+                items: { type: "string", enum: ["codex", "gemini", "antigravity"] },
                 default: ["codex", "gemini"],
                 description: "Order of providers for cross-provider fallback",
               },
@@ -1202,7 +1217,7 @@ export function generateConfigSchema(): object {
                 type: "array",
                 items: {
                   type: "string",
-                  enum: ["claude", "codex", "gemini", "grok", "cursor"],
+                  enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"],
                 },
                 description:
                   "Preferred CLI worker types for executor-style autopilot team execution tasks",
@@ -1221,7 +1236,7 @@ export function generateConfigSchema(): object {
               maxAgents: { type: "integer", minimum: 1 },
               defaultAgentType: {
                 type: "string",
-                enum: ["claude", "codex", "gemini", "grok", "cursor"],
+                enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"],
                 default: "claude",
               },
               monitorIntervalMs: { type: "integer", minimum: 1 },
@@ -1235,7 +1250,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["claude", "codex", "gemini", "grok", "cursor"] },
+                provider: { type: "string", enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"] },
                 model: { type: "string" },
                 agent: { type: "string" },
               },

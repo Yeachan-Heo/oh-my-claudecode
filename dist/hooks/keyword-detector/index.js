@@ -29,7 +29,8 @@ const KEYWORD_PATTERNS = {
     ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
     codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
-    cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i
+    cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
+    antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
 };
 /**
  * Matches the upstream Ouroboros CLI invocation form at the start of the
@@ -57,7 +58,7 @@ const KEYWORD_SKIP_PREDICATES = {
 const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
     'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
-    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor'
+    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
 /**
  * Canonical workflow skills detected via explicit slash invocation.

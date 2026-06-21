@@ -13,6 +13,7 @@ export function detectSkillRuntimeAvailability(detector = isCliAvailable) {
         codex: safeDetect('codex'),
         gemini: safeDetect('gemini'),
         grok: safeDetect('grok'),
+        antigravity: safeDetect('antigravity'),
     };
 }
 function normalizeSkillName(skillName) {

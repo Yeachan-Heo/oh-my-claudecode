@@ -25,6 +25,7 @@ export declare const TOOL_CATEGORIES: {
     readonly INTEROP: "interop";
     readonly CODEX: "codex";
     readonly GEMINI: "gemini";
+    readonly ANTIGRAVITY: "antigravity";
     readonly SHARED_MEMORY: "shared-memory";
     readonly DEEPINIT: "deepinit";
     readonly WIKI: "wiki";

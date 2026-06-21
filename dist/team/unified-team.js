@@ -71,6 +71,8 @@ export function getTeamMembers(teamName, workingDirectory) {
                 backend = 'tmux-codex';
             else if (worker.agentType === 'tmux-gemini')
                 backend = 'tmux-gemini';
+            else if (worker.agentType === 'tmux-antigravity')
+                backend = 'tmux-antigravity';
             else
                 backend = 'mcp-codex';
             const capabilities = getDefaultCapabilities(backend);

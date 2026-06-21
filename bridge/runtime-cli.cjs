@@ -2120,7 +2120,8 @@ var CLAUDE_FAMILY_HIGH_VARIANTS = {
 };
 var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: "gpt-5.3-codex",
-  geminiModel: "gemini-3.1-pro-preview"
+  geminiModel: "gemini-3.1-pro-preview",
+  antigravityModel: "Gemini 3.1 Pro (High)"
 };
 function readEnvValue(key) {
   const value = process.env[key]?.trim();
@@ -2400,7 +2401,8 @@ function buildDefaultConfig() {
     externalModels: {
       defaults: {
         codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
-        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
+        antigravityModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel
       },
       fallbackPolicy: {
         onModelFailure: "provider_chain",
@@ -2587,6 +2589,11 @@ function loadEnvConfig() {
   } else if (process.env.OMC_GROK_DEFAULT_MODEL) {
     externalModelsDefaults.grokModel = process.env.OMC_GROK_DEFAULT_MODEL;
   }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL) {
+    externalModelsDefaults.antigravityModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+  } else if (process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL) {
+    externalModelsDefaults.antigravityModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+  }
   const externalModelsFallback = {
     onModelFailure: "provider_chain"
   };
@@ -2652,7 +2659,7 @@ function warnOnDeprecatedDelegationRouting(config) {
 var CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
 var CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 var KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+var TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
 var TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
 function validateTeamConfig(config) {
   const team = config.team;
@@ -2738,7 +2745,8 @@ var AUTOPILOT_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set([
   "codex",
   "gemini",
   "grok",
-  "cursor"
+  "cursor",
+  "antigravity"
 ]);
 function validateAutopilotConfig(config) {
   const autopilot = config.autopilot;
@@ -3537,6 +3545,21 @@ var CONTRACTS = {
       return rawOutput.trim();
     }
   },
+  antigravity: {
+    agentType: "antigravity",
+    binary: "agy",
+    installInstructions: "Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    supportsPromptMode: true,
+    promptModeFlag: "-p",
+    buildLaunchArgs(model, extraFlags = []) {
+      const args = ["--dangerously-skip-permissions"];
+      if (model) args.push("--model", model);
+      return [...args, ...extraFlags];
+    },
+    parseOutput(rawOutput) {
+      return rawOutput.trim();
+    }
+  },
   cursor: {
     agentType: "cursor",
     binary: "cursor-agent",
@@ -3623,7 +3646,9 @@ var WORKER_MODEL_ENV_ALLOWLIST = [
   "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",
   "OMC_GEMINI_DEFAULT_MODEL",
   "OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL",
-  "OMC_GROK_DEFAULT_MODEL"
+  "OMC_GROK_DEFAULT_MODEL",
+  "OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL",
+  "OMC_ANTIGRAVITY_DEFAULT_MODEL"
 ];
 function getWorkerEnv(teamName, workerName2, agentType, env = process.env) {
   validateTeamName(teamName);
@@ -3877,6 +3902,13 @@ function agentTypeGuidance(agentType) {
         `- Prefer short, explicit \`${teamApiCommand} ... --json\` commands and parse outputs before next step.`,
         "- If a command fails, report the exact stderr to leader-fixed before retrying.",
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done.`
+      ].join("\n");
+    case "antigravity":
+      return [
+        "### Agent-Type Guidance (antigravity)",
+        "- Execute task work in small, verifiable increments and report each milestone to leader-fixed.",
+        "- Keep commit-sized changes scoped to assigned files only; no broad refactors.",
+        `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`
       ].join("\n");
     case "claude":
     default:
@@ -5235,6 +5267,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     if (agentType === "gemini") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || void 0;
     }
+    if (agentType === "antigravity") {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || void 0;
+    }
     if (agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
     }
@@ -5322,7 +5357,7 @@ async function shutdownTeam(teamName, sessionName2, cwd, timeoutMs = 3e4, worker
     teamName
   });
   const configData = await readJsonSafe((0, import_path15.join)(root, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
@@ -6822,6 +6857,9 @@ function resolveExternalModel(provider, raw, cfg) {
   }
   if (provider === "cursor") {
     return "";
+  }
+  if (provider === "antigravity") {
+    return defaults?.antigravityModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
   }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
@@ -8418,6 +8456,9 @@ async function spawnV2Worker(opts) {
     }
     if (opts.agentType === "gemini") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || void 0;
+    }
+    if (opts.agentType === "antigravity") {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || void 0;
     }
     if (opts.agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;

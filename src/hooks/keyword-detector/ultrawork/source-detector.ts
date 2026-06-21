@@ -1,4 +1,4 @@
-export type UltraworkSource = 'planner' | 'gpt' | 'gemini' | 'default';
+export type UltraworkSource = 'planner' | 'gpt' | 'gemini' | 'antigravity' | 'default';
 
 function normalizeToken(value?: string): string {
   return value?.trim().toLowerCase() ?? '';
@@ -35,6 +35,14 @@ export function isGeminiModel(modelId?: string): boolean {
   );
 }
 
+export function isAntigravityModel(modelId?: string): boolean {
+  const normalized = normalizeToken(modelId);
+  return (
+    normalized.includes('antigravity') ||
+    normalized.includes('agy')
+  );
+}
+
 export function getUltraworkSource(
   agentName?: string,
   modelId?: string,
@@ -45,6 +53,13 @@ export function getUltraworkSource(
 
   if (isGptModel(modelId)) {
     return 'gpt';
+  }
+
+  // Antigravity is checked before gemini: the antigravity default model display
+  // name contains "Gemini", so a plain gemini match would shadow it. The
+  // antigravity check keys on the antigravity/agy provider identity.
+  if (isAntigravityModel(modelId)) {
+    return 'antigravity';
   }
 
   if (isGeminiModel(modelId)) {

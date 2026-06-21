@@ -730,6 +730,11 @@ export async function spawnWorkerForTask(
         || process.env.OMC_GEMINI_DEFAULT_MODEL
         || undefined;
     }
+    if (agentType === 'antigravity') {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL
+        || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL
+        || undefined;
+    }
     if (agentType === 'grok') {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL
         || process.env.OMC_GROK_DEFAULT_MODEL
@@ -750,8 +755,9 @@ export async function spawnWorkerForTask(
     model: modelForAgent,
   });
 
-  // For prompt-mode agents (e.g. Gemini Ink TUI), pass instruction via CLI
-  // flag so tmux send-keys never needs to interact with the TUI input widget.
+  // For prompt-mode agents (e.g. Gemini Ink TUI, Antigravity --print), pass
+  // instruction via CLI flag so tmux send-keys never needs to interact with
+  // the TUI input widget.
   // Codex and Claude team workers are persistent interactive panes and are
   // nudged through the inbox transport instead of `codex exec`/print modes.
   if (usePromptMode) {
@@ -929,7 +935,7 @@ export async function shutdownTeam(
   // Polling for ACK files on CLI worker teams wastes the full timeoutMs on every shutdown.
   // Detect CLI worker teams by checking if all agent types are known CLI types, and skip
   // ACK polling — the tmux kill below handles process cleanup instead.
-  const CLI_AGENT_TYPES = new Set<string>(['claude', 'codex', 'gemini', 'grok', 'cursor']);
+  const CLI_AGENT_TYPES = new Set<string>(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
   const agentTypes: string[] = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every(t => CLI_AGENT_TYPES.has(t));
 

@@ -168,6 +168,32 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         expect(launchCmd).toContain('concrete progress');
         rmSync(cwd, { recursive: true, force: true });
     });
+    it('antigravity worker launch args lead with --dangerously-skip-permissions and pass the instruction as the -p value', async () => {
+        const runtime = makeRuntime(cwd, 'antigravity');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+        expect(launchCall).toBeDefined();
+        const launchCmd = launchCall[launchCall.length - 1];
+        // approval flag from the contract (no --print: agy's -p carries the prompt value)
+        expect(launchCmd).toContain("'--dangerously-skip-permissions'");
+        expect(launchCmd).not.toContain("'--print'");
+        // prompt-mode flag for the file-pointer instruction, with the inbox path as its value
+        expect(launchCmd).toContain("'-p'");
+        expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+        // --dangerously-skip-permissions precedes -p (flags before the -p value)
+        expect(launchCmd.indexOf("'--dangerously-skip-permissions'")).toBeLessThan(launchCmd.indexOf("'-p'"));
+        rmSync(cwd, { recursive: true, force: true });
+    });
+    it('antigravity worker skips trust-confirm (no "1" sent via send-keys)', async () => {
+        const runtime = makeRuntime(cwd, 'antigravity');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const literalMessages = tmuxCalls.args
+            .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+            .map(args => args[args.length - 1]);
+        // --dangerously-skip-permissions suppresses prompts, so no "1" is sent.
+        expect(literalMessages.some(msg => msg === '1')).toBe(false);
+        rmSync(cwd, { recursive: true, force: true });
+    });
     it('gemini worker skips trust-confirm (no "1" sent via send-keys)', async () => {
         const runtime = makeRuntime(cwd, 'gemini');
         await spawnWorkerForTask(runtime, 'worker-1', 0);
@@ -270,6 +296,8 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         delete process.env.OMC_GEMINI_DEFAULT_MODEL;
         delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL;
         delete process.env.OMC_GROK_DEFAULT_MODEL;
+        delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+        delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
         delete process.env.ANTHROPIC_MODEL;
         delete process.env.CLAUDE_MODEL;
         delete process.env.ANTHROPIC_BASE_URL;
@@ -406,6 +434,30 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         expect(launchCmd).toContain("'--always-approve'");
         expect(launchCmd).not.toContain("'--model'");
         expect(launchCmd).not.toContain("'--model' 'us.anthropic.claude-sonnet-4-6-v1:0'");
+    });
+    it('antigravity worker passes model from OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL (flags-first)', async () => {
+        process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL = 'Gemini 3.1 Pro (High)';
+        const runtime = makeRuntime(cwd, 'antigravity');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+        expect(launchCall).toBeDefined();
+        const launchCmd = launchCall[launchCall.length - 1];
+        expect(launchCmd).not.toContain("'--print'");
+        expect(launchCmd).toContain("'--dangerously-skip-permissions'");
+        expect(launchCmd).toContain("'--model'");
+        expect(launchCmd).toContain('Gemini 3.1 Pro (High)');
+        // approval flag and --model precede the -p prompt value
+        expect(launchCmd.indexOf("'--dangerously-skip-permissions'")).toBeLessThan(launchCmd.indexOf("'-p'"));
+    });
+    it('antigravity worker falls back to OMC_ANTIGRAVITY_DEFAULT_MODEL', async () => {
+        process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL = 'Gemini 3.1 Pro';
+        const runtime = makeRuntime(cwd, 'antigravity');
+        await spawnWorkerForTask(runtime, 'worker-1', 0);
+        const launchCall = tmuxCalls.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+        expect(launchCall).toBeDefined();
+        const launchCmd = launchCall[launchCall.length - 1];
+        expect(launchCmd).toContain("'--model'");
+        expect(launchCmd).toContain('Gemini 3.1 Pro');
     });
     it('claude worker does not pass model flag (not supported)', async () => {
         process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL = 'gpt-4o';

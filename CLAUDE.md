@@ -31,7 +31,7 @@ explore (haiku), analyst (opus), planner (opus), architect (opus), debugger (son
 </agent_catalog>
 
 <tools>
-External AI: `/team N:executor "task"`, `omc team N:codex|gemini "..."`, `omc ask <claude|codex|gemini>`, `/ccg`
+External AI: `/team N:executor "task"`, `omc team N:codex|gemini|antigravity "..."`, `omc ask <claude|codex|gemini|antigravity>`, `/ccg`
 OMC State: `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
 Teams: Claude Code implicit agent team via Agent/Task `name`; OMC tmux/CLI workers via `/team` or `omc team`; task tracking via TodoWrite or the available task-list surface
 Notepad: `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`

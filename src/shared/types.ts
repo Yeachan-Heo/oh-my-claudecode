@@ -23,7 +23,8 @@ export type AutopilotTeamAgentType =
   | "codex"
   | "gemini"
   | "grok"
-  | "cursor";
+  | "cursor"
+  | "antigravity";
 
 export interface AutopilotConfigBlock {
   /** Maximum total iterations across all phases. */
@@ -318,7 +319,7 @@ export interface HookResult {
 /**
  * External model provider type
  */
-export type ExternalModelProvider = "codex" | "gemini";
+export type ExternalModelProvider = "codex" | "gemini" | "antigravity";
 
 /**
  * External model configuration for a specific role or task
@@ -336,6 +337,7 @@ export interface ExternalModelsDefaults {
   codexModel?: string;
   geminiModel?: string;
   grokModel?: string;
+  antigravityModel?: string;
 }
 
 /**
@@ -460,7 +462,7 @@ export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
 export const CURSOR_EXECUTOR_TEAM_ROLES = ["executor"] as const;
 
 /** Provider for /team role routing. */
-export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor';
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
 
 /** Tier name accepted in role-assignment `model` field. */
 export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';

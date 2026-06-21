@@ -8,7 +8,7 @@
  */
 import { resolveAutopilotPlanPath } from "../../../config/plan-output.js";
 export const EXECUTION_COMPLETION_SIGNAL = "PIPELINE_EXECUTION_COMPLETE";
-const CLI_TEAM_AGENT_TYPES = new Set(["codex", "gemini", "grok", "cursor"]);
+const CLI_TEAM_AGENT_TYPES = new Set(["codex", "gemini", "grok", "cursor", "antigravity"]);
 function uniqueRequestedAgentTypes(agentTypes) {
     return [...new Set((agentTypes ?? []).filter(Boolean))];
 }

@@ -3744,7 +3744,8 @@ var init_models = __esm({
     };
     BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
       codexModel: "gpt-5.3-codex",
-      geminiModel: "gemini-3.1-pro-preview"
+      geminiModel: "gemini-3.1-pro-preview",
+      antigravityModel: "Gemini 3.1 Pro (High)"
     };
   }
 });
@@ -3909,7 +3910,8 @@ function buildDefaultConfig() {
     externalModels: {
       defaults: {
         codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
-        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel
+        geminiModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel,
+        antigravityModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel
       },
       fallbackPolicy: {
         onModelFailure: "provider_chain",
@@ -4094,6 +4096,11 @@ function loadEnvConfig() {
     externalModelsDefaults.grokModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL;
   } else if (process.env.OMC_GROK_DEFAULT_MODEL) {
     externalModelsDefaults.grokModel = process.env.OMC_GROK_DEFAULT_MODEL;
+  }
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL) {
+    externalModelsDefaults.antigravityModel = process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
+  } else if (process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL) {
+    externalModelsDefaults.antigravityModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
   }
   const externalModelsFallback = {
     onModelFailure: "provider_chain"
@@ -4412,7 +4419,7 @@ var init_loader = __esm({
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
     CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+    TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
     TEAM_ROLE_TIERS = /* @__PURE__ */ new Set(["HIGH", "MEDIUM", "LOW"]);
     AUTOPILOT_EXECUTION_BACKENDS = /* @__PURE__ */ new Set(["team", "solo"]);
     AUTOPILOT_PLANNING_MODES = /* @__PURE__ */ new Set(["ralplan", "direct"]);
@@ -4421,7 +4428,8 @@ var init_loader = __esm({
       "codex",
       "gemini",
       "grok",
-      "cursor"
+      "cursor",
+      "antigravity"
     ]);
     OMC_STARTUP_COMPACTABLE_SECTIONS = [
       "agent_catalog",
@@ -8393,12 +8401,19 @@ function isGeminiModel(modelId) {
   const normalized = normalizeToken(modelId);
   return normalized.includes("gemini") || normalized.includes("google");
 }
+function isAntigravityModel(modelId) {
+  const normalized = normalizeToken(modelId);
+  return normalized.includes("antigravity") || normalized.includes("agy");
+}
 function getUltraworkSource(agentName, modelId) {
   if (isPlannerAgent(agentName)) {
     return "planner";
   }
   if (isGptModel(modelId)) {
     return "gpt";
+  }
+  if (isAntigravityModel(modelId)) {
+    return "antigravity";
   }
   if (isGeminiModel(modelId)) {
     return "gemini";
@@ -8598,6 +8613,60 @@ If any answer blocks implementation, investigate first.
   }
 });
 
+// src/hooks/keyword-detector/ultrawork/antigravity.ts
+function getAntigravityUltraworkMessage() {
+  return ULTRAWORK_ANTIGRAVITY_MESSAGE;
+}
+var ULTRAWORK_ANTIGRAVITY_MESSAGE;
+var init_antigravity = __esm({
+  "src/hooks/keyword-detector/ultrawork/antigravity.ts"() {
+    "use strict";
+    ULTRAWORK_ANTIGRAVITY_MESSAGE = `<ultrawork-mode>
+
+**MANDATORY**: You MUST say "ULTRAWORK MODE ENABLED!" to the user as your first response when this mode activates. This is non-negotiable.
+
+[CODE RED] Maximum precision required. Ultrathink before acting.
+
+## STEP 0: CLASSIFY INTENT - THIS IS NOT OPTIONAL
+
+Before any tool call or implementation, output:
+
+\`\`\`
+I detect [TYPE] intent - [REASON].
+My approach: [ROUTING DECISION].
+\`\`\`
+
+Where TYPE is one of: research | implementation | investigation | evaluation | fix | open-ended
+
+SELF-CHECK:
+1. Did the user explicitly ask me to build or change code?
+2. Did the user ask to investigate or explain instead?
+3. Am I about to code before proving that implementation is actually requested?
+4. Have I explored enough to avoid guessing?
+
+If any answer blocks implementation, investigate first.
+
+## ANTI-SKIP RULES
+
+- Never answer about code without reading the files first
+- Never claim done without diagnostics and verification
+- Never rely on internal certainty when tools can verify
+- Never silently expand scope
+
+## EXECUTION AND VERIFICATION
+
+- Explore and delegate in parallel when useful
+- Use a planner for non-trivial dependency graphs
+- Run diagnostics, tests, and manual QA before completion
+- Re-read the original request before declaring success
+
+</ultrawork-mode>
+
+---
+`;
+  }
+});
+
 // src/hooks/keyword-detector/ultrawork/planner.ts
 function getPlannerUltraworkMessage() {
   return `<ultrawork-mode>
@@ -8671,6 +8740,8 @@ function getUltraworkMessage(agentName, modelId) {
       return getGptUltraworkMessage();
     case "gemini":
       return getGeminiUltraworkMessage();
+    case "antigravity":
+      return getAntigravityUltraworkMessage();
     case "default":
     default:
       return getDefaultUltraworkMessage();
@@ -8683,9 +8754,11 @@ var init_ultrawork = __esm({
     init_default();
     init_gpt();
     init_gemini();
+    init_antigravity();
     init_planner2();
     init_default();
     init_gemini();
+    init_antigravity();
     init_gpt();
     init_planner2();
     init_source_detector();
@@ -21089,7 +21162,7 @@ var init_execution_adapter = __esm({
     "use strict";
     init_plan_output();
     EXECUTION_COMPLETION_SIGNAL = "PIPELINE_EXECUTION_COMPLETE";
-    CLI_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set(["codex", "gemini", "grok", "cursor"]);
+    CLI_TEAM_AGENT_TYPES = /* @__PURE__ */ new Set(["codex", "gemini", "grok", "cursor", "antigravity"]);
     executionAdapter = {
       id: "execution",
       name: "Execution",
@@ -30270,6 +30343,21 @@ var init_model_contract = __esm({
           return rawOutput.trim();
         }
       },
+      antigravity: {
+        agentType: "antigravity",
+        binary: "agy",
+        installInstructions: "Install Antigravity CLI: curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        supportsPromptMode: true,
+        promptModeFlag: "-p",
+        buildLaunchArgs(model, extraFlags = []) {
+          const args = ["--dangerously-skip-permissions"];
+          if (model) args.push("--model", model);
+          return [...args, ...extraFlags];
+        },
+        parseOutput(rawOutput) {
+          return rawOutput.trim();
+        }
+      },
       cursor: {
         agentType: "cursor",
         binary: "cursor-agent",
@@ -30307,7 +30395,9 @@ var init_model_contract = __esm({
       "OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL",
       "OMC_GEMINI_DEFAULT_MODEL",
       "OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL",
-      "OMC_GROK_DEFAULT_MODEL"
+      "OMC_GROK_DEFAULT_MODEL",
+      "OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL",
+      "OMC_ANTIGRAVITY_DEFAULT_MODEL"
     ];
   }
 });
@@ -31547,6 +31637,13 @@ function agentTypeGuidance(agentType) {
         `- Prefer short, explicit \`${teamApiCommand} ... --json\` commands and parse outputs before next step.`,
         "- If a command fails, report the exact stderr to leader-fixed before retrying.",
         `- You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done.`
+      ].join("\n");
+    case "antigravity":
+      return [
+        "### Agent-Type Guidance (antigravity)",
+        "- Execute task work in small, verifiable increments and report each milestone to leader-fixed.",
+        "- Keep commit-sized changes scoped to assigned files only; no broad refactors.",
+        `- CRITICAL: You MUST run \`${claimTaskCommand}\` before starting work and \`${transitionTaskStatusCommand}\` when done. Do not exit without transitioning the task status.`
       ].join("\n");
     case "claude":
     default:
@@ -32828,6 +32925,9 @@ function resolveExternalModel(provider, raw, cfg) {
   }
   if (provider === "cursor") {
     return "";
+  }
+  if (provider === "antigravity") {
+    return defaults?.antigravityModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
   }
   return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
@@ -34524,6 +34624,9 @@ async function spawnV2Worker(opts) {
     }
     if (opts.agentType === "gemini") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || void 0;
+    }
+    if (opts.agentType === "antigravity") {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || void 0;
     }
     if (opts.agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
@@ -36427,6 +36530,9 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     if (agentType === "gemini") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || void 0;
     }
+    if (agentType === "antigravity") {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || void 0;
+    }
     if (agentType === "grok") {
       return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || void 0;
     }
@@ -36559,7 +36665,7 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
     teamName
   });
   const configData = await readJsonSafe5((0, import_path93.join)(root2, "config.json"));
-  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+  const CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
   const agentTypes = configData?.agentTypes ?? [];
   const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every((t) => CLI_AGENT_TYPES.has(t));
   if (!isCliWorkerTeam) {
@@ -81027,6 +81133,7 @@ var TOOL_CATEGORIES = {
   INTEROP: "interop",
   CODEX: "codex",
   GEMINI: "gemini",
+  ANTIGRAVITY: "antigravity",
   SHARED_MEMORY: "shared-memory",
   DEEPINIT: "deepinit",
   WIKI: "wiki"
@@ -82228,6 +82335,7 @@ var DISABLE_TOOLS_GROUP_MAP = {
   "interop": TOOL_CATEGORIES.INTEROP,
   "codex": TOOL_CATEGORIES.CODEX,
   "gemini": TOOL_CATEGORIES.GEMINI,
+  "antigravity": TOOL_CATEGORIES.ANTIGRAVITY,
   "shared-memory": TOOL_CATEGORIES.SHARED_MEMORY,
   "deepinit": TOOL_CATEGORIES.DEEPINIT,
   "deepinit-manifest": TOOL_CATEGORIES.DEEPINIT,
@@ -82962,7 +83070,8 @@ var KEYWORD_PATTERNS = {
   ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
-  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i
+  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
+  antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
 };
 var OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
 var KEYWORD_SKIP_PREDICATES = {
@@ -82985,7 +83094,8 @@ var KEYWORD_PRIORITY = [
   "deep-interview",
   "codex",
   "gemini",
-  "cursor"
+  "cursor",
+  "antigravity"
 ];
 var CANONICAL_WORKFLOW_SLASH_SKILLS = [
   "autopilot",
@@ -85743,7 +85853,8 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
         break;
       case "codex":
       case "gemini":
-      case "cursor": {
+      case "cursor":
+      case "antigravity": {
         const teamStartCommand = formatOmcCliInvocation(`team start --agent ${keywordType} --count N --task "<task from user message>"`);
         messages.push(
           `[MAGIC KEYWORD: team]
@@ -87185,7 +87296,8 @@ function detectSkillRuntimeAvailability(detector = isCliAvailable) {
     claude: safeDetect("claude"),
     codex: safeDetect("codex"),
     gemini: safeDetect("gemini"),
-    grok: safeDetect("grok")
+    grok: safeDetect("grok"),
+    antigravity: safeDetect("antigravity")
   };
 }
 function normalizeSkillName(skillName) {
@@ -89191,7 +89303,8 @@ var PROVIDER_BINARY = {
   codex: "codex",
   gemini: "gemini",
   grok: "grok",
-  cursor: "cursor-agent"
+  cursor: "cursor-agent",
+  antigravity: "agy"
 };
 function probeProvider(provider) {
   const binary = PROVIDER_BINARY[provider];
@@ -89219,7 +89332,7 @@ function collectConfiguredProviders() {
   const roleRouting = cfg.team?.roleRouting ?? {};
   for (const spec of Object.values(roleRouting)) {
     const provider = spec?.provider;
-    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok" || provider === "cursor") {
+    if (provider === "claude" || provider === "codex" || provider === "gemini" || provider === "grok" || provider === "cursor" || provider === "antigravity") {
       providers.add(provider);
     }
   }
@@ -90192,7 +90305,7 @@ init_worktree_paths();
 var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
 var MIN_WORKER_COUNT = 1;
 var MAX_WORKER_COUNT = 20;
-var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor"]);
+var VALID_TEAM_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
 var CURSOR_ALLOWED_TEAM_ROLES = /* @__PURE__ */ new Set(["executor"]);
 var DEFAULT_TEAM_CLI_AGENT_TYPE = "claude";
 var TEAM_HELP = `
@@ -90208,6 +90321,7 @@ Examples:
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
   omc team 1:cursor:executor "apply the implementation"
+  omc team 1:antigravity:executor "apply the implementation"
   omc team 2:codex "review auth flow" --new-window
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
@@ -94011,14 +94125,14 @@ var import_path122 = require("path");
 var import_url17 = require("url");
 init_security_config();
 var ASK_USAGE = [
-  "Usage: omc ask <claude|codex|gemini|grok|cursor> <question or task>",
-  '   or: omc ask <claude|codex|gemini|grok|cursor> -p "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --print "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --prompt "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt <role> "<prompt>"',
-  '   or: omc ask <claude|codex|gemini|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"'
+  "Usage: omc ask <claude|codex|gemini|antigravity|grok|cursor> <question or task>",
+  '   or: omc ask <claude|codex|gemini|antigravity|grok|cursor> -p "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok|cursor> --print "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok|cursor> --prompt "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok|cursor> --agent-prompt <role> "<prompt>"',
+  '   or: omc ask <claude|codex|gemini|antigravity|grok|cursor> --agent-prompt=<role> --prompt "<prompt>"'
 ].join("\n");
-var ASK_PROVIDERS = ["claude", "codex", "gemini", "grok", "cursor"];
+var ASK_PROVIDERS = ["claude", "codex", "gemini", "antigravity", "grok", "cursor"];
 var ASK_PROVIDER_SET = new Set(ASK_PROVIDERS);
 var ASK_AGENT_PROMPT_FLAG = "--agent-prompt";
 var SAFE_ROLE_PATTERN = /^[a-z][a-z0-9-]*$/;

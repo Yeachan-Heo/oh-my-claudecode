@@ -1288,10 +1288,13 @@ var CLAUDE_FAMILY_HIGH_VARIANTS = {
 };
 var BUILTIN_EXTERNAL_MODEL_DEFAULTS = {
   codexModel: "gpt-5.3-codex",
-  geminiModel: "gemini-3.1-pro-preview"
+  geminiModel: "gemini-3.1-pro-preview",
+  antigravityModel: "Gemini 3.1 Pro (High)"
 };
 function getBuiltinExternalDefaultModel(provider) {
-  return provider === "codex" ? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel : BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+  if (provider === "codex") return BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+  if (provider === "antigravity") return BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
+  return BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 
 // src/agents/prompt-helpers.ts

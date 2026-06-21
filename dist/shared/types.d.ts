@@ -15,7 +15,7 @@ export interface AgentConfig {
 }
 export type AutopilotExecutionBackend = "team" | "solo";
 export type AutopilotPlanningMode = "ralplan" | "direct" | false;
-export type AutopilotTeamAgentType = "claude" | "codex" | "gemini" | "grok" | "cursor";
+export type AutopilotTeamAgentType = "claude" | "codex" | "gemini" | "grok" | "cursor" | "antigravity";
 export interface AutopilotConfigBlock {
     /** Maximum total iterations across all phases. */
     maxIterations?: number;
@@ -306,7 +306,7 @@ export interface HookResult {
 /**
  * External model provider type
  */
-export type ExternalModelProvider = "codex" | "gemini";
+export type ExternalModelProvider = "codex" | "gemini" | "antigravity";
 /**
  * External model configuration for a specific role or task
  */
@@ -322,6 +322,7 @@ export interface ExternalModelsDefaults {
     codexModel?: string;
     geminiModel?: string;
     grokModel?: string;
+    antigravityModel?: string;
 }
 /**
  * External models fallback policy
@@ -411,7 +412,7 @@ export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
 /** Cursor team workers are currently supported only for executor-style tasks. */
 export declare const CURSOR_EXECUTOR_TEAM_ROLES: readonly ["executor"];
 /** Provider for /team role routing. */
-export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor';
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
 /** Tier name accepted in role-assignment `model` field. */
 export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';
 /** Known agent names derived from `buildDefaultConfig().agents` keys in src/config/loader.ts. */
