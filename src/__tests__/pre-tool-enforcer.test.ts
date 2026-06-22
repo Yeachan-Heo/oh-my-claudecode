@@ -347,6 +347,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(hookSpecificOutput.additionalContext).toContain('TeamCreate and TeamDelete are removed');
     expect(hookSpecificOutput.additionalContext).toContain('team_name for routing');
     expect(hookSpecificOutput.additionalContext).toContain('ignored legacy metadata');
+    expect(hookSpecificOutput.additionalContext).not.toContain('CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
     expect(hookSpecificOutput.additionalContext).not.toContain('verify CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
     expect(hookSpecificOutput.additionalContext).not.toContain('Restart Claude Code');
 
@@ -412,6 +413,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(context).toContain('name="worker-N"');
     expect(context).toContain('TeamCreate and TeamDelete are removed');
     expect(context).not.toContain('verify CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
+    expect(context).not.toContain('CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
     expect(context).not.toContain('Restart Claude Code');
   });
 
