@@ -20,7 +20,7 @@ Use this when you want parallel external perspectives without launching tmux tea
 ## Requirements
 
 - **Codex CLI**: `npm install -g @openai/codex` (or `@openai/codex`)
-- **Gemini CLI**: `npm install -g @google/gemini-cli`
+- **Gemini CLI**: `npm install -g @google/gemini-cli` (the Gemini axis can also be repointed at another CLI such as Antigravity's `agy` via `OMC_ASK_GEMINI_BIN` / `OMC_ASK_GEMINI_ARGS` — see the `ask` skill's "Backend overrides")
 - `omc ask` command available
 - If either CLI is unavailable, continue with whichever provider is available and note the limitation
 

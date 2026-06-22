@@ -4,7 +4,11 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import process from 'process';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { resolveProviderBinary, resolveProviderArgsOverride } from './lib/provider-overrides.mjs';
 
+// Default binary per provider. Each entry can be repointed at a drop-in CLI via
+// `OMC_ASK_<PROVIDER>_BIN` (binary) and `OMC_ASK_<PROVIDER>_ARGS` (JSON args)
+// without code changes — see scripts/lib/provider-overrides.mjs.
 const PROVIDER_BINARIES = {
   claude: 'claude',
   codex: 'codex',
@@ -256,12 +260,19 @@ async function writeArtifact({ provider, originalTask, finalPrompt, rawOutput, e
 
 async function main() {
   const { provider, prompt } = parseArgs(process.argv.slice(2));
-  const binary = PROVIDER_BINARIES[provider];
+  const binary = resolveProviderBinary(provider, PROVIDER_BINARIES[provider]);
+  const argsOverride = resolveProviderArgsOverride(provider, prompt);
 
   ensureBinary(provider, binary);
 
-  const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
-  const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
+  // When OMC_ASK_<PROVIDER>_ARGS embeds the prompt via {{prompt}}, pass it as an
+  // arg; otherwise pipe it over stdin. With no override, keep default behavior.
+  const pipePromptViaStdin = argsOverride
+    ? !argsOverride.usesPromptPlaceholder
+    : shouldPipePromptViaStdin(provider, prompt);
+  const providerArgs = argsOverride
+    ? argsOverride.args
+    : buildProviderArgs(provider, prompt, { pipePromptViaStdin });
   const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,

@@ -45,6 +45,24 @@ grok --version
 cursor-agent --version
 ```
 
+## Backend overrides (advanced)
+
+Any provider's local CLI can be repointed via environment variables, without code changes:
+
+| Variable | Effect |
+|----------|--------|
+| `OMC_ASK_<PROVIDER>_BIN` | Replace the provider's binary (e.g. `gemini` → `agy`). |
+| `OMC_ASK_<PROVIDER>_ARGS` | Replace its argument list. JSON array of strings; the literal `{{prompt}}` token is substituted with the prompt (omit it to pipe the prompt over stdin). |
+
+`<PROVIDER>` is the upper-cased provider name (`CLAUDE`, `CODEX`, `GEMINI`, `GROK`, `CURSOR`). When both are unset the built-in command is used, so default behavior is unchanged.
+
+Example — route the Gemini axis (and therefore `/ccg`) through Antigravity's `agy` CLI, e.g. after `@google/gemini-cli` access moves to Antigravity and the `gemini` binary returns `IneligibleTier`:
+
+```bash
+export OMC_ASK_GEMINI_BIN=agy
+export OMC_ASK_GEMINI_ARGS='["--print","{{prompt}}","--dangerously-skip-permissions"]'
+```
+
 ## Artifacts
 
 `omc ask` writes artifacts to:
