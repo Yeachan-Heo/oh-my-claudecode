@@ -937,8 +937,7 @@ function generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId) {
   if (teamState && !toolInput.name) {
     const teamName = teamState.team_name || teamState.teamName || 'team';
     return `[TEAM ROUTING REQUIRED] Team "${teamName}" is active but you are spawning an unnamed subagent. ` +
-      `Claude Code 2.1.178+ uses one implicit team per session when ` +
-      `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 is enabled; TeamCreate and TeamDelete are removed. ` +
+      `Claude Code 2.1.178+ uses the session's implicit native agent team; TeamCreate and TeamDelete are removed. ` +
       `Spawn teammates directly with Agent/Task name="worker-N" and subagent_type="${agentType}". ` +
       `Do NOT rely on team_name for routing; native Claude Code accepts it only as ignored legacy metadata.`;
   }
