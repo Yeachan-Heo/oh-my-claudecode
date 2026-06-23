@@ -128,6 +128,11 @@ const TEAM_API_OPERATION_NOTES: Partial<Record<TeamApiOperation, string>> = {
   'transition-task-status': 'Lifecycle flow is claim-safe and typically transitions in_progress -> completed|failed.',
 };
 
+function shouldPrintTeamHelpForError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /^Usage:\s+omc team\b/.test(message);
+}
+
 // ---------------------------------------------------------------------------
 // Task decomposition helpers
 // ---------------------------------------------------------------------------
@@ -1017,7 +1022,9 @@ export async function teamCommand(args: string[]): Promise<void> {
     await handleTeamStart(parsed, cwd);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    console.log(TEAM_HELP.trim());
+    if (shouldPrintTeamHelpForError(error)) {
+      console.log(TEAM_HELP.trim());
+    }
     process.exitCode = 1;
   }
 }

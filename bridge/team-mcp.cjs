@@ -18178,14 +18178,59 @@ async function cmuxExecAsync(args) {
     stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr ?? "")
   };
 }
+async function cmuxExecPrimaryWithLegacyFallback(primaryArgs, legacyArgs) {
+  try {
+    return await cmuxExecAsync(primaryArgs);
+  } catch (primaryError) {
+    try {
+      return await cmuxExecAsync(legacyArgs);
+    } catch (legacyError) {
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const legacyMessage = legacyError instanceof Error ? legacyError.message : String(legacyError);
+      throw new Error(
+        `cmux command failed for both current and legacy forms: current="${primaryArgs.join(" ")}" (${primaryMessage}); legacy="${legacyArgs.join(" ")}" (${legacyMessage})`
+      );
+    }
+  }
+}
 async function cmuxSendSurface(surfaceId, text) {
-  await cmuxExecAsync(["send", "--surface", surfaceId, text]);
+  await cmuxExecPrimaryWithLegacyFallback(
+    ["send-surface", "--surface", surfaceId, text],
+    ["send", "--surface", surfaceId, text]
+  );
+}
+function normalizeCmuxKey(key) {
+  const normalized = key.trim();
+  const lower = normalized.toLowerCase();
+  switch (lower) {
+    case "enter":
+    case "return":
+    case "tab":
+    case "escape":
+    case "esc":
+    case "backspace":
+    case "delete":
+    case "up":
+    case "down":
+    case "left":
+    case "right":
+      return lower === "return" ? "enter" : lower === "esc" ? "escape" : lower;
+    default:
+      return normalized;
+  }
 }
 async function cmuxSendSurfaceKey(surfaceId, key) {
-  await cmuxExecAsync(["send-key", "--surface", surfaceId, key]);
+  const normalizedKey = normalizeCmuxKey(key);
+  await cmuxExecPrimaryWithLegacyFallback(
+    ["send-key-surface", "--surface", surfaceId, normalizedKey],
+    ["send-key", "--surface", surfaceId, key]
+  );
 }
 async function cmuxCaptureSurface(surfaceId) {
-  const result = await cmuxExecAsync(["capture-pane", "--surface", surfaceId, "--scrollback"]);
+  const result = await cmuxExecPrimaryWithLegacyFallback(
+    ["read-screen", "--surface", surfaceId],
+    ["capture-pane", "--surface", surfaceId, "--scrollback"]
+  );
   return result.stdout;
 }
 async function cmuxCloseSurface(surfaceId) {

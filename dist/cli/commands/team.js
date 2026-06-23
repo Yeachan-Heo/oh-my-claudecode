@@ -113,6 +113,10 @@ const TEAM_API_OPERATION_NOTES = {
     'release-task-claim': 'Use this only for rollback/requeue to pending (not for completion).',
     'transition-task-status': 'Lifecycle flow is claim-safe and typically transitions in_progress -> completed|failed.',
 };
+function shouldPrintTeamHelpForError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /^Usage:\s+omc team\b/.test(message);
+}
 const NUMBERED_LINE_RE = /^\s*\d+[.)]\s+(.+)$/;
 const BULLETED_LINE_RE = /^\s*[-*•]\s+(.+)$/;
 // Conjunction split: "fix auth AND fix login AND fix logout" or "fix auth, fix login, and fix logout"
@@ -861,7 +865,9 @@ export async function teamCommand(args) {
     }
     catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
-        console.log(TEAM_HELP.trim());
+        if (shouldPrintTeamHelpForError(error)) {
+            console.log(TEAM_HELP.trim());
+        }
         process.exitCode = 1;
     }
 }

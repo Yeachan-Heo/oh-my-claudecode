@@ -554,32 +554,33 @@ async function spawnV2Worker(opts) {
 }
 async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
     const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
-    if (!safety.hasEvidence)
-        return;
     const teamRoot = absPath(cwd, TeamPaths.root(teamName));
     const errorMessage = cause instanceof Error ? cause.message : String(cause);
+    const recordedAt = new Date().toISOString();
+    const writeFailureMarker = async (extra = {}) => {
+        await mkdir(teamRoot, { recursive: true });
+        await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
+            reason: 'startup_failed_before_config_persisted',
+            error: errorMessage,
+            recorded_at: recordedAt,
+            ...extra,
+        }, null, 2), 'utf-8');
+    };
+    if (!safety.hasEvidence) {
+        await writeFailureMarker();
+        return;
+    }
     try {
         const cleanup = cleanupTeamWorktrees(teamName, cwd);
         if (cleanup.preserved.length === 0) {
             await rm(teamRoot, { recursive: true, force: true });
-            return;
         }
-        await mkdir(teamRoot, { recursive: true });
-        await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
-            reason: 'startup_failed_before_config_persisted',
-            error: errorMessage,
-            preserved: cleanup.preserved,
-            recorded_at: new Date().toISOString(),
-        }, null, 2), 'utf-8');
+        await writeFailureMarker({ preserved: cleanup.preserved });
     }
     catch (rollbackError) {
-        await mkdir(teamRoot, { recursive: true });
-        await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
-            reason: 'startup_failed_before_config_persisted',
-            error: errorMessage,
+        await writeFailureMarker({
             rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-            recorded_at: new Date().toISOString(),
-        }, null, 2), 'utf-8');
+        });
     }
 }
 async function rollbackStartedNativeWorktreeStartup(args) {

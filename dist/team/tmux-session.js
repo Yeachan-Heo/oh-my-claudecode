@@ -68,6 +68,22 @@ async function cmuxExecAsync(args) {
         stderr: typeof result.stderr === 'string' ? result.stderr : String(result.stderr ?? ''),
     };
 }
+async function cmuxExecPrimaryWithLegacyFallback(primaryArgs, legacyArgs) {
+    try {
+        return await cmuxExecAsync(primaryArgs);
+    }
+    catch (primaryError) {
+        try {
+            return await cmuxExecAsync(legacyArgs);
+        }
+        catch (legacyError) {
+            const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
+            const legacyMessage = legacyError instanceof Error ? legacyError.message : String(legacyError);
+            throw new Error(`cmux command failed for both current and legacy forms: current="${primaryArgs.join(' ')}" (${primaryMessage}); ` +
+                `legacy="${legacyArgs.join(' ')}" (${legacyMessage})`);
+        }
+    }
+}
 function parseCmuxSurfaceId(output) {
     const trimmed = output.trim();
     const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -87,13 +103,43 @@ async function cmuxSplitSurface(targetSurfaceId, direction, _cwd) {
     return parseCmuxSurfaceId(result.stdout);
 }
 async function cmuxSendSurface(surfaceId, text) {
-    await cmuxExecAsync(['send', '--surface', surfaceId, text]);
+    // cmux 0.64.x targets a specific surface with the dedicated
+    // `send-surface` subcommand. `cmux send --surface ...` is parsed as the
+    // focused-surface form plus an unknown option in current cmux builds, which
+    // makes worker startup fail after the split/worktree has already been
+    // created. The top-level `omc team` catch then prints generic usage and the
+    // startup rollback tears the empty worktree down. (#3325)
+    await cmuxExecPrimaryWithLegacyFallback(['send-surface', '--surface', surfaceId, text], ['send', '--surface', surfaceId, text]);
+}
+function normalizeCmuxKey(key) {
+    const normalized = key.trim();
+    const lower = normalized.toLowerCase();
+    switch (lower) {
+        case 'enter':
+        case 'return':
+        case 'tab':
+        case 'escape':
+        case 'esc':
+        case 'backspace':
+        case 'delete':
+        case 'up':
+        case 'down':
+        case 'left':
+        case 'right':
+            return lower === 'return' ? 'enter' : lower === 'esc' ? 'escape' : lower;
+        default:
+            return normalized;
+    }
 }
 async function cmuxSendSurfaceKey(surfaceId, key) {
-    await cmuxExecAsync(['send-key', '--surface', surfaceId, key]);
+    // See cmuxSendSurface(): targeting a surface uses `send-key-surface`, not a
+    // `--surface` option on `send-key`. Key names are lower-case in the cmux CLI
+    // reference; normalize common names while leaving advanced chord strings alone.
+    const normalizedKey = normalizeCmuxKey(key);
+    await cmuxExecPrimaryWithLegacyFallback(['send-key-surface', '--surface', surfaceId, normalizedKey], ['send-key', '--surface', surfaceId, key]);
 }
 async function cmuxCaptureSurface(surfaceId) {
-    const result = await cmuxExecAsync(['capture-pane', '--surface', surfaceId, '--scrollback']);
+    const result = await cmuxExecPrimaryWithLegacyFallback(['read-screen', '--surface', surfaceId], ['capture-pane', '--surface', surfaceId, '--scrollback']);
     return result.stdout;
 }
 async function cmuxCloseSurface(surfaceId) {

@@ -489,6 +489,21 @@ async function cmuxExecAsync(args) {
     stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr ?? "")
   };
 }
+async function cmuxExecPrimaryWithLegacyFallback(primaryArgs, legacyArgs) {
+  try {
+    return await cmuxExecAsync(primaryArgs);
+  } catch (primaryError) {
+    try {
+      return await cmuxExecAsync(legacyArgs);
+    } catch (legacyError) {
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const legacyMessage = legacyError instanceof Error ? legacyError.message : String(legacyError);
+      throw new Error(
+        `cmux command failed for both current and legacy forms: current="${primaryArgs.join(" ")}" (${primaryMessage}); legacy="${legacyArgs.join(" ")}" (${legacyMessage})`
+      );
+    }
+  }
+}
 function parseCmuxSurfaceId(output) {
   const trimmed = output.trim();
   const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -505,13 +520,43 @@ async function cmuxSplitSurface(targetSurfaceId, direction, _cwd) {
   return parseCmuxSurfaceId(result.stdout);
 }
 async function cmuxSendSurface(surfaceId, text) {
-  await cmuxExecAsync(["send", "--surface", surfaceId, text]);
+  await cmuxExecPrimaryWithLegacyFallback(
+    ["send-surface", "--surface", surfaceId, text],
+    ["send", "--surface", surfaceId, text]
+  );
+}
+function normalizeCmuxKey(key) {
+  const normalized = key.trim();
+  const lower = normalized.toLowerCase();
+  switch (lower) {
+    case "enter":
+    case "return":
+    case "tab":
+    case "escape":
+    case "esc":
+    case "backspace":
+    case "delete":
+    case "up":
+    case "down":
+    case "left":
+    case "right":
+      return lower === "return" ? "enter" : lower === "esc" ? "escape" : lower;
+    default:
+      return normalized;
+  }
 }
 async function cmuxSendSurfaceKey(surfaceId, key) {
-  await cmuxExecAsync(["send-key", "--surface", surfaceId, key]);
+  const normalizedKey = normalizeCmuxKey(key);
+  await cmuxExecPrimaryWithLegacyFallback(
+    ["send-key-surface", "--surface", surfaceId, normalizedKey],
+    ["send-key", "--surface", surfaceId, key]
+  );
 }
 async function cmuxCaptureSurface(surfaceId) {
-  const result = await cmuxExecAsync(["capture-pane", "--surface", surfaceId, "--scrollback"]);
+  const result = await cmuxExecPrimaryWithLegacyFallback(
+    ["read-screen", "--surface", surfaceId],
+    ["capture-pane", "--surface", surfaceId, "--scrollback"]
+  );
   return result.stdout;
 }
 async function cmuxCloseSurface(surfaceId) {
@@ -8618,30 +8663,32 @@ async function spawnV2Worker(opts) {
 }
 async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
   const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
-  if (!safety.hasEvidence) return;
   const teamRoot = absPath(cwd, TeamPaths.root(teamName));
   const errorMessage = cause instanceof Error ? cause.message : String(cause);
+  const recordedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const writeFailureMarker = async (extra = {}) => {
+    await (0, import_promises10.mkdir)(teamRoot, { recursive: true });
+    await (0, import_promises10.writeFile)((0, import_path22.join)(teamRoot, "startup-failure.json"), JSON.stringify({
+      reason: "startup_failed_before_config_persisted",
+      error: errorMessage,
+      recorded_at: recordedAt,
+      ...extra
+    }, null, 2), "utf-8");
+  };
+  if (!safety.hasEvidence) {
+    await writeFailureMarker();
+    return;
+  }
   try {
     const cleanup = cleanupTeamWorktrees(teamName, cwd);
     if (cleanup.preserved.length === 0) {
       await (0, import_promises10.rm)(teamRoot, { recursive: true, force: true });
-      return;
     }
-    await (0, import_promises10.mkdir)(teamRoot, { recursive: true });
-    await (0, import_promises10.writeFile)((0, import_path22.join)(teamRoot, "startup-failure.json"), JSON.stringify({
-      reason: "startup_failed_before_config_persisted",
-      error: errorMessage,
-      preserved: cleanup.preserved,
-      recorded_at: (/* @__PURE__ */ new Date()).toISOString()
-    }, null, 2), "utf-8");
+    await writeFailureMarker({ preserved: cleanup.preserved });
   } catch (rollbackError) {
-    await (0, import_promises10.mkdir)(teamRoot, { recursive: true });
-    await (0, import_promises10.writeFile)((0, import_path22.join)(teamRoot, "startup-failure.json"), JSON.stringify({
-      reason: "startup_failed_before_config_persisted",
-      error: errorMessage,
-      rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-      recorded_at: (/* @__PURE__ */ new Date()).toISOString()
-    }, null, 2), "utf-8");
+    await writeFailureMarker({
+      rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+    });
   }
 }
 async function rollbackStartedNativeWorktreeStartup(args) {

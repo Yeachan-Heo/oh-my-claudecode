@@ -8,17 +8,29 @@ const mockedCalls = vi.hoisted(() => ({
     wrapLiteralCapture: false,
     insertWrapSpaces: false,
     enterSubmitsCommand: true,
+    cmuxFailOnce: [],
 }));
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
     const execFileMock = vi.fn((_cmd, args, cb) => {
         mockedCalls.cmuxArgs.push(args);
+        const failIndex = mockedCalls.cmuxFailOnce.indexOf(args[0] ?? '');
+        if (failIndex >= 0) {
+            mockedCalls.cmuxFailOnce.splice(failIndex, 1);
+            cb(new Error(`cmux ${args[0]} failed`), '', `cmux ${args[0]} failed`);
+            return {};
+        }
         cb(null, '', '');
         return {};
     });
     const promisifyCustom = Symbol.for('nodejs.util.promisify.custom');
     execFileMock[promisifyCustom] = async (_cmd, args) => {
         mockedCalls.cmuxArgs.push(args);
+        const failIndex = mockedCalls.cmuxFailOnce.indexOf(args[0] ?? '');
+        if (failIndex >= 0) {
+            mockedCalls.cmuxFailOnce.splice(failIndex, 1);
+            throw new Error(`cmux ${args[0]} failed`);
+        }
         return { stdout: '', stderr: '' };
     };
     return {
@@ -74,6 +86,7 @@ describe('spawnWorkerInPane', () => {
         mockedCalls.echoOnLiteralSend = true;
         mockedCalls.wrapLiteralCapture = false;
         mockedCalls.insertWrapSpaces = false;
+        mockedCalls.cmuxFailOnce = [];
         vi.unstubAllEnvs();
         mockedCalls.enterSubmitsCommand = true;
     });
@@ -97,7 +110,7 @@ describe('spawnWorkerInPane', () => {
         expect(launchLine).toContain("'gpt-5;touch /tmp/pwn'");
         expect(launchLine).not.toContain('exec codex --full-auto');
     });
-    it('sends cmux worker command text and submits with send-key', async () => {
+    it('sends cmux worker command text to the target surface and submits with send-key-surface', async () => {
         vi.stubEnv('TMUX', '');
         vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
         await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
@@ -113,12 +126,12 @@ describe('spawnWorkerInPane', () => {
         });
         expect(mockedCalls.tmuxArgs.some((args) => args[0] === 'send-keys')).toBe(false);
         expect(mockedCalls.cmuxArgs).toHaveLength(2);
-        expect(mockedCalls.cmuxArgs[0]).toEqual(expect.arrayContaining(['send', '--surface', 'cmux-worker-1']));
-        expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send');
+        expect(mockedCalls.cmuxArgs[0]).toEqual(expect.arrayContaining(['send-surface', '--surface', 'cmux-worker-1']));
+        expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send-surface');
         expect(mockedCalls.cmuxArgs[0]?.at(-1)).toContain('exec "$@"');
-        expect(mockedCalls.cmuxArgs[1]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'Enter']);
+        expect(mockedCalls.cmuxArgs[1]).toEqual(['send-key-surface', '--surface', 'cmux-worker-1', 'enter']);
     });
-    it('uses cmux send-key semantics for Enter and control keys', async () => {
+    it('uses cmux send-key-surface semantics for Enter and control keys', async () => {
         vi.stubEnv('TMUX', '');
         vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
         await sendTeamPaneKey('cmux-worker-1', 'Enter');
@@ -127,11 +140,31 @@ describe('spawnWorkerInPane', () => {
         await sendTeamPaneKey('cmux-worker-1', 'C-u');
         expect(mockedCalls.tmuxArgs.some((args) => args[0] === 'send-keys')).toBe(false);
         expect(mockedCalls.cmuxArgs).toEqual([
-            ['send-key', '--surface', 'cmux-worker-1', 'Enter'],
-            ['send-key', '--surface', 'cmux-worker-1', 'Tab'],
-            ['send-key', '--surface', 'cmux-worker-1', 'C-m'],
-            ['send-key', '--surface', 'cmux-worker-1', 'C-u'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'enter'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'tab'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'C-m'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'C-u'],
         ]);
+    });
+    it('falls back to legacy cmux surface commands when current dialect is unavailable', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+        mockedCalls.cmuxFailOnce = ['send-surface', 'send-key-surface'];
+        await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
+            teamName: 'safe-team',
+            workerName: 'worker-1',
+            envVars: {
+                OMC_TEAM_NAME: 'safe-team',
+                OMC_TEAM_WORKER: 'safe-team/worker-1',
+            },
+            launchBinary: 'codex',
+            launchArgs: ['--full-auto'],
+            cwd: '/tmp',
+        });
+        expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send-surface');
+        expect(mockedCalls.cmuxArgs[1]?.[0]).toBe('send');
+        expect(mockedCalls.cmuxArgs[2]?.[0]).toBe('send-key-surface');
+        expect(mockedCalls.cmuxArgs[3]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'Enter']);
     });
     it('uses current JS runtime when launching bridge-entry helpers', () => {
         spawnBridgeInSession('session:0', '/tmp/bridge-entry.js', '/tmp/bridge-config.json');

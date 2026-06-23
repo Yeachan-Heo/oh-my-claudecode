@@ -246,6 +246,59 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(inbox).toContain('Subagent skip reason:');
         expect(inbox).toContain('only when explicitly allowed by the leader');
     });
+    it('preserves startup failure evidence when a worker launch throws after scaffolding', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-startup-failure-'));
+        mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('claude launch exploded'));
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify startup failure evidence' }],
+            cwd,
+        })).rejects.toThrow('claude launch exploded');
+        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+        const marker = JSON.parse(await readFile(markerPath, 'utf-8'));
+        expect(marker.reason).toBe('startup_failed_before_config_persisted');
+        expect(marker.error).toContain('claude launch exploded');
+        expect(marker.recorded_at).toBeTruthy();
+        expect(mocks.killTeamSession).toHaveBeenCalledWith('dispatch-session', [], '%1', { sessionMode: 'split-pane' });
+    });
+    it('keeps dirty worktree preservation metadata when startup rollback records failure evidence', async () => {
+        cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-dirty-startup-failure-'));
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), 'dirty startup failure test\n', 'utf-8');
+        await writeFile(join(cwd, 'AGENTS.md'), 'root agents\n', 'utf-8');
+        execFileSync('git', ['add', 'README.md', 'AGENTS.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        mocks.spawnWorkerInPane.mockImplementationOnce(async (_session, _pane, paneConfig) => {
+            await writeFile(join(paneConfig.cwd ?? cwd, 'dirty-startup.txt'), 'preserve me\n', 'utf-8');
+            throw new Error('claude launch exploded after dirty worktree');
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
+            tasks: [{ subject: 'Dispatch test', description: 'Verify dirty worktree preservation evidence' }],
+            cwd,
+        })).rejects.toThrow('claude launch exploded after dirty worktree');
+        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+        const marker = JSON.parse(await readFile(markerPath, 'utf-8'));
+        const backupPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'worktree-root-agents.json');
+        const worktreePath = join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1');
+        expect(marker.error).toContain('claude launch exploded after dirty worktree');
+        expect(marker.preserved?.[0]).toMatchObject({
+            workerName: 'worker-1',
+            path: worktreePath,
+        });
+        expect(marker.preserved?.[0]?.reason).toContain('worktree_dirty');
+        await expect(readFile(backupPath, 'utf-8')).resolves.toContain('root agents');
+        await expect(readFile(join(worktreePath, 'dirty-startup.txt'), 'utf-8')).resolves.toBe('preserve me\n');
+    });
     it('persists runtime-v2 worktree contract fields for split-pane teams', async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-worktree-contract-'));
         execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
