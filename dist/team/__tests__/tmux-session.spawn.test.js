@@ -9,15 +9,24 @@ const mockedCalls = vi.hoisted(() => ({
     insertWrapSpaces: false,
     enterSubmitsCommand: true,
     cmuxFailOnce: [],
+    cmuxFailures: [],
 }));
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
     const execFileMock = vi.fn((_cmd, args, cb) => {
         mockedCalls.cmuxArgs.push(args);
-        const failIndex = mockedCalls.cmuxFailOnce.indexOf(args[0] ?? '');
+        const command = args[0] ?? '';
+        const failureIndex = mockedCalls.cmuxFailures.findIndex(failure => failure.command === command);
+        if (failureIndex >= 0) {
+            const [failure] = mockedCalls.cmuxFailures.splice(failureIndex, 1);
+            const error = new Error(failure?.message ?? `cmux ${command} failed`);
+            cb(error, '', failure?.message ?? `cmux ${command} failed`);
+            return {};
+        }
+        const failIndex = mockedCalls.cmuxFailOnce.indexOf(command);
         if (failIndex >= 0) {
             mockedCalls.cmuxFailOnce.splice(failIndex, 1);
-            cb(new Error(`cmux ${args[0]} failed`), '', `cmux ${args[0]} failed`);
+            cb(new Error(`cmux ${command} failed`), '', `cmux ${command} failed`);
             return {};
         }
         cb(null, '', '');
@@ -26,10 +35,16 @@ vi.mock('child_process', async (importOriginal) => {
     const promisifyCustom = Symbol.for('nodejs.util.promisify.custom');
     execFileMock[promisifyCustom] = async (_cmd, args) => {
         mockedCalls.cmuxArgs.push(args);
-        const failIndex = mockedCalls.cmuxFailOnce.indexOf(args[0] ?? '');
+        const command = args[0] ?? '';
+        const failureIndex = mockedCalls.cmuxFailures.findIndex(failure => failure.command === command);
+        if (failureIndex >= 0) {
+            const [failure] = mockedCalls.cmuxFailures.splice(failureIndex, 1);
+            throw new Error(failure?.message ?? `cmux ${command} failed`);
+        }
+        const failIndex = mockedCalls.cmuxFailOnce.indexOf(command);
         if (failIndex >= 0) {
             mockedCalls.cmuxFailOnce.splice(failIndex, 1);
-            throw new Error(`cmux ${args[0]} failed`);
+            throw new Error(`cmux ${command} failed`);
         }
         return { stdout: '', stderr: '' };
     };
@@ -87,6 +102,7 @@ describe('spawnWorkerInPane', () => {
         mockedCalls.wrapLiteralCapture = false;
         mockedCalls.insertWrapSpaces = false;
         mockedCalls.cmuxFailOnce = [];
+        mockedCalls.cmuxFailures = [];
         vi.unstubAllEnvs();
         mockedCalls.enterSubmitsCommand = true;
     });
@@ -149,7 +165,10 @@ describe('spawnWorkerInPane', () => {
     it('falls back to legacy cmux surface commands when current dialect is unavailable', async () => {
         vi.stubEnv('TMUX', '');
         vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
-        mockedCalls.cmuxFailOnce = ['send-surface', 'send-key-surface'];
+        mockedCalls.cmuxFailures = [
+            { command: 'send-surface', message: 'error: unrecognized subcommand send-surface' },
+            { command: 'send-key-surface', message: 'error: unrecognized subcommand send-key-surface' },
+        ];
         await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
             teamName: 'safe-team',
             workerName: 'worker-1',
@@ -165,6 +184,99 @@ describe('spawnWorkerInPane', () => {
         expect(mockedCalls.cmuxArgs[1]?.[0]).toBe('send');
         expect(mockedCalls.cmuxArgs[2]?.[0]).toBe('send-key-surface');
         expect(mockedCalls.cmuxArgs[3]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'Enter']);
+    });
+    it('falls back for clap-style cmux surface option dialect errors', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+        mockedCalls.cmuxFailures = [
+            { command: 'send-surface', message: "error: Found argument '--surface' which wasn't expected" },
+        ];
+        await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
+            teamName: 'safe-team',
+            workerName: 'worker-1',
+            envVars: {
+                OMC_TEAM_NAME: 'safe-team',
+                OMC_TEAM_WORKER: 'safe-team/worker-1',
+            },
+            launchBinary: 'codex',
+            launchArgs: ['--full-auto'],
+            cwd: '/tmp',
+        });
+        expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send-surface');
+        expect(mockedCalls.cmuxArgs[1]?.[0]).toBe('send');
+        expect(mockedCalls.cmuxArgs[2]?.[0]).toBe('send-key-surface');
+    });
+    it('does not replay cmux worker command text after a non-dialect send failure', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+        const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+        mockedCalls.cmuxFailures = [
+            { command: 'send-surface', message: `cmux transport timed out after partial write --api-key ${secret}` },
+        ];
+        await expect(async () => {
+            try {
+                await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
+                    teamName: 'safe-team',
+                    workerName: 'worker-1',
+                    envVars: {
+                        OMC_TEAM_NAME: 'safe-team',
+                        OMC_TEAM_WORKER: 'safe-team/worker-1',
+                        SECRET_ENV: secret,
+                    },
+                    launchBinary: 'codex',
+                    launchArgs: ['--full-auto', '--api-key', secret],
+                    cwd: '/tmp',
+                });
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                expect(message).toContain('cmux command failed for current form: current=send-surface');
+                expect(message).toContain('cmux transport timed out after partial write');
+                expect(message).not.toContain(secret);
+                expect(message).not.toContain('SECRET_ENV');
+                expect(message).not.toContain('--api-key');
+                throw error;
+            }
+        }).rejects.toThrow(/cmux command failed for current form/);
+        expect(mockedCalls.cmuxArgs).toHaveLength(1);
+        expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send-surface');
+        expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send')).toBe(false);
+        expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface')).toBe(false);
+    });
+    it('redacts cmux command payloads when current and legacy dialects both fail', async () => {
+        vi.stubEnv('TMUX', '');
+        vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+        const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+        mockedCalls.cmuxFailures = [
+            { command: 'send-surface', message: `error: unrecognized subcommand send-surface ${secret}` },
+            { command: 'send', message: `legacy rejected command containing ${secret}` },
+        ];
+        await expect(async () => {
+            try {
+                await spawnWorkerInPane('cmux:workspace-1', 'cmux-worker-1', {
+                    teamName: 'safe-team',
+                    workerName: 'worker-1',
+                    envVars: {
+                        OMC_TEAM_NAME: 'safe-team',
+                        OMC_TEAM_WORKER: 'safe-team/worker-1',
+                        SECRET_ENV: secret,
+                    },
+                    launchBinary: 'codex',
+                    launchArgs: ['--full-auto', '--api-key', secret],
+                    cwd: '/tmp',
+                });
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                expect(message).toContain('cmux command failed for both current and legacy forms');
+                expect(message).not.toContain(secret);
+                expect(message).not.toContain('SECRET_ENV');
+                expect(message).not.toContain('--api-key');
+                expect(message).toContain('current=send-surface');
+                expect(message).toContain('legacy=send');
+                throw error;
+            }
+        }).rejects.toThrow(/cmux command failed for both current and legacy forms/);
     });
     it('uses current JS runtime when launching bridge-entry helpers', () => {
         spawnBridgeInSession('session:0', '/tmp/bridge-entry.js', '/tmp/bridge-config.json');

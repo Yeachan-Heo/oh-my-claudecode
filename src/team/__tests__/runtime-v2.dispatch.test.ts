@@ -308,6 +308,66 @@ describe('runtime v2 startup inbox dispatch', () => {
     );
   });
 
+  it('does not persist sensitive cmux worker command payloads in startup failure evidence', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-redacted-startup-failure-'));
+    const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+    modelContractMocks.getWorkerEnv.mockImplementation(() => ({
+      OMC_TEAM_WORKER: 'dispatch-team/worker-1',
+      SECRET_ENV: secret,
+    }));
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--api-key', secret]);
+    mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error(
+      'cmux command failed for both current and legacy forms: current=send-surface ([redacted]); legacy=send ([redacted])',
+    ));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify redacted startup failure evidence' }],
+      cwd,
+    })).rejects.toThrow(/cmux command failed for both current and legacy forms/);
+
+    const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+    const markerText = await readFile(markerPath, 'utf-8');
+    expect(markerText).toContain('current=send-surface');
+    expect(markerText).toContain('legacy=send');
+    expect(markerText).not.toContain(secret);
+    expect(markerText).not.toContain('SECRET_ENV');
+    expect(markerText).not.toContain('--api-key');
+  });
+
+  it('does not persist sensitive primary cmux failure payloads in startup failure evidence', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-redacted-primary-failure-'));
+    const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+    modelContractMocks.getWorkerEnv.mockImplementation(() => ({
+      OMC_TEAM_WORKER: 'dispatch-team/worker-1',
+      SECRET_ENV: secret,
+    }));
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--api-key', secret]);
+    mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error(
+      'cmux command failed for current form: current=send-surface (cmux transport timed out after partial write [redacted])',
+    ));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify redacted primary failure evidence' }],
+      cwd,
+    })).rejects.toThrow(/cmux command failed for current form/);
+
+    const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+    const markerText = await readFile(markerPath, 'utf-8');
+    expect(markerText).toContain('current=send-surface');
+    expect(markerText).toContain('cmux transport timed out after partial write');
+    expect(markerText).not.toContain(secret);
+    expect(markerText).not.toContain('SECRET_ENV');
+    expect(markerText).not.toContain('--api-key');
+  });
+
   it('keeps dirty worktree preservation metadata when startup rollback records failure evidence', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-dirty-startup-failure-'));
     execFileSync('git', ['init'], { cwd, stdio: 'pipe' });

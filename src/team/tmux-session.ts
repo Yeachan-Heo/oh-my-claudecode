@@ -81,6 +81,37 @@ async function cmuxExecAsync(args: string[]): Promise<{ stdout: string; stderr: 
   };
 }
 
+function getCmuxErrorText(error: unknown): string {
+  if (error instanceof Error) {
+    const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
+      ? (error as { stderr?: string }).stderr
+      : '';
+    return `${error.message}\n${stderr}`.trim();
+  }
+  return String(error);
+}
+
+function isCmuxDialectFailure(error: unknown): boolean {
+  const text = getCmuxErrorText(error);
+  return /(?:unknown|unrecognized|invalid|unsupported) (?:command|subcommand|option)|no such (?:command|subcommand)|Found argument .*--surface.*wasn't expected|unexpected argument|unexpected option/i.test(text);
+}
+
+function redactCmuxFailureMessage(error: unknown, argLists: string[][]): string {
+  let message = getCmuxErrorText(error);
+  const commandNames = new Set(argLists.map(args => args[0]).filter(Boolean));
+  const sensitiveArgs = [...new Set(argLists.flatMap(args => args).flatMap(arg => {
+    if (!arg || commandNames.has(arg)) return [];
+    const fragments = arg.match(/[A-Za-z0-9_./:@=-]{4,}/g) ?? [];
+    return [arg, ...fragments];
+  }))].sort((a, b) => b.length - a.length);
+
+  for (const arg of sensitiveArgs) {
+    message = message.split(arg).join('[redacted]');
+  }
+
+  return message;
+}
+
 async function cmuxExecPrimaryWithLegacyFallback(
   primaryArgs: string[],
   legacyArgs: string[],
@@ -88,14 +119,23 @@ async function cmuxExecPrimaryWithLegacyFallback(
   try {
     return await cmuxExecAsync(primaryArgs);
   } catch (primaryError) {
+    if (!isCmuxDialectFailure(primaryError)) {
+      const primaryMessage = redactCmuxFailureMessage(primaryError, [primaryArgs]);
+      const error = new Error(
+        `cmux command failed for current form: current=${primaryArgs[0] ?? '<unknown>'} (${primaryMessage})`,
+      );
+      (error as { cause?: unknown }).cause = primaryError;
+      throw error;
+    }
+
     try {
       return await cmuxExecAsync(legacyArgs);
     } catch (legacyError) {
-      const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
-      const legacyMessage = legacyError instanceof Error ? legacyError.message : String(legacyError);
+      const primaryMessage = redactCmuxFailureMessage(primaryError, [primaryArgs, legacyArgs]);
+      const legacyMessage = redactCmuxFailureMessage(legacyError, [primaryArgs, legacyArgs]);
       throw new Error(
-        `cmux command failed for both current and legacy forms: current="${primaryArgs.join(' ')}" (${primaryMessage}); ` +
-        `legacy="${legacyArgs.join(' ')}" (${legacyMessage})`,
+        `cmux command failed for both current and legacy forms: current=${primaryArgs[0] ?? '<unknown>'} (${primaryMessage}); ` +
+        `legacy=${legacyArgs[0] ?? '<unknown>'} (${legacyMessage})`,
       );
     }
   }
