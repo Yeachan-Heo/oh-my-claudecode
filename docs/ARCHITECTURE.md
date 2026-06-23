@@ -254,7 +254,7 @@ Coordinates N Claude agents with a 5-stage pipeline: `plan → prd → exec → 
 ```
 
 #### ccg (Claude-Codex-Gemini)
-Fans out to Codex and Gemini simultaneously; Claude synthesizes the results. Use `antigravity` workers in place of `gemini` when using the Antigravity CLI (Google's successor to the Gemini CLI).
+Fans out to Codex and Antigravity simultaneously; Claude synthesizes the results. Gemini remains available as an enterprise/API-key fallback when using the legacy Gemini CLI.
 - Trigger: `ccg`, `claude-codex-gemini`
 ```bash
 ccg: review this authentication implementation

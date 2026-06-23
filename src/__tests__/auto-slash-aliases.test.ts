@@ -360,8 +360,8 @@ Deep interview body`
 
     expect(result.success).toBe(true);
     expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask codex "<codex prompt>"`');
-    expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask gemini "<gemini prompt>"`');
+    expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask antigravity "<antigravity prompt>"`');
     expect(result.replacementText).not.toContain('`omc ask codex "<codex prompt>"`');
-    expect(result.replacementText).not.toContain('`omc ask gemini "<gemini prompt>"`');
+    expect(result.replacementText).not.toContain('`omc ask antigravity "<antigravity prompt>"`');
   });
 });
