@@ -21000,7 +21000,7 @@ var import_path11 = require("path");
 
 // src/utils/encode-project-path.ts
 function encodeProjectPath(projectPath) {
-  return projectPath.replace(/[/\\.:]/g, "-");
+  return projectPath.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
 // src/lib/worktree-paths.ts

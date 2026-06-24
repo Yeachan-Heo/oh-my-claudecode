@@ -5523,7 +5523,7 @@ If ANY checkbox is unchecked, YOU ARE NOT DONE. Continue working.`;
 
 // src/utils/encode-project-path.ts
 function encodeProjectPath(projectPath) {
-  return projectPath.replace(/[/\\.:]/g, "-");
+  return projectPath.replace(/[^a-zA-Z0-9]/g, "-");
 }
 var init_encode_project_path = __esm({
   "src/utils/encode-project-path.ts"() {
