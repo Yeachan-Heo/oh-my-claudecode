@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import {
+  __testingIsWithinProject,
   encodeProjectPath,
   parseSinceSpec,
   searchSessionHistory,
@@ -96,6 +97,32 @@ describe('session history search', () => {
     expect(report.results[0].sourcePath).toContain('session-current.jsonl');
   });
 
+  it('searches transcripts stored under the literal subdirectory cwd project dir', async () => {
+    const subdirCwd = join(repoRoot, 'src');
+    const subdirProjectDir = join(claudeDir, 'projects', encodeProjectPath(subdirCwd));
+
+    writeTranscript(join(subdirProjectDir, 'session-subdir.jsonl'), [
+      {
+        sessionId: 'session-subdir',
+        cwd: subdirCwd,
+        type: 'assistant',
+        timestamp: '2026-03-11T10:00:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'subdirectory cwd transcript sentinel' }] },
+      },
+    ]);
+
+    const report = await searchSessionHistory({
+      query: 'subdirectory cwd transcript sentinel',
+      workingDirectory: subdirCwd,
+    });
+
+    expect(report.scope.mode).toBe('current');
+    expect(report.scope.workingDirectory).toBe(repoRoot);
+    expect(report.totalMatches).toBe(1);
+    expect(report.results[0].sessionId).toBe('session-subdir');
+    expect(report.results[0].projectPath).toBe(subdirCwd);
+  });
+
   it('supports since and session filters', async () => {
     const recentOnly = await searchSessionHistory({
       query: 'provider routing',
@@ -161,6 +188,11 @@ describe('session history search', () => {
     expect(encodeProjectPath('C:\\Users\\me\\proj')).toBe('C--Users-me-proj');
     // POSIX paths are unaffected (no colon to replace).
     expect(encodeProjectPath('/home/me/proj')).toBe('-home-me-proj');
+  });
+
+  it('keeps Windows-style subdirectory paths within their project root', () => {
+    expect(__testingIsWithinProject('C:\\Users\\me\\repo\\packages\\api', ['C:\\Users\\me\\repo'])).toBe(true);
+    expect(__testingIsWithinProject('C:\\Users\\me\\repo-other', ['C:\\Users\\me\\repo'])).toBe(false);
   });
 
   it('parses relative and absolute since values', () => {
