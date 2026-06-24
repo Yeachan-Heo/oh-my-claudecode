@@ -14,6 +14,10 @@ function writeTranscript(filePath: string, entries: Array<Record<string, unknown
   writeFileSync(filePath, entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf-8');
 }
 
+function normalizePathForAssert(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
 describe('session history search', () => {
   const repoRoot = process.cwd();
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
@@ -117,10 +121,16 @@ describe('session history search', () => {
     });
 
     expect(report.scope.mode).toBe('current');
-    expect(report.scope.workingDirectory).toBe(repoRoot);
+    expect(report.scope.workingDirectory).toBeDefined();
+    const workingDirectory = report.scope.workingDirectory!;
+    expect(normalizePathForAssert(workingDirectory)).toBe(normalizePathForAssert(repoRoot));
     expect(report.totalMatches).toBe(1);
-    expect(report.results[0].sessionId).toBe('session-subdir');
-    expect(report.results[0].projectPath).toBe(subdirCwd);
+    expect(report.results[0]).toBeDefined();
+    const result = report.results[0]!;
+    expect(result.sessionId).toBe('session-subdir');
+    expect(result.projectPath).toBeDefined();
+    const resultProjectPath = result.projectPath!;
+    expect(normalizePathForAssert(resultProjectPath)).toBe(normalizePathForAssert(subdirCwd));
   });
 
   it('supports since and session filters', async () => {
