@@ -8,7 +8,7 @@
  * Bash hook scripts were removed in v3.9.0.
  */
 import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync, realpathSync, statSync } from 'fs';
-import { join, dirname, resolve, isAbsolute } from 'path';
+import { join, dirname, resolve, isAbsolute, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
@@ -270,6 +270,18 @@ const OMC_HOOK_FILENAMES = new Set([
     'persistent-mode.mjs',
     'code-simplifier.mjs',
     'stop-continuation.mjs',
+    'workflow-drift-guard.mjs',
+]);
+const OMC_HOOK_HELPER_FILENAMES = new Set([
+    'atomic-write.mjs',
+    'config-dir.mjs',
+    'config-dir.sh',
+    'model-routing-override-message.mjs',
+    'state-root.mjs',
+    'stdin.mjs',
+]);
+const OMC_HOOK_EXTRA_FILENAMES = new Set([
+    'find-node.sh',
 ]);
 /**
  * Detect whether a hook command belongs to oh-my-claudecode.
@@ -366,6 +378,57 @@ export function isProjectScopedPlugin() {
     const normalizedGlobalBase = globalPluginBase.replace(/\\/g, '/').replace(/\/$/, '');
     return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
+function pruneLegacyStandaloneHookScripts(log) {
+    if (!existsSync(HOOKS_DIR)) {
+        return;
+    }
+    let removed = 0;
+    for (const filename of readdirSync(HOOKS_DIR)) {
+        if (!OMC_HOOK_FILENAMES.has(filename) && !OMC_HOOK_EXTRA_FILENAMES.has(filename)) {
+            continue;
+        }
+        const targetPath = join(HOOKS_DIR, filename);
+        try {
+            if (statSync(targetPath).isFile()) {
+                unlinkSync(targetPath);
+                removed++;
+            }
+        }
+        catch {
+            // Best-effort cleanup only; do not fail installs because stale hook files
+            // disappeared concurrently or have unexpected permissions.
+        }
+    }
+    const hooksLibDir = join(HOOKS_DIR, 'lib');
+    if (existsSync(hooksLibDir)) {
+        for (const filename of readdirSync(hooksLibDir)) {
+            if (!OMC_HOOK_HELPER_FILENAMES.has(filename)) {
+                continue;
+            }
+            const targetPath = join(hooksLibDir, filename);
+            try {
+                if (statSync(targetPath).isFile()) {
+                    unlinkSync(targetPath);
+                    removed++;
+                }
+            }
+            catch {
+                // Best-effort cleanup only.
+            }
+        }
+        try {
+            if (readdirSync(hooksLibDir).length === 0) {
+                rmSync(hooksLibDir, { recursive: true, force: true });
+            }
+        }
+        catch {
+            // Preserve the directory if it cannot be inspected/removed safely.
+        }
+    }
+    if (removed > 0) {
+        log(`  Removed ${removed} legacy hook script file${removed === 1 ? '' : 's'} from ${basename(CLAUDE_CONFIG_DIR)}/hooks`);
+    }
+}
 function configureInstallerSettings(baseSettings, context) {
     let settings = { ...baseSettings };
     {
@@ -393,6 +456,9 @@ function configureInstallerSettings(baseSettings, context) {
         }
         const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
         const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
+        if (pluginHandlesHooks) {
+            pruneLegacyStandaloneHookScripts(context.log);
+        }
         const shouldConfigureSettingsHooks = (!context.runningAsPlugin || !!context.allowPluginHookRefresh) && !pluginHandlesHooks;
         if (shouldConfigureSettingsHooks) {
             const desiredHooks = getHooksSettingsConfig().hooks;

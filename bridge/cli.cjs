@@ -10093,6 +10093,50 @@ function isProjectScopedPlugin() {
   const normalizedGlobalBase = globalPluginBase.replace(/\\/g, "/").replace(/\/$/, "");
   return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
+function pruneLegacyStandaloneHookScripts(log3) {
+  if (!(0, import_fs37.existsSync)(HOOKS_DIR)) {
+    return;
+  }
+  let removed = 0;
+  for (const filename of (0, import_fs37.readdirSync)(HOOKS_DIR)) {
+    if (!OMC_HOOK_FILENAMES.has(filename) && !OMC_HOOK_EXTRA_FILENAMES.has(filename)) {
+      continue;
+    }
+    const targetPath = (0, import_path49.join)(HOOKS_DIR, filename);
+    try {
+      if ((0, import_fs37.statSync)(targetPath).isFile()) {
+        (0, import_fs37.unlinkSync)(targetPath);
+        removed++;
+      }
+    } catch {
+    }
+  }
+  const hooksLibDir = (0, import_path49.join)(HOOKS_DIR, "lib");
+  if ((0, import_fs37.existsSync)(hooksLibDir)) {
+    for (const filename of (0, import_fs37.readdirSync)(hooksLibDir)) {
+      if (!OMC_HOOK_HELPER_FILENAMES.has(filename)) {
+        continue;
+      }
+      const targetPath = (0, import_path49.join)(hooksLibDir, filename);
+      try {
+        if ((0, import_fs37.statSync)(targetPath).isFile()) {
+          (0, import_fs37.unlinkSync)(targetPath);
+          removed++;
+        }
+      } catch {
+      }
+    }
+    try {
+      if ((0, import_fs37.readdirSync)(hooksLibDir).length === 0) {
+        (0, import_fs37.rmSync)(hooksLibDir, { recursive: true, force: true });
+      }
+    } catch {
+    }
+  }
+  if (removed > 0) {
+    log3(`  Removed ${removed} legacy hook script file${removed === 1 ? "" : "s"} from ${(0, import_path49.basename)(CLAUDE_CONFIG_DIR)}/hooks`);
+  }
+}
 function configureInstallerSettings(baseSettings, context) {
   let settings = { ...baseSettings };
   {
@@ -10118,6 +10162,9 @@ function configureInstallerSettings(baseSettings, context) {
     }
     const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
     const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
+    if (pluginHandlesHooks) {
+      pruneLegacyStandaloneHookScripts(context.log);
+    }
     const shouldConfigureSettingsHooks = (!context.runningAsPlugin || !!context.allowPluginHookRefresh) && !pluginHandlesHooks;
     if (shouldConfigureSettingsHooks) {
       const desiredHooks = getHooksSettingsConfig().hooks;
@@ -11468,7 +11515,7 @@ function getInstallInfo() {
     return null;
   }
 }
-var import_fs37, import_path49, import_url9, import_os12, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, OMC_HOOK_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
+var import_fs37, import_path49, import_url9, import_os12, import_child_process13, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, OMC_HOOK_FILENAMES, OMC_HOOK_HELPER_FILENAMES, OMC_HOOK_EXTRA_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
 var init_installer = __esm({
   "src/installer/index.ts"() {
     "use strict";
@@ -11527,7 +11574,19 @@ var init_installer = __esm({
       "post-tool-use-failure.mjs",
       "persistent-mode.mjs",
       "code-simplifier.mjs",
-      "stop-continuation.mjs"
+      "stop-continuation.mjs",
+      "workflow-drift-guard.mjs"
+    ]);
+    OMC_HOOK_HELPER_FILENAMES = /* @__PURE__ */ new Set([
+      "atomic-write.mjs",
+      "config-dir.mjs",
+      "config-dir.sh",
+      "model-routing-override-message.mjs",
+      "state-root.mjs",
+      "stdin.mjs"
+    ]);
+    OMC_HOOK_EXTRA_FILENAMES = /* @__PURE__ */ new Set([
+      "find-node.sh"
     ]);
     STANDALONE_HOOK_TEMPLATE_FILES = [
       "keyword-detector.mjs",
@@ -79138,13 +79197,15 @@ function uniqueSortedTargets(targets) {
     return bTime - aTime;
   });
 }
-function buildCurrentProjectTargets(projectRoot) {
+function buildCurrentProjectTargets(projectRoot, transcriptProjectRoots = [projectRoot]) {
   const claudeDir = getClaudeConfigDir();
-  const projectRoots = /* @__PURE__ */ new Set([projectRoot]);
-  const mainRepoRoot = getMainRepoRoot(projectRoot);
-  if (mainRepoRoot) projectRoots.add(mainRepoRoot);
-  const claudeWorktreeParent = getClaudeWorktreeParent(projectRoot);
-  if (claudeWorktreeParent) projectRoots.add(claudeWorktreeParent);
+  const projectRoots = new Set(transcriptProjectRoots);
+  for (const root2 of transcriptProjectRoots) {
+    const mainRepoRoot = getMainRepoRoot(root2);
+    if (mainRepoRoot) projectRoots.add(mainRepoRoot);
+    const claudeWorktreeParent = getClaudeWorktreeParent(root2);
+    if (claudeWorktreeParent) projectRoots.add(claudeWorktreeParent);
+  }
   const targets = [];
   for (const root2 of projectRoots) {
     const encodedDir = (0, import_path37.join)(claudeDir, "projects", encodeProjectPath(root2));
@@ -79186,9 +79247,9 @@ function isWithinProject(projectPath, projectRoots) {
   if (!projectPath) {
     return false;
   }
-  const normalizedProjectPath = (0, import_path37.normalize)((0, import_path37.resolve)(projectPath));
+  const normalizedProjectPath = (0, import_path37.normalize)((0, import_path37.resolve)(projectPath)).replace(/\\/g, "/");
   return projectRoots.some((root2) => {
-    const normalizedRoot = (0, import_path37.normalize)((0, import_path37.resolve)(root2));
+    const normalizedRoot = (0, import_path37.normalize)((0, import_path37.resolve)(root2)).replace(/\\/g, "/");
     return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
   });
 }
@@ -79426,8 +79487,10 @@ async function searchSessionHistory(rawOptions) {
   const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
   const scopeMode = buildScopeMode(rawOptions.project);
   const projectFilter = scopeMode === "project" ? rawOptions.project : void 0;
-  const currentProjectRoots = [currentProjectRoot].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
-  const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot);
+  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path37.resolve)(rawOptions.workingDirectory) : workingDirectory;
+  const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
+  const transcriptProjectRoots = currentProjectRoots.filter((root2) => isWithinProject(root2, [currentProjectRoot]));
+  const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
   const allMatches = [];
   for (const target of targets) {
     const fileMatches = await collectMatchesFromFile(target, {

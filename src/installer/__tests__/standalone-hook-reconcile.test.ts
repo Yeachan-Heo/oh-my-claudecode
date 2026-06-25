@@ -410,6 +410,63 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     expect(writtenSettings.hooks).toBeUndefined();
   });
 
+  it('prunes legacy standalone OMC hook files when plugin handles hooks', async () => {
+    setupPluginWithHooks();
+
+    const hooksDir = join(testClaudeDir, 'hooks');
+    const hooksLibDir = join(hooksDir, 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    mkdirSync(join(hooksDir, 'attention'), { recursive: true });
+
+    const legacyFiles = [
+      'keyword-detector.mjs',
+      'session-start.mjs',
+      'pre-tool-use.mjs',
+      'post-tool-use.mjs',
+      'post-tool-use-failure.mjs',
+      'persistent-mode.mjs',
+      'code-simplifier.mjs',
+      'stop-continuation.mjs',
+      'workflow-drift-guard.mjs',
+      'find-node.sh',
+    ];
+    for (const filename of legacyFiles) {
+      writeFileSync(join(hooksDir, filename), 'legacy omc payload');
+    }
+    for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'model-routing-override-message.mjs', 'state-root.mjs', 'stdin.mjs']) {
+      writeFileSync(join(hooksLibDir, filename), 'legacy omc helper');
+    }
+
+    writeFileSync(join(hooksDir, 'notify-mac.sh'), 'user hook');
+    writeFileSync(join(hooksLibDir, 'user-helper.mjs'), 'user helper');
+    writeFileSync(join(hooksDir, 'attention', 'notify.mjs'), 'user nested hook');
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    expect(result.success).toBe(true);
+    for (const filename of legacyFiles) {
+      expect(existsSync(join(hooksDir, filename)), filename).toBe(false);
+    }
+    expect(existsSync(join(hooksLibDir, 'atomic-write.mjs'))).toBe(false);
+    expect(existsSync(join(hooksLibDir, 'config-dir.sh'))).toBe(false);
+    expect(readFileSync(join(hooksDir, 'notify-mac.sh'), 'utf-8')).toBe('user hook');
+    expect(readFileSync(join(hooksLibDir, 'user-helper.mjs'), 'utf-8')).toBe('user helper');
+    expect(readFileSync(join(hooksDir, 'attention', 'notify.mjs'), 'utf-8')).toBe('user nested hook');
+  });
+
+  it('does not prune standalone hook files when plugin is not handling hooks', async () => {
+    const hooksDir = join(testClaudeDir, 'hooks');
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(join(hooksDir, 'keyword-detector.mjs'), 'legacy omc payload');
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(hooksDir, 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
+  });
+
   it('preserves non-OMC hooks in settings.json when pruning plugin duplicates', async () => {
     // Set up plugin first (creates settings.json with enabledPlugins)
     setupPluginWithHooks();
