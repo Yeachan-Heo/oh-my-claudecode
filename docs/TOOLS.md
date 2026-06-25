@@ -644,6 +644,10 @@ session_search(query="authentication refactor")
 
 Returns session IDs, timestamps, source paths, and matching excerpts as structured JSON.
 
+### Related CLI: `omc session friction report`
+
+Use `omc session friction report --since 24h` for a local-only context-bloat and operator-friction report. The report summarizes metadata from local transcript/session/replay artifacts with counts, sizes, timestamps, and signal codes, and avoids raw prompt/session content by default. Use `--json` for local dashboards or audit scripts.
+
 ---
 
 ## Trace

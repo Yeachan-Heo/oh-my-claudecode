@@ -569,6 +569,18 @@ omc session search provider-routing --project all --json
 - Supports `--limit`, `--session`, `--since`, `--context`, `--case-sensitive`, and `--json`
 - MCP/tool surface: `session_search` returns structured JSON for agents and automations
 
+### `omc session friction report`
+
+```bash
+omc session friction report --since 24h
+omc session friction report --project all --json
+```
+
+- Local-only/offline report over Claude transcript files, `.omc/sessions/*.json`, and `.omc/state/agent-replay-*.jsonl`
+- Does not print raw prompt, response, or tool-result content by default; output uses counts, sizes, timestamps, and signal codes
+- Highlights context-bloat and operator-friction indicators such as high estimated context usage, large JSONL entries, tool error rates, long idle gaps, failed agents, and hook noise
+- Supports `--limit`, `--session`, `--since`, `--project`, and `--json`
+
 ### Non-interactive automation and CI/CD
 
 Use OMC's terminal and library surfaces in non-interactive environments:

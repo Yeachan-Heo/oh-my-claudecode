@@ -6,6 +6,10 @@ import {
   formatSessionSearchReport,
   sessionSearchCommand,
 } from '../commands/session-search.js';
+import {
+  formatSessionFrictionReport,
+  sessionFrictionReportCommand,
+} from '../commands/session-friction-report.js';
 import { encodeProjectPath } from '../../utils/encode-project-path.js';
 
 function writeTranscript(filePath: string, entries: Array<Record<string, unknown>>): void {
@@ -79,5 +83,76 @@ describe('session search cli command', () => {
     expect(text).toContain('session-current');
     expect(text).toContain('notify-hook');
     expect(text).toContain('/tmp/session-current.jsonl:3');
+  });
+
+  it('prints safe friction report JSON when requested', async () => {
+    const logger = { log: vi.fn() };
+    const report = await sessionFrictionReportCommand({
+      json: true,
+      workingDirectory: repoRoot,
+    }, logger);
+
+    expect(report.privacy.rawContentIncluded).toBe(false);
+    expect(logger.log).toHaveBeenCalledTimes(1);
+    const parsed = JSON.parse(String(logger.log.mock.calls[0][0]));
+    expect(parsed.privacy.rawContentIncluded).toBe(false);
+    expect(JSON.stringify(parsed)).not.toContain('notify-hook regression');
+  });
+
+  it('formats friction report output without raw excerpts', () => {
+    const text = formatSessionFrictionReport({
+      generatedAt: '2026-03-09T10:05:00.000Z',
+      scope: { mode: 'current', caseSensitive: false, workingDirectory: repoRoot } as never,
+      privacy: {
+        localOnly: true,
+        rawContentIncluded: false,
+        summary: 'safe metadata only',
+      },
+      totals: {
+        sessions: 1,
+        transcriptBytes: 4096,
+        transcriptLines: 2,
+        toolCalls: 3,
+        errorResults: 1,
+        criticalSignals: 0,
+        warningSignals: 1,
+      },
+      sessions: [{
+        sessionId: 'session-current',
+        projectPath: repoRoot,
+        sources: ['project-transcript'],
+        lastTimestamp: '2026-03-09T10:05:00.000Z',
+        transcriptBytes: 4096,
+        transcriptLines: 2,
+        userTurns: 1,
+        assistantTurns: 1,
+        toolCalls: 2,
+        toolResults: 1,
+        errorResults: 1,
+        maxLineBytes: 2048,
+        largestMessageBytes: 1024,
+        estimatedContextPercent: 80,
+        contextWindowTokens: 100000,
+        inputTokens: 80000,
+        maxIdleGapMinutes: 10,
+        replayEvents: 0,
+        replayAgentsSpawned: 0,
+        replayAgentsFailed: 0,
+        replayToolCalls: 1,
+        replayHooksFired: 0,
+        frictionScore: 40,
+        signals: [{
+          severity: 'warn',
+          code: 'context-high',
+          message: 'Estimated context usage is high.',
+          evidence: { estimatedContextPercent: 80 },
+        }],
+      }],
+    });
+
+    expect(text).toContain('Local session friction report');
+    expect(text).toContain('session-current');
+    expect(text).toContain('context-high');
+    expect(text).not.toContain('notify-hook regression');
   });
 });

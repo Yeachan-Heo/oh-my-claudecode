@@ -446,6 +446,7 @@ Use the HUD for live observability and the current session/replay artifacts for 
 - Session summaries: `.omc/sessions/*.json`
 - Replay logs: `.omc/state/agent-replay-*.jsonl`
 - Live HUD rendering: `omc hud`
+- Local friction reports: `omc session friction report --since 24h` summarizes context-bloat and operator-friction signals from local session artifacts without printing raw prompts or tool output; add `--json` for automation.
 
 ### Notification Tags (Telegram/Discord/Slack)
 

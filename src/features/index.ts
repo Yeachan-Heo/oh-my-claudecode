@@ -130,6 +130,15 @@ export {
   type SkillRegistry
 } from './builtin-skills/index.js';
 
+// Session Friction Report - local context-bloat and operator-friction summaries
+export {
+  generateSessionFrictionReport,
+  type SessionFrictionReport,
+  type SessionFrictionReportOptions,
+  type SessionFrictionSession,
+  type SessionFrictionSignal,
+} from './session-friction-report/index.js';
+
 // Model Routing - intelligent model tier routing
 export {
   // Main functions

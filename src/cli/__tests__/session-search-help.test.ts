@@ -13,5 +13,7 @@ describe('session search help text', () => {
     expect(cliIndexSource).toContain('omc session search "team leader stale"');
     expect(cliIndexSource).toContain('omc session search notify-hook --since 7d');
     expect(cliIndexSource).toContain('omc session search provider-routing --project all --json');
+    expect(cliIndexSource).toContain('omc session friction report --since 24h');
+    expect(cliIndexSource).toContain('omc session friction report --json');
   });
 });
