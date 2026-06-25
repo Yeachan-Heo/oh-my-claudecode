@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getWorktreeRoot, getOmcRoot, clearWorktreeCache } from '../lib/worktree-paths.js';
+import { getWorktreeRoot, getOmcRoot, getProjectIdentifier, clearWorktreeCache } from '../lib/worktree-paths.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'protocol.file.allow=always', ...args], {
@@ -38,12 +38,15 @@ describe('submodule state anchoring (issue #3349)', () => {
   let tempDir: string;
   let superRoot: string;
   let submodulePath: string;
+  let nestedSubmodulePath: string;
   let gitAvailable = true;
 
   beforeAll(() => {
     tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'omc-submodule-')));
     superRoot = join(tempDir, 'monorepo');
     const child = join(tempDir, 'child-origin');
+    const leaf = join(tempDir, 'leaf-origin');
+    const mid = join(tempDir, 'mid-origin');
     try {
       initRepo(child);
       initRepo(superRoot);
@@ -51,6 +54,17 @@ describe('submodule state anchoring (issue #3349)', () => {
       git(superRoot, 'submodule', 'add', child, 'apps/webapp');
       git(superRoot, 'commit', '-qm', 'add submodule');
       submodulePath = join(superRoot, 'apps', 'webapp');
+
+      // Build a nested submodule chain: leaf is a submodule of mid, and mid is
+      // a submodule of the superproject — so apps/mid/pkg climbs two levels.
+      initRepo(leaf);
+      initRepo(mid);
+      git(mid, 'submodule', 'add', leaf, 'pkg');
+      git(mid, 'commit', '-qm', 'add nested submodule');
+      git(superRoot, 'submodule', 'add', mid, 'apps/mid');
+      git(superRoot, 'commit', '-qm', 'add mid submodule');
+      git(superRoot, 'submodule', 'update', '--init', '--recursive');
+      nestedSubmodulePath = join(superRoot, 'apps', 'mid', 'pkg');
     } catch {
       gitAvailable = false;
     }
@@ -79,6 +93,23 @@ describe('submodule state anchoring (issue #3349)', () => {
       if (prev !== undefined) process.env.OMC_STATE_DIR = prev;
       clearWorktreeCache();
     }
+  });
+
+  it('getWorktreeRoot from a nested submodule climbs to the outermost superproject', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    expect(getWorktreeRoot(nestedSubmodulePath)).toBe(superRoot);
+  });
+
+  it('getProjectIdentifier from inside a submodule matches the superproject identifier', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    const fromSubmodule = getProjectIdentifier(submodulePath);
+    clearWorktreeCache();
+    const fromSuper = getProjectIdentifier(superRoot);
+    // A raw submodule cwd must not be identified as its own project — it lifts
+    // to the superproject before any git remote / git-common-dir lookup (#3349).
+    expect(fromSubmodule).toBe(fromSuper);
   });
 
   it('getWorktreeRoot in a plain (non-submodule) repo still returns its own toplevel', () => {
