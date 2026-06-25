@@ -136,6 +136,53 @@ export function readWorkspaceMarkerConfig(workspaceRoot: string): WorkspaceMarke
 }
 
 /**
+ * If `cwd` is inside a git submodule, return the outermost superproject working
+ * tree; otherwise return null. A submodule is a full git repo, so
+ * `git rev-parse --show-toplevel` stops at the submodule and `.omc/` would be
+ * created there instead of at the monorepo root (#3349). Climbing via
+ * `--show-superproject-working-tree` anchors state to the superproject, walking
+ * up through nested submodules until no superproject remains.
+ */
+function resolveSuperprojectRoot(cwd: string): string | null {
+  let anchor: string | null = null;
+  let probeCwd = cwd;
+  // Bounded by submodule nesting depth; guard against pathological loops.
+  for (let depth = 0; depth < 32; depth++) {
+    let superRoot: string;
+    try {
+      superRoot = execSync('git rev-parse --show-superproject-working-tree', {
+        cwd: probeCwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      }).trim();
+    } catch {
+      break;
+    }
+    if (!superRoot) break;
+    anchor = superRoot;
+    probeCwd = superRoot;
+  }
+  return anchor;
+}
+
+/**
+ * Resolve the state-anchor root for an optional worktreeRoot argument.
+ *
+ * Many callers pass a raw cwd as `worktreeRoot` (e.g. hooks forwarding
+ * `process.cwd()`), which historically was used verbatim — bypassing the
+ * submodule→superproject climb in getWorktreeRoot() and creating a stray
+ * `.omc/` inside the submodule (#3349). Routing the provided root back through
+ * getWorktreeRoot() applies the climb consistently. Non-git paths (no git
+ * resolution) fall back to the provided root unchanged, preserving prior
+ * behavior for synthetic/test directories.
+ */
+function resolveStateAnchorRoot(worktreeRoot?: string): string {
+  if (worktreeRoot) return getWorktreeRoot(worktreeRoot) || worktreeRoot;
+  return getWorktreeRoot() || process.cwd();
+}
+
+/**
  * Get the git worktree root for the current or specified directory.
  * Returns null if not in a git repository.
  */
@@ -152,7 +199,11 @@ export function getWorktreeRoot(cwd?: string): string | null {
   }
 
   try {
-    const root = execSync('git rev-parse --show-toplevel', {
+    // Prefer the superproject working tree when cwd is inside a submodule, so
+    // .omc/ anchors to the monorepo root rather than polluting the submodule
+    // working tree (#3349). Falls through to --show-toplevel for normal repos
+    // and linked worktrees (where there is no superproject).
+    const root = resolveSuperprojectRoot(effectiveCwd) || execSync('git rev-parse --show-toplevel', {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -314,7 +365,7 @@ export function clearDualDirWarnings(): void {
  * @returns A stable project identifier string
  */
 export function getProjectIdentifier(worktreeRoot?: string): string {
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  const root = resolveStateAnchorRoot(worktreeRoot);
 
   // Workspace marker can supply a stable, user-controlled identifier.
   // This wins over git remote so multi-repo workspaces have one consistent ID.
@@ -394,7 +445,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
 export function getOmcRoot(worktreeRoot?: string): string {
   const customDir = process.env.OMC_STATE_DIR;
   if (customDir) {
-    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+    const root = resolveStateAnchorRoot(worktreeRoot);
     const projectId = getProjectIdentifier(root);
     const centralizedPath = join(customDir, projectId);
 
@@ -420,7 +471,7 @@ export function getOmcRoot(worktreeRoot?: string): string {
     return join(workspaceAnchor, OmcPaths.ROOT);
   }
 
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  const root = resolveStateAnchorRoot(worktreeRoot);
   return join(root, OmcPaths.ROOT);
 }
 
