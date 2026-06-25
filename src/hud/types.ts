@@ -96,6 +96,8 @@ export interface ActiveAgent {
   id: string;
   type: string;
   model?: string;
+  /** Native Claude Code teammate name when spawned with Agent/Task name="..." */
+  name?: string;
   description?: string;
   status: 'running' | 'completed';
   startTime: Date;

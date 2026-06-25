@@ -376,6 +376,29 @@ function getShortAgentName(agentType: string): string {
 }
 
 /**
+ * Native Claude Code named agents are solid teammates, not anonymous subagents.
+ * Show their teammate name prominently so they do not collapse to the same HUD
+ * rendering as ordinary subagent calls that only have a role/type.
+ */
+function getTeammateName(agent: ActiveAgent): string | null {
+  const name = agent.name?.trim();
+  return name ? name : null;
+}
+
+function getAgentDisplayName(agent: ActiveAgent): string {
+  const teammateName = getTeammateName(agent);
+  return teammateName ? `tm:${teammateName}` : getShortAgentName(agent.type);
+}
+
+function getAgentDisplayMarker(agent: ActiveAgent): string {
+  return getTeammateName(agent) ? '◆' : getAgentCode(agent.type, agent.model);
+}
+
+function getAgentDisplayColor(agent: ActiveAgent): string {
+  return getTeammateName(agent) ? CYAN : getModelTierColor(agent.model);
+}
+
+/**
  * Render agents with descriptions - most informative format.
  * Shows what each agent is actually doing.
  *
@@ -392,9 +415,9 @@ export function renderAgentsWithDescriptions(agents: ActiveAgent[]): string | nu
 
   // Build agent entries with descriptions
   const entries = running.map((a) => {
-    const code = getAgentCode(a.type, a.model);
-    const color = getModelTierColor(a.model);
-    const desc = truncateDescription(a.description, 25);
+    const code = getAgentDisplayMarker(a);
+    const color = getAgentDisplayColor(a);
+    const desc = truncateDescription(a.description, getTeammateName(a) ? 30 : 25);
     const durationMs = now - a.startTime.getTime();
     const duration = formatDuration(durationMs);
 
@@ -430,8 +453,8 @@ export function renderAgentsDescOnly(agents: ActiveAgent[]): string | null {
 
   // Build descriptions
   const descriptions = running.map((a) => {
-    const color = getModelTierColor(a.model);
-    const shortName = getShortAgentName(a.type);
+    const color = getAgentDisplayColor(a);
+    const shortName = getAgentDisplayName(a);
     const desc = a.description ? truncateDescription(a.description, 20) : shortName;
     const durationMs = now - a.startTime.getTime();
     const duration = formatDuration(durationMs);
@@ -505,9 +528,9 @@ export function renderAgentsMultiLine(
     const isLast = index === displayCount - 1 && running.length <= maxLines;
     const prefix = isLast ? '└─' : '├─';
 
-    const code = getAgentCode(a.type, a.model);
-    const color = getModelTierColor(a.model);
-    const shortName = getShortAgentName(a.type).padEnd(12);
+    const code = getAgentDisplayMarker(a);
+    const color = getAgentDisplayColor(a);
+    const shortName = getAgentDisplayName(a).padEnd(12);
 
     const durationMs = now - a.startTime.getTime();
     const duration = formatDurationPadded(durationMs);

@@ -238,6 +238,19 @@ describe('Agents Element', () => {
       expect(result).toContain('Analyzing code');
     });
 
+    it('should render named teammates distinctly from anonymous subagents', () => {
+      const teammate: ActiveAgent = {
+        ...createAgent('oh-my-claudecode:executor', 'sonnet'),
+        name: 'worker-1',
+        description: 'Implementing fix',
+      };
+      const result = renderAgentsByFormat([teammate], 'descriptions');
+
+      expect(result).toContain('◆');
+      expect(result).not.toContain('x:');
+      expect(result).toContain('Implementing fix');
+    });
+
     it('should route to tasks format', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
@@ -383,6 +396,23 @@ describe('Agents Element', () => {
       expect(result.detailLines[0]).toContain('└─');
       expect(result.detailLines[0]).toContain('A');
       expect(result.detailLines[0]).toContain('analyzing code');
+    });
+
+    it('should show named teammate identity in solid multiline view', () => {
+      const agents: ActiveAgent[] = [
+        {
+          ...createAgent('oh-my-claudecode:executor', 'sonnet'),
+          name: 'worker-1',
+          description: 'implementing teammate task',
+        },
+      ];
+      const result = renderAgentsMultiLine(agents);
+
+      expect(result.detailLines).toHaveLength(1);
+      expect(result.detailLines[0]).toContain('◆');
+      expect(result.detailLines[0]).toContain('tm:worker-1');
+      expect(result.detailLines[0]).not.toContain('exec');
+      expect(result.detailLines[0]).toContain('implementing teammate task');
     });
 
     it('should render multiple agents with correct tree characters', () => {

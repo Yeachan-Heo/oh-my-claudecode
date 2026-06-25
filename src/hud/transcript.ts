@@ -517,6 +517,7 @@ function processEntry(
           id: block.id,
           type: input?.subagent_type ?? "unknown",
           model: input?.model,
+          name: input?.name,
           description: input?.description,
           status: "running",
           startTime: timestamp,
@@ -702,6 +703,7 @@ interface ContentBlock {
 interface TaskInput {
   subagent_type?: string;
   model?: string;
+  name?: string;
   description?: string;
 }
 
