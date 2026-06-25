@@ -2,9 +2,11 @@
  * Benchmark: subagent-tracking RMW latency under no contention.
  *
  * Measures per-update wall time for sequential updates. Local Linux keeps the
- * strict p99 <= 8ms guard; CI runners use repeated samples and a wider p99
+ * strict p99 <= 8ms guard; CI runners use repeated samples and a wider p50/p99
  * envelope so an isolated scheduler/filesystem stall does not fail dev, while
- * still catching sustained lock slowdowns and hangs.
+ * still catching sustained lock slowdowns and hangs (median-p50, median-p99,
+ * and max-p99 ceilings). GitHub-hosted runners routinely sustain ~23-31ms p50
+ * / ~30-32ms p99 on a healthy path, so the CI ceilings sit above that band.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -22,9 +24,13 @@ const N = 100;
 const WARMUP_RUNS = 1;
 const MEASURED_RUNS = 5;
 const LOCAL_P99_LIMIT_MS = 8;
-const CI_MEDIAN_P50_LIMIT_MS = 8;
+// CI ceilings sit above the GitHub-hosted runner steady-state band (p50
+// ~23-31ms, p99 ~30-32ms) so healthy runs pass, while still catching sustained
+// slowdowns/hangs via the median-p50, median-p99, and max-p99 guards. The
+// strict 8ms target is kept for LOCAL runs only (LOCAL_P99_LIMIT_MS). See #3352.
+const CI_MEDIAN_P50_LIMIT_MS = 40;
 const CI_MEDIAN_P99_LIMIT_MS = 25;
-const CI_MEDIAN_P99_JITTER_MARGIN_MS = 5;
+const CI_MEDIAN_P99_JITTER_MARGIN_MS = 20;
 const CI_MAX_P99_LIMIT_MS = 100;
 const isCi = process.env.CI === "true" || process.env.CI === "1";
 
