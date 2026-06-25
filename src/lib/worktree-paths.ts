@@ -172,15 +172,19 @@ function resolveSuperprojectRoot(cwd: string): string | null {
  * Resolve the state-anchor root for an optional worktreeRoot argument.
  *
  * Many callers pass a raw cwd as `worktreeRoot` (e.g. hooks forwarding
- * `process.cwd()`), which historically was used verbatim — bypassing the
- * submodule→superproject climb in getWorktreeRoot() and creating a stray
- * `.omc/` inside the submodule (#3349). Routing the provided root back through
- * getWorktreeRoot() applies the climb consistently. Non-git paths (no git
- * resolution) fall back to the provided root unchanged, preserving prior
- * behavior for synthetic/test directories.
+ * `process.cwd()`). When that cwd is inside a git submodule we climb to the
+ * outermost superproject so `.omc/` anchors to the monorepo root rather than
+ * the submodule (#3349).
+ *
+ * Crucially, when the provided dir is NOT inside a submodule the path is used
+ * VERBATIM (the historical contract) — it is NOT resolved up to its git
+ * toplevel. Callers that pass an explicit directory (including tests that
+ * isolate state under a per-process subdir of the repo) rely on it being the
+ * literal `.omc` base; resolving such a subdir up to the repo root would
+ * collapse separately-scoped state dirs into one and corrupt them.
  */
 function resolveStateAnchorRoot(worktreeRoot?: string): string {
-  if (worktreeRoot) return getWorktreeRoot(worktreeRoot) || worktreeRoot;
+  if (worktreeRoot) return resolveSuperprojectRoot(worktreeRoot) || worktreeRoot;
   return getWorktreeRoot() || process.cwd();
 }
 
@@ -410,7 +414,13 @@ export function clearDualDirWarnings(): void {
  * @returns A stable project identifier string
  */
 export function getProjectIdentifier(worktreeRoot?: string): string {
-  const root = resolveStateAnchorRoot(worktreeRoot);
+  // NOTE: intentionally does NOT apply the submodule→superproject climb. The
+  // project identifier is a state *identity* (used for OMC_STATE_DIR centralized
+  // dirs, which never live inside the working tree), and a submodule must keep
+  // its OWN identity — see the "should not change identifier for submodules"
+  // test. The #3349 climb applies only to the on-disk `.omc/` *location*
+  // (getOmcRoot's default branch), not to identity.
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
 
   // Workspace marker can supply a stable, user-controlled identifier.
   // This wins over git remote so multi-repo workspaces have one consistent ID.
@@ -490,7 +500,11 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
 export function getOmcRoot(worktreeRoot?: string): string {
   const customDir = process.env.OMC_STATE_DIR;
   if (customDir) {
-    const root = resolveStateAnchorRoot(worktreeRoot);
+    // Centralized state lives at $OMC_STATE_DIR/{projectId} — outside the
+    // working tree — so the #3349 stray-`.omc`-in-submodule problem does not
+    // apply here. Keep upstream behavior: identity is resolved by
+    // getProjectIdentifier (which preserves a submodule's own identity).
+    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
     const projectId = getProjectIdentifier(root);
     const centralizedPath = join(customDir, projectId);
 

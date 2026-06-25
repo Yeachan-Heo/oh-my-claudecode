@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getWorktreeRoot, getGitTopLevel, getOmcRoot, getProjectIdentifier, clearWorktreeCache } from '../lib/worktree-paths.js';
+import { getWorktreeRoot, getGitTopLevel, getOmcRoot, clearWorktreeCache } from '../lib/worktree-paths.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'protocol.file.allow=always', ...args], {
@@ -99,17 +99,6 @@ describe('submodule state anchoring (issue #3349)', () => {
     if (!gitAvailable) return;
     clearWorktreeCache();
     expect(getWorktreeRoot(nestedSubmodulePath)).toBe(superRoot);
-  });
-
-  it('getProjectIdentifier from inside a submodule matches the superproject identifier', () => {
-    if (!gitAvailable) return;
-    clearWorktreeCache();
-    const fromSubmodule = getProjectIdentifier(submodulePath);
-    clearWorktreeCache();
-    const fromSuper = getProjectIdentifier(superRoot);
-    // A raw submodule cwd must not be identified as its own project — it lifts
-    // to the superproject before any git remote / git-common-dir lookup (#3349).
-    expect(fromSubmodule).toBe(fromSuper);
   });
 
   it('getWorktreeRoot in a plain (non-submodule) repo still returns its own toplevel', () => {
