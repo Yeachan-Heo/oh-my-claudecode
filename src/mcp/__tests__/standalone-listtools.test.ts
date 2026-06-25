@@ -21,12 +21,13 @@
  *   of scope here.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildListToolsResponse, allTools } from '../tool-registry.js';
 
 describe('standalone MCP server – ListTools E2E drift guard', () => {
-  // Call the same helper the live ListTools handler uses.
-  const { tools } = buildListToolsResponse();
+  // Call the same helper the live ListTools handler uses, with filtering disabled
+  // so the drift guard stays independent of the parent test process env.
+  const { tools } = buildListToolsResponse('');
   const names = tools.map((t) => t.name);
 
   // -------------------------------------------------------------------------
@@ -94,5 +95,44 @@ describe('standalone MCP server – ListTools E2E drift guard', () => {
   // -------------------------------------------------------------------------
   it('buildListToolsResponse returns one entry per registered tool', () => {
     expect(tools.length).toBe(allTools.length);
+  });
+});
+
+describe('standalone MCP server – OMC_DISABLE_TOOLS filtering', () => {
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    savedEnv = process.env.OMC_DISABLE_TOOLS;
+    delete process.env.OMC_DISABLE_TOOLS;
+  });
+
+  afterEach(() => {
+    if (savedEnv !== undefined) {
+      process.env.OMC_DISABLE_TOOLS = savedEnv;
+    } else {
+      delete process.env.OMC_DISABLE_TOOLS;
+    }
+  });
+
+  it('preserves the full ListTools surface when OMC_DISABLE_TOOLS is unset', () => {
+    const { tools } = buildListToolsResponse();
+    const names = tools.map((tool) => tool.name);
+
+    expect(tools.length).toBe(allTools.length);
+    expect(names).toContain('ast_grep_search');
+    expect(names).toContain('ast_grep_replace');
+  });
+
+  it('excludes AST tools from standalone ListTools when OMC_DISABLE_TOOLS=ast', () => {
+    process.env.OMC_DISABLE_TOOLS = 'ast';
+
+    const { tools } = buildListToolsResponse();
+    const names = tools.map((tool) => tool.name);
+
+    expect(names).not.toContain('ast_grep_search');
+    expect(names).not.toContain('ast_grep_replace');
+    expect(names).toContain('lsp_hover');
+    expect(names).toContain('python_repl');
+    expect(tools.length).toBe(allTools.length - 2);
   });
 });

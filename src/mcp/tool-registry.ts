@@ -27,12 +27,15 @@ import { sharedMemoryTools } from '../tools/shared-memory-tools.js';
 import { deepinitManifestTool } from '../tools/deepinit-manifest.js';
 import { wikiTools } from '../tools/wiki-tools.js';
 import { skillsTools } from '../tools/skills-tools.js';
+import { TOOL_CATEGORIES, type ToolCategory } from '../constants/index.js';
+import { filterDisabledTools, tagCategory } from './disable-tools.js';
 import { z } from 'zod';
 
 /** Minimal tool definition shape shared across all tool families. */
 export interface ToolDef {
   name: string;
   description: string;
+  category?: ToolCategory;
   annotations?: {
     readOnlyHint?: boolean;
     destructiveHint?: boolean;
@@ -47,18 +50,23 @@ export interface ToolDef {
 
 /** All tools exposed by the standalone server, in registration order. */
 export const allTools: ToolDef[] = [
-  ...(lspTools as unknown as ToolDef[]),
-  ...(astTools as unknown as ToolDef[]),
-  pythonReplTool as unknown as ToolDef,
-  ...(stateTools as unknown as ToolDef[]),
-  ...(notepadTools as unknown as ToolDef[]),
-  ...(memoryTools as unknown as ToolDef[]),
-  ...(traceTools as unknown as ToolDef[]),
-  ...(sharedMemoryTools as unknown as ToolDef[]),
-  deepinitManifestTool as unknown as ToolDef,
-  ...(wikiTools as unknown as ToolDef[]),
-  ...(skillsTools as unknown as ToolDef[]),
+  ...tagCategory(lspTools as unknown as ToolDef[], TOOL_CATEGORIES.LSP),
+  ...tagCategory(astTools as unknown as ToolDef[], TOOL_CATEGORIES.AST),
+  { ...(pythonReplTool as unknown as ToolDef), category: TOOL_CATEGORIES.PYTHON },
+  ...tagCategory(stateTools as unknown as ToolDef[], TOOL_CATEGORIES.STATE),
+  ...tagCategory(notepadTools as unknown as ToolDef[], TOOL_CATEGORIES.NOTEPAD),
+  ...tagCategory(memoryTools as unknown as ToolDef[], TOOL_CATEGORIES.MEMORY),
+  ...tagCategory(traceTools as unknown as ToolDef[], TOOL_CATEGORIES.TRACE),
+  ...tagCategory(sharedMemoryTools as unknown as ToolDef[], TOOL_CATEGORIES.SHARED_MEMORY),
+  { ...(deepinitManifestTool as unknown as ToolDef), category: TOOL_CATEGORIES.DEEPINIT },
+  ...tagCategory(wikiTools as unknown as ToolDef[], TOOL_CATEGORIES.WIKI),
+  ...tagCategory(skillsTools as unknown as ToolDef[], TOOL_CATEGORIES.SKILLS),
 ];
+
+/** Tools currently enabled for standalone ListTools after OMC_DISABLE_TOOLS filtering. */
+export function getEnabledTools(envValue?: string): ToolDef[] {
+  return filterDisabledTools(allTools, envValue);
+}
 
 // ---------------------------------------------------------------------------
 // Zod → JSON Schema helpers (mirrors what the MCP server sends over the wire)
@@ -150,9 +158,9 @@ export interface ListToolsEntry {
  * Build the ListTools response payload exactly as standalone-server.ts sends it.
  * Tests call this directly to exercise the same code path as the live server.
  */
-export function buildListToolsResponse(): { tools: ListToolsEntry[] } {
+export function buildListToolsResponse(envValue?: string): { tools: ListToolsEntry[] } {
   return {
-    tools: allTools.map((tool) => ({
+    tools: getEnabledTools(envValue).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: zodToJsonSchema(tool.schema),

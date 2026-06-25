@@ -26031,13 +26031,15 @@ function uniqueSortedTargets(targets) {
     return bTime - aTime;
   });
 }
-function buildCurrentProjectTargets(projectRoot) {
+function buildCurrentProjectTargets(projectRoot, transcriptProjectRoots = [projectRoot]) {
   const claudeDir = getClaudeConfigDir();
-  const projectRoots = /* @__PURE__ */ new Set([projectRoot]);
-  const mainRepoRoot = getMainRepoRoot(projectRoot);
-  if (mainRepoRoot) projectRoots.add(mainRepoRoot);
-  const claudeWorktreeParent = getClaudeWorktreeParent(projectRoot);
-  if (claudeWorktreeParent) projectRoots.add(claudeWorktreeParent);
+  const projectRoots = new Set(transcriptProjectRoots);
+  for (const root of transcriptProjectRoots) {
+    const mainRepoRoot = getMainRepoRoot(root);
+    if (mainRepoRoot) projectRoots.add(mainRepoRoot);
+    const claudeWorktreeParent = getClaudeWorktreeParent(root);
+    if (claudeWorktreeParent) projectRoots.add(claudeWorktreeParent);
+  }
   const targets = [];
   for (const root of projectRoots) {
     const encodedDir = (0, import_path26.join)(claudeDir, "projects", encodeProjectPath(root));
@@ -26079,9 +26081,9 @@ function isWithinProject(projectPath, projectRoots) {
   if (!projectPath) {
     return false;
   }
-  const normalizedProjectPath = (0, import_path26.normalize)((0, import_path26.resolve)(projectPath));
+  const normalizedProjectPath = (0, import_path26.normalize)((0, import_path26.resolve)(projectPath)).replace(/\\/g, "/");
   return projectRoots.some((root) => {
-    const normalizedRoot = (0, import_path26.normalize)((0, import_path26.resolve)(root));
+    const normalizedRoot = (0, import_path26.normalize)((0, import_path26.resolve)(root)).replace(/\\/g, "/");
     return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
   });
 }
@@ -26319,8 +26321,10 @@ async function searchSessionHistory(rawOptions) {
   const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
   const scopeMode = buildScopeMode(rawOptions.project);
   const projectFilter = scopeMode === "project" ? rawOptions.project : void 0;
-  const currentProjectRoots = [currentProjectRoot].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
-  const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot);
+  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path26.resolve)(rawOptions.workingDirectory) : workingDirectory;
+  const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
+  const transcriptProjectRoots = currentProjectRoots.filter((root) => isWithinProject(root, [currentProjectRoot]));
+  const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
   const allMatches = [];
   for (const target of targets) {
     const fileMatches = await collectMatchesFromFile(target, {
@@ -28803,20 +28807,67 @@ Searched:
 };
 var skillsTools = [loadLocalTool, loadGlobalTool, listSkillsTool];
 
+// src/mcp/disable-tools.ts
+var DISABLE_TOOLS_GROUP_MAP = {
+  "lsp": TOOL_CATEGORIES.LSP,
+  "ast": TOOL_CATEGORIES.AST,
+  "python": TOOL_CATEGORIES.PYTHON,
+  "python-repl": TOOL_CATEGORIES.PYTHON,
+  "trace": TOOL_CATEGORIES.TRACE,
+  "state": TOOL_CATEGORIES.STATE,
+  "notepad": TOOL_CATEGORIES.NOTEPAD,
+  "memory": TOOL_CATEGORIES.MEMORY,
+  "project-memory": TOOL_CATEGORIES.MEMORY,
+  "skills": TOOL_CATEGORIES.SKILLS,
+  "interop": TOOL_CATEGORIES.INTEROP,
+  "codex": TOOL_CATEGORIES.CODEX,
+  "gemini": TOOL_CATEGORIES.GEMINI,
+  "antigravity": TOOL_CATEGORIES.ANTIGRAVITY,
+  "shared-memory": TOOL_CATEGORIES.SHARED_MEMORY,
+  "deepinit": TOOL_CATEGORIES.DEEPINIT,
+  "deepinit-manifest": TOOL_CATEGORIES.DEEPINIT,
+  "wiki": TOOL_CATEGORIES.WIKI
+};
+function parseDisabledGroups(envValue) {
+  const disabled = /* @__PURE__ */ new Set();
+  const value = envValue ?? process.env.OMC_DISABLE_TOOLS;
+  if (!value || !value.trim()) return disabled;
+  for (const name of value.split(",")) {
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed) continue;
+    const category = DISABLE_TOOLS_GROUP_MAP[trimmed];
+    if (category !== void 0) {
+      disabled.add(category);
+    }
+  }
+  return disabled;
+}
+function tagCategory(tools, category) {
+  return tools.map((t) => ({ ...t, category }));
+}
+function filterDisabledTools(tools, envValue) {
+  const disabledGroups = parseDisabledGroups(envValue);
+  if (disabledGroups.size === 0) return tools;
+  return tools.filter((tool) => !tool.category || !disabledGroups.has(tool.category));
+}
+
 // src/mcp/tool-registry.ts
 var allTools = [
-  ...lspTools,
-  ...astTools,
-  pythonReplTool,
-  ...stateTools,
-  ...notepadTools,
-  ...memoryTools,
-  ...traceTools,
-  ...sharedMemoryTools,
-  deepinitManifestTool,
-  ...wikiTools,
-  ...skillsTools
+  ...tagCategory(lspTools, TOOL_CATEGORIES.LSP),
+  ...tagCategory(astTools, TOOL_CATEGORIES.AST),
+  { ...pythonReplTool, category: TOOL_CATEGORIES.PYTHON },
+  ...tagCategory(stateTools, TOOL_CATEGORIES.STATE),
+  ...tagCategory(notepadTools, TOOL_CATEGORIES.NOTEPAD),
+  ...tagCategory(memoryTools, TOOL_CATEGORIES.MEMORY),
+  ...tagCategory(traceTools, TOOL_CATEGORIES.TRACE),
+  ...tagCategory(sharedMemoryTools, TOOL_CATEGORIES.SHARED_MEMORY),
+  { ...deepinitManifestTool, category: TOOL_CATEGORIES.DEEPINIT },
+  ...tagCategory(wikiTools, TOOL_CATEGORIES.WIKI),
+  ...tagCategory(skillsTools, TOOL_CATEGORIES.SKILLS)
 ];
+function getEnabledTools(envValue) {
+  return filterDisabledTools(allTools, envValue);
+}
 function zodTypeToJsonSchema(zodType) {
   const result = {};
   if (!zodType || !zodType._def) {
@@ -28872,9 +28923,9 @@ function zodToJsonSchema2(schema) {
   }
   return { type: "object", properties, required: required2 };
 }
-function buildListToolsResponse() {
+function buildListToolsResponse(envValue) {
   return {
-    tools: allTools.map((tool) => ({
+    tools: getEnabledTools(envValue).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: zodToJsonSchema2(tool.schema),
@@ -28896,10 +28947,11 @@ var server = new Server(
   }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => buildListToolsResponse());
+var getStandaloneTools = () => getEnabledTools();
 var setStandaloneCallToolRequestHandler = server.setRequestHandler.bind(server);
 setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  const tool = allTools.find((t) => t.name === name);
+  const tool = getStandaloneTools().find((t) => t.name === name);
   if (!tool) {
     return {
       content: [{ type: "text", text: `Unknown tool: ${name}` }],
