@@ -8,6 +8,7 @@
  * Bash hook scripts were removed in v3.9.0.
  */
 import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, readdirSync, cpSync, unlinkSync, rmSync, realpathSync, statSync } from 'fs';
+import { createHash } from 'crypto';
 import { join, dirname, resolve, isAbsolute, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -283,6 +284,42 @@ const OMC_HOOK_HELPER_FILENAMES = new Set([
 const OMC_HOOK_EXTRA_FILENAMES = new Set([
     'find-node.sh',
 ]);
+function hashFileContents(path) {
+    try {
+        return createHash('sha256').update(readFileSync(path)).digest('hex');
+    }
+    catch {
+        return null;
+    }
+}
+function getShippedStandaloneHookPayloadPath(filename, location) {
+    const packageDir = getPackageDir();
+    if (location === 'hooks') {
+        if (OMC_HOOK_FILENAMES.has(filename)) {
+            return join(packageDir, 'templates', 'hooks', filename);
+        }
+        if (filename === 'find-node.sh') {
+            return join(packageDir, 'scripts', 'find-node.sh');
+        }
+        return null;
+    }
+    if (!OMC_HOOK_HELPER_FILENAMES.has(filename)) {
+        return null;
+    }
+    if (filename === 'config-dir.mjs' || filename === 'config-dir.sh') {
+        return join(packageDir, 'scripts', 'lib', filename);
+    }
+    return join(packageDir, 'templates', 'hooks', 'lib', filename);
+}
+function isShippedStandaloneHookPayload(targetPath, filename, location) {
+    const shippedPath = getShippedStandaloneHookPayloadPath(filename, location);
+    if (!shippedPath || !existsSync(shippedPath)) {
+        return false;
+    }
+    const targetHash = hashFileContents(targetPath);
+    const shippedHash = hashFileContents(shippedPath);
+    return targetHash !== null && shippedHash !== null && targetHash === shippedHash;
+}
 /**
  * Detect whether a hook command belongs to oh-my-claudecode.
  *
@@ -389,7 +426,7 @@ function pruneLegacyStandaloneHookScripts(log) {
         }
         const targetPath = join(HOOKS_DIR, filename);
         try {
-            if (statSync(targetPath).isFile()) {
+            if (statSync(targetPath).isFile() && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
                 unlinkSync(targetPath);
                 removed++;
             }
@@ -407,7 +444,7 @@ function pruneLegacyStandaloneHookScripts(log) {
             }
             const targetPath = join(hooksLibDir, filename);
             try {
-                if (statSync(targetPath).isFile()) {
+                if (statSync(targetPath).isFile() && isShippedStandaloneHookPayload(targetPath, filename, 'hooks/lib')) {
                     unlinkSync(targetPath);
                     removed++;
                 }

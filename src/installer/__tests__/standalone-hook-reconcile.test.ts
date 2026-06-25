@@ -37,6 +37,20 @@ function writeCompletePluginPayload(root: string): void {
   writePluginFile(join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }, null, 2));
 }
 
+function shippedStandaloneHookPayload(filename: string, location: 'hooks' | 'hooks/lib'): string {
+  if (location === 'hooks') {
+    if (filename === 'find-node.sh') {
+      return readFileSync(join(process.cwd(), 'scripts', filename), 'utf-8');
+    }
+    return readFileSync(join(process.cwd(), 'templates', 'hooks', filename), 'utf-8');
+  }
+
+  if (filename === 'config-dir.mjs' || filename === 'config-dir.sh') {
+    return readFileSync(join(process.cwd(), 'scripts', 'lib', filename), 'utf-8');
+  }
+  return readFileSync(join(process.cwd(), 'templates', 'hooks', 'lib', filename), 'utf-8');
+}
+
 describe('install() standalone hook reconciliation', () => {
   beforeEach(() => {
     testClaudeDir = mkdtempSync(join(tmpdir(), 'omc-standalone-hooks-'));
@@ -431,10 +445,10 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
       'find-node.sh',
     ];
     for (const filename of legacyFiles) {
-      writeFileSync(join(hooksDir, filename), 'legacy omc payload');
+      writeFileSync(join(hooksDir, filename), shippedStandaloneHookPayload(filename, 'hooks'));
     }
     for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'model-routing-override-message.mjs', 'state-root.mjs', 'stdin.mjs']) {
-      writeFileSync(join(hooksLibDir, filename), 'legacy omc helper');
+      writeFileSync(join(hooksLibDir, filename), shippedStandaloneHookPayload(filename, 'hooks/lib'));
     }
 
     writeFileSync(join(hooksDir, 'notify-mac.sh'), 'user hook');
@@ -453,6 +467,28 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     expect(readFileSync(join(hooksDir, 'notify-mac.sh'), 'utf-8')).toBe('user hook');
     expect(readFileSync(join(hooksLibDir, 'user-helper.mjs'), 'utf-8')).toBe('user helper');
     expect(readFileSync(join(hooksDir, 'attention', 'notify.mjs'), 'utf-8')).toBe('user nested hook');
+  });
+
+  it('preserves same-basename non-OMC hook files while pruning shipped OMC payloads', async () => {
+    setupPluginWithHooks();
+
+    const hooksDir = join(testClaudeDir, 'hooks');
+    const hooksLibDir = join(hooksDir, 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+
+    writeFileSync(join(hooksDir, 'keyword-detector.mjs'), 'console.log("user-owned keyword detector");\n');
+    writeFileSync(join(hooksDir, 'session-start.mjs'), shippedStandaloneHookPayload('session-start.mjs', 'hooks'));
+    writeFileSync(join(hooksLibDir, 'config-dir.mjs'), 'export function getClaudeConfigDir() { return "/user"; }\n');
+    writeFileSync(join(hooksLibDir, 'state-root.mjs'), shippedStandaloneHookPayload('state-root.mjs', 'hooks/lib'));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(hooksDir, 'keyword-detector.mjs'), 'utf-8')).toBe('console.log("user-owned keyword detector");\n');
+    expect(existsSync(join(hooksDir, 'session-start.mjs'))).toBe(false);
+    expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).toBe('export function getClaudeConfigDir() { return "/user"; }\n');
+    expect(existsSync(join(hooksLibDir, 'state-root.mjs'))).toBe(false);
   });
 
   it('does not prune standalone hook files when plugin is not handling hooks', async () => {
