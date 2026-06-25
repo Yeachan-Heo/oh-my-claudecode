@@ -273,6 +273,11 @@ async function sendStopNotification(modeName, stateData, sessionId, directory) {
  */
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
+// A delegated subagent counts as pending owned async work while its tracking
+// entry stays "running". Bound by 30 min so an orphaned entry (subagent killed
+// without SubagentStop) eventually releases the gate; over-suppression is the
+// benign direction (the agent stops cleanly instead of being nagged mid-work).
+const RUNNING_SUBAGENT_STALE_MS = 30 * 60 * 1000;
 
 // Stop breaker constants for first-class mode enforcement
 const TEAM_PIPELINE_STOP_BLOCKER_MAX = 20;
@@ -395,8 +400,25 @@ function hasPendingScheduledWakeup(stateDir, sessionId) {
   });
 }
 
+function hasRunningSubagent(stateDir) {
+  // subagent-tracking.json is per-directory (not session-scoped), written by the
+  // wired SubagentStart/SubagentStop hooks. A "running" entry means a delegated
+  // agent is still working, so persistent modes must not inject a "stalled"
+  // reinforcement while we wait for it (mirrors the background-task gate).
+  const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+  const agents = Array.isArray(tracking?.agents) ? tracking.agents : [];
+  return agents.some((agent) => {
+    if (agent?.status !== "running") return false;
+    return isFreshTimestamp(agent.started_at, RUNNING_SUBAGENT_STALE_MS);
+  });
+}
+
 function hasPendingOwnedAsyncWork(stateDir, sessionId) {
-  return hasPendingBackgroundTask(stateDir, sessionId) || hasPendingScheduledWakeup(stateDir, sessionId);
+  return (
+    hasPendingBackgroundTask(stateDir, sessionId) ||
+    hasRunningSubagent(stateDir) ||
+    hasPendingScheduledWakeup(stateDir, sessionId)
+  );
 }
 
 function normalizeTeamPhase(state) {
