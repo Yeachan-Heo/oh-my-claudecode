@@ -419,8 +419,11 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   // dirs, which never live inside the working tree), and a submodule must keep
   // its OWN identity — see the "should not change identifier for submodules"
   // test. The #3349 climb applies only to the on-disk `.omc/` *location*
-  // (getOmcRoot's default branch), not to identity.
-  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+  // (getOmcRoot's default branch), not to identity. The no-arg fallback uses
+  // getGitTopLevel() (literal toplevel, no climb) so a process launched inside a
+  // submodule still resolves the submodule's own identity, and findWorkspaceRoot
+  // below sees the unclimbed root so an inner `.omc-workspace` marker is honored.
+  const root = worktreeRoot || getGitTopLevel() || process.cwd();
 
   // Workspace marker can supply a stable, user-controlled identifier.
   // This wins over git remote so multi-repo workspaces have one consistent ID.
@@ -502,9 +505,11 @@ export function getOmcRoot(worktreeRoot?: string): string {
   if (customDir) {
     // Centralized state lives at $OMC_STATE_DIR/{projectId} — outside the
     // working tree — so the #3349 stray-`.omc`-in-submodule problem does not
-    // apply here. Keep upstream behavior: identity is resolved by
-    // getProjectIdentifier (which preserves a submodule's own identity).
-    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+    // apply here. Identity must NOT climb: use the literal git toplevel
+    // (getGitTopLevel) for the no-arg fallback so a submodule launched without
+    // an explicit worktreeRoot keeps its own centralized id rather than merging
+    // into the parent project's (preserves submodule identity).
+    const root = worktreeRoot || getGitTopLevel() || process.cwd();
     const projectId = getProjectIdentifier(root);
     const centralizedPath = join(customDir, projectId);
 
