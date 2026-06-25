@@ -41,7 +41,9 @@ describe('session search cli command', () => {
   afterEach(() => {
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.OMC_STATE_DIR;
-    rmSync(tempRoot, { recursive: true, force: true });
+    // Windows can throw ENOTEMPTY on rmdir when handles/indexing linger;
+    // retry to avoid a flaky teardown failure in the Windows path suite.
+    rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   it('prints JSON when requested', async () => {
