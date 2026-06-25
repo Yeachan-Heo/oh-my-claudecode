@@ -739,6 +739,29 @@ function extractClaudeGoalSnapshot(data) {
 }
 
 
+function isCancelSkillBootstrapTool(toolName, toolInput) {
+  const skillName = extractSkillName(toolInput);
+  if (toolName === 'Skill' && skillName === 'cancel') return true;
+  if (toolName === 'ToolSearch') return true;
+
+  if (toolName === 'Read') {
+    const filePath = typeof toolInput.file_path === 'string'
+      ? toolInput.file_path
+      : typeof toolInput.path === 'string'
+        ? toolInput.path
+        : '';
+    const normalized = filePath.replace(/\\/g, '/');
+    if (/(?:^|\/)(?:skills|skill-bodies)\/cancel\/SKILL\.md$/i.test(normalized)) return true;
+  }
+
+  if (/state_(?:clear|read|write|list_active|get_status)$/i.test(toolName)) return true;
+  if (/^mcp__.*__state_(?:clear|read|write|list_active|get_status)$/i.test(toolName)) return true;
+
+  if (toolName !== 'Bash') return false;
+  const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode|gjc)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(command);
+}
+
 function isUltragoalBootstrapTool(toolName, toolInput) {
   if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return true;
   if (toolName !== 'Bash') return false;
@@ -751,6 +774,7 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const toolName = data.tool_name || data.toolName || '';
   const toolInput = data.toolInput || data.tool_input || {};
   if (isUltragoalBootstrapTool(toolName, toolInput)) return null;
+  if (isCancelSkillBootstrapTool(toolName, toolInput)) return null;
   const loaded = readSessionModeState(stateDir, 'ultragoal', sessionId);
   const state = loaded.state;
   if (!state?.active) return null;
@@ -766,6 +790,7 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
 
+  if (!expectedObjective && actualObjective && activeStatus) return null;
   if (objectiveMatches && activeStatus) return null;
 
   const mismatch = actualObjective

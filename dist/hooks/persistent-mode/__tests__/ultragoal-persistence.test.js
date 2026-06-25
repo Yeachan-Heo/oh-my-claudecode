@@ -48,6 +48,18 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
         });
         expect(result.hookSpecificOutput?.permissionDecision).not.toBe('deny');
     });
+    it('allows standalone active goal snapshot when no expected ultragoal objective exists', () => {
+        const cwd = makeTempProject('omc-ultragoal-standalone-empty-');
+        writeUltragoalState(cwd, { claude_goal_objective: '' });
+        const result = runHook(preToolScript, {
+            cwd,
+            session_id: 'session-a',
+            tool_name: 'Bash',
+            tool_input: { command: 'npm test' },
+            goal: { objective: 'Standalone Claude Code aggregate goal', status: 'active' },
+        });
+        expect(result.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    });
     it('allows ultragoal CLI bootstrap commands before Claude /goal is visible', () => {
         const cwd = makeTempProject('omc-ultragoal-bootstrap-');
         writeUltragoalState(cwd);
@@ -65,6 +77,31 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
         });
         expect(createGoals.hookSpecificOutput?.permissionDecision).not.toBe('deny');
         expect(completeGoals.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    });
+    it('allows cancel skill bootstrap paths when ultragoal goal snapshot is absent', () => {
+        const cwd = makeTempProject('omc-ultragoal-cancel-bootstrap-');
+        writeUltragoalState(cwd);
+        const readCancelSkill = runHook(preToolScript, {
+            cwd,
+            session_id: 'session-a',
+            tool_name: 'Read',
+            tool_input: { file_path: join(process.cwd(), 'skills', 'cancel', 'SKILL.md') },
+        });
+        const invokeCancelSkill = runHook(preToolScript, {
+            cwd,
+            session_id: 'session-a',
+            tool_name: 'Skill',
+            tool_input: { skill: 'oh-my-claudecode:cancel' },
+        });
+        const clearState = runHook(preToolScript, {
+            cwd,
+            session_id: 'session-a',
+            tool_name: 'mcp__omx_state__state_clear',
+            tool_input: { mode: 'ultragoal' },
+        });
+        expect(readCancelSkill.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+        expect(invokeCancelSkill.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+        expect(clearState.hookSpecificOutput?.permissionDecision).not.toBe('deny');
     });
     it('denies PreToolUse when active ultragoal has no visible Claude /goal', () => {
         const cwd = makeTempProject('omc-ultragoal-deny-');
