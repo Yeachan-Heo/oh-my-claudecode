@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getWorktreeRoot, getOmcRoot, getProjectIdentifier, clearWorktreeCache } from '../lib/worktree-paths.js';
+import { getWorktreeRoot, getGitTopLevel, getOmcRoot, getProjectIdentifier, clearWorktreeCache } from '../lib/worktree-paths.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'protocol.file.allow=always', ...args], {
@@ -116,5 +116,16 @@ describe('submodule state anchoring (issue #3349)', () => {
     if (!gitAvailable) return;
     clearWorktreeCache();
     expect(getWorktreeRoot(superRoot)).toBe(superRoot);
+  });
+
+  // Security boundary: path-restriction / containment checks must stay confined
+  // to the submodule, NOT climb to the superproject (Codex review on PR #3350).
+  it('getGitTopLevel from inside a submodule stays at the submodule (no climb)', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    expect(getGitTopLevel(submodulePath)).toBe(submodulePath);
+    // Contrast: the state-anchor resolver DOES climb to the superproject.
+    clearWorktreeCache();
+    expect(getWorktreeRoot(submodulePath)).toBe(superRoot);
   });
 });

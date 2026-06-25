@@ -55,6 +55,8 @@ export const OmcPaths = {
  */
 const MAX_WORKTREE_CACHE_SIZE = 8;
 const worktreeCacheMap = new Map<string, string>();
+/** LRU cache for literal git-toplevel lookups (getGitTopLevel, no submodule climb). */
+const toplevelCacheMap = new Map<string, string>();
 
 /**
  * LRU cache for workspace marker lookups.
@@ -183,8 +185,59 @@ function resolveStateAnchorRoot(worktreeRoot?: string): string {
 }
 
 /**
- * Get the git worktree root for the current or specified directory.
+ * Get the literal git toplevel for a directory: `git rev-parse --show-toplevel`
+ * with NO submodule→superproject climb. Returns null if not in a git repository.
+ *
+ * SECURITY: this is the correct primitive for path-restriction / containment
+ * checks. A tool operating inside a submodule must be confined to that submodule
+ * working tree, not the parent superproject. Use this — NOT getWorktreeRoot() —
+ * for boundary validation (getWorktreeRoot climbs to the superproject for state
+ * anchoring and would widen the boundary across submodule borders; see #3349
+ * and the Codex review on PR #3350).
+ */
+export function getGitTopLevel(cwd?: string): string | null {
+  const effectiveCwd = cwd || process.cwd();
+
+  // Return cached value if present (LRU: move to end on access)
+  if (toplevelCacheMap.has(effectiveCwd)) {
+    const root = toplevelCacheMap.get(effectiveCwd)!;
+    toplevelCacheMap.delete(effectiveCwd);
+    toplevelCacheMap.set(effectiveCwd, root);
+    return root || null;
+  }
+
+  try {
+    const root = execSync('git rev-parse --show-toplevel', {
+      cwd: effectiveCwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000,
+    }).trim();
+
+    if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = toplevelCacheMap.keys().next().value;
+      if (oldest !== undefined) toplevelCacheMap.delete(oldest);
+    }
+    toplevelCacheMap.set(effectiveCwd, root);
+    return root;
+  } catch {
+    // Not in a git repository - do NOT cache so a later git init re-detects.
+    return null;
+  }
+}
+
+/**
+ * Get the state-anchor "worktree root" for a directory.
+ *
+ * When cwd is inside a git submodule this climbs to the outermost superproject
+ * working tree so `.omc/` state anchors to the monorepo root rather than
+ * polluting the submodule working tree (#3349). For normal repos and linked
+ * worktrees (no superproject) it returns the literal git toplevel unchanged.
  * Returns null if not in a git repository.
+ *
+ * SECURITY: do NOT use this for path-restriction / containment checks — the
+ * submodule climb widens the boundary across submodule borders. Use
+ * getGitTopLevel() for confinement.
  */
 export function getWorktreeRoot(cwd?: string): string | null {
   const effectiveCwd = cwd || process.cwd();
@@ -198,32 +251,24 @@ export function getWorktreeRoot(cwd?: string): string | null {
     return root || null;
   }
 
-  try {
-    // Prefer the superproject working tree when cwd is inside a submodule, so
-    // .omc/ anchors to the monorepo root rather than polluting the submodule
-    // working tree (#3349). Falls through to --show-toplevel for normal repos
-    // and linked worktrees (where there is no superproject).
-    const root = resolveSuperprojectRoot(effectiveCwd) || execSync('git rev-parse --show-toplevel', {
-      cwd: effectiveCwd,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
-    }).trim();
-
-    // Evict oldest entry when at capacity
-    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-      const oldest = worktreeCacheMap.keys().next().value;
-      if (oldest !== undefined) {
-        worktreeCacheMap.delete(oldest);
-      }
-    }
-    worktreeCacheMap.set(effectiveCwd, root);
-    return root;
-  } catch {
+  // Prefer the superproject working tree when cwd is inside a submodule (#3349);
+  // otherwise the literal git toplevel.
+  const root = resolveSuperprojectRoot(effectiveCwd) || getGitTopLevel(effectiveCwd);
+  if (!root) {
     // Not in a git repository - do NOT cache fallback
     // so that if directory becomes a git repo later, we re-detect
     return null;
   }
+
+  // Evict oldest entry when at capacity
+  if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+    const oldest = worktreeCacheMap.keys().next().value;
+    if (oldest !== undefined) {
+      worktreeCacheMap.delete(oldest);
+    }
+  }
+  worktreeCacheMap.set(effectiveCwd, root);
+  return root;
 }
 
 /**
@@ -626,6 +671,7 @@ export function ensureAllOmcDirs(worktreeRoot?: string): void {
  */
 export function clearWorktreeCache(): void {
   worktreeCacheMap.clear();
+  toplevelCacheMap.clear();
   workspaceCacheMap.clear();
 }
 
