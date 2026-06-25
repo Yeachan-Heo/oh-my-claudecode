@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync, symlinkSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync, symlinkSync, realpathSync } from 'fs';
 import { execSync } from 'child_process';
 import { join, basename, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -48,6 +48,23 @@ try {
 } catch {
   canSymlink = false;
 }
+
+function canonicalTestPath(path: string): string {
+  let canonical = path;
+  try {
+    canonical = realpathSync.native(path);
+  } catch {
+    try {
+      canonical = realpathSync(path);
+    } catch {
+      // Keep the original path for the assertion failure message.
+    }
+  }
+
+  const slashNormalized = canonical.replace(/\\/g, '/');
+  return process.platform === 'win32' ? slashNormalized.toLowerCase() : slashNormalized;
+}
+
 
 const TEST_DIR = join(tmpdir(), 'worktree-paths-test');
 
@@ -307,9 +324,18 @@ describe('worktree-paths', () => {
         clearWorktreeCache();
         process.chdir(submodulePath);
 
-        expect(validateWorkingDirectory()).toBe(submodulePath);
-        expect(validateWorkingDirectory(parentDir)).toBe(submodulePath);
-        expect(validateWorkingDirectoryOrLinkedWorktree(parentDir)).toBe(submodulePath);
+        const expectedSubmoduleRoot = canonicalTestPath(submodulePath);
+        const parentRoot = canonicalTestPath(parentDir);
+        const defaultRoot = canonicalTestPath(validateWorkingDirectory());
+        const explicitParentRoot = canonicalTestPath(validateWorkingDirectory(parentDir));
+        const linkedParentRoot = canonicalTestPath(validateWorkingDirectoryOrLinkedWorktree(parentDir));
+
+        expect(defaultRoot).toBe(expectedSubmoduleRoot);
+        expect(explicitParentRoot).toBe(expectedSubmoduleRoot);
+        expect(linkedParentRoot).toBe(expectedSubmoduleRoot);
+        expect(defaultRoot).not.toBe(parentRoot);
+        expect(explicitParentRoot).not.toBe(parentRoot);
+        expect(linkedParentRoot).not.toBe(parentRoot);
       } finally {
         process.chdir(originalCwd);
         clearWorktreeCache();
