@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getWorktreeRoot, getGitTopLevel, getOmcRoot, clearWorktreeCache } from '../lib/worktree-paths.js';
+import { getWorktreeRoot, getGitTopLevel, getOmcRoot, resolveToWorktreeRoot, clearWorktreeCache } from '../lib/worktree-paths.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'protocol.file.allow=always', ...args], {
@@ -116,5 +116,59 @@ describe('submodule state anchoring (issue #3349)', () => {
     // Contrast: the state-anchor resolver DOES climb to the superproject.
     clearWorktreeCache();
     expect(getWorktreeRoot(submodulePath)).toBe(superRoot);
+  });
+
+  // Hook normalization contract (Codex P2 review on PR #3350): every hook
+  // entrypoint runs input.directory through resolveToWorktreeRoot() before
+  // resolving state. Under OMC_STATE_DIR the resolved root becomes the
+  // centralized *identity*, which must preserve the submodule — NOT climb to
+  // the superproject — otherwise a submodule session merges into the parent's
+  // centralized state. Default (on-disk) mode must still climb for #3349.
+  it('resolveToWorktreeRoot preserves submodule identity under OMC_STATE_DIR (no climb)', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    const prev = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = join(tempDir, 'central');
+    try {
+      // OMC_STATE_DIR set: identity-bearing root stays at the submodule.
+      expect(resolveToWorktreeRoot(submodulePath)).toBe(submodulePath);
+    } finally {
+      if (prev === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = prev;
+      clearWorktreeCache();
+    }
+  });
+
+  it('resolveToWorktreeRoot still climbs to the superproject in default (on-disk) mode', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    const prev = process.env.OMC_STATE_DIR;
+    delete process.env.OMC_STATE_DIR;
+    try {
+      expect(resolveToWorktreeRoot(submodulePath)).toBe(superRoot);
+    } finally {
+      if (prev !== undefined) process.env.OMC_STATE_DIR = prev;
+      clearWorktreeCache();
+    }
+  });
+
+  it('centralized .omc for a submodule session does not merge into the parent superproject', () => {
+    if (!gitAvailable) return;
+    clearWorktreeCache();
+    const prev = process.env.OMC_STATE_DIR;
+    const central = join(tempDir, 'central');
+    process.env.OMC_STATE_DIR = central;
+    try {
+      // Mirror the hook path: resolveToWorktreeRoot() then getOmcRoot().
+      const submoduleOmc = getOmcRoot(resolveToWorktreeRoot(submodulePath));
+      clearWorktreeCache();
+      const superOmc = getOmcRoot(resolveToWorktreeRoot(superRoot));
+      expect(submoduleOmc).not.toBe(superOmc);
+      expect(submoduleOmc.startsWith(central)).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = prev;
+      clearWorktreeCache();
+    }
   });
 });

@@ -1000,9 +1000,21 @@ export function ensureSessionStateDir(sessionId: string, worktreeRoot?: string):
  * @returns The worktree root (never a subdirectory)
  */
 export function resolveToWorktreeRoot(directory?: string): string {
+  // The resolved root feeds BOTH on-disk `.omc/` placement AND, under
+  // OMC_STATE_DIR, the centralized-state *identity* (getProjectIdentifier).
+  // The #3349 submodule→superproject climb exists ONLY to place `.omc/` at the
+  // superproject working tree; it must NOT change a submodule's centralized
+  // identity (that contract is documented on getProjectIdentifier/getOmcRoot).
+  // So when OMC_STATE_DIR is set — where on-disk placement is moot and identity
+  // is all that matters — resolve to the literal git toplevel (no climb) so a
+  // hook/session launched inside a submodule keeps its own id instead of
+  // merging into the parent superproject's. Non-submodule repos and linked
+  // worktrees are unaffected: with no superproject the two resolvers are equal.
+  // See PR #3350 Codex review (hook normalization / submodule identity).
+  const resolveRoot = process.env.OMC_STATE_DIR ? getGitTopLevel : getWorktreeRoot;
   if (directory) {
     const resolved = resolve(directory);
-    const root = getWorktreeRoot(resolved);
+    const root = resolveRoot(resolved);
     if (root) return root;
 
     console.error('[worktree] non-git directory provided, falling back to process root', {
@@ -1010,7 +1022,7 @@ export function resolveToWorktreeRoot(directory?: string): string {
     });
   }
   // Fallback: derive from process CWD (the MCP server / CLI entry point)
-  return getWorktreeRoot(process.cwd()) || process.cwd();
+  return resolveRoot(process.cwd()) || process.cwd();
 }
 
 // ============================================================================
