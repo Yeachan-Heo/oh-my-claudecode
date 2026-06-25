@@ -417,12 +417,17 @@ export function renderAgentsWithDescriptions(agents: ActiveAgent[]): string | nu
   const entries = running.map((a) => {
     const code = getAgentDisplayMarker(a);
     const color = getAgentDisplayColor(a);
-    const desc = truncateDescription(a.description, getTeammateName(a) ? 30 : 25);
+    const teammateName = getTeammateName(a);
+    const displayName = getAgentDisplayName(a);
+    const desc = truncateDescription(a.description, teammateName ? 30 : 25);
+    const label = teammateName
+      ? `${displayName}${desc ? ` ${desc}` : ""}`
+      : desc;
     const durationMs = now - a.startTime.getTime();
     const duration = formatDuration(durationMs);
 
-    // Format: O:description or O:description(2m)
-    let entry = `${color}${code}${RESET}:${dim(desc)}`;
+    // Format: O:description or ◆:tm:worker-1 description(2m)
+    let entry = `${color}${code}${RESET}:${dim(label)}`;
     if (duration && duration !== '!') {
       entry += dim(duration);
     } else if (duration === '!') {

@@ -248,6 +248,7 @@ describe('Agents Element', () => {
 
       expect(result).toContain('◆');
       expect(result).not.toContain('x:');
+      expect(result).toContain('tm:worker-1');
       expect(result).toContain('Implementing fix');
     });
 
