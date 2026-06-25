@@ -128,6 +128,31 @@ jobs:
           path: dist/
           retention-days: 7
 
+  no-committed-build-artifacts:
+    name: No Committed Build Artifacts
+    runs-on: ubuntu-latest
+    # PR-only: the maintainer regenerates dist/ and bridge/ in the merge/release
+    # commit, so pushes to dev/main legitimately change them. Contributors must not.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reject committed dist/ or bridge/ changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD -- dist/ bridge/ || true)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::This PR commits generated build artifacts. dist/ and bridge/ are produced by 'npm run build' and must NOT be committed — the maintainer regenerates them at merge/release. Run 'git restore dist/ bridge/' and recommit. See .github/CLAUDE.md."
+            echo "Offending files:"
+            echo "$CHANGED" | sed 's/^/  - /'
+            exit 1
+          fi
+          echo "✅ No committed dist/ or bridge/ changes."
+
   multirepo-paths-gate:
     name: Multi-repo Path Gate (AST-grep)
     runs-on: ${{ matrix.os }}

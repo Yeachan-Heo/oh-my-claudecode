@@ -246,6 +246,18 @@ npm run build
 
 Runs the complete pipeline: `tsc` → esbuild bundles → docs composition → all bridge artifacts.
 
+### Do NOT commit `dist/` or `bridge/`
+
+`npm run build` regenerates `dist/` and `bridge/`. **These are build artifacts — do not commit them in your PR.** They are gitignored, but the `bridge/*.cjs` bundles are tracked in the repo, so a rebuild will show them as modified in your working tree. The maintainer regenerates them at merge/release; committing them in a contributor PR inflates the diff, causes merge conflicts, and obscures the real change.
+
+Before committing, restore them:
+
+```bash
+git restore dist/ bridge/
+```
+
+CI enforces this: the **No Committed Build Artifacts** check fails any PR whose diff touches `dist/` or `bridge/`. (Your source change still ships — `bridge/` is rebuilt from it when the maintainer merges.)
+
 ---
 
 ## 7. Running Tests & Lint
