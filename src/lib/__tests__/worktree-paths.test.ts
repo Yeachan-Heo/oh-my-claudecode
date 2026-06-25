@@ -23,6 +23,7 @@ import {
   validateSessionId,
   resolveToWorktreeRoot,
   validateWorkingDirectory,
+  validateWorkingDirectoryOrLinkedWorktree,
   getWorktreeRoot,
   getProjectIdentifier,
   clearDualDirWarnings,
@@ -278,6 +279,43 @@ describe('worktree-paths', () => {
 
       errorSpy.mockRestore();
       rmSync(nestedRepoDir, { recursive: true, force: true });
+    });
+
+    it('uses the submodule git top-level as the trusted validation boundary', () => {
+      const parentDir = mkdtempSync(join(tmpdir(), 'worktree-paths-validator-parent-'));
+      const subDir = mkdtempSync(join(tmpdir(), 'worktree-paths-validator-child-'));
+      const originalCwd = process.cwd();
+
+      try {
+        execSync('git init', { cwd: subDir, stdio: 'pipe' });
+        execSync('git commit --allow-empty -m "sub init"', {
+          cwd: subDir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+        });
+        execSync('git init', { cwd: parentDir, stdio: 'pipe' });
+        execSync('git commit --allow-empty -m "parent init"', {
+          cwd: parentDir,
+          stdio: 'pipe',
+          env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+        });
+        execSync(`git -c protocol.file.allow=always submodule add "${subDir}" mysub`, {
+          cwd: parentDir,
+          stdio: 'pipe',
+        });
+        const submodulePath = join(parentDir, 'mysub');
+        clearWorktreeCache();
+        process.chdir(submodulePath);
+
+        expect(validateWorkingDirectory()).toBe(submodulePath);
+        expect(validateWorkingDirectory(parentDir)).toBe(submodulePath);
+        expect(validateWorkingDirectoryOrLinkedWorktree(parentDir)).toBe(submodulePath);
+      } finally {
+        process.chdir(originalCwd);
+        clearWorktreeCache();
+        rmSync(parentDir, { recursive: true, force: true });
+        rmSync(subDir, { recursive: true, force: true });
+      }
     });
   });
 

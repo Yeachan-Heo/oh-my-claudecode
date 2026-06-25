@@ -1148,18 +1148,19 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
 }
 
 /**
- * Validate that a workingDirectory is within the trusted worktree root.
+ * Validate that a workingDirectory is within the trusted git top-level.
  * The trusted root is derived from process.cwd(), NOT from user input.
  *
- * Always returns a git worktree root — never a subdirectory.
- * This prevents .omc/state/ from being created in subdirectories (#576).
+ * Always returns a git top-level — never a subdirectory.
+ * This prevents .omc/state/ from being created in subdirectories (#576)
+ * without widening submodule launches to their superproject.
  *
  * @param workingDirectory - User-supplied working directory
  * @returns The validated worktree root
  * @throws Error if workingDirectory is outside trusted root
  */
 export function validateWorkingDirectory(workingDirectory?: string): string {
-  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
 
   if (!workingDirectory) {
     return trustedRoot;
@@ -1175,8 +1176,8 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
     trustedRootReal = trustedRoot;
   }
 
-  // Try to resolve the provided directory to a git worktree root.
-  const providedRoot = getWorktreeRoot(resolved);
+  // Try to resolve the provided directory to its literal git top-level.
+  const providedRoot = getGitTopLevel(resolved);
 
   if (providedRoot) {
     // Git resolution succeeded — require exact worktree identity.
@@ -1245,7 +1246,7 @@ function getGitCommonDir(cwd: string): string | null {
  * rejected.
  */
 export function validateWorkingDirectoryOrLinkedWorktree(workingDirectory?: string): string {
-  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
 
   if (!workingDirectory) {
     return trustedRoot;
@@ -1260,7 +1261,7 @@ export function validateWorkingDirectoryOrLinkedWorktree(workingDirectory?: stri
     trustedRootReal = trustedRoot;
   }
 
-  const providedRoot = getWorktreeRoot(resolved);
+  const providedRoot = getGitTopLevel(resolved);
 
   if (providedRoot) {
     let providedRootReal: string;
