@@ -84,37 +84,12 @@ function readWorkspaceMarkerConfig(workspaceRoot) {
     return {};
   }
 }
-function resolveSuperprojectRoot(cwd) {
-  let anchor = null;
-  let probeCwd = cwd;
-  for (let depth = 0; depth < 32; depth++) {
-    let superRoot;
-    try {
-      superRoot = execSync("git rev-parse --show-superproject-working-tree", {
-        cwd: probeCwd,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 5e3
-      }).trim();
-    } catch {
-      break;
-    }
-    if (!superRoot) break;
-    anchor = superRoot;
-    probeCwd = superRoot;
-  }
-  return anchor;
-}
-function resolveStateAnchorRoot(worktreeRoot) {
-  if (worktreeRoot) return resolveSuperprojectRoot(worktreeRoot) || worktreeRoot;
-  return getWorktreeRoot() || process.cwd();
-}
-function getGitTopLevel(cwd) {
+function getWorktreeRoot(cwd) {
   const effectiveCwd = cwd || process.cwd();
-  if (toplevelCacheMap.has(effectiveCwd)) {
-    const root = toplevelCacheMap.get(effectiveCwd);
-    toplevelCacheMap.delete(effectiveCwd);
-    toplevelCacheMap.set(effectiveCwd, root);
+  if (worktreeCacheMap.has(effectiveCwd)) {
+    const root = worktreeCacheMap.get(effectiveCwd);
+    worktreeCacheMap.delete(effectiveCwd);
+    worktreeCacheMap.set(effectiveCwd, root);
     return root || null;
   }
   try {
@@ -124,39 +99,20 @@ function getGitTopLevel(cwd) {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5e3
     }).trim();
-    if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-      const oldest = toplevelCacheMap.keys().next().value;
-      if (oldest !== void 0) toplevelCacheMap.delete(oldest);
+    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = worktreeCacheMap.keys().next().value;
+      if (oldest !== void 0) {
+        worktreeCacheMap.delete(oldest);
+      }
     }
-    toplevelCacheMap.set(effectiveCwd, root);
+    worktreeCacheMap.set(effectiveCwd, root);
     return root;
   } catch {
     return null;
   }
 }
-function getWorktreeRoot(cwd) {
-  const effectiveCwd = cwd || process.cwd();
-  if (worktreeCacheMap.has(effectiveCwd)) {
-    const root2 = worktreeCacheMap.get(effectiveCwd);
-    worktreeCacheMap.delete(effectiveCwd);
-    worktreeCacheMap.set(effectiveCwd, root2);
-    return root2 || null;
-  }
-  const root = resolveSuperprojectRoot(effectiveCwd) || getGitTopLevel(effectiveCwd);
-  if (!root) {
-    return null;
-  }
-  if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-    const oldest = worktreeCacheMap.keys().next().value;
-    if (oldest !== void 0) {
-      worktreeCacheMap.delete(oldest);
-    }
-  }
-  worktreeCacheMap.set(effectiveCwd, root);
-  return root;
-}
 function getProjectIdentifier(worktreeRoot) {
-  const root = worktreeRoot || getGitTopLevel() || process.cwd();
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
   const workspaceRoot = findWorkspaceRoot(root);
   if (workspaceRoot) {
     const cfg = readWorkspaceMarkerConfig(workspaceRoot);
@@ -205,7 +161,7 @@ function getProjectIdentifier(worktreeRoot) {
 function getOmcRoot(worktreeRoot) {
   const customDir = process.env.OMC_STATE_DIR;
   if (customDir) {
-    const root2 = worktreeRoot || getGitTopLevel() || process.cwd();
+    const root2 = worktreeRoot || getWorktreeRoot() || process.cwd();
     const projectId = getProjectIdentifier(root2);
     const centralizedPath = join2(customDir, projectId);
     const legacyPath = join2(root2, OmcPaths.ROOT);
@@ -222,10 +178,10 @@ function getOmcRoot(worktreeRoot) {
   if (workspaceAnchor) {
     return join2(workspaceAnchor, OmcPaths.ROOT);
   }
-  const root = resolveStateAnchorRoot(worktreeRoot);
+  const root = worktreeRoot || getWorktreeRoot() || process.cwd();
   return join2(root, OmcPaths.ROOT);
 }
-var WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, toplevelCacheMap, workspaceCacheMap, dualDirWarnings;
+var WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, workspaceCacheMap, dualDirWarnings;
 var init_worktree_paths = __esm({
   "src/lib/worktree-paths.ts"() {
     "use strict";
@@ -251,7 +207,6 @@ var init_worktree_paths = __esm({
     };
     MAX_WORKTREE_CACHE_SIZE = 8;
     worktreeCacheMap = /* @__PURE__ */ new Map();
-    toplevelCacheMap = /* @__PURE__ */ new Map();
     workspaceCacheMap = /* @__PURE__ */ new Map();
     dualDirWarnings = /* @__PURE__ */ new Set();
   }
