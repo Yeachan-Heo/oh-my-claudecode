@@ -90,6 +90,10 @@ export function parseRalphthonArgs(args: string[]): RalphthonCliOptions {
         if (!isNaN(val) && val > 0) options.maxWaves = val;
         break;
       }
+      case "--leader": {
+        options.leader = args[++i];
+        break;
+      }
       case "--poll-interval": {
         const val = parseInt(args[++i], 10);
         if (!isNaN(val) && val > 0) options.pollInterval = val;
@@ -349,7 +353,7 @@ export async function ralphthonCommand(args: string[]): Promise<void> {
   }
 
   const tmuxSession = getCurrentTmuxSession();
-  const leaderPane = getCurrentTmuxPane();
+  const leaderPane = options.leader || getCurrentTmuxPane();
 
   if (!tmuxSession || !leaderPane) {
     console.error(chalk.red("Could not detect tmux session/pane."));

@@ -220,6 +220,8 @@ export interface RalphthonCliOptions {
   pollInterval: number;
   /** Task description (positional argument) */
   task?: string;
+  /** Custom leader pane ID */
+  leader?: string;
 }
 
 // ============================================================================

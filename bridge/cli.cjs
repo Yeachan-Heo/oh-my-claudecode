@@ -5586,12 +5586,37 @@ function readWorkspaceMarkerConfig(workspaceRoot) {
     return {};
   }
 }
-function getWorktreeRoot(cwd2) {
+function resolveSuperprojectRoot(cwd2) {
+  let anchor = null;
+  let probeCwd = cwd2;
+  for (let depth = 0; depth < 32; depth++) {
+    let superRoot;
+    try {
+      superRoot = (0, import_child_process6.execSync)("git rev-parse --show-superproject-working-tree", {
+        cwd: probeCwd,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 5e3
+      }).trim();
+    } catch {
+      break;
+    }
+    if (!superRoot) break;
+    anchor = superRoot;
+    probeCwd = superRoot;
+  }
+  return anchor;
+}
+function resolveStateAnchorRoot(worktreeRoot) {
+  if (worktreeRoot) return resolveSuperprojectRoot(worktreeRoot) || worktreeRoot;
+  return getWorktreeRoot() || process.cwd();
+}
+function getGitTopLevel(cwd2) {
   const effectiveCwd = cwd2 || process.cwd();
-  if (worktreeCacheMap.has(effectiveCwd)) {
-    const root2 = worktreeCacheMap.get(effectiveCwd);
-    worktreeCacheMap.delete(effectiveCwd);
-    worktreeCacheMap.set(effectiveCwd, root2);
+  if (toplevelCacheMap.has(effectiveCwd)) {
+    const root2 = toplevelCacheMap.get(effectiveCwd);
+    toplevelCacheMap.delete(effectiveCwd);
+    toplevelCacheMap.set(effectiveCwd, root2);
     return root2 || null;
   }
   try {
@@ -5601,17 +5626,36 @@ function getWorktreeRoot(cwd2) {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5e3
     }).trim();
-    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-      const oldest = worktreeCacheMap.keys().next().value;
-      if (oldest !== void 0) {
-        worktreeCacheMap.delete(oldest);
-      }
+    if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = toplevelCacheMap.keys().next().value;
+      if (oldest !== void 0) toplevelCacheMap.delete(oldest);
     }
-    worktreeCacheMap.set(effectiveCwd, root2);
+    toplevelCacheMap.set(effectiveCwd, root2);
     return root2;
   } catch {
     return null;
   }
+}
+function getWorktreeRoot(cwd2) {
+  const effectiveCwd = cwd2 || process.cwd();
+  if (worktreeCacheMap.has(effectiveCwd)) {
+    const root3 = worktreeCacheMap.get(effectiveCwd);
+    worktreeCacheMap.delete(effectiveCwd);
+    worktreeCacheMap.set(effectiveCwd, root3);
+    return root3 || null;
+  }
+  const root2 = resolveSuperprojectRoot(effectiveCwd) || getGitTopLevel(effectiveCwd);
+  if (!root2) {
+    return null;
+  }
+  if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+    const oldest = worktreeCacheMap.keys().next().value;
+    if (oldest !== void 0) {
+      worktreeCacheMap.delete(oldest);
+    }
+  }
+  worktreeCacheMap.set(effectiveCwd, root2);
+  return root2;
 }
 function validatePath(inputPath) {
   if (inputPath.includes("..")) {
@@ -5622,7 +5666,7 @@ function validatePath(inputPath) {
   }
 }
 function getProjectIdentifier(worktreeRoot) {
-  const root2 = worktreeRoot || getWorktreeRoot() || process.cwd();
+  const root2 = worktreeRoot || getGitTopLevel() || process.cwd();
   const workspaceRoot = findWorkspaceRoot(root2);
   if (workspaceRoot) {
     const cfg = readWorkspaceMarkerConfig(workspaceRoot);
@@ -5671,7 +5715,7 @@ function getProjectIdentifier(worktreeRoot) {
 function getOmcRoot(worktreeRoot) {
   const customDir = process.env.OMC_STATE_DIR;
   if (customDir) {
-    const root3 = worktreeRoot || getWorktreeRoot() || process.cwd();
+    const root3 = worktreeRoot || getGitTopLevel() || process.cwd();
     const projectId = getProjectIdentifier(root3);
     const centralizedPath = (0, import_path17.join)(customDir, projectId);
     const legacyPath = (0, import_path17.join)(root3, OmcPaths.ROOT);
@@ -5688,7 +5732,7 @@ function getOmcRoot(worktreeRoot) {
   if (workspaceAnchor) {
     return (0, import_path17.join)(workspaceAnchor, OmcPaths.ROOT);
   }
-  const root2 = worktreeRoot || getWorktreeRoot() || process.cwd();
+  const root2 = resolveStateAnchorRoot(worktreeRoot);
   return (0, import_path17.join)(root2, OmcPaths.ROOT);
 }
 function resolveOmcPath(relativePath, worktreeRoot) {
@@ -5828,15 +5872,16 @@ function ensureSessionStateDir(sessionId, worktreeRoot) {
   return sessionDir;
 }
 function resolveToWorktreeRoot(directory) {
+  const resolveRoot = process.env.OMC_STATE_DIR ? getGitTopLevel : getWorktreeRoot;
   if (directory) {
     const resolved = (0, import_path17.resolve)(directory);
-    const root2 = getWorktreeRoot(resolved);
+    const root2 = resolveRoot(resolved);
     if (root2) return root2;
     console.error("[worktree] non-git directory provided, falling back to process root", {
       directory: resolved
     });
   }
-  return getWorktreeRoot(process.cwd()) || process.cwd();
+  return resolveRoot(process.cwd()) || process.cwd();
 }
 function resolveTranscriptPath(transcriptPath, cwd2) {
   if (!transcriptPath) return void 0;
@@ -5898,7 +5943,7 @@ function resolveTranscriptPath(transcriptPath, cwd2) {
   return transcriptPath;
 }
 function validateWorkingDirectory(workingDirectory) {
-  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
   if (!workingDirectory) {
     return trustedRoot;
   }
@@ -5909,7 +5954,7 @@ function validateWorkingDirectory(workingDirectory) {
   } catch {
     trustedRootReal = trustedRoot;
   }
-  const providedRoot = getWorktreeRoot(resolved);
+  const providedRoot = getGitTopLevel(resolved);
   if (providedRoot) {
     let providedRootReal;
     try {
@@ -5953,7 +5998,7 @@ function getGitCommonDir(cwd2) {
   }
 }
 function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
-  const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+  const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
   if (!workingDirectory) {
     return trustedRoot;
   }
@@ -5964,7 +6009,7 @@ function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
   } catch {
     trustedRootReal = trustedRoot;
   }
-  const providedRoot = getWorktreeRoot(resolved);
+  const providedRoot = getGitTopLevel(resolved);
   if (providedRoot) {
     let providedRootReal;
     try {
@@ -5999,7 +6044,7 @@ function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
   }
   return trustedRoot;
 }
-var import_crypto4, import_child_process6, import_fs12, import_os4, import_path17, WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, workspaceCacheMap, dualDirWarnings, SESSION_ID_REGEX, processSessionId;
+var import_crypto4, import_child_process6, import_fs12, import_os4, import_path17, WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, toplevelCacheMap, workspaceCacheMap, dualDirWarnings, SESSION_ID_REGEX, processSessionId;
 var init_worktree_paths = __esm({
   "src/lib/worktree-paths.ts"() {
     "use strict";
@@ -6030,6 +6075,7 @@ var init_worktree_paths = __esm({
     };
     MAX_WORKTREE_CACHE_SIZE = 8;
     worktreeCacheMap = /* @__PURE__ */ new Map();
+    toplevelCacheMap = /* @__PURE__ */ new Map();
     workspaceCacheMap = /* @__PURE__ */ new Map();
     dualDirWarnings = /* @__PURE__ */ new Set();
     SESSION_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
@@ -7313,7 +7359,7 @@ function canClearStateForSession(state, sessionId) {
 }
 function resolveStateRoot(directory) {
   const baseDir = directory || process.cwd();
-  return getWorktreeRoot(baseDir) || baseDir;
+  return getGitTopLevel(baseDir) || baseDir;
 }
 function resolveFile(mode, directory, sessionId) {
   const baseDir = resolveStateRoot(directory);
@@ -17967,7 +18013,7 @@ function isSafeRepoPath(cwd2, inputPath, options = {}) {
   if (!inputPath) {
     return false;
   }
-  const worktreeRoot = getWorktreeRoot(cwd2);
+  const worktreeRoot = getGitTopLevel(cwd2);
   if (!worktreeRoot) {
     return false;
   }
@@ -75294,7 +75340,7 @@ function validateToolPath(inputPath) {
   if (!isToolPathRestricted()) {
     return resolved;
   }
-  const projectRoot = getWorktreeRoot() || process.cwd();
+  const projectRoot = getGitTopLevel() || process.cwd();
   const normalizedRoot = (0, import_path19.normalize)(projectRoot);
   const normalizedPath = (0, import_path19.normalize)(resolved);
   const rel = (0, import_path19.relative)(normalizedRoot, normalizedPath);
@@ -92029,6 +92075,7 @@ function formatRalphthonStatus(prd) {
 
 // src/ralphthon/orchestrator.ts
 init_tmux_utils();
+init_tmux_session();
 init_mode_state_io();
 var MODE_NAME = "ralphthon";
 function readRalphthonState(directory, sessionId) {
@@ -92056,7 +92103,17 @@ function isPaneIdle(paneId) {
       { timeout: 5e3 }
     ).trim();
     const shellNames = ["bash", "zsh", "fish", "sh", "dash"];
-    return shellNames.includes(output);
+    if (shellNames.includes(output)) {
+      return true;
+    }
+    if (output === "node" || output === "claude" || output === "agy") {
+      const captured = tmuxExec(
+        ["capture-pane", "-t", paneId, "-p", "-S", "-80"],
+        { timeout: 5e3 }
+      ).trim();
+      return paneLooksReady(captured) && !paneHasActiveTask(captured);
+    }
+    return false;
   } catch {
     return false;
   }
@@ -92357,6 +92414,10 @@ function parseRalphthonArgs(args) {
         if (!isNaN(val) && val > 0) options.maxWaves = val;
         break;
       }
+      case "--leader": {
+        options.leader = args[++i];
+        break;
+      }
       case "--poll-interval": {
         const val = parseInt(args[++i], 10);
         if (!isNaN(val) && val > 0) options.pollInterval = val;
@@ -92564,7 +92625,7 @@ async function ralphthonCommand(args) {
     process.exit(1);
   }
   const tmuxSession = getCurrentTmuxSession2();
-  const leaderPane = getCurrentTmuxPane();
+  const leaderPane = options.leader || getCurrentTmuxPane();
   if (!tmuxSession || !leaderPane) {
     console.error(source_default.red("Could not detect tmux session/pane."));
     process.exit(1);

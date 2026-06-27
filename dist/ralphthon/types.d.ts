@@ -207,6 +207,8 @@ export interface RalphthonCliOptions {
     pollInterval: number;
     /** Task description (positional argument) */
     task?: string;
+    /** Custom leader pane ID */
+    leader?: string;
 }
 export declare const RALPHTHON_DEFAULTS: RalphthonConfig;
 export declare const PRD_FILENAME = "ralphthon-prd.json";

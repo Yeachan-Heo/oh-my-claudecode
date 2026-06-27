@@ -26,21 +26,27 @@ import { sharedMemoryTools } from '../tools/shared-memory-tools.js';
 import { deepinitManifestTool } from '../tools/deepinit-manifest.js';
 import { wikiTools } from '../tools/wiki-tools.js';
 import { skillsTools } from '../tools/skills-tools.js';
+import { TOOL_CATEGORIES } from '../constants/index.js';
+import { filterDisabledTools, tagCategory } from './disable-tools.js';
 import { z } from 'zod';
 /** All tools exposed by the standalone server, in registration order. */
 export const allTools = [
-    ...lspTools,
-    ...astTools,
-    pythonReplTool,
-    ...stateTools,
-    ...notepadTools,
-    ...memoryTools,
-    ...traceTools,
-    ...sharedMemoryTools,
-    deepinitManifestTool,
-    ...wikiTools,
-    ...skillsTools,
+    ...tagCategory(lspTools, TOOL_CATEGORIES.LSP),
+    ...tagCategory(astTools, TOOL_CATEGORIES.AST),
+    { ...pythonReplTool, category: TOOL_CATEGORIES.PYTHON },
+    ...tagCategory(stateTools, TOOL_CATEGORIES.STATE),
+    ...tagCategory(notepadTools, TOOL_CATEGORIES.NOTEPAD),
+    ...tagCategory(memoryTools, TOOL_CATEGORIES.MEMORY),
+    ...tagCategory(traceTools, TOOL_CATEGORIES.TRACE),
+    ...tagCategory(sharedMemoryTools, TOOL_CATEGORIES.SHARED_MEMORY),
+    { ...deepinitManifestTool, category: TOOL_CATEGORIES.DEEPINIT },
+    ...tagCategory(wikiTools, TOOL_CATEGORIES.WIKI),
+    ...tagCategory(skillsTools, TOOL_CATEGORIES.SKILLS),
 ];
+/** Tools currently enabled for standalone ListTools after OMC_DISABLE_TOOLS filtering. */
+export function getEnabledTools(envValue) {
+    return filterDisabledTools(allTools, envValue);
+}
 // ---------------------------------------------------------------------------
 // Zod → JSON Schema helpers (mirrors what the MCP server sends over the wire)
 // ---------------------------------------------------------------------------
@@ -112,9 +118,9 @@ export function zodToJsonSchema(schema) {
  * Build the ListTools response payload exactly as standalone-server.ts sends it.
  * Tests call this directly to exercise the same code path as the live server.
  */
-export function buildListToolsResponse() {
+export function buildListToolsResponse(envValue) {
     return {
-        tools: allTools.map((tool) => ({
+        tools: getEnabledTools(envValue).map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: zodToJsonSchema(tool.schema),

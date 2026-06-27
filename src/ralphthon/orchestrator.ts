@@ -9,6 +9,7 @@
  */
 
 import { tmuxExec } from '../cli/tmux-utils.js';
+import { paneLooksReady, paneHasActiveTask } from '../team/tmux-session.js';
 import {
   writeModeState,
   readModeState,
@@ -79,10 +80,6 @@ export function clearRalphthonState(
 // Tmux Interaction
 // ============================================================================
 
-/**
- * Check if a tmux pane is idle (no running foreground process).
- * Returns true if the pane's current command is a shell (bash/zsh/fish).
- */
 export function isPaneIdle(paneId: string): boolean {
   try {
     const output = tmuxExec(
@@ -91,7 +88,20 @@ export function isPaneIdle(paneId: string): boolean {
     ).trim();
 
     const shellNames = ['bash', 'zsh', 'fish', 'sh', 'dash'];
-    return shellNames.includes(output);
+    if (shellNames.includes(output)) {
+      return true;
+    }
+
+    // If running node, claude or agy, check interactive prompt state robustly
+    if (output === 'node' || output === 'claude' || output === 'agy') {
+      const captured = tmuxExec(
+        ['capture-pane', '-t', paneId, '-p', '-S', '-80'],
+        { timeout: 5000 },
+      ).trim();
+      return paneLooksReady(captured) && !paneHasActiveTask(captured);
+    }
+
+    return false;
   } catch {
     return false;
   }

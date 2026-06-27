@@ -75,6 +75,60 @@ describe("HUD transcript — agent lifecycle", () => {
             expect(fg).toBeDefined();
             expect(fg?.status).toBe("completed");
         });
+        it("preserves native teammate names from named Task calls", async () => {
+            const transcriptPath = createTempTranscript([
+                {
+                    timestamp: "2026-04-07T00:00:00.000Z",
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_team_001",
+                                name: "Task",
+                                input: {
+                                    name: "worker-1",
+                                    subagent_type: "executor",
+                                    description: "Implement HUD fix",
+                                },
+                            },
+                        ],
+                    },
+                },
+            ]);
+            const result = await parseTranscript(transcriptPath, { staleTaskThresholdMinutes: 10 ** 9 });
+            const teammate = result.agents.find((a) => a.id === "toolu_team_001");
+            expect(teammate?.name).toBe("worker-1");
+            expect(teammate?.type).toBe("executor");
+            expect(teammate?.description).toBe("Implement HUD fix");
+        });
+        it("preserves native teammate names from proxied Agent calls", async () => {
+            const transcriptPath = createTempTranscript([
+                {
+                    timestamp: "2026-04-07T00:00:00.000Z",
+                    message: {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_proxy_agent_001",
+                                name: "proxy_Agent",
+                                input: {
+                                    name: "worker-2",
+                                    subagent_type: "executor",
+                                    description: "Review HUD fix",
+                                },
+                            },
+                        ],
+                    },
+                },
+            ]);
+            const result = await parseTranscript(transcriptPath, { staleTaskThresholdMinutes: 10 ** 9 });
+            const teammate = result.agents.find((a) => a.id === "toolu_proxy_agent_001");
+            expect(teammate?.name).toBe("worker-2");
+            expect(teammate?.type).toBe("executor");
+            expect(teammate?.description).toBe("Review HUD fix");
+        });
         it("does NOT misclassify a foreground agent result as a background launch when the result text incidentally contains the phrase 'Async agent launched'", async () => {
             // This is the regression case. An Explore agent investigation report
             // quoted earlier background-launch notifications in its output. The

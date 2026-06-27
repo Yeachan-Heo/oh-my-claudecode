@@ -103,15 +103,17 @@ function uniqueSortedTargets(targets) {
         return bTime - aTime;
     });
 }
-function buildCurrentProjectTargets(projectRoot) {
+function buildCurrentProjectTargets(projectRoot, transcriptProjectRoots = [projectRoot]) {
     const claudeDir = getClaudeConfigDir();
-    const projectRoots = new Set([projectRoot]);
-    const mainRepoRoot = getMainRepoRoot(projectRoot);
-    if (mainRepoRoot)
-        projectRoots.add(mainRepoRoot);
-    const claudeWorktreeParent = getClaudeWorktreeParent(projectRoot);
-    if (claudeWorktreeParent)
-        projectRoots.add(claudeWorktreeParent);
+    const projectRoots = new Set(transcriptProjectRoots);
+    for (const root of transcriptProjectRoots) {
+        const mainRepoRoot = getMainRepoRoot(root);
+        if (mainRepoRoot)
+            projectRoots.add(mainRepoRoot);
+        const claudeWorktreeParent = getClaudeWorktreeParent(root);
+        if (claudeWorktreeParent)
+            projectRoots.add(claudeWorktreeParent);
+    }
     const targets = [];
     for (const root of projectRoots) {
         const encodedDir = join(claudeDir, 'projects', encodeProjectPath(root));
@@ -153,9 +155,9 @@ function isWithinProject(projectPath, projectRoots) {
     if (!projectPath) {
         return false;
     }
-    const normalizedProjectPath = normalize(resolve(projectPath));
+    const normalizedProjectPath = normalize(resolve(projectPath)).replace(/\\/g, '/');
     return projectRoots.some((root) => {
-        const normalizedRoot = normalize(resolve(root));
+        const normalizedRoot = normalize(resolve(root)).replace(/\\/g, '/');
         return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
     });
 }
@@ -430,13 +432,15 @@ export async function searchSessionHistory(rawOptions) {
     const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
     const scopeMode = buildScopeMode(rawOptions.project);
     const projectFilter = scopeMode === 'project' ? rawOptions.project : undefined;
-    const currentProjectRoots = [currentProjectRoot]
+    const literalWorkingDirectory = rawOptions.workingDirectory ? resolve(rawOptions.workingDirectory) : workingDirectory;
+    const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory]
         .concat(getMainRepoRoot(currentProjectRoot) ?? [])
         .concat(getClaudeWorktreeParent(currentProjectRoot) ?? [])
         .filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
+    const transcriptProjectRoots = currentProjectRoots.filter((root) => isWithinProject(root, [currentProjectRoot]));
     const targets = scopeMode === 'all'
         ? buildAllProjectTargets()
-        : buildCurrentProjectTargets(currentProjectRoot);
+        : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
     const allMatches = [];
     for (const target of targets) {
         const fileMatches = await collectMatchesFromFile(target, {
@@ -471,5 +475,5 @@ export async function searchSessionHistory(rawOptions) {
         results: allMatches.slice(0, limit),
     };
 }
-export { encodeProjectPath, parseSinceSpec };
+export { encodeProjectPath, isWithinProject as __testingIsWithinProject, parseSinceSpec };
 //# sourceMappingURL=index.js.map

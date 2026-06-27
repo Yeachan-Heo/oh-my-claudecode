@@ -8,6 +8,7 @@
  * Terminates after N consecutive hardening waves with no new issues.
  */
 import { tmuxExec } from '../cli/tmux-utils.js';
+import { paneLooksReady, paneHasActiveTask } from '../team/tmux-session.js';
 import { writeModeState, readModeState, clearModeStateFile, } from '../lib/mode-state-io.js';
 import { readRalphthonPrd, getRalphthonPrdStatus, formatTaskPrompt, formatHardeningTaskPrompt, formatHardeningGenerationPrompt, } from './prd.js';
 import { RALPHTHON_DEFAULTS } from './types.js';
@@ -40,15 +41,19 @@ export function clearRalphthonState(directory, sessionId) {
 // ============================================================================
 // Tmux Interaction
 // ============================================================================
-/**
- * Check if a tmux pane is idle (no running foreground process).
- * Returns true if the pane's current command is a shell (bash/zsh/fish).
- */
 export function isPaneIdle(paneId) {
     try {
         const output = tmuxExec(['display-message', '-t', paneId, '-p', '#{pane_current_command}'], { timeout: 5000 }).trim();
         const shellNames = ['bash', 'zsh', 'fish', 'sh', 'dash'];
-        return shellNames.includes(output);
+        if (shellNames.includes(output)) {
+            return true;
+        }
+        // If running node, claude or agy, check interactive prompt state robustly
+        if (output === 'node' || output === 'claude' || output === 'agy') {
+            const captured = tmuxExec(['capture-pane', '-t', paneId, '-p', '-S', '-80'], { timeout: 5000 }).trim();
+            return paneLooksReady(captured) && !paneHasActiveTask(captured);
+        }
+        return false;
     }
     catch {
         return false;

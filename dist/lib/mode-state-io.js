@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { getOmcRoot, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, getWorktreeRoot, } from './worktree-paths.js';
+import { getGitTopLevel, getOmcRoot, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, } from './worktree-paths.js';
 import { atomicWriteJsonSync } from './atomic-write.js';
 export function getStateSessionOwner(state) {
     if (!state || typeof state !== 'object') {
@@ -34,7 +34,7 @@ export function canClearStateForSession(state, sessionId) {
 // ---------------------------------------------------------------------------
 function resolveStateRoot(directory) {
     const baseDir = directory || process.cwd();
-    return getWorktreeRoot(baseDir) || baseDir;
+    return getGitTopLevel(baseDir) || baseDir;
 }
 /**
  * Resolve the state file path for a given mode.

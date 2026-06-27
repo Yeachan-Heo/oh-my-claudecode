@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getOmcRoot, getWorktreeRoot } from '../../lib/worktree-paths.js';
+import { getOmcRoot, getGitTopLevel } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 const SAFE_PATTERNS = [
     /^git (status|diff|log|branch|show|fetch)/,
@@ -238,7 +238,9 @@ function isSafeRepoPath(cwd, inputPath, options = {}) {
     if (!inputPath) {
         return false;
     }
-    const worktreeRoot = getWorktreeRoot(cwd);
+    // Literal git toplevel (no submodule→superproject climb) so the containment
+    // boundary stays the actual repo the path lives in (#3349 / PR #3350).
+    const worktreeRoot = getGitTopLevel(cwd);
     if (!worktreeRoot) {
         return false;
     }

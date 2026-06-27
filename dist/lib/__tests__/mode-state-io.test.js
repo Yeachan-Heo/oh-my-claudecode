@@ -4,13 +4,17 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 import { writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
+import { clearWorktreeCache, getProjectIdentifier } from '../worktree-paths.js';
 let tempDir;
 describe('mode-state-io', () => {
     beforeEach(() => {
         tempDir = mkdtempSync(join(tmpdir(), 'mode-state-io-test-'));
+        clearWorktreeCache();
     });
     afterEach(() => {
         rmSync(tempDir, { recursive: true, force: true });
+        clearWorktreeCache();
+        delete process.env.OMC_STATE_DIR;
     });
     // -----------------------------------------------------------------------
     // writeModeState
@@ -89,6 +93,45 @@ describe('mode-state-io', () => {
             const state = readModeState('ralph', tempDir);
             expect(state).not.toBeNull();
             expect(state.iteration).toBe(2);
+        });
+        it('keeps centralized submodule mode state under the submodule identity', () => {
+            const parentDir = mkdtempSync(join(tmpdir(), 'mode-state-submod-parent-'));
+            const subDir = mkdtempSync(join(tmpdir(), 'mode-state-submod-child-'));
+            const stateDir = mkdtempSync(join(tmpdir(), 'mode-state-central-'));
+            try {
+                execSync('git init', { cwd: subDir, stdio: 'pipe' });
+                execSync('git commit --allow-empty -m "sub init"', {
+                    cwd: subDir,
+                    stdio: 'pipe',
+                    env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+                });
+                execSync('git init', { cwd: parentDir, stdio: 'pipe' });
+                execSync('git commit --allow-empty -m "parent init"', {
+                    cwd: parentDir,
+                    stdio: 'pipe',
+                    env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+                });
+                execSync(`git -c protocol.file.allow=always submodule add "${subDir}" mysub`, {
+                    cwd: parentDir,
+                    stdio: 'pipe',
+                });
+                process.env.OMC_STATE_DIR = stateDir;
+                clearWorktreeCache();
+                const submodulePath = join(parentDir, 'mysub');
+                const submoduleId = getProjectIdentifier(submodulePath);
+                const parentId = getProjectIdentifier(parentDir);
+                const result = writeModeState('ralph', { active: true }, submodulePath, 'session-submodule');
+                expect(result).toBe(true);
+                expect(existsSync(join(stateDir, submoduleId, 'state', 'sessions', 'session-submodule', 'ralph-state.json'))).toBe(true);
+                expect(existsSync(join(stateDir, parentId, 'state', 'sessions', 'session-submodule', 'ralph-state.json'))).toBe(false);
+            }
+            finally {
+                delete process.env.OMC_STATE_DIR;
+                clearWorktreeCache();
+                rmSync(stateDir, { recursive: true, force: true });
+                rmSync(parentDir, { recursive: true, force: true });
+                rmSync(subDir, { recursive: true, force: true });
+            }
         });
     });
     // -----------------------------------------------------------------------

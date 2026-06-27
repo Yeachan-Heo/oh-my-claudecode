@@ -5,26 +5,7 @@
  * createSdkMcpServer helper for local Node.js Agent SDK integrations. This is not a VS Code
  * extension host or CI runner by itself.
  */
-import { type ToolCategory } from "../constants/index.js";
-/**
- * Map from user-facing OMC_DISABLE_TOOLS group names to ToolCategory values.
- * Supports both canonical names and common aliases.
- */
-export declare const DISABLE_TOOLS_GROUP_MAP: Record<string, ToolCategory>;
-/**
- * Parse OMC_DISABLE_TOOLS env var value into a Set of disabled ToolCategory values.
- *
- * Accepts a comma-separated list of group names (case-insensitive).
- * Unknown names are silently ignored.
- *
- * @param envValue - The env var value to parse. Defaults to process.env.OMC_DISABLE_TOOLS.
- * @returns Set of ToolCategory values that should be disabled.
- *
- * @example
- * // OMC_DISABLE_TOOLS=lsp,python-repl,project-memory
- * parseDisabledGroups(); // Set { 'lsp', 'python', 'memory' }
- */
-export declare function parseDisabledGroups(envValue?: string): Set<ToolCategory>;
+export { DISABLE_TOOLS_GROUP_MAP, parseDisabledGroups } from "./disable-tools.js";
 /**
  * In-process MCP server exposing all OMC custom tools
  *
@@ -60,5 +41,4 @@ export declare function getOmcToolNames(options?: ToolNameFilterOptions): string
  * Test-only helper for deterministic category-filter verification independent of env startup state.
  */
 export declare function _getAllToolNamesForTests(options?: ToolNameFilterOptions): string[];
-export {};
 //# sourceMappingURL=omc-tools-server.d.ts.map

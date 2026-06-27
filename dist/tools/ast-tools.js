@@ -10,7 +10,7 @@ import { z } from "zod";
 import { readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, extname, resolve, normalize, relative, isAbsolute } from "path";
 import { createRequire } from "module";
-import { getWorktreeRoot } from "../lib/worktree-paths.js";
+import { getGitTopLevel } from "../lib/worktree-paths.js";
 import { isToolPathRestricted } from "../lib/security-config.js";
 // Dynamic import for @ast-grep/napi
 // Graceful degradation: if the module is not available (e.g., in bundled/plugin context),
@@ -60,7 +60,9 @@ export function validateToolPath(inputPath) {
     if (!isToolPathRestricted()) {
         return resolved;
     }
-    const projectRoot = getWorktreeRoot() || process.cwd();
+    // Use the literal git toplevel (not the superproject-climbing getWorktreeRoot)
+    // so a tool inside a submodule stays confined to that submodule (#3349 / PR #3350).
+    const projectRoot = getGitTopLevel() || process.cwd();
     const normalizedRoot = normalize(projectRoot);
     const normalizedPath = normalize(resolved);
     const rel = relative(normalizedRoot, normalizedPath);

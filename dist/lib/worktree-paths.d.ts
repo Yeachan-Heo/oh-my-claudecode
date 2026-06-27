@@ -55,8 +55,29 @@ export declare function findWorkspaceRoot(startDir?: string): string | null;
  */
 export declare function readWorkspaceMarkerConfig(workspaceRoot: string): WorkspaceMarkerConfig;
 /**
- * Get the git worktree root for the current or specified directory.
+ * Get the literal git toplevel for a directory: `git rev-parse --show-toplevel`
+ * with NO submodule→superproject climb. Returns null if not in a git repository.
+ *
+ * SECURITY: this is the correct primitive for path-restriction / containment
+ * checks. A tool operating inside a submodule must be confined to that submodule
+ * working tree, not the parent superproject. Use this — NOT getWorktreeRoot() —
+ * for boundary validation (getWorktreeRoot climbs to the superproject for state
+ * anchoring and would widen the boundary across submodule borders; see #3349
+ * and the Codex review on PR #3350).
+ */
+export declare function getGitTopLevel(cwd?: string): string | null;
+/**
+ * Get the state-anchor "worktree root" for a directory.
+ *
+ * When cwd is inside a git submodule this climbs to the outermost superproject
+ * working tree so `.omc/` state anchors to the monorepo root rather than
+ * polluting the submodule working tree (#3349). For normal repos and linked
+ * worktrees (no superproject) it returns the literal git toplevel unchanged.
  * Returns null if not in a git repository.
+ *
+ * SECURITY: do NOT use this for path-restriction / containment checks — the
+ * submodule climb widens the boundary across submodule borders. Use
+ * getGitTopLevel() for confinement.
  */
 export declare function getWorktreeRoot(cwd?: string): string | null;
 /**
@@ -356,11 +377,12 @@ export declare function resolveToWorktreeRoot(directory?: string): string;
  */
 export declare function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: string): string | undefined;
 /**
- * Validate that a workingDirectory is within the trusted worktree root.
+ * Validate that a workingDirectory is within the trusted git top-level.
  * The trusted root is derived from process.cwd(), NOT from user input.
  *
- * Always returns a git worktree root — never a subdirectory.
- * This prevents .omc/state/ from being created in subdirectories (#576).
+ * Always returns a git top-level — never a subdirectory.
+ * This prevents .omc/state/ from being created in subdirectories (#576)
+ * without widening submodule launches to their superproject.
  *
  * @param workingDirectory - User-supplied working directory
  * @returns The validated worktree root

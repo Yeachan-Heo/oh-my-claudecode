@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync, symlinkSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, mkdtempSync, writeFileSync, symlinkSync, realpathSync } from 'fs';
 import { execSync } from 'child_process';
 import { join, basename, resolve } from 'path';
 import { tmpdir } from 'os';
-import { validatePath, resolveOmcPath, resolveStatePath, ensureOmcDir, getWorktreeNotepadPath, getWorktreeProjectMemoryPath, getOmcRoot, resolvePlanPath, resolveResearchPath, resolveLogsPath, resolveWisdomPath, isPathUnderOmc, ensureAllOmcDirs, clearWorktreeCache, getProcessSessionId, resetProcessSessionId, validateSessionId, resolveToWorktreeRoot, validateWorkingDirectory, getWorktreeRoot, getProjectIdentifier, clearDualDirWarnings, findWorkspaceRoot, readWorkspaceMarkerConfig, warnSiblingRetrofit, clearSiblingRetrofitWarnings, resolveSessionStatePaths, isLegacyStateMigrationEnabled, } from '../worktree-paths.js';
+import { validatePath, resolveOmcPath, resolveStatePath, ensureOmcDir, getWorktreeNotepadPath, getWorktreeProjectMemoryPath, getOmcRoot, resolvePlanPath, resolveResearchPath, resolveLogsPath, resolveWisdomPath, isPathUnderOmc, ensureAllOmcDirs, clearWorktreeCache, getProcessSessionId, resetProcessSessionId, validateSessionId, resolveToWorktreeRoot, validateWorkingDirectory, validateWorkingDirectoryOrLinkedWorktree, getWorktreeRoot, getProjectIdentifier, clearDualDirWarnings, findWorkspaceRoot, readWorkspaceMarkerConfig, warnSiblingRetrofit, clearSiblingRetrofitWarnings, resolveSessionStatePaths, isLegacyStateMigrationEnabled, } from '../worktree-paths.js';
 // Check once at module load whether symlinks can be created (needs admin / Developer Mode on Windows)
 let canSymlink = false;
 try {
@@ -17,6 +17,22 @@ try {
 }
 catch {
     canSymlink = false;
+}
+function canonicalTestPath(path) {
+    let canonical = path;
+    try {
+        canonical = realpathSync.native(path);
+    }
+    catch {
+        try {
+            canonical = realpathSync(path);
+        }
+        catch {
+            // Keep the original path for the assertion failure message.
+        }
+    }
+    const slashNormalized = canonical.replace(/\\/g, '/');
+    return process.platform === 'win32' ? slashNormalized.toLowerCase() : slashNormalized;
 }
 const TEST_DIR = join(tmpdir(), 'worktree-paths-test');
 describe('worktree-paths', () => {
@@ -201,6 +217,49 @@ describe('worktree-paths', () => {
             }));
             errorSpy.mockRestore();
             rmSync(nestedRepoDir, { recursive: true, force: true });
+        });
+        it('uses the submodule git top-level as the trusted validation boundary', () => {
+            const parentDir = mkdtempSync(join(tmpdir(), 'worktree-paths-validator-parent-'));
+            const subDir = mkdtempSync(join(tmpdir(), 'worktree-paths-validator-child-'));
+            const originalCwd = process.cwd();
+            try {
+                execSync('git init', { cwd: subDir, stdio: 'pipe' });
+                execSync('git commit --allow-empty -m "sub init"', {
+                    cwd: subDir,
+                    stdio: 'pipe',
+                    env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+                });
+                execSync('git init', { cwd: parentDir, stdio: 'pipe' });
+                execSync('git commit --allow-empty -m "parent init"', {
+                    cwd: parentDir,
+                    stdio: 'pipe',
+                    env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+                });
+                execSync(`git -c protocol.file.allow=always submodule add "${subDir}" mysub`, {
+                    cwd: parentDir,
+                    stdio: 'pipe',
+                });
+                const submodulePath = join(parentDir, 'mysub');
+                clearWorktreeCache();
+                process.chdir(submodulePath);
+                const expectedSubmoduleRoot = canonicalTestPath(submodulePath);
+                const parentRoot = canonicalTestPath(parentDir);
+                const defaultRoot = canonicalTestPath(validateWorkingDirectory());
+                const explicitParentRoot = canonicalTestPath(validateWorkingDirectory(parentDir));
+                const linkedParentRoot = canonicalTestPath(validateWorkingDirectoryOrLinkedWorktree(parentDir));
+                expect(defaultRoot).toBe(expectedSubmoduleRoot);
+                expect(explicitParentRoot).toBe(expectedSubmoduleRoot);
+                expect(linkedParentRoot).toBe(expectedSubmoduleRoot);
+                expect(defaultRoot).not.toBe(parentRoot);
+                expect(explicitParentRoot).not.toBe(parentRoot);
+                expect(linkedParentRoot).not.toBe(parentRoot);
+            }
+            finally {
+                process.chdir(originalCwd);
+                clearWorktreeCache();
+                rmSync(parentDir, { recursive: true, force: true });
+                rmSync(subDir, { recursive: true, force: true });
+            }
         });
     });
     describe('getProcessSessionId (Issue #456)', () => {

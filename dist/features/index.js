@@ -34,6 +34,8 @@ getBackgroundManager, resetBackgroundManager } from './background-agent/index.js
 export { 
 // Functions
 createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames } from './builtin-skills/index.js';
+// Session Friction Report - local context-bloat and operator-friction summaries
+export { generateSessionFrictionReport, } from './session-friction-report/index.js';
 // Model Routing - intelligent model tier routing
 export { 
 // Main functions

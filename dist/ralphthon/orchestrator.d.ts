@@ -20,10 +20,6 @@ export declare function writeRalphthonState(directory: string, state: RalphthonS
  * Clear ralphthon state
  */
 export declare function clearRalphthonState(directory: string, sessionId?: string): boolean;
-/**
- * Check if a tmux pane is idle (no running foreground process).
- * Returns true if the pane's current command is a shell (bash/zsh/fish).
- */
 export declare function isPaneIdle(paneId: string): boolean;
 /**
  * Check if a tmux pane exists

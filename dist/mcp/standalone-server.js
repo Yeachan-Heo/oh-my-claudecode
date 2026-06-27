@@ -12,7 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { registerStandaloneShutdownHandlers } from './standalone-shutdown.js';
 import { cleanupOwnedBridgeSessions } from '../tools/python-repl/bridge-manager.js';
-import { allTools, buildListToolsResponse } from './tool-registry.js';
+import { buildListToolsResponse, getEnabledTools } from './tool-registry.js';
 import { disconnectAll as disconnectAllLsp } from '../tools/lsp/index.js';
 // Create the MCP server
 const server = new Server({
@@ -25,11 +25,12 @@ const server = new Server({
 });
 // List available tools — delegates to tool-registry so tests exercise the same path.
 server.setRequestHandler(ListToolsRequestSchema, async () => buildListToolsResponse());
+const getStandaloneTools = () => getEnabledTools();
 // Handle tool calls
 const setStandaloneCallToolRequestHandler = server.setRequestHandler.bind(server);
 setStandaloneCallToolRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const tool = allTools.find(t => t.name === name);
+    const tool = getStandaloneTools().find(t => t.name === name);
     if (!tool) {
         return {
             content: [{ type: 'text', text: `Unknown tool: ${name}` }],

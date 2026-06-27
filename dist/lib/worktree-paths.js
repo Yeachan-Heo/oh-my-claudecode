@@ -51,6 +51,8 @@ export const OmcPaths = {
  */
 const MAX_WORKTREE_CACHE_SIZE = 8;
 const worktreeCacheMap = new Map();
+/** LRU cache for literal git-toplevel lookups (getGitTopLevel, no submodule climb). */
+const toplevelCacheMap = new Map();
 /**
  * LRU cache for workspace marker lookups.
  */
@@ -132,8 +134,109 @@ export function readWorkspaceMarkerConfig(workspaceRoot) {
     }
 }
 /**
- * Get the git worktree root for the current or specified directory.
+ * If `cwd` is inside a git submodule, return the outermost superproject working
+ * tree; otherwise return null. A submodule is a full git repo, so
+ * `git rev-parse --show-toplevel` stops at the submodule and `.omc/` would be
+ * created there instead of at the monorepo root (#3349). Climbing via
+ * `--show-superproject-working-tree` anchors state to the superproject, walking
+ * up through nested submodules until no superproject remains.
+ */
+function resolveSuperprojectRoot(cwd) {
+    let anchor = null;
+    let probeCwd = cwd;
+    // Bounded by submodule nesting depth; guard against pathological loops.
+    for (let depth = 0; depth < 32; depth++) {
+        let superRoot;
+        try {
+            superRoot = execSync('git rev-parse --show-superproject-working-tree', {
+                cwd: probeCwd,
+                encoding: 'utf-8',
+                stdio: ['pipe', 'pipe', 'pipe'],
+                timeout: 5000,
+            }).trim();
+        }
+        catch {
+            break;
+        }
+        if (!superRoot)
+            break;
+        anchor = superRoot;
+        probeCwd = superRoot;
+    }
+    return anchor;
+}
+/**
+ * Resolve the state-anchor root for an optional worktreeRoot argument.
+ *
+ * Many callers pass a raw cwd as `worktreeRoot` (e.g. hooks forwarding
+ * `process.cwd()`). When that cwd is inside a git submodule we climb to the
+ * outermost superproject so `.omc/` anchors to the monorepo root rather than
+ * the submodule (#3349).
+ *
+ * Crucially, when the provided dir is NOT inside a submodule the path is used
+ * VERBATIM (the historical contract) — it is NOT resolved up to its git
+ * toplevel. Callers that pass an explicit directory (including tests that
+ * isolate state under a per-process subdir of the repo) rely on it being the
+ * literal `.omc` base; resolving such a subdir up to the repo root would
+ * collapse separately-scoped state dirs into one and corrupt them.
+ */
+function resolveStateAnchorRoot(worktreeRoot) {
+    if (worktreeRoot)
+        return resolveSuperprojectRoot(worktreeRoot) || worktreeRoot;
+    return getWorktreeRoot() || process.cwd();
+}
+/**
+ * Get the literal git toplevel for a directory: `git rev-parse --show-toplevel`
+ * with NO submodule→superproject climb. Returns null if not in a git repository.
+ *
+ * SECURITY: this is the correct primitive for path-restriction / containment
+ * checks. A tool operating inside a submodule must be confined to that submodule
+ * working tree, not the parent superproject. Use this — NOT getWorktreeRoot() —
+ * for boundary validation (getWorktreeRoot climbs to the superproject for state
+ * anchoring and would widen the boundary across submodule borders; see #3349
+ * and the Codex review on PR #3350).
+ */
+export function getGitTopLevel(cwd) {
+    const effectiveCwd = cwd || process.cwd();
+    // Return cached value if present (LRU: move to end on access)
+    if (toplevelCacheMap.has(effectiveCwd)) {
+        const root = toplevelCacheMap.get(effectiveCwd);
+        toplevelCacheMap.delete(effectiveCwd);
+        toplevelCacheMap.set(effectiveCwd, root);
+        return root || null;
+    }
+    try {
+        const root = execSync('git rev-parse --show-toplevel', {
+            cwd: effectiveCwd,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            timeout: 5000,
+        }).trim();
+        if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+            const oldest = toplevelCacheMap.keys().next().value;
+            if (oldest !== undefined)
+                toplevelCacheMap.delete(oldest);
+        }
+        toplevelCacheMap.set(effectiveCwd, root);
+        return root;
+    }
+    catch {
+        // Not in a git repository - do NOT cache so a later git init re-detects.
+        return null;
+    }
+}
+/**
+ * Get the state-anchor "worktree root" for a directory.
+ *
+ * When cwd is inside a git submodule this climbs to the outermost superproject
+ * working tree so `.omc/` state anchors to the monorepo root rather than
+ * polluting the submodule working tree (#3349). For normal repos and linked
+ * worktrees (no superproject) it returns the literal git toplevel unchanged.
  * Returns null if not in a git repository.
+ *
+ * SECURITY: do NOT use this for path-restriction / containment checks — the
+ * submodule climb widens the boundary across submodule borders. Use
+ * getGitTopLevel() for confinement.
  */
 export function getWorktreeRoot(cwd) {
     const effectiveCwd = cwd || process.cwd();
@@ -145,28 +248,23 @@ export function getWorktreeRoot(cwd) {
         worktreeCacheMap.set(effectiveCwd, root);
         return root || null;
     }
-    try {
-        const root = execSync('git rev-parse --show-toplevel', {
-            cwd: effectiveCwd,
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-            timeout: 5000,
-        }).trim();
-        // Evict oldest entry when at capacity
-        if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
-            const oldest = worktreeCacheMap.keys().next().value;
-            if (oldest !== undefined) {
-                worktreeCacheMap.delete(oldest);
-            }
-        }
-        worktreeCacheMap.set(effectiveCwd, root);
-        return root;
-    }
-    catch {
+    // Prefer the superproject working tree when cwd is inside a submodule (#3349);
+    // otherwise the literal git toplevel.
+    const root = resolveSuperprojectRoot(effectiveCwd) || getGitTopLevel(effectiveCwd);
+    if (!root) {
         // Not in a git repository - do NOT cache fallback
         // so that if directory becomes a git repo later, we re-detect
         return null;
     }
+    // Evict oldest entry when at capacity
+    if (worktreeCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+        const oldest = worktreeCacheMap.keys().next().value;
+        if (oldest !== undefined) {
+            worktreeCacheMap.delete(oldest);
+        }
+    }
+    worktreeCacheMap.set(effectiveCwd, root);
+    return root;
 }
 /**
  * Validate that a path is safe (no traversal attacks).
@@ -301,7 +399,16 @@ export function clearDualDirWarnings() {
  * @returns A stable project identifier string
  */
 export function getProjectIdentifier(worktreeRoot) {
-    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+    // NOTE: intentionally does NOT apply the submodule→superproject climb. The
+    // project identifier is a state *identity* (used for OMC_STATE_DIR centralized
+    // dirs, which never live inside the working tree), and a submodule must keep
+    // its OWN identity — see the "should not change identifier for submodules"
+    // test. The #3349 climb applies only to the on-disk `.omc/` *location*
+    // (getOmcRoot's default branch), not to identity. The no-arg fallback uses
+    // getGitTopLevel() (literal toplevel, no climb) so a process launched inside a
+    // submodule still resolves the submodule's own identity, and findWorkspaceRoot
+    // below sees the unclimbed root so an inner `.omc-workspace` marker is honored.
+    const root = worktreeRoot || getGitTopLevel() || process.cwd();
     // Workspace marker can supply a stable, user-controlled identifier.
     // This wins over git remote so multi-repo workspaces have one consistent ID.
     const workspaceRoot = findWorkspaceRoot(root);
@@ -378,7 +485,13 @@ export function getProjectIdentifier(worktreeRoot) {
 export function getOmcRoot(worktreeRoot) {
     const customDir = process.env.OMC_STATE_DIR;
     if (customDir) {
-        const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+        // Centralized state lives at $OMC_STATE_DIR/{projectId} — outside the
+        // working tree — so the #3349 stray-`.omc`-in-submodule problem does not
+        // apply here. Identity must NOT climb: use the literal git toplevel
+        // (getGitTopLevel) for the no-arg fallback so a submodule launched without
+        // an explicit worktreeRoot keeps its own centralized id rather than merging
+        // into the parent project's (preserves submodule identity).
+        const root = worktreeRoot || getGitTopLevel() || process.cwd();
         const projectId = getProjectIdentifier(root);
         const centralizedPath = join(customDir, projectId);
         // Log notice if both legacy .omc/ and new centralized dir exist
@@ -398,7 +511,7 @@ export function getOmcRoot(worktreeRoot) {
     if (workspaceAnchor) {
         return join(workspaceAnchor, OmcPaths.ROOT);
     }
-    const root = worktreeRoot || getWorktreeRoot() || process.cwd();
+    const root = resolveStateAnchorRoot(worktreeRoot);
     return join(root, OmcPaths.ROOT);
 }
 /**
@@ -540,6 +653,7 @@ export function ensureAllOmcDirs(worktreeRoot) {
  */
 export function clearWorktreeCache() {
     worktreeCacheMap.clear();
+    toplevelCacheMap.clear();
     workspaceCacheMap.clear();
 }
 // ============================================================================
@@ -769,9 +883,21 @@ export function ensureSessionStateDir(sessionId, worktreeRoot) {
  * @returns The worktree root (never a subdirectory)
  */
 export function resolveToWorktreeRoot(directory) {
+    // The resolved root feeds BOTH on-disk `.omc/` placement AND, under
+    // OMC_STATE_DIR, the centralized-state *identity* (getProjectIdentifier).
+    // The #3349 submodule→superproject climb exists ONLY to place `.omc/` at the
+    // superproject working tree; it must NOT change a submodule's centralized
+    // identity (that contract is documented on getProjectIdentifier/getOmcRoot).
+    // So when OMC_STATE_DIR is set — where on-disk placement is moot and identity
+    // is all that matters — resolve to the literal git toplevel (no climb) so a
+    // hook/session launched inside a submodule keeps its own id instead of
+    // merging into the parent superproject's. Non-submodule repos and linked
+    // worktrees are unaffected: with no superproject the two resolvers are equal.
+    // See PR #3350 Codex review (hook normalization / submodule identity).
+    const resolveRoot = process.env.OMC_STATE_DIR ? getGitTopLevel : getWorktreeRoot;
     if (directory) {
         const resolved = resolve(directory);
-        const root = getWorktreeRoot(resolved);
+        const root = resolveRoot(resolved);
         if (root)
             return root;
         console.error('[worktree] non-git directory provided, falling back to process root', {
@@ -779,7 +905,7 @@ export function resolveToWorktreeRoot(directory) {
         });
     }
     // Fallback: derive from process CWD (the MCP server / CLI entry point)
-    return getWorktreeRoot(process.cwd()) || process.cwd();
+    return resolveRoot(process.cwd()) || process.cwd();
 }
 // ============================================================================
 // TRANSCRIPT PATH RESOLUTION (Issue #1094)
@@ -901,18 +1027,19 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
     return transcriptPath;
 }
 /**
- * Validate that a workingDirectory is within the trusted worktree root.
+ * Validate that a workingDirectory is within the trusted git top-level.
  * The trusted root is derived from process.cwd(), NOT from user input.
  *
- * Always returns a git worktree root — never a subdirectory.
- * This prevents .omc/state/ from being created in subdirectories (#576).
+ * Always returns a git top-level — never a subdirectory.
+ * This prevents .omc/state/ from being created in subdirectories (#576)
+ * without widening submodule launches to their superproject.
  *
  * @param workingDirectory - User-supplied working directory
  * @returns The validated worktree root
  * @throws Error if workingDirectory is outside trusted root
  */
 export function validateWorkingDirectory(workingDirectory) {
-    const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+    const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
     if (!workingDirectory) {
         return trustedRoot;
     }
@@ -925,8 +1052,8 @@ export function validateWorkingDirectory(workingDirectory) {
     catch {
         trustedRootReal = trustedRoot;
     }
-    // Try to resolve the provided directory to a git worktree root.
-    const providedRoot = getWorktreeRoot(resolved);
+    // Try to resolve the provided directory to its literal git top-level.
+    const providedRoot = getGitTopLevel(resolved);
     if (providedRoot) {
         // Git resolution succeeded — require exact worktree identity.
         let providedRootReal;
@@ -990,7 +1117,7 @@ function getGitCommonDir(cwd) {
  * rejected.
  */
 export function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
-    const trustedRoot = getWorktreeRoot(process.cwd()) || process.cwd();
+    const trustedRoot = getGitTopLevel(process.cwd()) || process.cwd();
     if (!workingDirectory) {
         return trustedRoot;
     }
@@ -1002,7 +1129,7 @@ export function validateWorkingDirectoryOrLinkedWorktree(workingDirectory) {
     catch {
         trustedRootReal = trustedRoot;
     }
-    const providedRoot = getWorktreeRoot(resolved);
+    const providedRoot = getGitTopLevel(resolved);
     if (providedRoot) {
         let providedRootReal;
         try {

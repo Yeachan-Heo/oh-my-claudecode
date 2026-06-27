@@ -839,6 +839,41 @@ describe("Stop Hook Blocking Contract", () => {
             expect(output.decision).toBeUndefined();
             expect(String(output.reason || "")).not.toContain("[RALPH LOOP");
         });
+        it("returns continue: true for active ralph with a running delegated subagent", () => {
+            const sessionId = "ralph-mjs-subagent-running";
+            writeActiveRalphState(tempDir, sessionId);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: "agent-mjs-running",
+                    agent_type: "executor",
+                    started_at: new Date().toISOString(),
+                    parent_mode: "ralph",
+                    status: "running",
+                },
+            ]);
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.continue).toBe(true);
+            expect(output.decision).toBeUndefined();
+            expect(String(output.reason || "")).not.toContain("[RALPH LOOP");
+        });
+        it("returns decision: block for active ralph when the only delegated subagent has completed", () => {
+            // Negative control: a completed (non-running) subagent must NOT suppress
+            // the boulder — only an in-flight one does. Proves the gate has teeth.
+            const sessionId = "ralph-mjs-subagent-done";
+            writeActiveRalphState(tempDir, sessionId);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: "agent-mjs-done",
+                    agent_type: "executor",
+                    started_at: new Date(Date.now() - 60_000).toISOString(),
+                    completed_at: new Date().toISOString(),
+                    parent_mode: "ralph",
+                    status: "completed",
+                },
+            ]);
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.decision).toBe("block");
+        });
         it("returns continue: true for tombstoned stale ralph state", () => {
             const sessionId = "ralph-mjs-tombstoned";
             const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -1538,6 +1573,41 @@ describe("Stop Hook Blocking Contract", () => {
                 stop_reason: "ScheduleWakeup",
             });
             expect(output.continue).toBe(true);
+        });
+        it("returns continue: true for active ralph with a running delegated subagent", () => {
+            const sessionId = "ralph-cjs-subagent-running";
+            writeActiveRalphState(tempDir, sessionId);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: "agent-cjs-running",
+                    agent_type: "executor",
+                    started_at: new Date().toISOString(),
+                    parent_mode: "ralph",
+                    status: "running",
+                },
+            ]);
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.continue).toBe(true);
+            expect(output.decision).toBeUndefined();
+            expect(String(output.reason || "")).not.toContain("[RALPH LOOP");
+        });
+        it("returns decision: block for active ralph when the only delegated subagent has completed", () => {
+            // Negative control: a completed (non-running) subagent must NOT suppress
+            // the boulder — only an in-flight one does. Proves the gate has teeth.
+            const sessionId = "ralph-cjs-subagent-done";
+            writeActiveRalphState(tempDir, sessionId);
+            writeSubagentTrackingState(tempDir, [
+                {
+                    agent_id: "agent-cjs-done",
+                    agent_type: "executor",
+                    started_at: new Date(Date.now() - 60_000).toISOString(),
+                    completed_at: new Date().toISOString(),
+                    parent_mode: "ralph",
+                    status: "completed",
+                },
+            ]);
+            const output = runScript({ directory: tempDir, sessionId });
+            expect(output.decision).toBe("block");
         });
         it("returns continue: true when skill state is active but delegated subagents are still running", () => {
             const sessionId = "skill-active-subagents-cjs";

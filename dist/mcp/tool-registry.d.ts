@@ -12,11 +12,13 @@
  * Team runtime tools (omc_run_team_start, omc_run_team_status) are intentionally
  * excluded: they live in the separate "team" MCP server (bridge/team-mcp.cjs).
  */
+import { type ToolCategory } from '../constants/index.js';
 import { z } from 'zod';
 /** Minimal tool definition shape shared across all tool families. */
 export interface ToolDef {
     name: string;
     description: string;
+    category?: ToolCategory;
     annotations?: {
         readOnlyHint?: boolean;
         destructiveHint?: boolean;
@@ -34,6 +36,8 @@ export interface ToolDef {
 }
 /** All tools exposed by the standalone server, in registration order. */
 export declare const allTools: ToolDef[];
+/** Tools currently enabled for standalone ListTools after OMC_DISABLE_TOOLS filtering. */
+export declare function getEnabledTools(envValue?: string): ToolDef[];
 export declare function zodToJsonSchema(schema: z.ZodRawShape | z.ZodObject<z.ZodRawShape>): {
     type: 'object';
     properties: Record<string, unknown>;
@@ -54,7 +58,7 @@ export interface ListToolsEntry {
  * Build the ListTools response payload exactly as standalone-server.ts sends it.
  * Tests call this directly to exercise the same code path as the live server.
  */
-export declare function buildListToolsResponse(): {
+export declare function buildListToolsResponse(envValue?: string): {
     tools: ListToolsEntry[];
 };
 //# sourceMappingURL=tool-registry.d.ts.map
