@@ -6,7 +6,7 @@
  */
 
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { dim } from '../colors.js';
 import type { CwdFormat } from '../types.js';
 
@@ -52,9 +52,14 @@ export function renderCwd(
 
   switch (format) {
     case 'relative': {
-      const home = homedir();
-      displayPath = cwd.startsWith(home)
-        ? '~' + cwd.slice(home.length)
+      // cwd reaches here from `git rev-parse --show-toplevel` (via
+      // resolveToWorktreeRoot), which emits forward slashes even on Windows,
+      // while homedir() emits backslashes. Compare on normalized separators so
+      // the prefix check matches, as pathToFileUrl() already does above.
+      const home = homedir().replace(/\\/g, '/');
+      const normalizedCwd = cwd.replace(/\\/g, '/');
+      displayPath = normalizedCwd.startsWith(home)
+        ? '~' + normalizedCwd.slice(home.length)
         : cwd;
       break;
     }
@@ -66,7 +71,10 @@ export function renderCwd(
       // directory names like src/, test/, docs/, packages/core, apps/web.
       const parent = basename(dirname(cwd));
       const folder = basename(cwd);
-      displayPath = parent ? join(parent, folder) : folder;
+      // Join with a literal "/" rather than join(), whose win32 separator would
+      // render "parent\leaf" and break display consistency with the rest of the
+      // HUD (which uses forward slashes everywhere).
+      displayPath = parent ? `${parent}/${folder}` : folder;
       break;
     }
     default:
