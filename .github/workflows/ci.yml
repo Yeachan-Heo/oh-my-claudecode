@@ -91,6 +91,7 @@ jobs:
           src/__tests__/session-history-search.test.ts
           src/cli/__tests__/session-search.test.ts
           src/lib/__tests__/worktree-paths.test.ts
+          src/hooks/project-memory/__tests__/hot-path-tracker.test.ts
 
   build:
     name: Build

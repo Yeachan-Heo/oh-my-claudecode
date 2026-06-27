@@ -17,9 +17,13 @@ export function trackAccess(
   projectRoot: string,
   type: "file" | "directory",
 ): HotPath[] {
-  const relativePath = path.isAbsolute(filePath)
-    ? path.relative(projectRoot, filePath)
-    : filePath;
+  // path.relative() returns the platform separator (backslashes on Windows).
+  // Store hot paths with forward slashes so the persisted data, the rendered
+  // output, and the scope-affinity comparison are identical on every OS
+  // (a no-op on POSIX, where paths already use forward slashes).
+  const relativePath = (
+    path.isAbsolute(filePath) ? path.relative(projectRoot, filePath) : filePath
+  ).replace(/\\/g, "/");
 
   const normalizedHotPaths = ensureHotPathList(hotPaths);
 
@@ -135,19 +139,25 @@ function getScopeAffinityScore(
     return 0;
   }
 
-  if (hotPath === scopePath) {
+  // hotPath is stored from path.relative(), which uses the platform separator
+  // (backslashes on Windows), while scopePath is already normalized to forward
+  // slashes by normalizeScopePath(). Normalize the separators so the comparisons
+  // below match on every OS (a no-op on POSIX).
+  const normalizedHotPath = hotPath.replace(/\\/g, "/");
+
+  if (normalizedHotPath === scopePath) {
     return 400;
   }
 
-  if (hotPath.startsWith(`${scopePath}/`)) {
+  if (normalizedHotPath.startsWith(`${scopePath}/`)) {
     return 320;
   }
 
-  if (scopePath.startsWith(`${hotPath}/`)) {
+  if (scopePath.startsWith(`${normalizedHotPath}/`)) {
     return 220;
   }
 
-  const hotSegments = hotPath.split("/");
+  const hotSegments = normalizedHotPath.split("/");
   const scopeSegments = scopePath.split("/");
   let sharedSegments = 0;
 
