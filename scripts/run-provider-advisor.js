@@ -12,6 +12,7 @@ const PROVIDER_BINARIES = {
   antigravity: 'agy',
   grok: 'grok',
   cursor: 'cursor-agent',
+  copilot: 'copilot',
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 
@@ -50,6 +51,9 @@ const ANTIGRAVITY_TIMEOUT_MS = (() => {
  * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
  * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
+ * - copilot: `copilot -p <prompt> -s --allow-all-tools --no-ask-user` (GitHub
+ *   Copilot CLI one-shot; `-s` prints only the final answer, --allow-all-tools and
+ *   --no-ask-user keep it non-interactive; prompt is the `-p` value, never stdin)
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
@@ -75,6 +79,14 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     // Cursor Agent's print mode takes the prompt as a positional arg. Keep stdin
     // closed so it cannot interpret advisor prompt bytes as interactive input.
     return ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt];
+  }
+  if (provider === 'copilot') {
+    // GitHub Copilot CLI one-shot: `-p <prompt>` runs non-interactively and exits;
+    // `-s` prints only the final answer (clean stdout for the advisor artifact);
+    // --allow-all-tools and --no-ask-user keep it autonomous so it never blocks on
+    // a permission or ask_user prompt. Prompt is the `-p` value, never stdin.
+    // Verified on GitHub Copilot CLI 1.0.65.
+    return ['-p', prompt, '-s', '--allow-all-tools', '--no-ask-user'];
   }
   // claude: `claude -p` reads the prompt from stdin when no prompt arg is given.
   return pipePromptViaStdin ? ['-p'] : ['-p', prompt];
@@ -106,8 +118,8 @@ function shouldPipePromptViaStdin(provider, prompt) {
     return prompt.includes('\n') || prompt.length > 500 || /^\s*-/.test(prompt);
   }
 
-  // grok (ACP stdin), cursor-agent (interactive stdin), and any other provider
-  // never pipe the prompt.
+  // grok (ACP stdin), cursor-agent (interactive stdin), copilot (prompt is the
+  // `-p` arg value), and any other provider never pipe the prompt.
   return false;
 }
 
@@ -115,8 +127,8 @@ const ASK_ORIGINAL_TASK_ENV = 'OMC_ASK_ORIGINAL_TASK';
 const ASK_ORIGINAL_TASK_ENV_ALIAS = 'OMX_ASK_ORIGINAL_TASK';
 
 function usage() {
-  console.error('Usage: omc ask <claude|codex|gemini|antigravity|grok|cursor> "<prompt>"');
-  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|antigravity|grok|cursor> <prompt...>');
+  console.error('Usage: omc ask <claude|codex|gemini|antigravity|grok|cursor|copilot> "<prompt>"');
+  console.error('Legacy direct usage: node scripts/run-provider-advisor.js <claude|codex|gemini|antigravity|grok|cursor|copilot> <prompt...>');
   console.error('                 or: node scripts/run-provider-advisor.js claude --print "<prompt>"');
   console.error('                 or: node scripts/run-provider-advisor.js gemini --prompt "<prompt>"');
 }

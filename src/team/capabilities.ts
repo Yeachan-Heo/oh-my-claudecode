@@ -21,6 +21,7 @@ const DEFAULT_CAPABILITIES: Record<WorkerBackend, WorkerCapability[]> = {
   'tmux-cursor': ['code-edit', 'refactoring', 'general'],
   'tmux-grok': ['code-edit', 'code-review', 'refactoring', 'general'],
   'tmux-antigravity': ['ui-design', 'documentation', 'research', 'code-edit'],
+  'tmux-copilot': ['code-edit', 'code-review', 'refactoring', 'general'],
 };
 
 /**

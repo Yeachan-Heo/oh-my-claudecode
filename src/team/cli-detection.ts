@@ -38,5 +38,6 @@ export function detectAllClis(): Record<string, CliInfo> {
     cursor: detectCli('cursor-agent'),
     grok: detectCli('grok'),
     antigravity: detectCli('agy'),
+    copilot: detectCli('copilot'),
   };
 }

@@ -51,4 +51,17 @@ describe('cli-detection', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith('agy', ['--version'], expect.objectContaining({ timeout: 5000 }));
     mockSpawnSync.mockRestore();
   });
+
+  it('detectAllClis probes the copilot binary', () => {
+    const mockSpawnSync = vi.mocked(spawnSync);
+    // Make every probe report not-found so we exercise the copilot version probe.
+    mockSpawnSync.mockReturnValue({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null } as any);
+
+    const result = detectAllClis();
+
+    expect(result).toHaveProperty('copilot');
+    expect(result.copilot).toEqual({ available: false });
+    expect(mockSpawnSync).toHaveBeenCalledWith('copilot', ['--version'], expect.objectContaining({ timeout: 5000 }));
+    mockSpawnSync.mockRestore();
+  });
 });

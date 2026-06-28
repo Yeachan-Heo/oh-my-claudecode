@@ -50,8 +50,8 @@ const VALID_SEVERITIES: ReadonlySet<string> = new Set(['critical', 'major', 'min
 
 /**
  * Returns true when a role + provider pair requires the verdict-output contract.
- * External providers (codex/gemini/grok) on reviewer-style roles need it; Claude
- * teammates speak through the team messaging API directly.
+ * External providers (codex/gemini/grok/copilot) on reviewer-style roles need it;
+ * Claude teammates speak through the team messaging API directly.
  */
 export function shouldInjectContract(
   role: CanonicalTeamRole | null | undefined,

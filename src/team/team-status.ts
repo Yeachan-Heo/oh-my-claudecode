@@ -59,7 +59,7 @@ function peekRecentOutboxMessages(
 
 export interface WorkerStatus {
   workerName: string;
-  provider: 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
+  provider: 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity' | 'copilot';
   heartbeat: HeartbeatData | null;
   isAlive: boolean;
   currentTask: TaskFile | null;
@@ -133,7 +133,7 @@ export function getTeamStatus(
     };
 
     const currentTask = workerTasks.find(t => t.status === 'in_progress') || null;
-    const provider = w.agentType.replace(/^(?:mcp|tmux)-/, '') as 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
+    const provider = w.agentType.replace(/^(?:mcp|tmux)-/, '') as 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity' | 'copilot';
 
     return {
       workerName: w.name,

@@ -113,6 +113,29 @@ describe('stage-router resolveRoleAssignment', () => {
       expect(out.agent).toBe('critic');
     });
 
+    it('respects provider=copilot and resolves to empty model (no Claude fallthrough) when omitted', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { 'code-reviewer': { provider: 'copilot' } } },
+      };
+      const out = resolveRoleAssignment('code-reviewer', cfg);
+      expect(out.provider).toBe('copilot');
+      // copilot has no builtin default model and none configured → resolves to ''
+      // (Copilot's own `auto` picks the model), NOT a Claude tier model id.
+      expect(out.model).toBe('');
+      expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
+      expect(out.agent).toBe('codeReviewer');
+    });
+
+    it('respects provider=copilot with explicit model passthrough', () => {
+      const cfg: PluginConfig = {
+        team: { roleRouting: { critic: { provider: 'copilot', model: 'claude-sonnet-4.5' } } },
+      };
+      const out = resolveRoleAssignment('critic', cfg);
+      expect(out.provider).toBe('copilot');
+      expect(out.model).toBe('claude-sonnet-4.5');
+      expect(out.agent).toBe('critic');
+    });
+
     it('respects provider=cursor and resolves to empty model (cursor-agent owns model selection)', () => {
       const cfg: PluginConfig = {
         team: { roleRouting: { executor: { provider: 'cursor' } } },
@@ -142,6 +165,16 @@ describe('stage-router resolveRoleAssignment', () => {
       const out = resolveRoleAssignment('code-reviewer', cfg);
       expect(out.provider).toBe('grok');
       expect(out.model).toBe('grok-code-fast-1');
+    });
+
+    it('copilot resolves configured externalModels.defaults.copilotModel when model omitted', () => {
+      const cfg: PluginConfig = {
+        externalModels: { defaults: { copilotModel: 'gpt-5.4' } },
+        team: { roleRouting: { 'code-reviewer': { provider: 'copilot' } } },
+      };
+      const out = resolveRoleAssignment('code-reviewer', cfg);
+      expect(out.provider).toBe('copilot');
+      expect(out.model).toBe('gpt-5.4');
     });
 
     it('tier name on grok provider falls back to provider default (tiers are claude-centric)', () => {

@@ -179,6 +179,16 @@ describe('model-contract', () => {
       expect(c.installInstructions).toContain('antigravity.google');
       expect(c.installInstructions).not.toContain('| bash');
     });
+    it('returns contract for copilot', () => {
+      const c = getContract('copilot');
+      expect(c.agentType).toBe('copilot');
+      expect(c.binary).toBe('copilot');
+      expect(c.supportsPromptMode).toBe(true);
+      expect(c.promptModeFlag).toBe('-p');
+      // Points to the official npm install command, not a raw pipe-to-shell command.
+      expect(c.installInstructions).toContain('@github/copilot');
+      expect(c.installInstructions).not.toContain('| bash');
+    });
     it('throws for unknown agent type', () => {
       expect(() => getContract('unknown' as any)).toThrow('Unknown agent type');
     });
@@ -191,6 +201,7 @@ describe('model-contract', () => {
         // Other prompt-mode providers stay supported on Windows.
         expect(isHeadlessSupportedOnPlatform('gemini', 'win32')).toBe(true);
         expect(isHeadlessSupportedOnPlatform('grok', 'win32')).toBe(true);
+        expect(isHeadlessSupportedOnPlatform('copilot', 'win32')).toBe(true);
       });
 
       it('getPromptModeArgs throws for an antigravity team worker on Windows', () => {
@@ -266,6 +277,24 @@ describe('model-contract', () => {
         const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
         clearSecurityConfigCache();
         expect(() => getContract('grok')).toThrow('blocked by security policy');
+      } finally {
+        if (origSecurity === undefined) {
+          delete process.env.OMC_SECURITY;
+        } else {
+          process.env.OMC_SECURITY = origSecurity;
+        }
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+      }
+    });
+
+    it('blocks copilot when external LLM is disabled', async () => {
+      const origSecurity = process.env.OMC_SECURITY;
+      process.env.OMC_SECURITY = 'strict';
+      try {
+        const { clearSecurityConfigCache } = await import('../../lib/security-config.js');
+        clearSecurityConfigCache();
+        expect(() => getContract('copilot')).toThrow('blocked by security policy');
       } finally {
         if (origSecurity === undefined) {
           delete process.env.OMC_SECURITY;
@@ -369,6 +398,21 @@ describe('model-contract', () => {
 
       const withModel = buildLaunchArgs('grok', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'grok-4-fast' });
       expect(withModel).toEqual(['--always-approve', '--model', 'grok-4-fast']);
+    });
+    it('copilot leads with -s --allow-all-tools --no-ask-user (no -p; appended later by getPromptModeArgs) and appends --model <m> when given', () => {
+      const noModel = buildLaunchArgs('copilot', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+      expect(noModel).toEqual(['-s', '--allow-all-tools', '--no-ask-user']);
+      expect(noModel).not.toContain('--model');
+      // -p is NOT in buildLaunchArgs: copilot's -p takes the prompt as its value and
+      // is appended (with the instruction) by getPromptModeArgs.
+      expect(noModel).not.toContain('-p');
+
+      const withModel = buildLaunchArgs('copilot', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'claude-sonnet-4.5' });
+      expect(withModel).toEqual(['-s', '--allow-all-tools', '--no-ask-user', '--model', 'claude-sonnet-4.5']);
+    });
+    it('copilot appends extraFlags after the model flag', () => {
+      const args = buildLaunchArgs('copilot', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'm', extraFlags: ['--add-dir', '/work'] });
+      expect(args).toEqual(['-s', '--allow-all-tools', '--no-ask-user', '--model', 'm', '--add-dir', '/work']);
     });
     it('passes model flag when specified', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });
@@ -608,6 +652,13 @@ describe('model-contract', () => {
       expect(c.promptModeFlag).toBe('-p');
     });
 
+    it('copilot supports prompt mode', () => {
+      expect(isPromptModeAgent('copilot')).toBe(true);
+      const c = getContract('copilot');
+      expect(c.supportsPromptMode).toBe(true);
+      expect(c.promptModeFlag).toBe('-p');
+    });
+
     it('getPromptModeArgs returns flag + instruction for antigravity', () => {
       const args = getPromptModeArgs('antigravity', 'Read inbox');
       expect(args).toEqual(['-p', 'Read inbox']);
@@ -615,6 +666,11 @@ describe('model-contract', () => {
 
     it('getPromptModeArgs returns flag + instruction for grok', () => {
       const args = getPromptModeArgs('grok', 'Read inbox');
+      expect(args).toEqual(['-p', 'Read inbox']);
+    });
+
+    it('getPromptModeArgs returns flag + instruction for copilot', () => {
+      const args = getPromptModeArgs('copilot', 'Read inbox');
       expect(args).toEqual(['-p', 'Read inbox']);
     });
 

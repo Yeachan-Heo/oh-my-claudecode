@@ -110,7 +110,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { spawnWorkerForTask, type TeamRuntime } from '../runtime.js';
 
-function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude' | 'grok' | 'antigravity'): TeamRuntime {
+function makeRuntime(cwd: string, agentType: 'gemini' | 'codex' | 'claude' | 'grok' | 'antigravity' | 'copilot'): TeamRuntime {
   return {
     teamName: 'test-team',
     sessionName: 'test-session:0',
@@ -361,6 +361,8 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     delete process.env.OMC_GROK_DEFAULT_MODEL;
     delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
     delete process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
+    delete process.env.OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL;
+    delete process.env.OMC_COPILOT_DEFAULT_MODEL;
     delete process.env.ANTHROPIC_MODEL;
     delete process.env.CLAUDE_MODEL;
     delete process.env.ANTHROPIC_BASE_URL;
@@ -556,6 +558,67 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
     //  model-env allowlist, exactly as they would for any non-claude worker —
     //  that is pane startup env, not the grok model selection.)
     expect(launchCmd).toContain("'--always-approve'");
+    expect(launchCmd).not.toContain("'--model'");
+    expect(launchCmd).not.toContain("'--model' 'us.anthropic.claude-sonnet-4-6-v1:0'");
+  });
+
+  it('copilot worker passes model from OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL', async () => {
+    process.env.OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL = 'gpt-5.4';
+    const runtime = makeRuntime(cwd, 'copilot');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--allow-all-tools'");
+    expect(launchCmd).toContain("'--no-ask-user'");
+    expect(launchCmd).toContain("'--model'");
+    expect(launchCmd).toContain("'gpt-5.4'");
+  });
+
+  it('copilot worker falls back to OMC_COPILOT_DEFAULT_MODEL', async () => {
+    process.env.OMC_COPILOT_DEFAULT_MODEL = 'claude-sonnet-4.5';
+    const runtime = makeRuntime(cwd, 'copilot');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    expect(launchCmd).toContain("'--model'");
+    expect(launchCmd).toContain("'claude-sonnet-4.5'");
+  });
+
+  it('direct copilot worker does not fall through to a Claude/Bedrock model', async () => {
+    // A DIRECT copilot launch must resolve its model only from copilot env vars.
+    // Even with Bedrock/Claude model env present, copilot must NOT receive any
+    // --model flag (its copilot env vars are unset here) and must NOT pick up a
+    // Claude/Bedrock model id via resolveClaudeWorkerModel().
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+    process.env.ANTHROPIC_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.CLAUDE_CODE_BEDROCK_SONNET_MODEL = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    process.env.OMC_MODEL_MEDIUM = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const runtime = makeRuntime(cwd, 'copilot');
+
+    await spawnWorkerForTask(runtime, 'worker-1', 0);
+
+    const launchCall = tmuxCalls.args.find(
+      args => args[0] === 'send-keys' && args.includes('-l')
+    );
+    expect(launchCall).toBeDefined();
+    const launchCmd = launchCall![launchCall!.length - 1];
+
+    // copilot env vars unset → no --model flag at all. The copilot branch returns
+    // undefined and never falls through to resolveClaudeWorkerModel(), so the
+    // Claude/Bedrock model id is never passed as a `--model` CLI argument.
+    expect(launchCmd).toContain("'--allow-all-tools'");
     expect(launchCmd).not.toContain("'--model'");
     expect(launchCmd).not.toContain("'--model' 'us.anthropic.claude-sonnet-4-6-v1:0'");
   });

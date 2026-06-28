@@ -5,7 +5,7 @@ import { normalizeToCcAlias } from '../features/delegation-enforcer.js';
 import { isBedrock, isVertexAI, isProviderSpecificModelId } from '../config/models.js';
 import { isExternalLLMDisabled } from '../lib/security-config.js';
 
-export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
+export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity' | 'copilot';
 
 export interface CliAgentContract {
   agentType: CliAgentType;
@@ -304,6 +304,27 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       return rawOutput.trim();
     },
   },
+  copilot: {
+    agentType: 'copilot',
+    binary: 'copilot',
+    installInstructions: 'Install GitHub Copilot CLI: npm install -g @github/copilot',
+    supportsPromptMode: true,
+    promptModeFlag: '-p',
+    buildLaunchArgs(model?: string, extraFlags: string[] = []): string[] {
+      // GitHub Copilot CLI one-shot worker. `-p <instruction>` is appended later by
+      // getPromptModeArgs (like grok/gemini), so buildLaunchArgs returns only the
+      // leading flags: `-s` prints only the agent's final answer (clean stdout for
+      // parsing), and `--allow-all-tools` + `--no-ask-user` keep the run autonomous
+      // so it never blocks on a permission or ask_user prompt. Verified against
+      // GitHub Copilot CLI 1.0.65.
+      const args = ['-s', '--allow-all-tools', '--no-ask-user'];
+      if (model) args.push('--model', model);
+      return [...args, ...extraFlags];
+    },
+    parseOutput(rawOutput: string): string {
+      return rawOutput.trim();
+    },
+  },
 };
 
 export function getContract(agentType: CliAgentType): CliAgentContract {
@@ -432,6 +453,8 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
   'OMC_GROK_DEFAULT_MODEL',
   'OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL',
   'OMC_ANTIGRAVITY_DEFAULT_MODEL',
+  'OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL',
+  'OMC_COPILOT_DEFAULT_MODEL',
 ] as const;
 
 export function getWorkerEnv(

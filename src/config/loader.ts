@@ -402,6 +402,14 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     externalModelsDefaults.antigravityModel = process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL;
   }
 
+  if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL) {
+    externalModelsDefaults.copilotModel =
+      process.env.OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL;
+  } else if (process.env.OMC_COPILOT_DEFAULT_MODEL) {
+    // Legacy fallback
+    externalModelsDefaults.copilotModel = process.env.OMC_COPILOT_DEFAULT_MODEL;
+  }
+
   const externalModelsFallback: ExternalModelsConfig["fallbackPolicy"] = {
     onModelFailure: "provider_chain",
   };
@@ -498,8 +506,8 @@ function warnOnDeprecatedDelegationRouting(config: PluginConfig): void {
 const CANONICAL_TEAM_ROLE_SET = new Set<string>(CANONICAL_TEAM_ROLES);
 const CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set<string>(CURSOR_EXECUTOR_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set<string>(KNOWN_AGENT_NAMES);
-// /team CLI workers — codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
-const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
+// /team CLI workers: codex/gemini/grok/cursor/copilot here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
+const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity", "copilot"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
 
 export function validateTeamConfig(config: PluginConfig): void {
@@ -1091,6 +1099,10 @@ export function generateConfigSchema(): object {
                 default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel,
                 description: "Default Antigravity model",
               },
+              copilotModel: {
+                type: "string",
+                description: "Default GitHub Copilot CLI model (omit to let Copilot pick automatically)",
+              },
             },
           },
           rolePreferences: {
@@ -1217,7 +1229,7 @@ export function generateConfigSchema(): object {
                 type: "array",
                 items: {
                   type: "string",
-                  enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"],
+                  enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity", "copilot"],
                 },
                 description:
                   "Preferred CLI worker types for executor-style autopilot team execution tasks",
@@ -1236,7 +1248,7 @@ export function generateConfigSchema(): object {
               maxAgents: { type: "integer", minimum: 1 },
               defaultAgentType: {
                 type: "string",
-                enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"],
+                enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity", "copilot"],
                 default: "claude",
               },
               monitorIntervalMs: { type: "integer", minimum: 1 },
@@ -1250,7 +1262,7 @@ export function generateConfigSchema(): object {
             additionalProperties: {
               type: "object",
               properties: {
-                provider: { type: "string", enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity"] },
+                provider: { type: "string", enum: ["claude", "codex", "gemini", "grok", "cursor", "antigravity", "copilot"] },
                 model: { type: "string" },
                 agent: { type: "string" },
               },

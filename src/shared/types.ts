@@ -338,6 +338,7 @@ export interface ExternalModelsDefaults {
   geminiModel?: string;
   grokModel?: string;
   antigravityModel?: string;
+  copilotModel?: string;
 }
 
 /**
@@ -462,7 +463,7 @@ export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
 export const CURSOR_EXECUTOR_TEAM_ROLES = ["executor"] as const;
 
 /** Provider for /team role routing. */
-export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
+export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity' | 'copilot';
 
 /** Tier name accepted in role-assignment `model` field. */
 export type TeamRoleTier = 'HIGH' | 'MEDIUM' | 'LOW';

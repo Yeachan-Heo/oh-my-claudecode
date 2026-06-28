@@ -296,6 +296,8 @@ describe('parseAskArgs', () => {
     expect(parseAskArgs(['grok', '-p', 'brainstorm'])).toEqual({ provider: 'grok', prompt: 'brainstorm' });
     expect(parseAskArgs(['cursor', 'review', 'this'])).toEqual({ provider: 'cursor', prompt: 'review this' });
     expect(parseAskArgs(['cursor', '-p', 'brainstorm'])).toEqual({ provider: 'cursor', prompt: 'brainstorm' });
+    expect(parseAskArgs(['copilot', 'review', 'this'])).toEqual({ provider: 'copilot', prompt: 'review this' });
+    expect(parseAskArgs(['copilot', '-p', 'brainstorm'])).toEqual({ provider: 'copilot', prompt: 'brainstorm' });
   });
 
   it('supports --agent-prompt flag and equals syntax', () => {
@@ -693,6 +695,47 @@ describe('run-provider-advisor script contract', () => {
         '--sandbox',
         'disabled',
         'review this\nand that',
+      ]);
+      expect(launch!.options.input ?? null).toBeNull();
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('launches copilot as `copilot -p <prompt> -s --allow-all-tools --no-ask-user` and never pipes stdin', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-copilot-args-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      // Copilot's headless `-p` takes the prompt as its arg value; stdin is not used
+      // for the prompt, so it must stay closed even for multiline prompts.
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['copilot', '--prompt', 'review this\nand that'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { input: string | null };
+      }>;
+
+      // version probe + launch, both via the `copilot` binary
+      expect(calls).toHaveLength(2);
+      const launch = calls.find((c) => !c.args.includes('--version'));
+      expect(launch).toBeDefined();
+      expect(launch!.command).toBe('copilot');
+      expect(launch!.args).toEqual([
+        '-p',
+        'review this\nand that',
+        '-s',
+        '--allow-all-tools',
+        '--no-ask-user',
       ]);
       expect(launch!.options.input ?? null).toBeNull();
     } finally {

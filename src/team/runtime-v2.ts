@@ -729,6 +729,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
         || process.env.OMC_GROK_DEFAULT_MODEL
         || undefined;
     }
+    if (opts.agentType === 'copilot') {
+      return process.env.OMC_EXTERNAL_MODELS_DEFAULT_COPILOT_MODEL
+        || process.env.OMC_COPILOT_DEFAULT_MODEL
+        || undefined;
+    }
     if (opts.agentType === 'cursor') {
       return undefined;
     }

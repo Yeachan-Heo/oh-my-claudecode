@@ -133,7 +133,7 @@ function resolveClaudeModel(
  * an explicit non-tier model ID is passed through.
  */
 function resolveExternalModel(
-  provider: 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity',
+  provider: 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity' | 'copilot',
   raw: string | undefined,
   cfg: PluginConfig,
 ): string {
@@ -146,6 +146,11 @@ function resolveExternalModel(
   }
   if (provider === 'grok') {
     return defaults?.grokModel ?? '';
+  }
+  if (provider === 'copilot') {
+    // Empty string lets the Copilot CLI pick its own model (`--model` omitted,
+    // i.e. Copilot's `auto`). An explicit non-tier model ID is honored above.
+    return defaults?.copilotModel ?? '';
   }
   if (provider === 'cursor') {
     return '';
