@@ -34,6 +34,12 @@ describe('renderCwd', () => {
       expect(result).toContain('~');
     });
 
+    it('does not collapse a sibling prefix under the home directory name', () => {
+      const result = renderCwd('/Users/testuser2/workspace/project', 'relative');
+      expect(result).toContain('/Users/testuser2/workspace/project');
+      expect(result).not.toContain('~2');
+    });
+
     it('preserves paths outside home directory', () => {
       const result = renderCwd('/tmp/some/path', 'relative');
       expect(result).toContain('/tmp/some/path');
@@ -107,6 +113,12 @@ describe('renderCwd', () => {
       const result = renderCwd('C:/Users/testuser', 'relative');
       expect(result).toContain('~');
       expect(result).not.toContain('C:');
+    });
+
+    it('does not collapse a sibling prefix under the Windows home directory name', () => {
+      const result = renderCwd('C:/Users/testuser2/workspace/project', 'relative');
+      expect(result).toContain('C:/Users/testuser2/workspace/project');
+      expect(result).not.toContain('~2');
     });
 
     it('preserves a path outside home', () => {

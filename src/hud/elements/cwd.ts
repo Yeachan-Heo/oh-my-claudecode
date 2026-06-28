@@ -54,13 +54,18 @@ export function renderCwd(
     case 'relative': {
       // cwd reaches here from `git rev-parse --show-toplevel` (via
       // resolveToWorktreeRoot), which emits forward slashes even on Windows,
-      // while homedir() emits backslashes. Compare on normalized separators so
-      // the prefix check matches, as pathToFileUrl() already does above.
+      // while homedir() emits backslashes. Compare on normalized separators,
+      // but only abbreviate when cwd is exactly home or crosses a real path
+      // boundary so sibling prefixes like /Users/testuser2 do not fold to ~2.
       const home = homedir().replace(/\\/g, '/');
       const normalizedCwd = cwd.replace(/\\/g, '/');
-      displayPath = normalizedCwd.startsWith(home)
-        ? '~' + normalizedCwd.slice(home.length)
-        : cwd;
+      if (normalizedCwd === home) {
+        displayPath = '~';
+      } else if (normalizedCwd.startsWith(`${home}/`)) {
+        displayPath = '~' + normalizedCwd.slice(home.length);
+      } else {
+        displayPath = cwd;
+      }
       break;
     }
     case 'absolute':
