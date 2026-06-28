@@ -34,13 +34,18 @@ Maintenance release with **11 bug fixes** and **3 other changes** across **14 me
 
 ### Install / Update
 
+The npm CLI and the Claude Code marketplace/plugin are separate install tracks, not either/or replacements. Update whichever track you use; if you have both installed, update both. CLI-dependent skill paths such as `ask`, `ccg`, and CLI-backed `team` require the `omc` CLI from the npm package.
+
+**CLI / runtime:**
+
 ```bash
 npm install -g oh-my-claude-sisyphus@4.15.1
 ```
 
-Or reinstall the plugin:
-```bash
-claude /install-plugin oh-my-claudecode
+**Claude Code plugin:**
+
+```text
+/plugin marketplace update omc
 ```
 
 ## Contributors

@@ -76,8 +76,19 @@ jobs:
             echo "## oh-my-claudecode v${VERSION}" > release-notes.md
             echo "" >> release-notes.md
             echo "### Install / Update" >> release-notes.md
+            echo "" >> release-notes.md
+            echo 'The npm CLI and the Claude Code marketplace/plugin are separate install tracks, not either/or replacements. Update whichever track you use; if you have both installed, update both. CLI-dependent skill paths such as `ask`, `ccg`, and CLI-backed `team` require the `omc` CLI from the npm package.' >> release-notes.md
+            echo "" >> release-notes.md
+            echo "**CLI / runtime:**" >> release-notes.md
+            echo "" >> release-notes.md
             echo '```bash' >> release-notes.md
             echo "npm install -g oh-my-claude-sisyphus@${VERSION}" >> release-notes.md
+            echo '```' >> release-notes.md
+            echo "" >> release-notes.md
+            echo "**Claude Code plugin:**" >> release-notes.md
+            echo "" >> release-notes.md
+            echo '```text' >> release-notes.md
+            echo "/plugin marketplace update omc" >> release-notes.md
             echo '```' >> release-notes.md
           fi
 
