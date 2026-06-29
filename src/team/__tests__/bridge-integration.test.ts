@@ -7,6 +7,7 @@ import { readTask, updateTask } from '../task-file-ops.js';
 import { checkShutdownSignal, writeShutdownSignal, appendOutbox } from '../inbox-outbox.js';
 import { writeHeartbeat, readHeartbeat } from '../heartbeat.js';
 import { sanitizeName } from '../tmux-session.js';
+import { isPathWithin } from '../bridge-entry.js';
 import { logAuditEvent, readAuditLog } from '../audit-log.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 
@@ -307,7 +308,7 @@ describe('validateBridgeWorkingDirectory logic', () => {
     }
     const resolved = realpathSync(workingDirectory);
     const home = homedir();
-    if (!resolved.startsWith(home + '/') && resolved !== home) {
+    if (!isPathWithin(resolved, home)) {
       throw new Error(`workingDirectory is outside home directory: ${resolved}`);
     }
   }

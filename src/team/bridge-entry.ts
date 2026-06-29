@@ -18,7 +18,21 @@ import { deleteHeartbeat } from './heartbeat.js';
 import { unregisterMcpWorker } from './team-registration.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
+import { toForwardSlash } from '../utils/paths.js';
 import { sanitizeName } from './tmux-session.js';
+
+/**
+ * True when `candidate` (an absolute path) is `dir` itself or sits beneath it.
+ * The comparison is done on forward-slash form so that Windows backslash paths
+ * from resolve()/realpathSync() still match a homedir()/config-dir prefix —
+ * otherwise `C:\\Users\\me\\...`.startsWith(`C:\\Users\\me/`) is always false
+ * and every containment check below fails closed.
+ */
+export function isPathWithin(candidate: string, dir: string): boolean {
+  const c = toForwardSlash(candidate);
+  const d = toForwardSlash(dir);
+  return c === d || c.startsWith(d + '/');
+}
 
 /**
  * Validate that a config path is under the user's home directory
@@ -28,16 +42,15 @@ import { sanitizeName } from './tmux-session.js';
 export function validateConfigPath(configPath: string, homeDir: string, claudeConfigDir: string): boolean {
   // Resolve to canonical absolute path to defeat ".." traversal
   const resolved = resolve(configPath);
+  const resolvedFwd = toForwardSlash(resolved);
 
-  const isUnderHome = resolved.startsWith(homeDir + '/') || resolved === homeDir;
+  const isUnderHome = isPathWithin(resolved, homeDir);
   const normalizedConfigDir = resolve(claudeConfigDir);
   const normalizedOmcDir = resolve(homeDir, '.omc');
-  const hasOmcComponent = resolved.includes('/.omc/') || resolved.endsWith('/.omc');
+  const hasOmcComponent = resolvedFwd.includes('/.omc/') || resolvedFwd.endsWith('/.omc');
   const isTrustedSubpath =
-    resolved === normalizedConfigDir ||
-    resolved.startsWith(normalizedConfigDir + '/') ||
-    resolved === normalizedOmcDir ||
-    resolved.startsWith(normalizedOmcDir + '/') ||
+    isPathWithin(resolved, normalizedConfigDir) ||
+    isPathWithin(resolved, normalizedOmcDir) ||
     hasOmcComponent;
   if (!isUnderHome || !isTrustedSubpath) return false;
 
@@ -46,7 +59,7 @@ export function validateConfigPath(configPath: string, homeDir: string, claudeCo
   try {
     const parentDir = resolve(resolved, '..');
     const realParent = realpathSync(parentDir);
-    if (!realParent.startsWith(homeDir + '/') && realParent !== homeDir) {
+    if (!isPathWithin(realParent, homeDir)) {
       return false;
     }
   } catch {
@@ -77,7 +90,7 @@ function validateBridgeWorkingDirectory(workingDirectory: string): void {
   // Resolve symlinks and verify under homedir
   const resolved = realpathSync(workingDirectory);
   const home = homedir();
-  if (!resolved.startsWith(home + '/') && resolved !== home) {
+  if (!isPathWithin(resolved, home)) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
 
