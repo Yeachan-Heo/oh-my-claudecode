@@ -62,6 +62,18 @@ describe('Signal Extraction', () => {
       expect(signals.codeBlockCount).toBe(2);
     });
 
+    it('should count a single indented code block', () => {
+      const prompt = 'Here is code:\n    const x = 1;\n    return x;\ndone';
+      const signals = extractLexicalSignals(prompt);
+      expect(signals.codeBlockCount).toBe(1);
+    });
+
+    it('should count two separate indented code blocks', () => {
+      const prompt = 'First:\n    const a = 1;\n\nSecond:\n    const b = 2;';
+      const signals = extractLexicalSignals(prompt);
+      expect(signals.codeBlockCount).toBe(2);
+    });
+
     it('should detect architecture keywords', () => {
       const signals = extractLexicalSignals('We need to refactor the architecture');
       expect(signals.hasArchitectureKeywords).toBe(true);
