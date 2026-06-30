@@ -308,4 +308,24 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
     expect(result!.enterpriseCurrency).toBe('JPY');
     expect(result!.enterpriseDecimalPlaces).toBe(0);
   });
+
+  it('skips out-of-range decimal_places rather than crashing toFixed (EUR, 101)', () => {
+    // A malformed/changed payload must not reach toFixed() (RangeError outside 0–100).
+    const response = {
+      ...baseResponse,
+      five_hour: { utilization: 45 },
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 16793,
+        monthly_limit: 50000,
+        currency: 'EUR',
+        decimal_places: 101,
+      },
+    };
+    const result = parseUsageResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(45);
+    expect(result!.enterpriseSpentUsd).toBeUndefined();
+    expect(result!.enterpriseDecimalPlaces).toBeUndefined();
+  });
 });

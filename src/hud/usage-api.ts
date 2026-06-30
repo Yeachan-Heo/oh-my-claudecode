@@ -913,7 +913,10 @@ function clamp(v: number | undefined): number {
  * can format with the right number of decimals — ¥50,000 not ¥50,000.00.
  */
 function minorUnitDecimals(currency: string, decimalPlaces?: number): number | null {
-  if (decimalPlaces != null && Number.isInteger(decimalPlaces) && decimalPlaces >= 0) {
+  // ISO 4217 minor-unit exponents are 0–4. Reject anything outside that range
+  // (malformed/changed payload) so a bogus value can't reach toFixed(), which
+  // throws a RangeError outside 0–100 — skip the field instead of crashing.
+  if (decimalPlaces != null && Number.isInteger(decimalPlaces) && decimalPlaces >= 0 && decimalPlaces <= 4) {
     return decimalPlaces;
   }
   if (currency === 'USD') return 2;
