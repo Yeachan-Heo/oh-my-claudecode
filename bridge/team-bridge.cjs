@@ -1271,7 +1271,7 @@ function findPermissionViolations(changedPaths, permissions, cwd) {
 // src/config/models.ts
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
-  SONNET: "claude-sonnet-5",
+  SONNET: "claude-sonnet-4-6",
   OPUS: "claude-opus-4-8",
   FABLE: "claude-fable-5"
 };
