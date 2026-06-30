@@ -83,6 +83,7 @@ function resolveOmcRoot(startDir) {
       cwd: dir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
       timeout: 5000,
     }).trim();
     if (top) return join(top, '.omc');
@@ -384,6 +385,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     const mainRepoRoot = dirname(resolve(effectiveCwd, gitCommonDir));
@@ -391,6 +393,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     if (mainRepoRoot !== worktreeTop) {

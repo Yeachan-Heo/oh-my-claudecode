@@ -50,6 +50,7 @@ function getModifiedFiles(cwd, extensions, maxFiles) {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
       timeout: 5000,
     });
 
