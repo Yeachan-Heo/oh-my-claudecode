@@ -135,6 +135,29 @@ describe('renderEnterpriseCost', () => {
     expect(plain).toBe('spent:KRW 4,500,000.00');
   });
 
+  it('renders zero-decimal currencies without decimals (JPY)', () => {
+    const limits = base({
+      enterpriseSpentUsd: 50000,
+      enterpriseLimitUsd: 100000,
+      enterpriseCurrency: 'JPY',
+      enterpriseDecimalPlaces: 0,
+      enterpriseUtilization: 50,
+    });
+    const plain = strip(renderEnterpriseCost(limits)!);
+    expect(plain).toBe('spent:JPY 50,000/JPY 100,000 (50%)');
+  });
+
+  it('renders three-decimal currencies with full precision (BHD)', () => {
+    const limits = base({
+      enterpriseSpentUsd: 1.234,
+      enterpriseLimitUsd: null,
+      enterpriseCurrency: 'BHD',
+      enterpriseDecimalPlaces: 3,
+    });
+    const plain = strip(renderEnterpriseCost(limits)!);
+    expect(plain).toBe('spent:BHD 1.234');
+  });
+
   it('appends stale marker when stale=true', () => {
     const limits = base({
       enterpriseSpentUsd: 100,

@@ -901,19 +901,22 @@ function clamp(v: number | undefined): number {
 }
 
 /**
- * Resolve the minor-unit divisor for `used_credits`/`monthly_limit`.
+ * Resolve the minor-unit exponent for `used_credits`/`monthly_limit`.
  *
  * The API annotates the currency's minor-unit exponent in `decimal_places`
  * (EUR=2, JPY=0, BHD=3 per ISO 4217), so we no longer have to guess the scale.
  * USD is implicitly 2-digit when the field is absent (long-standing behaviour).
  * Returns null when the scale is unknown (non-USD currency without
  * decimal_places), so callers skip the field rather than show a wrong figure.
+ *
+ * The exponent (not just the divisor) is carried through to the renderer so it
+ * can format with the right number of decimals — ¥50,000 not ¥50,000.00.
  */
-function minorUnitDivisor(currency: string, decimalPlaces?: number): number | null {
+function minorUnitDecimals(currency: string, decimalPlaces?: number): number | null {
   if (decimalPlaces != null && Number.isInteger(decimalPlaces) && decimalPlaces >= 0) {
-    return 10 ** decimalPlaces;
+    return decimalPlaces;
   }
-  if (currency === 'USD') return 100;
+  if (currency === 'USD') return 2;
   return null;
 }
 
@@ -928,7 +931,8 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
   const extra = response.extra_usage;
   const usedCredits = extra?.used_credits;
   const extraCurrency = (extra?.currency ?? 'USD').toUpperCase();
-  const minorDivisor = minorUnitDivisor(extraCurrency, extra?.decimal_places);
+  const minorDecimals = minorUnitDecimals(extraCurrency, extra?.decimal_places);
+  const minorDivisor = minorDecimals == null ? null : 10 ** minorDecimals;
   const isEnterpriseContext = isEnterpriseUsageContext(options);
   // Enterprise credits are usable once we know the minor-unit scale: USD, or any
   // currency the API annotated with decimal_places (minorDivisor != null). The
@@ -1001,6 +1005,7 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
       result.enterpriseSpentUsd = extra.used_credits / minorDivisor;
       result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / minorDivisor;
       result.enterpriseCurrency = currency;
+      if (minorDecimals != null) result.enterpriseDecimalPlaces = minorDecimals;
       // Only compute utilization when there is a positive cap
       if (extra.monthly_limit != null && extra.monthly_limit > 0) {
         result.enterpriseUtilization = clamp((extra.used_credits / extra.monthly_limit) * 100);

@@ -284,6 +284,7 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
     expect(result!.enterpriseSpentUsd).toBeCloseTo(167.93, 2);
     expect(result!.enterpriseLimitUsd).toBeCloseTo(500, 2);
     expect(result!.enterpriseCurrency).toBe('EUR');
+    expect(result!.enterpriseDecimalPlaces).toBe(2);
     expect(result!.enterpriseUtilization).toBeCloseTo(33.586, 2);
   });
 
@@ -305,5 +306,6 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
     expect(result!.enterpriseSpentUsd).toBeCloseTo(50000, 2);
     expect(result!.enterpriseLimitUsd).toBeCloseTo(100000, 2);
     expect(result!.enterpriseCurrency).toBe('JPY');
+    expect(result!.enterpriseDecimalPlaces).toBe(0);
   });
 });

@@ -24,13 +24,14 @@ function getColor(percent: number): string {
 }
 
 /**
- * Format a monetary amount with thousands-separator commas and 2 decimal places.
- * e.g. 3323.93 → "3,323.93"
+ * Format a monetary amount with thousands-separator commas, honouring the
+ * currency's minor-unit exponent (USD/EUR=2, JPY=0, BHD=3).
+ * e.g. (3323.93, 2) → "3,323.93"; (50000, 0) → "50,000".
  */
-function formatMoney(amount: number): string {
-  const [intPart, decPart] = amount.toFixed(2).split('.');
+function formatMoney(amount: number, decimals: number): string {
+  const [intPart, decPart] = amount.toFixed(decimals).split('.');
   const withCommas = (intPart ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${withCommas}.${decPart ?? '00'}`;
+  return decPart ? `${withCommas}.${decPart}` : withCommas;
 }
 
 /**
@@ -57,7 +58,8 @@ export function renderEnterpriseCost(
   const staleMarker = stale ? `${DIM}*${RESET}` : '';
   const currency = limits.enterpriseCurrency ?? 'USD';
   const prefix = currencyPrefix(currency);
-  const spentStr = formatMoney(limits.enterpriseSpentUsd);
+  const decimals = limits.enterpriseDecimalPlaces ?? 2;
+  const spentStr = formatMoney(limits.enterpriseSpentUsd, decimals);
 
   if (limits.enterpriseLimitUsd == null) {
     // Unlimited plan — show spent amount only
@@ -65,7 +67,7 @@ export function renderEnterpriseCost(
   }
 
   // Capped plan — show spent/limit (utilization%)
-  const limitStr = formatMoney(limits.enterpriseLimitUsd);
+  const limitStr = formatMoney(limits.enterpriseLimitUsd, decimals);
   const utilization = limits.enterpriseUtilization ?? 0;
   const rounded = Math.min(100, Math.max(0, Math.round(utilization)));
   const color = getColor(rounded);
