@@ -264,4 +264,46 @@ describe('parseUsageResponse - enterprise extra_usage', () => {
     expect(result!.extraUsageLimitUsd).toBeCloseTo(50, 2);
     expect(result!.enterpriseSpentUsd).toBeUndefined();
   });
+
+  it('parses a non-USD currency when the API annotates decimal_places (EUR)', () => {
+    // Real enterprise payload: 16793 minor units at 2 decimals = €167.93,
+    // 50000 = €500.00, 16793/50000 = 33.586% (matches the API utilization).
+    const response = {
+      ...baseResponse,
+      five_hour: { utilization: 0 },
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 16793,
+        monthly_limit: 50000,
+        currency: 'EUR',
+        decimal_places: 2,
+      },
+    };
+    const result = parseUsageResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.enterpriseSpentUsd).toBeCloseTo(167.93, 2);
+    expect(result!.enterpriseLimitUsd).toBeCloseTo(500, 2);
+    expect(result!.enterpriseCurrency).toBe('EUR');
+    expect(result!.enterpriseUtilization).toBeCloseTo(33.586, 2);
+  });
+
+  it('uses decimal_places for zero-digit currencies instead of guessing /100 (JPY)', () => {
+    // JPY is 0-digit: 50000 used_credits = ¥50000, not ¥500.
+    const response = {
+      ...baseResponse,
+      five_hour: { utilization: 0 },
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 50000,
+        monthly_limit: 100000,
+        currency: 'JPY',
+        decimal_places: 0,
+      },
+    };
+    const result = parseUsageResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.enterpriseSpentUsd).toBeCloseTo(50000, 2);
+    expect(result!.enterpriseLimitUsd).toBeCloseTo(100000, 2);
+    expect(result!.enterpriseCurrency).toBe('JPY');
+  });
 });

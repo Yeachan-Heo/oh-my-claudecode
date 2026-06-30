@@ -94,6 +94,9 @@ interface UsageApiResponse {
     used_credits?: number;
     monthly_limit?: number | null;
     currency?: string;
+    // ISO 4217 minor-unit exponent for `used_credits`/`monthly_limit`
+    // (EUR=2, JPY=0, BHD=3). When present we no longer have to guess the scale.
+    decimal_places?: number;
   };
 }
 
@@ -898,6 +901,23 @@ function clamp(v: number | undefined): number {
 }
 
 /**
+ * Resolve the minor-unit divisor for `used_credits`/`monthly_limit`.
+ *
+ * The API annotates the currency's minor-unit exponent in `decimal_places`
+ * (EUR=2, JPY=0, BHD=3 per ISO 4217), so we no longer have to guess the scale.
+ * USD is implicitly 2-digit when the field is absent (long-standing behaviour).
+ * Returns null when the scale is unknown (non-USD currency without
+ * decimal_places), so callers skip the field rather than show a wrong figure.
+ */
+function minorUnitDivisor(currency: string, decimalPlaces?: number): number | null {
+  if (decimalPlaces != null && Number.isInteger(decimalPlaces) && decimalPlaces >= 0) {
+    return 10 ** decimalPlaces;
+  }
+  if (currency === 'USD') return 100;
+  return null;
+}
+
+/**
  * Parse API response into RateLimits
  */
 export function parseUsageResponse(response: UsageApiResponse, options?: ParseUsageResponseOptions): RateLimits | null {
@@ -908,13 +928,16 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
   const extra = response.extra_usage;
   const usedCredits = extra?.used_credits;
   const extraCurrency = (extra?.currency ?? 'USD').toUpperCase();
+  const minorDivisor = minorUnitDivisor(extraCurrency, extra?.decimal_places);
   const isEnterpriseContext = isEnterpriseUsageContext(options);
-  // used_credits are only usable when we know how to interpret the minor-unit digits;
-  // see the USD guards in the extra_usage branch below for rationale.
-  const hasUsableUsedCredits = usedCredits != null && extraCurrency === 'USD';
-  const hasUsableEnterprise = isEnterpriseContext && hasUsableUsedCredits;
+  // Enterprise credits are usable once we know the minor-unit scale: USD, or any
+  // currency the API annotated with decimal_places (minorDivisor != null). The
+  // enterprise renderer is currency-aware (enterpriseCurrency).
+  const hasUsableEnterprise = isEnterpriseContext && usedCredits != null && minorDivisor != null;
   const hasUsableUsdExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
-  const hasUsableCreditExtraUsage = !isEnterpriseContext && hasUsableUsedCredits && extra?.monthly_limit != null && extra.monthly_limit > 0;
+  // The Max/Pro overage renderer (limits.ts) hard-codes "$", so credit-shaped
+  // overage stays USD-only until that renderer learns about currency.
+  const hasUsableCreditExtraUsage = !isEnterpriseContext && usedCredits != null && extraCurrency === 'USD' && extra?.monthly_limit != null && extra.monthly_limit > 0;
   const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
 
   // Need at least one valid value. Model-specific weekly buckets are valid usage data
@@ -969,14 +992,14 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
   // Add extra (metered) usage if available (Pro subscribers with extra usage allocation)
   if (extra != null) {
     // Enterprise path: used_credits (minor units) is present instead of spent_usd/limit_usd.
-    // Only USD is observed in practice; the /100 divisor below assumes 2-digit minor units.
-    // For any non-USD currency we refuse to guess the minor-unit digit count (JPY/KRW are
-    // 0-digit, TND/BHD are 3-digit per ISO 4217) and skip the enterprise fields — the
-    // renderer will then return null rather than display a wrong figure.
-    const currency = (extra.currency ?? 'USD').toUpperCase();
-    if (extra.used_credits != null && currency === 'USD' && isEnterpriseContext) {
-      result.enterpriseSpentUsd = extra.used_credits / 100;
-      result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / 100;
+    // The scale comes from minorUnitDivisor — USD (implicitly 2-digit) or any currency
+    // the API annotated with decimal_places (EUR=2, JPY=0, BHD=3 per ISO 4217). When the
+    // scale is unknown (non-USD with no decimal_places) minorDivisor is null and we skip
+    // the enterprise fields — the renderer then returns null rather than show a wrong figure.
+    const currency = extraCurrency;
+    if (extra.used_credits != null && minorDivisor != null && isEnterpriseContext) {
+      result.enterpriseSpentUsd = extra.used_credits / minorDivisor;
+      result.enterpriseLimitUsd = extra.monthly_limit == null ? null : extra.monthly_limit / minorDivisor;
       result.enterpriseCurrency = currency;
       // Only compute utilization when there is a positive cap
       if (extra.monthly_limit != null && extra.monthly_limit > 0) {
