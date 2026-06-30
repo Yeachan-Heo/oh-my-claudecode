@@ -25,7 +25,7 @@ const TIER_ENV_KEYS = {
  */
 export const CLAUDE_FAMILY_DEFAULTS = {
     HAIKU: 'claude-haiku-4-5',
-    SONNET: 'claude-sonnet-4-6',
+    SONNET: 'claude-sonnet-5',
     OPUS: 'claude-opus-4-8',
     FABLE: 'claude-fable-5',
 };
@@ -234,7 +234,7 @@ export function isBedrock() {
  *
  * These IDs must be passed through to the CLI as-is because normalizing them
  * to aliases like "sonnet" causes Claude Code to expand them to Anthropic API
- * model names (e.g. claude-sonnet-4-6) which are invalid on Bedrock/Vertex.
+ * model names (e.g. claude-sonnet-5) which are invalid on Bedrock/Vertex.
  */
 export function isProviderSpecificModelId(modelId) {
     // Bedrock prefixed formats (region.anthropic.claude-*, anthropic.claude-*)
@@ -258,7 +258,7 @@ export function isProviderSpecificModelId(modelId) {
  * The `[1m]` suffix is a Claude Code internal annotation for the 1M context
  * window variant. It is valid for the parent session's API path but is
  * rejected by the sub-agent spawning runtime, which strips it to a bare
- * Anthropic model ID (e.g., `claude-sonnet-4-6`) that is invalid on Bedrock.
+ * Anthropic model ID (e.g., `claude-sonnet-5`) that is invalid on Bedrock.
  */
 export function hasExtendedContextSuffix(modelId) {
     return /\[\d+[mk]\]$/i.test(modelId);

@@ -63,7 +63,7 @@ Run vanilla Claude Code benchmark:
 **Options:**
 - `--limit N` - Limit to N instances (default: all)
 - `--skip N` - Skip first N instances (default: 0)
-- `--model MODEL` - Claude model to use (default: claude-sonnet-4-6-20260217)
+- `--model MODEL` - Claude model to use (default: claude-sonnet-5)
 - `--timeout SECS` - Timeout per instance (default: 300)
 
 **Examples:**

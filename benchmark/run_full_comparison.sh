@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Parse arguments
 LIMIT=""
 SKIP=""
-MODEL="claude-sonnet-4-6-20260217"
+MODEL="claude-sonnet-5"
 TIMEOUT="300"
 SKIP_VANILLA=false
 SKIP_OMC=false
@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --limit N         Limit to N instances (default: all)"
             echo "  --skip N          Skip first N instances (default: 0)"
-            echo "  --model MODEL     Claude model to use (default: claude-sonnet-4-6-20260217)"
+            echo "  --model MODEL     Claude model to use (default: claude-sonnet-5)"
             echo "  --timeout SECS    Timeout per instance (default: 300)"
             echo "  --skip-vanilla    Skip vanilla benchmark run"
             echo "  --skip-omc        Skip OMC benchmark run"

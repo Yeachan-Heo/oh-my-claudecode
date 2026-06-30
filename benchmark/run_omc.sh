@@ -38,7 +38,7 @@ LOG_FILE="$LOGS_DIR/${RUN_MODE}_${TIMESTAMP}.log"
 # Parse arguments
 LIMIT=""
 SKIP=""
-MODEL="claude-sonnet-4-6-20260217"
+MODEL="claude-sonnet-5"
 TIMEOUT="300"
 
 while [[ $# -gt 0 ]]; do
@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --limit N       Limit to N instances (default: all)"
             echo "  --skip N        Skip first N instances (default: 0)"
-            echo "  --model MODEL   Claude model to use (default: claude-sonnet-4-6-20260217)"
+            echo "  --model MODEL   Claude model to use (default: claude-sonnet-5)"
             echo "  --timeout SECS  Timeout per instance (default: 300)"
             echo "  -h, --help      Show this help message"
             exit 0

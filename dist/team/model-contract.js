@@ -133,7 +133,7 @@ const CONTRACTS = {
             if (model) {
                 // Provider-specific model IDs (Bedrock, Vertex) must be passed as-is.
                 // Normalizing them to aliases like "sonnet" causes Claude Code to expand
-                // them to Anthropic API names (claude-sonnet-4-6) which are invalid on
+                // them to Anthropic API names (claude-sonnet-5) which are invalid on
                 // these providers. (issue #1695)
                 const resolved = isProviderSpecificModelId(model) ? model : normalizeToCcAlias(model);
                 args.push('--model', resolved);
@@ -396,7 +396,7 @@ export function isPromptModeAgent(agentType) {
  *
  * When running on a non-standard provider (Bedrock, Vertex), workers need
  * the provider-specific model ID passed explicitly via --model. Without it,
- * Claude Code falls back to its built-in default (claude-sonnet-4-6) which
+ * Claude Code falls back to its built-in default (claude-sonnet-5) which
  * is invalid on these providers.
  *
  * Resolution order:

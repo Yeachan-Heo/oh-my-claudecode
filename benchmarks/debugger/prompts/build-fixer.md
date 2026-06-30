@@ -1,7 +1,7 @@
 ---
 name: build-fixer
 description: Build and compilation error resolution specialist (minimal diffs, no architecture changes)
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 ---
 
 <Agent_Prompt>

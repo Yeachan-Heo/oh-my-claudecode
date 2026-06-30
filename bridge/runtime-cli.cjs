@@ -2181,7 +2181,7 @@ var TIER_ENV_KEYS = {
 };
 var CLAUDE_FAMILY_DEFAULTS = {
   HAIKU: "claude-haiku-4-5",
-  SONNET: "claude-sonnet-4-6",
+  SONNET: "claude-sonnet-5",
   OPUS: "claude-opus-4-8",
   FABLE: "claude-fable-5"
 };

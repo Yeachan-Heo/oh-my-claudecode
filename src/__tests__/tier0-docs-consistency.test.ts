@@ -123,7 +123,7 @@ describe('Tier-0 contract docs consistency', () => {
     const omc = readProjectFile('benchmark', 'run_omc.sh');
     const fullComparison = readProjectFile('benchmark', 'run_full_comparison.sh');
     const resultsReadme = readProjectFile('benchmark', 'results', 'README.md');
-    const expectedModel = 'claude-sonnet-4-6-20260217';
+    const expectedModel = 'claude-sonnet-5';
 
     for (const content of [benchmarkReadme, benchmarkRunner, quickTest, vanilla, omc, fullComparison, resultsReadme]) {
       expect(content).toContain(expectedModel);
@@ -131,7 +131,7 @@ describe('Tier-0 contract docs consistency', () => {
 
     expect(benchmarkReadme).not.toContain('claude-sonnet-4.5-20250929');
     expect(benchmarkRunner).not.toContain('claude-sonnet-4-20250514');
-    expect(resultsReadme).toContain('Claude Sonnet 4.6');
+    expect(resultsReadme).toContain('Claude Sonnet 5');
   });
 
   it('removes dead package build aliases and keeps seminar demo model guidance current', () => {
@@ -140,8 +140,8 @@ describe('Tier-0 contract docs consistency', () => {
 
     expect(packageJson.scripts).not.toHaveProperty('build:codex');
     expect(packageJson.scripts).not.toHaveProperty('build:gemini');
-    expect(seminarDemo).toContain('# 빠른 모델 (Sonnet 4.6)');
-    expect(seminarDemo).toContain('export OMC_MODEL=anthropic/claude-sonnet-4-6');
+    expect(seminarDemo).toContain('# 빠른 모델 (Sonnet 5)');
+    expect(seminarDemo).toContain('export OMC_MODEL=anthropic/claude-sonnet-5');
     expect(seminarDemo).not.toContain('anthropic/claude-sonnet-4-5');
   });
 });

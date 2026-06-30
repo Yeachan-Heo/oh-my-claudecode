@@ -1328,7 +1328,7 @@ async function main() {
         } else if (sessionHasLmSuffix) {
           // No model param, but the session model has a [1m] context-window suffix.
           // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
-          // Anthropic model ID (e.g. claude-sonnet-4-6) which is invalid on Bedrock.
+          // Anthropic model ID (e.g. claude-sonnet-5) which is invalid on Bedrock.
           // Fix: pass a tier alias (sonnet/haiku/opus). The Agent tool schema only accepts
           // tier aliases for the model param — full Bedrock IDs are rejected by the schema.
           const tierAlias = normalizeToCcAlias(sessionModel) || 'sonnet';

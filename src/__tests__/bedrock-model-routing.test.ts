@@ -1,16 +1,16 @@
 /**
  * Repro test for Bedrock model routing bug
  *
- * Bug: On Bedrock, workers get model ID "claude-sonnet-4-6" (bare builtin default)
+ * Bug: On Bedrock, workers get model ID "claude-sonnet-5" (bare builtin default)
  * instead of inheriting the parent model. On Bedrock, this bare ID is invalid
  * — Bedrock requires full IDs like "us.anthropic.claude-sonnet-4-6-v1:0".
  *
  * Root cause chain:
- * 1. buildDefaultConfig() → config.agents.executor.model = 'claude-sonnet-4-6'
+ * 1. buildDefaultConfig() → config.agents.executor.model = 'claude-sonnet-5'
  *    (from CLAUDE_FAMILY_DEFAULTS.SONNET, because no Bedrock env vars found)
- * 2. getAgentDefinitions() resolves executor.model = 'claude-sonnet-4-6'
+ * 2. getAgentDefinitions() resolves executor.model = 'claude-sonnet-5'
  *    (configuredModel from config takes precedence over agent's defaultModel)
- * 3. enforceModel() injects 'claude-sonnet-4-6' into Task calls
+ * 3. enforceModel() injects 'claude-sonnet-5' into Task calls
  * 4. Claude Code passes it to Bedrock API → 400 invalid model
  *
  * The defense (forceInherit) works IF CLAUDE_CODE_USE_BEDROCK=1 is in the env.
@@ -103,10 +103,10 @@ describe('Bedrock model routing repro', () => {
       expect(getDefaultModelMedium()).toBe('global.anthropic.claude-sonnet-4-6-v1:0');
     });
 
-    it('falls back to bare "claude-sonnet-4-6" without env vars', async () => {
+    it('falls back to bare "claude-sonnet-5" without env vars', async () => {
       const { getDefaultModelMedium } = await import('../config/models.js');
       // getDefaultModelMedium returns the raw config value (not normalized)
-      expect(getDefaultModelMedium()).toBe('claude-sonnet-4-6');
+      expect(getDefaultModelMedium()).toBe('claude-sonnet-5');
     });
   });
 
@@ -132,7 +132,7 @@ describe('Bedrock model routing repro', () => {
       // 3. Agent definitions use full builtin model IDs from config
       const { getAgentDefinitions } = await import('../agents/definitions.js');
       const defs = getAgentDefinitions({ config });
-      expect(defs['executor'].model).toBe('claude-sonnet-4-6');
+      expect(defs['executor'].model).toBe('claude-sonnet-5');
       expect(defs['explore'].model).toBe('claude-haiku-4-5');
       expect(defs['architect'].model).toBe('claude-opus-4-8');
 

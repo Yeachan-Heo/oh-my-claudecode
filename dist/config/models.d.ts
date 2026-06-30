@@ -62,7 +62,7 @@ export declare function isBedrock(): boolean;
  *
  * These IDs must be passed through to the CLI as-is because normalizing them
  * to aliases like "sonnet" causes Claude Code to expand them to Anthropic API
- * model names (e.g. claude-sonnet-4-6) which are invalid on Bedrock/Vertex.
+ * model names (e.g. claude-sonnet-5) which are invalid on Bedrock/Vertex.
  */
 export declare function isProviderSpecificModelId(modelId: string): boolean;
 /**
@@ -72,7 +72,7 @@ export declare function isProviderSpecificModelId(modelId: string): boolean;
  * The `[1m]` suffix is a Claude Code internal annotation for the 1M context
  * window variant. It is valid for the parent session's API path but is
  * rejected by the sub-agent spawning runtime, which strips it to a bare
- * Anthropic model ID (e.g., `claude-sonnet-4-6`) that is invalid on Bedrock.
+ * Anthropic model ID (e.g., `claude-sonnet-5`) that is invalid on Bedrock.
  */
 export declare function hasExtendedContextSuffix(modelId: string): boolean;
 /**

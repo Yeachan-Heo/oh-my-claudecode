@@ -76,7 +76,7 @@ export declare function isPromptModeAgent(agentType: CliAgentType): boolean;
  *
  * When running on a non-standard provider (Bedrock, Vertex), workers need
  * the provider-specific model ID passed explicitly via --model. Without it,
- * Claude Code falls back to its built-in default (claude-sonnet-4-6) which
+ * Claude Code falls back to its built-in default (claude-sonnet-5) which
  * is invalid on these providers.
  *
  * Resolution order:

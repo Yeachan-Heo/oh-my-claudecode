@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Quick test configuration
 TEST_LIMIT=5
-MODEL="claude-sonnet-4-6-20260217"
+MODEL="claude-sonnet-5"
 TIMEOUT="180"  # 3 minutes per instance for quick test
 
 # Parse arguments
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --limit N       Number of instances to test (default: 5)"
-            echo "  --model MODEL   Claude model to use (default: claude-sonnet-4-6-20260217)"
+            echo "  --model MODEL   Claude model to use (default: claude-sonnet-5)"
             echo "  --timeout SECS  Timeout per instance (default: 180)"
             echo "  -h, --help      Show this help message"
             exit 0

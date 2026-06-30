@@ -67,8 +67,8 @@ npm run dev
 # 불필요한 로그 숨기기
 export OMC_QUIET=true
 
-# 빠른 모델 (Sonnet 4.6)
-export OMC_MODEL=anthropic/claude-sonnet-4-6
+# 빠른 모델 (Sonnet 5)
+export OMC_MODEL=anthropic/claude-sonnet-5
 ```
 
 ### 타이밍
