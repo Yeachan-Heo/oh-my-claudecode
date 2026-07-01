@@ -1034,6 +1034,40 @@ This article argues that fake popularity signals damage trust in open source.`;
         const autopilotMatch = result.find((r) => r.type === 'autopilot');
         expect(autopilotMatch).toBeDefined();
       });
+
+      it('should NOT detect the quoted keyword when an unrelated genuine command with a directive appears elsewhere in the same message', () => {
+        const result = detectKeywordsWithType(
+          'Docs say "use autopilot" as an example, but can you run ralph now to fix the deployment script?',
+        );
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        const ralphMatch = result.find((r) => r.type === 'ralph');
+        expect(autopilotMatch).toBeUndefined();
+        expect(ralphMatch).toBeDefined();
+      });
+
+      it('should NOT detect autopilot when a bug-report prompt describes fixing the false positive itself', () => {
+        const result = detectKeywordsWithType(
+          'Please fix the detector: it activates when the user writes "use autopilot" in a bug report.',
+        );
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeUndefined();
+      });
+
+      it('should NOT detect autopilot when asked to implement a regression test for the quoted phrase', () => {
+        const result = detectKeywordsWithType(
+          'Implement a regression test for the sentence "use autopilot" so it no longer activates.',
+        );
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeUndefined();
+      });
+
+      it('should NOT detect ralph when asked to address a false positive describing the quoted phrase', () => {
+        const result = detectKeywordsWithType(
+          'Please address this false positive: "run ralph on this" should be treated as docs text.',
+        );
+        const ralphMatch = result.find((r) => r.type === 'ralph');
+        expect(ralphMatch).toBeUndefined();
+      });
     });
 
     describe('edge cases', () => {

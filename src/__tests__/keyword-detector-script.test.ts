@@ -697,6 +697,78 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
   });
 
+  // Regression (issue #3380, QA round 2): the execution-directive check that
+  // gates the quote exemption must be scoped to the specific quoted span, not
+  // the generic ±80-char context window shared with unrelated keywords in the
+  // same message — otherwise a genuine directive-bearing command elsewhere in
+  // the message wrongly neutralizes the exemption for a keyword that is
+  // purely quoted as an example.
+  it('does not activate the quoted keyword when an unrelated genuine command appears elsewhere in the message', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-mixed-message-'));
+    const sessionId = 'session-mixed-message-3380';
+    const output = runKeywordDetector(
+      'Docs say "use autopilot" as an example, but can you run ralph now to fix the deployment script?',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
+  // Regression (issue #3380, repo-owner review bot finding against the round-1
+  // fix commit): a bug-report/discussion prompt that describes fixing this
+  // exact false positive, and happens to contain an execution-directive verb
+  // near the quoted example, must not itself trigger the false positive it is
+  // describing.
+  it('does not activate autopilot when a bug-report prompt describes fixing the false positive itself', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-bugreport-fix-'));
+    const sessionId = 'session-bugreport-fix-3380';
+    const output = runKeywordDetector(
+      'Please fix the detector: it activates when the user writes "use autopilot" in a bug report.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
+  it('does not activate autopilot when asked to implement a regression test for the quoted phrase', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-implement-test-'));
+    const sessionId = 'session-implement-test-3380';
+    const output = runKeywordDetector(
+      'Implement a regression test for the sentence "use autopilot" so it no longer activates.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
+  it('does not activate ralph when asked to address a false positive describing the quoted phrase', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-address-fp-'));
+    const sessionId = 'session-address-fp-3380';
+    const output = runKeywordDetector(
+      'Please address this false positive: "run ralph on this" should be treated as docs text.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
+  });
+
   // Japanese full-width katakana variants must fire on the deployed runtime
   // hook (scripts/keyword-detector.mjs), not just the TS source. Mirrors the
   // existing Korean positive controls above and guards the standalone copy

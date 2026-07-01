@@ -556,6 +556,24 @@ function isWithinQuotedSpan(text, position) {
   return false;
 }
 
+// Bounds of the specific quoted span containing `position`, or null if none.
+// Used to scope the execution-directive check for the quote exemption to
+// this keyword's own quote — not the generic ±80-char context window, which
+// can otherwise pick up an unrelated genuine command elsewhere in the same
+// message and wrongly neutralize the exemption for a keyword that is purely
+// quoted as an example.
+function findQuotedSpanBounds(text, position) {
+  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
+    if (match.index === undefined) continue;
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position >= start && position < end) {
+      return { start, end };
+    }
+  }
+  return null;
+}
+
 function stripQuotedSpans(text) {
   return text.replace(QUOTED_SPAN_PATTERN, ' ');
 }
@@ -676,8 +694,22 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   // `"ralph" fix the auth bug`) is still a genuine request stylistically
   // wrapped in quotes, so the exemption only applies when no execution
   // directive is present.
-  if (keywordInsideQuotes && !hasExecutionDirective) {
-    return true;
+  //
+  // The directive check here is scoped to this keyword's own quoted span
+  // (±28 chars around the span's bounds), not the generic ±80-char context
+  // window used elsewhere in this function. Otherwise an unrelated genuine
+  // command elsewhere in the same message could wrongly neutralize the
+  // exemption for a keyword that is purely quoted as an example.
+  if (keywordInsideQuotes) {
+    const span = findQuotedSpanBounds(text, position);
+    const hasExecutionDirectiveNearQuote = span
+      ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(
+          text.slice(Math.max(0, span.start - 28), Math.min(text.length, span.end + 28)),
+        )
+      : hasExecutionDirective;
+    if (!hasExecutionDirectiveNearQuote) {
+      return true;
+    }
   }
 
   if (keywordText) {
