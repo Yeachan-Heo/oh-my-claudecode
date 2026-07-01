@@ -515,6 +515,30 @@ function hasDirectInvocationPrefix(text: string, position: number): boolean {
   return /^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)?$/i.test(prefix);
 }
 
+function hasConversationalInvocationNearKeyword(
+  text: string,
+  position: number,
+  keywordLength: number,
+  keywordText: string,
+): boolean {
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const context = text.slice(start, end);
+  const escaped = escapeRegExp(keywordText.trim());
+  if (!escaped) {
+    return false;
+  }
+
+  const conversationalInvocationPatterns = [
+    new RegExp(`\\bplease\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\blet['’]?s\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bi\\s+(?:want|need|would\\s+like)\\s+(?:a|an)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:can|could|would|will)\\s+you\\s+${escaped}\\b`, 'i'),
+  ];
+
+  return conversationalInvocationPatterns.some((pattern) => pattern.test(context));
+}
+
 function hasExplicitInvocationContext(
   text: string,
   position: number,
@@ -532,19 +556,7 @@ function hasExplicitInvocationContext(
     return true;
   }
 
-  const escaped = escapeRegExp(keywordText.trim());
-  if (!escaped) {
-    return false;
-  }
-
-  const conversationalInvocationPatterns = [
-    new RegExp(`\\bplease\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\blet['’]?s\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\bi\\s+(?:want|need|would\\s+like)\\s+(?:a|an)\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\b(?:can|could|would|will)\\s+you\\s+${escaped}\\b`, 'i'),
-  ];
-
-  return conversationalInvocationPatterns.some((pattern) => pattern.test(context));
+  return hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
 }
 
 function hasDiagnosticIntentNearKeyword(context: string, keyword: string): boolean {
@@ -664,6 +676,10 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
     }
 
     if (hasActivationIntent) {
+      return false;
+    }
+
+    if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) {
       return false;
     }
 

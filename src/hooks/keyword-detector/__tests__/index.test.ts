@@ -410,6 +410,15 @@ Final draft.`);
         expect(ralphProblem.find((r) => r.type === 'ralph')).toBeDefined();
       });
 
+      it('should detect later directive occurrence after earlier informational same keyword mention', () => {
+        const result = detectKeywordsWithType(
+          'The old docs call ralph deprecated. Please ralph and fix the flaky tests.',
+        );
+        expect(result).toEqual([
+          expect.objectContaining({ type: 'ralph', keyword: 'ralph' }),
+        ]);
+      });
+
       it('should NOT detect "don\'t stop" phrase', () => {
         const result = detectKeywordsWithType("Don't stop until done");
         const ralphMatch = result.find((r) => r.type === 'ralph');

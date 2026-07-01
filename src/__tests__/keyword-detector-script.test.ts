@@ -719,6 +719,24 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
   });
 
+  // Regression (issue #3382): an informational/reference occurrence of a
+  // keyword earlier in the same prompt must not suppress a later directive
+  // occurrence of that same keyword.
+  it('activates ralph for a later directive after an earlier informational mention', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-info-then-directive-'));
+    const sessionId = 'session-info-then-directive-3382';
+    const output = runKeywordDetector(
+      'The old docs call ralph deprecated. Please ralph and fix the flaky tests.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
+
   // Regression (issue #3380, repo-owner review bot finding against the round-1
   // fix commit): a bug-report/discussion prompt that describes fixing this
   // exact false positive, and happens to contain an execution-directive verb

@@ -620,6 +620,25 @@ function hasDirectInvocationPrefix(text, position) {
   return /^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)?$/i.test(prefix);
 }
 
+function hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText) {
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const context = text.slice(start, end);
+  const escaped = escapeRegExp((keywordText || '').trim());
+  if (!escaped) {
+    return false;
+  }
+
+  const conversationalInvocationPatterns = [
+    new RegExp(`\\bplease\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\blet['’]?s\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\bi\\s+(?:want|need|would\\s+like)\\s+(?:a|an)\\s+${escaped}\\b`, 'i'),
+    new RegExp(`\\b(?:can|could|would|will)\\s+you\\s+${escaped}\\b`, 'i'),
+  ];
+
+  return conversationalInvocationPatterns.some((pattern) => pattern.test(context));
+}
+
 function hasExplicitInvocationContext(text, position, keywordLength, keywordText) {
   if (hasDirectInvocationPrefix(text, position)) {
     return true;
@@ -628,7 +647,11 @@ function hasExplicitInvocationContext(text, position, keywordLength, keywordText
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
   const context = text.slice(start, end);
-  return hasActivationIntentNearKeyword(context, keywordText);
+  if (hasActivationIntentNearKeyword(context, keywordText)) {
+    return true;
+  }
+
+  return hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
 }
 
 function hasDiagnosticIntentNearKeyword(context, keyword) {
@@ -729,6 +752,9 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
 
   if (keywordText) {
     if (hasActivationIntentNearKeyword(context, keywordText)) {
+      return false;
+    }
+    if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) {
       return false;
     }
     if (isRalphUltraworkMetaOrBanterContext(context, keywordText)) {
