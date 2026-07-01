@@ -518,25 +518,23 @@ function hasDirectInvocationPrefix(text: string, position: number): boolean {
 function hasConversationalInvocationNearKeyword(
   text: string,
   position: number,
-  keywordLength: number,
-  keywordText: string,
+  _keywordLength: number,
+  _keywordText: string,
 ): boolean {
-  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
-  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
-  const context = text.slice(start, end);
-  const escaped = escapeRegExp(keywordText.trim());
-  if (!escaped) {
+  if (isWithinQuotedSpan(text, position)) {
     return false;
   }
 
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const prefix = stripQuotedSpans(text.slice(start, position));
   const conversationalInvocationPatterns = [
-    new RegExp(`\\bplease\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\blet['’]?s\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\bi\\s+(?:want|need|would\\s+like)\\s+(?:a|an)\\s+${escaped}\\b`, 'i'),
-    new RegExp(`\\b(?:can|could|would|will)\\s+you\\s+${escaped}\\b`, 'i'),
+    /\bplease\s+$/i,
+    /\blet['’]?s\s+$/i,
+    /\bi\s+(?:want|need|would\s+like)\s+(?:a|an)\s+$/i,
+    /\b(?:can|could|would|will)\s+you\s+$/i,
   ];
 
-  return conversationalInvocationPatterns.some((pattern) => pattern.test(context));
+  return conversationalInvocationPatterns.some((pattern) => pattern.test(prefix));
 }
 
 function hasExplicitInvocationContext(

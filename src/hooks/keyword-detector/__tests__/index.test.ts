@@ -419,6 +419,20 @@ Final draft.`);
         ]);
       });
 
+      it('should NOT detect earlier informational ralph because a later quoted phrase says please ralph', () => {
+        const result = detectKeywordsWithType(
+          'The docs say ralph is triggered by the phrase "please ralph".',
+        );
+        expect(result.find((r) => r.type === 'ralph')).toBeUndefined();
+      });
+
+      it('should NOT detect earlier informational autopilot because a later quoted phrase says please autopilot', () => {
+        const result = detectKeywordsWithType(
+          'The docs say autopilot is triggered by the phrase "please autopilot".',
+        );
+        expect(result.find((r) => r.type === 'autopilot')).toBeUndefined();
+      });
+
       it('should NOT detect "don\'t stop" phrase', () => {
         const result = detectKeywordsWithType("Don't stop until done");
         const ralphMatch = result.find((r) => r.type === 'ralph');
