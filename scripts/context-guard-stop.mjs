@@ -84,6 +84,7 @@ function runGitRevParse(args, cwd) {
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: GIT_PROBE_TIMEOUT_MS,
+    windowsHide: true,
   }).trim();
 }
 
