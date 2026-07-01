@@ -412,14 +412,15 @@ if [ "$MODE" = "global" ]; then
   rm -f "$CONFIG_DIR/hooks/session-start.sh"
   echo "Legacy hooks cleaned"
 
-  # Check for manual hook entries in settings.json
+  # Check for manual legacy OMC hook entries in settings.json
   SETTINGS_FILE="$CONFIG_DIR/settings.json"
   if [ -f "$SETTINGS_FILE" ]; then
-    if jq -e '.hooks' "$SETTINGS_FILE" > /dev/null 2>&1; then
+    if jq -e 'any(.. | objects | .command? | strings; test("(^|[^[:alnum:]_-])(keyword-detector|stop-continuation|persistent-mode|session-start)(\\.(sh|mjs|cjs|js))?([^[:alnum:]_-]|$)"))' "$SETTINGS_FILE" > /dev/null 2>&1; then
       echo ""
-      echo "NOTE: Found legacy hooks in settings.json. These should be removed since"
-      echo "the plugin now provides hooks automatically. Remove the \"hooks\" section"
-      echo "from $SETTINGS_FILE to prevent duplicate hook execution."
+      echo "NOTE: Found legacy OMC hook entries in settings.json. These should be removed since"
+      echo "the plugin now provides OMC hooks automatically. Remove only the legacy OMC"
+      echo "hook entries from $SETTINGS_FILE to prevent duplicate hook execution;"
+      echo "third-party hook entries can remain."
     fi
   fi
 fi

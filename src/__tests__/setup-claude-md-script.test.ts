@@ -413,6 +413,132 @@ Use the real docs file.
     expect(`${result.stdout}\n${result.stderr}`).toContain('Plugin verified');
   });
 
+  it('does not warn for third-party-only settings hooks', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({
+        plugins: ['oh-my-claudecode'],
+        hooks: {
+          Stop: [
+            {
+              matcher: '',
+              hooks: [{ type: 'command', command: 'node /opt/vendor/hooks/third-party-stop.js' }],
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: configDir,
+      },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).not.toContain('legacy OMC hook entries');
+  });
+
+  it('warns when settings hooks reference a legacy OMC hook command', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({
+        plugins: ['oh-my-claudecode'],
+        hooks: {
+          UserPromptSubmit: [
+            {
+              matcher: '',
+              hooks: [{ type: 'command', command: '$HOME/.claude/hooks/keyword-detector.sh' }],
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: configDir,
+      },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('legacy OMC hook entries');
+  });
+
+  it('does not advise deleting the whole hooks section when hooks are mixed', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({
+        plugins: ['oh-my-claudecode'],
+        hooks: {
+          Stop: [
+            {
+              matcher: '',
+              hooks: [
+                { type: 'command', command: 'node /opt/vendor/hooks/third-party-stop.js' },
+                { type: 'command', command: '$HOME/.claude/hooks/session-start.sh' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: configDir,
+      },
+      encoding: 'utf-8',
+    });
+
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(result.status).toBe(0);
+    expect(output).toContain('legacy OMC hook entries');
+    expect(output).not.toContain('Remove the "hooks" section');
+    expect(output).toContain('third-party hook entries can remain');
+  });
+
   it('overwrites an existing global CLAUDE.md by default when preserve mode is not requested', () => {
     const fixture = createPluginFixture(`<!-- OMC:START -->
 <!-- OMC:VERSION:9.9.9 -->
