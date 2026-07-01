@@ -583,6 +583,14 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
   const questionOutsideQuotes = stripQuotedSpans(text);
   const keywordInsideQuotes = isWithinQuotedSpan(text, position);
 
+  // A keyword occurrence inside a quoted span is reported/example text, not a
+  // command directed at the assistant — e.g. an example sentence like
+  // `"use autopilot"` inside a paragraph discussing that exact phrasing.
+  // Short-circuit before any activation-intent checks so quoting always wins.
+  if (keywordInsideQuotes) {
+    return true;
+  }
+
   if (keywordText) {
     const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
     const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);

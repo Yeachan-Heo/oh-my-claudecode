@@ -1001,6 +1001,29 @@ This article argues that fake popularity signals damage trust in open source.`;
       });
     });
 
+    describe('quoted-span exemption (issue #3380)', () => {
+      it('should NOT detect autopilot inside a quoted example sentence', () => {
+        const text =
+          'Your last message contained "I thought if I told it to use autopilot, it would just continue..." — that\'s reported speech about a hypothetical.';
+        const result = detectKeywordsWithType(text);
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeUndefined();
+      });
+
+      it('should still detect autopilot when unquoted', () => {
+        const result = detectKeywordsWithType('use autopilot on this task');
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeDefined();
+      });
+
+      it('should NOT detect ralph inside a quoted example sentence', () => {
+        const text = 'The docs give "run ralph on this" as an example of an activating phrase.';
+        const result = detectKeywordsWithType(text);
+        const ralphMatch = result.find((r) => r.type === 'ralph');
+        expect(ralphMatch).toBeUndefined();
+      });
+    });
+
     describe('edge cases', () => {
       it('should handle empty input', () => {
         const result = detectKeywordsWithType('');
