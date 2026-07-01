@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 const RUN_CJS_PATH = join(__dirname, '..', '..', 'scripts', 'run.cjs');
 const NODE = process.execPath;
@@ -38,25 +38,41 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
   }
 
   function runCjs(target: string, env: Record<string, string> = {}): { status: number; stdout: string; stderr: string } {
-    try {
-      const stdout = execFileSync(NODE, [RUN_CJS_PATH, target], {
-        encoding: 'utf-8',
-        env: {
-          ...process.env,
-          ...env,
-        },
-        timeout: 10000,
-        input: '{}',
-      });
-      return { status: 0, stdout: stdout || '', stderr: '' };
-    } catch (err: any) {
-      return {
-        status: err.status ?? 1,
-        stdout: err.stdout || '',
-        stderr: err.stderr || '',
-      };
-    }
+    const result = spawnSync(NODE, [RUN_CJS_PATH, target], {
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        ...env,
+      },
+      timeout: 10000,
+      input: '{}',
+    });
+
+    return {
+      status: result.status ?? (result.error || result.signal ? 1 : 0),
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    };
   }
+
+  it('keeps UserPromptSubmit manifest timeouts aligned for prompt hooks', () => {
+    const hooksJson = JSON.parse(readFileSync(join(__dirname, '..', '..', 'hooks', 'hooks.json'), 'utf-8'));
+    const promptHooks = hooksJson.hooks.UserPromptSubmit.flatMap((entry: any) => entry.hooks);
+
+    const keywordDetector = promptHooks.find((hook: any) => hook.command.includes('keyword-detector.mjs'));
+    const skillInjector = promptHooks.find((hook: any) => hook.command.includes('skill-injector.mjs'));
+
+    expect(keywordDetector?.timeout).toBe(10);
+    expect(skillInjector?.timeout).toBe(8);
+
+    const hooksDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'HOOKS.md'), 'utf-8');
+    const referenceDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'REFERENCE.md'), 'utf-8');
+
+    expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 10s |');
+    expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 8s |');
+    expect(referenceDoc).toContain('| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`');
+    expect(referenceDoc).toContain('| 10s, 8s');
+  });
 
   it('exits 0 when no target argument is provided', () => {
     try {
@@ -202,7 +218,7 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     expect(result.status).toBe(0);
   });
 
-  it('honors hooks.json timeouts so wrapped hooks fail open instead of blocking', () => {
+  it('uses an inner timeout below the hooks.json outer budget so wrapped hooks fail open with output', () => {
     const pluginRoot = join(tmpDir, 'plugin-root');
     const scriptsDir = join(pluginRoot, 'scripts');
     const hooksDir = join(pluginRoot, 'hooks');
@@ -225,7 +241,7 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
                 {
                   type: 'command',
                   command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/slow-stop-hook.cjs',
-                  timeout: 1,
+                  timeout: 2,
                 },
               ],
             },
@@ -242,6 +258,8 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain('slow-stop-done');
-    expect(elapsedMs).toBeLessThan(2500);
+    expect(result.stderr).toContain('[run.cjs] Hook slow-stop-hook.cjs timed out after 1500ms; exiting fail-open.');
+    expect(result.stderr).not.toContain('timed out after 2000ms');
+    expect(elapsedMs).toBeLessThan(2000);
   });
 });

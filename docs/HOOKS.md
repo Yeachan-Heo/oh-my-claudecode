@@ -98,8 +98,8 @@ Fires when the user submits a prompt.
 
 | Script | Role | Timeout |
 |--------|------|---------|
-| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 5s |
-| `skill-injector.mjs` | Injects skill prompts | 3s |
+| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 10s |
+| `skill-injector.mjs` | Injects skill prompts | 8s |
 
 Runs on all user input (`matcher: "*"`). When the keyword detector finds keywords like "ultrawork", "ralph", or "autopilot", it injects the corresponding skill invocation instruction via `additionalContext`.
 

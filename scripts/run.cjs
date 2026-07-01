@@ -99,6 +99,13 @@ function flattenHookEntries(rawHooks) {
   return Object.values(rawHooks).flatMap((entries) => Array.isArray(entries) ? entries : []);
 }
 
+const TIMEOUT_CUSHION_MS = 500;
+
+function resolveInnerTimeoutMs(manifestTimeoutMs) {
+  if (manifestTimeoutMs == null) return null;
+  return Math.max(1, manifestTimeoutMs - TIMEOUT_CUSHION_MS);
+}
+
 function resolveHookTimeoutMs(targetPath, extraArgs) {
   const pluginRoot = dirname(dirname(targetPath));
   const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
@@ -135,7 +142,8 @@ if (!resolved) {
   process.exit(0);
 }
 
-const timeoutMs = resolveHookTimeoutMs(resolved, process.argv.slice(3));
+const manifestTimeoutMs = resolveHookTimeoutMs(resolved, process.argv.slice(3));
+const timeoutMs = resolveInnerTimeoutMs(manifestTimeoutMs);
 
 const result = spawnSync(
   process.execPath,
