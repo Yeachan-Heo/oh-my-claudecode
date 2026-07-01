@@ -769,6 +769,43 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
   });
 
+  // Regression (issue #3380, QA round 3): the execution-directive check must
+  // NOT include the quoted text's own interior — only text immediately
+  // outside the quote's boundaries. Otherwise a directive word used INSIDE a
+  // narrated/reported quote (extremely common: "she said 'fix X'") makes the
+  // quote self-report as directive-bearing and defeats the exemption for
+  // exactly the reported-speech case issue #3380 exists to catch.
+  it('does not activate autopilot when the execution directive is INSIDE the quoted text itself', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-inside-quote-directive-'));
+    const sessionId = 'session-inside-quote-directive-3380';
+    const output = runKeywordDetector(
+      'The old ticket said "please fix autopilot" and closed without action.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
+  it('does not activate autopilot for a narrated quote containing a directive, while still detecting an unrelated genuine command', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-inside-quote-mixed-'));
+    const sessionId = 'session-inside-quote-mixed-3380';
+    const output = runKeywordDetector(
+      'The FAQ says "please fix autopilot" is a common typo people made in 2023. Separately, ralph the test suite until it passes.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
   // Japanese full-width katakana variants must fire on the deployed runtime
   // hook (scripts/keyword-detector.mjs), not just the TS source. Mirrors the
   // existing Korean positive controls above and guards the standalone copy

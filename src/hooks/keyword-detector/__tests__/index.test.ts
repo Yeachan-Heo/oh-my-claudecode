@@ -1068,6 +1068,24 @@ This article argues that fake popularity signals damage trust in open source.`;
         const ralphMatch = result.find((r) => r.type === 'ralph');
         expect(ralphMatch).toBeUndefined();
       });
+
+      it('should NOT detect autopilot when the execution directive is INSIDE the quoted text itself', () => {
+        const result = detectKeywordsWithType(
+          'The old ticket said "please fix autopilot" and closed without action.',
+        );
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeUndefined();
+      });
+
+      it('should NOT detect autopilot for a narrated quote containing a directive, while still detecting an unrelated genuine command', () => {
+        const result = detectKeywordsWithType(
+          'The FAQ says "please fix autopilot" is a common typo people made in 2023. Separately, ralph the test suite until it passes.',
+        );
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        const ralphMatch = result.find((r) => r.type === 'ralph');
+        expect(autopilotMatch).toBeUndefined();
+        expect(ralphMatch).toBeDefined();
+      });
     });
 
     describe('edge cases', () => {

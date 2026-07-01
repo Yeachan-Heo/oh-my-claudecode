@@ -621,16 +621,25 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   // wrapped in quotes, so the exemption only applies when no execution
   // directive is present.
   //
-  // The directive check here is scoped to this keyword's own quoted span
-  // (±28 chars around the span's bounds), not the generic ±80-char context
-  // window used elsewhere in this function. Otherwise an unrelated genuine
-  // command elsewhere in the same message could wrongly neutralize the
-  // exemption for a keyword that is purely quoted as an example.
+  // The directive check here is scoped to text immediately OUTSIDE this
+  // keyword's own quoted span (±28 chars before/after the span's bounds),
+  // not the generic ±80-char context window used elsewhere in this function,
+  // and NOT the quote's own interior. Two failure modes this avoids:
+  // - Scoping to the wide window: an unrelated genuine command elsewhere in
+  //   the same message could sit inside it and wrongly neutralize the
+  //   exemption for a keyword that is purely quoted as an example.
+  // - Scoping to (or including) the quote's own interior: a directive word
+  //   used INSIDE the quoted text itself — extremely common in narrated
+  //   examples and bug reports, e.g. `"please fix autopilot" they said` —
+  //   would make the quote self-report as directive-bearing and defeat the
+  //   exemption for exactly the reported-speech case it exists to catch.
   if (keywordInsideQuotes) {
     const span = findQuotedSpanBounds(text, position);
     const hasExecutionDirectiveNearQuote = span
       ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(
-          text.slice(Math.max(0, span.start - 28), Math.min(text.length, span.end + 28)),
+          text.slice(Math.max(0, span.start - 28), span.start) +
+            ' ' +
+            text.slice(span.end, Math.min(text.length, span.end + 28)),
         )
       : hasExecutionDirective;
     if (!hasExecutionDirectiveNearQuote) {
