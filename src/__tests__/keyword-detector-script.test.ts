@@ -806,6 +806,46 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
   });
 
+  // Regression (issue #3380, repo-owner review bot finding against commit
+  // 0d6cf924): the near-quote command check must also recognize activation
+  // verbs (use/run/start/enable/activate/invoke/trigger/launch), not just
+  // execution-directive verbs (fix/debug/...) — otherwise a genuine command
+  // that quotes only the mode name for emphasis (e.g. `run "ralph" on this
+  // issue`) is wrongly suppressed, even though it activated before the
+  // quote-exemption existed.
+  it('still activates ralph when the mode name alone is quoted for emphasis after an activation verb', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-quoted-activation-verb-ralph-'));
+    const sessionId = 'session-quoted-activation-verb-ralph-3380';
+    const output = runKeywordDetector('run "ralph" on this issue', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
+
+  it('still activates autopilot when the mode name alone is quoted for emphasis after an activation verb', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-quoted-activation-verb-autopilot-'));
+    const sessionId = 'session-quoted-activation-verb-autopilot-3380';
+    const output = runKeywordDetector('use "autopilot" on this task', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(true);
+  });
+
+  it('still activates ultrawork when the mode name alone is quoted for emphasis after an activation verb', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-quoted-activation-verb-ultrawork-'));
+    const sessionId = 'session-quoted-activation-verb-ultrawork-3380';
+    const output = runKeywordDetector('start "ultrawork" on this repo', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: ULTRAWORK]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ultrawork-state.json'))).toBe(true);
+  });
+
   // Japanese full-width katakana variants must fire on the deployed runtime
   // hook (scripts/keyword-detector.mjs), not just the TS source. Mirrors the
   // existing Korean positive controls above and guards the standalone copy

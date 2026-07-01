@@ -690,33 +690,39 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   // A keyword occurrence inside a quoted span is usually reported/example
   // text, not a command directed at the assistant — e.g. an example sentence
   // like `"use autopilot"` inside a paragraph discussing that exact phrasing.
-  // But a quoted keyword paired with a nearby execution directive (e.g.
-  // `"ralph" fix the auth bug`) is still a genuine request stylistically
-  // wrapped in quotes, so the exemption only applies when no execution
-  // directive is present.
+  // But a quoted keyword paired with a nearby execution directive OR
+  // activation verb (e.g. `"ralph" fix the auth bug`, or `run "ralph" on
+  // this issue`) is still a genuine request stylistically wrapped in quotes,
+  // so the exemption only applies when neither is present.
   //
-  // The directive check here is scoped to text immediately OUTSIDE this
-  // keyword's own quoted span (±28 chars before/after the span's bounds),
-  // not the generic ±80-char context window used elsewhere in this function,
-  // and NOT the quote's own interior. Two failure modes this avoids:
+  // This check is scoped to text immediately OUTSIDE this keyword's own
+  // quoted span (±28 chars before/after the span's bounds), not the generic
+  // ±80-char context window used elsewhere in this function, and NOT the
+  // quote's own interior. Three failure modes this avoids:
   // - Scoping to the wide window: an unrelated genuine command elsewhere in
   //   the same message could sit inside it and wrongly neutralize the
   //   exemption for a keyword that is purely quoted as an example.
-  // - Scoping to (or including) the quote's own interior: a directive word
-  //   used INSIDE the quoted text itself — extremely common in narrated
-  //   examples and bug reports, e.g. `"please fix autopilot" they said` —
-  //   would make the quote self-report as directive-bearing and defeat the
-  //   exemption for exactly the reported-speech case it exists to catch.
+  // - Scoping to (or including) the quote's own interior: a directive or
+  //   activation word used INSIDE the quoted text itself — extremely common
+  //   in narrated examples and bug reports, e.g. `"please fix autopilot"
+  //   they said` or `"...told it to use autopilot..."` — would make the
+  //   quote self-report as command-bearing and defeat the exemption for
+  //   exactly the reported-speech case it exists to catch.
+  // - Checking only execution-directive verbs (fix/debug/...) and not
+  //   activation verbs (use/run/start/...): genuine commands stylistically
+  //   quoting just the mode name, e.g. `run "ralph" on this issue` or
+  //   `use "autopilot" on this task`, would be wrongly suppressed even
+  //   though they activated before this exemption existed.
   if (keywordInsideQuotes) {
     const span = findQuotedSpanBounds(text, position);
-    const hasExecutionDirectiveNearQuote = span
-      ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(
+    const hasGenuineCommandNearQuote = span
+      ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|use|run|start|enable|activate|invoke|trigger|launch)\b/i.test(
           text.slice(Math.max(0, span.start - 28), span.start) +
             ' ' +
             text.slice(span.end, Math.min(text.length, span.end + 28)),
         )
       : hasExecutionDirective;
-    if (!hasExecutionDirectiveNearQuote) {
+    if (!hasGenuineCommandNearQuote) {
       return true;
     }
   }
