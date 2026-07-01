@@ -593,6 +593,18 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   const line = text.slice(lineBounds.start, lineBounds.end);
   const questionOutsideQuotes = stripQuotedSpans(text);
   const keywordInsideQuotes = isWithinQuotedSpan(text, position);
+  const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
+
+  // A keyword occurrence inside a quoted span is usually reported/example
+  // text, not a command directed at the assistant — e.g. an example sentence
+  // like `"use autopilot"` inside a paragraph discussing that exact phrasing.
+  // But a quoted keyword paired with a nearby execution directive (e.g.
+  // `"ralph" fix the auth bug`) is still a genuine request stylistically
+  // wrapped in quotes, so the exemption only applies when no execution
+  // directive is present.
+  if (keywordInsideQuotes && !hasExecutionDirective) {
+    return true;
+  }
 
   if (keywordText) {
     if (hasActivationIntentNearKeyword(context, keywordText)) {

@@ -664,6 +664,39 @@ diff --git a/a b/b
     expect(existsSync(autopilotStatePath)).toBe(true);
   });
 
+  // Regression (issue #3380): a keyword quoted inside reported/example text
+  // (e.g. an example sentence like `"use autopilot"` embedded in prose
+  // discussing that exact phrasing) must not activate. This guards the
+  // deployed scripts/keyword-detector.mjs against drift from
+  // src/hooks/keyword-detector/index.ts, since this exact false positive was
+  // fixed in the TS source but initially missed in this standalone copy.
+  it('does not activate autopilot for a keyword quoted inside reported speech', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-quoted-span-'));
+    const sessionId = 'session-quoted-span-3380';
+    const output = runKeywordDetector(
+      'Your last message contained "I thought if I told it to use autopilot, it would just continue..." — that\'s reported speech about a hypothetical.',
+      cwd,
+      sessionId,
+    );
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const autopilotStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(autopilotStatePath)).toBe(false);
+  });
+
+  it('still activates ralph when quoted for emphasis alongside an execution directive (issue #3380 regression guard)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-quoted-directive-'));
+    const sessionId = 'session-quoted-directive-3380';
+    const output = runKeywordDetector('"ralph" fix the auth bug', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
+
   // Japanese full-width katakana variants must fire on the deployed runtime
   // hook (scripts/keyword-detector.mjs), not just the TS source. Mirrors the
   // existing Korean positive controls above and guards the standalone copy

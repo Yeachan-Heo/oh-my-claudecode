@@ -582,18 +582,22 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
   const line = text.slice(lineBounds.start, lineBounds.end);
   const questionOutsideQuotes = stripQuotedSpans(text);
   const keywordInsideQuotes = isWithinQuotedSpan(text, position);
+  const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
 
-  // A keyword occurrence inside a quoted span is reported/example text, not a
-  // command directed at the assistant — e.g. an example sentence like
-  // `"use autopilot"` inside a paragraph discussing that exact phrasing.
-  // Short-circuit before any activation-intent checks so quoting always wins.
-  if (keywordInsideQuotes) {
+  // A keyword occurrence inside a quoted span is usually reported/example
+  // text, not a command directed at the assistant — e.g. an example sentence
+  // like `"use autopilot"` inside a paragraph discussing that exact phrasing.
+  // But a quoted keyword paired with a nearby execution directive (e.g.
+  // `"ralph" fix the auth bug`) is still a genuine request stylistically
+  // wrapped in quotes, so the exemption only applies when no execution
+  // directive is present — checked before any other activation-intent logic
+  // so quoting wins for reported speech but not for real commands.
+  if (keywordInsideQuotes && !hasExecutionDirective) {
     return true;
   }
 
   if (keywordText) {
     const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
-    const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
 
     // Explicit command + execution intent should remain actionable even if the
     // surrounding message also contains a help question.

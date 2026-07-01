@@ -1022,6 +1022,18 @@ This article argues that fake popularity signals damage trust in open source.`;
         const ralphMatch = result.find((r) => r.type === 'ralph');
         expect(ralphMatch).toBeUndefined();
       });
+
+      it('should still detect ralph when quoted for emphasis alongside an execution directive', () => {
+        const result = detectKeywordsWithType('"ralph" fix the auth bug');
+        const ralphMatch = result.find((r) => r.type === 'ralph');
+        expect(ralphMatch).toBeDefined();
+      });
+
+      it('should still detect autopilot when quoted for emphasis alongside an execution directive', () => {
+        const result = detectKeywordsWithType('"autopilot" implement the login page');
+        const autopilotMatch = result.find((r) => r.type === 'autopilot');
+        expect(autopilotMatch).toBeDefined();
+      });
     });
 
     describe('edge cases', () => {
