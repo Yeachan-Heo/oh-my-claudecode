@@ -498,6 +498,7 @@ export function startDaemon(config?: DaemonConfig): DaemonResponse {
       OMC_DAEMON_CONFIG_FILE: configPath,
     };
     const child = spawn('node', ['-e', daemonScript], {
+      windowsHide: true,
       detached: true,
       stdio: 'ignore',
       cwd: process.cwd(),

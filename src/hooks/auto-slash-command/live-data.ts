@@ -352,6 +352,7 @@ function globToRegex(glob: string): RegExp {
 function checkIfModified(pattern: string): boolean {
   try {
     const output = execSync("git diff --name-only 2>/dev/null || true", {
+      windowsHide: true,
       timeout: 5000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -366,6 +367,7 @@ function checkIfModified(pattern: string): boolean {
 function checkIfBranch(pattern: string): boolean {
   try {
     const branch = execSync("git branch --show-current 2>/dev/null || true", {
+      windowsHide: true,
       timeout: 5000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -381,6 +383,7 @@ function checkIfBranch(pattern: string): boolean {
 function executeCommand(command: string): { stdout: string; error: boolean } {
   try {
     const stdout = execSync(command, {
+      windowsHide: true,
       timeout: TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES + 1024,
       encoding: "utf-8",
@@ -528,6 +531,7 @@ export function resolveLiveData(content: string): string {
     // Write script to stdin of shell
     try {
       const result = execSync(block.shell, {
+        windowsHide: true,
         input: block.body,
         timeout: TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES + 1024,

@@ -28,6 +28,7 @@ export interface IdleNotificationRepoState {
 function runCommand(command: string, args: string[], cwd: string): string | null {
   try {
     return execFileSync(command, args, {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       timeout: COMMAND_TIMEOUT_MS,

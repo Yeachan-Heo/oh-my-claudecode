@@ -197,7 +197,7 @@ export class LspClient {
         ? ['exec', '-i', '-w', this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args]
         : this.serverConfig.args;
 
-      this.process = spawn(command, args, {
+      this.process = spawn(command, args, { windowsHide: true,
         cwd: this.workspaceRoot,
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: !this.devContainerContext && process.platform === 'win32'

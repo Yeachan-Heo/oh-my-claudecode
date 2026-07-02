@@ -42,7 +42,7 @@ export function runTscDiagnostics(directory: string): TscResult {
   }
 
   try {
-    execFileSync('tsc', ['--noEmit', '--pretty', 'false'], {
+    execFileSync('tsc', ['--noEmit', '--pretty', 'false'], { windowsHide: true,
       cwd: directory,
       encoding: 'utf-8',
       stdio: 'pipe'

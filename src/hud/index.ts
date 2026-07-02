@@ -180,6 +180,7 @@ function spawnSessionSummaryScript(
       {
         stdio: "ignore",
         detached: true,
+        windowsHide: true,
         env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "session-summary" },
       },
     );

@@ -76,7 +76,7 @@ export function getFormatter(ext: string): string | null {
 export function isFormatterAvailable(command: string): boolean {
   const binary = command.split(' ')[0];
   const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(checkCommand, [binary], { stdio: 'ignore' });
+  const result = spawnSync(checkCommand, [binary], { windowsHide: true, stdio: 'ignore' });
   return result.status === 0;
 }
 
@@ -102,7 +102,7 @@ export function formatFile(filePath: string): { success: boolean; message: strin
 
   try {
     const [formatterBin, ...formatterArgs] = formatter.split(' ');
-    execFileSync(formatterBin, [...formatterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
+    execFileSync(formatterBin, [...formatterArgs, filePath], { windowsHide: true, encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Formatted ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Format failed: ${_error}` };
@@ -157,14 +157,14 @@ export function lintFile(filePath: string): { success: boolean; message: string 
 
   const linterBin = linter.split(' ')[0];
   const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const checkResult = spawnSync(checkCommand, [linterBin], { stdio: 'ignore' });
+  const checkResult = spawnSync(checkCommand, [linterBin], { windowsHide: true, stdio: 'ignore' });
   if (checkResult.status !== 0) {
     return { success: true, message: `Linter ${linter} not available` };
   }
 
   try {
     const [linterCmd, ...linterArgs] = linter.split(' ');
-    execFileSync(linterCmd, [...linterArgs, filePath], { encoding: 'utf-8', stdio: 'pipe' });
+    execFileSync(linterCmd, [...linterArgs, filePath], { windowsHide: true, encoding: 'utf-8', stdio: 'pipe' });
     return { success: true, message: `Lint passed for ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Lint errors in ${filePath}` };
@@ -272,13 +272,13 @@ export function runTypeCheck(directory: string): { success: boolean; message: st
   }
 
   const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const tscCheck = spawnSync(checkCommand, ['tsc'], { stdio: 'ignore' });
+  const tscCheck = spawnSync(checkCommand, ['tsc'], { windowsHide: true, stdio: 'ignore' });
   if (tscCheck.status !== 0) {
     return { success: true, message: 'TypeScript not installed' };
   }
 
   // shell:true on Windows avoids Node 20.12+ EINVAL when spawning npx.cmd (CVE-2024-27980). #2721
-  const tscResult = spawnSync('npx', ['tsc', '--noEmit'], {
+  const tscResult = spawnSync('npx', ['tsc', '--noEmit'], { windowsHide: true,
     cwd: directory,
     stdio: 'pipe',
     shell: process.platform === 'win32',
@@ -303,7 +303,7 @@ export function runTests(directory: string): { success: boolean; message: string
     try {
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.test) {
-        execFileSync('npm', ['test'], {
+        execFileSync('npm', ['test'], { windowsHide: true,
           cwd: directory,
           encoding: 'utf-8',
           stdio: 'pipe',
@@ -320,7 +320,7 @@ export function runTests(directory: string): { success: boolean; message: string
   // Check for pytest
   if (existsSync(join(directory, 'pytest.ini')) || existsSync(join(directory, 'pyproject.toml'))) {
     try {
-      execFileSync('pytest', [], { cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
+      execFileSync('pytest', [], { windowsHide: true, cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
       return { success: true, message: 'Tests passed' };
     } catch (_error) {
       return { success: false, message: 'Tests failed' };
@@ -345,7 +345,7 @@ export function runLint(directory: string): { success: boolean; message: string 
       const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
       if (pkg.scripts?.lint) {
         try {
-          execFileSync('npm', ['run', 'lint'], {
+          execFileSync('npm', ['run', 'lint'], { windowsHide: true,
             cwd: directory,
             encoding: 'utf-8',
             stdio: 'pipe',

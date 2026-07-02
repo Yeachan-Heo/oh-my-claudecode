@@ -299,7 +299,7 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
 
     let branchName = "ralph/task";
     try {
-      branchName = execSync("git rev-parse --abbrev-ref HEAD", {
+      branchName = execSync("git rev-parse --abbrev-ref HEAD", { windowsHide: true,
         cwd: directory,
         encoding: "utf-8",
         timeout: 5000,

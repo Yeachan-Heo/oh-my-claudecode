@@ -245,8 +245,8 @@ function syncMarketplaceClone(verbose: boolean = false): { ok: boolean; message:
   }
 
   const stdio = verbose ? 'inherit' : 'pipe';
-  const execOpts = { encoding: 'utf-8' as const, stdio: stdio as any, timeout: 60000 };
-  const queryExecOpts = { encoding: 'utf-8' as const, stdio: 'pipe' as const, timeout: 60000 };
+  const execOpts = { encoding: 'utf-8' as const, stdio: stdio as any, timeout: 60000, windowsHide: true };
+  const queryExecOpts = { encoding: 'utf-8' as const, stdio: 'pipe' as const, timeout: 60000, windowsHide: true };
 
   try {
     execFileSync('git', ['-C', marketplacePath, 'fetch', '--all', '--prune'], execOpts);
@@ -763,7 +763,8 @@ export function getInstalledVersion(): VersionMetadata | null {
       const result = execSync('npm list -g oh-my-claude-sisyphus --json', {
         encoding: 'utf-8',
         timeout: 5000,
-        stdio: 'pipe'
+        stdio: 'pipe',
+        windowsHide: true
       });
       const data = JSON.parse(result);
       if (data.dependencies?.['oh-my-claude-sisyphus']?.version) {

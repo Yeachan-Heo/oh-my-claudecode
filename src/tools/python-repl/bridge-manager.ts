@@ -394,7 +394,7 @@ export async function spawnBridgeServer(
   // Pass socket path as positional argument (matches gyoshu_bridge.py argparse)
   const bridgeArgs = [bridgePath, socketPath];
 
-  const proc: ChildProcess = spawn(pythonEnv.pythonPath, bridgeArgs, {
+  const proc: ChildProcess = spawn(pythonEnv.pythonPath, bridgeArgs, { windowsHide: true,
     stdio: ['ignore', 'ignore', 'pipe'],
     cwd: effectiveProjectDir,
     env: {

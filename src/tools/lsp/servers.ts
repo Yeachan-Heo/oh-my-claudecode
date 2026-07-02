@@ -172,7 +172,7 @@ export const LSP_SERVERS: Record<string, LspServerConfig> = {
 export function commandExists(command: string): boolean {
   if (isAbsolute(command)) return existsSync(command);
   const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(checkCommand, [command], { stdio: 'ignore' });
+  const result = spawnSync(checkCommand, [command], { windowsHide: true, stdio: 'ignore' });
   return result.status === 0;
 }
 
