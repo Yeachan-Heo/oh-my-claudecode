@@ -622,3 +622,34 @@ describe('HUD pane tmux server targeting', () => {
     expect(lastCall?.[2]?.env?.TMUX).toBe('/tmp/tmux-100/default,123,0');
   });
 });
+
+// ---------------------------------------------------------------------------
+// tmuxExec — dedicated server socket (-L) isolation
+// ---------------------------------------------------------------------------
+describe('tmuxExec socket option', () => {
+  it('injects -L <socket> before the subcommand when socket is set', () => {
+    mockedExecFileSync.mockClear();
+    mockedExecFileSync.mockReturnValue('' as any);
+
+    tmuxExec(['new-session', '-d', '-s', 'omc-proj-main-123'], { stripTmux: true, socket: 'omc-proj-main-123' });
+
+    const lastCall = mockedExecFileSync.mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const passedArgs = lastCall![1] as string[];
+    // `-L <socket>` is a server option and must precede the subcommand.
+    expect(passedArgs.slice(0, 3)).toEqual(['-L', 'omc-proj-main-123', 'new-session']);
+    // socket must not leak into the child_process options object.
+    expect((lastCall![2] as { socket?: string }).socket).toBeUndefined();
+  });
+
+  it('omits -L entirely when no socket is provided', () => {
+    mockedExecFileSync.mockClear();
+    mockedExecFileSync.mockReturnValue('' as any);
+
+    tmuxExec(['has-session', '-t', 'omc-proj-main-123'], { stripTmux: true });
+
+    const passedArgs = mockedExecFileSync.mock.calls.at(-1)![1] as string[];
+    expect(passedArgs).toEqual(['has-session', '-t', 'omc-proj-main-123']);
+    expect(passedArgs).not.toContain('-L');
+  });
+});

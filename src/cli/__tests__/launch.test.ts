@@ -380,6 +380,20 @@ describe('runClaude outside-tmux — mouse scrolling (issue #890)', () => {
     expect(attachIdx).toBeGreaterThan(clipboardIdx);
   });
 
+  it('routes every tmux call through a dedicated -L socket (session name) for server isolation', () => {
+    runClaude('/tmp', [], 'sid');
+
+    const tmuxCalls = vi.mocked(tmuxExec).mock.calls;
+    expect(tmuxCalls.length).toBeGreaterThan(0);
+    // Every tmux invocation in the outside-tmux launch path — including the ones
+    // issued by configureTmuxClipboardForSession — must carry the same socket so
+    // they all target the launch's own isolated server rather than the shared
+    // default server (psmux mirroring guard).
+    for (const [, opts] of tmuxCalls) {
+      expect((opts as { socket?: string } | undefined)?.socket).toBe('test-session');
+    }
+  });
+
   it('preserves a valid detached session when attach-session is interrupted', () => {
     vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
       if (args[0] === 'attach-session') {

@@ -599,9 +599,17 @@ function runClaudeOutsideTmux(
     : `${envPrefix}sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; `;
   const claudeCmd = wrapWithLoginShell(`${preflight}${rawClaudeCmd}`);
   const sessionName = buildTmuxSessionName(cwd);
+  // Pin this launch to its own tmux server via a unique -L socket (the session
+  // name is already unique per launch). Separate sockets are separate server
+  // processes with disjoint session tables, so concurrent `omc` instances can
+  // never cross-attach. This is what keeps psmux (native-Windows tmux, whose
+  // default server has a single shared console surface) from mirroring two
+  // launches into one session. See TmuxExecOptions.socket. All tmux calls below
+  // must carry the same socket or they would target the wrong server.
+  const socket = sessionName;
 
   try {
-    tmuxExec(['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stripTmux: true, stdio: 'inherit' });
+    tmuxExec(['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stripTmux: true, socket, stdio: 'inherit' });
   } catch {
     if (options.requireTmux) {
       abortMadmaxRequiresTmux('launch-failed');
@@ -611,19 +619,19 @@ function runClaudeOutsideTmux(
   }
 
   try {
-    configureTmuxClipboardForSession(sessionName, { stripTmux: true, stdio: 'ignore' });
+    configureTmuxClipboardForSession(sessionName, { stripTmux: true, socket, stdio: 'ignore' });
   } catch {
     /* non-fatal — user's tmux may not support these options */
   }
 
   try {
-    tmuxExec(['set-option', '-t', sessionName, 'mouse', 'on'], { stripTmux: true, stdio: 'ignore' });
+    tmuxExec(['set-option', '-t', sessionName, 'mouse', 'on'], { stripTmux: true, socket, stdio: 'ignore' });
   } catch {
     /* non-fatal — user's tmux may not support these options */
   }
 
   try {
-    tmuxExec(['attach-session', '-t', sessionName], { stripTmux: true, stdio: 'inherit' });
+    tmuxExec(['attach-session', '-t', sessionName], { stripTmux: true, socket, stdio: 'inherit' });
   } catch {
     if (options.requireTmux) {
       abortMadmaxRequiresTmux('launch-failed');
@@ -632,7 +640,7 @@ function runClaudeOutsideTmux(
     // attach paths (SSH disconnect, terminal drop, etc.) do not kill or
     // duplicate a valid Claude session.
     try {
-      tmuxExec(['has-session', '-t', sessionName], { stripTmux: true, stdio: 'ignore' });
+      tmuxExec(['has-session', '-t', sessionName], { stripTmux: true, socket, stdio: 'ignore' });
       return;
     } catch {
       runClaudeDirect(cwd, args);

@@ -24,6 +24,17 @@ export interface TmuxExecOptions {
    *  Default: false — preserves TMUX (targets the current server).
    *  Set to true for OMC-owned background sessions and cross-session scans. */
   stripTmux?: boolean;
+  /** Target a dedicated tmux server on this socket name (`tmux -L <socket>`).
+   *  Each socket is a separate server process with a disjoint session table, so
+   *  distinct sockets can never cross-attach. Used to isolate each `omc` launch
+   *  onto its own server instead of sharing the single default server.
+   *
+   *  This is essential on psmux (the native-Windows tmux reimplementation): unlike
+   *  real tmux — where every attached terminal gets its own independent client view
+   *  of a shared server — psmux's default server exposes a single console surface,
+   *  so two `omc` instances attaching to it mirror each other's keystrokes. A unique
+   *  `-L` socket per launch gives each its own server and eliminates the mirroring. */
+  socket?: string;
 }
 
 export function tmuxEnv(): NodeJS.ProcessEnv {
@@ -63,11 +74,13 @@ function escapeForCmdSet(value: string): string {
   return value.replace(/"/g, '""');
 }
 
-function resolveTmuxInvocation(args: string[]): TmuxCommandInvocation {
+function resolveTmuxInvocation(args: string[], opts?: TmuxExecOptions): TmuxCommandInvocation {
   const resolvedBinary = resolveTmuxBinaryPath();
+  // `-L <socket>` is a tmux server option and must precede the subcommand.
+  const fullArgs = opts?.socket ? ['-L', opts.socket, ...args] : args;
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
     const comspec = process.env.COMSPEC || 'cmd.exe';
-    const commandLine = [quoteForCmd(resolvedBinary), ...args.map(quoteForCmd)].join(' ');
+    const commandLine = [quoteForCmd(resolvedBinary), ...fullArgs.map(quoteForCmd)].join(' ');
     return {
       command: comspec,
       args: ['/d', '/s', '/c', commandLine],
@@ -76,7 +89,7 @@ function resolveTmuxInvocation(args: string[]): TmuxCommandInvocation {
 
   return {
     command: resolvedBinary,
-    args,
+    args: fullArgs,
   };
 }
 
@@ -84,8 +97,8 @@ export function tmuxExec(
   args: string[],
   opts?: TmuxExecOptions & Omit<ExecFileSyncOptionsWithStringEncoding, 'env' | 'encoding'> & { encoding?: BufferEncoding },
 ): string {
-  const { stripTmux: _, ...execOpts } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
+  const { stripTmux: _, socket: __, ...execOpts } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args, opts);
   return execFileSync(invocation.command, invocation.args, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
 }
 
@@ -93,8 +106,8 @@ export async function tmuxExecAsync(
   args: string[],
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
-  const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
+  const { stripTmux: _, socket: __, timeout, ...rest } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args, opts);
   return promisify(execFile)(invocation.command, invocation.args, {
     encoding: 'utf-8', env: resolveEnv(opts),
     ...(timeout !== undefined ? { timeout } : {}), ...rest,
@@ -124,8 +137,8 @@ export function tmuxSpawn(
   args: string[],
   opts?: TmuxExecOptions & Omit<SpawnSyncOptionsWithStringEncoding, 'env' | 'encoding'> & { encoding?: BufferEncoding },
 ): SpawnSyncReturns<string> {
-  const { stripTmux: _, ...spawnOpts } = opts ?? {};
-  const invocation = resolveTmuxInvocation(args);
+  const { stripTmux: _, socket: __, ...spawnOpts } = opts ?? {};
+  const invocation = resolveTmuxInvocation(args, opts);
   return spawnSync(invocation.command, invocation.args, { encoding: 'utf-8', ...spawnOpts, env: resolveEnv(opts) });
 }
 
