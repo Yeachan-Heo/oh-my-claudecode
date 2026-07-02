@@ -445,11 +445,38 @@ async function verifyWorkerStartCommandDelivered(paneId: string, startCmd: strin
   return false;
 }
 
-async function verifyWorkerStartCommandSubmitted(paneId: string, startCmd: string): Promise<boolean> {
+function resolvePositiveIntegerEnv(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+
+interface WorkerStartSubmitVerificationOptions {
+  timeoutMs?: number;
+  initialPollIntervalMs?: number;
+  maxPollIntervalMs?: number;
+}
+
+async function verifyWorkerStartCommandSubmitted(
+  paneId: string,
+  startCmd: string,
+  opts: WorkerStartSubmitVerificationOptions = {},
+): Promise<boolean> {
   if (isCmuxSurfaceTarget(paneId)) return true;
   const expected = normalizeTmuxCapture(startCmd);
   const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
+    ? Number(opts.timeoutMs)
+    : resolvePositiveIntegerEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', 8_000);
+  const maxPollIntervalMs = Number.isFinite(opts.maxPollIntervalMs) && (opts.maxPollIntervalMs ?? 0) > 0
+    ? Number(opts.maxPollIntervalMs)
+    : 500;
+  let pollIntervalMs = Number.isFinite(opts.initialPollIntervalMs) && (opts.initialPollIntervalMs ?? 0) > 0
+    ? Number(opts.initialPollIntervalMs)
+    : 50;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
     const captured = await capturePaneAsync(paneId, { joinWrappedLines: true });
     const normalizedCaptured = normalizeTmuxCapture(captured);
     const commandStillBuffered = normalizedCaptured.includes(expected)
@@ -457,7 +484,10 @@ async function verifyWorkerStartCommandSubmitted(paneId: string, startCmd: strin
     if (!commandStillBuffered) {
       return true;
     }
-    await sleep(50);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(pollIntervalMs, remainingMs));
+    pollIntervalMs = Math.min(Math.max(pollIntervalMs * 2, pollIntervalMs + 1), maxPollIntervalMs);
   }
   return false;
 }

@@ -9,6 +9,9 @@ const mockedCalls = vi.hoisted(() => ({
   wrapLiteralCapture: false,
   insertWrapSpaces: false,
   enterSubmitsCommand: true,
+  submitClearsAfterCaptures: 0,
+  delayedSubmitCapturesRemaining: null as number | null,
+  delayedSubmitReplacement: '',
   cmuxFailOnce: [] as string[],
   cmuxFailures: [] as Array<{ command: string; message: string }>,
 }));
@@ -68,6 +71,15 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
     tmuxExecAsync: vi.fn(async (args: string[]) => {
       mockedCalls.tmuxArgs.push(args);
       if (args[0] === 'capture-pane') {
+        if (mockedCalls.delayedSubmitCapturesRemaining !== null) {
+          if (mockedCalls.delayedSubmitCapturesRemaining <= 0) {
+            mockedCalls.paneCapture = mockedCalls.delayedSubmitReplacement;
+            mockedCalls.delayedSubmitCapturesRemaining = null;
+            mockedCalls.delayedSubmitReplacement = '';
+          } else {
+            mockedCalls.delayedSubmitCapturesRemaining -= 1;
+          }
+        }
         const stdout = args.includes('-J')
           ? mockedCalls.paneCapture.replace(/\n/g, mockedCalls.insertWrapSpaces ? ' ' : '')
           : mockedCalls.paneCapture;
@@ -80,9 +92,15 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
           : literal;
       }
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.enterSubmitsCommand) {
-        mockedCalls.paneCapture = mockedCalls.paneCapture.includes('cursor-agent')
+        const replacement = mockedCalls.paneCapture.includes('cursor-agent')
           ? 'cursor-agent ready\n'
           : '';
+        if (mockedCalls.submitClearsAfterCaptures > 0) {
+          mockedCalls.delayedSubmitCapturesRemaining = mockedCalls.submitClearsAfterCaptures;
+          mockedCalls.delayedSubmitReplacement = replacement;
+        } else {
+          mockedCalls.paneCapture = replacement;
+        }
       }
       return { stdout: '', stderr: '' };
     }),
@@ -100,6 +118,7 @@ import { sendTeamPaneKey, spawnBridgeInSession, spawnWorkerInPane } from '../tmu
 
 describe('spawnWorkerInPane', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mockedCalls.tmuxArgs = [];
     mockedCalls.cmuxArgs = [];
     mockedCalls.paneCapture = '';
@@ -111,6 +130,9 @@ describe('spawnWorkerInPane', () => {
     mockedCalls.cmuxFailures = [];
     vi.unstubAllEnvs();
     mockedCalls.enterSubmitsCommand = true;
+    mockedCalls.submitClearsAfterCaptures = 0;
+    mockedCalls.delayedSubmitCapturesRemaining = null;
+    mockedCalls.delayedSubmitReplacement = '';
   });
 
   it('uses argv-style launch with literal tmux send-keys', async () => {
@@ -398,8 +420,35 @@ describe('spawnWorkerInPane', () => {
     expect(mockedCalls.paneCapture).toBe('cursor-agent ready\n');
   });
 
+  it('waits for slow tmux alt-screen repaint before treating worker start submit as failed', async () => {
+    vi.useFakeTimers();
+    mockedCalls.submitClearsAfterCaptures = 6;
+
+    const start = spawnWorkerInPane('session:0', '%2', {
+      teamName: 'safe-team',
+      workerName: 'worker-1',
+      envVars: {
+        OMC_TEAM_NAME: 'safe-team',
+        OMC_TEAM_WORKER: 'safe-team/worker-1',
+      },
+      launchBinary: 'claude',
+      launchArgs: ['--dangerously-skip-permissions'],
+      cwd: '/tmp',
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(start).resolves.toBeUndefined();
+
+    const submitVerificationCaptures = mockedCalls.tmuxArgs.filter(
+      (args) => args[0] === 'capture-pane' && args.includes('-J'),
+    );
+    expect(submitVerificationCaptures.length).toBeGreaterThan(5);
+    vi.useRealTimers();
+  });
+
   it('fails loudly when a single Cursor worker start command remains unsubmitted after Enter', async () => {
     mockedCalls.enterSubmitsCommand = false;
+    vi.stubEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', '200');
 
     await expect(
       spawnWorkerInPane('session:0', '%2', {
