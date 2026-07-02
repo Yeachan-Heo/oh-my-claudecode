@@ -61,33 +61,46 @@ const CLAUDE_CODE_PATTERNS = [
 
 /** Anchored OMC HUD status line, not copied output embedded in logs/tests. */
 const OMC_HUD_STATUS_LINE_PATTERN =
-  /^\s*\[OMC#[^\]\s]*\]\s*\|.*\b(?:Model:|ctx:|session:|5h:|wk:|thinking)\b/im;
+  /^\s*\[OMC#[^\]\s]*\]\s*\|.*\b(?:Model:|ctx:|session:|5h:|wk:|thinking)\b/i;
 
-/** OMC HUD mode/help line rendered directly in the captured UI block. */
-const OMC_HUD_MODE_LINE_PATTERN = /^\s*⏵⏵\s+.*\(shift\+tab to cycle\)/im;
+/** OMC HUD mode/help line rendered in the captured UI footer. */
+const OMC_HUD_MODE_LINE_PATTERN = /^\s*⏵⏵\s+.*\(shift\+tab to cycle\)/i;
 
-/** Live Claude/OMC UI chrome that appears around the HUD block. */
-const OMC_HUD_CHROME_PATTERN = /^\s*(?:[─━═]{8,}|[╭╰╮╯│┃].*|❯\s*$)/m;
-
-const COPIED_HUD_CONTEXT_PATTERNS = [
-  /^\s*\$\s+\S/m,
-  /^\s*(?:FAIL\b|AssertionError:|stderr \|)/m,
-  /^\s*src\/.*:/m,
-  /^\s*\*\d+[a-z]*\|/m,
+/** Rate-limit text shown by the live Claude/OMC limit screen, not arbitrary API/log output. */
+const OMC_HUD_RATE_LIMIT_SCREEN_PATTERNS = [
+  /you(?:'|’)ve\s+(?:hit|reached)\s+(?:your\s+)?(?:session\s+|usage\s+)?limit/i,
+  /\b(?:session|usage|weekly|5[- ]?hour)\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i,
+  /\blimit\s+resets?\b/i,
+  /stop\s+and\s+wait\s+for\s+limit\s+to\s+reset/i,
 ];
 
+function hasOmcRateLimitScreenText(content: string): boolean {
+  return OMC_HUD_RATE_LIMIT_SCREEN_PATTERNS.some(pattern => pattern.test(content));
+}
+
 function hasLiveOmcHudEvidence(content: string): boolean {
-  const hudStatus = OMC_HUD_STATUS_LINE_PATTERN.exec(content);
-  if (!hudStatus) {
+  const nonEmptyLines = content
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter(line => line.trim().length > 0);
+  const hudStatusIndex = nonEmptyLines.findIndex(line => OMC_HUD_STATUS_LINE_PATTERN.test(line));
+  if (hudStatusIndex === -1) {
     return false;
   }
 
-  const beforeHudStatus = content.slice(0, hudStatus.index);
-  if (COPIED_HUD_CONTEXT_PATTERNS.some(pattern => pattern.test(beforeHudStatus))) {
+  const modeLineIndex = nonEmptyLines.findIndex((line, index) =>
+    index > hudStatusIndex && OMC_HUD_MODE_LINE_PATTERN.test(line)
+  );
+  if (modeLineIndex === -1) {
     return false;
   }
 
-  return OMC_HUD_MODE_LINE_PATTERN.test(content) || OMC_HUD_CHROME_PATTERN.test(content);
+  const isFooterBlock =
+    hudStatusIndex >= nonEmptyLines.length - 4 &&
+    modeLineIndex === nonEmptyLines.length - 1 &&
+    modeLineIndex - hudStatusIndex <= 2;
+
+  return isFooterBlock;
 }
 
 /**
@@ -282,12 +295,13 @@ export function analyzePaneContent(content: string): PaneAnalysisResult {
   // "Update assistant config") cannot produce false-positive keyword matches.
   const cleanedContent = stripGitOutputLines(content);
 
-  // Check for Claude Code indicators. OMC HUD evidence is intentionally
-  // anchored to live HUD/status-line shape so copied/search/test output with
-  // `[OMC#...]` or `shift+tab to cycle` cannot impersonate a Claude pane.
+  // Check for Claude Code indicators. OMC HUD footer evidence only counts as a
+  // Claude pane when paired with live limit-screen wording; copied HUD footers
+  // next to unrelated API/log rate-limit text must not impersonate a blocked pane.
+  const hasClaudeText = CLAUDE_CODE_PATTERNS.some((pattern) => pattern.test(cleanedContent));
+  const hasLiveOmcHud = hasLiveOmcHudEvidence(cleanedContent);
   const hasClaudeCode =
-    CLAUDE_CODE_PATTERNS.some((pattern) => pattern.test(cleanedContent)) ||
-    hasLiveOmcHudEvidence(cleanedContent);
+    hasClaudeText || (hasLiveOmcHud && hasOmcRateLimitScreenText(cleanedContent));
 
   // Check for rate limit messages
   const rateLimitMatches = RATE_LIMIT_PATTERNS.filter((pattern) =>
