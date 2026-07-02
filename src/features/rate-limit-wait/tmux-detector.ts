@@ -66,6 +66,14 @@ const OMC_HUD_STATUS_LINE_PATTERN =
 /** OMC HUD mode/help line rendered in the captured UI footer. */
 const OMC_HUD_MODE_LINE_PATTERN = /^\s*⏵⏵\s+.*\(shift\+tab to cycle\)/i;
 
+/** Shell commands that print saved terminal transcripts rather than a live UI. */
+const SAVED_TRANSCRIPT_COMMAND_PATTERN =
+  /^\s*(?:[$#%]|❯)\s*(?:cat|bat|less|more|tail|head|sed|awk)\b.*(?:hud|transcript|terminal|output|copied|\.txt)\b/i;
+
+/** Plain-language labels commonly pasted above copied terminal/HUD output. */
+const SAVED_TRANSCRIPT_LABEL_PATTERN =
+  /\b(?:copied\s+from|saved\s+terminal\s+output|terminal\s+transcript|copied\s+hud)\b/i;
+
 /** Rate-limit text shown by the live Claude/OMC limit screen, not arbitrary API/log output. */
 const OMC_HUD_RATE_LIMIT_SCREEN_PATTERNS = [
   /you(?:'|’)ve\s+(?:hit|reached)\s+(?:your\s+)?(?:session\s+|usage\s+)?limit/i,
@@ -78,7 +86,19 @@ function hasOmcRateLimitScreenText(content: string): boolean {
   return OMC_HUD_RATE_LIMIT_SCREEN_PATTERNS.some(pattern => pattern.test(content));
 }
 
+function hasSavedTranscriptContext(content: string): boolean {
+  return content
+    .split('\n')
+    .some(line =>
+      SAVED_TRANSCRIPT_COMMAND_PATTERN.test(line) ||
+      SAVED_TRANSCRIPT_LABEL_PATTERN.test(line)
+    );
+}
+
 function hasLiveOmcHudEvidence(content: string): boolean {
+  if (hasSavedTranscriptContext(content)) {
+    return false;
+  }
   const nonEmptyLines = content
     .split('\n')
     .map(line => line.trimEnd())

@@ -162,6 +162,60 @@ describe('tmux-detector', () => {
       expect(result.confidence).toBeGreaterThanOrEqual(0.6);
     });
 
+    it('should not treat cat output of a full blocked HUD transcript as a live blocked pane', () => {
+      const content = `
+        $ cat copied-hud.txt
+        ● You've hit your session limit · resets 12pm (Asia/Tokyo)
+        ─────────────────────────────────────────────
+        ❯
+        ─────────────────────────────────────────────
+          [OMC#4.15.1L] | Model: Opus 4.8 | 5h:100% wk:14% | thinking | session:80m | ctx:14%
+          ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(false);
+      expect(result.hasRateLimitMessage).toBe(true);
+      expect(result.isBlocked).toBe(false);
+    });
+
+    it('should not treat labeled saved terminal output of a full blocked HUD transcript as live', () => {
+      const content = `
+        copied from saved terminal output:
+        ● You've hit your session limit · resets 12pm (Asia/Tokyo)
+        ─────────────────────────────────────────────
+        ❯
+        ─────────────────────────────────────────────
+          [OMC#4.15.1L] | Model: Opus 4.8 | 5h:100% wk:14% | thinking | session:80m | ctx:14%
+          ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(false);
+      expect(result.hasRateLimitMessage).toBe(true);
+      expect(result.isBlocked).toBe(false);
+    });
+
+    it('should not treat copied footer, border, and mode with API rate-limit text as live', () => {
+      const content = `
+        copied from saved terminal output:
+        Error: rate limit exceeded
+        ─────────────────────────────────────────────
+        ❯
+        ─────────────────────────────────────────────
+          [OMC#4.15.1L] | Model: Opus 4.8 | 5h:100% wk:14% | thinking | session:80m | ctx:14%
+          ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(false);
+      expect(result.hasRateLimitMessage).toBe(true);
+      expect(result.isBlocked).toBe(false);
+    });
+
     it('should not treat copied HUD snippets plus rate-limit text as OMC pane evidence', () => {
       const content = `
         $ cat notes.txt
