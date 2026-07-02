@@ -57,6 +57,8 @@ const CLAUDE_CODE_PATTERNS = [
   /claude code/i,
   /conversation/i,
   /assistant/i,
+  /\[OMC#[^\]\s]*\]/,
+  /shift\+tab to cycle/i,
 ];
 
 /**

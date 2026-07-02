@@ -142,6 +142,55 @@ describe('tmux-detector', () => {
       expect(result.isBlocked).toBe(true);
       expect(result.confidence).toBeGreaterThanOrEqual(0.6);
     });
+
+    it('should detect OMC HUD rate-limit pane without Claude branding', () => {
+      const content = `
+        ● You've hit your session limit · resets 12pm (Asia/Tokyo)
+        ─────────────────────────────────────────────
+        ❯
+        ─────────────────────────────────────────────
+          [OMC#4.15.1L] | Model: Opus 4.8 | 5h:100% wk:14% | thinking | session:80m | ctx:14%
+          ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(true);
+      expect(result.hasRateLimitMessage).toBe(true);
+      expect(result.isBlocked).toBe(true);
+      expect(result.rateLimitType).toBe('unknown');
+      expect(result.confidence).toBeGreaterThanOrEqual(0.6);
+    });
+
+    it('should not flag plain shell output without Claude or OMC evidence', () => {
+      const content = `
+        $ npm run build
+        Build completed successfully.
+        $ git status
+        On branch dev
+        nothing to commit, working tree clean
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(false);
+      expect(result.hasRateLimitMessage).toBe(false);
+      expect(result.isBlocked).toBe(false);
+    });
+
+    it('should not treat model labels alone as Claude or OMC evidence', () => {
+      const content = `
+        $ echo "Model: Opus 4.8"
+        Model: Opus 4.8
+        Error: rate limit exceeded
+      `;
+
+      const result = analyzePaneContent(content);
+
+      expect(result.hasClaudeCode).toBe(false);
+      expect(result.hasRateLimitMessage).toBe(true);
+      expect(result.isBlocked).toBe(false);
+    });
   });
 
   describe('isTmuxAvailable', () => {
