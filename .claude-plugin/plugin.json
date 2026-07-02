@@ -49,6 +49,7 @@
     "./skills/skillify/",
     "./skills/team/",
     "./skills/trace/",
+    "./skills/ultradebug/",
     "./skills/ultraqa/",
     "./skills/ultrawork/",
     "./skills/ultragoal/",

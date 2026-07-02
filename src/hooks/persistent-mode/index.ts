@@ -47,6 +47,14 @@ import {
   clearVerificationState,
   type VerificationState,
 } from '../ralph/index.js';
+import {
+  readUltradebugState,
+  writeUltradebugState,
+  clearUltradebugState,
+  incrementUltradebugIteration,
+  detectUltradebugComplete,
+  buildUltradebugContinuationPrompt,
+} from '../ultradebug/index.js';
 import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
@@ -74,7 +82,7 @@ export interface PersistentModeResult {
   /** Message to inject into context */
   message: string;
   /** Which mode triggered the block */
-  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+  mode: 'ralph' | 'ultradebug' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
   /** Additional metadata */
   metadata?: {
     todoCount?: number;
@@ -96,7 +104,7 @@ const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
+const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan', 'ultradebug']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
   'complete',
   'completed',
@@ -1248,6 +1256,154 @@ ${newState.prompt ? `Original task: ${truncatePromptForEcho(newState.prompt)}` :
 }
 
 // ---------------------------------------------------------------------------
+// UltraDebug enforcement (ralph-engine driven, D4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan ONLY assistant-authored turns in the transcript tail for the ultradebug
+ * completion promise. The injected continuation prompt quotes the promise
+ * string, so scanning user-role records would false-positive — restrict to
+ * assistant text/thinking blocks. Fails closed (returns false) on any read or
+ * parse error so a flaky transcript never falsely completes the loop.
+ */
+function transcriptHasUltradebugPromise(transcriptPath: string): boolean {
+  let lines: string[];
+  try {
+    lines = readTranscriptTailLines(transcriptPath);
+  } catch {
+    return false;
+  }
+
+  for (const line of lines) {
+    const trimmed = line?.trim();
+    if (!trimmed) continue;
+
+    let parsed: { type?: string; message?: { role?: string; content?: unknown } };
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    const role = parsed?.message?.role;
+    const isAssistant = parsed?.type === 'assistant' || role === 'assistant';
+    if (!isAssistant) continue;
+
+    const text = extractTranscriptText(parsed.message?.content);
+    if (detectUltradebugComplete(text)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check UltraDebug loop state and decide whether to re-inject the debug
+ * continuation prompt. Mirrors checkRalphLoop's shape (state read, session
+ * isolation, hard-max auto-disable) but drives the scientific-method bug-fixing
+ * lifecycle instead of PRD stories. Termination follows SKILL.md
+ * <Exit_Conditions>:
+ *  - completion promise present in an assistant turn -> complete, clear state;
+ *  - iteration >= max_iterations -> stop, KEEP state (active:false) for --resume;
+ *  - hard max reached -> auto-disable, KEEP state for --resume;
+ *  - otherwise increment and re-inject.
+ * The thinking-only-streak guard is applied by the shared wrapper in
+ * checkPersistentModes(), so it is not re-implemented here.
+ */
+async function checkUltradebug(
+  sessionId?: string,
+  directory?: string,
+  cancelInProgress?: boolean,
+  stopContext?: StopContext,
+): Promise<PersistentModeResult | null> {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readUltradebugState(workingDir, sessionId);
+  const ultradebugStatePath = sessionId
+    ? resolveSessionStatePath('ultradebug', sessionId, workingDir)
+    : resolveStatePath('ultradebug', workingDir);
+
+  if (!state || !state.active || isStaleState(state)) {
+    return null;
+  }
+
+  // Session isolation (lenient form — see checkRalphLoop for rationale).
+  if (state.session_id && sessionId && state.session_id !== sessionId) {
+    return null;
+  }
+
+  if (isAwaitingConfirmation(state)) {
+    return null;
+  }
+
+  // Never re-arm internals while a cancel is in progress.
+  if (cancelInProgress) {
+    return { shouldBlock: false, message: '', mode: 'none' };
+  }
+
+  // Completion promise: only genuine when an assistant turn printed it. This is
+  // genuine completion, so clear state (idempotent with the skill's own delete).
+  const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+  if (transcriptPath && existsSync(transcriptPath) && transcriptHasUltradebugPromise(transcriptPath)) {
+    clearUltradebugState(workingDir, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[ULTRADEBUG COMPLETE] Bug fixed and verified after ${state.iteration} iteration(s). Session state cleared.`,
+      mode: 'none',
+    };
+  }
+
+  // Hard max: independent of max_iterations so it cannot be bypassed by a large
+  // initial max. Auto-disable but KEEP state for --resume.
+  const hardMax = getHardMaxIterations();
+  if (hardMax > 0 && state.iteration >= hardMax) {
+    state.active = false;
+    if (!shouldWriteStateBack(ultradebugStatePath)) {
+      return { shouldBlock: false, message: '', mode: 'none' };
+    }
+    writeUltradebugState(workingDir, state, sessionId);
+    return {
+      shouldBlock: true,
+      message: `[ULTRADEBUG - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled; state kept for --resume. Restart with /oh-my-claudecode:ultradebug --resume if needed.`,
+      mode: 'ultradebug',
+      metadata: { iteration: state.iteration, maxIterations: state.max_iterations },
+    };
+  }
+
+  // Max iterations: unlike ralph (which extends), ultradebug STOPS and keeps
+  // state for --resume (SKILL.md <Exit_Conditions>). Release the stop.
+  if (state.iteration >= state.max_iterations) {
+    state.active = false;
+    if (!shouldWriteStateBack(ultradebugStatePath)) {
+      return { shouldBlock: false, message: '', mode: 'none' };
+    }
+    writeUltradebugState(workingDir, state, sessionId);
+    return {
+      shouldBlock: false,
+      message: `[ULTRADEBUG - MAX ITERATIONS] Reached max iterations (${state.max_iterations}) without completion. Stopping; report the strongest hypothesis and remaining unknowns. State kept for /oh-my-claudecode:ultradebug --resume.`,
+      mode: 'ultradebug',
+      metadata: { iteration: state.iteration, maxIterations: state.max_iterations },
+    };
+  }
+
+  // Increment and re-inject the continuation prompt.
+  const newState = incrementUltradebugIteration(workingDir, sessionId);
+  if (!newState) {
+    return null;
+  }
+
+  return {
+    shouldBlock: true,
+    message: buildUltradebugContinuationPrompt(newState.iteration, newState.max_iterations),
+    mode: 'ultradebug',
+    metadata: {
+      iteration: newState.iteration,
+      maxIterations: newState.max_iterations,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Stop Breaker helpers (shared by team pipeline and ralplan)
 // ---------------------------------------------------------------------------
 
@@ -2291,6 +2447,17 @@ async function resolvePersistentModeBlock(
     if (ralphResult) return ralphResult;
     const autopilotResult = await runAutopilotPriority();
     if (autopilotResult) return autopilotResult;
+  }
+
+  // Priority 1.5: UltraDebug (stateful bug-fixing loop, ralph-engine driven, D4)
+  // Self-gates on its own session state; returns null when inactive so lower
+  // priorities still run. Suppressed while the ultradebug slot is tombstoned so
+  // a completed run does not re-arm until the tombstone TTL expires.
+  if (!tombstonedWorkflowModes.has('ultradebug')) {
+    const ultradebugResult = await checkUltradebug(sessionId, workingDir, cancelInProgress, stopContext);
+    if (ultradebugResult) {
+      return ultradebugResult;
+    }
   }
 
   // Priority 1.6: Autoresearch (stateful single-mission runtime)
