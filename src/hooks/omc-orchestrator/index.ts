@@ -8,12 +8,12 @@
  * Adapted from oh-my-opencode's omc-orchestrator hook for shell-based hooks.
  */
 
-import * as path from 'path';
-import { execSync } from 'child_process';
-import { getOmcRoot, getWorktreeRoot } from '../../lib/worktree-paths.js';
-import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { toForwardSlash } from '../../utils/paths.js';
-import { existsSync, readFileSync } from 'fs';
+import * as path from "path";
+import { execSync } from "child_process";
+import { getOmcRoot, getWorktreeRoot } from "../../lib/worktree-paths.js";
+import { getClaudeConfigDir } from "../../utils/config-dir.js";
+import { toForwardSlash } from "../../utils/paths.js";
+import { existsSync, readFileSync } from "fs";
 import {
   HOOK_NAME,
   ALLOWED_PATH_PATTERNS,
@@ -24,24 +24,25 @@ import {
   BOULDER_CONTINUATION_PROMPT,
   VERIFICATION_REMINDER,
   SINGLE_TASK_DIRECTIVE,
-} from './constants.js';
+} from "./constants.js";
 import {
   readBoulderState,
   getPlanProgress,
-} from '../../features/boulder-state/index.js';
-import {
-  addWorkingMemoryEntry,
-  setPriorityContext,
-} from '../notepad/index.js';
-import { logAuditEntry } from './audit.js';
+} from "../../features/boulder-state/index.js";
+import { addWorkingMemoryEntry, setPriorityContext } from "../notepad/index.js";
+import { logAuditEntry } from "./audit.js";
 
 // Re-export constants
-export * from './constants.js';
+export * from "./constants.js";
 
-export type EnforcementLevel = 'off' | 'warn' | 'strict';
+export type EnforcementLevel = "off" | "warn" | "strict";
 
 // Config caching (30s TTL)
-let enforcementCache: { level: EnforcementLevel; directory: string; timestamp: number } | null = null;
+let enforcementCache: {
+  level: EnforcementLevel;
+  directory: string;
+  timestamp: number;
+} | null = null;
 const CACHE_TTL_MS = 30_000; // 30 seconds
 
 /**
@@ -60,24 +61,27 @@ function getEnforcementLevel(directory: string): EnforcementLevel {
   const now = Date.now();
 
   // Return cached value if valid
-  if (enforcementCache &&
-      enforcementCache.directory === directory &&
-      (now - enforcementCache.timestamp) < CACHE_TTL_MS) {
+  if (
+    enforcementCache &&
+    enforcementCache.directory === directory &&
+    now - enforcementCache.timestamp < CACHE_TTL_MS
+  ) {
     return enforcementCache.level;
   }
 
-  const localConfig = path.join(getOmcRoot(directory), 'config.json');
-  const globalConfig = path.join(getClaudeConfigDir(), '.omc-config.json');
+  const localConfig = path.join(getOmcRoot(directory), "config.json");
+  const globalConfig = path.join(getClaudeConfigDir(), ".omc-config.json");
 
-  let level: EnforcementLevel = 'warn'; // Default
+  let level: EnforcementLevel = "warn"; // Default
 
   for (const configPath of [localConfig, globalConfig]) {
     if (existsSync(configPath)) {
       try {
-        const content = readFileSync(configPath, 'utf-8');
+        const content = readFileSync(configPath, "utf-8");
         const config = JSON.parse(content);
-        const configLevel = config.delegationEnforcementLevel ?? config.enforcementLevel;
-        if (['off', 'warn', 'strict'].includes(configLevel)) {
+        const configLevel =
+          config.delegationEnforcementLevel ?? config.enforcementLevel;
+        if (["off", "warn", "strict"].includes(configLevel)) {
           level = configLevel as EnforcementLevel;
           break; // Found valid level, stop searching
         }
@@ -119,7 +123,7 @@ interface GitFileStat {
   path: string;
   added: number;
   removed: number;
-  status: 'modified' | 'added' | 'deleted';
+  status: "modified" | "added" | "deleted";
 }
 
 /**
@@ -131,21 +135,26 @@ export function isAllowedPath(filePath: string, directory?: string): boolean {
   // then normalize to collapse .. segments, then ensure forward slashes.
   const normalized = toForwardSlash(path.normalize(toForwardSlash(filePath)));
   // Reject explicit traversal that escapes (e.g. "../foo")
-  if (normalized.startsWith('../') || normalized === '..') return false;
+  if (normalized.startsWith("../") || normalized === "..") return false;
   // Fast path: check relative patterns
-  if (ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(normalized))) return true;
+  if (ALLOWED_PATH_PATTERNS.some((pattern) => pattern.test(normalized)))
+    return true;
   // Absolute path: strip worktree root, then re-check
   if (path.isAbsolute(filePath)) {
     const relToConfigDir = path.relative(getClaudeConfigDir(), filePath);
-    if (!relToConfigDir || (!relToConfigDir.startsWith('..') && !path.isAbsolute(relToConfigDir))) {
+    if (
+      !relToConfigDir ||
+      (!relToConfigDir.startsWith("..") && !path.isAbsolute(relToConfigDir))
+    ) {
       return true;
     }
 
     const root = directory ? getWorktreeRoot(directory) : getWorktreeRoot();
     if (root) {
       const rel = toForwardSlash(path.relative(root, filePath));
-      if (rel.startsWith('../') || rel === '..' || path.isAbsolute(rel)) return false;
-      return ALLOWED_PATH_PATTERNS.some(pattern => pattern.test(rel));
+      if (rel.startsWith("../") || rel === ".." || path.isAbsolute(rel))
+        return false;
+      return ALLOWED_PATH_PATTERNS.some((pattern) => pattern.test(rel));
     }
   }
   return false;
@@ -169,7 +178,7 @@ export function isWriteEditTool(toolName: string): boolean {
 
 function isDelegationToolName(toolName: string): boolean {
   const normalizedToolName = toolName.toLowerCase();
-  return normalizedToolName === 'task' || normalizedToolName === 'agent';
+  return normalizedToolName === "task" || normalizedToolName === "agent";
 }
 
 /**
@@ -177,50 +186,50 @@ function isDelegationToolName(toolName: string): boolean {
  */
 export function getGitDiffStats(directory: string): GitFileStat[] {
   try {
-    const output = execSync('git diff --numstat HEAD', {
+    const output = execSync("git diff --numstat HEAD", {
       windowsHide: true,
       cwd: directory,
-      encoding: 'utf-8',
+      encoding: "utf-8",
       timeout: 5000,
     }).trim();
 
     if (!output) return [];
 
-    const statusOutput = execSync('git status --porcelain', {
+    const statusOutput = execSync("git status --porcelain", {
       windowsHide: true,
       cwd: directory,
-      encoding: 'utf-8',
+      encoding: "utf-8",
       timeout: 5000,
     }).trim();
 
-    const statusMap = new Map<string, 'modified' | 'added' | 'deleted'>();
-    for (const line of statusOutput.split('\n')) {
+    const statusMap = new Map<string, "modified" | "added" | "deleted">();
+    for (const line of statusOutput.split("\n")) {
       if (!line) continue;
       const status = line.substring(0, 2).trim();
       const filePath = line.substring(3);
-      if (status === 'A' || status === '??') {
-        statusMap.set(filePath, 'added');
-      } else if (status === 'D') {
-        statusMap.set(filePath, 'deleted');
+      if (status === "A" || status === "??") {
+        statusMap.set(filePath, "added");
+      } else if (status === "D") {
+        statusMap.set(filePath, "deleted");
       } else {
-        statusMap.set(filePath, 'modified');
+        statusMap.set(filePath, "modified");
       }
     }
 
     const stats: GitFileStat[] = [];
-    for (const line of output.split('\n')) {
-      const parts = line.split('\t');
+    for (const line of output.split("\n")) {
+      const parts = line.split("\t");
       if (parts.length < 3) continue;
 
       const [addedStr, removedStr, path] = parts;
-      const added = addedStr === '-' ? 0 : parseInt(addedStr, 10);
-      const removed = removedStr === '-' ? 0 : parseInt(removedStr, 10);
+      const added = addedStr === "-" ? 0 : parseInt(addedStr, 10);
+      const removed = removedStr === "-" ? 0 : parseInt(removedStr, 10);
 
       stats.push({
         path,
         added,
         removed,
-        status: statusMap.get(path) ?? 'modified',
+        status: statusMap.get(path) ?? "modified",
       });
     }
 
@@ -234,39 +243,40 @@ export function getGitDiffStats(directory: string): GitFileStat[] {
  * Format file changes for display
  */
 export function formatFileChanges(stats: GitFileStat[]): string {
-  if (stats.length === 0) return '[FILE CHANGES SUMMARY]\nNo file changes detected.\n';
+  if (stats.length === 0)
+    return "[FILE CHANGES SUMMARY]\nNo file changes detected.\n";
 
-  const modified = stats.filter((s) => s.status === 'modified');
-  const added = stats.filter((s) => s.status === 'added');
-  const deleted = stats.filter((s) => s.status === 'deleted');
+  const modified = stats.filter((s) => s.status === "modified");
+  const added = stats.filter((s) => s.status === "added");
+  const deleted = stats.filter((s) => s.status === "deleted");
 
-  const lines: string[] = ['[FILE CHANGES SUMMARY]'];
+  const lines: string[] = ["[FILE CHANGES SUMMARY]"];
 
   if (modified.length > 0) {
-    lines.push('Modified files:');
+    lines.push("Modified files:");
     for (const f of modified) {
       lines.push(`  ${f.path}  (+${f.added}, -${f.removed})`);
     }
-    lines.push('');
+    lines.push("");
   }
 
   if (added.length > 0) {
-    lines.push('Created files:');
+    lines.push("Created files:");
     for (const f of added) {
       lines.push(`  ${f.path}  (+${f.added})`);
     }
-    lines.push('');
+    lines.push("");
   }
 
   if (deleted.length > 0) {
-    lines.push('Deleted files:');
+    lines.push("Deleted files:");
     for (const f of deleted) {
       lines.push(`  ${f.path}  (-${f.removed})`);
     }
-    lines.push('');
+    lines.push("");
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
@@ -293,7 +303,7 @@ Task tool with resume="${sessionId}", prompt="fix: [describe the specific failur
 export function buildOrchestratorReminder(
   planName: string,
   progress: { total: number; completed: number },
-  sessionId?: string
+  sessionId?: string,
 ): string {
   const remaining = progress.total - progress.completed;
   return `
@@ -314,10 +324,12 @@ ALL pass? → commit atomic unit, mark \`[x]\`, next task.`;
 export function buildBoulderContinuation(
   planName: string,
   remaining: number,
-  total: number
+  total: number,
 ): string {
-  return BOULDER_CONTINUATION_PROMPT.replace(/{PLAN_NAME}/g, planName) +
-    `\n\n[Status: ${total - remaining}/${total} completed, ${remaining} remaining]`;
+  return (
+    BOULDER_CONTINUATION_PROMPT.replace(/{PLAN_NAME}/g, planName) +
+    `\n\n[Status: ${total - remaining}/${total} completed, ${remaining} remaining]`
+  );
 }
 
 /**
@@ -327,7 +339,9 @@ export function buildBoulderContinuation(
  */
 function processRememberTags(output: string, directory: string): void {
   // Match priority remember tags
-  const priorityMatches = output.matchAll(/<remember\s+priority>([\s\S]*?)<\/remember>/gi);
+  const priorityMatches = output.matchAll(
+    /<remember\s+priority>([\s\S]*?)<\/remember>/gi,
+  );
   for (const match of priorityMatches) {
     const content = match[1].trim();
     if (content) {
@@ -352,33 +366,35 @@ function suggestAgentForFile(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
 
   const suggestions: Record<string, string> = {
-    '.ts': 'executor-low (simple) or executor (complex)',
-    '.tsx': 'designer-low (simple) or designer (complex UI)',
-    '.js': 'executor-low',
-    '.jsx': 'designer-low',
-    '.py': 'executor-low (simple) or executor (complex)',
-    '.vue': 'designer',
-    '.svelte': 'designer',
-    '.css': 'designer-low',
-    '.scss': 'designer-low',
-    '.md': 'writer (documentation)',
-    '.json': 'executor-low',
+    ".ts": "executor-low (simple) or executor (complex)",
+    ".tsx": "designer-low (simple) or designer (complex UI)",
+    ".js": "executor-low",
+    ".jsx": "designer-low",
+    ".py": "executor-low (simple) or executor (complex)",
+    ".vue": "designer",
+    ".svelte": "designer",
+    ".css": "designer-low",
+    ".scss": "designer-low",
+    ".md": "writer (documentation)",
+    ".json": "executor-low",
   };
 
-  return suggestions[ext] || 'executor';
+  return suggestions[ext] || "executor";
 }
 
 /**
  * Process pre-tool-use hook for orchestrator
  * Returns warning message if orchestrator tries to modify non-allowed paths
  */
-export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecuteOutput {
+export function processOrchestratorPreTool(
+  input: ToolExecuteInput,
+): ToolExecuteOutput {
   const { toolName, toolInput, sessionId } = input;
   const directory = input.directory || process.cwd();
   const enforcementLevel = getEnforcementLevel(directory);
 
   // Early exit if enforcement is off
-  if (enforcementLevel === 'off') {
+  if (enforcementLevel === "off") {
     return { continue: true };
   }
 
@@ -390,7 +406,11 @@ export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecute
   // Extract file path from tool input.
   // Claude Code sends file_path (snake_case) for Write/Edit tools and notebook_path for NotebookEdit.
   // toolInput is the tool's own parameter object, NOT normalized by normalizeHookInput.
-  const filePath = (toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path ?? toolInput?.file ?? toolInput?.notebook_path) as string | undefined;
+  const filePath = (toolInput?.file_path ??
+    toolInput?.filePath ??
+    toolInput?.path ??
+    toolInput?.file ??
+    toolInput?.notebook_path) as string | undefined;
 
   // Allow if path is in allowed prefix
   if (!filePath || isAllowedPath(filePath, directory)) {
@@ -399,8 +419,8 @@ export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecute
       logAuditEntry({
         tool: toolName,
         filePath,
-        decision: 'allowed',
-        reason: 'allowed_path',
+        decision: "allowed",
+        reason: "allowed_path",
         enforcementLevel,
         sessionId,
       });
@@ -413,22 +433,23 @@ export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecute
   logAuditEntry({
     tool: toolName,
     filePath,
-    decision: enforcementLevel === 'strict' ? 'blocked' : 'warned',
-    reason: isSource ? 'source_file' : 'other',
+    decision: enforcementLevel === "strict" ? "blocked" : "warned",
+    reason: isSource ? "source_file" : "other",
     enforcementLevel,
     sessionId,
   });
 
   // Build warning with agent suggestion
   const agentSuggestion = suggestAgentForFile(filePath);
-  const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace('$FILE_PATH', filePath) +
+  const warning =
+    ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", filePath) +
     `\n\nSuggested agent: ${agentSuggestion}`;
 
   // Block if strict mode, warn otherwise
-  if (enforcementLevel === 'strict') {
+  if (enforcementLevel === "strict") {
     return {
       continue: false,
-      reason: 'DELEGATION_REQUIRED',
+      reason: "DELEGATION_REQUIRED",
       message: warning,
     };
   } else {
@@ -445,14 +466,18 @@ export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecute
  */
 export function processOrchestratorPostTool(
   input: ToolExecuteInput,
-  output: string
+  output: string,
 ): ToolExecuteOutput {
   const { toolName, toolInput, directory } = input;
   const workDir = directory || process.cwd();
 
   // Handle write/edit tools
   if (isWriteEditTool(toolName)) {
-    const filePath = (toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path ?? toolInput?.file ?? toolInput?.notebook_path) as string | undefined;
+    const filePath = (toolInput?.file_path ??
+      toolInput?.filePath ??
+      toolInput?.path ??
+      toolInput?.file ??
+      toolInput?.notebook_path) as string | undefined;
 
     if (filePath && !isAllowedPath(filePath, workDir)) {
       return {
@@ -465,7 +490,9 @@ export function processOrchestratorPostTool(
   // Handle delegation tool completion
   if (isDelegationToolName(toolName)) {
     // Check for background task launch
-    const isBackgroundLaunch = output.includes('Background task launched') || output.includes('Background task resumed');
+    const isBackgroundLaunch =
+      output.includes("Background task launched") ||
+      output.includes("Background task resumed");
     if (isBackgroundLaunch) {
       return { continue: true };
     }
@@ -500,7 +527,9 @@ ${buildOrchestratorReminder(boulderState.plan_name, progress)}
     // No boulder state - add standalone verification reminder
     return {
       continue: true,
-      modifiedOutput: output + `\n<system-reminder>\n${buildVerificationReminder()}\n</system-reminder>`,
+      modifiedOutput:
+        output +
+        `\n<system-reminder>\n${buildVerificationReminder()}\n</system-reminder>`,
     };
   }
 
@@ -530,7 +559,11 @@ export function checkBoulderContinuation(directory: string): {
 
   return {
     shouldContinue: true,
-    message: buildBoulderContinuation(boulderState.plan_name, remaining, progress.total),
+    message: buildBoulderContinuation(
+      boulderState.plan_name,
+      remaining,
+      progress.total,
+    ),
   };
 }
 
@@ -558,10 +591,14 @@ export function createOmcOrchestratorHook(directory: string) {
     /**
      * Post-tool execution handler
      */
-    postTool: (toolName: string, toolInput: Record<string, unknown>, output: string) => {
+    postTool: (
+      toolName: string,
+      toolInput: Record<string, unknown>,
+      output: string,
+    ) => {
       return processOrchestratorPostTool(
         { toolName, toolInput, directory },
-        output
+        output,
       );
     },
 

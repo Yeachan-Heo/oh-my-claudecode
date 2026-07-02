@@ -9,9 +9,9 @@
  * - Type checking enforcement
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join, extname, normalize } from 'path';
-import { execFileSync, spawnSync } from 'child_process';
+import { existsSync, readFileSync } from "fs";
+import { join, extname, normalize } from "path";
+import { execFileSync, spawnSync } from "child_process";
 
 // =============================================================================
 // SECURITY UTILITIES
@@ -25,13 +25,13 @@ export function isValidFilePath(filePath: string): boolean {
   // Normalize Windows path separators to forward slashes before checking.
   // Backslashes are valid path separators on Windows (e.g. src\file.ts,
   // C:\repo\file.ts) and must not be treated as shell metacharacters.
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replace(/\\/g, "/");
 
   // Block shell metacharacters
   if (/[;&|`$()<>{}[\]*?~!#\n\r\t\0]/.test(normalized)) return false;
 
   // Block path traversal
-  if (normalize(normalized).includes('..')) return false;
+  if (normalize(normalized).includes("..")) return false;
 
   return true;
 }
@@ -50,17 +50,17 @@ export interface FormatConfig {
 }
 
 const DEFAULT_FORMATTERS: Record<string, string> = {
-  '.ts': 'prettier --write',
-  '.tsx': 'prettier --write',
-  '.js': 'prettier --write',
-  '.jsx': 'prettier --write',
-  '.json': 'prettier --write',
-  '.css': 'prettier --write',
-  '.scss': 'prettier --write',
-  '.md': 'prettier --write',
-  '.py': 'black',
-  '.go': 'gofmt -w',
-  '.rs': 'rustfmt'
+  ".ts": "prettier --write",
+  ".tsx": "prettier --write",
+  ".js": "prettier --write",
+  ".jsx": "prettier --write",
+  ".json": "prettier --write",
+  ".css": "prettier --write",
+  ".scss": "prettier --write",
+  ".md": "prettier --write",
+  ".py": "black",
+  ".go": "gofmt -w",
+  ".rs": "rustfmt",
 };
 
 /**
@@ -74,19 +74,29 @@ export function getFormatter(ext: string): string | null {
  * Check if a formatter is available
  */
 export function isFormatterAvailable(command: string): boolean {
-  const binary = command.split(' ')[0];
-  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(checkCommand, [binary], { windowsHide: true, stdio: 'ignore' });
+  const binary = command.split(" ")[0];
+  const checkCommand = process.platform === "win32" ? "where" : "which";
+  const result = spawnSync(checkCommand, [binary], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
   return result.status === 0;
 }
 
 /**
  * Format a file using the appropriate formatter
  */
-export function formatFile(filePath: string): { success: boolean; message: string } {
+export function formatFile(filePath: string): {
+  success: boolean;
+  message: string;
+} {
   // Validate file path for security
   if (!isValidFilePath(filePath)) {
-    return { success: false, message: 'Invalid file path: contains unsafe characters or path traversal' };
+    return {
+      success: false,
+      message:
+        "Invalid file path: contains unsafe characters or path traversal",
+    };
   }
 
   const ext = extname(filePath);
@@ -101,8 +111,12 @@ export function formatFile(filePath: string): { success: boolean; message: strin
   }
 
   try {
-    const [formatterBin, ...formatterArgs] = formatter.split(' ');
-    execFileSync(formatterBin, [...formatterArgs, filePath], { windowsHide: true, encoding: 'utf-8', stdio: 'pipe' });
+    const [formatterBin, ...formatterArgs] = formatter.split(" ");
+    execFileSync(formatterBin, [...formatterArgs, filePath], {
+      windowsHide: true,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
     return { success: true, message: `Formatted ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Format failed: ${_error}` };
@@ -123,13 +137,13 @@ export interface LintConfig {
 }
 
 const DEFAULT_LINTERS: Record<string, string> = {
-  '.ts': 'eslint --fix',
-  '.tsx': 'eslint --fix',
-  '.js': 'eslint --fix',
-  '.jsx': 'eslint --fix',
-  '.py': 'ruff check --fix',
-  '.go': 'golangci-lint run',
-  '.rs': 'cargo clippy'
+  ".ts": "eslint --fix",
+  ".tsx": "eslint --fix",
+  ".js": "eslint --fix",
+  ".jsx": "eslint --fix",
+  ".py": "ruff check --fix",
+  ".go": "golangci-lint run",
+  ".rs": "cargo clippy",
 };
 
 /**
@@ -142,10 +156,17 @@ export function getLinter(ext: string): string | null {
 /**
  * Run linter on a file
  */
-export function lintFile(filePath: string): { success: boolean; message: string } {
+export function lintFile(filePath: string): {
+  success: boolean;
+  message: string;
+} {
   // Validate file path for security
   if (!isValidFilePath(filePath)) {
-    return { success: false, message: 'Invalid file path: contains unsafe characters or path traversal' };
+    return {
+      success: false,
+      message:
+        "Invalid file path: contains unsafe characters or path traversal",
+    };
   }
 
   const ext = extname(filePath);
@@ -155,16 +176,23 @@ export function lintFile(filePath: string): { success: boolean; message: string 
     return { success: true, message: `No linter configured for ${ext}` };
   }
 
-  const linterBin = linter.split(' ')[0];
-  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const checkResult = spawnSync(checkCommand, [linterBin], { windowsHide: true, stdio: 'ignore' });
+  const linterBin = linter.split(" ")[0];
+  const checkCommand = process.platform === "win32" ? "where" : "which";
+  const checkResult = spawnSync(checkCommand, [linterBin], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
   if (checkResult.status !== 0) {
     return { success: true, message: `Linter ${linter} not available` };
   }
 
   try {
-    const [linterCmd, ...linterArgs] = linter.split(' ');
-    execFileSync(linterCmd, [...linterArgs, filePath], { windowsHide: true, encoding: 'utf-8', stdio: 'pipe' });
+    const [linterCmd, ...linterArgs] = linter.split(" ");
+    execFileSync(linterCmd, [...linterArgs, filePath], {
+      windowsHide: true,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
     return { success: true, message: `Lint passed for ${filePath}` };
   } catch (_error) {
     return { success: false, message: `Lint errors in ${filePath}` };
@@ -187,50 +215,56 @@ export interface CommitConfig {
 }
 
 const DEFAULT_COMMIT_TYPES = [
-  'feat',     // New feature
-  'fix',      // Bug fix
-  'docs',     // Documentation
-  'style',    // Formatting, no code change
-  'refactor', // Refactoring
-  'perf',     // Performance improvement
-  'test',     // Adding tests
-  'build',    // Build system changes
-  'ci',       // CI configuration
-  'chore',    // Maintenance
-  'revert'    // Revert previous commit
+  "feat", // New feature
+  "fix", // Bug fix
+  "docs", // Documentation
+  "style", // Formatting, no code change
+  "refactor", // Refactoring
+  "perf", // Performance improvement
+  "test", // Adding tests
+  "build", // Build system changes
+  "ci", // CI configuration
+  "chore", // Maintenance
+  "revert", // Revert previous commit
 ];
 
-const CONVENTIONAL_COMMIT_REGEX = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?(!)?:\s.+$/;
+const CONVENTIONAL_COMMIT_REGEX =
+  /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?(!)?:\s.+$/;
 
 /**
  * Validate a commit message against conventional commit format
  */
 export function validateCommitMessage(
   message: string,
-  config?: Partial<CommitConfig>
+  config?: Partial<CommitConfig>,
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  const lines = message.trim().split('\n');
+  const lines = message.trim().split("\n");
   const subject = lines[0];
 
   // Check subject line
   if (!subject) {
-    errors.push('Commit message cannot be empty');
+    errors.push("Commit message cannot be empty");
     return { valid: false, errors };
   }
 
   // Determine effective types: prefer config.types when non-empty
-  const effectiveTypes = config?.types?.length ? config.types : DEFAULT_COMMIT_TYPES;
-  const commitRegex = effectiveTypes === DEFAULT_COMMIT_TYPES
-    ? CONVENTIONAL_COMMIT_REGEX
-    : new RegExp(`^(${effectiveTypes.join('|')})(\\([a-z0-9-]+\\))?(!)?:\\s.+$`);
+  const effectiveTypes = config?.types?.length
+    ? config.types
+    : DEFAULT_COMMIT_TYPES;
+  const commitRegex =
+    effectiveTypes === DEFAULT_COMMIT_TYPES
+      ? CONVENTIONAL_COMMIT_REGEX
+      : new RegExp(
+          `^(${effectiveTypes.join("|")})(\\([a-z0-9-]+\\))?(!)?:\\s.+$`,
+        );
 
   // Check conventional commit format
   if (!commitRegex.test(subject)) {
     errors.push(
-      'Subject must follow conventional commit format: type(scope?): description'
+      "Subject must follow conventional commit format: type(scope?): description",
     );
-    errors.push(`Allowed types: ${effectiveTypes.join(', ')}`);
+    errors.push(`Allowed types: ${effectiveTypes.join(", ")}`);
   }
 
   // Check subject length
@@ -243,14 +277,14 @@ export function validateCommitMessage(
   if (config?.requireScope) {
     const hasScope = /\([a-z0-9-]+\)/.test(subject);
     if (!hasScope) {
-      errors.push('Scope is required in commit message');
+      errors.push("Scope is required in commit message");
     }
   }
 
   // Check for body if required
   if (config?.requireBody) {
     if (lines.length < 3 || !lines[2]) {
-      errors.push('Commit body is required');
+      errors.push("Commit body is required");
     }
   }
 
@@ -264,29 +298,36 @@ export function validateCommitMessage(
 /**
  * Run TypeScript type checking
  */
-export function runTypeCheck(directory: string): { success: boolean; message: string } {
-  const tsconfigPath = join(directory, 'tsconfig.json');
+export function runTypeCheck(directory: string): {
+  success: boolean;
+  message: string;
+} {
+  const tsconfigPath = join(directory, "tsconfig.json");
 
   if (!existsSync(tsconfigPath)) {
-    return { success: true, message: 'No tsconfig.json found' };
+    return { success: true, message: "No tsconfig.json found" };
   }
 
-  const checkCommand = process.platform === 'win32' ? 'where' : 'which';
-  const tscCheck = spawnSync(checkCommand, ['tsc'], { windowsHide: true, stdio: 'ignore' });
+  const checkCommand = process.platform === "win32" ? "where" : "which";
+  const tscCheck = spawnSync(checkCommand, ["tsc"], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
   if (tscCheck.status !== 0) {
-    return { success: true, message: 'TypeScript not installed' };
+    return { success: true, message: "TypeScript not installed" };
   }
 
   // shell:true on Windows avoids Node 20.12+ EINVAL when spawning npx.cmd (CVE-2024-27980). #2721
-  const tscResult = spawnSync('npx', ['tsc', '--noEmit'], { windowsHide: true,
+  const tscResult = spawnSync("npx", ["tsc", "--noEmit"], {
+    windowsHide: true,
     cwd: directory,
-    stdio: 'pipe',
-    shell: process.platform === 'win32',
+    stdio: "pipe",
+    shell: process.platform === "win32",
   });
   if (tscResult.status === 0) {
-    return { success: true, message: 'Type check passed' };
+    return { success: true, message: "Type check passed" };
   }
-  return { success: false, message: 'Type errors found' };
+  return { success: false, message: "Type errors found" };
 }
 
 // =============================================================================
@@ -296,38 +337,50 @@ export function runTypeCheck(directory: string): { success: boolean; message: st
 /**
  * Detect and run tests for a project
  */
-export function runTests(directory: string): { success: boolean; message: string } {
-  const packageJsonPath = join(directory, 'package.json');
+export function runTests(directory: string): {
+  success: boolean;
+  message: string;
+} {
+  const packageJsonPath = join(directory, "package.json");
 
   if (existsSync(packageJsonPath)) {
     try {
-      const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
       if (pkg.scripts?.test) {
-        execFileSync('npm', ['test'], { windowsHide: true,
+        execFileSync("npm", ["test"], {
+          windowsHide: true,
           cwd: directory,
-          encoding: 'utf-8',
-          stdio: 'pipe',
+          encoding: "utf-8",
+          stdio: "pipe",
           // shell:true on Windows avoids Node 20.12+ EINVAL when spawning npm.cmd (CVE-2024-27980). #2721
-          shell: process.platform === 'win32',
+          shell: process.platform === "win32",
         });
-        return { success: true, message: 'Tests passed' };
+        return { success: true, message: "Tests passed" };
       }
     } catch (_error) {
-      return { success: false, message: 'Tests failed' };
+      return { success: false, message: "Tests failed" };
     }
   }
 
   // Check for pytest
-  if (existsSync(join(directory, 'pytest.ini')) || existsSync(join(directory, 'pyproject.toml'))) {
+  if (
+    existsSync(join(directory, "pytest.ini")) ||
+    existsSync(join(directory, "pyproject.toml"))
+  ) {
     try {
-      execFileSync('pytest', [], { windowsHide: true, cwd: directory, encoding: 'utf-8', stdio: 'pipe' });
-      return { success: true, message: 'Tests passed' };
+      execFileSync("pytest", [], {
+        windowsHide: true,
+        cwd: directory,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      return { success: true, message: "Tests passed" };
     } catch (_error) {
-      return { success: false, message: 'Tests failed' };
+      return { success: false, message: "Tests failed" };
     }
   }
 
-  return { success: true, message: 'No test runner found' };
+  return { success: true, message: "No test runner found" };
 }
 
 // =============================================================================
@@ -337,24 +390,28 @@ export function runTests(directory: string): { success: boolean; message: string
 /**
  * Run project-level lint checks
  */
-export function runLint(directory: string): { success: boolean; message: string } {
-  const packageJsonPath = join(directory, 'package.json');
+export function runLint(directory: string): {
+  success: boolean;
+  message: string;
+} {
+  const packageJsonPath = join(directory, "package.json");
 
   if (existsSync(packageJsonPath)) {
     try {
-      const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
       if (pkg.scripts?.lint) {
         try {
-          execFileSync('npm', ['run', 'lint'], { windowsHide: true,
+          execFileSync("npm", ["run", "lint"], {
+            windowsHide: true,
             cwd: directory,
-            encoding: 'utf-8',
-            stdio: 'pipe',
+            encoding: "utf-8",
+            stdio: "pipe",
             // shell:true on Windows avoids Node 20.12+ EINVAL when spawning npm.cmd (CVE-2024-27980). #2721
-            shell: process.platform === 'win32',
+            shell: process.platform === "win32",
           });
-          return { success: true, message: 'Lint passed' };
+          return { success: true, message: "Lint passed" };
         } catch (_error) {
-          return { success: false, message: 'Lint errors found' };
+          return { success: false, message: "Lint errors found" };
         }
       }
     } catch {
@@ -362,7 +419,7 @@ export function runLint(directory: string): { success: boolean; message: string 
     }
   }
 
-  return { success: true, message: 'No lint script found' };
+  return { success: true, message: "No lint script found" };
 }
 
 // =============================================================================
@@ -383,46 +440,48 @@ export interface PreCommitResult {
  */
 export function runPreCommitChecks(
   directory: string,
-  commitMessage?: string
+  commitMessage?: string,
 ): PreCommitResult {
-  const checks: PreCommitResult['checks'] = [];
+  const checks: PreCommitResult["checks"] = [];
 
   // Type checking
   const typeCheck = runTypeCheck(directory);
   checks.push({
-    name: 'Type Check',
+    name: "Type Check",
     passed: typeCheck.success,
-    message: typeCheck.message
+    message: typeCheck.message,
   });
 
   // Test runner
   const testCheck = runTests(directory);
   checks.push({
-    name: 'Tests',
+    name: "Tests",
     passed: testCheck.success,
-    message: testCheck.message
+    message: testCheck.message,
   });
 
   // Lint
   const lintCheck = runLint(directory);
   checks.push({
-    name: 'Lint',
+    name: "Lint",
     passed: lintCheck.success,
-    message: lintCheck.message
+    message: lintCheck.message,
   });
 
   // Commit message validation
   if (commitMessage) {
     const commitCheck = validateCommitMessage(commitMessage);
     checks.push({
-      name: 'Commit Message',
+      name: "Commit Message",
       passed: commitCheck.valid,
-      message: commitCheck.valid ? 'Valid format' : commitCheck.errors.join('; ')
+      message: commitCheck.valid
+        ? "Valid format"
+        : commitCheck.errors.join("; "),
     });
   }
 
   // All checks must pass
-  const canCommit = checks.every(c => c.passed);
+  const canCommit = checks.every((c) => c.passed);
 
   return { canCommit, checks };
 }
@@ -436,17 +495,17 @@ export function runPreCommitChecks(
  */
 export function getPreCommitReminderMessage(result: PreCommitResult): string {
   if (result.canCommit) {
-    return '';
+    return "";
   }
 
-  const failedChecks = result.checks.filter(c => !c.passed);
+  const failedChecks = result.checks.filter((c) => !c.passed);
 
   return `<pre-commit-validation>
 
 [PRE-COMMIT CHECKS FAILED]
 
 The following checks did not pass:
-${failedChecks.map(c => `- ${c.name}: ${c.message}`).join('\n')}
+${failedChecks.map((c) => `- ${c.name}: ${c.message}`).join("\n")}
 
 Please fix these issues before committing.
 
@@ -460,9 +519,12 @@ Please fix these issues before committing.
 /**
  * Generate auto-format reminder message
  */
-export function getAutoFormatMessage(filePath: string, result: { success: boolean; message: string }): string {
+export function getAutoFormatMessage(
+  filePath: string,
+  result: { success: boolean; message: string },
+): string {
   if (result.success) {
-    return '';
+    return "";
   }
 
   return `<auto-format>

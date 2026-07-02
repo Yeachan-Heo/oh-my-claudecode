@@ -14,11 +14,11 @@
  * returns null and the normal repo/branch/status elements take over.
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
-import { cyan, dim, green, yellow } from '../colors.js';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { cyan, dim, green, yellow } from "../colors.js";
+import { getOmcRoot } from "../../lib/worktree-paths.js";
 
 /**
  * Liveness window for the session counter. A session dir whose
@@ -43,7 +43,8 @@ const ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
  * session — e.g. session-started.json is missing if the session-start
  * hook crashed or the user is on an older install).
  */
-const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CACHE_TTL_MS = 30_000;
 
@@ -69,13 +70,13 @@ export function resetMultiRepoCache(): void {
 
 function isGitRepo(dir: string): boolean {
   try {
-    execSync('git rev-parse --show-toplevel', {
+    execSync("git rev-parse --show-toplevel", {
       windowsHide: true,
       cwd: dir,
-      encoding: 'utf-8',
+      encoding: "utf-8",
       timeout: 1000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: process.platform === "win32" ? "cmd.exe" : undefined,
     });
     return true;
   } catch {
@@ -85,7 +86,7 @@ function isGitRepo(dir: string): boolean {
 
 function looksLikeRepo(entryPath: string): boolean {
   // .git can be a directory (normal clone) or a file (worktree / submodule).
-  return existsSync(join(entryPath, '.git'));
+  return existsSync(join(entryPath, ".git"));
 }
 
 /**
@@ -106,7 +107,7 @@ function countActiveSessions(cwd: string): number {
   // cwd here is verified to be the workspace anchor (marker present),
   // so getOmcRoot resolves to <cwd>/.omc. Route through the canonical
   // helper so OMC_STATE_DIR and OMC_DISABLE_MULTIREPO are honored.
-  const sessionsDir = join(getOmcRoot(cwd), 'state', 'sessions');
+  const sessionsDir = join(getOmcRoot(cwd), "state", "sessions");
   if (!existsSync(sessionsDir)) return 0;
 
   const now = Date.now();
@@ -127,14 +128,21 @@ function countActiveSessions(cwd: string): number {
           // some filesystems. Scan immediate children.
           for (const f of readdirSync(dirPath)) {
             try {
-              if (now - statSync(join(dirPath, f)).mtimeMs < ACTIVITY_WINDOW_MS) {
+              if (
+                now - statSync(join(dirPath, f)).mtimeMs <
+                ACTIVITY_WINDOW_MS
+              ) {
                 fresh = true;
                 break;
               }
-            } catch { /* skip */ }
+            } catch {
+              /* skip */
+            }
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
 
       if (fresh) active++;
     }
@@ -165,7 +173,10 @@ export function detectMultiRepo(cwd?: string): MultiRepoInfo | null {
   try {
     // If cwd is inside a git repo, skip — that's the single-repo path.
     if (isGitRepo(key)) {
-      multiRepoCache.set(key, { value: null, expiresAt: Date.now() + CACHE_TTL_MS });
+      multiRepoCache.set(key, {
+        value: null,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
       return null;
     }
 
@@ -175,7 +186,7 @@ export function detectMultiRepo(cwd?: string): MultiRepoInfo | null {
       const entries = readdirSync(key, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        if (entry.name.startsWith('.')) continue;
+        if (entry.name.startsWith(".")) continue;
         if (looksLikeRepo(join(key, entry.name))) subrepoCount++;
       }
     } catch {
@@ -183,11 +194,14 @@ export function detectMultiRepo(cwd?: string): MultiRepoInfo | null {
     }
 
     if (subrepoCount < 2) {
-      multiRepoCache.set(key, { value: null, expiresAt: Date.now() + CACHE_TTL_MS });
+      multiRepoCache.set(key, {
+        value: null,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
       return null;
     }
 
-    const hasMarker = existsSync(join(key, '.omc-workspace'));
+    const hasMarker = existsSync(join(key, ".omc-workspace"));
     const activeSessions = hasMarker ? countActiveSessions(key) : 0;
     result = {
       isMultiRepo: true,
@@ -200,7 +214,10 @@ export function detectMultiRepo(cwd?: string): MultiRepoInfo | null {
     result = null;
   }
 
-  multiRepoCache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  multiRepoCache.set(key, {
+    value: result,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
   return result;
 }
 
@@ -218,10 +235,10 @@ export function renderMultiRepo(cwd?: string): string | null {
 
   if (!info.hasMarker) {
     return (
-      yellow('⚠ multi-repo detected') +
-      dim(' — run: ') +
+      yellow("⚠ multi-repo detected") +
+      dim(" — run: ") +
       cyan(`echo {} > "${info.parentName}/.omc-workspace"`) +
-      dim(' to enable shared state')
+      dim(" to enable shared state")
     );
   }
 
@@ -231,12 +248,12 @@ export function renderMultiRepo(cwd?: string): string | null {
   // will linger until the window expires.
   const sessionsPart =
     info.activeSessions > 0
-      ? ` ${dim('sessions:~')}${green(String(info.activeSessions))}`
-      : ` ${dim('sessions:~')}${dim('0')}`;
+      ? ` ${dim("sessions:~")}${green(String(info.activeSessions))}`
+      : ` ${dim("sessions:~")}${dim("0")}`;
 
   return (
-    `${dim('mr:')}${cyan(info.parentName)}` +
-    ` ${dim('repos:')}${cyan(String(info.subrepoCount))}` +
+    `${dim("mr:")}${cyan(info.parentName)}` +
+    ` ${dim("repos:")}${cyan(String(info.subrepoCount))}` +
     sessionsPart
   );
 }

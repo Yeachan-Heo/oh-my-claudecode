@@ -56,7 +56,10 @@ import { join, basename, dirname } from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
-import { getClaudeConfigDir, getUpdateCheckCachePath } from "../utils/config-dir.js";
+import {
+  getClaudeConfigDir,
+  getUpdateCheckCachePath,
+} from "../utils/config-dir.js";
 
 /**
  * Extract session ID (UUID) from a transcript path.
@@ -227,8 +230,14 @@ function showDiagnostic(): void {
   try {
     const settings = JSON.parse(readFileSync(settingsFile, "utf-8"));
     const sl = settings.statusLine;
-    if (sl && typeof sl === "object" && typeof (sl as Record<string, unknown>).command === "string") {
-      statusLineOk = ((sl as Record<string, unknown>).command as string).includes("omc-hud");
+    if (
+      sl &&
+      typeof sl === "object" &&
+      typeof (sl as Record<string, unknown>).command === "string"
+    ) {
+      statusLineOk = (
+        (sl as Record<string, unknown>).command as string
+      ).includes("omc-hud");
     } else if (typeof sl === "string") {
       statusLineOk = sl.includes("omc-hud");
     }
@@ -241,7 +250,9 @@ function showDiagnostic(): void {
 
   console.log(`[OMC] HUD v${version} | preset: ${preset}`);
   console.log(`  HUD script:  ${hudExists ? "installed" : "MISSING"}`);
-  console.log(`  statusLine:  ${statusLineOk ? "configured" : "NOT configured"}`);
+  console.log(
+    `  statusLine:  ${statusLineOk ? "configured" : "NOT configured"}`,
+  );
 
   if (!hudExists || !statusLineOk) {
     console.log("  Run /oh-my-claudecode:hud setup to fix.");
@@ -365,7 +376,8 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     // Stdin owns fresher five-hour/seven-day values, while getUsage() may provide
     // Sonnet/Opus weekly, monthly, extra, stale, and error metadata.
     const stdinRateLimits = getRateLimitsFromStdin(stdin);
-    const usageResult = config.elements.rateLimits === false ? null : await getUsage();
+    const usageResult =
+      config.elements.rateLimits === false ? null : await getUsage();
     const rateLimitsResult =
       config.elements.rateLimits === false
         ? null
@@ -444,13 +456,20 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       ? await refreshMissionBoardState(cwd, config.missionBoard)
       : null;
     const contextPercent = getContextPercent(stdin);
-    const payloadEstimate = estimatePayloadFromTranscriptPath(resolvedTranscriptPath);
+    const payloadEstimate = estimatePayloadFromTranscriptPath(
+      resolvedTranscriptPath,
+    );
 
     // Read subscription info for enterprise detection (best-effort).
     // Rate-limit rendering must not depend on this metadata being present.
     const subscriptionInfo = (() => {
       try {
-        return getSubscriptionInfo() ?? { subscriptionType: null, rateLimitTier: null };
+        return (
+          getSubscriptionInfo() ?? {
+            subscriptionType: null,
+            rateLimitTier: null,
+          }
+        );
       } catch {
         return { subscriptionType: null, rateLimitTier: null };
       }

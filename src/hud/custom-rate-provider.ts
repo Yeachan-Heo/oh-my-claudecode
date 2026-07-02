@@ -19,16 +19,16 @@
  * cache is returned (stale: true); if no cache exists, error is set.
  */
 
-import { spawn } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { getClaudeConfigDir } from '../utils/config-dir.js';
+import { spawn } from "child_process";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { getClaudeConfigDir } from "../utils/config-dir.js";
 import type {
   RateLimitsProviderConfig,
   CustomBucket,
   CustomProviderOutput,
   CustomProviderResult,
-} from './types.js';
+} from "./types.js";
 
 const CACHE_TTL_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 800;
@@ -43,9 +43,9 @@ interface CustomProviderCache {
 function getCachePath(): string {
   return join(
     getClaudeConfigDir(),
-    'plugins',
-    'oh-my-claudecode',
-    '.custom-rate-cache.json',
+    "plugins",
+    "oh-my-claudecode",
+    ".custom-rate-cache.json",
   );
 }
 
@@ -53,7 +53,7 @@ function readCache(): CustomProviderCache | null {
   try {
     const p = getCachePath();
     if (!existsSync(p)) return null;
-    return JSON.parse(readFileSync(p, 'utf-8')) as CustomProviderCache;
+    return JSON.parse(readFileSync(p, "utf-8")) as CustomProviderCache;
   } catch {
     return null;
   }
@@ -81,34 +81,42 @@ function isCacheValid(cache: CustomProviderCache): boolean {
  * Sends SIGTERM when the timeout fires, then SIGKILL after 200 ms if still
  * alive. The returned promise rejects on non-zero exit or timeout.
  */
-function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<string> {
+function spawnWithTimeout(
+  cmd: string | string[],
+  timeoutMs: number,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const [executable, ...args] = Array.isArray(cmd)
       ? cmd
-      : (['sh', '-c', cmd] as string[]);
+      : (["sh", "-c", cmd] as string[]);
 
-    const child = spawn(executable, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(executable, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
-    let stdout = '';
-    child.stdout.on('data', (chunk: Buffer) => {
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
+      child.kill("SIGTERM");
       setTimeout(() => {
         try {
-          child.kill('SIGKILL');
+          child.kill("SIGKILL");
         } catch {
           // already exited
         }
       }, 200);
-      reject(new Error(`Custom rate limit command timed out after ${timeoutMs}ms`));
+      reject(
+        new Error(`Custom rate limit command timed out after ${timeoutMs}ms`),
+      );
     }, timeoutMs);
 
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       clearTimeout(timer);
       if (!timedOut) {
         if (code === 0) {
@@ -119,7 +127,7 @@ function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<st
       }
     });
 
-    child.on('error', (err) => {
+    child.on("error", (err) => {
       clearTimeout(timer);
       if (!timedOut) reject(err);
     });
@@ -139,7 +147,7 @@ function parseOutput(raw: string, periods?: string[]): CustomBucket[] | null {
   }
 
   if (
-    typeof parsed !== 'object' ||
+    typeof parsed !== "object" ||
     parsed === null ||
     (parsed as CustomProviderOutput).version !== 1 ||
     !Array.isArray((parsed as CustomProviderOutput).buckets)
@@ -148,17 +156,19 @@ function parseOutput(raw: string, periods?: string[]): CustomBucket[] | null {
   }
 
   const buckets = (parsed as CustomProviderOutput).buckets.filter((b) => {
-    if (typeof b.id !== 'string' || typeof b.label !== 'string') return false;
-    if (!b.usage || typeof b.usage.type !== 'string') return false;
+    if (typeof b.id !== "string" || typeof b.label !== "string") return false;
+    if (!b.usage || typeof b.usage.type !== "string") return false;
     const u = b.usage;
-    if (u.type === 'percent') return typeof (u as { value: unknown }).value === 'number';
-    if (u.type === 'credit') {
+    if (u.type === "percent")
+      return typeof (u as { value: unknown }).value === "number";
+    if (u.type === "credit") {
       return (
-        typeof (u as { used: unknown }).used === 'number' &&
-        typeof (u as { limit: unknown }).limit === 'number'
+        typeof (u as { used: unknown }).used === "number" &&
+        typeof (u as { limit: unknown }).limit === "number"
       );
     }
-    if (u.type === 'string') return typeof (u as { value: unknown }).value === 'string';
+    if (u.type === "string")
+      return typeof (u as { value: unknown }).value === "string";
     return false;
   });
 
@@ -197,10 +207,12 @@ export async function executeCustomProvider(
 
     if (buckets === null) {
       if (process.env.OMC_DEBUG) {
-        console.error('[custom-rate-provider] Invalid output format from command');
+        console.error(
+          "[custom-rate-provider] Invalid output format from command",
+        );
       }
       if (cache) return { buckets: cache.buckets, stale: true };
-      return { buckets: [], stale: false, error: 'invalid output' };
+      return { buckets: [], stale: false, error: "invalid output" };
     }
 
     writeCache(buckets);
@@ -208,11 +220,11 @@ export async function executeCustomProvider(
   } catch (err) {
     if (process.env.OMC_DEBUG) {
       console.error(
-        '[custom-rate-provider] Command failed:',
+        "[custom-rate-provider] Command failed:",
         err instanceof Error ? err.message : err,
       );
     }
     if (cache) return { buckets: cache.buckets, stale: true };
-    return { buckets: [], stale: false, error: 'command failed' };
+    return { buckets: [], stale: false, error: "command failed" };
   }
 }

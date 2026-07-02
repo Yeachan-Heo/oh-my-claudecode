@@ -111,8 +111,8 @@ export interface RalphLoopState {
   critic_mode?: RalphCriticMode;
 }
 
-export const RALPH_CRITIC_MODES = ['architect', 'critic', 'codex'] as const;
-export type RalphCriticMode = typeof RALPH_CRITIC_MODES[number];
+export const RALPH_CRITIC_MODES = ["architect", "critic", "codex"] as const;
+export type RalphCriticMode = (typeof RALPH_CRITIC_MODES)[number];
 
 export interface RalphLoopOptions {
   /** Maximum iterations (default: 10) */
@@ -134,7 +134,7 @@ export interface RalphLoopHook {
 }
 
 const DEFAULT_MAX_ITERATIONS = 10;
-const DEFAULT_RALPH_CRITIC_MODE: RalphCriticMode = 'architect';
+const DEFAULT_RALPH_CRITIC_MODE: RalphCriticMode = "architect";
 
 /**
  * Read Ralph Loop state from disk
@@ -247,14 +247,16 @@ export function stripNoPrdFlag(prompt: string): string {
 /**
  * Normalize a Ralph critic mode flag value.
  */
-export function normalizeRalphCriticMode(value: string | null | undefined): RalphCriticMode | null {
+export function normalizeRalphCriticMode(
+  value: string | null | undefined,
+): RalphCriticMode | null {
   if (!value) {
     return null;
   }
 
   const normalized = value.trim().toLowerCase();
   return (RALPH_CRITIC_MODES as readonly string[]).includes(normalized)
-    ? normalized as RalphCriticMode
+    ? (normalized as RalphCriticMode)
     : null;
 }
 
@@ -299,7 +301,8 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
 
     let branchName = "ralph/task";
     try {
-      branchName = execSync("git rev-parse --abbrev-ref HEAD", { windowsHide: true,
+      branchName = execSync("git rev-parse --abbrev-ref HEAD", {
+        windowsHide: true,
         cwd: directory,
         encoding: "utf-8",
         timeout: 5000,
@@ -335,7 +338,10 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
       session_id: sessionId,
       project_path: directory,
       linked_ultrawork: enableUltrawork,
-      critic_mode: options?.criticMode ?? detectCriticModeFlag(prompt) ?? DEFAULT_RALPH_CRITIC_MODE,
+      critic_mode:
+        options?.criticMode ??
+        detectCriticModeFlag(prompt) ??
+        DEFAULT_RALPH_CRITIC_MODE,
       prd_mode: true,
     };
 
@@ -406,7 +412,10 @@ export function hasPrd(directory: string, sessionId?: string): boolean {
 /**
  * Get PRD completion status for ralph
  */
-export function getPrdCompletionStatus(directory: string, sessionId?: string): {
+export function getPrdCompletionStatus(
+  directory: string,
+  sessionId?: string,
+): {
   hasPrd: boolean;
   allComplete: boolean;
   status: PRDStatus | null;
@@ -449,7 +458,12 @@ export function getRalphContext(directory: string, sessionId?: string): string {
   // Add current story from PRD
   const prdStatus = getPrdCompletionStatus(directory, sessionId);
   if (prdStatus.hasPrd && prdStatus.nextStory) {
-    parts.push(formatNextStoryPrompt(prdStatus.nextStory, findPrdPath(directory, sessionId) ?? undefined));
+    parts.push(
+      formatNextStoryPrompt(
+        prdStatus.nextStory,
+        findPrdPath(directory, sessionId) ?? undefined,
+      ),
+    );
   }
 
   // Add PRD status summary
@@ -465,7 +479,11 @@ export function getRalphContext(directory: string, sessionId?: string): string {
 /**
  * Update ralph state with current story
  */
-export function setCurrentStory(directory: string, storyId: string, sessionId?: string): boolean {
+export function setCurrentStory(
+  directory: string,
+  storyId: string,
+  sessionId?: string,
+): boolean {
   const state = readRalphState(directory, sessionId);
   if (!state) {
     return false;
@@ -557,7 +575,10 @@ export function getTeamPhaseDirective(
 /**
  * Check if ralph should complete based on PRD status
  */
-export function shouldCompleteByPrd(directory: string, sessionId?: string): boolean {
+export function shouldCompleteByPrd(
+  directory: string,
+  sessionId?: string,
+): boolean {
   const status = getPrdCompletionStatus(directory, sessionId);
   return status.hasPrd && status.allComplete;
 }

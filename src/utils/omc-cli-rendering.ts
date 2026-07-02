@@ -1,6 +1,6 @@
-import { spawnSync } from 'child_process';
+import { spawnSync } from "child_process";
 
-const OMC_CLI_BINARY = 'omc';
+const OMC_CLI_BINARY = "omc";
 const OMC_PLUGIN_BRIDGE_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs';
 
 export interface OmcCliRenderOptions {
@@ -9,10 +9,10 @@ export interface OmcCliRenderOptions {
 }
 
 function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
-  const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
+  const lookupCommand = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(lookupCommand, [command], {
     windowsHide: true,
-    stdio: 'ignore',
+    stdio: "ignore",
     env,
   });
   return result.status === 0;
@@ -20,12 +20,16 @@ function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
 
 export function resolveOmcCliPrefix(options: OmcCliRenderOptions = {}): string {
   const env = options.env ?? process.env;
-  const omcAvailable = options.omcAvailable ?? commandExists(OMC_CLI_BINARY, env);
+  const omcAvailable =
+    options.omcAvailable ?? commandExists(OMC_CLI_BINARY, env);
   if (omcAvailable) {
     return OMC_CLI_BINARY;
   }
 
-  const pluginRoot = typeof env.CLAUDE_PLUGIN_ROOT === 'string' ? env.CLAUDE_PLUGIN_ROOT.trim() : '';
+  const pluginRoot =
+    typeof env.CLAUDE_PLUGIN_ROOT === "string"
+      ? env.CLAUDE_PLUGIN_ROOT.trim()
+      : "";
   if (pluginRoot) {
     return OMC_PLUGIN_BRIDGE_PREFIX;
   }
@@ -45,7 +49,7 @@ export function formatOmcCliInvocation(
   commandSuffix: string,
   options: OmcCliRenderOptions = {},
 ): string {
-  const suffix = commandSuffix.trim().replace(/^omc\s+/, '');
+  const suffix = commandSuffix.trim().replace(/^omc\s+/, "");
   return `${resolveInvocationPrefix(suffix, options)} ${suffix}`.trim();
 }
 
@@ -53,7 +57,7 @@ export function rewriteOmcCliInvocations(
   text: string,
   options: OmcCliRenderOptions = {},
 ): string {
-  if (!text.includes('omc ')) {
+  if (!text.includes("omc ")) {
     return text;
   }
 
@@ -62,8 +66,11 @@ export function rewriteOmcCliInvocations(
       const prefix = resolveInvocationPrefix(suffix, options);
       return `\`${prefix} ${suffix}\``;
     })
-    .replace(/(^|\n)([ \t>*-]*)omc ([^\n]+)/g, (_match, lineStart: string, leader: string, suffix: string) => {
-      const prefix = resolveInvocationPrefix(suffix, options);
-      return `${lineStart}${leader}${prefix} ${suffix}`;
-    });
+    .replace(
+      /(^|\n)([ \t>*-]*)omc ([^\n]+)/g,
+      (_match, lineStart: string, leader: string, suffix: string) => {
+        const prefix = resolveInvocationPrefix(suffix, options);
+        return `${lineStart}${leader}${prefix} ${suffix}`;
+      },
+    );
 }

@@ -8,10 +8,16 @@
  * Default: disabled (opt-in only)
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { execSync } from 'child_process';
-import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  unlinkSync,
+} from "fs";
+import { join } from "path";
+import { execSync } from "child_process";
+import { getGlobalOmcConfigCandidates } from "../../utils/paths.js";
 
 /** Config shape for the code-simplifier feature */
 export interface CodeSimplifierConfig {
@@ -33,11 +39,11 @@ export interface CodeSimplifierHookResult {
   message: string;
 }
 
-const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
+const DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"];
 const DEFAULT_MAX_FILES = 10;
 
 /** Marker filename used to prevent re-triggering within the same turn cycle */
-export const TRIGGER_MARKER_FILENAME = 'code-simplifier-triggered.marker';
+export const TRIGGER_MARKER_FILENAME = "code-simplifier-triggered.marker";
 
 /**
  * Read the global OMC config from the XDG-aware location, with legacy
@@ -45,13 +51,13 @@ export const TRIGGER_MARKER_FILENAME = 'code-simplifier-triggered.marker';
  * Returns null if the file does not exist or cannot be parsed.
  */
 export function readOmcConfig(): OmcGlobalConfig | null {
-  for (const configPath of getGlobalOmcConfigCandidates('config.json')) {
+  for (const configPath of getGlobalOmcConfigCandidates("config.json")) {
     if (!existsSync(configPath)) {
       continue;
     }
 
     try {
-      return JSON.parse(readFileSync(configPath, 'utf-8')) as OmcGlobalConfig;
+      return JSON.parse(readFileSync(configPath, "utf-8")) as OmcGlobalConfig;
     } catch {
       return null;
     }
@@ -79,17 +85,17 @@ export function getModifiedFiles(
   maxFiles: number = DEFAULT_MAX_FILES,
 ): string[] {
   try {
-    const output = execSync('git diff HEAD --name-only', {
+    const output = execSync("git diff HEAD --name-only", {
       windowsHide: true,
       cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
       timeout: 5000,
     });
 
     return output
       .trim()
-      .split('\n')
+      .split("\n")
       .filter((file) => file.trim().length > 0)
       .filter((file) => extensions.some((ext) => file.endsWith(ext)))
       .slice(0, maxFiles);
@@ -114,7 +120,11 @@ export function writeTriggerMarker(stateDir: string): void {
     if (!existsSync(stateDir)) {
       mkdirSync(stateDir, { recursive: true });
     }
-    writeFileSync(join(stateDir, TRIGGER_MARKER_FILENAME), new Date().toISOString(), 'utf-8');
+    writeFileSync(
+      join(stateDir, TRIGGER_MARKER_FILENAME),
+      new Date().toISOString(),
+      "utf-8",
+    );
   } catch {
     // Ignore write errors — marker is best-effort
   }
@@ -139,8 +149,8 @@ export function clearTriggerMarker(stateDir: string): void {
  * Build the message injected into Claude's context when code-simplifier triggers.
  */
 export function buildSimplifierMessage(files: string[]): string {
-  const fileList = files.map((f) => `  - ${f}`).join('\n');
-  const fileArgs = files.join('\\n');
+  const fileList = files.map((f) => `  - ${f}`).join("\n");
+  const fileArgs = files.join("\\n");
 
   return `[CODE SIMPLIFIER] Recently modified files detected. Delegate to the code-simplifier agent to simplify the following files for clarity, consistency, and maintainability (without changing behavior):
 
@@ -164,13 +174,13 @@ export function processCodeSimplifier(
   stateDir: string,
 ): CodeSimplifierHookResult {
   if (!isCodeSimplifierEnabled()) {
-    return { shouldBlock: false, message: '' };
+    return { shouldBlock: false, message: "" };
   }
 
   // If already triggered this turn, clear marker and allow stop
   if (isAlreadyTriggered(stateDir)) {
     clearTriggerMarker(stateDir);
-    return { shouldBlock: false, message: '' };
+    return { shouldBlock: false, message: "" };
   }
 
   const config = readOmcConfig();
@@ -179,7 +189,7 @@ export function processCodeSimplifier(
   const files = getModifiedFiles(cwd, extensions, maxFiles);
 
   if (files.length === 0) {
-    return { shouldBlock: false, message: '' };
+    return { shouldBlock: false, message: "" };
   }
 
   writeTriggerMarker(stateDir);
