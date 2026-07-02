@@ -70,6 +70,7 @@ export function resetMultiRepoCache(): void {
 function isGitRepo(dir: string): boolean {
   try {
     execSync('git rev-parse --show-toplevel', {
+      windowsHide: true,
       cwd: dir,
       encoding: 'utf-8',
       timeout: 1000,

@@ -178,6 +178,7 @@ function isDelegationToolName(toolName: string): boolean {
 export function getGitDiffStats(directory: string): GitFileStat[] {
   try {
     const output = execSync('git diff --numstat HEAD', {
+      windowsHide: true,
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
@@ -186,6 +187,7 @@ export function getGitDiffStats(directory: string): GitFileStat[] {
     if (!output) return [];
 
     const statusOutput = execSync('git status --porcelain', {
+      windowsHide: true,
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,

@@ -80,6 +80,7 @@ export function getModifiedFiles(
 ): string[] {
   try {
     const output = execSync('git diff HEAD --name-only', {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],

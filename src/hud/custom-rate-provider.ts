@@ -87,7 +87,7 @@ function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<st
       ? cmd
       : (['sh', '-c', cmd] as string[]);
 
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(executable, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => {

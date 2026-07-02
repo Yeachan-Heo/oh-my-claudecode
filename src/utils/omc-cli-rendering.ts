@@ -11,6 +11,7 @@ export interface OmcCliRenderOptions {
 function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
   const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(lookupCommand, [command], {
+    windowsHide: true,
     stdio: 'ignore',
     env,
   });

@@ -212,6 +212,7 @@ export function getGitTopLevel(cwd?: string): string | null {
 
   try {
     const root = execSync('git rev-parse --show-toplevel', {
+      windowsHide: true,
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -445,6 +446,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   let source: string;
   try {
     const remoteUrl = execSync('git remote get-url origin', {
+      windowsHide: true,
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -463,6 +465,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   let primaryRoot = root;
   try {
     const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+      windowsHide: true,
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1104,6 +1107,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
   // to find the main repo root and re-encode.
   try {
     const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+      windowsHide: true,
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1121,6 +1125,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
     try { mainRepoRoot = realpathSync(mainRepoRoot); } catch { /* keep as-is */ }
 
     const worktreeTop = execSync('git rev-parse --show-toplevel', {
+      windowsHide: true,
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1223,6 +1228,7 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
 function getGitCommonDir(cwd: string): string | null {
   try {
     const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
