@@ -49,7 +49,7 @@ const RATE_LIMIT_PATTERNS = [
   /\bweekly\s+(?:usage\s+)?(?:limit|quota|cap|allowance|allocation)\b/i,
 ];
 
-/** Patterns that indicate Claude Code is running */
+/** Patterns that indicate Claude Code is running outside the OMC HUD */
 const CLAUDE_CODE_PATTERNS = [
   /claude/i,
   /anthropic/i,
@@ -57,9 +57,38 @@ const CLAUDE_CODE_PATTERNS = [
   /claude code/i,
   /conversation/i,
   /assistant/i,
-  /\[OMC#[^\]\s]*\]/,
-  /shift\+tab to cycle/i,
 ];
+
+/** Anchored OMC HUD status line, not copied output embedded in logs/tests. */
+const OMC_HUD_STATUS_LINE_PATTERN =
+  /^\s*\[OMC#[^\]\s]*\]\s*\|.*\b(?:Model:|ctx:|session:|5h:|wk:|thinking)\b/im;
+
+/** OMC HUD mode/help line rendered directly in the captured UI block. */
+const OMC_HUD_MODE_LINE_PATTERN = /^\s*⏵⏵\s+.*\(shift\+tab to cycle\)/im;
+
+/** Live Claude/OMC UI chrome that appears around the HUD block. */
+const OMC_HUD_CHROME_PATTERN = /^\s*(?:[─━═]{8,}|[╭╰╮╯│┃].*|❯\s*$)/m;
+
+const COPIED_HUD_CONTEXT_PATTERNS = [
+  /^\s*\$\s+\S/m,
+  /^\s*(?:FAIL\b|AssertionError:|stderr \|)/m,
+  /^\s*src\/.*:/m,
+  /^\s*\*\d+[a-z]*\|/m,
+];
+
+function hasLiveOmcHudEvidence(content: string): boolean {
+  const hudStatus = OMC_HUD_STATUS_LINE_PATTERN.exec(content);
+  if (!hudStatus) {
+    return false;
+  }
+
+  const beforeHudStatus = content.slice(0, hudStatus.index);
+  if (COPIED_HUD_CONTEXT_PATTERNS.some(pattern => pattern.test(beforeHudStatus))) {
+    return false;
+  }
+
+  return OMC_HUD_MODE_LINE_PATTERN.test(content) || OMC_HUD_CHROME_PATTERN.test(content);
+}
 
 /**
  * Tightened weekly rate-limit pattern, extracted so `analyzePaneContent` can
@@ -253,10 +282,12 @@ export function analyzePaneContent(content: string): PaneAnalysisResult {
   // "Update assistant config") cannot produce false-positive keyword matches.
   const cleanedContent = stripGitOutputLines(content);
 
-  // Check for Claude Code indicators
-  const hasClaudeCode = CLAUDE_CODE_PATTERNS.some((pattern) =>
-    pattern.test(cleanedContent)
-  );
+  // Check for Claude Code indicators. OMC HUD evidence is intentionally
+  // anchored to live HUD/status-line shape so copied/search/test output with
+  // `[OMC#...]` or `shift+tab to cycle` cannot impersonate a Claude pane.
+  const hasClaudeCode =
+    CLAUDE_CODE_PATTERNS.some((pattern) => pattern.test(cleanedContent)) ||
+    hasLiveOmcHudEvidence(cleanedContent);
 
   // Check for rate limit messages
   const rateLimitMatches = RATE_LIMIT_PATTERNS.filter((pattern) =>
