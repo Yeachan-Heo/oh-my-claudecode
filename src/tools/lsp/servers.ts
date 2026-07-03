@@ -6,8 +6,8 @@
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync } from 'fs';
-import { extname, isAbsolute } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, extname, isAbsolute, join, parse, resolve } from 'path';
 
 export interface LspServerConfig {
   name: string;
@@ -19,17 +19,93 @@ export interface LspServerConfig {
   initializeTimeoutMs?: number;
 }
 
+const TYPESCRIPT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'];
+
+const TYPESCRIPT_CLASSIC_SERVER: LspServerConfig = {
+  name: 'TypeScript Language Server',
+  command: 'typescript-language-server',
+  args: ['--stdio'],
+  extensions: TYPESCRIPT_EXTENSIONS,
+  installHint: 'npm install -g typescript-language-server typescript'
+};
+
+function getTypeScriptNativeBin(packageRoot: string): string {
+  const packageNodeModules = dirname(packageRoot);
+  const workspaceRoot = dirname(packageNodeModules);
+  const executable = process.platform === 'win32' ? 'tsc.cmd' : 'tsc';
+  return join(workspaceRoot, 'node_modules', '.bin', executable);
+}
+
+function findTypeScriptPackageRoot(workspaceRoot: string): string | null {
+  let dir = resolve(workspaceRoot);
+
+  while (true) {
+    const packageJsonPath = join(dir, 'node_modules', 'typescript', 'package.json');
+    if (existsSync(packageJsonPath)) {
+      return dirname(packageJsonPath);
+    }
+
+    const parsed = parse(dir);
+    if (parsed.root === dir) {
+      return null;
+    }
+
+    dir = dirname(dir);
+  }
+}
+
+function readTypeScriptMajorVersion(packageRoot: string): number | null {
+  try {
+    const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof packageJson.version !== 'string') {
+      return null;
+    }
+
+    const major = Number.parseInt(packageJson.version.split('.')[0] ?? '', 10);
+    return Number.isNaN(major) ? null : major;
+  } catch {
+    return null;
+  }
+}
+
+function shouldUseNativeTypeScriptServer(packageRoot: string): boolean {
+  const majorVersion = readTypeScriptMajorVersion(packageRoot);
+  if (majorVersion !== null && majorVersion >= 7) {
+    return true;
+  }
+
+  if (existsSync(join(packageRoot, 'lib', 'getExePath.js'))) {
+    return true;
+  }
+
+  return !existsSync(join(packageRoot, 'lib', 'tsserver.js'));
+}
+
+export function getTypeScriptServerForWorkspace(workspaceRoot: string): LspServerConfig {
+  const packageRoot = findTypeScriptPackageRoot(workspaceRoot);
+  if (!packageRoot || !shouldUseNativeTypeScriptServer(packageRoot)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+
+  const localTsc = getTypeScriptNativeBin(packageRoot);
+  if (!existsSync(localTsc)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+
+  return {
+    name: 'TypeScript 7 Native Language Server (typescript-go)',
+    command: localTsc,
+    args: ['--lsp', '--stdio'],
+    extensions: TYPESCRIPT_EXTENSIONS,
+    installHint: 'Install TypeScript 7 locally so node_modules/.bin/tsc is available'
+  };
+}
+
 /**
  * Known LSP servers and their configurations
  */
 export const LSP_SERVERS: Record<string, LspServerConfig> = {
-  typescript: {
-    name: 'TypeScript Language Server',
-    command: 'typescript-language-server',
-    args: ['--stdio'],
-    extensions: ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'],
-    installHint: 'npm install -g typescript-language-server typescript'
-  },
+  typescript: TYPESCRIPT_CLASSIC_SERVER,
   python: {
     name: 'Python Language Server (ty)',
     command: 'ty',
@@ -177,10 +253,16 @@ export function commandExists(command: string): boolean {
 }
 
 /**
- * Get the LSP server config for a file based on its extension
+ * Get the LSP server config for a file based on its extension.
+ * When workspaceRoot is provided, TypeScript files prefer a project-local
+ * native TypeScript 7 language server (`tsc --lsp --stdio`) when available.
  */
-export function getServerForFile(filePath: string): LspServerConfig | null {
+export function getServerForFile(filePath: string, workspaceRoot?: string): LspServerConfig | null {
   const ext = extname(filePath).toLowerCase();
+
+  if (TYPESCRIPT_EXTENSIONS.includes(ext) && workspaceRoot) {
+    return getTypeScriptServerForWorkspace(workspaceRoot);
+  }
 
   for (const [_, config] of Object.entries(LSP_SERVERS)) {
     if (config.extensions.includes(ext)) {

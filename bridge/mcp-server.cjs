@@ -2994,7 +2994,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve9.call(this, root, ref);
+      let _sch = resolve10.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3021,7 +3021,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve9(root, ref) {
+    function resolve10(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3648,21 +3648,21 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse7(serialize(uri, options), options);
+        parse8(serialize(uri, options), options);
       }
       return uri;
     }
-    function resolve9(baseURI, relativeURI, options) {
+    function resolve10(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse7(baseURI, schemelessOptions), parse7(relativeURI, schemelessOptions), schemelessOptions, true);
+      const resolved = resolveComponent(parse8(baseURI, schemelessOptions), parse8(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
     function resolveComponent(base, relative7, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse7(serialize(base, options), options);
-        relative7 = parse7(serialize(relative7, options), options);
+        base = parse8(serialize(base, options), options);
+        relative7 = parse8(serialize(relative7, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative7.scheme) {
@@ -3885,7 +3885,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort };
     }
-    function parse7(uri, opts) {
+    function parse8(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -3910,11 +3910,11 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize8,
-      resolve: resolve9,
+      resolve: resolve10,
       resolveComponent,
       equal,
       serialize,
-      parse: parse7
+      parse: parse8
     };
     module2.exports = fastUri;
     module2.exports.default = fastUri;
@@ -16761,7 +16761,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve9) => setTimeout(resolve9, pollInterval));
+        await new Promise((resolve10) => setTimeout(resolve10, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -16778,7 +16778,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -16856,7 +16856,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve9(parseResult.data);
+            resolve10(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -17117,12 +17117,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve9, interval);
+      const timeoutId = setTimeout(resolve10, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -17851,12 +17851,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve9) => {
+    return new Promise((resolve10) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve9();
+        resolve10();
       } else {
-        this._stdout.once("drain", resolve9);
+        this._stdout.once("drain", resolve10);
       }
     });
   }
@@ -18911,7 +18911,7 @@ async function removeFileIfExists(filePath) {
   }
 }
 function sleep(ms) {
-  return new Promise((resolve9) => setTimeout(resolve9, ms));
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
 // src/tools/lsp/client.ts
@@ -19186,14 +19186,75 @@ function runDocker(args) {
 var import_child_process5 = require("child_process");
 var import_fs5 = require("fs");
 var import_path6 = require("path");
+var TYPESCRIPT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
+var TYPESCRIPT_CLASSIC_SERVER = {
+  name: "TypeScript Language Server",
+  command: "typescript-language-server",
+  args: ["--stdio"],
+  extensions: TYPESCRIPT_EXTENSIONS,
+  installHint: "npm install -g typescript-language-server typescript"
+};
+function getTypeScriptNativeBin(packageRoot) {
+  const packageNodeModules = (0, import_path6.dirname)(packageRoot);
+  const workspaceRoot = (0, import_path6.dirname)(packageNodeModules);
+  const executable = process.platform === "win32" ? "tsc.cmd" : "tsc";
+  return (0, import_path6.join)(workspaceRoot, "node_modules", ".bin", executable);
+}
+function findTypeScriptPackageRoot(workspaceRoot) {
+  let dir = (0, import_path6.resolve)(workspaceRoot);
+  while (true) {
+    const packageJsonPath = (0, import_path6.join)(dir, "node_modules", "typescript", "package.json");
+    if ((0, import_fs5.existsSync)(packageJsonPath)) {
+      return (0, import_path6.dirname)(packageJsonPath);
+    }
+    const parsed = (0, import_path6.parse)(dir);
+    if (parsed.root === dir) {
+      return null;
+    }
+    dir = (0, import_path6.dirname)(dir);
+  }
+}
+function readTypeScriptMajorVersion(packageRoot) {
+  try {
+    const packageJson = JSON.parse((0, import_fs5.readFileSync)((0, import_path6.join)(packageRoot, "package.json"), "utf8"));
+    if (typeof packageJson.version !== "string") {
+      return null;
+    }
+    const major = Number.parseInt(packageJson.version.split(".")[0] ?? "", 10);
+    return Number.isNaN(major) ? null : major;
+  } catch {
+    return null;
+  }
+}
+function shouldUseNativeTypeScriptServer(packageRoot) {
+  const majorVersion = readTypeScriptMajorVersion(packageRoot);
+  if (majorVersion !== null && majorVersion >= 7) {
+    return true;
+  }
+  if ((0, import_fs5.existsSync)((0, import_path6.join)(packageRoot, "lib", "getExePath.js"))) {
+    return true;
+  }
+  return !(0, import_fs5.existsSync)((0, import_path6.join)(packageRoot, "lib", "tsserver.js"));
+}
+function getTypeScriptServerForWorkspace(workspaceRoot) {
+  const packageRoot = findTypeScriptPackageRoot(workspaceRoot);
+  if (!packageRoot || !shouldUseNativeTypeScriptServer(packageRoot)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+  const localTsc = getTypeScriptNativeBin(packageRoot);
+  if (!(0, import_fs5.existsSync)(localTsc)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+  return {
+    name: "TypeScript 7 Native Language Server (typescript-go)",
+    command: localTsc,
+    args: ["--lsp", "--stdio"],
+    extensions: TYPESCRIPT_EXTENSIONS,
+    installHint: "Install TypeScript 7 locally so node_modules/.bin/tsc is available"
+  };
+}
 var LSP_SERVERS = {
-  typescript: {
-    name: "TypeScript Language Server",
-    command: "typescript-language-server",
-    args: ["--stdio"],
-    extensions: [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"],
-    installHint: "npm install -g typescript-language-server typescript"
-  },
+  typescript: TYPESCRIPT_CLASSIC_SERVER,
   python: {
     name: "Python Language Server (ty)",
     command: "ty",
@@ -19335,8 +19396,11 @@ function commandExists(command) {
   const result = (0, import_child_process5.spawnSync)(checkCommand, [command], { stdio: "ignore" });
   return result.status === 0;
 }
-function getServerForFile(filePath) {
+function getServerForFile(filePath, workspaceRoot) {
   const ext = (0, import_path6.extname)(filePath).toLowerCase();
+  if (TYPESCRIPT_EXTENSIONS.includes(ext) && workspaceRoot) {
+    return getTypeScriptServerForWorkspace(workspaceRoot);
+  }
   for (const [_, config2] of Object.entries(LSP_SERVERS)) {
     if (config2.extensions.includes(ext)) {
       return config2;
@@ -19407,7 +19471,7 @@ var LspClient = class _LspClient {
 Install with: ${this.serverConfig.installHint}`
       );
     }
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const command = this.devContainerContext ? "docker" : this.serverConfig.command;
       const args = this.devContainerContext ? ["exec", "-i", "-w", this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args] : this.serverConfig.args;
       this.process = (0, import_child_process6.spawn)(command, args, {
@@ -19434,7 +19498,7 @@ Install with: ${this.serverConfig.installHint}`
       });
       this.initialize().then(() => {
         this.initialized = true;
-        resolve9();
+        resolve10();
       }).catch(reject);
     });
   }
@@ -19578,13 +19642,13 @@ Install with: ${this.serverConfig.installHint}`
     const message = `Content-Length: ${Buffer.byteLength(content)}\r
 \r
 ${content}`;
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`LSP request '${method}' timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       this.pendingRequests.set(id, {
-        resolve: resolve9,
+        resolve: resolve10,
         reject,
         timeout: timeoutHandle
       });
@@ -19660,7 +19724,7 @@ ${content}`;
       }
     });
     this.openDocuments.add(hostUri);
-    await new Promise((resolve9) => setTimeout(resolve9, 100));
+    await new Promise((resolve10) => setTimeout(resolve10, 100));
   }
   /**
    * Close a document
@@ -19821,13 +19885,13 @@ ${content}`;
     if (this.diagnostics.has(uri)) {
       return Promise.resolve();
     }
-    return new Promise((resolve9) => {
+    return new Promise((resolve10) => {
       let resolved = false;
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
           this.diagnosticWaiters.delete(uri);
-          resolve9();
+          resolve10();
         }
       }, timeoutMs);
       const existing = this.diagnosticWaiters.get(uri) || [];
@@ -19835,7 +19899,7 @@ ${content}`;
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
-          resolve9();
+          resolve10();
         }
       });
       this.diagnosticWaiters.set(uri, existing);
@@ -19971,11 +20035,11 @@ var LspClientManager = class {
    * Get or create a client for a file
    */
   async getClientForFile(filePath) {
-    const serverConfig = getServerForFile(filePath);
+    const workspaceRoot = this.findWorkspaceRoot(filePath);
+    const serverConfig = getServerForFile(filePath, workspaceRoot);
     if (!serverConfig) {
       return null;
     }
-    const workspaceRoot = this.findWorkspaceRoot(filePath);
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
     const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? "host"}`;
     let client = this.clients.get(key);
@@ -19997,11 +20061,11 @@ var LspClientManager = class {
    * The lastUsed timestamp is refreshed on both entry and exit.
    */
   async runWithClientLease(filePath, fn) {
-    const serverConfig = getServerForFile(filePath);
+    const workspaceRoot = this.findWorkspaceRoot(filePath);
+    const serverConfig = getServerForFile(filePath, workspaceRoot);
     if (!serverConfig) {
       throw new Error(`No language server available for: ${filePath}`);
     }
-    const workspaceRoot = this.findWorkspaceRoot(filePath);
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
     const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? "host"}`;
     let client = this.clients.get(key);
@@ -22192,7 +22256,7 @@ var SessionLock = class {
   }
 };
 function sleep2(ms) {
-  return new Promise((resolve9) => setTimeout(resolve9, ms));
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
 // src/tools/python-repl/socket-client.ts
@@ -22222,7 +22286,7 @@ var JsonRpcError = class extends Error {
   }
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
-  return new Promise((resolve9, reject) => {
+  return new Promise((resolve10, reject) => {
     const id = (0, import_crypto2.randomUUID)();
     const request = {
       jsonrpc: "2.0",
@@ -22312,7 +22376,7 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
           }
           if (!settled) {
             settled = true;
-            resolve9(response.result);
+            resolve10(response.result);
           }
         } catch (e) {
           if (!settled) {
@@ -24648,7 +24712,7 @@ function withFileLockSync(lockPath, fn, opts) {
   }
 }
 function sleep3(ms) {
-  return new Promise((resolve9) => setTimeout(resolve9, ms));
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 async function acquireFileLock(lockPath, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
@@ -25542,7 +25606,7 @@ function mergeArrays(fieldName, base, incoming) {
       return mergeScalarArray(base, incoming);
   }
 }
-function mergeByKey(base, incoming, keyFn, resolve9) {
+function mergeByKey(base, incoming, keyFn, resolve10) {
   const seen = /* @__PURE__ */ new Map();
   for (const item of base) {
     seen.set(keyFn(item), item);
@@ -25551,7 +25615,7 @@ function mergeByKey(base, incoming, keyFn, resolve9) {
     const key = keyFn(item);
     const existing = seen.get(key);
     if (existing) {
-      seen.set(key, resolve9(existing, item));
+      seen.set(key, resolve10(existing, item));
     } else {
       seen.set(key, item);
     }

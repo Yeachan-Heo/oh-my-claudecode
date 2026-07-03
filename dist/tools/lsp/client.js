@@ -680,12 +680,11 @@ export class LspClientManager {
      * Get or create a client for a file
      */
     async getClientForFile(filePath) {
-        const serverConfig = getServerForFile(filePath);
+        const workspaceRoot = this.findWorkspaceRoot(filePath);
+        const serverConfig = getServerForFile(filePath, workspaceRoot);
         if (!serverConfig) {
             return null;
         }
-        // Find workspace root
-        const workspaceRoot = this.findWorkspaceRoot(filePath);
         const devContainerContext = resolveDevContainerContext(workspaceRoot);
         const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
         let client = this.clients.get(key);
@@ -708,11 +707,11 @@ export class LspClientManager {
      * The lastUsed timestamp is refreshed on both entry and exit.
      */
     async runWithClientLease(filePath, fn) {
-        const serverConfig = getServerForFile(filePath);
+        const workspaceRoot = this.findWorkspaceRoot(filePath);
+        const serverConfig = getServerForFile(filePath, workspaceRoot);
         if (!serverConfig) {
             throw new Error(`No language server available for: ${filePath}`);
         }
-        const workspaceRoot = this.findWorkspaceRoot(filePath);
         const devContainerContext = resolveDevContainerContext(workspaceRoot);
         const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
         let client = this.clients.get(key);

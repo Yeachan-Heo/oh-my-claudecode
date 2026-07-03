@@ -3215,8 +3215,8 @@ function stripTrailing(p) {
   return toForwardSlash(p).replace(/\/+$/, "");
 }
 function compareSemverDesc(a, b) {
-  const parse8 = (s) => s.split(".").map((n) => parseInt(n, 10) || 0);
-  const pa = parse8(a), pb = parse8(b);
+  const parse9 = (s) => s.split(".").map((n) => parseInt(n, 10) || 0);
+  const pa = parse9(a), pb = parse9(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const diff = (pb[i] ?? 0) - (pa[i] ?? 0);
     if (diff !== 0) return diff;
@@ -6963,7 +6963,7 @@ async function removeFileIfExists(filePath) {
   }
 }
 function sleep2(ms) {
-  return new Promise((resolve24) => setTimeout(resolve24, ms));
+  return new Promise((resolve25) => setTimeout(resolve25, ms));
 }
 var import_child_process9, fs5, fsPromises2, path5, import_url6, import_child_process10, import_util6, execFileAsync3, BRIDGE_SPAWN_TIMEOUT_MS, DEFAULT_GRACE_PERIOD_MS, SIGTERM_GRACE_MS, ownedBridgeSessionIds, USE_TCP_FALLBACK;
 var init_bridge_manager = __esm({
@@ -8023,7 +8023,7 @@ function withFileLockSync(lockPath, fn, opts) {
   }
 }
 function sleep3(ms) {
-  return new Promise((resolve24) => setTimeout(resolve24, ms));
+  return new Promise((resolve25) => setTimeout(resolve25, ms));
 }
 async function acquireFileLock(lockPath, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
@@ -25847,7 +25847,7 @@ async function pollTelegram(config2, state, rateLimiter) {
   try {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
     const path22 = `/bot${config2.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
-    const updates = await new Promise((resolve24, reject) => {
+    const updates = await new Promise((resolve25, reject) => {
       const req = (0, import_https.request)(
         {
           hostname: "api.telegram.org",
@@ -25864,7 +25864,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                resolve24(body.result || []);
+                resolve25(body.result || []);
               } else {
                 reject(new Error(`HTTP ${res.statusCode}`));
               }
@@ -25928,7 +25928,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             text: "Injected into Claude Code session.",
             reply_to_message_id: msg.message_id
           });
-          await new Promise((resolve24) => {
+          await new Promise((resolve25) => {
             const replyReq = (0, import_https.request)(
               {
                 hostname: "api.telegram.org",
@@ -25943,13 +25943,13 @@ async function pollTelegram(config2, state, rateLimiter) {
               },
               (res) => {
                 res.resume();
-                resolve24();
+                resolve25();
               }
             );
-            replyReq.on("error", () => resolve24());
+            replyReq.on("error", () => resolve25());
             replyReq.on("timeout", () => {
               replyReq.destroy();
-              resolve24();
+              resolve25();
             });
             replyReq.write(replyBody);
             replyReq.end();
@@ -26088,13 +26088,13 @@ async function pollLoop() {
         }
       }
       writeDaemonState(state);
-      await new Promise((resolve24) => setTimeout(resolve24, config2.pollIntervalMs));
+      await new Promise((resolve25) => setTimeout(resolve25, config2.pollIntervalMs));
     } catch (error2) {
       state.errors++;
       state.lastError = redactTokens(error2 instanceof Error ? error2.message : String(error2));
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
-      await new Promise((resolve24) => setTimeout(resolve24, config2.pollIntervalMs * 2));
+      await new Promise((resolve25) => setTimeout(resolve25, config2.pollIntervalMs * 2));
     }
   }
   log("Poll loop ended");
@@ -27687,7 +27687,7 @@ async function triggerStopCallbacks(metrics, _input, options = {}) {
   try {
     await Promise.race([
       Promise.allSettled(promises),
-      new Promise((resolve24) => setTimeout(resolve24, 5e3))
+      new Promise((resolve25) => setTimeout(resolve25, 5e3))
     ]);
   } catch (error2) {
     console.error("[stop-callback] Callback execution error:", error2);
@@ -28111,7 +28111,7 @@ async function sendTelegram2(config2, payload) {
       text: payload.message,
       parse_mode: config2.parseMode || "Markdown"
     });
-    const result = await new Promise((resolve24) => {
+    const result = await new Promise((resolve25) => {
       const req = (0, import_https2.request)(
         telegramRequestOptions(Buffer.byteLength(body), config2.botToken),
         (res) => {
@@ -28127,9 +28127,9 @@ async function sendTelegram2(config2, payload) {
                 }
               } catch {
               }
-              resolve24({ platform: "telegram", success: true, messageId });
+              resolve25({ platform: "telegram", success: true, messageId });
             } else {
-              resolve24({
+              resolve25({
                 platform: "telegram",
                 success: false,
                 error: `HTTP ${res.statusCode}`
@@ -28139,11 +28139,11 @@ async function sendTelegram2(config2, payload) {
         }
       );
       req.on("error", (e) => {
-        resolve24({ platform: "telegram", success: false, error: e.message });
+        resolve25({ platform: "telegram", success: false, error: e.message });
       });
       req.on("timeout", () => {
         req.destroy();
-        resolve24({
+        resolve25({
           platform: "telegram",
           success: false,
           error: "Request timeout"
@@ -28390,9 +28390,9 @@ async function dispatchNotifications(config2, event, payload, platformMessages) 
           }
         )
       ),
-      new Promise((resolve24) => {
+      new Promise((resolve25) => {
         timer = setTimeout(
-          () => resolve24([
+          () => resolve25([
             {
               platform: "unknown",
               success: false,
@@ -29193,7 +29193,7 @@ async function withMailboxLock(teamName, workerName2, cwd2, fn) {
   while (Date.now() < deadline) {
     const result = await withLock(lockDir, fn);
     if (result.ok) return result.value;
-    await new Promise((resolve24) => setTimeout(resolve24, delayMs));
+    await new Promise((resolve25) => setTimeout(resolve25, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire mailbox lock for ${workerName2} after ${timeoutMs}ms`);
@@ -29299,7 +29299,7 @@ async function teamCreateTask(teamName, task, cwd2) {
       return created;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve24) => setTimeout(resolve24, delayMs));
+    await new Promise((resolve25) => setTimeout(resolve25, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
@@ -29339,7 +29339,7 @@ async function teamUpdateTask(teamName, taskId, updates, cwd2) {
       return merged;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve24) => setTimeout(resolve24, delayMs));
+    await new Promise((resolve25) => setTimeout(resolve25, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task update lock for task ${taskId} in team ${teamName} after ${timeoutMs}ms`);
@@ -32193,7 +32193,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
         );
       }
       const jitter = 0.5 + Math.random() * 0.5;
-      await new Promise((resolve24) => setTimeout(resolve24, Math.floor(pollMs * jitter)));
+      await new Promise((resolve25) => setTimeout(resolve25, Math.floor(pollMs * jitter)));
       pollMs = Math.min(pollMs * 2, DISPATCH_LOCK_MAX_POLL_MS);
     }
   }
@@ -34184,8 +34184,8 @@ async function startMergeOrchestrator(config2) {
   let persisted = { lastShas: {} };
   if ((0, import_node_fs9.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync92 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync92(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync93 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync93(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -34519,8 +34519,8 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
               return false;
             }
           })(),
-          new Promise((resolve24) => {
-            const t = setTimeout(() => resolve24(false), remaining);
+          new Promise((resolve25) => {
+            const t = setTimeout(() => resolve25(false), remaining);
             if (typeof t.unref === "function") t.unref();
           })
         ]);
@@ -34574,8 +34574,8 @@ async function recoverFromRestart(config2) {
   let persistedShasLoaded = 0;
   if ((0, import_node_fs9.existsSync)(persistedPath)) {
     try {
-      const { readFileSync: readFileSync92 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync92(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync93 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync93(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -34879,7 +34879,7 @@ async function waitForWorkerStartupEvidence(teamName, workerName2, taskId, cwd2,
       return true;
     }
     if (attempt < attempts) {
-      await new Promise((resolve24) => setTimeout(resolve24, delayMs));
+      await new Promise((resolve25) => setTimeout(resolve25, delayMs));
     }
   }
   return false;
@@ -35588,10 +35588,10 @@ async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
     await writeFile9(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
     const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, task.id));
     try {
-      const { readFileSync: readFileSync92, writeFileSync: writeFileSync39 } = await import("fs");
+      const { readFileSync: readFileSync93, writeFileSync: writeFileSync39 } = await import("fs");
       const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
       withFileLockSync2(taskPath2 + ".lock", () => {
-        const raw = readFileSync92(taskPath2, "utf-8");
+        const raw = readFileSync93(taskPath2, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status === "in_progress") {
           taskData.status = "pending";
@@ -35621,7 +35621,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename3 } = await import("fs/promises");
-  const { readFileSync: readFileSync92, writeFileSync: writeFileSync39, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync93, writeFileSync: writeFileSync39, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config2.workers) {
     const outputFile = worker.output_file;
@@ -35655,7 +35655,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
       const taskPath2 = absPath(cwd2, TeamPaths.taskFile(sanitized, taskId));
       if (!fsExistsSync(taskPath2)) continue;
       try {
-        const taskRaw = readFileSync92(taskPath2, "utf-8");
+        const taskRaw = readFileSync93(taskPath2, "utf-8");
         const taskData = JSON.parse(taskRaw);
         if (taskData.owner === worker.name && taskData.status === "in_progress") {
           targetTaskId = taskId;
@@ -35683,7 +35683,7 @@ async function processCliWorkerVerdicts(teamName, cwd2) {
     let transitionOk = false;
     try {
       withFileLockSync2(targetTaskPath + ".lock", () => {
-        const raw = readFileSync92(targetTaskPath, "utf-8");
+        const raw = readFileSync93(targetTaskPath, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status !== "in_progress" || taskData.owner !== worker.name) {
           return;
@@ -36408,7 +36408,7 @@ async function readJsonSafe5(filePath) {
         return null;
       }
     }
-    await new Promise((resolve24) => setTimeout(resolve24, 25));
+    await new Promise((resolve25) => setTimeout(resolve25, 25));
   }
   return null;
 }
@@ -36526,7 +36526,7 @@ async function nextPendingTaskIndex(runtime) {
     let task = await readTask(root2, taskId);
     if (!task) {
       for (let attempt = 1; attempt < transientReadRetryAttempts; attempt++) {
-        await new Promise((resolve24) => setTimeout(resolve24, transientReadRetryDelayMs));
+        await new Promise((resolve25) => setTimeout(resolve25, transientReadRetryDelayMs));
         task = await readTask(root2, taskId);
         if (task) break;
       }
@@ -37119,8 +37119,8 @@ function resolveSessionEndCleanupBudgetMs(env2 = process.env) {
   return Math.min(Math.floor(parsed), MAX_SESSION_END_CLEANUP_BUDGET_MS);
 }
 function unrefDelay(ms) {
-  return new Promise((resolve24) => {
-    const timer = setTimeout(() => resolve24("timeout"), ms);
+  return new Promise((resolve25) => {
+    const timer = setTimeout(() => resolve25("timeout"), ms);
     if (typeof timer.unref === "function") {
       timer.unref();
     }
@@ -40225,7 +40225,7 @@ var require_regexp_tree = __commonJS({
       /**
        * Parses a string.
        */
-      parse: function parse8(string3, parseOptions) {
+      parse: function parse9(string3, parseOptions) {
         if (!tokenizer) {
           throw new Error("Tokenizer instance wasn't specified.");
         }
@@ -44335,7 +44335,7 @@ var require_regexp_tree2 = __commonJS({
        *
        * @return Object AST
        */
-      parse: function parse8(regexp, options) {
+      parse: function parse9(regexp, options) {
         return parser.parse("" + regexp, options);
       },
       /**
@@ -44855,7 +44855,7 @@ function validateCredentials(creds) {
   return !isCredentialExpired(creds);
 }
 function refreshAccessToken(refreshToken) {
-  return new Promise((resolve24) => {
+  return new Promise((resolve25) => {
     const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID;
     const body = new URLSearchParams({
       grant_type: "refresh_token",
@@ -44883,7 +44883,7 @@ function refreshAccessToken(refreshToken) {
             try {
               const parsed = JSON.parse(data);
               if (parsed.access_token) {
-                resolve24({
+                resolve25({
                   accessToken: parsed.access_token,
                   refreshToken: parsed.refresh_token || refreshToken,
                   expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1e3 : parsed.expires_at
@@ -44896,20 +44896,20 @@ function refreshAccessToken(refreshToken) {
           if (process.env.OMC_DEBUG) {
             console.error(`[usage-api] Token refresh failed: HTTP ${res.statusCode}`);
           }
-          resolve24(null);
+          resolve25(null);
         });
       }
     );
-    req.on("error", () => resolve24(null));
+    req.on("error", () => resolve25(null));
     req.on("timeout", () => {
       req.destroy();
-      resolve24(null);
+      resolve25(null);
     });
     req.end(body);
   });
 }
 function fetchUsageFromApi(accessToken) {
-  return new Promise((resolve24) => {
+  return new Promise((resolve25) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -44930,41 +44930,41 @@ function fetchUsageFromApi(accessToken) {
         res.on("end", () => {
           if (res.statusCode === 200) {
             try {
-              resolve24({ data: JSON.parse(data) });
+              resolve25({ data: JSON.parse(data) });
             } catch {
-              resolve24({ data: null });
+              resolve25({ data: null });
             }
           } else if (res.statusCode === 429) {
             if (process.env.OMC_DEBUG) {
               console.error(`[usage-api] Anthropic API returned 429 (rate limited)`);
             }
-            resolve24({ data: null, rateLimited: true });
+            resolve25({ data: null, rateLimited: true });
           } else {
-            resolve24({ data: null });
+            resolve25({ data: null });
           }
         });
       }
     );
-    req.on("error", () => resolve24({ data: null }));
+    req.on("error", () => resolve25({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve24({ data: null });
+      resolve25({ data: null });
     });
     req.end();
   });
 }
 function fetchUsageFromZai() {
-  return new Promise((resolve24) => {
+  return new Promise((resolve25) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
     if (!baseUrl || !authToken) {
-      resolve24({ data: null });
+      resolve25({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve24({ data: null });
+      resolve25({ data: null });
       return;
     }
     try {
@@ -44992,29 +44992,29 @@ function fetchUsageFromZai() {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve24({ data: JSON.parse(data) });
+                resolve25({ data: JSON.parse(data) });
               } catch {
-                resolve24({ data: null });
+                resolve25({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] z.ai API returned 429 (rate limited)`);
               }
-              resolve24({ data: null, rateLimited: true });
+              resolve25({ data: null, rateLimited: true });
             } else {
-              resolve24({ data: null });
+              resolve25({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve24({ data: null }));
+      req.on("error", () => resolve25({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve24({ data: null });
+        resolve25({ data: null });
       });
       req.end();
     } catch {
-      resolve24({ data: null });
+      resolve25({ data: null });
     }
   });
 }
@@ -45233,16 +45233,16 @@ function parseZaiResponse(response) {
   return result;
 }
 function fetchUsageFromMinimax(apiKey) {
-  return new Promise((resolve24) => {
+  return new Promise((resolve25) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve24({ data: null });
+      resolve25({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve24({ data: null });
+      resolve25({ data: null });
       return;
     }
     try {
@@ -45269,29 +45269,29 @@ function fetchUsageFromMinimax(apiKey) {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve24({ data: JSON.parse(data) });
+                resolve25({ data: JSON.parse(data) });
               } catch {
-                resolve24({ data: null });
+                resolve25({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] MiniMax API returned 429 (rate limited)`);
               }
-              resolve24({ data: null, rateLimited: true });
+              resolve25({ data: null, rateLimited: true });
             } else {
-              resolve24({ data: null });
+              resolve25({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve24({ data: null }));
+      req.on("error", () => resolve25({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve24({ data: null });
+        resolve25({ data: null });
       });
       req.end();
     } catch {
-      resolve24({ data: null });
+      resolve25({ data: null });
     }
   });
 }
@@ -46435,7 +46435,7 @@ function isCacheValid2(cache) {
   return Date.now() - cache.timestamp < CACHE_TTL_MS2;
 }
 function spawnWithTimeout(cmd, timeoutMs) {
-  return new Promise((resolve24, reject) => {
+  return new Promise((resolve25, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
     const child = (0, import_child_process38.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -46458,7 +46458,7 @@ function spawnWithTimeout(cmd, timeoutMs) {
       clearTimeout(timer);
       if (!timedOut) {
         if (code === 0) {
-          resolve24(stdout);
+          resolve25(stdout);
         } else {
           reject(new Error(`Command exited with code ${code}`));
         }
@@ -52516,7 +52516,7 @@ var require_compile = __commonJS2((exports2) => {
     const schOrFunc = root2.refs[ref];
     if (schOrFunc)
       return schOrFunc;
-    let _sch = resolve24.call(this, root2, ref);
+    let _sch = resolve25.call(this, root2, ref);
     if (_sch === void 0) {
       const schema = (_a = root2.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
       const { schemaId } = this.opts;
@@ -52543,7 +52543,7 @@ var require_compile = __commonJS2((exports2) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve24(root2, ref) {
+  function resolve25(root2, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string")
       ref = sch;
@@ -53041,7 +53041,7 @@ var require_fast_uri = __commonJS2((exports2, module2) => {
     }
     return uri;
   }
-  function resolve24(baseURI, relativeURI, options) {
+  function resolve25(baseURI, relativeURI, options) {
     const schemelessOptions = Object.assign({ scheme: "null" }, options);
     const resolved = resolveComponents(parse62(baseURI, schemelessOptions), parse62(relativeURI, schemelessOptions), schemelessOptions, true);
     return serialize(resolved, { ...schemelessOptions, skipEscape: true });
@@ -53274,7 +53274,7 @@ var require_fast_uri = __commonJS2((exports2, module2) => {
   var fastUri = {
     SCHEMES,
     normalize: normalize13,
-    resolve: resolve24,
+    resolve: resolve25,
     resolveComponents,
     equal,
     serialize,
@@ -67641,7 +67641,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = (_c = (_a = task2.pollInterval) !== null && _a !== void 0 ? _a : (_b = this._options) === null || _b === void 0 ? void 0 : _b.defaultTaskPollInterval) !== null && _c !== void 0 ? _c : 1e3;
-        await new Promise((resolve24) => setTimeout(resolve24, pollInterval));
+        await new Promise((resolve25) => setTimeout(resolve25, pollInterval));
         (_d = options === null || options === void 0 ? void 0 : options.signal) === null || _d === void 0 || _d.throwIfAborted();
       }
     } catch (error2) {
@@ -67653,7 +67653,7 @@ var Protocol = class {
   }
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options !== null && options !== void 0 ? options : {};
-    return new Promise((resolve24, reject) => {
+    return new Promise((resolve25, reject) => {
       var _a, _b, _c, _d, _e, _f, _g;
       const earlyReject = (error2) => {
         reject(error2);
@@ -67734,7 +67734,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve24(parseResult.data);
+            resolve25(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -67931,12 +67931,12 @@ var Protocol = class {
       }
     } catch (_d) {
     }
-    return new Promise((resolve24, reject) => {
+    return new Promise((resolve25, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve24, interval);
+      const timeoutId = setTimeout(resolve25, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -68735,7 +68735,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = (_a = task.pollInterval) !== null && _a !== void 0 ? _a : 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve24) => setTimeout(resolve24, pollInterval));
+      await new Promise((resolve25) => setTimeout(resolve25, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -73590,14 +73590,75 @@ function runDocker(args) {
 var import_child_process3 = require("child_process");
 var import_fs7 = require("fs");
 var import_path12 = require("path");
+var TYPESCRIPT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
+var TYPESCRIPT_CLASSIC_SERVER = {
+  name: "TypeScript Language Server",
+  command: "typescript-language-server",
+  args: ["--stdio"],
+  extensions: TYPESCRIPT_EXTENSIONS,
+  installHint: "npm install -g typescript-language-server typescript"
+};
+function getTypeScriptNativeBin(packageRoot) {
+  const packageNodeModules = (0, import_path12.dirname)(packageRoot);
+  const workspaceRoot = (0, import_path12.dirname)(packageNodeModules);
+  const executable = process.platform === "win32" ? "tsc.cmd" : "tsc";
+  return (0, import_path12.join)(workspaceRoot, "node_modules", ".bin", executable);
+}
+function findTypeScriptPackageRoot(workspaceRoot) {
+  let dir = (0, import_path12.resolve)(workspaceRoot);
+  while (true) {
+    const packageJsonPath = (0, import_path12.join)(dir, "node_modules", "typescript", "package.json");
+    if ((0, import_fs7.existsSync)(packageJsonPath)) {
+      return (0, import_path12.dirname)(packageJsonPath);
+    }
+    const parsed = (0, import_path12.parse)(dir);
+    if (parsed.root === dir) {
+      return null;
+    }
+    dir = (0, import_path12.dirname)(dir);
+  }
+}
+function readTypeScriptMajorVersion(packageRoot) {
+  try {
+    const packageJson = JSON.parse((0, import_fs7.readFileSync)((0, import_path12.join)(packageRoot, "package.json"), "utf8"));
+    if (typeof packageJson.version !== "string") {
+      return null;
+    }
+    const major = Number.parseInt(packageJson.version.split(".")[0] ?? "", 10);
+    return Number.isNaN(major) ? null : major;
+  } catch {
+    return null;
+  }
+}
+function shouldUseNativeTypeScriptServer(packageRoot) {
+  const majorVersion = readTypeScriptMajorVersion(packageRoot);
+  if (majorVersion !== null && majorVersion >= 7) {
+    return true;
+  }
+  if ((0, import_fs7.existsSync)((0, import_path12.join)(packageRoot, "lib", "getExePath.js"))) {
+    return true;
+  }
+  return !(0, import_fs7.existsSync)((0, import_path12.join)(packageRoot, "lib", "tsserver.js"));
+}
+function getTypeScriptServerForWorkspace(workspaceRoot) {
+  const packageRoot = findTypeScriptPackageRoot(workspaceRoot);
+  if (!packageRoot || !shouldUseNativeTypeScriptServer(packageRoot)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+  const localTsc = getTypeScriptNativeBin(packageRoot);
+  if (!(0, import_fs7.existsSync)(localTsc)) {
+    return TYPESCRIPT_CLASSIC_SERVER;
+  }
+  return {
+    name: "TypeScript 7 Native Language Server (typescript-go)",
+    command: localTsc,
+    args: ["--lsp", "--stdio"],
+    extensions: TYPESCRIPT_EXTENSIONS,
+    installHint: "Install TypeScript 7 locally so node_modules/.bin/tsc is available"
+  };
+}
 var LSP_SERVERS = {
-  typescript: {
-    name: "TypeScript Language Server",
-    command: "typescript-language-server",
-    args: ["--stdio"],
-    extensions: [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"],
-    installHint: "npm install -g typescript-language-server typescript"
-  },
+  typescript: TYPESCRIPT_CLASSIC_SERVER,
   python: {
     name: "Python Language Server (ty)",
     command: "ty",
@@ -73739,8 +73800,11 @@ function commandExists(command) {
   const result = (0, import_child_process3.spawnSync)(checkCommand, [command], { stdio: "ignore" });
   return result.status === 0;
 }
-function getServerForFile(filePath) {
+function getServerForFile(filePath, workspaceRoot) {
   const ext = (0, import_path12.extname)(filePath).toLowerCase();
+  if (TYPESCRIPT_EXTENSIONS.includes(ext) && workspaceRoot) {
+    return getTypeScriptServerForWorkspace(workspaceRoot);
+  }
   for (const [_, config2] of Object.entries(LSP_SERVERS)) {
     if (config2.extensions.includes(ext)) {
       return config2;
@@ -73811,7 +73875,7 @@ var LspClient = class _LspClient {
 Install with: ${this.serverConfig.installHint}`
       );
     }
-    return new Promise((resolve24, reject) => {
+    return new Promise((resolve25, reject) => {
       const command = this.devContainerContext ? "docker" : this.serverConfig.command;
       const args = this.devContainerContext ? ["exec", "-i", "-w", this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args] : this.serverConfig.args;
       this.process = (0, import_child_process4.spawn)(command, args, {
@@ -73838,7 +73902,7 @@ Install with: ${this.serverConfig.installHint}`
       });
       this.initialize().then(() => {
         this.initialized = true;
-        resolve24();
+        resolve25();
       }).catch(reject);
     });
   }
@@ -73982,13 +74046,13 @@ Install with: ${this.serverConfig.installHint}`
     const message = `Content-Length: ${Buffer.byteLength(content)}\r
 \r
 ${content}`;
-    return new Promise((resolve24, reject) => {
+    return new Promise((resolve25, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`LSP request '${method}' timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       this.pendingRequests.set(id, {
-        resolve: resolve24,
+        resolve: resolve25,
         reject,
         timeout: timeoutHandle
       });
@@ -74064,7 +74128,7 @@ ${content}`;
       }
     });
     this.openDocuments.add(hostUri);
-    await new Promise((resolve24) => setTimeout(resolve24, 100));
+    await new Promise((resolve25) => setTimeout(resolve25, 100));
   }
   /**
    * Close a document
@@ -74225,13 +74289,13 @@ ${content}`;
     if (this.diagnostics.has(uri)) {
       return Promise.resolve();
     }
-    return new Promise((resolve24) => {
+    return new Promise((resolve25) => {
       let resolved = false;
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
           this.diagnosticWaiters.delete(uri);
-          resolve24();
+          resolve25();
         }
       }, timeoutMs);
       const existing = this.diagnosticWaiters.get(uri) || [];
@@ -74239,7 +74303,7 @@ ${content}`;
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
-          resolve24();
+          resolve25();
         }
       });
       this.diagnosticWaiters.set(uri, existing);
@@ -74375,11 +74439,11 @@ var LspClientManager = class {
    * Get or create a client for a file
    */
   async getClientForFile(filePath) {
-    const serverConfig = getServerForFile(filePath);
+    const workspaceRoot = this.findWorkspaceRoot(filePath);
+    const serverConfig = getServerForFile(filePath, workspaceRoot);
     if (!serverConfig) {
       return null;
     }
-    const workspaceRoot = this.findWorkspaceRoot(filePath);
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
     const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? "host"}`;
     let client = this.clients.get(key);
@@ -74401,11 +74465,11 @@ var LspClientManager = class {
    * The lastUsed timestamp is refreshed on both entry and exit.
    */
   async runWithClientLease(filePath, fn) {
-    const serverConfig = getServerForFile(filePath);
+    const workspaceRoot = this.findWorkspaceRoot(filePath);
+    const serverConfig = getServerForFile(filePath, workspaceRoot);
     if (!serverConfig) {
       throw new Error(`No language server available for: ${filePath}`);
     }
-    const workspaceRoot = this.findWorkspaceRoot(filePath);
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
     const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? "host"}`;
     let client = this.clients.get(key);
@@ -76169,7 +76233,7 @@ var SessionLock = class {
   }
 };
 function sleep(ms) {
-  return new Promise((resolve24) => setTimeout(resolve24, ms));
+  return new Promise((resolve25) => setTimeout(resolve25, ms));
 }
 
 // src/tools/python-repl/socket-client.ts
@@ -76199,7 +76263,7 @@ var JsonRpcError = class extends Error {
   }
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
-  return new Promise((resolve24, reject) => {
+  return new Promise((resolve25, reject) => {
     const id = (0, import_crypto5.randomUUID)();
     const request = {
       jsonrpc: "2.0",
@@ -76289,7 +76353,7 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
           }
           if (!settled) {
             settled = true;
-            resolve24(response.result);
+            resolve25(response.result);
           }
         } catch (e) {
           if (!settled) {
@@ -79025,7 +79089,7 @@ function mergeArrays(fieldName, base, incoming) {
       return mergeScalarArray(base, incoming);
   }
 }
-function mergeByKey(base, incoming, keyFn, resolve24) {
+function mergeByKey(base, incoming, keyFn, resolve25) {
   const seen = /* @__PURE__ */ new Map();
   for (const item of base) {
     seen.set(keyFn(item), item);
@@ -79034,7 +79098,7 @@ function mergeByKey(base, incoming, keyFn, resolve24) {
     const key = keyFn(item);
     const existing = seen.get(key);
     if (existing) {
-      seen.set(key, resolve24(existing, item));
+      seen.set(key, resolve25(existing, item));
     } else {
       seen.set(key, item);
     }
@@ -89213,7 +89277,7 @@ async function pollLoop2(config2) {
       log2(`Poll error: ${state.lastError}`, config2);
       writeDaemonState2(state, config2);
     }
-    await new Promise((resolve24) => setTimeout(resolve24, config2.pollIntervalMs));
+    await new Promise((resolve25) => setTimeout(resolve25, config2.pollIntervalMs));
   }
 }
 function startDaemon(config2) {
@@ -92831,7 +92895,7 @@ async function ralphthonCommand(args) {
   console.log(source_default.gray("Orchestrator running. Press Ctrl+C to stop."));
 }
 function sleep5(ms) {
-  return new Promise((resolve24) => setTimeout(resolve24, ms));
+  return new Promise((resolve25) => setTimeout(resolve25, ms));
 }
 
 // src/cli/commands/ultragoal.ts
@@ -95333,15 +95397,15 @@ async function runHudWatchLoop(options) {
     if (shouldStop) {
       break;
     }
-    await new Promise((resolve24) => {
+    await new Promise((resolve25) => {
       const timer = setTimeout(() => {
         wakeSleep = null;
-        resolve24();
+        resolve25();
       }, options.intervalMs);
       wakeSleep = () => {
         clearTimeout(timer);
         wakeSleep = null;
-        resolve24();
+        resolve25();
       };
       timer.unref?.();
     });
