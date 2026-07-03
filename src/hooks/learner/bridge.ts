@@ -18,7 +18,7 @@ import {
 } from "fs";
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
-import { OmcPaths } from "../../lib/worktree-paths.js";
+import { OmcPaths, getOmcRoot } from "../../lib/worktree-paths.js";
 import { parseYamlMetadata } from "./parser.js";
 import { expandTriggers } from "./transliteration-map.js";
 
@@ -182,9 +182,6 @@ function summarizeSkillContent(content: string): string {
   return (firstUsefulLine || content.replace(/\s+/g, " ").trim()).slice(0, 240);
 }
 
-/** State file path */
-const STATE_FILE = `${OmcPaths.STATE}/skill-sessions.json`;
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -242,7 +239,7 @@ interface SessionState {
  * Get state file path for a project.
  */
 function getStateFilePath(projectRoot: string): string {
-  return join(projectRoot, STATE_FILE);
+  return join(getOmcRoot(projectRoot), "state", "skill-sessions.json");
 }
 
 /**
