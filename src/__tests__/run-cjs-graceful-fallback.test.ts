@@ -63,15 +63,15 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     const skillInjector = promptHooks.find((hook: any) => hook.command.includes('skill-injector.mjs'));
 
     expect(keywordDetector?.timeout).toBe(10);
-    expect(skillInjector?.timeout).toBe(8);
+    expect(skillInjector?.timeout).toBe(15);
 
     const hooksDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'HOOKS.md'), 'utf-8');
     const referenceDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'REFERENCE.md'), 'utf-8');
 
     expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 10s |');
-    expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 8s |');
+    expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 15s |');
     expect(referenceDoc).toContain('| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`');
-    expect(referenceDoc).toContain('| 10s, 8s');
+    expect(referenceDoc).toContain('| 10s, 15s');
   });
 
   it('exits 0 when no target argument is provided', () => {
