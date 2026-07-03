@@ -7,7 +7,7 @@
 
 import { spawnSync } from 'child_process';
 import { existsSync } from 'fs';
-import { extname, isAbsolute } from 'path';
+import { dirname, extname, isAbsolute, join, resolve } from 'path';
 
 export interface LspServerConfig {
   name: string;
@@ -177,14 +177,57 @@ export function commandExists(command: string): boolean {
 }
 
 /**
+ * Walk up from a file to find its project-local `node_modules/typescript` install.
+ */
+function findLocalTypescriptDir(filePath: string): string | null {
+  let dir = dirname(resolve(filePath));
+  // ponytail: plain parent walk to the filesystem root; no symlink-cycle guard needed.
+  for (;;) {
+    const tsDir = join(dir, 'node_modules', 'typescript');
+    if (existsSync(join(tsDir, 'package.json'))) return tsDir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Resolve the correct TypeScript language server for a file.
+ *
+ * TypeScript 7+ (the native `typescript-go` build) ships no `lib/tsserver.js`, so
+ * `typescript-language-server` — a wrapper around the classic tsserver protocol — can't
+ * drive it. It silently falls back to an unrelated global TypeScript (or fails outright),
+ * so OMC's LSP tools return nothing useful. TS7 instead exposes an LSP directly via
+ * `tsc --lsp --stdio`. When the project's TypeScript is a native build, launch that; the
+ * JS shim (`typescript/bin/tsc`) is run through `node` so it works cross-platform.
+ */
+export function resolveTypescriptServer(filePath: string): LspServerConfig {
+  const tsDir = findLocalTypescriptDir(filePath);
+  if (tsDir) {
+    const hasClassicTsserver = existsSync(join(tsDir, 'lib', 'tsserver.js'));
+    const nativeBin = join(tsDir, 'bin', 'tsc');
+    if (!hasClassicTsserver && existsSync(nativeBin)) {
+      return {
+        name: 'TypeScript Native LSP (typescript-go)',
+        command: process.execPath,
+        args: [nativeBin, '--lsp', '--stdio'],
+        extensions: LSP_SERVERS.typescript.extensions,
+        installHint: LSP_SERVERS.typescript.installHint
+      };
+    }
+  }
+  return LSP_SERVERS.typescript;
+}
+
+/**
  * Get the LSP server config for a file based on its extension
  */
 export function getServerForFile(filePath: string): LspServerConfig | null {
   const ext = extname(filePath).toLowerCase();
 
-  for (const [_, config] of Object.entries(LSP_SERVERS)) {
+  for (const [key, config] of Object.entries(LSP_SERVERS)) {
     if (config.extensions.includes(ext)) {
-      return config;
+      return key === 'typescript' ? resolveTypescriptServer(filePath) : config;
     }
   }
 
