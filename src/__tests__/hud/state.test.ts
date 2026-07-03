@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readHudConfig, writeHudConfig } from "../../hud/state.js";
-import { DEFAULT_HUD_CONFIG } from "../../hud/types.js";
+import { DEFAULT_HUD_CONFIG, PRESET_CONFIGS } from "../../hud/types.js";
 
 // Mock fs and os modules
 vi.mock("node:fs", () => ({
@@ -34,12 +34,18 @@ describe("readHudConfig", () => {
   });
 
   describe("priority order", () => {
-    it("returns defaults when no config files exist", () => {
+    it("applies the focused preset when no config files exist", () => {
       mockExistsSync.mockReturnValue(false);
 
       const config = readHudConfig();
 
-      expect(config).toEqual(DEFAULT_HUD_CONFIG);
+      expect(config.preset).toBe("focused");
+      expect(config.elements.gitBranch).toBe(PRESET_CONFIGS.focused.gitBranch);
+      expect(config.elements.gitStatus).toBe(PRESET_CONFIGS.focused.gitStatus);
+      expect(config.elements.useBars).toBe(PRESET_CONFIGS.focused.useBars);
+      expect(config.elements.agentsMaxLines).toBe(
+        PRESET_CONFIGS.focused.agentsMaxLines,
+      );
     });
 
     it("reads from settings.json omcHud key first", () => {
@@ -124,6 +130,24 @@ describe("readHudConfig", () => {
       expect(config.elements.cwd).toBe(true);
     });
 
+    it("applies the focused preset when settings.json has no omcHud and no legacy config exists", () => {
+      mockExistsSync.mockImplementation((path) => {
+        const s = String(path);
+        return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(
+          s,
+        );
+      });
+      mockReadFileSync.mockReturnValue(JSON.stringify({ someOtherKey: true }));
+
+      const config = readHudConfig();
+
+      expect(config.preset).toBe("focused");
+      expect(config.elements.gitBranch).toBe(PRESET_CONFIGS.focused.gitBranch);
+      expect(config.elements.gitStatus).toBe(PRESET_CONFIGS.focused.gitStatus);
+      expect(config.elements.cwd).toBe(PRESET_CONFIGS.focused.cwd);
+      expect(config.elements.useBars).toBe(PRESET_CONFIGS.focused.useBars);
+    });
+
     it("prefers settings.json over legacy hud-config.json", () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockImplementation((path) => {
@@ -162,7 +186,7 @@ describe("readHudConfig", () => {
   });
 
   describe("error handling", () => {
-    it("returns defaults when settings.json is invalid JSON", () => {
+    it("applies the focused preset when settings.json is invalid JSON and no legacy config exists", () => {
       mockExistsSync.mockImplementation((path) => {
         const s = String(path);
         return /[\\/]Users[\\/]testuser[\\/]\.claude[\\/]settings\.json$/.test(
@@ -173,7 +197,9 @@ describe("readHudConfig", () => {
 
       const config = readHudConfig();
 
-      expect(config).toEqual(DEFAULT_HUD_CONFIG);
+      expect(config.elements.gitBranch).toBe(PRESET_CONFIGS.focused.gitBranch);
+      expect(config.elements.gitStatus).toBe(PRESET_CONFIGS.focused.gitStatus);
+      expect(config.elements.useBars).toBe(PRESET_CONFIGS.focused.useBars);
     });
 
     it("falls back to legacy when settings.json read fails", () => {

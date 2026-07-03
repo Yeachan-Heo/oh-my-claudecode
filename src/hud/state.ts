@@ -391,7 +391,7 @@ export function readHudConfig(): HudConfig {
     return mergeWithDefaults(legacyConfig);
   }
 
-  return DEFAULT_HUD_CONFIG;
+  return mergeWithDefaults({});
 }
 
 /**
