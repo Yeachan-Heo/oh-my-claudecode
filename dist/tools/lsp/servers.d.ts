@@ -13,7 +13,6 @@ export interface LspServerConfig {
     initializationOptions?: Record<string, unknown>;
     initializeTimeoutMs?: number;
 }
-export declare function getTypeScriptServerForWorkspace(workspaceRoot: string): LspServerConfig;
 /**
  * Known LSP servers and their configurations
  */
@@ -23,11 +22,9 @@ export declare const LSP_SERVERS: Record<string, LspServerConfig>;
  */
 export declare function commandExists(command: string): boolean;
 /**
- * Get the LSP server config for a file based on its extension.
- * When workspaceRoot is provided, TypeScript files prefer a project-local
- * native TypeScript 7 language server (`tsc --lsp --stdio`) when available.
+ * Get the LSP server config for a file based on its extension
  */
-export declare function getServerForFile(filePath: string, workspaceRoot?: string): LspServerConfig | null;
+export declare function getServerForFile(filePath: string): LspServerConfig | null;
 /**
  * Get all available servers (installed and not installed)
  */
