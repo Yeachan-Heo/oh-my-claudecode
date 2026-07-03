@@ -752,20 +752,10 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
     mkdirSync(hooksLibDir, { recursive: true });
   }
 
-  for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
-    const sourcePath = join(templatesDir, filename);
-    const targetPath = join(HOOKS_DIR, filename);
-    copyFileSync(sourcePath, targetPath);
-    if (!isWindows()) {
-      chmodSync(targetPath, 0o755);
-    }
-  }
-
+  // Hook entrypoints import ./lib/*.mjs at module load time. Reconcile the
+  // helper payload before replacing entrypoints so an interrupted update cannot
+  // leave fresh hooks pointing at a stale or partial hooks/lib directory.
   if (existsSync(templatesLibDir)) {
-    if (!existsSync(hooksLibDir)) {
-      mkdirSync(hooksLibDir, { recursive: true });
-    }
-
     for (const filename of readdirSync(templatesLibDir)) {
       const sourcePath = join(templatesLibDir, filename);
       try {
@@ -783,6 +773,7 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
       }
     }
   }
+
   // config-dir.mjs: canonical source is scripts/lib/, not templates (avoids duplication)
   const configDirHelperMjs = join(packageDir, 'scripts', 'lib', 'config-dir.mjs');
   const configDirHelperMjsDest = join(hooksLibDir, 'config-dir.mjs');
@@ -799,6 +790,15 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
     copyFileSync(configDirHelperSrc, configDirHelperDest);
     chmodSync(findNodeDest, 0o755);
     chmodSync(configDirHelperDest, 0o755);
+  }
+
+  for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
+    const sourcePath = join(templatesDir, filename);
+    const targetPath = join(HOOKS_DIR, filename);
+    copyFileSync(sourcePath, targetPath);
+    if (!isWindows()) {
+      chmodSync(targetPath, 0o755);
+    }
   }
 
   log('  Installed standalone hook scripts');

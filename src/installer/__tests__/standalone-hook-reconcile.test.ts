@@ -154,6 +154,27 @@ describe('install() standalone hook reconciliation', () => {
     }
   });
 
+  it('repairs stale partial standalone hooks/lib payloads before hook entrypoints are refreshed', async () => {
+    const hooksDir = join(testClaudeDir, 'hooks');
+    const hooksLibDir = join(hooksDir, 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    writeFileSync(join(hooksLibDir, 'config-dir.mjs'), 'export function getClaudeConfigDir() { return "/stale"; }\n');
+    writeFileSync(join(hooksDir, 'keyword-detector.mjs'), 'import "./lib/stdin.mjs";\n');
+
+    const { install } = await loadInstaller();
+    const result = install({
+      force: true,
+      skipClaudeCheck: true,
+    });
+
+    expect(result.success).toBe(true);
+    for (const filename of ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs']) {
+      expect(existsSync(join(hooksLibDir, filename)), filename).toBe(true);
+    }
+    expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');
+    expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).not.toContain('/stale');
+  });
+
   it('installs standalone hooks with all runtime helper imports', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-hook-project-'));
     try {
