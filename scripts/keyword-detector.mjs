@@ -151,7 +151,7 @@ ANALYSIS MODE. Gather context before diving deep:
 
 const TDD_MESSAGE = `<tdd-mode>
 [TDD MODE ACTIVATED]
-Write or update tests first when practical, confirm they fail for the right reason, then implement the minimal fix and re-run verification.
+Do not write blind tests. First anchor to the task's acceptance criteria or spec (a SPEC/AC ledger, ticket, or the exact failing behavior you're fixing) and write the failing test that proves the specific requirement you're implementing right now — confirm it fails for the right reason, then implement the minimal fix and re-run verification. If no acceptance criteria or reproducible failing case exists yet, define that first before writing any test.
 </tdd-mode>
 
 ---
