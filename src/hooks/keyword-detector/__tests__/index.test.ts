@@ -378,6 +378,17 @@ Final draft.`);
         expect(detectKeywordsWithType(prompt).find((r) => r.type === 'autopilot')).toBeDefined();
       });
 
+      it.each([
+        'build me a website เหมือน Airbnb',
+        'I want a dashboard เกี่ยวกับ sales',
+      ])('should detect Thai-adjacent autopilot creation alias "%s"', (prompt) => {
+        expect(detectKeywordsWithType(prompt).find((r) => r.type === 'autopilot')).toBeDefined();
+      });
+
+      it('should NOT detect colon-prefixed autopilot heading help question', () => {
+        expect(detectKeywordsWithType('autopilot: what is it and how do I use it?')).toEqual([]);
+      });
+
       it('Korean informational prompt does not trigger keyword', () => {
         // "알려줘" (tell me about) is informational
         expect(detectKeywordsWithType('오토파일럿 기능 알려줘')).toHaveLength(0);
@@ -499,10 +510,10 @@ Final draft.`);
         expect(autopilotMatch).toBeDefined();
       });
 
-      it('should NOT detect "build me" phrase', () => {
-        const result = detectKeywordsWithType('build me a web app');
+      it('should detect documented "build me" autopilot alias', () => {
+        const result = detectKeywordsWithType('build me a website');
         const autopilotMatch = result.find((r) => r.type === 'autopilot');
-        expect(autopilotMatch).toBeUndefined();
+        expect(autopilotMatch).toBeDefined();
       });
 
       it('should NOT detect "autonomous" keyword', () => {

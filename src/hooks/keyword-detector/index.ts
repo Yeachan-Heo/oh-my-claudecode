@@ -46,7 +46,7 @@ export interface DetectedKeyword {
 const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   cancel: /\b(cancelomc|stopomc)\b/i,
   ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
-  autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i,
+  autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
   ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i,
   // Team keyword detection disabled — team mode is now explicit-only via /team skill.
   // This prevents infinite spawning when Claude workers receive prompts containing "team".
@@ -606,6 +606,19 @@ function isRalphUltraworkMetaOrBanterContext(context: string, keywordText: strin
   return metaOrBanterPatterns.some((pattern) => pattern.test(context));
 }
 
+function isAutopilotCreationAlias(keywordText: string): boolean {
+  const normalized = keywordText.toLowerCase().trim();
+  return /^(?:build|create|make)\s+me\b/.test(normalized) || /^i\s+want\s+an?(?:\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension))?\s*$/.test(normalized);
+}
+
+function hasActionableCommandAfterSeparator(text: string, position: number, keywordLength: number): boolean {
+  const suffix = text.slice(position + keywordLength).match(/^\s*[:：]\s*([^\n]{0,80})/u)?.[1] ?? '';
+  if (/\?|？|\b(?:what(?:'s|\s+is)|how\s+(?:to|do\s+i)\s+use|explain|describe|tell\s+me\s+about)\b/iu.test(suffix)) {
+    return false;
+  }
+  return /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch)\b|(?:ทำ|ทํา|สร้าง|แก้|เปิด|รัน|เรียก|เริ่ม)/iu.test(suffix);
+}
+
 function isInformationalKeywordContext(text: string, position: number, keywordLength: number, keywordText?: string): boolean {
   const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
   const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
@@ -619,6 +632,8 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
   const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
   const hasCommandSeparatorInvocation =
     hasDirectInvocationPrefix(text, position) && /^\s*[:：]/.test(text.slice(position + keywordLength));
+  const hasActionableCommandSeparatorInvocation =
+    hasCommandSeparatorInvocation && hasActionableCommandAfterSeparator(text, position, keywordLength);
 
   // A keyword occurrence inside a quoted span is usually reported/example
   // text, not a command directed at the assistant — e.g. an example sentence
@@ -665,7 +680,11 @@ function isInformationalKeywordContext(text: string, position: number, keywordLe
 
   if (keywordText) {
     const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
-    if (hasCommandSeparatorInvocation) {
+    if (hasActionableCommandSeparatorInvocation) {
+      return false;
+    }
+
+    if (isAutopilotCreationAlias(keywordText)) {
       return false;
     }
 

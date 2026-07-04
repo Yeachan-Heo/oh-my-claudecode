@@ -691,6 +691,31 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, stateFile))).toBe(false);
   });
 
+  it.each([
+    'build me a website เหมือน Airbnb',
+    'I want a dashboard เกี่ยวกับ sales',
+  ])('activates autopilot for Thai-adjacent creation alias "%s"', (prompt) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-thai-creation-'));
+    const sessionId = 'session-autopilot-thai-creation';
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(true);
+  });
+
+  it('does not activate autopilot for colon-prefixed heading help question', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-colon-help-'));
+    const sessionId = 'session-autopilot-colon-help';
+    const output = runKeywordDetector('autopilot: what is it and how do I use it?', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
   it('does not activate autopilot for English help-style use questions in the script copy', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-help-question-'));
     const sessionId = 'session-autopilot-help-question';

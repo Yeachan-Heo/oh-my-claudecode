@@ -597,6 +597,19 @@ function hasDiagnosticIntentNearKeyword(context, keyword) {
   return patterns.some((pattern) => pattern.test(context));
 }
 
+function isAutopilotCreationAlias(keywordText) {
+  const normalized = (keywordText || '').toLowerCase().trim();
+  return /^(?:build|create|make)\s+me\b/.test(normalized) || /^i\s+want\s+an?(?:\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension))?\s*$/.test(normalized);
+}
+
+function hasActionableCommandAfterSeparator(text, position, keywordLength) {
+  const suffix = text.slice(position + keywordLength).match(/^\s*[:：]\s*([^\n]{0,80})/u)?.[1] ?? '';
+  if (/\?|？|\b(?:what(?:'s|\s+is)|how\s+(?:to|do\s+i)\s+use|explain|describe|tell\s+me\s+about)\b/iu.test(suffix)) {
+    return false;
+  }
+  return /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch)\b|(?:ทำ|ทํา|สร้าง|แก้|เปิด|รัน|เรียก|เริ่ม)/iu.test(suffix);
+}
+
 function isRalphUltraworkMetaOrBanterContext(context, keywordText) {
   const normalizedKeyword = (keywordText || '').toLowerCase().replace(/\s+/g, '');
   if (!['ralph', '랄프', 'ラルフ', 'ultrawork', 'ulw', 'uw', '울트라워크', 'ウルトラワーク'].includes(normalizedKeyword)) {
@@ -640,6 +653,8 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
   const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
   const hasCommandSeparatorInvocation =
     hasDirectInvocationPrefix(text, position) && /^\s*[:：]/.test(text.slice(position + keywordLength));
+  const hasActionableCommandSeparatorInvocation =
+    hasCommandSeparatorInvocation && hasActionableCommandAfterSeparator(text, position, keywordLength);
 
   // A keyword occurrence inside a quoted span is usually reported/example
   // text, not a command directed at the assistant — e.g. an example sentence
@@ -683,7 +698,11 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
 
   if (keywordText) {
     const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
-    if (hasCommandSeparatorInvocation) {
+    if (hasActionableCommandSeparatorInvocation) {
+      return false;
+    }
+
+    if (isAutopilotCreationAlias(keywordText)) {
       return false;
     }
     if (hasActivationIntent && hasExecutionDirective) {
@@ -1066,7 +1085,10 @@ async function main() {
     }
 
     // Autopilot keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i) ||
+        hasActionableKeyword(cleanPrompt, /\b(build|create|make)\s+me\s+(an?\s+)?(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
+        hasActionableKeyword(cleanPrompt, /\bi\s+want\s+a\s+(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
+        hasActionableKeyword(cleanPrompt, /\bi\s+want\s+an\s+(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i)) {
       matches.push({ name: 'autopilot', args: '' });
     }
 
