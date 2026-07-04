@@ -562,6 +562,36 @@ diff --git a/a b/b
     expect(context).not.toContain('[MAGIC KEYWORD: CODE-REVIEW]');
   });
 
+  it.each([
+    'so does this not print out status each epoch via rich cli? don\'t stop anything',
+    'spawn subagent. Ralph is randomly trigger. open issue ...',
+  ])('does not activate ralph for issue #3411 false-positive prompt: %s', (prompt) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-3411-negative-'));
+    const sessionId = `session-3411-negative-${prompt.replace(/\W+/g, '-').slice(0, 80)}`;
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(false);
+  });
+
+  it.each([
+    '/oh-my-claudecode:ralph issue #3411',
+    'ralph this',
+  ])('still activates ralph for issue #3411 explicit invocation: %s', (prompt) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-3411-positive-'));
+    const sessionId = `session-3411-positive-${prompt.replace(/\W+/g, '-').slice(0, 80)}`;
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(true);
+  });
+
   it('does not activate ralph for Korean banter/question wording from issue #3162', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-banter-'));
     const sessionId = 'session-3162-ralph-banter';

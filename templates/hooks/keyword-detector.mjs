@@ -581,6 +581,37 @@ function hasExplicitInvocationContext(text, position, keywordLength, keywordText
   return hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
 }
 
+function hasExplicitRalphInvocationContext(text, position, keywordLength, keywordText) {
+  const normalizedKeyword = (keywordText || '').toLowerCase().replace(/\s+/g, '');
+  const prefix = text.slice(0, position);
+  const suffix = text.slice(position + keywordLength);
+
+  if (/^\s*(?:[$/!]\s*|force:\s*|\/?oh-my-(?:claudecode|codex):\s*)$/i.test(prefix)) {
+    return true;
+  }
+
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
+  const context = text.slice(start, end);
+  if (hasActivationIntentNearKeyword(context, keywordText)) {
+    return true;
+  }
+
+  if (normalizedKeyword === '랄프' || normalizedKeyword === 'ラルフ') {
+    return /^\s*(?:켜|켜줘|실행|시작|돌려|돌려줘|써|써줘|사용해|진행해|起動|開始|実行|使って|やって|を?実行|を?起動|を?開始)/u.test(suffix);
+  }
+
+  if (normalizedKeyword !== 'ralph') {
+    return false;
+  }
+
+  if (/^\s*[:：]\s*\S/.test(suffix)) {
+    return true;
+  }
+
+  return /^['"]?\s+(?:this\b|and\s+)?(?:fix\b|debug\b|investigate\b|resolve\b|handle\b|patch\b|address\b|implement\b|run\b|start\b|enable\b|activate\b|invoke\b|trigger\b|launch\b)|^['"]?\s+this\b|^\s+the\s+[^.?!\n]{0,60}\buntil\b/i.test(suffix);
+}
+
 function hasDiagnosticIntentNearKeyword(context, keyword) {
   const escaped = escapeRegExp((keyword || '').trim());
   if (!escaped) return false;
@@ -758,6 +789,33 @@ function hasActionableKeyword(text, pattern) {
     }
 
     if (isInformationalKeywordContext(searchText, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+function hasActionableRalphKeyword(text, pattern) {
+  const searchText = looksLikeSystemEcho(text)
+    ? stripSystemEchoes(text)
+    : text;
+
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+
+  for (const match of searchText.matchAll(globalPattern)) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    if (isInformationalKeywordContext(searchText, match.index, match[0].length, match[0])) {
+      continue;
+    }
+
+    if (!hasExplicitRalphInvocationContext(searchText, match.index, match[0].length, match[0])) {
       continue;
     }
 
@@ -1080,7 +1138,7 @@ async function main() {
     }
 
     // Ralph keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(ralph)\b|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i)) {
+    if (hasActionableRalphKeyword(cleanPrompt, /\b(ralph)\b|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i)) {
       matches.push({ name: 'ralph', args: '' });
     }
 
