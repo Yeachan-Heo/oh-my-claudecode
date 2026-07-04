@@ -664,6 +664,59 @@ diff --git a/a b/b
     expect(existsSync(autopilotStatePath)).toBe(true);
   });
 
+  it.each([
+    [
+      'ทำไม autopilot มันชอบทำงานเองนะ',
+      '[MAGIC KEYWORD: AUTOPILOT]',
+      'autopilot-state.json',
+    ],
+    [
+      'ผมอยากเพิ่ม rule ให้ถามกลับเหมือน skill deep interview แต่ระบบเดิมก็ทำได้อยู่แล้วถูกมั้ย',
+      '[MAGIC KEYWORD: DEEP-INTERVIEW]',
+      'deep-interview-state.json',
+    ],
+    [
+      'autopilot คืออะไร ใช้งานยังไง',
+      '[MAGIC KEYWORD: AUTOPILOT]',
+      'autopilot-state.json',
+    ],
+  ] as const)('does not activate workflow for informational Thai prompt "%s"', (prompt, marker, stateFile) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-thai-info-'));
+    const sessionId = 'session-thai-info';
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain(marker);
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, stateFile))).toBe(false);
+  });
+
+  it('does not activate autopilot for English help-style use questions in the script copy', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-help-question-'));
+    const sessionId = 'session-autopilot-help-question';
+    const output = runKeywordDetector('How do I use autopilot?', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(false);
+  });
+
+  it.each([
+    'autopilot: build me a todo app',
+    'autopilot: ทำเว็บเหมือน Trello',
+    'autopilot: แก้บั๊กเกี่ยวกับ auth',
+  ])('still activates autopilot for colon-prefixed command "%s"', (prompt) => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-autopilot-colon-positive-'));
+    const sessionId = 'session-autopilot-colon-positive';
+    const output = runKeywordDetector(prompt, cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'))).toBe(true);
+  });
+
   // Regression (issue #3380): a keyword quoted inside reported/example text
   // (e.g. an example sentence like `"use autopilot"` embedded in prose
   // discussing that exact phrasing) must not activate. This guards the

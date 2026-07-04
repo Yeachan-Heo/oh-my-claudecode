@@ -362,6 +362,22 @@ Final draft.`);
         expect(result).toEqual([]);
       });
 
+      it('should NOT detect informational Thai prompts with English mode names', () => {
+        expect(detectKeywordsWithType('ทำไม autopilot มันชอบทำงานเองนะ')).toEqual([]);
+        expect(
+          detectKeywordsWithType('ผมอยากเพิ่ม rule ให้ถามกลับเหมือน skill deep interview แต่ระบบเดิมก็ทำได้อยู่แล้วถูกมั้ย'),
+        ).toEqual([]);
+        expect(detectKeywordsWithType('autopilot คืออะไร ใช้งานยังไง')).toEqual([]);
+      });
+
+      it.each([
+        'autopilot: build me a todo app',
+        'autopilot: ทำเว็บเหมือน Trello',
+        'autopilot: แก้บั๊กเกี่ยวกับ auth',
+      ])('should detect explicit Thai-adjacent autopilot command "%s"', (prompt) => {
+        expect(detectKeywordsWithType(prompt).find((r) => r.type === 'autopilot')).toBeDefined();
+      });
+
       it('Korean informational prompt does not trigger keyword', () => {
         // "알려줘" (tell me about) is informational
         expect(detectKeywordsWithType('오토파일럿 기능 알려줘')).toHaveLength(0);
