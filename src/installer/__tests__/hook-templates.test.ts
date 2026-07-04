@@ -80,7 +80,7 @@ describe('keyword-detector packaged artifacts', () => {
     const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
 
     for (const scriptPath of [templatePath, pluginPath]) {
-      const result = runKeywordHook(scriptPath, 'ralph execute and code review this change');
+      const result = runKeywordHook(scriptPath, 'ralph fix and code review this change');
       const context = JSON.stringify(result);
 
       expect(context).toContain('[MAGIC KEYWORD: RALPH]');
@@ -94,7 +94,7 @@ describe('keyword-detector packaged artifacts', () => {
 
   it('keeps multi-skill keyword payloads under a compact budget', () => {
     const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
-    const result = runKeywordHook(pluginPath, 'ralph with ultrawork and ralplan this migration');
+    const result = runKeywordHook(pluginPath, 'ralph this with ultrawork and plan this migration');
     const context = JSON.stringify(result);
 
     expect(context).toContain('[MAGIC KEYWORDS DETECTED: RALPH, ULTRAWORK]');
@@ -219,8 +219,8 @@ OMC Ultrawork = "특수부대 작전 반"
     expect(JSON.stringify(templateAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
     expect(JSON.stringify(pluginAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
 
-    const templateRalphProblem = runKeywordHook(templatePath, 'investigate problem with ralph state');
-    const pluginRalphProblem = runKeywordHook(pluginPath, 'investigate problem with ralph state');
+    const templateRalphProblem = runKeywordHook(templatePath, 'run ralph on parser state issue');
+    const pluginRalphProblem = runKeywordHook(pluginPath, 'run ralph on parser state issue');
     expect(JSON.stringify(templateRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
     expect(JSON.stringify(pluginRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
   });
