@@ -1,6 +1,6 @@
 # Developer API Reference
 
-> Internal API documentation for oh-my-claudecode developers and contributors.
+> Internal API documentation for lazycc developers and contributors.
 
 ## Table of Contents
 1. [Notepad Wisdom System](#notepad-wisdom-system)
@@ -344,7 +344,7 @@ if (result.success && result.context) {
 
   // Continue with Task delegation
   Task({
-    subagent_type: "oh-my-claudecode:executor",
+    subagent_type: "lazycc:executor",
     model: "sonnet",
     prompt: result.context.continuationPrompt
   });

@@ -70,7 +70,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
         vi.resetModules();
     });
     it('skips recreating ~/.claude/agents when installed plugin agent files already exist', async () => {
-        const pluginInstallPath = join(claudeConfigDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '9.9.9');
+        const pluginInstallPath = join(claudeConfigDir, 'plugins', 'cache', 'omc', 'lazycc', '9.9.9');
         const pluginAgentsDir = join(pluginInstallPath, 'agents');
         mkdirSync(pluginAgentsDir, { recursive: true });
         writeFileSync(join(pluginAgentsDir, 'executor.md'), '---\nname: executor\ndescription: test\n---\n');
@@ -78,7 +78,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
         mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
         writeFileSync(installedPluginsPath, JSON.stringify({
             plugins: {
-                'oh-my-claudecode@omc': [
+                'lazycc@lazycc': [
                     { installPath: pluginInstallPath }
                 ]
             }

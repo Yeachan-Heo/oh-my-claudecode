@@ -2,7 +2,7 @@
 /**
  * OMC HUD - Main Entry Point
  *
- * Statusline command that visualizes oh-my-claudecode state.
+ * Statusline command that visualizes lazycc state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
 
@@ -222,7 +222,7 @@ function showDiagnostic(): void {
   console.log(`  statusLine:  ${statusLineOk ? "configured" : "NOT configured"}`);
 
   if (!hudExists || !statusLineOk) {
-    console.log("  Run /oh-my-claudecode:hud setup to fix.");
+    console.log("  Run /lazycc:hud setup to fix.");
   } else {
     console.log("  HUD renders automatically inside Claude Code sessions.");
   }

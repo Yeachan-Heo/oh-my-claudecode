@@ -5,7 +5,7 @@
  * The pipeline unifies autopilot/ultrawork/ultrapilot into a single
  * configurable sequence: RALPLAN -> EXECUTION -> RALPH -> QA.
  *
- * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1130
+ * @see https://github.com/Yeachan-Heo/lazycc/issues/1130
  */
 /** The canonical stage execution order */
 export const STAGE_ORDER = [

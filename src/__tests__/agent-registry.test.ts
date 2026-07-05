@@ -21,6 +21,20 @@ const MODEL_ENV_KEYS = [
   'OMC_MODEL_LOW',
 ] as const;
 
+const PRE_EXISTING_AGENT_COUNT = 19;
+const LAZYCODEX_COMPATIBLE_AGENT_COUNT = 8;
+const EXPECTED_AGENT_COUNT = PRE_EXISTING_AGENT_COUNT + LAZYCODEX_COMPATIBLE_AGENT_COUNT;
+const LAZYCODEX_COMPATIBLE_AGENTS = [
+  'explorer',
+  'plan',
+  'lazycodex-executor',
+  'lazycodex-code-reviewer',
+  'metis',
+  'momus',
+  'lazycodex-qa-executor',
+  'lazycodex-gate-reviewer',
+] as const;
+
 describe('Agent Registry Validation', () => {
   let savedEnv: Record<string, string | undefined>;
 
@@ -44,13 +58,16 @@ describe('Agent Registry Validation', () => {
   test('agent count matches documentation', () => {
     const agentsDir = path.join(__dirname, '../../agents');
     const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
-    expect(promptFiles.length).toBe(19);
+    expect(promptFiles.length).toBe(EXPECTED_AGENT_COUNT);
   });
 
-  test('agent count is always 19 (no conditional agents)', () => {
+  test('agent count includes base and LazyCodex-compatible agents without conditional entries', () => {
     const agents = getAgentDefinitions();
-    expect(Object.keys(agents).length).toBe(19);
+    expect(Object.keys(agents).length).toBe(EXPECTED_AGENT_COUNT);
     expect(Object.keys(agents)).toContain('tracer');
+    for (const name of LAZYCODEX_COMPATIBLE_AGENTS) {
+      expect(Object.keys(agents)).toContain(name);
+    }
     // Consolidated agents should not be in registry
     expect(Object.keys(agents)).not.toContain('harsh-critic');
     expect(Object.keys(agents)).not.toContain('quality-reviewer');

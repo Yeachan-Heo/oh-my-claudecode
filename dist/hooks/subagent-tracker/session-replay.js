@@ -82,7 +82,7 @@ export function appendReplayEvent(directory, sessionId, event) {
 export function recordAgentStart(directory, sessionId, agentId, agentType, task, parentMode, model) {
     appendReplayEvent(directory, sessionId, {
         agent: agentId.substring(0, 7),
-        agent_type: agentType.replace('oh-my-claudecode:', ''),
+        agent_type: agentType.replace('lazycc:', ''),
         event: 'agent_start',
         task: task?.substring(0, 100),
         parent_mode: parentMode,
@@ -95,7 +95,7 @@ export function recordAgentStart(directory, sessionId, agentId, agentType, task,
 export function recordAgentStop(directory, sessionId, agentId, agentType, success, durationMs) {
     appendReplayEvent(directory, sessionId, {
         agent: agentId.substring(0, 7),
-        agent_type: agentType.replace('oh-my-claudecode:', ''),
+        agent_type: agentType.replace('lazycc:', ''),
         event: 'agent_stop',
         success,
         duration_ms: durationMs,

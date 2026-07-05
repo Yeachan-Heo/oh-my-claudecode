@@ -1,4 +1,4 @@
-# Speaker Notes: oh-my-claudecode Seminar
+# Speaker Notes: lazycc Seminar
 
 ## Time Allocation (60 minutes total)
 | Section | Time | Slides |
@@ -43,7 +43,7 @@
 - "What if the AI could run multiple specialists in parallel, route tasks to the right model tier, and persist until verification passes?"
 
 **The Reveal**
-- "That's exactly what oh-my-claudecode does. It transforms Claude Code from a single generalist assistant into a coordinated team of 28 specialists."
+- "That's exactly what lazycc does. It transforms Claude Code from a single generalist assistant into a coordinated team of 28 specialists."
 - "Today, I'm going to show you how this changes everything about AI-assisted development."
 
 ### Transition
@@ -564,7 +564,7 @@ Narrate:
 - "  Which mode is active"
 - "  How many agents are working"
 - "  What each agent is doing"
-- "Installation: `/oh-my-claudecode:hud setup` - adds to your shell prompt"
+- "Installation: `/lazycc:hud setup` - adds to your shell prompt"
 
 **Notepad Wisdom** (Slide 36)
 - "OMC learns from every session via the notepad system:"
@@ -614,10 +614,10 @@ Narrate:
 **Installation** (Slide 39)
 ```bash
 # Step 1: Install OMC
-npm install -g oh-my-claudecode
+npm install -g lazycc
 
 # Step 2: Run setup wizard
-claude-code "/oh-my-claudecode:omc-setup"
+claude-code "/lazycc:omc-setup"
 
 # Step 3: Start using it
 claude-code "autopilot: build me a todo app"
@@ -662,7 +662,7 @@ claude-code "autopilot: build me a todo app"
 - "28 agents with 3-tier model routing save you 30-50% on costs while getting work done faster."
 
 **Resources** (Slide 42)
-- "GitHub: github.com/Yeachan-Heo/oh-my-claudecode"
+- "GitHub: github.com/Yeachan-Heo/lazycc"
 - "Documentation: Full guides in the repo README"
 - "Community: Join discussions, share your experiences"
 - "Contributing: It's MIT licensed - PRs welcome"
@@ -745,7 +745,7 @@ You are an expert in pytest and Python testing best practices.
 Focus on: fixtures, parametrization, mocking with pytest-mock.
 ```
 
-Then invoke: `Task(subagent_type="oh-my-claudecode:pytest-specialist")`
+Then invoke: `Task(subagent_type="lazycc:pytest-specialist")`
 
 You can also customize execution modes, delegation categories, and model routing rules via the config file at `~/.claude/.omc-config.json`.
 

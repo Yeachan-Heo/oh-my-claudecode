@@ -3,7 +3,7 @@
 
 # src
 
-TypeScript source code for oh-my-claudecode - the core library that powers multi-agent orchestration.
+TypeScript source code for lazycc - the core library that powers multi-agent orchestration.
 
 ## Purpose
 

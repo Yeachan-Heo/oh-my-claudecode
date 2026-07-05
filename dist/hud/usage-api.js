@@ -53,7 +53,7 @@ export function isZaiHost(urlString) {
  * Get the cache file path
  */
 function getCachePath() {
-    return join(getClaudeConfigDir(), 'plugins', 'oh-my-claudecode', '.usage-cache.json');
+    return join(getClaudeConfigDir(), 'plugins', 'lazycc', '.usage-cache.json');
 }
 /**
  * Read cached usage data

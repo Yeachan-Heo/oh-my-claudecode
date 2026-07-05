@@ -8,7 +8,7 @@
  * Idle = pane shows a prompt (paneLooksReady) AND no active task running
  * (paneHasActiveTask is false).
  *
- * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
+ * @see https://github.com/anthropics/lazycc/issues/1047
  */
 export interface NudgeConfig {
     /** Milliseconds a pane must be idle before the first nudge (default: 30000) */

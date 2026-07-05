@@ -33,7 +33,7 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 - Parallel execution is used within phases where possible (Phase 2 and Phase 4)
 - QA cycles repeat up to 5 times; if the same error persists 3 times, stop and report the fundamental issue
 - Validation requires approval from all reviewers; rejected items get fixed and re-validated
-- Cancel with `/oh-my-claudecode:cancel` at any time; progress is preserved for resume
+- Cancel with `/lazycc:cancel` at any time; progress is preserved for resume
 </Execution_Policy>
 
 <Steps>
@@ -69,13 +69,13 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 
 6. **Phase 5 - Cleanup**: Delete all state files on successful completion
    - Remove `.omc/state/autopilot-state.json`, `ralph-state.json`, `ultrawork-state.json`, `ultraqa-state.json`
-   - Run `/oh-my-claudecode:cancel` for clean exit
+   - Run `/lazycc:cancel` for clean exit
 </Steps>
 
 <Tool_Usage>
-- Use `Task(subagent_type="oh-my-claudecode:architect", ...)` for Phase 4 architecture validation
-- Use `Task(subagent_type="oh-my-claudecode:security-reviewer", ...)` for Phase 4 security review
-- Use `Task(subagent_type="oh-my-claudecode:code-reviewer", ...)` for Phase 4 quality review
+- Use `Task(subagent_type="lazycc:architect", ...)` for Phase 4 architecture validation
+- Use `Task(subagent_type="lazycc:security-reviewer", ...)` for Phase 4 security review
+- Use `Task(subagent_type="lazycc:code-reviewer", ...)` for Phase 4 quality review
 - Agents form their own analysis first, then spawn Claude Task agents for cross-validation
 - Never block on external tools; proceed with available agents if delegation fails
 </Tool_Usage>
@@ -141,7 +141,7 @@ Optional settings in `.claude/settings.json`:
 
 ## Resume
 
-If autopilot was cancelled or failed, run `/oh-my-claudecode:autopilot` again to resume from where it stopped.
+If autopilot was cancelled or failed, run `/lazycc:autopilot` again to resume from where it stopped.
 
 ## Best Practices for Input
 

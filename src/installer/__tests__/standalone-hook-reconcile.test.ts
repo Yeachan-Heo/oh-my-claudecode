@@ -129,7 +129,7 @@ describe('install() standalone hook reconciliation', () => {
       'plugins',
       'cache',
       'omc',
-      'oh-my-claudecode',
+      'lazycc',
       '4.1.5',
     );
 

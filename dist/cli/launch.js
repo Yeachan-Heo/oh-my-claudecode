@@ -9,7 +9,7 @@ import { basename, join } from 'path';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
 import { stripRetiredTeamMcpServers } from '../installer/mcp-registry.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
-import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, wrapWithLoginShell, isClaudeAvailable, quoteShellArg, } from './tmux-utils.js';
+import { resolveLaunchPolicy, buildTmuxSessionName, buildTmuxShellCommand, wrapWithLoginShell, isClaudeAvailable, quoteShellArg, tmuxExec, } from './tmux-utils.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 // Flag mapping
@@ -364,7 +364,7 @@ export function runClaude(cwd, args, sessionId) {
 function runClaudeInsideTmux(cwd, args) {
     // Enable mouse scrolling in the current tmux session (non-fatal if it fails)
     try {
-        execFileSync('tmux', ['set-option', 'mouse', 'on'], { stdio: 'ignore' });
+        tmuxExec(['set-option', 'mouse', 'on'], { stdio: 'ignore' });
     }
     catch { /* non-fatal — user's tmux may not support these options */ }
     // Launch Claude in current pane
@@ -425,27 +425,27 @@ function runClaudeOutsideTmux(cwd, args, _sessionId) {
     const claudeCmd = wrapWithLoginShell(`${envPrefix}sleep 0.3; perl -e 'use POSIX;tcflush(0,TCIFLUSH)' 2>/dev/null; ${rawClaudeCmd}`);
     const sessionName = buildTmuxSessionName(cwd);
     try {
-        execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stdio: 'inherit' });
+        tmuxExec(['new-session', '-d', '-s', sessionName, '-c', cwd, claudeCmd], { stripTmux: true, stdio: 'inherit' });
     }
     catch {
         runClaudeDirect(cwd, args);
         return;
     }
     try {
-        execFileSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+        tmuxExec(['set-option', '-t', sessionName, 'mouse', 'on'], { stripTmux: true, stdio: 'ignore' });
     }
     catch {
         /* non-fatal — user's tmux may not support these options */
     }
     try {
-        execFileSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
+        tmuxExec(['attach-session', '-t', sessionName], { stripTmux: true, stdio: 'inherit' });
     }
     catch {
         // If the detached session still exists, preserve it so interrupted
         // attach paths (SSH disconnect, terminal drop, etc.) do not kill or
         // duplicate a valid Claude session.
         try {
-            execFileSync('tmux', ['has-session', '-t', sessionName], { stdio: 'ignore' });
+            tmuxExec(['has-session', '-t', sessionName], { stripTmux: true, stdio: 'ignore' });
             return;
         }
         catch {

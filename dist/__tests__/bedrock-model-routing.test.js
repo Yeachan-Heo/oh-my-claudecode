@@ -123,7 +123,7 @@ describe('Bedrock model routing repro', () => {
             const executorResult = enforceModel({
                 description: 'Implement feature',
                 prompt: 'Write the code',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
             });
             expect(executorResult.injected).toBe(true);
             expect(executorResult.modifiedInput.model).toBe('sonnet');
@@ -131,7 +131,7 @@ describe('Bedrock model routing repro', () => {
             const exploreResult = enforceModel({
                 description: 'Find files',
                 prompt: 'Search codebase',
-                subagent_type: 'oh-my-claudecode:explore',
+                subagent_type: 'lazycc:explore',
             });
             expect(exploreResult.injected).toBe(true);
             expect(exploreResult.modifiedInput.model).toBe('haiku');
@@ -139,7 +139,7 @@ describe('Bedrock model routing repro', () => {
             const architectResult = enforceModel({
                 description: 'Design system',
                 prompt: 'Analyze architecture',
-                subagent_type: 'oh-my-claudecode:architect',
+                subagent_type: 'lazycc:architect',
             });
             expect(architectResult.injected).toBe(true);
             expect(architectResult.modifiedInput.model).toBe('opus');
@@ -162,7 +162,7 @@ describe('Bedrock model routing repro', () => {
                 const result = enforceModel({
                     description: 'test',
                     prompt: 'test',
-                    subagent_type: `oh-my-claudecode:${agent}`,
+                    subagent_type: `lazycc:${agent}`,
                 });
                 expect(result.model).toBe('inherit');
                 expect(result.modifiedInput.model).toBeUndefined();
@@ -201,7 +201,7 @@ describe('Bedrock model routing repro', () => {
             const result = enforceModel({
                 description: 'Implement feature',
                 prompt: 'Write the code',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
             });
             expect(result.injected).toBe(true);
             // After the fix: enforceModel normalizes to 'sonnet' (CC-supported alias)
@@ -237,7 +237,7 @@ describe('Bedrock model routing repro', () => {
             const taskInput = {
                 description: 'Implement feature',
                 prompt: 'Write the code',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'sonnet', // LLM passes this based on CLAUDE.md instructions
             };
             // Bridge logic (bridge.ts:1082-1093):
@@ -258,7 +258,7 @@ describe('Bedrock model routing repro', () => {
             const taskInput = {
                 description: 'Implement feature',
                 prompt: 'Write the code',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'sonnet', // LLM passes this based on CLAUDE.md instructions
             };
             const nextTaskInput = { ...taskInput };
@@ -281,7 +281,7 @@ describe('Bedrock model routing repro', () => {
             const result = enforceModel({
                 description: 'Implement feature',
                 prompt: 'Write the code',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'sonnet', // LLM passes this explicitly
             });
             // enforceModel preserves explicit model (doesn't override it)
@@ -297,7 +297,7 @@ describe('Bedrock model routing repro', () => {
             const result = enforceModel({
                 description: 'test',
                 prompt: 'test',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
             });
             // This is exactly the model ID from the error report
             expect(result.modifiedInput.model).toBe('sonnet');
@@ -316,7 +316,7 @@ describe('Bedrock model routing repro', () => {
                 toolInput: {
                     description: 'Implement feature',
                     prompt: 'Write the code',
-                    subagent_type: 'oh-my-claudecode:executor',
+                    subagent_type: 'lazycc:executor',
                     model: 'claude-sonnet-4-6',
                 },
                 directory: process.cwd(),
@@ -337,7 +337,7 @@ describe('Bedrock model routing repro', () => {
                 toolInput: {
                     description: 'Implement feature',
                     prompt: 'Write the code',
-                    subagent_type: 'oh-my-claudecode:executor',
+                    subagent_type: 'lazycc:executor',
                     // No model param — this is the correct behavior
                 },
                 directory: process.cwd(),
@@ -356,7 +356,7 @@ describe('Bedrock model routing repro', () => {
                 toolInput: {
                     description: 'Implement feature',
                     prompt: 'Write the code',
-                    subagent_type: 'oh-my-claudecode:executor',
+                    subagent_type: 'lazycc:executor',
                     model: 'sonnet',
                 },
                 directory: process.cwd(),

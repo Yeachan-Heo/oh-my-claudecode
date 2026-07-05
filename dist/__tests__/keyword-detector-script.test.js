@@ -30,7 +30,7 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         expect(context).toContain('<search-mode>');
         expect(context).toContain('MAXIMIZE SEARCH EFFORT');
         expect(context).not.toContain('[MAGIC KEYWORD: DEEPSEARCH]');
-        expect(context).not.toContain('Skill: oh-my-claudecode:deepsearch');
+        expect(context).not.toContain('Skill: lazycc:deepsearch');
     });
     it.each([
         ['ultrathink', '<think-mode>'],
@@ -83,6 +83,13 @@ OMC Ultrawork = "특수부대 작전 반"
     });
     it('does not re-trigger on quoted follow-up references to ultrawork', () => {
         const output = runKeywordDetector('The article said "OMC Ultrawork", but why is the answer the same?');
+        const context = output.hookSpecificOutput?.additionalContext ?? '';
+        expect(output.continue).toBe(true);
+        expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');
+        expect(context).toBe('');
+    });
+    it('does not activate ultrawork for single-mode explanatory definitions followed by a budget question', () => {
+        const output = runKeywordDetector('OMC Ultrawork = "special ops". how much would it cost?');
         const context = output.hookSpecificOutput?.additionalContext ?? '';
         expect(output.continue).toBe(true);
         expect(context).not.toContain('[MAGIC KEYWORD: ULTRAWORK]');

@@ -46,7 +46,7 @@ autopilot: build a React dashboard with user authentication
 **ASCII Mockup:**
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ claude @ oh-my-claudecode                                    [Phase 4/5] ⚡ │
+│ claude @ lazycc                                    [Phase 4/5] ⚡ │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │ > autopilot: build a REST API for bookstore inventory                       │
@@ -252,7 +252,7 @@ Create as a slide graphic using:
 **Description:** HUD statusline showing active agents, todo progress, token usage, and context window status in real-time.
 
 **Capture Instructions:**
-1. Ensure HUD is installed: `claude` then `/oh-my-claudecode:hud setup`
+1. Ensure HUD is installed: `claude` then `/lazycc:hud setup`
 2. Start a task with multiple agents:
    ```
    ultrawork: refactor the authentication system
@@ -500,7 +500,7 @@ Time →
 **Capture Instructions:**
 1. Use a pipeline preset or custom pipeline:
    ```
-   /oh-my-claudecode:pipeline review "analyze the authentication system"
+   /lazycc:pipeline review "analyze the authentication system"
    ```
 2. Capture showing each stage completing and passing data to next
 3. Alternative: Check `.omc/logs/pipeline.log` for formatted output
@@ -759,7 +759,7 @@ Time →
 **Capture Instructions:**
 1. Start swarm mode:
    ```
-   /oh-my-claudecode:swarm 5:executor "implement all CRUD operations"
+   /lazycc:swarm 5:executor "implement all CRUD operations"
    ```
 2. Capture when agents are actively claiming tasks
 3. Check `.omc/state/swarm-tasks.json` for task status

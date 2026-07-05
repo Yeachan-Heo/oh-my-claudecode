@@ -76,7 +76,7 @@ Run vanilla Claude Code benchmark:
 
 ### run_omc.sh
 Run OMC-enhanced benchmark:
-- Claude Code with oh-my-claudecode orchestration
+- Claude Code with lazycc orchestration
 - Saves predictions to `predictions/omc/`
 - Logs to `logs/omc_*.log`
 

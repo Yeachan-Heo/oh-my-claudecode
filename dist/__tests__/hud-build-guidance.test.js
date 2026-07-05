@@ -18,8 +18,8 @@ describe('HUD build/load guidance', () => {
         const content = readFileSync(join(root, 'scripts', 'lib', 'hud-wrapper-template.txt'), 'utf-8');
         expect(content).toContain('join(configDir, "plugins", "marketplaces", "omc", "dist/hud/index.js")');
         expect(content).toContain('pathToFileURL(marketplaceHudPath).href');
-        expect(content).toContain('"oh-my-claude-sisyphus/dist/hud/index.js"');
-        expect(content).toContain('"oh-my-claudecode/dist/hud/index.js"');
+        expect(content).toContain('"lazycc/dist/hud/index.js"');
+        expect(content).toContain('"lazycc/dist/hud/index.js"');
         expect(content).toContain('Plugin installed but not built');
         expect(content).toContain('Plugin HUD load failed');
     });
@@ -28,8 +28,8 @@ describe('HUD build/load guidance', () => {
         expect(content).toContain('const latestInstalledVersion = sortedVersions[0];');
         expect(content).toContain('join(configDir, "plugins", "marketplaces", "omc", "dist/hud/index.js")');
         expect(content).toContain('pathToFileURL(marketplaceHudPath).href');
-        expect(content).toContain('"oh-my-claude-sisyphus/dist/hud/index.js"');
-        expect(content).toContain('"oh-my-claudecode/dist/hud/index.js"');
+        expect(content).toContain('"lazycc/dist/hud/index.js"');
+        expect(content).toContain('"lazycc/dist/hud/index.js"');
         expect(content).toContain('Plugin HUD load failed');
     });
 });

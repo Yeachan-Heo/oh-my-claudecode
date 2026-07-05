@@ -81,7 +81,7 @@ describe('install() CLAUDE.md target resolution', () => {
   });
 
   it('preserves project-scoped behavior by skipping global CLAUDE.md writes', async () => {
-    process.env.CLAUDE_PLUGIN_ROOT = join(tempRoot, 'project', '.claude', 'plugins', 'oh-my-claudecode');
+    process.env.CLAUDE_PLUGIN_ROOT = join(tempRoot, 'project', '.claude', 'plugins', 'lazycc');
     writeFileSync(join(testHomeDir, 'CLAUDE.md'), '# Home CLAUDE\nkeep me\n');
 
     const { install } = await loadInstaller();

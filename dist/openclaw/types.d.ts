@@ -145,5 +145,7 @@ export interface OpenClawResult {
     error?: string;
     /** HTTP status code if available */
     statusCode?: number;
+    /** Internal skip marker for burst-deduped events */
+    skipped?: "deduped";
 }
 //# sourceMappingURL=types.d.ts.map

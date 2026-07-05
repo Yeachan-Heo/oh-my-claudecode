@@ -35,10 +35,10 @@ export function getRuntimePackageVersion(): string {
 
   // Fallback: extract version from the plugin cache directory path.
   // When package.json is missing (e.g. Claude Code plugin system didn't copy it),
-  // the path itself contains the version: .../oh-my-claudecode/4.11.2/dist/lib/version.js
+  // the path itself contains the version: .../lazycc/4.11.2/dist/lib/version.js
   try {
     const __filename = fileURLToPath(import.meta.url);
-    const pathMatch = __filename.match(/oh-my-claudecode\/(\d+\.\d+\.\d+[^/]*)\//);
+    const pathMatch = __filename.match(/lazycc\/(\d+\.\d+\.\d+[^/]*)\//);
     if (pathMatch?.[1]) {
       return pathMatch[1];
     }

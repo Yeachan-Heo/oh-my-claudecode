@@ -19,7 +19,7 @@ describe('team-worker pre-tool guardrails', () => {
     it('blocks Skill tool usage inside worker context', async () => {
         const result = await processHook('pre-tool-use', {
             toolName: 'Skill',
-            toolInput: { skill: 'oh-my-claudecode:team' },
+            toolInput: { skill: 'lazycc:team' },
         });
         expect(result.continue).toBe(false);
         expect(result.reason).toBe('team-worker-skill-blocked');

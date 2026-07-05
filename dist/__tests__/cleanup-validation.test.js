@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { EXPECTED_AGENT_NAMES, EXPECTED_LAZYCODEX_AGENT_NAMES, REMOVED_AGENT_NAMES, } from './registry-contract-fixtures.js';
 describe('Cleanup Validation', () => {
     it('omc-plan skill resolves correctly', async () => {
         const { getBuiltinSkill } = await import('../features/builtin-skills/skills.js');
@@ -20,7 +21,7 @@ describe('Cleanup Validation', () => {
         expect('detectDeprecatedKeywords' in keywordModule).toBe(false);
         expect('DEPRECATED_KEYWORD_PATTERNS' in keywordModule).toBe(false);
     });
-    it('PluginConfig.agents matches 19-agent registry + omc', async () => {
+    it('PluginConfig.agents keeps native OMC model overrides and omc entry', async () => {
         const { DEFAULT_CONFIG } = await import('../config/loader.js');
         const agentKeys = Object.keys(DEFAULT_CONFIG.agents || {});
         expect(agentKeys).toContain('omc');
@@ -40,11 +41,18 @@ describe('Cleanup Validation', () => {
         expect(agentKeys).not.toContain('deepExecutor');
         expect(agentKeys).not.toContain('buildFixer');
     });
-    it('agent registry has 19 agents', async () => {
+    it('agent registry has native OMC agents plus LazyCodex-compatible agents', async () => {
         const { getAgentDefinitions } = await import('../agents/definitions.js');
         const defs = getAgentDefinitions();
-        expect(Object.keys(defs)).toHaveLength(19);
-        expect(defs).toHaveProperty('tracer');
+        const agentNames = Object.keys(defs);
+        expect(agentNames).toHaveLength(EXPECTED_AGENT_NAMES.length);
+        expect(agentNames).toEqual(expect.arrayContaining([...EXPECTED_AGENT_NAMES]));
+        for (const lazycodexAgentName of EXPECTED_LAZYCODEX_AGENT_NAMES) {
+            expect(defs).toHaveProperty(lazycodexAgentName);
+        }
+        for (const removedName of REMOVED_AGENT_NAMES) {
+            expect(agentNames).not.toContain(removedName);
+        }
     });
 });
 //# sourceMappingURL=cleanup-validation.test.js.map

@@ -1,7 +1,7 @@
 # Hephaestus vs Deep-Executor: Comparative Analysis
 
 ## Analysis Summary
-- **Research Question**: How do the Hephaestus (oh-my-opencode) and Deep-Executor (oh-my-claudecode) agent architectures differ, and what can each learn from the other?
+- **Research Question**: How do the Hephaestus (oh-my-opencode) and Deep-Executor (lazycc) agent architectures differ, and what can each learn from the other?
 - **Methodology**: Structured feature comparison across 14 capability dimensions, scored 0-3
 
 ---

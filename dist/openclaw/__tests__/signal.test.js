@@ -43,14 +43,14 @@ describe("buildOpenClawSignal", () => {
         const signal = buildOpenClawSignal("post-tool-use", {
             toolName: "Bash",
             toolInput: { command: "gh pr create --base dev --fill" },
-            toolOutput: "https://github.com/example/oh-my-claudecode/pull/1501",
+            toolOutput: "https://github.com/example/lazycc/pull/1501",
         });
         expect(signal).toMatchObject({
             kind: "pull-request",
             phase: "finished",
             routeKey: "pull-request.created",
             priority: "high",
-            prUrl: "https://github.com/example/oh-my-claudecode/pull/1501",
+            prUrl: "https://github.com/example/lazycc/pull/1501",
         });
     });
     it("keeps generic tool completion low priority when no higher-level signal exists", () => {

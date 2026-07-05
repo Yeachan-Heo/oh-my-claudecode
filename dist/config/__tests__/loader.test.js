@@ -106,7 +106,7 @@ describe("startup context compaction", () => {
         const tempDir = mkdtempSync(join(tmpdir(), "omc-loader-context-"));
         try {
             const omcAgentsPath = join(tempDir, "AGENTS.md");
-            const omcGuidance = `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+            const omcGuidance = `# lazycc - Intelligent Multi-Agent Orchestration
 
 <guidance_schema_contract>
 schema

@@ -109,7 +109,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # 7. Build OMC project
-log_info "Building oh-my-claudecode project..."
+log_info "Building lazycc project..."
 cd "$PROJECT_ROOT"
 npm install --silent
 npm run build --silent

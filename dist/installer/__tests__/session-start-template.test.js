@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const SCRIPT_PATH = join(__dirname, '..', '..', '..', 'templates', 'hooks', 'session-start.mjs');
@@ -9,23 +9,27 @@ describe('session-start template guard for same-root parallel sessions (#1744)',
     let tempDir;
     let fakeHome;
     let fakeProject;
+    let fetchPreload;
     beforeEach(() => {
         tempDir = mkdtempSync(join(tmpdir(), 'omc-session-start-template-'));
         fakeHome = join(tempDir, 'home');
         fakeProject = join(tempDir, 'project');
         mkdirSync(join(fakeProject, '.omc', 'state'), { recursive: true });
+        fetchPreload = join(tempDir, 'fetch-preload.mjs');
+        writeFileSync(fetchPreload, "globalThis.fetch = async () => ({ ok: true, json: async () => ({ version: '99.99.99' }) });\n");
     });
     afterEach(() => {
         rmSync(tempDir, { recursive: true, force: true });
     });
-    function runSessionStart(input) {
-        const raw = execFileSync(NODE, [SCRIPT_PATH], {
+    function runSessionStart(input, env = {}) {
+        const raw = execFileSync(NODE, ['--import', fetchPreload, SCRIPT_PATH], {
             input: JSON.stringify(input),
             encoding: 'utf-8',
             env: {
                 ...process.env,
                 HOME: fakeHome,
                 USERPROFILE: fakeHome,
+                ...env,
             },
             timeout: 15000,
         }).trim();
@@ -90,6 +94,46 @@ describe('session-start template guard for same-root parallel sessions (#1744)',
         const context = output.hookSpecificOutput?.additionalContext || '';
         expect(context).not.toContain('[PARALLEL SESSION WARNING]');
         expect(context).not.toContain('[ULTRAWORK MODE RESTORED]');
+    });
+    it('does not run the standalone update probe without LazyCodex opt-in', () => {
+        const output = runSessionStart({
+            hook_event_name: 'SessionStart',
+            session_id: 'session-b',
+            cwd: fakeProject,
+        });
+        const context = output.hookSpecificOutput?.additionalContext || '';
+        expect(output.continue).toBe(true);
+        expect(context).not.toContain('[OMC AUTO-UPGRADE AVAILABLE]');
+        expect(existsSync(join(fakeHome, '.omc', 'update-check.json'))).toBe(false);
+    });
+    it('does not run the standalone update probe with explicit false or malformed env values', () => {
+        const output = runSessionStart({
+            hook_event_name: 'SessionStart',
+            session_id: 'session-b',
+            cwd: fakeProject,
+        }, {
+            OMC_LAZYCODEX_AUTO_UPDATE: 'yes; touch /tmp/omc-injected',
+            OMC_LAZYCODEX_GLOBAL_CLAUDE_MUTATION: 'false',
+            OMC_LAZYCODEX_TELEMETRY: 'false',
+        });
+        const context = output.hookSpecificOutput?.additionalContext || '';
+        expect(output.continue).toBe(true);
+        expect(context).not.toContain('[OMC AUTO-UPGRADE AVAILABLE]');
+        expect(existsSync(join(fakeHome, '.omc', 'update-check.json'))).toBe(false);
+    });
+    it('runs the standalone update probe when LazyCodex auto-update is explicitly opted in', () => {
+        const configDir = join(fakeHome, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, '.omc-config.json'), JSON.stringify({ lazycodex: { autoUpdate: true } }));
+        const output = runSessionStart({
+            hook_event_name: 'SessionStart',
+            session_id: 'session-b',
+            cwd: fakeProject,
+        }, { CLAUDE_CONFIG_DIR: configDir });
+        const context = output.hookSpecificOutput?.additionalContext || '';
+        expect(output.continue).toBe(true);
+        expect(context).toContain('[OMC AUTO-UPGRADE AVAILABLE]');
+        expect(existsSync(join(fakeHome, '.omc', 'update-check.json'))).toBe(true);
     });
 });
 //# sourceMappingURL=session-start-template.test.js.map

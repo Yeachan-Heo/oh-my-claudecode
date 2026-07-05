@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md) | [Русский](README.ru.md) | [Türkçe](README.tr.md) | [Deutsch](README.de.md) | Français | [Italiano](README.it.md)
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -13,7 +13,7 @@
 
 _N'apprenez pas Claude Code. Utilisez simplement OMC._
 
-[Démarrer](#démarrage-rapide) • [Documentation](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Guide de migration](docs/MIGRATION.md)
+[Démarrer](#démarrage-rapide) • [Documentation](https://yeachan-heo.github.io/lazycc-website) • [Guide de migration](docs/MIGRATION.md)
 
 ---
 
@@ -22,14 +22,14 @@ _N'apprenez pas Claude Code. Utilisez simplement OMC._
 **Étape 1 : Installation**
 
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **Étape 2 : Configuration**
 
 ```bash
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 Si vous exécutez OMC via `omc --plugin-dir <path>` ou `claude --plugin-dir <path>`, ajoutez `--plugin-dir-mode` à `omc setup` (ou exportez `OMC_PLUGIN_ROOT` auparavant) pour éviter de dupliquer les compétences/agents que le plugin fournit déjà au moment de l'exécution. Consultez la [section Plugin directory flags dans REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags) pour une matrice de décision complète et tous les indicateurs disponibles.
@@ -49,7 +49,7 @@ C'est tout. Le reste est automatique.
 À partir de la **v4.1.7**, **Team** est la surface d'orchestration canonique dans OMC. Les anciens points d'entrée comme **swarm** et **ultrapilot** sont toujours supportés, mais **redirigent désormais vers Team en coulisses**.
 
 ```bash
-/oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+/lazycc:team 3:executor "fix all TypeScript errors"
 ```
 
 Team fonctionne comme un pipeline par étapes :
@@ -68,33 +68,33 @@ Activez les teams natifs de Claude Code dans `~/.claude/settings.json` :
 
 > Si les teams sont désactivés, OMC vous avertira et basculera vers une exécution sans Team lorsque possible.
 
-> **Note : Nom du package** — Le projet utilise la marque **oh-my-claudecode** (repo, plugin, commandes), mais le package npm est publié sous le nom [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). Si vous installez les outils CLI via npm/bun, utilisez `npm install -g oh-my-claude-sisyphus`.
+> **Note : Nom du package** — Le projet utilise la marque **lazycc** (repo, plugin, commandes), mais le package npm est publié sous le nom [`lazycc`](https://www.npmjs.com/package/lazycc). Si vous installez les outils CLI via npm/bun, utilisez `npm install -g lazycc`.
 
 ### Mise à jour
 
 ```bash
 # 1. Mettre à jour le plugin
-/plugin install oh-my-claudecode
+/plugin install lazycc
 
 # 2. Relancer le setup pour actualiser la configuration
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 Si vous rencontrez des problèmes après la mise à jour, videz l'ancien cache du plugin :
 
 ```bash
-/oh-my-claudecode:omc-doctor
+/lazycc:omc-doctor
 ```
 
 <h1 align="center">Votre Claude vient de recevoir des super-pouvoirs.</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## Pourquoi oh-my-claudecode ?
+## Pourquoi lazycc ?
 
 - **Aucune configuration requise** — Fonctionne directement avec des valeurs par défaut intelligentes
 - **Orchestration team-first** — Team est la surface multi-agents canonique (swarm/ultrapilot sont des façades de compatibilité)
@@ -111,7 +111,7 @@ Si vous rencontrez des problèmes après la mise à jour, videz l'ancien cache d
 
 ### Modes d'orchestration
 
-Plusieurs stratégies pour différents cas d'utilisation — de l'orchestration Team au refactoring économe en tokens. [En savoir plus →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+Plusieurs stratégies pour différents cas d'utilisation — de l'orchestration Team au refactoring économe en tokens. [En savoir plus →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | Mode                            | Description                                                                                 | Utilisation                                                                      |
 | ------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -180,7 +180,7 @@ Raccourcis optionnels pour les utilisateurs avancés. Le langage naturel fonctio
 
 | Mot-clé      | Effet                               | Exemple                                                         |
 | ------------ | ----------------------------------- | --------------------------------------------------------------- |
-| `team`       | Orchestration Team canonique        | `/oh-my-claudecode:team 3:executor "fix all TypeScript errors"` |
+| `team`       | Orchestration Team canonique        | `/lazycc:team 3:executor "fix all TypeScript errors"` |
 | `autopilot`  | Exécution entièrement autonome      | `autopilot: build a todo app`                                   |
 | `ralph`      | Mode persistant                     | `ralph: refactor auth`                                          |
 | `ulw`        | Parallélisme maximal                | `ulw fix all errors`                                            |
@@ -237,7 +237,7 @@ Transmettez les événements de session Claude Code vers une passerelle [OpenCla
 **Configuration rapide (recommandé) :**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → Tapez "openclaw" quand demandé → choisir "OpenClaw Gateway"
 ```
 
@@ -296,7 +296,7 @@ Voir `scripts/openclaw-gateway-demo.mjs` pour un gateway de référence qui rela
 
 - **[Référence complète](docs/REFERENCE.md)** — Documentation complète des fonctionnalités
 - **[Monitoring de performance](docs/PERFORMANCE-MONITORING.md)** — Suivi des agents, débogage et optimisation
-- **[Site web](https://yeachan-heo.github.io/oh-my-claudecode-website)** — Guides interactifs et exemples
+- **[Site web](https://yeachan-heo.github.io/lazycc-website)** — Guides interactifs et exemples
 - **[Guide de migration](docs/MIGRATION.md)** — Mise à jour depuis v2.x
 - **[Architecture](docs/ARCHITECTURE.md)** — Comment ça fonctionne en coulisses
 
@@ -336,7 +336,7 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 Soutenir ce projet
 

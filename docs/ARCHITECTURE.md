@@ -1,10 +1,10 @@
 # Architecture
 
-> How oh-my-claudecode orchestrates multi-agent workflows.
+> How lazycc orchestrates multi-agent workflows.
 
 ## Overview
 
-oh-my-claudecode enables Claude Code to orchestrate specialized agents through a skill-based routing system. It is built on four interlocking systems: **Hooks** detect lifecycle events, **Skills** inject behaviors, **Agents** execute specialized work, and **State** tracks progress across context resets.
+lazycc enables Claude Code to orchestrate specialized agents through a skill-based routing system. It is built on four interlocking systems: **Hooks** detect lifecycle events, **Skills** inject behaviors, **Agents** execute specialized work, and **State** tracks progress across context resets.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -49,7 +49,7 @@ User Input --> Hooks (event detection) --> Skills (behavior injection)
 
 ### Overview
 
-OMC provides 19 specialized agents organized into 4 lanes. Each agent is invoked as `oh-my-claudecode:<agent-name>` and runs on the appropriate model tier.
+OMC provides 19 specialized agents organized into 4 lanes. Each agent is invoked as `lazycc:<agent-name>` and runs on the appropriate model tier.
 
 ### Build/Analysis Lane
 
@@ -119,7 +119,7 @@ Work is delegated through the Task tool with intelligent model routing:
 
 ```typescript
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   model="sonnet",
   prompt="Implement feature..."
 )
@@ -212,9 +212,9 @@ Active skills: ultrawork + default + git-master
 
 **Slash commands:**
 ```bash
-/oh-my-claudecode:autopilot build me a todo app
-/oh-my-claudecode:ralph refactor the auth module
-/oh-my-claudecode:team 3:executor "implement fullstack app"
+/lazycc:autopilot build me a todo app
+/lazycc:ralph refactor the auth module
+/lazycc:team 3:executor "implement fullstack app"
 ```
 
 **Magic keywords** — include a keyword in natural language and the skill activates automatically:
@@ -250,7 +250,7 @@ ultrawork implement user authentication with OAuth
 #### team
 Coordinates N Claude agents with a 5-stage pipeline: `plan → prd → exec → verify → fix`
 ```bash
-/oh-my-claudecode:team 3:executor "implement fullstack todo app"
+/lazycc:team 3:executor "implement fullstack todo app"
 ```
 
 #### ccg (Claude-Codex-Gemini)
@@ -271,20 +271,20 @@ ralplan this feature
 
 | Skill | Description | Command |
 |-------|-------------|---------|
-| `cancel` | Cancel active execution mode | `/oh-my-claudecode:cancel` |
-| `hud` | Status bar configuration | `/oh-my-claudecode:hud` |
-| `omc-setup` | Initial setup wizard | `/oh-my-claudecode:omc-setup` |
-| `omc-doctor` | Diagnose installation | `/oh-my-claudecode:omc-doctor` |
-| `learner` | Extract reusable skills from session | `/oh-my-claudecode:learner` |
-| `skill` | Manage local skills (list/add/remove) | `/oh-my-claudecode:skill` |
-| `trace` | Evidence-driven causal tracing | `/oh-my-claudecode:trace` |
-| `release` | Automated release workflow | `/oh-my-claudecode:release` |
-| `deepinit` | Generate hierarchical AGENTS.md | `/oh-my-claudecode:deepinit` |
-| `deep-interview` | Socratic deep interview | `/oh-my-claudecode:deep-interview` |
-| `sciomc` | Parallel scientist agent orchestration | `/oh-my-claudecode:sciomc` |
-| `external-context` | Parallel document-specialist research | `/oh-my-claudecode:external-context` |
-| `ai-slop-cleaner` | Clean AI expression patterns | `/oh-my-claudecode:ai-slop-cleaner` |
-| `writer-memory` | Memory system for writing projects | `/oh-my-claudecode:writer-memory` |
+| `cancel` | Cancel active execution mode | `/lazycc:cancel` |
+| `hud` | Status bar configuration | `/lazycc:hud` |
+| `omc-setup` | Initial setup wizard | `/lazycc:omc-setup` |
+| `omc-doctor` | Diagnose installation | `/lazycc:omc-doctor` |
+| `learner` | Extract reusable skills from session | `/lazycc:learner` |
+| `skill` | Manage local skills (list/add/remove) | `/lazycc:skill` |
+| `trace` | Evidence-driven causal tracing | `/lazycc:trace` |
+| `release` | Automated release workflow | `/lazycc:release` |
+| `deepinit` | Generate hierarchical AGENTS.md | `/lazycc:deepinit` |
+| `deep-interview` | Socratic deep interview | `/lazycc:deep-interview` |
+| `sciomc` | Parallel scientist agent orchestration | `/lazycc:sciomc` |
+| `external-context` | Parallel document-specialist research | `/lazycc:external-context` |
+| `ai-slop-cleaner` | Clean AI expression patterns | `/lazycc:ai-slop-cleaner` |
+| `writer-memory` | Memory system for writing projects | `/lazycc:writer-memory` |
 
 ### Magic Keyword Reference
 

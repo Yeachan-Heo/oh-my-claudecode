@@ -67,7 +67,7 @@ describe('Agents Element', () => {
 
     it('should show single-character codes for known agents', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
+        createAgent('lazycc:architect', 'opus'),
       ];
       const result = renderAgentsCoded(agents);
       // Architect with opus should be uppercase A in magenta
@@ -77,7 +77,7 @@ describe('Agents Element', () => {
 
     it('should use lowercase for sonnet/haiku tiers', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:explore', 'haiku'),
+        createAgent('lazycc:explore', 'haiku'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain('e');
@@ -86,9 +86,9 @@ describe('Agents Element', () => {
     it('should handle multiple agents', () => {
       const now = Date.now();
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 2000)),
-        createAgent('oh-my-claudecode:explore', 'haiku', new Date(now - 1000)),
-        createAgent('oh-my-claudecode:executor', 'sonnet', new Date(now)),
+        createAgent('lazycc:architect', 'opus', new Date(now - 2000)),
+        createAgent('lazycc:explore', 'haiku', new Date(now - 1000)),
+        createAgent('lazycc:executor', 'sonnet', new Date(now)),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toBeDefined();
@@ -97,14 +97,14 @@ describe('Agents Element', () => {
     });
 
     it('should handle agents without model info', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect')];
+      const agents: ActiveAgent[] = [createAgent('lazycc:architect')];
       const result = renderAgentsCoded(agents);
       expect(result).toContain('A');
     });
 
     it('should use first letter for unknown agent types', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:unknown-agent', 'sonnet'),
+        createAgent('lazycc:unknown-agent', 'sonnet'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result!.replace(/\x1b\[[0-9;]*m/g, '')).toBe('agents:u');
@@ -118,7 +118,7 @@ describe('Agents Element', () => {
 
     it('should not show duration for very recent agents', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus', new Date()),
+        createAgent('lazycc:architect', 'opus', new Date()),
       ];
       const result = renderAgentsCodedWithDuration(agents);
       // No duration suffix for <10s
@@ -128,7 +128,7 @@ describe('Agents Element', () => {
     it('should show seconds for agents running 10-59s', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'lazycc:architect',
           'opus',
           new Date(Date.now() - 30000)
         ), // 30 seconds ago
@@ -141,7 +141,7 @@ describe('Agents Element', () => {
     it('should show minutes for agents running 1-9 min', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'lazycc:architect',
           'opus',
           new Date(Date.now() - 180000)
         ), // 3 minutes ago
@@ -154,7 +154,7 @@ describe('Agents Element', () => {
     it('should show alert for agents running 10+ min', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'lazycc:architect',
           'opus',
           new Date(Date.now() - 600000)
         ), // 10 minutes ago
@@ -171,14 +171,14 @@ describe('Agents Element', () => {
     });
 
     it('should show full agent names', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect')];
+      const agents: ActiveAgent[] = [createAgent('lazycc:architect')];
       const result = renderAgentsDetailed(agents);
       expect(result).toContain('architect');
     });
 
     it('should abbreviate common long names', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
+        createAgent('lazycc:executor', 'sonnet'),
       ];
       const result = renderAgentsDetailed(agents);
       expect(result).toContain('exec');
@@ -187,7 +187,7 @@ describe('Agents Element', () => {
     it('should include duration for long-running agents', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'lazycc:architect',
           'opus',
           new Date(Date.now() - 120000)
         ), // 2 minutes
@@ -200,8 +200,8 @@ describe('Agents Element', () => {
   describe('renderAgentsByFormat (format router)', () => {
     const now = Date.now();
     const agents: ActiveAgent[] = [
-      createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 1000)),
-      createAgent('oh-my-claudecode:explore', 'haiku', new Date(now)),
+      createAgent('lazycc:architect', 'opus', new Date(now - 1000)),
+      createAgent('lazycc:explore', 'haiku', new Date(now)),
     ];
 
     it('should route to count format', () => {
@@ -229,7 +229,7 @@ describe('Agents Element', () => {
     it('should route to descriptions format', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('lazycc:architect', 'opus'),
           description: 'Analyzing code',
         },
       ];
@@ -241,7 +241,7 @@ describe('Agents Element', () => {
     it('should route to tasks format', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('lazycc:architect', 'opus'),
           description: 'Analyzing code',
         },
       ];
@@ -309,7 +309,7 @@ describe('Agents Element', () => {
     testCases.forEach(({ type, model, expected }) => {
       it(`should render ${type} (${model}) as '${expected}'`, () => {
         const agents: ActiveAgent[] = [
-          createAgent(`oh-my-claudecode:${type}`, model),
+          createAgent(`lazycc:${type}`, model),
         ];
         const result = renderAgentsCoded(agents);
         const stripped = result!.replace(/\x1b\[[0-9;]*m/g, '');
@@ -321,7 +321,7 @@ describe('Agents Element', () => {
   describe('Model tier color coding', () => {
     it('should use magenta for opus tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
+        createAgent('lazycc:architect', 'opus'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(MAGENTA);
@@ -329,7 +329,7 @@ describe('Agents Element', () => {
 
     it('should use yellow for sonnet tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
+        createAgent('lazycc:executor', 'sonnet'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(YELLOW);
@@ -337,7 +337,7 @@ describe('Agents Element', () => {
 
     it('should use green for haiku tier', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:explore', 'haiku'),
+        createAgent('lazycc:explore', 'haiku'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(GREEN);
@@ -345,7 +345,7 @@ describe('Agents Element', () => {
 
     it('should use cyan for unknown model', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect'),
+        createAgent('lazycc:architect'),
       ];
       const result = renderAgentsCoded(agents);
       expect(result).toContain(CYAN);
@@ -361,7 +361,7 @@ describe('Agents Element', () => {
 
     it('should return empty for completed agents only', () => {
       const agents: ActiveAgent[] = [
-        { ...createAgent('oh-my-claudecode:architect'), status: 'completed' },
+        { ...createAgent('lazycc:architect'), status: 'completed' },
       ];
       const result = renderAgentsMultiLine(agents);
       expect(result.headerPart).toBeNull();
@@ -371,7 +371,7 @@ describe('Agents Element', () => {
     it('should render single agent with tree character (last)', () => {
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('lazycc:architect', 'opus'),
           description: 'analyzing code',
         },
       ];
@@ -389,11 +389,11 @@ describe('Agents Element', () => {
       const now = Date.now();
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus', new Date(now - 1000)),
+          ...createAgent('lazycc:architect', 'opus', new Date(now - 1000)),
           description: 'analyzing code',
         },
         {
-          ...createAgent('oh-my-claudecode:explore', 'haiku', new Date(now)),
+          ...createAgent('lazycc:explore', 'haiku', new Date(now)),
           description: 'searching files',
         },
       ];
@@ -411,10 +411,10 @@ describe('Agents Element', () => {
 
     it('should limit to maxLines and show overflow indicator', () => {
       const agents: ActiveAgent[] = [
-        createAgent('oh-my-claudecode:architect', 'opus'),
-        createAgent('oh-my-claudecode:explore', 'haiku'),
-        createAgent('oh-my-claudecode:executor', 'sonnet'),
-        createAgent('oh-my-claudecode:document-specialist', 'haiku'),
+        createAgent('lazycc:architect', 'opus'),
+        createAgent('lazycc:explore', 'haiku'),
+        createAgent('lazycc:executor', 'sonnet'),
+        createAgent('lazycc:document-specialist', 'haiku'),
       ];
       const result = renderAgentsMultiLine(agents, 2);
       // 2 agents + 1 overflow indicator
@@ -425,7 +425,7 @@ describe('Agents Element', () => {
     it('should include duration for long-running agents', () => {
       const agents: ActiveAgent[] = [
         createAgent(
-          'oh-my-claudecode:architect',
+          'lazycc:architect',
           'opus',
           new Date(Date.now() - 120000) // 2 minutes ago
         ),
@@ -438,7 +438,7 @@ describe('Agents Element', () => {
     it('should truncate long descriptions', () => {
       const agents: ActiveAgent[] = [
         {
-          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          ...createAgent('lazycc:architect', 'opus'),
           description:
             'This is a very long description that should be truncated to fit in the display',
         },
@@ -452,14 +452,14 @@ describe('Agents Element', () => {
     });
 
     it('should handle agents without descriptions', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect', 'opus')];
+      const agents: ActiveAgent[] = [createAgent('lazycc:architect', 'opus')];
       const result = renderAgentsMultiLine(agents);
       expect(result.detailLines).toHaveLength(1);
       expect(result.detailLines[0]).toContain('...');
     });
 
     it('should route to multiline from renderAgentsByFormat', () => {
-      const agents: ActiveAgent[] = [createAgent('oh-my-claudecode:architect', 'opus')];
+      const agents: ActiveAgent[] = [createAgent('lazycc:architect', 'opus')];
       const result = renderAgentsByFormat(agents, 'multiline');
       // Should return the header part only (backward compatibility)
       expect(result).toContain('agents:');

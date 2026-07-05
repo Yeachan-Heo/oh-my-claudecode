@@ -141,13 +141,13 @@ export function getGlobalOmcStateCandidates(...segments) {
     ]);
 }
 /**
- * Get the plugin cache base directory for oh-my-claudecode.
+ * Get the plugin cache base directory for lazycc.
  * This is the directory containing version subdirectories.
  *
- * Structure: <configDir>/plugins/cache/omc/oh-my-claudecode/
+ * Structure: <configDir>/plugins/cache/lazycc/lazycc/
  */
 export function getPluginCacheBase() {
-    return join(getClaudeConfigDir(), 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    return join(getClaudeConfigDir(), 'plugins', 'cache', 'lazycc', 'lazycc');
 }
 /**
  * Safely delete a file, ignoring ENOENT errors.

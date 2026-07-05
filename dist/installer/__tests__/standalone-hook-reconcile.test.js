@@ -93,5 +93,46 @@ describe('install() standalone hook reconciliation', () => {
         expect(commands).toContain('node $HOME/.claude/hooks/other-plugin.mjs');
         expect(commands).toContain(`node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`);
     });
+    it('removes legacy OMC settings hooks in plugin mode without re-injecting them', async () => {
+        const settingsPath = join(testClaudeDir, 'settings.json');
+        const pluginRoot = join(testClaudeDir, 'plugins', 'cache', 'omc', 'lazycc', '4.1.5');
+        mkdirSync(pluginRoot, { recursive: true });
+        mkdirSync(testClaudeDir, { recursive: true });
+        writeFileSync(settingsPath, JSON.stringify({
+            hooks: {
+                UserPromptSubmit: [
+                    {
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node $HOME/.claude/hooks/keyword-detector.mjs',
+                            },
+                        ],
+                    },
+                    {
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node $HOME/.claude/hooks/other-plugin.mjs',
+                            },
+                        ],
+                    },
+                ],
+            },
+        }, null, 2));
+        process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+        const { install } = await loadInstaller();
+        const result = install({
+            force: true,
+            skipClaudeCheck: true,
+        });
+        const writtenSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+        const commands = writtenSettings.hooks?.UserPromptSubmit?.map(group => group.hooks[0]?.command) ?? [];
+        expect(result.success).toBe(true);
+        expect(result.hooksConfigured).toBe(true);
+        expect(commands).toEqual(['node $HOME/.claude/hooks/other-plugin.mjs']);
+        expect(commands).not.toContain(`node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`);
+        expect(writtenSettings.statusLine?.command).toContain(`${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
+    });
 });
 //# sourceMappingURL=standalone-hook-reconcile.test.js.map

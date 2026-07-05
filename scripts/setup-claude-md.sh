@@ -10,7 +10,7 @@ set -euo pipefail
 
 MODE="${1:?Usage: setup-claude-md.sh <local|global> [overwrite|preserve]}"
 INSTALL_STYLE="${2:-overwrite}"
-DOWNLOAD_URL="https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md"
+DOWNLOAD_URL="https://raw.githubusercontent.com/Yeachan-Heo/lazycc/main/docs/CLAUDE.md"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 . "$SCRIPT_DIR/lib/config-dir.sh"
@@ -41,7 +41,7 @@ resolve_active_plugin_root() {
     active_path=$(jq -r '
       (.plugins // .)
       | to_entries[]
-      | select(.key | startswith("oh-my-claudecode"))
+      | select(.key | startswith("lazycc"))
       | .value[0].installPath // empty
     ' "$installed_plugins" 2>/dev/null)
 
@@ -414,8 +414,8 @@ if [ "$MODE" = "global" ]; then
 fi
 
 # Verify plugin installation
-if [ -f "$CONFIG_DIR/settings.json" ] && grep -q "oh-my-claudecode" "$CONFIG_DIR/settings.json"; then
+if [ -f "$CONFIG_DIR/settings.json" ] && grep -q "lazycc" "$CONFIG_DIR/settings.json"; then
   echo "Plugin verified"
 else
-  echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+  echo "Plugin NOT found - run: claude /install-plugin lazycc"
 fi

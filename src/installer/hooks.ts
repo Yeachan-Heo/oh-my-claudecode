@@ -350,7 +350,7 @@ Ralph mode auto-activates Ultrawork for maximum parallel execution. Follow these
 ### Completion Requirements
 - Verify ALL requirements from the original task are met
 - Architect verification is MANDATORY before claiming completion
-- When FULLY complete, run \`/oh-my-claudecode:cancel\` to cleanly exit and clean up state files
+- When FULLY complete, run \`/lazycc:cancel\` to cleanly exit and clean up state files
 
 Continue working until the task is truly done.
 `;

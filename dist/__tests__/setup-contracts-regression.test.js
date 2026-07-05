@@ -10,10 +10,12 @@
  * to avoid false positives and allowlist bloat.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { tmpdir } from 'os';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -375,6 +377,28 @@ describe('Contract 9: hooks/hooks.json portability', () => {
             const details = violations.map(v => `  ${v.event}: ${v.command}`).join('\n');
             expect.fail(`Found absolute node binary paths in hooks.json:\n${details}\n\n` +
                 `This is the exact regression from issue #2348. Hook commands must use bare 'node', not resolved absolute paths.`);
+        }
+    });
+    it('plugin setup does not rewrite source hooks.json to absolute node paths', () => {
+        if (!existsSync(HOOKS_JSON_PATH))
+            return;
+        const before = readFileSync(HOOKS_JSON_PATH, 'utf-8');
+        const tempConfigDir = mkdtempSync(join(tmpdir(), 'omc-plugin-setup-'));
+        try {
+            const result = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', 'plugin-setup.mjs')], {
+                cwd: REPO_ROOT,
+                env: {
+                    ...process.env,
+                    CLAUDE_CONFIG_DIR: tempConfigDir,
+                },
+                encoding: 'utf-8',
+            });
+            expect(result.status, result.stderr || result.stdout).toBe(0);
+            expect(readFileSync(HOOKS_JSON_PATH, 'utf-8')).toBe(before);
+        }
+        finally {
+            writeFileSync(HOOKS_JSON_PATH, before);
+            rmSync(tempConfigDir, { recursive: true, force: true });
         }
     });
 });

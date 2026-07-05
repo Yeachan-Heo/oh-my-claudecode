@@ -288,7 +288,7 @@ export function canStartMode(mode: ExecutionMode, cwd: string): CanStartResult {
         return {
           allowed: false,
           blockedBy: exclusiveMode,
-          message: `Cannot start ${MODE_CONFIGS[mode].name} while ${config.name} is active. Cancel ${config.name} first with /oh-my-claudecode:cancel.`,
+          message: `Cannot start ${MODE_CONFIGS[mode].name} while ${config.name} is active. Cancel ${config.name} first with /lazycc:cancel.`,
         };
       }
     }

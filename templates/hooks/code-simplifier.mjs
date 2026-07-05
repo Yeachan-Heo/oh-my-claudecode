@@ -78,7 +78,7 @@ function buildMessage(files) {
     `code-simplifier agent to simplify the following files for clarity, ` +
     `consistency, and maintainability (without changing behavior):\n\n` +
     `${fileList}\n\n` +
-    `Use: Task(subagent_type="oh-my-claudecode:code-simplifier", ` +
+    `Use: Task(subagent_type="lazycc:code-simplifier", ` +
     `prompt="Simplify the recently modified files:\\n${fileArgs}")`
   );
 }

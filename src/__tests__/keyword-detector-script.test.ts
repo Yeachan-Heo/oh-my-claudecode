@@ -42,7 +42,7 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(context).toContain('<search-mode>');
     expect(context).toContain('MAXIMIZE SEARCH EFFORT');
     expect(context).not.toContain('[MAGIC KEYWORD: DEEPSEARCH]');
-    expect(context).not.toContain('Skill: oh-my-claudecode:deepsearch');
+    expect(context).not.toContain('Skill: lazycc:deepsearch');
   });
 
   it.each([

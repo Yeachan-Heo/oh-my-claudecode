@@ -379,7 +379,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
 
       expect(output.decision).toBe("block");
       expect(output.reason).toContain("AUTOPILOT");
-      expect(output.reason).not.toContain('/oh-my-claudecode:cancel');
+      expect(output.reason).not.toContain('/lazycc:cancel');
     });
 
     it("should include cancel guidance only for session-owned autopilot state", () => {
@@ -407,7 +407,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
 
       expect(output.decision).toBe("block");
-      expect(output.reason).toContain('/oh-my-claudecode:cancel');
+      expect(output.reason).toContain('/lazycc:cancel');
       expect(output.reason).toContain("this session's autopilot state files");
     });
   });

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames, clearSkillsCache } from '../features/builtin-skills/skills.js';
+import { CC_NATIVE_COMMAND_NAMES, EXPECTED_BUILTIN_SKILL_NAMES, EXPECTED_CANONICAL_SKILL_NAMES, EXPECTED_SKILL_ALIASES, REMOVED_SKILL_NAMES, } from './registry-contract-fixtures.js';
 describe('Builtin Skills', () => {
     const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     const originalPath = process.env.PATH;
@@ -73,10 +74,9 @@ describe('Builtin Skills', () => {
         clearSkillsCache();
     });
     describe('createBuiltinSkills()', () => {
-        it('should return correct number of skills (33 canonical + 1 alias)', () => {
+        it('should return the expected LazyCodex-compatible skills and aliases', () => {
             const skills = createBuiltinSkills();
-            // 34 entries: 33 canonical skills + 1 deprecated alias (psm)
-            expect(skills).toHaveLength(34);
+            expect(skills).toHaveLength(EXPECTED_BUILTIN_SKILL_NAMES.length);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -118,45 +118,15 @@ describe('Builtin Skills', () => {
     describe('Skill names', () => {
         it('should have valid skill names', () => {
             const skills = createBuiltinSkills();
-            const expectedSkills = [
-                'ask',
-                'ai-slop-cleaner',
-                'autopilot',
-                'cancel',
-                'ccg',
-                'configure-notifications',
-                'deep-dive',
-                'deep-interview',
-                'deepinit',
-                'omc-doctor',
-                'external-context',
-                'hud',
-                'learner',
-                'mcp-setup',
-                'omc-setup',
-                'omc-teams',
-                'omc-plan',
-                'omc-reference',
-                'project-session-manager',
-                'psm',
-                'ralph',
-                'ralplan',
-                'release',
-                'sciomc',
-                'self-improve',
-                'setup',
-                'skill',
-                'team',
-                'trace',
-                'ultraqa',
-                'ultrawork',
-                'visual-verdict',
-                'wiki',
-                'writer-memory',
-            ];
             const actualSkillNames = skills.map((s) => s.name);
-            expect(actualSkillNames).toEqual(expect.arrayContaining(expectedSkills));
-            expect(actualSkillNames.length).toBe(expectedSkills.length);
+            expect(actualSkillNames).toEqual(expect.arrayContaining([...EXPECTED_BUILTIN_SKILL_NAMES]));
+            expect(actualSkillNames.length).toBe(EXPECTED_BUILTIN_SKILL_NAMES.length);
+            for (const name of actualSkillNames) {
+                expect(name).toMatch(/^[a-z0-9][a-z0-9-]*$/u);
+            }
+            for (const removedName of REMOVED_SKILL_NAMES) {
+                expect(actualSkillNames).not.toContain(removedName);
+            }
         });
         it('should not have duplicate skill names', () => {
             const skills = createBuiltinSkills();
@@ -189,7 +159,7 @@ describe('Builtin Skills', () => {
             expect(skill).toBeDefined();
             expect(skill?.description).toContain('install/update routing');
             expect(skill?.template).toContain('Process the request by the **first argument only**');
-            expect(skill?.template).toContain('/oh-my-claudecode:setup doctor --json');
+            expect(skill?.template).toContain('/lazycc:setup doctor --json');
             expect(skill?.template).not.toContain('{{ARGUMENTS_AFTER_DOCTOR}}');
         });
         it('should emphasize worktree-first guidance in project session manager skill text', () => {
@@ -234,7 +204,7 @@ describe('Builtin Skills', () => {
             // Verify per-lane critical unknowns (B3 fix)
             expect(skill?.template).toContain('Per-Lane Critical Unknowns');
             // Verify pipeline handoff is fully wired (B1 fix)
-            expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
+            expect(skill?.template).toContain('Skill("lazycc:autopilot")');
             expect(skill?.template).toContain('consensus plan as Phase 0+1 output');
             // Verify untrusted data guard (NB1 fix)
             expect(skill?.template).toContain('trace-context');
@@ -256,7 +226,7 @@ describe('Builtin Skills', () => {
             });
             expect(skill?.template).toContain('## Skill Pipeline');
             expect(skill?.template).toContain('Pipeline: `deep-interview → omc-plan → autopilot`');
-            expect(skill?.template).toContain('Skill("oh-my-claudecode:omc-plan")');
+            expect(skill?.template).toContain('Skill("lazycc:omc-plan")');
             expect(skill?.template).toContain('`--consensus --direct`');
             expect(skill?.template).toContain('`.omc/specs/deep-interview-{slug}.md`');
             expect(skill?.template).toContain('Why now: {one_sentence_targeting_rationale}');
@@ -307,7 +277,7 @@ describe('Builtin Skills', () => {
             });
             expect(skill?.template).toContain('## Skill Pipeline');
             expect(skill?.template).toContain('Next skill: `autopilot`');
-            expect(skill?.template).toContain('Skill("oh-my-claudecode:autopilot")');
+            expect(skill?.template).toContain('Skill("lazycc:autopilot")');
             expect(skill?.template).toContain('`.omc/plans/ralplan-*.md`');
         });
         it('should expose review mode guidance for ai-slop-cleaner', () => {
@@ -335,7 +305,7 @@ describe('Builtin Skills', () => {
             expect(skill).toBeDefined();
             expect(skill?.template).toContain('/omc-teams` only supports **`claude`**, **`codex`**, and **`gemini`**');
             expect(skill?.template).toContain('unsupported type such as `expert`');
-            expect(skill?.template).toContain('/oh-my-claudecode:team');
+            expect(skill?.template).toContain('/lazycc:team');
         });
         it('should be case-insensitive', () => {
             const skillLower = getBuiltinSkill('autopilot');
@@ -355,27 +325,14 @@ describe('Builtin Skills', () => {
     describe('listBuiltinSkillNames()', () => {
         it('should return canonical skill names by default', () => {
             const names = listBuiltinSkillNames();
-            expect(names).toHaveLength(33);
-            expect(names).toContain('ai-slop-cleaner');
-            expect(names).toContain('ask');
-            expect(names).toContain('autopilot');
-            expect(names).toContain('cancel');
-            expect(names).toContain('ccg');
-            expect(names).toContain('configure-notifications');
-            expect(names).toContain('ralph');
-            expect(names).toContain('ultrawork');
-            expect(names).toContain('omc-plan');
-            expect(names).toContain('omc-reference');
-            expect(names).toContain('deepinit');
-            expect(names).toContain('release');
-            expect(names).toContain('omc-doctor');
-            expect(names).toContain('hud');
-            expect(names).toContain('omc-setup');
-            expect(names).toContain('setup');
-            expect(names).toContain('trace');
-            expect(names).toContain('visual-verdict');
-            expect(names).not.toContain('swarm'); // removed in #1131
-            expect(names).not.toContain('psm');
+            expect(names).toHaveLength(EXPECTED_CANONICAL_SKILL_NAMES.length);
+            expect(names).toEqual(expect.arrayContaining([...EXPECTED_CANONICAL_SKILL_NAMES]));
+            for (const alias of EXPECTED_SKILL_ALIASES) {
+                expect(names).not.toContain(alias);
+            }
+            for (const removedName of REMOVED_SKILL_NAMES) {
+                expect(names).not.toContain(removedName);
+            }
         });
         it('should return an array of strings', () => {
             const names = listBuiltinSkillNames();
@@ -385,24 +342,18 @@ describe('Builtin Skills', () => {
         });
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
-            // swarm alias removed in #1131, psm still exists
-            expect(names).toHaveLength(34);
-            expect(names).toContain('ai-slop-cleaner');
-            expect(names).toContain('trace');
-            expect(names).toContain('visual-verdict');
-            expect(names).not.toContain('swarm');
-            expect(names).toContain('psm');
+            expect(names).toHaveLength(EXPECTED_BUILTIN_SKILL_NAMES.length);
+            expect(names).toEqual(expect.arrayContaining([...EXPECTED_BUILTIN_SKILL_NAMES]));
+            for (const removedName of REMOVED_SKILL_NAMES) {
+                expect(names).not.toContain(removedName);
+            }
         });
     });
     describe('CC native command denylist (issue #830)', () => {
         it('should not expose any builtin skill whose name is a bare CC native command', () => {
             const skills = createBuiltinSkills();
-            const bareNativeNames = [
-                'compact', 'clear', 'help', 'config', 'plan',
-                'review', 'doctor', 'init', 'memory',
-            ];
             const skillNames = skills.map((s) => s.name.toLowerCase());
-            for (const native of bareNativeNames) {
+            for (const native of CC_NATIVE_COMMAND_NAMES) {
                 expect(skillNames).not.toContain(native);
             }
         });

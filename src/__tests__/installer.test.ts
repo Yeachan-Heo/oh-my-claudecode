@@ -185,7 +185,7 @@ describe('Installer Constants', () => {
 
         // Detect pattern: command file that tells user to invoke the same-named skill
         const skillInvokePattern = new RegExp(
-          `/oh-my-claudecode:${commandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+          `/lazycc:${commandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
           'i'
         );
 
@@ -327,12 +327,12 @@ describe('Installer Constants', () => {
   describe('extractOmcVersionFromClaudeMd()', () => {
     it('prefers the OMC version marker', () => {
       const content = `<!-- OMC:VERSION:4.7.7 -->
-# oh-my-claudecode - Intelligent Multi-Agent Orchestration`;
+# lazycc - Intelligent Multi-Agent Orchestration`;
       expect(extractOmcVersionFromClaudeMd(content)).toBe('v4.7.7');
     });
 
     it('falls back to legacy heading versions', () => {
-      const content = '# oh-my-claudecode v4.6.0 - Intelligent Multi-Agent Orchestration';
+      const content = '# lazycc v4.6.0 - Intelligent Multi-Agent Orchestration';
       expect(extractOmcVersionFromClaudeMd(content)).toBe('v4.6.0');
     });
   });
@@ -503,7 +503,7 @@ describe('Installer Constants', () => {
     });
 
     it('should return true when CLAUDE_PLUGIN_ROOT is set', () => {
-      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/.claude/plugins/marketplaces/oh-my-claudecode';
+      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/.claude/plugins/marketplaces/lazycc';
       expect(isRunningAsPlugin()).toBe(true);
     });
 
@@ -535,13 +535,13 @@ describe('Installer Constants', () => {
 
     it('should return false for global plugin installation', () => {
       // Global plugins are under ~/.claude/plugins/
-      process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '3.9.0');
+      process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc', '3.9.0');
       expect(isProjectScopedPlugin()).toBe(false);
     });
 
     it('should return true for project-scoped plugin installation', () => {
       // Project-scoped plugins are in the project's .claude/plugins/ directory
-      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/myproject/.claude/plugins/oh-my-claudecode';
+      process.env.CLAUDE_PLUGIN_ROOT = '/home/user/myproject/.claude/plugins/lazycc';
       expect(isProjectScopedPlugin()).toBe(true);
     });
 

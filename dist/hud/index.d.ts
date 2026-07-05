@@ -2,7 +2,7 @@
 /**
  * OMC HUD - Main Entry Point
  *
- * Statusline command that visualizes oh-my-claudecode state.
+ * Statusline command that visualizes lazycc state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
 /** @internal Reset spawn guard — used by tests only. */

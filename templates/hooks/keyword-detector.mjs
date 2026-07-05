@@ -413,7 +413,7 @@ function createSkillInvocation(skillName, originalPrompt, args = '') {
 
 You MUST invoke the skill using the Skill tool:
 
-Skill: oh-my-claudecode:${skillName}${argsSection}
+Skill: lazycc:${skillName}${argsSection}
 
 User request:
 ${originalPrompt}
@@ -433,7 +433,7 @@ function createMultiSkillInvocation(skills, originalPrompt) {
   const skillBlocks = skills.map((s, i) => {
     const argsSection = s.args ? `\nArguments: ${s.args}` : '';
     return `### Skill ${i + 1}: ${s.name.toUpperCase()}
-Skill: oh-my-claudecode:${s.name}${argsSection}`;
+Skill: lazycc:${s.name}${argsSection}`;
   }).join('\n\n');
 
   return `[MAGIC KEYWORDS DETECTED: ${skills.map(s => s.name.toUpperCase()).join(', ')}]

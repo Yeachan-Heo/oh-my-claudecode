@@ -171,7 +171,7 @@ describe('HUD marketplace resolution', () => {
     const npmRoot = process.platform === 'win32'
       ? join(npmPrefix, 'node_modules')
       : join(npmPrefix, 'lib', 'node_modules');
-    const npmPackageRoot = join(npmRoot, 'oh-my-claude-sisyphus');
+    const npmPackageRoot = join(npmRoot, 'lazycc');
     const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
     mkdirSync(npmHudDir, { recursive: true });
     writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
@@ -207,7 +207,7 @@ describe('HUD marketplace resolution', () => {
     expect(readFileSync(sentinelPath, 'utf-8')).toBe('global-prefix-loaded');
   });
 
-  it('omc-hud.mjs loads the published npm package name before the branded fallback', () => {
+  it('omc-hud.mjs loads the lazycc npm package fallback', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-npm-package-'));
     tempDirs.push(configDir);
 
@@ -215,7 +215,7 @@ describe('HUD marketplace resolution', () => {
     mkdirSync(fakeHome, { recursive: true });
 
     const sentinelPath = join(configDir, 'npm-package-loaded.txt');
-    const npmPackageRoot = join(configDir, 'node_modules', 'oh-my-claude-sisyphus');
+    const npmPackageRoot = join(configDir, 'node_modules', 'lazycc');
     const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
     mkdirSync(npmHudDir, { recursive: true });
     writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
@@ -238,11 +238,8 @@ describe('HUD marketplace resolution', () => {
     expect(existsSync(hudScriptPath)).toBe(true);
 
     const content = readFileSync(hudScriptPath, 'utf-8');
-    expect(content).toContain('"oh-my-claude-sisyphus/dist/hud/index.js"');
-    expect(content).toContain('"oh-my-claudecode/dist/hud/index.js"');
-    expect(content.indexOf('"oh-my-claude-sisyphus/dist/hud/index.js"')).toBeLessThan(
-      content.indexOf('"oh-my-claudecode/dist/hud/index.js"')
-    );
+    const npmFallbacks = content.match(/"lazycc\/dist\/hud\/index\.js"/g) ?? [];
+    expect(npmFallbacks).toHaveLength(1);
 
     execFileSync(process.execPath, [hudScriptPath], {
       cwd: root,

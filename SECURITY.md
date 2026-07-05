@@ -1,6 +1,6 @@
 # Security Guide
 
-This document describes the security configuration and deployment guidelines for oh-my-claudecode (OMC).
+This document describes the security configuration and deployment guidelines for lazycc (OMC).
 
 ## Quick Start: Strict Mode
 
@@ -111,7 +111,7 @@ export OMC_SECURITY=strict
 - Do not set `"permission": {"*": "allow"}` in Claude Code settings; prefer `"ask"` mode
 - Avoid hook commands (`hook.command`) — they execute with `shell: true`
 - Minimize sensitive environment variables (API keys, tokens) — MCP processes inherit them
-- Install OMC manually (`oh-my-claudecode install`), not via agent
+- Install OMC manually (`lazycc install`), not via agent
 - Pin to a verified version with `"disableAutoUpdate": true`
 - Clone repositories only from trusted sources — `.mcp.json` files are auto-loaded by Claude Code
 
@@ -127,4 +127,4 @@ These are structural characteristics that cannot be fully resolved by configurat
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability, please report it via [GitHub Issues](https://github.com/Yeachan-Heo/oh-my-claudecode/issues) with the `security` label.
+If you discover a security vulnerability, please report it via [GitHub Issues](https://github.com/Yeachan-Heo/lazycc/issues) with the `security` label.

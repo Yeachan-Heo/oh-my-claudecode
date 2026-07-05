@@ -1,7 +1,7 @@
 /**
  * Auto-Update System
  *
- * Provides version checking and auto-update functionality for oh-my-claudecode.
+ * Provides version checking and auto-update functionality for lazycc.
  *
  * Features:
  * - Check for new versions from GitHub releases
@@ -19,7 +19,7 @@ import { isAutoUpdateDisabled } from '../lib/security-config.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
-export const REPO_NAME = 'oh-my-claudecode';
+export const REPO_NAME = 'lazycc';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
 /**
@@ -172,7 +172,7 @@ export function shouldBlockStandaloneUpdateInCurrentSession() {
     return false;
 }
 export function syncPluginCache(verbose = false) {
-    const pluginCacheRoot = join(getClaudeConfigDir(), 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const pluginCacheRoot = join(getClaudeConfigDir(), 'plugins', 'cache', 'lazycc', 'lazycc');
     if (!existsSync(pluginCacheRoot)) {
         return { synced: false, skipped: true, errors: [] };
     }
@@ -186,7 +186,7 @@ export function syncPluginCache(verbose = false) {
         if (!npmRoot) {
             throw new Error('npm root -g returned an empty path');
         }
-        const sourceRoot = join(npmRoot, 'oh-my-claude-sisyphus');
+        const sourceRoot = join(npmRoot, 'lazycc');
         const packageJsonPath = join(sourceRoot, 'package.json');
         const packageJsonRaw = String(readFileSync(packageJsonPath, 'utf-8') ?? '');
         const packageMetadata = JSON.parse(packageJsonRaw);
@@ -299,15 +299,15 @@ export function getInstalledVersion() {
         // Try to detect version from package.json if installed via npm
         try {
             // Check if we can find the package in node_modules
-            const result = execSync('npm list -g oh-my-claude-sisyphus --json', {
+            const result = execSync('npm list -g lazycc --json', {
                 encoding: 'utf-8',
                 timeout: 5000,
                 stdio: 'pipe'
             });
             const data = JSON.parse(result);
-            if (data.dependencies?.['oh-my-claude-sisyphus']?.version) {
+            if (data.dependencies?.['lazycc']?.version) {
                 return {
-                    version: data.dependencies['oh-my-claude-sisyphus'].version,
+                    version: data.dependencies['lazycc'].version,
                     installedAt: new Date().toISOString(),
                     installMethod: 'npm'
                 };
@@ -354,14 +354,14 @@ export async function fetchLatestRelease() {
     const response = await fetch(`${GITHUB_API_URL}/releases/latest`, {
         headers: {
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'oh-my-claudecode-updater'
+            'User-Agent': 'lazycc-updater'
         }
     });
     if (response.status === 404) {
         // No releases found - try to get version from package.json in repo
         const pkgResponse = await fetch(`${GITHUB_RAW_URL}/main/package.json`, {
             headers: {
-                'User-Agent': 'oh-my-claudecode-updater'
+                'User-Agent': 'lazycc-updater'
             }
         });
         if (pkgResponse.ok) {
@@ -431,9 +431,16 @@ export async function checkForUpdates() {
  */
 export function reconcileUpdateRuntime(options) {
     const errors = [];
-    const runningAsPlugin = isRunningAsPlugin();
     const projectScopedPlugin = isProjectScopedPlugin();
-    const shouldRefreshPluginHooks = runningAsPlugin && !projectScopedPlugin;
+    // Plugin installs execute hooks from <pluginRoot>/hooks/hooks.json. Re-running
+    // the standalone settings.json hook merge during `omc update` re-injects the
+    // legacy ~/.claude/hooks/* entries and causes duplicate hook execution.
+    //
+    // Reconciliation should still refresh shared installer artifacts (CLAUDE.md,
+    // HUD, MCP registry, statusLine, etc.), but it must leave settings.json hook
+    // ownership alone for plugin installs so the plugin hook manifest remains the
+    // single source of truth.
+    const shouldRefreshPluginHooks = false;
     if (!projectScopedPlugin) {
         try {
             if (!existsSync(HOOKS_DIR)) {
@@ -541,7 +548,7 @@ export async function performUpdate(options) {
                 success: false,
                 previousVersion,
                 newVersion: 'unknown',
-                message: 'Running inside an active Claude Code plugin session. Use "/plugin install oh-my-claudecode" to update, or pass --standalone to force npm update.',
+                message: 'Running inside an active Claude Code plugin session. Use "/plugin install lazycc" to update, or pass --standalone to force npm update.',
             };
         }
         // Fetch the latest release to get the version
@@ -549,7 +556,7 @@ export async function performUpdate(options) {
         const newVersion = release.tag_name.replace(/^v/, '');
         // Use npm for updates on all platforms (install.sh was removed)
         try {
-            execSync('npm install -g oh-my-claude-sisyphus@latest', {
+            execSync('npm install -g lazycc@latest', {
                 encoding: 'utf-8',
                 stdio: options?.verbose ? 'inherit' : 'pipe',
                 timeout: 120000, // 2 minute timeout for npm
@@ -624,8 +631,8 @@ export async function performUpdate(options) {
         }
         catch (npmError) {
             throw new Error('Auto-update via npm failed. Please run manually:\n' +
-                '  npm install -g oh-my-claude-sisyphus@latest\n' +
-                'Or use: /plugin install oh-my-claudecode\n' +
+                '  npm install -g lazycc@latest\n' +
+                'Or use: /plugin install lazycc\n' +
                 `Error: ${npmError instanceof Error ? npmError.message : npmError}`);
         }
     }
@@ -645,18 +652,18 @@ export async function performUpdate(options) {
  */
 export function formatUpdateNotification(checkResult) {
     if (!checkResult.updateAvailable) {
-        return `oh-my-claudecode is up to date (v${checkResult.currentVersion ?? 'unknown'})`;
+        return `lazycc is up to date (v${checkResult.currentVersion ?? 'unknown'})`;
     }
     const lines = [
         '╔═══════════════════════════════════════════════════════════╗',
-        '║           oh-my-claudecode Update Available!              ║',
+        '║           lazycc Update Available!              ║',
         '╚═══════════════════════════════════════════════════════════╝',
         '',
         `  Current version: ${checkResult.currentVersion ?? 'unknown'}`,
         `  Latest version:  ${checkResult.latestVersion}`,
         '',
         '  To update, run: /update',
-        '  Or reinstall via: /plugin install oh-my-claudecode',
+        '  Or reinstall via: /plugin install lazycc',
         ''
     ];
     // Add truncated release notes if available

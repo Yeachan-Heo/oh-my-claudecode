@@ -87,10 +87,10 @@ function isDelegationToolName(toolName) {
     return normalizedToolName === 'agent' || normalizedToolName === 'task';
 }
 function canonicalizeSubagentType(subagentType) {
-    const hasPrefix = subagentType.startsWith('oh-my-claudecode:');
-    const rawAgentType = subagentType.replace(/^oh-my-claudecode:/, '');
+    const hasPrefix = subagentType.startsWith('lazycc:');
+    const rawAgentType = subagentType.replace(/^lazycc:/, '');
     const canonicalAgentType = normalizeDelegationRole(rawAgentType);
-    return hasPrefix ? `oh-my-claudecode:${canonicalAgentType}` : canonicalAgentType;
+    return hasPrefix ? `lazycc:${canonicalAgentType}` : canonicalAgentType;
 }
 /**
  * Enforce model parameter for an agent delegation call
@@ -129,7 +129,7 @@ export function enforceModel(agentInput) {
             model: normalizedModel,
         };
     }
-    const agentType = canonicalSubagentType.replace(/^oh-my-claudecode:/, '');
+    const agentType = canonicalSubagentType.replace(/^lazycc:/, '');
     const agentDefs = getAgentDefinitions({ config });
     const agentDef = agentDefs[agentType];
     if (!agentDef) {
@@ -222,7 +222,7 @@ export function processPreToolUse(toolName, toolInput) {
  * Get model for an agent type (for testing/debugging)
  */
 export function getModelForAgent(agentType) {
-    const normalizedType = normalizeDelegationRole(agentType.replace(/^oh-my-claudecode:/, ''));
+    const normalizedType = normalizeDelegationRole(agentType.replace(/^lazycc:/, ''));
     const agentDefs = getAgentDefinitions({ config: getCachedConfig() });
     const agentDef = agentDefs[normalizedType];
     if (!agentDef) {

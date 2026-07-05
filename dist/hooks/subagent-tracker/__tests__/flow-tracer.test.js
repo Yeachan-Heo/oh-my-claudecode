@@ -68,12 +68,12 @@ describe('flow-tracer', () => {
     });
     describe('recordSkillInvoked', () => {
         it('should record skill_invoked event with skill name', () => {
-            recordSkillInvoked(testDir, 'sess-inv1', 'oh-my-claudecode:plan');
+            recordSkillInvoked(testDir, 'sess-inv1', 'lazycc:plan');
             const events = readReplayEvents(testDir, 'sess-inv1');
             expect(events).toHaveLength(1);
             expect(events[0].event).toBe('skill_invoked');
             expect(events[0].agent).toBe('system');
-            expect(events[0].skill_name).toBe('oh-my-claudecode:plan');
+            expect(events[0].skill_name).toBe('lazycc:plan');
         });
     });
     describe('recordModeChange', () => {

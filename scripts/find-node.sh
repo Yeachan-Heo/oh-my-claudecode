@@ -95,7 +95,7 @@ fi
 # Invoke node with all provided arguments
 # ---------------------------------------------------------------------------
 if [ -z "$NODE_BIN" ]; then
-  printf '[OMC] Error: Could not find node binary. Run /oh-my-claudecode:omc-setup to fix.\n' >&2
+  printf '[OMC] Error: Could not find node binary. Run /lazycc:omc-setup to fix.\n' >&2
   exit 0  # exit 0 so this hook does not block Claude Code
 fi
 

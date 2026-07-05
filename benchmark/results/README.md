@@ -103,7 +103,7 @@ Instances that vanilla solved but OMC failed:
 # Install SWE-bench
 pip install swebench
 
-# Install oh-my-claudecode (if testing OMC)
+# Install lazycc (if testing OMC)
 # Follow setup instructions in main README
 ```
 

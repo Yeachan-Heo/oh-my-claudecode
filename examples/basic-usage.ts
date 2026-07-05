@@ -5,7 +5,7 @@
  * with the Claude Agent SDK.
  */
 
-// Note: In real usage, import from 'oh-my-claudecode'
+// Note: In real usage, import from 'lazycc'
 import { createOmcSession, enhancePrompt } from '../src/index.js';
 
 // For demonstration - in real usage, import from '@anthropic-ai/claude-agent-sdk'

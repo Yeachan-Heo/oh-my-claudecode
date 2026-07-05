@@ -6,7 +6,7 @@
  */
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { isTmuxAvailable, isClaudeAvailable } from './tmux-utils.js';
+import { isTmuxAvailable, isClaudeAvailable, tmuxExec } from './tmux-utils.js';
 import { initInteropSession } from '../interop/shared-state.js';
 export function readInteropRuntimeFlags(env = process.env) {
     const rawMode = (env.OMX_OMC_INTEROP_MODE || 'off').toLowerCase();
@@ -83,9 +83,7 @@ export function launchInteropSession(cwd = process.cwd()) {
     // Get current pane ID
     let currentPaneId;
     try {
-        const output = execFileSync('tmux', ['display-message', '-p', '#{pane_id}'], {
-            encoding: 'utf-8',
-        });
+        const output = tmuxExec(['display-message', '-p', '#{pane_id}']);
         currentPaneId = output.trim();
     }
     catch (_error) {
@@ -101,7 +99,7 @@ export function launchInteropSession(cwd = process.cwd()) {
         if (hasCodex) {
             // Create right pane with codex
             console.log('Splitting pane: Left (Claude Code) | Right (Codex)');
-            execFileSync('tmux', [
+            tmuxExec([
                 'split-window',
                 '-h',
                 '-c', cwd,
@@ -109,7 +107,7 @@ export function launchInteropSession(cwd = process.cwd()) {
                 'codex',
             ], { stdio: 'inherit' });
             // Select left pane (original/current)
-            execFileSync('tmux', ['select-pane', '-t', currentPaneId], { stdio: 'ignore' });
+            tmuxExec(['select-pane', '-t', currentPaneId], { stdio: 'ignore' });
             console.log('\nInterop session ready!');
             console.log('- Left pane: Claude Code (this terminal)');
             console.log('- Right pane: Codex CLI');

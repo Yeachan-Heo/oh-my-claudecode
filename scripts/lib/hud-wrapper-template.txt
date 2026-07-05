@@ -111,7 +111,7 @@ async function main() {
   // 2. Plugin cache (for production installs)
   // Respect CLAUDE_CONFIG_DIR so installs under a custom config dir are found
   const configDir = getClaudeConfigDir();
-  const pluginCacheBase = join(configDir, "plugins", "cache", "omc", "oh-my-claudecode");
+  const pluginCacheBase = join(configDir, "plugins", "cache", "lazycc", "lazycc");
   if (existsSync(pluginCacheBase)) {
     try {
       const versions = readdirSync(pluginCacheBase);
@@ -200,12 +200,11 @@ async function main() {
     }
   }
 
-  // 4. npm package (current project, global install, or branded fallback)
+  // 4. npm package (current project or global install)
   // Tests can disable this fallback to avoid host-global package nondeterminism.
   if (process.env.OMC_HUD_DISABLE_NPM_FALLBACK !== "1") {
     const npmHudPackages = [
-      "oh-my-claude-sisyphus/dist/hud/index.js",
-      "oh-my-claudecode/dist/hud/index.js",
+      "lazycc/dist/hud/index.js",
     ];
     for (const hudPackage of npmHudPackages) {
       if (await importHudPackage(hudPackage)) {
@@ -234,9 +233,9 @@ async function main() {
       console.log(`[OMC HUD] Plugin HUD load failed${detail}. Run: cd "${pluginCacheDir}" && npm install && npm run build`);
     }
   } else if (existsSync(pluginCacheBase)) {
-    console.log(`[OMC HUD] Plugin cache found but no versions installed. Run: /oh-my-claudecode:omc-setup`);
+    console.log(`[OMC HUD] Plugin cache found but no versions installed. Run: /lazycc:omc-setup`);
   } else {
-    console.log("[OMC HUD] Plugin not installed. Run: /oh-my-claudecode:omc-setup");
+    console.log("[OMC HUD] Plugin not installed. Run: /lazycc:omc-setup");
   }
 }
 

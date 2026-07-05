@@ -91,6 +91,42 @@ describe('HUD marketplace resolution', () => {
         });
         expect(readFileSync(sentinelPath, 'utf-8')).toBe('marketplace-loaded');
     });
+    it('omc-hud.mjs surfaces dynamic import errors from OMC_PLUGIN_ROOT HUD paths', () => {
+        const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-import-error-'));
+        tempDirs.push(configDir);
+        const fakeHome = join(configDir, 'home');
+        mkdirSync(fakeHome, { recursive: true });
+        execFileSync(process.execPath, [join(root, 'scripts', 'plugin-setup.mjs')], {
+            cwd: root,
+            env: {
+                ...process.env,
+                CLAUDE_CONFIG_DIR: configDir,
+                HOME: fakeHome,
+            },
+            stdio: 'pipe',
+        });
+        const pluginRoot = join(configDir, 'broken-plugin-root');
+        const pluginHudDir = join(pluginRoot, 'dist', 'hud');
+        mkdirSync(pluginHudDir, { recursive: true });
+        writeFileSync(join(pluginRoot, 'package.json'), '{"type":"module"}\n');
+        writeFileSync(join(pluginHudDir, 'index.js'), "import '../platform/index.js';\n");
+        const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
+        const output = execFileSync(process.execPath, [hudScriptPath], {
+            cwd: root,
+            env: {
+                ...process.env,
+                CLAUDE_CONFIG_DIR: configDir,
+                HOME: fakeHome,
+                OMC_PLUGIN_ROOT: pluginRoot,
+                OMC_HUD_DISABLE_NPM_FALLBACK: '1',
+            },
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        const normalized = output.replace(/\\/g, '/');
+        expect(normalized).toContain('[OMC HUD] HUD import failed from');
+        expect(normalized).toContain('/broken-plugin-root/dist/hud/index.js');
+    });
     it('omc-hud.mjs loads a global npm install outside a Node project via npm prefix resolution', () => {
         const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-global-prefix-'));
         tempDirs.push(configDir);
@@ -103,7 +139,7 @@ describe('HUD marketplace resolution', () => {
         const npmRoot = process.platform === 'win32'
             ? join(npmPrefix, 'node_modules')
             : join(npmPrefix, 'lib', 'node_modules');
-        const npmPackageRoot = join(npmRoot, 'oh-my-claude-sisyphus');
+        const npmPackageRoot = join(npmRoot, 'lazycc');
         const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
         mkdirSync(npmHudDir, { recursive: true });
         writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
@@ -131,13 +167,13 @@ describe('HUD marketplace resolution', () => {
         });
         expect(readFileSync(sentinelPath, 'utf-8')).toBe('global-prefix-loaded');
     });
-    it('omc-hud.mjs loads the published npm package name before the branded fallback', () => {
+    it('omc-hud.mjs loads the lazycc npm package fallback', () => {
         const configDir = mkdtempSync(join(tmpdir(), 'omc-hud-npm-package-'));
         tempDirs.push(configDir);
         const fakeHome = join(configDir, 'home');
         mkdirSync(fakeHome, { recursive: true });
         const sentinelPath = join(configDir, 'npm-package-loaded.txt');
-        const npmPackageRoot = join(configDir, 'node_modules', 'oh-my-claude-sisyphus');
+        const npmPackageRoot = join(configDir, 'node_modules', 'lazycc');
         const npmHudDir = join(npmPackageRoot, 'dist', 'hud');
         mkdirSync(npmHudDir, { recursive: true });
         writeFileSync(join(npmPackageRoot, 'package.json'), '{"type":"module"}\n');
@@ -154,9 +190,8 @@ describe('HUD marketplace resolution', () => {
         const hudScriptPath = join(configDir, 'hud', 'omc-hud.mjs');
         expect(existsSync(hudScriptPath)).toBe(true);
         const content = readFileSync(hudScriptPath, 'utf-8');
-        expect(content).toContain('"oh-my-claude-sisyphus/dist/hud/index.js"');
-        expect(content).toContain('"oh-my-claudecode/dist/hud/index.js"');
-        expect(content.indexOf('"oh-my-claude-sisyphus/dist/hud/index.js"')).toBeLessThan(content.indexOf('"oh-my-claudecode/dist/hud/index.js"'));
+        const npmFallbacks = content.match(/"lazycc\/dist\/hud\/index\.js"/g) ?? [];
+        expect(npmFallbacks).toHaveLength(1);
         execFileSync(process.execPath, [hudScriptPath], {
             cwd: root,
             env: {

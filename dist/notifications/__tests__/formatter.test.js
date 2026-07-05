@@ -73,7 +73,7 @@ describe("formatNotification routing", () => {
             ...basePayload,
             event: "agent-call",
             agentName: "executor",
-            agentType: "oh-my-claudecode:executor",
+            agentType: "lazycc:executor",
         });
         expect(result).toContain("# Agent Spawned");
     });
@@ -101,9 +101,9 @@ describe("formatAgentCall", () => {
     it("should include agent type when provided", () => {
         const result = formatAgentCall({
             ...basePayload,
-            agentType: "oh-my-claudecode:executor",
+            agentType: "lazycc:executor",
         });
-        expect(result).toContain("**Type:** `oh-my-claudecode:executor`");
+        expect(result).toContain("**Type:** `lazycc:executor`");
     });
     it("should include footer with project info", () => {
         const result = formatAgentCall(basePayload);

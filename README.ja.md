@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | 日本語 | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -15,7 +15,7 @@
 
 *Claude Code を学ぶ必要はありません。OMC を使うだけ。*
 
-[はじめる](#クイックスタート) • [ドキュメント](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI リファレンス](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [ワークフロー](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [移行ガイド](docs/MIGRATION.md)
+[はじめる](#クイックスタート) • [ドキュメント](https://yeachan-heo.github.io/lazycc-website) • [CLI リファレンス](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference) • [ワークフロー](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows) • [移行ガイド](docs/MIGRATION.md)
 
 ---
 
@@ -23,8 +23,8 @@
 
 **ステップ 1: インストール**
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **ステップ 2: セットアップ**
@@ -102,19 +102,19 @@ Codex + Gemini を一つのコマンドで使うには **`/ccg`** スキルを�
 
 ワーカーはオンデマンドで起動し、タスク完了後に終了します — アイドルリソースの無駄なし。`codex` / `gemini` CLI のインストールとアクティブな tmux セッションが必要です。
 
-> **注意: パッケージ名について** — プロジェクトのブランド名は **oh-my-claudecode**（リポジトリ、プラグイン、コマンド）ですが、npmパッケージは [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) として公開されています。npm/bunでCLIツールをインストールする場合は `npm install -g oh-my-claude-sisyphus` を使用してください。
+> **注意: パッケージ名について** — プロジェクトのブランド名は **lazycc**（リポジトリ、プラグイン、コマンド）ですが、npmパッケージは [`lazycc`](https://www.npmjs.com/package/lazycc) として公開されています。npm/bunでCLIツールをインストールする場合は `npm install -g lazycc` を使用してください。
 
 ### アップデート
 
 ```bash
 # 1. マーケットプレイスクローンを更新
-/plugin marketplace update omc
+/plugin marketplace update lazycc
 
 # 2. セットアップを再実行して設定を更新
 /omc-setup
 ```
 
-> **注意:** マーケットプレイスの自動更新が有効になっていない場合は、セットアップ実行前に `/plugin marketplace update omc` を手動で実行して最新バージョンを同期する必要があります。
+> **注意:** マーケットプレイスの自動更新が有効になっていない場合は、セットアップ実行前に `/plugin marketplace update lazycc` を手動で実行して最新バージョンを同期する必要があります。
 
 更新後に問題が発生した場合は、古いプラグインキャッシュをクリアしてください：
 
@@ -125,12 +125,12 @@ Codex + Gemini を一つのコマンドで使うには **`/ccg`** スキルを�
 <h1 align="center">あなたの Claude がステロイド級にパワーアップ。</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## なぜ oh-my-claudecode なのか?
+## なぜ lazycc なのか?
 
 - **設定不要** - 賢いデフォルト設定ですぐに使える
 - **Team ファースト・オーケストレーション** - Team が標準マルチエージェントサーフェス（swarm/ultrapilot は互換性ファサード）
@@ -146,7 +146,7 @@ Codex + Gemini を一つのコマンドで使うには **`/ccg`** スキルを�
 ## 機能
 
 ### 実行モード
-用途に応じた複数の戦略 - 完全自律ビルドからトークン効率の良いリファクタリングまで。[詳しくはこちら →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+用途に応じた複数の戦略 - 完全自律ビルドからトークン効率の良いリファクタリングまで。[詳しくはこちら →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | モード | 特徴 | 用途 |
 |------|---------|------|
@@ -277,7 +277,7 @@ Claude Code セッションイベントを [OpenClaw](https://openclaw.ai/) ゲ�
 **クイックセットアップ（推奨）:**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → プロンプトで "openclaw" と入力 → "OpenClaw Gateway" を選択
 ```
 
@@ -335,11 +335,11 @@ OpenClaw ペイロードを ClawdBot 経由で Discord にリレーするリフ�
 ## ドキュメント
 
 - **[完全リファレンス](docs/REFERENCE.md)** - 全機能の詳細ドキュメント
-- **[CLI リファレンス](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference)** - すべての `omc` コマンド、フラグ、ツール
-- **[通知ガイド](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#notifications)** - Discord、Telegram、Slack、webhook のセットアップ
-- **[推奨ワークフロー](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows)** - 一般的なタスクのための実績あるスキルチェーン
-- **[リリースノート](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#release-notes)** - 各バージョンの新機能
-- **[ウェブサイト](https://yeachan-heo.github.io/oh-my-claudecode-website)** - インタラクティブガイドと例
+- **[CLI リファレンス](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference)** - すべての `omc` コマンド、フラグ、ツール
+- **[通知ガイド](https://yeachan-heo.github.io/lazycc-website/docs.html#notifications)** - Discord、Telegram、Slack、webhook のセットアップ
+- **[推奨ワークフロー](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows)** - 一般的なタスクのための実績あるスキルチェーン
+- **[リリースノート](https://yeachan-heo.github.io/lazycc-website/docs.html#release-notes)** - 各バージョンの新機能
+- **[ウェブサイト](https://yeachan-heo.github.io/lazycc-website)** - インタラクティブガイドと例
 - **[移行ガイド](docs/MIGRATION.md)** - v2.x からのアップグレード
 - **[アーキテクチャ](docs/ARCHITECTURE.md)** - 内部の仕組み
 - **[パフォーマンス監視](docs/PERFORMANCE-MONITORING.md)** - エージェント追跡、デバッグ、最適化
@@ -380,7 +380,7 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 このプロジェクトを支援
 

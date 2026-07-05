@@ -85,14 +85,14 @@ fi
 
 # Verify OMC is built
 if [ ! -d "$PROJECT_ROOT/dist" ] || [ ! -f "$PROJECT_ROOT/dist/index.js" ]; then
-    log_error "oh-my-claudecode is not built. Run: npm run build"
+    log_error "lazycc is not built. Run: npm run build"
     exit 1
 fi
 
 log_info "=========================================="
 log_info "Running OMC-Enhanced Benchmark"
 log_info "=========================================="
-log_info "Mode: $RUN_MODE (with oh-my-claudecode orchestration)"
+log_info "Mode: $RUN_MODE (with lazycc orchestration)"
 log_info "Model: $MODEL"
 log_info "Timeout: ${TIMEOUT}s per instance"
 [ -n "$LIMIT" ] && log_info "Limit: $LIMIT instances"

@@ -1,6 +1,6 @@
 # Migration Guide
 
-This guide covers all migration paths for oh-my-claudecode. Find your current version below.
+This guide covers all migration paths for lazycc. Find your current version below.
 
 ---
 
@@ -107,30 +107,30 @@ The following skills have been **completely removed** in v3.5.3:
 
 | Removed Skill        | Replacement                            |
 | -------------------- | -------------------------------------- |
-| `cancel-autopilot`   | `/oh-my-claudecode:cancel`             |
-| `cancel-ralph`       | `/oh-my-claudecode:cancel`             |
-| `cancel-ultrawork`   | `/oh-my-claudecode:cancel`             |
-| `cancel-ultraqa`     | `/oh-my-claudecode:cancel`             |
-| `omc-default`        | `/oh-my-claudecode:omc-setup --local`  |
-| `omc-default-global` | `/oh-my-claudecode:omc-setup --global` |
-| `planner`            | `/oh-my-claudecode:plan`               |
+| `cancel-autopilot`   | `/lazycc:cancel`             |
+| `cancel-ralph`       | `/lazycc:cancel`             |
+| `cancel-ultrawork`   | `/lazycc:cancel`             |
+| `cancel-ultraqa`     | `/lazycc:cancel`             |
+| `omc-default`        | `/lazycc:omc-setup --local`  |
+| `omc-default-global` | `/lazycc:omc-setup --global` |
+| `planner`            | `/lazycc:plan`               |
 
 ### What Changed
 
 **Before v3.5.3:**
 
 ```bash
-/oh-my-claudecode:cancel-ralph      # Cancel ralph specifically
-/oh-my-claudecode:omc-default       # Configure local project
-/oh-my-claudecode:planner "task"    # Start planning
+/lazycc:cancel-ralph      # Cancel ralph specifically
+/lazycc:omc-default       # Configure local project
+/lazycc:planner "task"    # Start planning
 ```
 
 **After v3.5.3:**
 
 ```bash
-/oh-my-claudecode:cancel            # Auto-detects and cancels any active mode
-/oh-my-claudecode:omc-setup --local # Configure local project
-/oh-my-claudecode:plan "task"       # Start planning (includes interview mode)
+/lazycc:cancel            # Auto-detects and cancels any active mode
+/lazycc:omc-setup --local # Configure local project
+/lazycc:plan "task"       # Start planning (includes interview mode)
 ```
 
 ### New Features
@@ -144,8 +144,8 @@ The following skills have been **completely removed** in v3.5.3:
 **Plan skill now supports consensus mode:**
 
 ```bash
-/oh-my-claudecode:plan --consensus "task"  # Iterative planning with Critic review
-/oh-my-claudecode:ralplan "task"           # Alias for plan --consensus
+/lazycc:plan --consensus "task"  # Iterative planning with Critic review
+/lazycc:ralplan "task"           # Alias for plan --consensus
 ```
 
 ### Migration Steps
@@ -167,7 +167,7 @@ The following skills have been **completely removed** in v3.5.3:
 
 Your old commands still work! But now you don't need them.
 
-**Before 3.0:** Explicitly invoke 25+ commands like `/oh-my-claudecode:ralph "task"`, `/oh-my-claudecode:ultrawork "task"`
+**Before 3.0:** Explicitly invoke 25+ commands like `/lazycc:ralph "task"`, `/lazycc:ultrawork "task"`
 
 **After 3.0:** Just work naturally - Claude auto-activates the right behaviors. One-time setup: just say "setup omc"
 
@@ -175,15 +175,15 @@ Your old commands still work! But now you don't need them.
 
 The project was rebranded to better reflect its purpose and improve discoverability.
 
-- **Project/brand name**: `oh-my-claudecode` (GitHub repo, plugin name, commands)
-- **npm package name**: `oh-my-claude-sisyphus` (unchanged)
+- **Project/brand name**: `lazycc` (GitHub repo, plugin name, commands)
+- **npm package name**: `lazycc` (unchanged)
 
-> **Why the difference?** The npm package name `oh-my-claude-sisyphus` was kept for backward compatibility with existing installations. The project, GitHub repository, plugin, and all commands use `oh-my-claudecode`.
+> **Why the difference?** The npm package name `lazycc` was kept for backward compatibility with existing installations. The project, GitHub repository, plugin, and all commands use `lazycc`.
 
 #### NPM Install Command (unchanged)
 
 ```bash
-npm i -g oh-my-claude-sisyphus@latest
+npm i -g lazycc@latest
 ```
 
 ### What Changed
@@ -194,13 +194,13 @@ You had to remember and explicitly invoke specific commands for each mode:
 
 ```bash
 # 2.x workflow: Multiple commands, lots to remember
-/oh-my-claudecode:ralph "implement user authentication"       # Persistence mode
-/oh-my-claudecode:ultrawork "refactor the API layer"          # Maximum parallelism
-/oh-my-claudecode:planner "plan the new dashboard"            # Planning interview
-/oh-my-claudecode:deepsearch "find database schema files"     # Deep search
-/oh-my-claudecode:git-master "commit these changes"           # Git expertise
-/oh-my-claudecode:deepinit ./src                              # Index codebase
-/oh-my-claudecode:analyze "why is this test failing?"         # Deep analysis
+/lazycc:ralph "implement user authentication"       # Persistence mode
+/lazycc:ultrawork "refactor the API layer"          # Maximum parallelism
+/lazycc:planner "plan the new dashboard"            # Planning interview
+/lazycc:deepsearch "find database schema files"     # Deep search
+/lazycc:git-master "commit these changes"           # Git expertise
+/lazycc:deepinit ./src                              # Index codebase
+/lazycc:analyze "why is this test failing?"         # Deep analysis
 ```
 
 #### After (3.0): Auto-Activation + Keywords
@@ -269,20 +269,20 @@ All 2.x commands continue to work. Here's what changed:
 
 | 2.x Command                            | 3.0 Equivalent                                     | Works?                 |
 | -------------------------------------- | -------------------------------------------------- | ---------------------- |
-| `/oh-my-claudecode:ralph "task"`       | Say "don't stop until done" OR use `ralph` keyword | ✅ YES (both ways)     |
-| `/oh-my-claudecode:ultrawork "task"`   | Say "fast" or "parallel" OR use `ulw` keyword      | ✅ YES (both ways)     |
-| `/oh-my-claudecode:ultrawork-ralph`    | Say "ralph ulw:" prefix                            | ✅ YES (keyword combo) |
-| `/oh-my-claudecode:planner "task"`     | Say "plan this" OR use `plan` keyword              | ✅ YES (both ways)     |
-| `/oh-my-claudecode:plan "description"` | Start planning naturally                           | ✅ YES                 |
-| `/oh-my-claudecode:review [path]`      | Invoke normally                                    | ✅ YES (unchanged)     |
-| `/oh-my-claudecode:deepsearch "query"` | Say "find" or "search"                             | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:analyze "target"`   | Say "analyze" — routes to debugger/architect agent | ✅ YES (keyword route) |
-| `/oh-my-claudecode:deepinit [path]`    | Invoke normally                                    | ✅ YES (unchanged)     |
-| `/oh-my-claudecode:git-master`         | Say "git", "commit", "atomic commit"               | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:frontend-ui-ux`     | Say "UI", "styling", "component", "design"         | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:note "content"`     | Say "remember this" or "save this"                 | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:cancel-ralph`       | Say "stop", "cancel", or "abort"                   | ✅ YES (auto-detect)   |
-| `/oh-my-claudecode:omc-doctor`         | Invoke normally                                    | ✅ YES (unchanged)     |
+| `/lazycc:ralph "task"`       | Say "don't stop until done" OR use `ralph` keyword | ✅ YES (both ways)     |
+| `/lazycc:ultrawork "task"`   | Say "fast" or "parallel" OR use `ulw` keyword      | ✅ YES (both ways)     |
+| `/lazycc:ultrawork-ralph`    | Say "ralph ulw:" prefix                            | ✅ YES (keyword combo) |
+| `/lazycc:planner "task"`     | Say "plan this" OR use `plan` keyword              | ✅ YES (both ways)     |
+| `/lazycc:plan "description"` | Start planning naturally                           | ✅ YES                 |
+| `/lazycc:review [path]`      | Invoke normally                                    | ✅ YES (unchanged)     |
+| `/lazycc:deepsearch "query"` | Say "find" or "search"                             | ✅ YES (auto-detect)   |
+| `/lazycc:analyze "target"`   | Say "analyze" — routes to debugger/architect agent | ✅ YES (keyword route) |
+| `/lazycc:deepinit [path]`    | Invoke normally                                    | ✅ YES (unchanged)     |
+| `/lazycc:git-master`         | Say "git", "commit", "atomic commit"               | ✅ YES (auto-detect)   |
+| `/lazycc:frontend-ui-ux`     | Say "UI", "styling", "component", "design"         | ✅ YES (auto-detect)   |
+| `/lazycc:note "content"`     | Say "remember this" or "save this"                 | ✅ YES (auto-detect)   |
+| `/lazycc:cancel-ralph`       | Say "stop", "cancel", or "abort"                   | ✅ YES (auto-detect)   |
+| `/lazycc:omc-doctor`         | Invoke normally                                    | ✅ YES (unchanged)     |
 | All other commands                     | Work exactly as before                             | ✅ YES                 |
 
 ### Magic Keywords
@@ -332,7 +332,7 @@ If in planning       → End planning interview
 If multiple active   → Stop the most recent
 ```
 
-No more `/oh-my-claudecode:cancel-ralph` - just say "cancel"!
+No more `/lazycc:cancel-ralph` - just say "cancel"!
 
 ### Migration Steps
 
@@ -341,15 +341,15 @@ Follow these steps to migrate your existing setup:
 #### 1. Uninstall Old Package (if installed via npm)
 
 ```bash
-npm uninstall -g oh-my-claudecode
+npm uninstall -g lazycc
 ```
 
 #### 2. Install via Plugin System (Required)
 
 ```bash
 # In Claude Code:
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 > **Note**: npm/bun global installs are no longer supported. Use the plugin system.
@@ -391,7 +391,7 @@ Update your shell configuration files (`.bashrc`, `.zshrc`, etc.):
 
 Search for and update any references to:
 
-- Package name: `oh-my-claudecode` → `oh-my-claudecode`
+- Package name: `lazycc` → `lazycc`
 - Agent names: Use the mapping table above
 - Commands: Use the new slash commands
 - Directory paths: Update `.omc` → `.omc`
@@ -415,7 +415,7 @@ After migration, verify your setup:
 1. **Check installation**:
 
    ```bash
-   npm list -g oh-my-claudecode
+   npm list -g lazycc
    ```
 
 2. **Verify directories exist**:
@@ -426,7 +426,7 @@ After migration, verify your setup:
    ```
 
 3. **Test a simple command**:
-   Run `/oh-my-claudecode:omc-help` in Claude Code to ensure the plugin is loaded correctly.
+   Run `/lazycc:omc-help` in Claude Code to ensure the plugin is loaded correctly.
 
 ### New Features in 3.0
 
@@ -435,7 +435,7 @@ After migration, verify your setup:
 **No commands to memorize.** Work naturally:
 
 ```
-Before: "OK, I need to use /oh-my-claudecode:ultrawork for speed..."
+Before: "OK, I need to use /lazycc:ultrawork for speed..."
 After:  "I'm in a hurry, go fast!"
         ↓
         Claude: "I'm activating ultrawork mode..."
@@ -457,7 +457,7 @@ Your request              Claude's action
 
 You don't ask for delegation - it happens automatically.
 
-#### 3. Learned Skills (`/oh-my-claudecode:learner`)
+#### 3. Learned Skills (`/lazycc:learner`)
 
 Extract reusable insights from problem-solving:
 
@@ -483,7 +483,7 @@ See what Claude is doing in the status bar:
 [OMC] ralph:3/10 | US-002 | ultrawork skill:planner | ctx:67% | agents:2 | todos:2/5
 ```
 
-Run `/oh-my-claudecode:hud setup` to install. Presets: minimal, focused, full.
+Run `/lazycc:hud setup` to install. Presets: minimal, focused, full.
 
 #### 5. Three-Tier Memory System
 
@@ -497,10 +497,10 @@ Permanently loaded on session start
 Never lost through compaction
 ```
 
-Or use `/oh-my-claudecode:note` to save discoveries manually:
+Or use `/lazycc:note` to save discoveries manually:
 
 ```bash
-/oh-my-claudecode:note Project uses PostgreSQL with Prisma ORM
+/lazycc:note Project uses PostgreSQL with Prisma ORM
 ```
 
 #### 6. Structured Task Tracking (PRD Support)
@@ -508,7 +508,7 @@ Or use `/oh-my-claudecode:note` to save discoveries manually:
 **Ralph Loop now uses Product Requirements Documents:**
 
 ```bash
-/oh-my-claudecode:ralph-init "implement OAuth with multiple providers"
+/lazycc:ralph-init "implement OAuth with multiple providers"
     ↓
 Auto-creates PRD with user stories
     ↓
@@ -603,7 +603,7 @@ Background agents can be resumed with full context via `resume-session` tool.
 Version 3.1 is a drop-in upgrade. No migration required!
 
 ```bash
-npm update -g oh-my-claudecode
+npm update -g lazycc
 ```
 
 All existing configurations, plans, and workflows continue working unchanged.
@@ -632,7 +632,7 @@ Version 3.4.0 introduces powerful parallel execution modes and advanced workflow
 Chain agents with data passing between stages:
 
 ```bash
-/oh-my-claudecode:pipeline explore:haiku -> architect:opus -> executor:sonnet
+/lazycc:pipeline explore:haiku -> architect:opus -> executor:sonnet
 ```
 
 **Built-in Presets:**
@@ -649,7 +649,7 @@ Chain agents with data passing between stages:
 Smart cancellation that auto-detects active mode:
 
 ```bash
-/oh-my-claudecode:cancel
+/lazycc:cancel
 # Or just say: "stop", "cancel", "abort"
 ```
 
@@ -658,12 +658,12 @@ Smart cancellation that auto-detects active mode:
 **Deprecation Notice:**
 Individual cancel commands are deprecated but still work:
 
-- `/oh-my-claudecode:cancel-ralph` (deprecated)
-- `/oh-my-claudecode:cancel-ultraqa` (deprecated)
-- `/oh-my-claudecode:cancel-ultrawork` (deprecated)
-- `/oh-my-claudecode:cancel-autopilot` (deprecated)
+- `/lazycc:cancel-ralph` (deprecated)
+- `/lazycc:cancel-ultraqa` (deprecated)
+- `/lazycc:cancel-ultrawork` (deprecated)
+- `/lazycc:cancel-autopilot` (deprecated)
 
-Use `/oh-my-claudecode:cancel` instead.
+Use `/lazycc:cancel` instead.
 
 #### 6. Explore-High Agent
 
@@ -671,7 +671,7 @@ Opus-powered architectural search for complex codebase exploration:
 
 ```typescript
 Task(
-  (subagent_type = "oh-my-claudecode:explore-high"),
+  (subagent_type = "lazycc:explore-high"),
   (model = "opus"),
   (prompt = "Find all authentication-related code patterns..."),
 );
@@ -704,14 +704,14 @@ When multiple execution mode keywords are present:
 **Explicit mode keywords:** `ulw`, `ultrawork`
 **Generic keywords:** `fast`, `parallel`
 
-Users set their default mode preference via `/oh-my-claudecode:omc-setup`.
+Users set their default mode preference via `/lazycc:omc-setup`.
 
 ### Migration Steps
 
 Version 3.4.0 is a drop-in upgrade. No migration required!
 
 ```bash
-npm update -g oh-my-claudecode
+npm update -g lazycc
 ```
 
 All existing configurations, plans, and workflows continue working unchanged.
@@ -780,13 +780,13 @@ After upgrading, verify new features:
 1. **Check installation**:
 
    ```bash
-   npm list -g oh-my-claudecode
+   npm list -g lazycc
    ```
 
 2. **Test unified cancel**:
 
    ```bash
-   /oh-my-claudecode:cancel
+   /lazycc:cancel
    ```
 
 3. **Check state directory**:
@@ -835,7 +835,7 @@ Expected timeline: Q1 2026
 
 ### Stay Updated
 
-- Watch the [GitHub repository](https://github.com/Yeachan-Heo/oh-my-claudecode) for announcements
+- Watch the [GitHub repository](https://github.com/Yeachan-Heo/lazycc) for announcements
 - Check [CHANGELOG.md](../CHANGELOG.md) for detailed release notes
 - Join discussions in GitHub Issues
 
@@ -848,7 +848,7 @@ Expected timeline: Q1 2026
 **2.x Workflow:**
 
 ```
-/oh-my-claudecode:ultrawork "implement the todo list feature"
+/lazycc:ultrawork "implement the todo list feature"
 ```
 
 **3.0+ Workflow:**
@@ -866,7 +866,7 @@ Claude: "I'm activating ultrawork for maximum parallelism"
 **2.x Workflow:**
 
 ```
-/oh-my-claudecode:ralph "debug the memory leak"
+/lazycc:ralph "debug the memory leak"
 ```
 
 **3.0+ Workflow:**
@@ -884,7 +884,7 @@ Claude: "I'm activating ralph-loop to ensure completion"
 **2.x Workflow:**
 
 ```
-/oh-my-claudecode:planner "design the new authentication system"
+/lazycc:planner "design the new authentication system"
 ```
 
 **3.0+ Workflow:**
@@ -904,7 +904,7 @@ Interview begins automatically
 **2.x Workflow:**
 
 ```
-/oh-my-claudecode:cancel-ralph
+/lazycc:cancel-ralph
 ```
 
 **3.0+ Workflow:**
@@ -921,10 +921,10 @@ Interview begins automatically
 
 ### Project-Scoped Configuration (Recommended)
 
-Apply oh-my-claudecode to current project only:
+Apply lazycc to current project only:
 
 ```
-/oh-my-claudecode:omc-default
+/lazycc:omc-default
 ```
 
 Creates: `./.claude/CLAUDE.md`
@@ -934,7 +934,7 @@ Creates: `./.claude/CLAUDE.md`
 Apply to all Claude Code sessions:
 
 ```
-/oh-my-claudecode:omc-default-global
+/lazycc:omc-default-global
 ```
 
 Creates: `~/.claude/CLAUDE.md`
@@ -952,10 +952,10 @@ A: No. Keywords are optional shortcuts. Claude auto-detects intent without them.
 A: No. All commands continue to work across minor versions (3.0 → 3.1). Major version changes (3.x → 4.0) will provide migration paths.
 
 **Q: What if I like explicit commands?**
-A: Keep using them! `/oh-my-claudecode:ralph`, `/oh-my-claudecode:ultrawork`, and `/oh-my-claudecode:plan` work. Note: `/oh-my-claudecode:planner` now redirects to `/oh-my-claudecode:plan`.
+A: Keep using them! `/lazycc:ralph`, `/lazycc:ultrawork`, and `/lazycc:plan` work. Note: `/lazycc:planner` now redirects to `/lazycc:plan`.
 
 **Q: How do I know what Claude is doing?**
-A: Claude announces major behaviors: "I'm activating ralph-loop..." or set up `/oh-my-claudecode:hud` for real-time status.
+A: Claude announces major behaviors: "I'm activating ralph-loop..." or set up `/lazycc:hud` for real-time status.
 
 **Q: Where's the full command list?**
 A: See [README.md](../README.md) for full command reference. All commands still work.
@@ -967,11 +967,11 @@ A: Keywords are explicit shortcuts. Natural language triggers auto-detection. Bo
 
 ## Need Help?
 
-- **Diagnose issues**: Run `/oh-my-claudecode:omc-doctor`
-- **See all commands**: Run `/oh-my-claudecode:omc-help`
-- **View real-time status**: Run `/oh-my-claudecode:hud setup`
+- **Diagnose issues**: Run `/lazycc:omc-doctor`
+- **See all commands**: Run `/lazycc:omc-help`
+- **View real-time status**: Run `/lazycc:hud setup`
 - **Review detailed changelog**: See [CHANGELOG.md](../CHANGELOG.md)
-- **Report bugs**: [GitHub Issues](https://github.com/Yeachan-Heo/oh-my-claudecode/issues)
+- **Report bugs**: [GitHub Issues](https://github.com/Yeachan-Heo/lazycc/issues)
 
 ---
 
@@ -984,4 +984,4 @@ Now that you understand the migration:
 3. **For advanced usage**: Check [docs/ARCHITECTURE.md](ARCHITECTURE.md) for deep dives
 4. **For team onboarding**: Share this guide with teammates
 
-Welcome to oh-my-claudecode!
+Welcome to lazycc!

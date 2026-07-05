@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | Português
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -15,7 +15,7 @@
 
 *Não aprenda Claude Code. Só use OMC.*
 
-[Começar Rápido](#início-rápido) • [Documentação](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Referência CLI](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [Workflows](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [Guia de Migração](docs/MIGRATION.md)
+[Começar Rápido](#início-rápido) • [Documentação](https://yeachan-heo.github.io/lazycc-website) • [Referência CLI](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference) • [Workflows](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows) • [Guia de Migração](docs/MIGRATION.md)
 
 ---
 
@@ -23,8 +23,8 @@
 
 **Passo 1: Instale**
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **Passo 2: Configure**
@@ -102,19 +102,19 @@ Para trabalho misto de Codex + Gemini em um único comando, use a skill **`/ccg`
 
 Trabalhadores são iniciados sob demanda e encerrados quando a tarefa é concluída — sem uso ocioso de recursos. Requer as CLIs `codex` / `gemini` instaladas e uma sessão tmux ativa.
 
-> **Observação: Nome do pacote** — O projeto usa a marca **oh-my-claudecode** (repo, plugin, comandos), mas o pacote npm é publicado como [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). Se você instalar as ferramentas de CLI via npm/bun, use `npm install -g oh-my-claude-sisyphus`.
+> **Observação: Nome do pacote** — O projeto usa a marca **lazycc** (repo, plugin, comandos), mas o pacote npm é publicado como [`lazycc`](https://www.npmjs.com/package/lazycc). Se você instalar as ferramentas de CLI via npm/bun, use `npm install -g lazycc`.
 
 ### Atualizando
 
 ```bash
 # 1. Atualize o clone do marketplace
-/plugin marketplace update omc
+/plugin marketplace update lazycc
 
 # 2. Execute o setup novamente para atualizar a configuração
 /omc-setup
 ```
 
-> **Observação:** Se a atualização automática do marketplace não estiver habilitada, você precisa executar manualmente `/plugin marketplace update omc` para sincronizar a versão mais recente antes de executar o setup.
+> **Observação:** Se a atualização automática do marketplace não estiver habilitada, você precisa executar manualmente `/plugin marketplace update lazycc` para sincronizar a versão mais recente antes de executar o setup.
 
 Se você tiver problemas depois de atualizar, limpe o cache antigo do plugin:
 
@@ -125,12 +125,12 @@ Se você tiver problemas depois de atualizar, limpe o cache antigo do plugin:
 <h1 align="center">Seu Claude acabou de tomar esteroides.</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## Por que oh-my-claudecode?
+## Por que lazycc?
 
 - **Configuração zero** - Funciona de cara com padrões inteligentes
 - **Orquestração team-first** - Team é a superfície canônica multiagente (swarm/ultrapilot são fachadas de compatibilidade)
@@ -146,7 +146,7 @@ Se você tiver problemas depois de atualizar, limpe o cache antigo do plugin:
 ## Recursos
 
 ### Modos de Orquestração
-Múltiplas estratégias para diferentes casos de uso — da orquestração com Team até refatoração com eficiência de tokens. [Saiba mais →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+Múltiplas estratégias para diferentes casos de uso — da orquestração com Team até refatoração com eficiência de tokens. [Saiba mais →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | Modo | O que é | Usar para |
 |------|---------|-----------|
@@ -275,7 +275,7 @@ Encaminhe eventos de sessão do Claude Code para um gateway do [OpenClaw](https:
 **Configuração rápida (recomendado):**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → Digite "openclaw" quando solicitado → escolha "OpenClaw Gateway"
 ```
 
@@ -333,11 +333,11 @@ Veja `scripts/openclaw-gateway-demo.mjs` para um gateway de referência que retr
 ## Documentação
 
 - **[Referência Completa](docs/REFERENCE.md)** - Documentação completa de recursos
-- **[Referência CLI](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference)** - Todos os comandos, flags e ferramentas do `omc`
-- **[Guia de Notificações](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#notifications)** - Configuração de Discord, Telegram, Slack e webhooks
-- **[Workflows Recomendados](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows)** - Cadeias de skills testadas em batalha para tarefas comuns
-- **[Notas de Lançamento](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#release-notes)** - Novidades em cada versão
-- **[Website](https://yeachan-heo.github.io/oh-my-claudecode-website)** - Guias interativos e exemplos
+- **[Referência CLI](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference)** - Todos os comandos, flags e ferramentas do `omc`
+- **[Guia de Notificações](https://yeachan-heo.github.io/lazycc-website/docs.html#notifications)** - Configuração de Discord, Telegram, Slack e webhooks
+- **[Workflows Recomendados](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows)** - Cadeias de skills testadas em batalha para tarefas comuns
+- **[Notas de Lançamento](https://yeachan-heo.github.io/lazycc-website/docs.html#release-notes)** - Novidades em cada versão
+- **[Website](https://yeachan-heo.github.io/lazycc-website)** - Guias interativos e exemplos
 - **[Guia de Migração](docs/MIGRATION.md)** - Upgrade a partir da v2.x
 - **[Arquitetura](docs/ARCHITECTURE.md)** - Como funciona por baixo dos panos
 - **[Monitoramento de Performance](docs/PERFORMANCE-MONITORING.md)** - Rastreamento de agentes, debugging e otimização
@@ -378,7 +378,7 @@ MIT
 
 ## Histórico de Stars
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 Apoie Este Projeto
 

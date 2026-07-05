@@ -9,7 +9,7 @@
  * Storage: .omc/state/shared-memory/{namespace}/{key}.json
  * Config gate: agents.sharedMemory.enabled in ~/.claude/.omc-config.json
  *
- * @see https://github.com/anthropics/oh-my-claudecode/issues/1119
+ * @see https://github.com/anthropics/lazycc/issues/1119
  */
 
 import { z } from 'zod';

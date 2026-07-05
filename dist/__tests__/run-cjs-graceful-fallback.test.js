@@ -9,14 +9,14 @@ const NODE = process.execPath;
  * Regression tests for run.cjs graceful fallback when CLAUDE_PLUGIN_ROOT
  * points to a stale/deleted/broken plugin cache directory.
  *
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1007
+ * See: https://github.com/Yeachan-Heo/lazycc/issues/1007
  */
 describe('run.cjs — graceful fallback for stale plugin paths', () => {
     let tmpDir;
     let fakeCacheBase;
     beforeEach(() => {
         tmpDir = mkdtempSync(join(tmpdir(), 'omc-run-cjs-test-'));
-        fakeCacheBase = join(tmpDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        fakeCacheBase = join(tmpDir, 'plugins', 'cache', 'lazycc', 'lazycc');
         mkdirSync(fakeCacheBase, { recursive: true });
     });
     afterEach(() => {

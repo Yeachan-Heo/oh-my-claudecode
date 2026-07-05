@@ -2,7 +2,7 @@
 
 ## Summary
 
-When `/oh-my-claudecode:cancel` is invoked, it clears mode state files for
+When `/lazycc:cancel` is invoked, it clears mode state files for
 ralph, ultrawork, autopilot, team, etc. — but it does **not** clear
 `skill-active-state.json`. This causes the stop hook to keep firing
 reinforcements after cancel until either the reinforcement limit or the stale
@@ -11,7 +11,7 @@ TTL expires.
 ## Reproduction
 
 1. Invoke a `medium`-protected skill (e.g. `sciomc`, `learner`, `release`)
-2. Before the skill completes, invoke `/oh-my-claudecode:cancel`
+2. Before the skill completes, invoke `/lazycc:cancel`
 3. Observe: stop hook continues to block with `[SKILL ACTIVE: sciomc]`
    reinforcements 1/5 → 2/5 → ... until limit or 15-min TTL
 

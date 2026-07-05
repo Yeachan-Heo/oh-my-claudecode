@@ -165,7 +165,7 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
       ].filter(f => f.endsWith('.md') || f.endsWith('.sh'));
       const combined = files.map(f => readFileSync(f, 'utf-8')).join('\n');
       expect(combined).toContain("grep -m1 'OMC:VERSION:'");
-      expect(combined).not.toContain('grep -m1 "^# oh-my-claudecode"');
+      expect(combined).not.toContain('grep -m1 "^# lazycc"');
     });
 
     it('omc-setup SKILL.md explicitly tells the agent to execute immediately', () => {

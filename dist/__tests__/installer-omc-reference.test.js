@@ -42,13 +42,13 @@ function writeInstalledPluginRegistry(claudeConfigDir, pluginRoot) {
     const pluginsDir = join(claudeConfigDir, 'plugins');
     mkdirSync(pluginsDir, { recursive: true });
     writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
-        'oh-my-claudecode': [
+        'lazycc': [
             { installPath: pluginRoot },
         ],
     }, null, 2));
 }
 function writeEnabledPluginSettings(claudeConfigDir) {
-    writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }, null, 2));
+    writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }, null, 2));
 }
 function getBundledSkillNames() {
     const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug', 'skillify']);
@@ -114,7 +114,7 @@ describe('installer bundled + standalone skill sync', () => {
         expect(existsSync(join(claudeConfigDir, 'skills', 'plan', 'SKILL.md'))).toBe(false);
     });
     it('installs bundled skills when no enabled OMC plugin is configured', async () => {
-        const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+        const pluginRoot = join(tempRoot, 'plugin-cache', 'lazycc', '4.10.2');
         mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
         writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
         writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
@@ -137,7 +137,7 @@ describe('installer bundled + standalone skill sync', () => {
         expect(existsSync(join(claudeConfigDir, 'skills', 'omc-setup', 'phases', '04-welcome.md'))).toBe(true);
     });
     it('skips bundled skill sync when an installed plugin already provides skills', async () => {
-        const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+        const pluginRoot = join(tempRoot, 'plugin-cache', 'lazycc', '4.10.2');
         mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
         writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
         writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
@@ -152,7 +152,7 @@ describe('installer bundled + standalone skill sync', () => {
         expect(existsSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'))).toBe(false);
     });
     it('forces bundled skill sync with noPlugin even when plugin skills exist', async () => {
-        const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+        const pluginRoot = join(tempRoot, 'plugin-cache', 'lazycc', '4.10.2');
         mkdirSync(join(pluginRoot, 'skills', 'ralph'), { recursive: true });
         writeFileSync(join(pluginRoot, 'skills', 'ralph', 'SKILL.md'), 'name: ralph\n');
         writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
@@ -169,7 +169,7 @@ describe('installer bundled + standalone skill sync', () => {
         expect(readFileSync(join(claudeConfigDir, 'skills', 'ralph', 'SKILL.md'), 'utf-8')).toContain('name: ralph');
     });
     it('falls back to bundled skills when plugin is enabled but skill files are unavailable', async () => {
-        const pluginRoot = join(tempRoot, 'plugin-cache', 'oh-my-claudecode', '4.10.2');
+        const pluginRoot = join(tempRoot, 'plugin-cache', 'lazycc', '4.10.2');
         mkdirSync(pluginRoot, { recursive: true });
         writeInstalledPluginRegistry(claudeConfigDir, pluginRoot);
         writeEnabledPluginSettings(claudeConfigDir);

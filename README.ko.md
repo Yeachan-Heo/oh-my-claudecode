@@ -1,10 +1,10 @@
 [English](README.md) | 한국어 | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -15,7 +15,7 @@
 
 *Claude Code를 배우지 마세요. 그냥 OMC를 쓰세요.*
 
-[시작하기](#빠른-시작) • [문서](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI 레퍼런스](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [워크플로우](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [마이그레이션 가이드](docs/MIGRATION.md)
+[시작하기](#빠른-시작) • [문서](https://yeachan-heo.github.io/lazycc-website) • [CLI 레퍼런스](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference) • [워크플로우](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows) • [마이그레이션 가이드](docs/MIGRATION.md)
 
 ---
 
@@ -23,8 +23,8 @@
 
 **Step 1: 설치**
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **Step 2: 설정**
@@ -106,19 +106,19 @@ omc team shutdown auth-review
 
 워커는 요청 시 생성되고 작업 완료 후 종료됩니다 — 유휴 리소스 낭비 없음. `codex` / `gemini` CLI가 설치되어 있고 활성 tmux 세션이 필요합니다.
 
-> **참고: 패키지 이름** — 프로젝트 브랜드명은 **oh-my-claudecode** (저장소, 플러그인, 명령어)이지만, npm 패키지는 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus)로 배포됩니다. npm/bun으로 CLI 도구를 설치할 때는 `npm install -g oh-my-claude-sisyphus`를 사용하세요.
+> **참고: 패키지 이름** — 프로젝트 브랜드명은 **lazycc** (저장소, 플러그인, 명령어)이지만, npm 패키지는 [`lazycc`](https://www.npmjs.com/package/lazycc)로 배포됩니다. npm/bun으로 CLI 도구를 설치할 때는 `npm install -g lazycc`를 사용하세요.
 
 ### 업데이트
 
 ```bash
 # 1. 마켓플레이스 클론 업데이트
-/plugin marketplace update omc
+/plugin marketplace update lazycc
 
 # 2. 셋업을 다시 실행하여 설정 갱신
 /omc-setup
 ```
 
-> **참고:** 마켓플레이스 auto-update가 활성화되어 있지 않은 경우, 셋업 실행 전에 `/plugin marketplace update omc`를 수동으로 실행하여 최신 버전을 동기화해야 합니다.
+> **참고:** 마켓플레이스 auto-update가 활성화되어 있지 않은 경우, 셋업 실행 전에 `/plugin marketplace update lazycc`를 수동으로 실행하여 최신 버전을 동기화해야 합니다.
 
 업데이트 후 문제가 발생하면, 이전 플러그인 캐시를 정리하세요:
 
@@ -129,12 +129,12 @@ omc team shutdown auth-review
 <h1 align="center">당신의 Claude가 스테로이드를 맞았습니다.</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## 왜 oh-my-claudecode인가?
+## 왜 lazycc인가?
 
 - **설정 불필요** - 똑똑한 기본값으로 바로 작동합니다
 - **Team 우선 오케스트레이션** - Team은 표준 멀티 에이전트 인터페이스입니다 (swarm/ultrapilot은 호환성 파사드)
@@ -150,7 +150,7 @@ omc team shutdown auth-review
 ## 기능
 
 ### 실행 모드
-다양한 사용 사례를 위한 여러 전략 - 완전 자율 빌드부터 토큰 효율적인 리팩토링까지. [자세히 보기 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+다양한 사용 사례를 위한 여러 전략 - 완전 자율 빌드부터 토큰 효율적인 리팩토링까지. [자세히 보기 →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | 모드 | 특징 | 용도 |
 |------|---------|---------|
@@ -282,7 +282,7 @@ Claude Code 세션 이벤트를 [OpenClaw](https://openclaw.ai/) 게이트웨이
 **빠른 설정 (권장):**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → 프롬프트에서 "openclaw" 입력 → "OpenClaw Gateway" 선택
 ```
 
@@ -340,11 +340,11 @@ OpenClaw 페이로드를 ClawdBot을 통해 Discord에 전달하는 레퍼런스
 ## 문서
 
 - **[전체 레퍼런스](docs/REFERENCE.md)** - 완전한 기능 문서
-- **[CLI 레퍼런스](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference)** - 모든 `omc` 명령어, 플래그 및 도구
-- **[알림 가이드](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#notifications)** - Discord, Telegram, Slack 및 webhook 설정
-- **[추천 워크플로우](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows)** - 일반 작업을 위한 검증된 스킬 체인
-- **[릴리스 노트](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#release-notes)** - 각 버전의 새로운 기능
-- **[웹사이트](https://yeachan-heo.github.io/oh-my-claudecode-website)** - 인터랙티브 가이드와 예제
+- **[CLI 레퍼런스](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference)** - 모든 `omc` 명령어, 플래그 및 도구
+- **[알림 가이드](https://yeachan-heo.github.io/lazycc-website/docs.html#notifications)** - Discord, Telegram, Slack 및 webhook 설정
+- **[추천 워크플로우](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows)** - 일반 작업을 위한 검증된 스킬 체인
+- **[릴리스 노트](https://yeachan-heo.github.io/lazycc-website/docs.html#release-notes)** - 각 버전의 새로운 기능
+- **[웹사이트](https://yeachan-heo.github.io/lazycc-website)** - 인터랙티브 가이드와 예제
 - **[마이그레이션 가이드](docs/MIGRATION.md)** - v2.x에서 업그레이드
 - **[아키텍처](docs/ARCHITECTURE.md)** - 내부 작동 원리
 - **[성능 모니터링](docs/PERFORMANCE-MONITORING.md)** - 에이전트 추적, 디버깅 및 최적화
@@ -385,7 +385,7 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 이 프로젝트 후원하기
 

@@ -18,8 +18,9 @@ export { qaTesterAgent, QA_TESTER_PROMPT_METADATA } from './qa-tester.js';
 export { scientistAgent, SCIENTIST_PROMPT_METADATA } from './scientist.js';
 export { tracerAgent, TRACER_PROMPT_METADATA } from './tracer.js';
 export { documentSpecialistAgent, DOCUMENT_SPECIALIST_PROMPT_METADATA } from './document-specialist.js';
-export { debuggerAgent, verifierAgent } from './definitions.js';
-export { testEngineerAgent } from './definitions.js';
-export { securityReviewerAgent, codeReviewerAgent, gitMasterAgent, codeSimplifierAgent } from './definitions.js';
+export { debuggerAgent, verifierAgent } from './registry-agents.js';
+export { testEngineerAgent } from './registry-agents.js';
+export { securityReviewerAgent, codeReviewerAgent, gitMasterAgent, codeSimplifierAgent } from './registry-agents.js';
+export { explorerAgent, lazycodexExplorerAgent, planAgent, lazycodexPlanAgent, lazycodexExecutorAgent, lazycodexCodeReviewerAgent, metisAgent, momusAgent, lazycodexQaExecutorAgent, lazycodexGateReviewerAgent } from './lazycodex-compatible.js';
 export { getAgentDefinitions, omcSystemPrompt } from './definitions.js';
 //# sourceMappingURL=index.d.ts.map

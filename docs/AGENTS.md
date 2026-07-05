@@ -3,13 +3,13 @@
 
 # docs
 
-User documentation and technical guides for oh-my-claudecode.
+User documentation and technical guides for lazycc.
 
 ## Purpose
 
 This directory contains documentation for end-users and developers:
 
-- **End-user guides**: How to use oh-my-claudecode features
+- **End-user guides**: How to use lazycc features
 - **Technical reference**: Architecture, compatibility, migration
 - **Design documents**: Feature design specifications
 
@@ -72,7 +72,7 @@ This directory contains documentation for end-users and developers:
 
 Use raw GitHub URLs for external accessibility:
 
-[Migration Guide](https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/MIGRATION.md)
+[Migration Guide](https://raw.githubusercontent.com/Yeachan-Heo/lazycc/main/docs/MIGRATION.md)
 
 #### Version References
 

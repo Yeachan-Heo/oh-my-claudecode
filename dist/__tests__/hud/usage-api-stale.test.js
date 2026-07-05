@@ -8,8 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 const CLAUDE_CONFIG_DIR = '/tmp/test-claude';
-const CACHE_PATH = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode/.usage-cache.json`;
-const CACHE_DIR = `${CLAUDE_CONFIG_DIR}/plugins/oh-my-claudecode`;
+const CACHE_PATH = `${CLAUDE_CONFIG_DIR}/plugins/lazycc/.usage-cache.json`;
+const CACHE_DIR = `${CLAUDE_CONFIG_DIR}/plugins/lazycc`;
 function createFsMock(initialFiles) {
     const files = new Map(Object.entries(initialFiles));
     const directories = new Set([CLAUDE_CONFIG_DIR, CACHE_DIR]);

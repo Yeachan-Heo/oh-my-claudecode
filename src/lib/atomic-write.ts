@@ -1,5 +1,5 @@
 /**
- * Atomic, durable file writes for oh-my-claudecode.
+ * Atomic, durable file writes for lazycc.
  * Self-contained module with no external dependencies.
  */
 

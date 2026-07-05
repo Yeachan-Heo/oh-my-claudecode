@@ -483,8 +483,8 @@ describe('Keyword Detector', () => {
       expect(ralphMatch).toBeUndefined();
     });
 
-    it('should not detect ralph in /oh-my-claudecode:ralph-init', () => {
-      const primary = getPrimaryKeyword('/oh-my-claudecode:ralph-init "my project"');
+    it('should not detect ralph in /lazycc:ralph-init', () => {
+      const primary = getPrimaryKeyword('/lazycc:ralph-init "my project"');
       expect(primary?.type).not.toBe('ralph');
     });
 
@@ -583,7 +583,7 @@ describe('Team staged workflow integration', () => {
   });
 
   it('compacts OMC-style root AGENTS guidance on session-start without dropping key sections', async () => {
-    const agentsContent = `# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+    const agentsContent = `# lazycc - Intelligent Multi-Agent Orchestration
 
 <guidance_schema_contract>
 schema

@@ -1935,9 +1935,9 @@ function getInvokedSkillName(toolInput: unknown): string | null {
 
 /**
  * Extract the raw (un-normalized) skill name from Skill tool input.
- * Used to distinguish OMC built-in skills (prefixed with 'oh-my-claudecode:')
+ * Used to distinguish OMC built-in skills (prefixed with 'lazycc:')
  * from project custom skills or other plugin skills with the same bare name.
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+ * See: https://github.com/Yeachan-Heo/lazycc/issues/1581
  */
 function getRawSkillName(toolInput: unknown): string | undefined {
   if (!toolInput || typeof toolInput !== "object") return undefined;
@@ -1951,7 +1951,7 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
   const messages: string[] = [];
 
   // Ensure mode state activation also works when execution starts via Skill tool
-  // (e.g., ralplan consensus handoff into Skill("oh-my-claudecode:ralph")).
+  // (e.g., ralplan consensus handoff into Skill("lazycc:ralph")).
   const toolName = (input.toolName || "").toLowerCase();
   if (toolName === "skill") {
     const skillName = getInvokedSkillName(input.toolInput);
@@ -2016,7 +2016,7 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
     const currentState = readSkillActiveState(directory, input.sessionId);
     const completingSkill = (getInvokedSkillName(input.toolInput) ?? "")
       .toLowerCase()
-      .replace(/^oh-my-claudecode:/, "");
+      .replace(/^lazycc:/, "");
     if (!currentState || !currentState.active || currentState.skill_name === completingSkill) {
       clearSkillActiveState(directory, input.sessionId);
     }

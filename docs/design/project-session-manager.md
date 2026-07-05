@@ -2,7 +2,7 @@
 
 > **Skill Name:** `project-session-manager` (alias: `psm`)
 > **Version:** 1.0.0
-> **Author:** oh-my-claudecode
+> **Author:** lazycc
 > **Status:** Design Draft
 
 ## Executive Summary
@@ -54,7 +54,7 @@ PSM provides a unified interface to:
 ### 2.1 PR Review
 
 ```bash
-# Review PR #123 from oh-my-claudecode repo
+# Review PR #123 from lazycc repo
 /psm review omc#123
 
 # Review PR from any GitHub URL
@@ -226,8 +226,8 @@ https://github.com/anthropics/claude-code/pull/123
 {
   "aliases": {
     "omc": {
-      "repo": "anthropics/oh-my-claudecode",
-      "local": "~/Workspace/oh-my-claudecode",
+      "repo": "anthropics/lazycc",
+      "local": "~/Workspace/lazycc",
       "default_base": "main"
     },
     "cc": {
@@ -258,7 +258,7 @@ https://github.com/anthropics/claude-code/pull/123
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    PSM Skill Entry Point                     │
-│                   /oh-my-claudecode:psm                      │
+│                   /lazycc:psm                      │
 └─────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -395,12 +395,12 @@ User Command
   "last_accessed": "2024-01-26T14:45:00Z",
   "tmux_session": "psm:omc:pr-123",
   "worktree_path": "~/.psm/worktrees/omc/pr-123",
-  "source_repo": "~/Workspace/oh-my-claudecode",
+  "source_repo": "~/Workspace/lazycc",
   "github": {
     "pr_number": 123,
     "pr_title": "Add webhook support",
     "pr_author": "contributor",
-    "pr_url": "https://github.com/anthropics/oh-my-claudecode/pull/123"
+    "pr_url": "https://github.com/anthropics/lazycc/pull/123"
   },
   "state": "active",
   "notes": []
@@ -1000,7 +1000,7 @@ interface PSMPlugin {
 ```bash
 $ /psm review omc#123
 
-🔍 Fetching PR #123 from oh-my-claudecode...
+🔍 Fetching PR #123 from lazycc...
    Title: "Add webhook support for external integrations"
    Author: @contributor
    Changed: 12 files (+450, -23)

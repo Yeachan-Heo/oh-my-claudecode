@@ -94,11 +94,11 @@ If both unavailable:
 ## Invocation
 
 ```bash
-/oh-my-claudecode:ccg <task description>
+/lazycc:ccg <task description>
 ```
 
 Example:
 
 ```bash
-/oh-my-claudecode:ccg Review this PR - architecture/security via Codex and UX/readability via Gemini
+/lazycc:ccg Review this PR - architecture/security via Codex and UX/readability via Gemini
 ```

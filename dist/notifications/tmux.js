@@ -3,7 +3,7 @@
  *
  * Detects the current tmux session name for inclusion in notification payloads.
  */
-import { execSync } from "child_process";
+import { tmuxShell } from "../cli/tmux-utils.js";
 /**
  * Get the current tmux session name.
  * Returns null if not running inside tmux.
@@ -19,8 +19,7 @@ export function getCurrentTmuxSession() {
         // is wrong when Claude runs in a detached session.
         const paneId = process.env.TMUX_PANE;
         if (paneId) {
-            const lines = execSync("tmux list-panes -a -F '#{pane_id} #{session_name}'", {
-                encoding: "utf-8",
+            const lines = tmuxShell("list-panes -a -F '#{pane_id} #{session_name}'", {
                 timeout: 3000,
                 stdio: ["pipe", "pipe", "pipe"],
             }).split("\n");
@@ -29,8 +28,7 @@ export function getCurrentTmuxSession() {
                 return match.split(" ")[1] ?? null;
         }
         // Fallback: ask the attached session (may differ when detached).
-        const sessionName = execSync("tmux display-message -p '#S'", {
-            encoding: "utf-8",
+        const sessionName = tmuxShell("display-message -p '#S'", {
             timeout: 3000,
             stdio: ["pipe", "pipe", "pipe"],
         }).trim();
@@ -49,8 +47,7 @@ export function getTeamTmuxSessions(teamName) {
         return [];
     const prefix = `omc-team-${sanitized}-`;
     try {
-        const output = execSync("tmux list-sessions -F '#{session_name}'", {
-            encoding: "utf-8",
+        const output = tmuxShell("list-sessions -F '#{session_name}'", {
             timeout: 3000,
             stdio: ["pipe", "pipe", "pipe"],
         });
@@ -89,8 +86,7 @@ export function getCurrentTmuxPaneId() {
         return envPane;
     // Fallback: ask tmux directly (similar to getCurrentTmuxSession)
     try {
-        const paneId = execSync("tmux display-message -p '#{pane_id}'", {
-            encoding: "utf-8",
+        const paneId = tmuxShell("display-message -p '#{pane_id}'", {
             timeout: 3000,
             stdio: ["pipe", "pipe", "pipe"],
         }).trim();

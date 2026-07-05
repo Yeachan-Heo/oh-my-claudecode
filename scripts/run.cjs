@@ -10,12 +10,12 @@
  * /usr/bin/sh is a PE32+ binary the OS refuses to execute natively.
  * Fixes issues #909, #899, #892, #869.
  *
- * Usage (from hooks.json, after setup patches the absolute node path in):
- *   /abs/path/to/node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" \
+ * Usage (from portable hooks.json):
+ *   node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" \
  *       "${CLAUDE_PLUGIN_ROOT}/scripts/<hook>.mjs" [args...]
  *
- * During post-install setup, the leading `node` token is replaced with
- * process.execPath so nvm/fnm users and Windows users all get the right binary.
+ * Once this runner starts, child hooks are launched with process.execPath so
+ * they use the same Node binary as the runner process.
  */
 
 const { spawnSync } = require('child_process');
@@ -42,7 +42,7 @@ if (!target) {
  *      same script name and use that instead.
  *   4. If all else fails, return null (caller exits cleanly).
  *
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1007
+ * See: https://github.com/Yeachan-Heo/lazycc/issues/1007
  */
 function resolveTarget(targetPath) {
   // Fast path: target exists (common case)
@@ -57,13 +57,13 @@ function resolveTarget(targetPath) {
   }
 
   // Fallback: scan plugin cache for the same script in the latest version.
-  // CLAUDE_PLUGIN_ROOT is e.g. ~/.claude/plugins/cache/omc/oh-my-claudecode/4.2.14
+  // CLAUDE_PLUGIN_ROOT is e.g. ~/.claude/plugins/cache/lazycc/lazycc/4.2.14
   // We look one level up for sibling version directories.
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     if (!pluginRoot) return null;
 
-    const cacheBase = dirname(pluginRoot);          // .../oh-my-claudecode/
+    const cacheBase = dirname(pluginRoot);          // .../lazycc/
     const scriptRelative = targetPath.slice(pluginRoot.length); // /scripts/persistent-mode.cjs
 
     if (!scriptRelative || !existsSync(cacheBase)) return null;

@@ -25,7 +25,7 @@ import { getClaudeConfigDir } from '../utils/config-dir.js';
 const CACHE_TTL_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 800;
 function getCachePath() {
-    return join(getClaudeConfigDir(), 'plugins', 'oh-my-claudecode', '.custom-rate-cache.json');
+    return join(getClaudeConfigDir(), 'plugins', 'lazycc', '.custom-rate-cache.json');
 }
 function readCache() {
     try {

@@ -778,4 +778,4 @@ deepinit_manifest(action="save")
 deepinit_manifest(action="check")
 ```
 
-Used internally by the `deepinit` skill (`/oh-my-claudecode:deepinit`) to enable incremental AGENTS.md regeneration instead of full re-scans.
+Used internally by the `deepinit` skill (`/lazycc:deepinit`) to enable incremental AGENTS.md regeneration instead of full re-scans.

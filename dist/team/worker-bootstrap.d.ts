@@ -12,6 +12,7 @@ export interface WorkerBootstrapParams {
     cwd: string;
 }
 export declare function generateTriggerMessage(teamName: string, workerName: string, teamStateRoot?: string): string;
+export declare function generatePromptModeStartupPrompt(teamName: string, workerName: string, teamStateRoot?: string): string;
 export declare function generateMailboxTriggerMessage(teamName: string, workerName: string, count?: number, teamStateRoot?: string): string;
 /**
  * Generate the worker overlay markdown.

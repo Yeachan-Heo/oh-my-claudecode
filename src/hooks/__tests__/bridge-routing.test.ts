@@ -376,7 +376,7 @@ Read src/hooks/bridge.ts first.`,
         const input: HookInput = {
           sessionId,
           toolName: 'Skill',
-          toolInput: { skill: 'oh-my-claudecode:ralph' },
+          toolInput: { skill: 'lazycc:ralph' },
           directory: tempDir,
         };
 
@@ -438,7 +438,7 @@ Read src/hooks/bridge.ts first.`,
         const result = await processHook('pre-tool-use', {
           sessionId,
           toolName: 'Skill',
-          toolInput: { skill: 'oh-my-claudecode:ralph' },
+          toolInput: { skill: 'lazycc:ralph' },
           directory: tempDir,
         });
 
@@ -471,7 +471,7 @@ Read src/hooks/bridge.ts first.`,
         const result = await processHook('pre-tool-use', {
           sessionId,
           toolName: 'Skill',
-          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          toolInput: { skill: 'lazycc:ralplan' },
           directory: tempDir,
         });
 
@@ -515,7 +515,7 @@ Read src/hooks/bridge.ts first.`,
           sessionId,
           toolName: 'Skill',
           toolInput: {
-            skill: 'oh-my-claudecode:omc-plan',
+            skill: 'lazycc:omc-plan',
             args: '--consensus issue #1926',
           },
           directory: tempDir,
@@ -549,14 +549,14 @@ Read src/hooks/bridge.ts first.`,
         await processHook('pre-tool-use', {
           sessionId,
           toolName: 'Skill',
-          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          toolInput: { skill: 'lazycc:ralplan' },
           directory: tempDir,
         });
 
         const postResult = await processHook('post-tool-use', {
           sessionId,
           toolName: 'Skill',
-          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          toolInput: { skill: 'lazycc:ralplan' },
           toolOutput: { ok: true },
           directory: tempDir,
         });

@@ -13,7 +13,7 @@
  * 2. Read/write/clear functions for skill-active-state.json
  * 3. A check function for the Stop hook to determine if blocking is needed
  *
- * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1033
+ * Fix for: https://github.com/Yeachan-Heo/lazycc/issues/1033
  */
 export type SkillProtectionLevel = 'none' | 'light' | 'medium' | 'heavy';
 export interface SkillStateConfig {
@@ -41,11 +41,11 @@ export interface SkillActiveState {
  * default to 'none' so the Stop hook does not block them.
  *
  * @param skillName - The normalized (prefix-stripped) skill name.
- * @param rawSkillName - The original skill name as invoked (e.g., 'oh-my-claudecode:plan'
- *   or 'plan'). When provided, only skills invoked with the 'oh-my-claudecode:' prefix
+ * @param rawSkillName - The original skill name as invoked (e.g., 'lazycc:plan'
+ *   or 'plan'). When provided, only skills invoked with the 'lazycc:' prefix
  *   are eligible for protection. This prevents project custom skills (e.g., a user's
  *   `.claude/skills/plan/`) from being confused with OMC built-in skills of the same name.
- *   See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+ *   See: https://github.com/Yeachan-Heo/lazycc/issues/1581
  */
 export declare function getSkillProtection(skillName: string, rawSkillName?: string): SkillProtectionLevel;
 /**

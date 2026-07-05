@@ -11,7 +11,7 @@ A thin, repo-aware release assistant. On first run it inspects the project and C
 ## Usage
 
 ```
-/oh-my-claudecode:release [version]
+/lazycc:release [version]
 ```
 
 - `version` is optional. If omitted the skill will ask. Accepts `patch`, `minor`, `major`, or an explicit semver like `2.4.0`.

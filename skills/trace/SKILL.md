@@ -14,7 +14,7 @@ This is the orchestration layer on top of the built-in `tracer` agent. The goal 
 
 ## Good entry cases
 
-Use `/oh-my-claudecode:trace` when the problem is:
+Use `/lazycc:trace` when the problem is:
 
 - ambiguous
 - causal

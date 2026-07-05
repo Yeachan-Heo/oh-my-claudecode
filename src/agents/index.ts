@@ -41,12 +41,12 @@ export { documentSpecialistAgent, DOCUMENT_SPECIALIST_PROMPT_METADATA } from './
 export {
   debuggerAgent,
   verifierAgent
-} from './definitions.js';
+} from './registry-agents.js';
 
 // Reformed agents (Domain Specialists)
 export {
   testEngineerAgent
-} from './definitions.js';
+} from './registry-agents.js';
 
 // Specialized agents (Security, Code Review, Git, Code Simplifier)
 export {
@@ -54,7 +54,20 @@ export {
   codeReviewerAgent,
   gitMasterAgent,
   codeSimplifierAgent
-} from './definitions.js';
+} from './registry-agents.js';
+
+export {
+  explorerAgent,
+  lazycodexExplorerAgent,
+  planAgent,
+  lazycodexPlanAgent,
+  lazycodexExecutorAgent,
+  lazycodexCodeReviewerAgent,
+  metisAgent,
+  momusAgent,
+  lazycodexQaExecutorAgent,
+  lazycodexGateReviewerAgent
+} from './lazycodex-compatible.js';
 
 // Core exports (getAgentDefinitions and omcSystemPrompt)
 export {

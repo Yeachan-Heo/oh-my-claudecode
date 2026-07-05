@@ -1,7 +1,7 @@
 /**
  * Tests for deepinit-manifest tool
  *
- * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1719
+ * @see https://github.com/Yeachan-Heo/lazycc/issues/1719
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, symlinkSync } from 'node:fs';

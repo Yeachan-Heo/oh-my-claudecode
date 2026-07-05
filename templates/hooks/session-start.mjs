@@ -54,6 +54,40 @@ function writeJsonFile(path, data) {
   }
 }
 
+function parseLazyCodexBoolean(value) {
+  if (typeof value !== 'string') return null;
+
+  switch (value.trim().toLowerCase()) {
+    case '1':
+    case 'true':
+    case 'yes':
+    case 'on':
+      return true;
+    case '0':
+    case 'false':
+    case 'no':
+    case 'off':
+      return false;
+    default:
+      return null;
+  }
+}
+
+function getLazyCodexConfig() {
+  const config = readJsonFile(join(getClaudeConfigDir(), '.omc-config.json'));
+  return config && typeof config === 'object' && config.lazycodex && typeof config.lazycodex === 'object'
+    ? config.lazycodex
+    : null;
+}
+
+function isLazyCodexAutoUpdateEnabled() {
+  const envValue = parseLazyCodexBoolean(process.env.OMC_LAZYCODEX_AUTO_UPDATE);
+  if (envValue !== null) return envValue;
+
+  const configValue = getLazyCodexConfig()?.autoUpdate;
+  return typeof configValue === 'boolean' ? configValue : false;
+}
+
 async function checkForUpdates(currentVersion) {
   const cacheFile = join(homedir(), '.omc', 'update-check.json');
   const now = Date.now();
@@ -69,7 +103,7 @@ async function checkForUpdates(currentVersion) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 2000);
   try {
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
+    const response = await fetch('https://registry.npmjs.org/lazycc/latest', {
       signal: controller.signal
     });
 
@@ -286,13 +320,15 @@ async function main() {
     for (let i = 1; i <= 4; i++) {
       const candidate = join(__dirname, ...Array(i).fill('..'), 'package.json');
       const pkg = readJsonFile(candidate);
-      if ((pkg?.name === 'oh-my-claude-sisyphus' || pkg?.name === 'oh-my-claudecode') && pkg?.version) {
+      if ((pkg?.name === 'lazycc' || pkg?.name === 'lazycc') && pkg?.version) {
         currentVersion = pkg.version;
         break;
       }
     }
 
-    const updateInfo = currentVersion ? await checkForUpdates(currentVersion) : null;
+    const updateInfo = currentVersion && isLazyCodexAutoUpdateEnabled()
+      ? await checkForUpdates(currentVersion)
+      : null;
     if (updateInfo) {
       // Read config to check autoUpgradePrompt preference
       const configPath = join(getClaudeConfigDir(), '.omc-config.json');
@@ -304,10 +340,10 @@ async function main() {
 
 [OMC AUTO-UPGRADE AVAILABLE]
 
-oh-my-claudecode v${updateInfo.latestVersion} is available (current: v${updateInfo.currentVersion}).
+lazycc v${updateInfo.latestVersion} is available (current: v${updateInfo.currentVersion}).
 
 ACTION: Use AskUserQuestion to ask the user if they want to upgrade now. Offer these options:
-- "Upgrade now" (Recommended): Run \`npm install -g oh-my-claude-sisyphus@latest\` via Bash, then run \`omc install --force --skip-claude-check --refresh-hooks\` to reconcile hooks and CLAUDE.md
+- "Upgrade now" (Recommended): Run \`npm install -g lazycc@latest\` via Bash, then run \`omc install --force --skip-claude-check --refresh-hooks\` to reconcile hooks and CLAUDE.md
 - "Skip this time": Continue the session without upgrading
 - "Don't ask again": Tell the user to set "autoUpgradePrompt": false in [$CLAUDE_CONFIG_DIR|~/.claude]/.omc-config.json to disable future prompts
 
@@ -322,7 +358,7 @@ Keep the prompt brief. If the user accepts, execute the upgrade commands and rep
 
 [OMC UPDATE AVAILABLE]
 
-A new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
+A new version of lazycc is available: v${updateInfo.latestVersion} (current: ${updateInfo.currentVersion})
 
 To update, run: omc update
 

@@ -4,5 +4,41 @@
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs"]
     }
+  },
+  "lazyccCompatibility": {
+    "lazycodexSource": {
+      "mcpParity": {
+        "schemaVersion": 1,
+        "bridge": {
+          "name": "t",
+          "supported": true,
+          "command": "node",
+          "args": ["${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs"],
+          "smoke": "Bounded stdio startup/load smoke only; LazyCodex MCP servers remain staged unless listed under mcpServers."
+        },
+        "servers": {
+          "grep_app": {
+            "supported": false,
+            "stagedReason": "Remote LazyCodex endpoint is inventoried, but not advertised until an OMC bridge smoke covers remote MCP connectivity and auth-free operation."
+          },
+          "context7": {
+            "supported": false,
+            "stagedReason": "Remote LazyCodex endpoint is inventoried, but not advertised until an OMC bridge smoke covers remote MCP connectivity and tool discovery."
+          },
+          "codegraph": {
+            "supported": false,
+            "stagedReason": "LazyCodex component runtime is generated output outside OMC source ownership; package-safe Claude bridge parity is deferred."
+          },
+          "git_bash": {
+            "supported": false,
+            "stagedReason": "LazyCodex component runtime is generated output outside OMC source ownership; mutation-capable shell bridge parity is deferred pending explicit policy gates."
+          },
+          "lsp": {
+            "supported": false,
+            "stagedReason": "OMC exposes native LSP tools through the t bridge, but the standalone LazyCodex lsp MCP daemon is not advertised until daemon packaging and shutdown smoke are covered."
+          }
+        }
+      }
+    }
   }
 }

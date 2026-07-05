@@ -260,7 +260,7 @@ User added custom stuff here`;
     it('strips markers from omcContent that already has markers', () => {
       // Simulate docs/CLAUDE.md shipping with markers already
       const omcWithMarkers = `<!-- OMC:START -->
-# oh-my-claudecode
+# lazycc
 Agent instructions here
 <!-- OMC:END -->`;
 

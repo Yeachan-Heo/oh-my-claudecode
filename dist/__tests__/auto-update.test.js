@@ -28,7 +28,6 @@ import { execSync, execFileSync } from 'child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { install, isProjectScopedPlugin, checkNodeVersion, CLAUDE_CONFIG_DIR } from '../installer/index.js';
-import * as hooksModule from '../installer/hooks.js';
 import { reconcileUpdateRuntime, performUpdate, shouldBlockStandaloneUpdateInCurrentSession, syncPluginCache, } from '../features/auto-update.js';
 const mockedExecSync = vi.mocked(execSync);
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -82,11 +81,12 @@ describe('auto-update reconciliation', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
         delete process.env.OMC_UPDATE_RECONCILE;
+        delete process.env.CLAUDE_PLUGIN_ROOT;
         if (originalPlatformDescriptor) {
             Object.defineProperty(process, 'platform', originalPlatformDescriptor);
         }
     });
-    it('reconciles runtime state and refreshes hooks after update', () => {
+    it('reconciles runtime state without re-injecting settings hooks', () => {
         mockedExistsSync.mockReturnValue(false);
         const result = reconcileUpdateRuntime({ verbose: false });
         expect(result.success).toBe(true);
@@ -134,7 +134,7 @@ describe('auto-update reconciliation', () => {
     });
     it('syncs active plugin cache roots and logs when copy occurs', () => {
         const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
-        const activeRoot = '/tmp/.claude/plugins/cache/omc/oh-my-claudecode/4.1.5';
+        const activeRoot = '/tmp/.claude/plugins/cache/lazycc/lazycc/4.1.5';
         mockedReadFileSync.mockImplementation((path) => {
             const normalized = String(path).replace(/\\/g, '/');
             if (normalized.includes('.omc-version.json')) {
@@ -147,7 +147,7 @@ describe('auto-update reconciliation', () => {
             if (normalized.endsWith('/plugins/installed_plugins.json')) {
                 return JSON.stringify({
                     plugins: {
-                        'oh-my-claudecode': [{ installPath: activeRoot }],
+                        'lazycc': [{ installPath: activeRoot }],
                     },
                 });
             }
@@ -189,7 +189,7 @@ describe('auto-update reconciliation', () => {
     });
     it('syncs the plugin cache directory when cache root exists', () => {
         const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
-        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc');
         const versionedCacheRoot = `${cacheRoot}/4.9.0`;
         mockedExecSync.mockImplementation((command) => {
             if (command === 'npm root -g') {
@@ -199,7 +199,7 @@ describe('auto-update reconciliation', () => {
         });
         mockedReadFileSync.mockImplementation((path) => {
             const normalized = String(path).replace(/\\/g, '/');
-            if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
+            if (normalized === '/usr/lib/node_modules/lazycc/package.json') {
                 return JSON.stringify({ version: '4.9.0' });
             }
             if (normalized.includes('.omc-version.json')) {
@@ -216,7 +216,7 @@ describe('auto-update reconciliation', () => {
             if (normalized === cacheRoot) {
                 return true;
             }
-            if (normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus/')) {
+            if (normalized.startsWith('/usr/lib/node_modules/lazycc/')) {
                 return normalized.endsWith('/dist') || normalized.endsWith('/package.json');
             }
             return true;
@@ -229,12 +229,12 @@ describe('auto-update reconciliation', () => {
             timeout: 10000,
         }));
         expect(mockedMkdirSync).toHaveBeenCalledWith(versionedCacheRoot, { recursive: true });
-        expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/oh-my-claude-sisyphus/dist', `${versionedCacheRoot}/dist`, expect.objectContaining({ recursive: true, force: true }));
-        expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/oh-my-claude-sisyphus/package.json', `${versionedCacheRoot}/package.json`, expect.objectContaining({ recursive: true, force: true }));
+        expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/lazycc/dist', `${versionedCacheRoot}/dist`, expect.objectContaining({ recursive: true, force: true }));
+        expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/lazycc/package.json', `${versionedCacheRoot}/package.json`, expect.objectContaining({ recursive: true, force: true }));
         expect(consoleLogSpy).toHaveBeenCalledWith('[omc update] Plugin cache synced');
     });
     it('skips plugin cache sync gracefully when cache dir does not exist', () => {
-        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc');
         mockedExistsSync.mockImplementation((path) => {
             const normalized = String(path).replace(/\\/g, '/');
             if (normalized === cacheRoot) {
@@ -249,7 +249,7 @@ describe('auto-update reconciliation', () => {
     });
     it('handles plugin cache sync errors non-fatally', () => {
         const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
-        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc');
         const versionedCacheRoot = `${cacheRoot}/4.9.0`;
         mockedExecSync.mockImplementation((command) => {
             if (command === 'npm root -g') {
@@ -259,7 +259,7 @@ describe('auto-update reconciliation', () => {
         });
         mockedReadFileSync.mockImplementation((path) => {
             const normalized = String(path).replace(/\\/g, '/');
-            if (normalized === '/usr/lib/node_modules/oh-my-claude-sisyphus/package.json') {
+            if (normalized === '/usr/lib/node_modules/lazycc/package.json') {
                 return JSON.stringify({ version: '4.9.0' });
             }
             if (normalized.includes('.omc-version.json')) {
@@ -276,7 +276,7 @@ describe('auto-update reconciliation', () => {
             if (normalized === cacheRoot) {
                 return true;
             }
-            if (normalized.startsWith('/usr/lib/node_modules/oh-my-claude-sisyphus/')) {
+            if (normalized.startsWith('/usr/lib/node_modules/lazycc/')) {
                 return normalized.endsWith('/dist');
             }
             return true;
@@ -298,7 +298,7 @@ describe('auto-update reconciliation', () => {
         delete process.env.CLAUDE_SESSION_ID;
         delete process.env.CLAUDECODE_SESSION_ID;
         expect(shouldBlockStandaloneUpdateInCurrentSession()).toBe(false);
-        process.env.CLAUDE_PLUGIN_ROOT = '/tmp/.claude/plugins/cache/omc/oh-my-claudecode/4.1.5';
+        process.env.CLAUDE_PLUGIN_ROOT = '/tmp/.claude/plugins/cache/lazycc/lazycc/4.1.5';
         expect(shouldBlockStandaloneUpdateInCurrentSession()).toBe(false);
         process.env.CLAUDE_CODE_ENTRYPOINT = 'hook';
         expect(shouldBlockStandaloneUpdateInCurrentSession()).toBe(true);
@@ -308,8 +308,8 @@ describe('auto-update reconciliation', () => {
     });
     it('dedupes plugin roots and ignores missing targets during sync', () => {
         const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
-        const activeRoot = '/tmp/.claude/plugins/cache/omc/oh-my-claudecode/4.1.5';
-        const staleRoot = '/tmp/.claude/plugins/cache/omc/oh-my-claudecode/4.1.4';
+        const activeRoot = '/tmp/.claude/plugins/cache/lazycc/lazycc/4.1.5';
+        const staleRoot = '/tmp/.claude/plugins/cache/lazycc/lazycc/4.1.4';
         process.env.CLAUDE_PLUGIN_ROOT = activeRoot;
         mockedReadFileSync.mockImplementation((path) => {
             const normalized = String(path).replace(/\\/g, '/');
@@ -323,7 +323,7 @@ describe('auto-update reconciliation', () => {
             if (normalized.endsWith('/plugins/installed_plugins.json')) {
                 return JSON.stringify({
                     plugins: {
-                        'oh-my-claudecode': [
+                        'lazycc': [
                             { installPath: activeRoot },
                             { installPath: staleRoot },
                         ],
@@ -354,8 +354,8 @@ describe('auto-update reconciliation', () => {
         expect(consoleLogSpy).toHaveBeenCalledWith('[omc update] Synced plugin cache');
     });
     it('allows standalone update when CLAUDE_PLUGIN_ROOT is inherited without an active Claude session', async () => {
-        const pluginRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.1.5');
-        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const pluginRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc', '4.1.5');
+        const cacheRoot = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'lazycc', 'lazycc');
         process.env.OMC_UPDATE_RECONCILE = '1';
         process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
         delete process.env.CLAUDE_CODE_ENTRYPOINT;
@@ -374,7 +374,7 @@ describe('auto-update reconciliation', () => {
             }),
         }));
         mockedExecSync.mockImplementation((command) => {
-            if (command === 'npm install -g oh-my-claude-sisyphus@latest') {
+            if (command === 'npm install -g lazycc@latest') {
                 return '';
             }
             if (command === 'npm root -g') {
@@ -397,12 +397,13 @@ describe('auto-update reconciliation', () => {
         });
         const result = await performUpdate({ verbose: false });
         expect(result.success).toBe(true);
-        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g oh-my-claude-sisyphus@latest', expect.any(Object));
+        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g lazycc@latest', expect.any(Object));
     });
-    it('runs reconciliation as part of performUpdate', async () => {
+    it('runs reconciliation as part of performUpdate without plugin hook reinjection', async () => {
         // Set env var so performUpdate takes the direct reconciliation path
         // (simulates being in the re-exec'd process after npm install)
         process.env.OMC_UPDATE_RECONCILE = '1';
+        process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'lazycc', '4.1.5');
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: true,
             json: async () => ({
@@ -418,13 +419,13 @@ describe('auto-update reconciliation', () => {
         mockedExecSync.mockReturnValue('');
         const result = await performUpdate({ verbose: false });
         expect(result.success).toBe(true);
-        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g oh-my-claude-sisyphus@latest', expect.any(Object));
+        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g lazycc@latest', expect.any(Object));
         expect(mockedInstall).toHaveBeenCalledWith({
             force: true,
             verbose: false,
             skipClaudeCheck: true,
-            forceHooks: true,
-            refreshHooksInPlugin: true,
+            forceHooks: false,
+            refreshHooksInPlugin: false,
         });
         delete process.env.OMC_UPDATE_RECONCILE;
     });
@@ -596,7 +597,7 @@ describe('auto-update reconciliation', () => {
             }),
         }));
         mockedExecSync.mockImplementation((command) => {
-            if (command === 'npm install -g oh-my-claude-sisyphus@latest') {
+            if (command === 'npm install -g lazycc@latest') {
                 return '';
             }
             throw new Error(`Unexpected execSync command: ${command}`);
@@ -612,7 +613,7 @@ describe('auto-update reconciliation', () => {
         });
         const result = await performUpdate({ verbose: false });
         expect(result.success).toBe(true);
-        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g oh-my-claude-sisyphus@latest', expect.objectContaining({
+        expect(mockedExecSync).toHaveBeenCalledWith('npm install -g lazycc@latest', expect.objectContaining({
             windowsHide: true,
         }));
         expect(mockedExecFileSync).toHaveBeenNthCalledWith(1, 'where.exe', ['omc.cmd'], expect.objectContaining({
@@ -692,83 +693,6 @@ describe('auto-update reconciliation', () => {
             forceHooks: false,
             refreshHooksInPlugin: false,
         });
-    });
-    it('preserves non-OMC hooks when refreshing plugin hooks during reconciliation', () => {
-        const existingSettings = {
-            hooks: {
-                UserPromptSubmit: [
-                    {
-                        hooks: [
-                            {
-                                type: 'command',
-                                command: 'node $HOME/.claude/hooks/other-plugin.mjs',
-                            },
-                        ],
-                    },
-                ],
-            },
-        };
-        const settingsPath = join(CLAUDE_CONFIG_DIR, 'settings.json');
-        const baseHooks = hooksModule.getHooksSettingsConfig();
-        const freshHooks = {
-            ...baseHooks,
-            hooks: {
-                ...baseHooks.hooks,
-                UserPromptSubmit: [
-                    {
-                        hooks: [
-                            {
-                                type: 'command',
-                                command: 'node $HOME/.claude/hooks/keyword-detector.mjs',
-                            },
-                        ],
-                    },
-                ],
-            },
-        };
-        mockedExistsSync.mockImplementation((path) => {
-            const normalized = String(path).replace(/\\/g, '/');
-            if (normalized === settingsPath) {
-                return true;
-            }
-            if (normalized.endsWith('/.claude/hud')) {
-                return false;
-            }
-            if (normalized.includes('/hooks/')) {
-                return false;
-            }
-            return true;
-        });
-        mockedIsProjectScopedPlugin.mockReturnValue(false);
-        mockedReadFileSync.mockImplementation((path) => {
-            if (String(path) === settingsPath) {
-                return JSON.stringify(existingSettings);
-            }
-            if (String(path).includes('/hooks/')) {
-                return 'hook-script';
-            }
-            return '';
-        });
-        vi.spyOn(hooksModule, 'getHooksSettingsConfig').mockReturnValue(freshHooks);
-        const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-        process.env.CLAUDE_PLUGIN_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.1.5');
-        const result = install({
-            force: true,
-            skipClaudeCheck: true,
-            refreshHooksInPlugin: true,
-        });
-        if (originalPluginRoot !== undefined) {
-            process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
-        }
-        else {
-            delete process.env.CLAUDE_PLUGIN_ROOT;
-        }
-        const settingsWrite = mockedWriteFileSync.mock.calls.find((call) => String(call[0]).includes('settings.json'));
-        if (settingsWrite) {
-            const writtenSettings = JSON.parse(String(settingsWrite[1]));
-            expect(writtenSettings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('node $HOME/.claude/hooks/other-plugin.mjs');
-        }
-        expect(result.hooksConfigured).toBe(true);
     });
 });
 //# sourceMappingURL=auto-update.test.js.map

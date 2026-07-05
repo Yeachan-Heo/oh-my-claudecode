@@ -21,7 +21,7 @@ fi
 
 # Install OMC if in omc mode
 if [ "$RUN_MODE" = "omc" ]; then
-    echo "Installing oh-my-claudecode for enhanced mode..."
+    echo "Installing lazycc for enhanced mode..."
 
     # Check if OMC source is mounted
     if [ -d "/workspace/omc-source" ]; then
@@ -29,7 +29,7 @@ if [ "$RUN_MODE" = "omc" ]; then
         cd /workspace/omc-source && npm install && npm link
     else
         echo "Installing OMC from npm..."
-        npm install -g oh-my-claudecode
+        npm install -g lazycc
     fi
 
     # Initialize OMC configuration

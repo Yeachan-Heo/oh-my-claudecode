@@ -210,7 +210,7 @@ export function isExplicitCancelCommand(context?: StopContext): boolean {
 
   const prompt = (context.prompt ?? '').trim();
   if (prompt) {
-    const slashCancelPattern = /^\/(?:oh-my-claudecode:)?cancel(?:\s+--force)?\s*$/i;
+    const slashCancelPattern = /^\/(?:lazycc:)?cancel(?:\s+--force)?\s*$/i;
     const keywordCancelPattern = /^(?:cancelomc|stopomc)\s*$/i;
     if (slashCancelPattern.test(prompt) || keywordCancelPattern.test(prompt)) {
       return true;
@@ -235,7 +235,7 @@ export function isExplicitCancelCommand(context?: StopContext): boolean {
   const toolInput = (context.tool_input ?? context.toolInput) as Record<string, unknown> | undefined;
   if (toolName.includes('skill') && toolInput && typeof toolInput.skill === 'string') {
     const skill = toolInput.skill.toLowerCase();
-    if (skill === 'oh-my-claudecode:cancel' || skill.endsWith(':cancel')) {
+    if (skill === 'lazycc:cancel' || skill.endsWith(':cancel')) {
       return true;
     }
   }
@@ -249,7 +249,7 @@ export function isExplicitCancelCommand(context?: StopContext): boolean {
  * Blocking these stops causes a deadlock: can't compact because can't stop,
  * can't continue because context is full.
  *
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
+ * See: https://github.com/Yeachan-Heo/lazycc/issues/213
  */
 export function isContextLimitStop(context?: StopContext): boolean {
   const contextPatterns = [
@@ -269,7 +269,7 @@ export function isContextLimitStop(context?: StopContext): boolean {
  * injects a continuation prompt, Claude immediately hits the rate limit again,
  * stops again, and the cycle repeats indefinitely.
  *
- * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/777
+ * Fix for: https://github.com/Yeachan-Heo/lazycc/issues/777
  */
 export function isRateLimitStop(context?: StopContext): boolean {
   if (!context) return false;

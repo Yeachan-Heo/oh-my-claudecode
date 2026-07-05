@@ -3,7 +3,7 @@
  *
  * CLI commands for rate limit wait and auto-resume functionality.
  *
- * Design Philosophy (aligned with oh-my-claudecode values):
+ * Design Philosophy (aligned with LazyCC values):
  * - Zero learning curve: `omc wait` just works
  * - Smart defaults: Auto-detects tmux and daemon status
  * - Minimal commands: Most users only need `omc wait`

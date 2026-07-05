@@ -23,7 +23,7 @@ const CACHE_STUB_MARKER = 'FROM_CACHE_STUB_99_99_99';
 
 /**
  * Build an isolated CLAUDE_CONFIG_DIR with a stub HUD at
- * `<configDir>/plugins/cache/omc/oh-my-claudecode/99.99.99/dist/hud/index.js`.
+ * `<configDir>/plugins/cache/lazycc/lazycc/99.99.99/dist/hud/index.js`.
  * Used to pin the cache-fallback step (step 2 in the wrapper) so tests can
  * assert the wrapper actually executed that branch instead of accidentally
  * matching a globally-installed npm fallback (step 4).
@@ -32,7 +32,7 @@ function makeStubConfigDir(rootDir: string): string {
   const configDir = join(rootDir, 'isolated-config');
   const stubDir = join(
     configDir,
-    'plugins', 'cache', 'omc', 'oh-my-claudecode', '99.99.99', 'dist', 'hud',
+    'plugins', 'cache', 'lazycc', 'lazycc', '99.99.99', 'dist', 'hud',
   );
   mkdirSync(stubDir, { recursive: true });
   writeFileSync(
@@ -46,7 +46,7 @@ function makeStubConfigDir(rootDir: string): string {
 /**
  * Minimal env that scrubs PATH/NODE_PATH so the wrapper's
  * `getGlobalNodeModuleRoots()` cannot reach a globally-installed
- * `oh-my-claude-sisyphus` and silently satisfy the npm fallback step.
+ * `lazycc` and silently satisfy the npm fallback step.
  */
 function scrubbedEnv(extra: Record<string, string>): Record<string, string> {
   return {
@@ -192,7 +192,7 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
   it('case 6: cache step is semver-aware — stable beats prerelease with same [M.m.p]', () => {
     const s = staged!;
     const configDir = join(s.dir, 'isolated-config-semver');
-    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'lazycc', 'lazycc');
     // Two versions: 1.0.0-alpha (should lose) and 1.0.0 (should win).
     // A naive localeCompare(numeric) sort places "1.0.0-alpha" > "1.0.0" and picks the prerelease.
     const stableDir = join(cacheBase, '1.0.0', 'dist', 'hud');
@@ -222,7 +222,7 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
   it('case 7: cache step orders prerelease tags numerically — rc.10 beats rc.2', () => {
     const s = staged!;
     const configDir = join(s.dir, 'isolated-config-pre-numeric');
-    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'lazycc', 'lazycc');
     // Two prerelease-only versions with the same [M.m.p]. A naive localeCompare
     // without { numeric: true } places "rc.2" above "rc.10".
     const rc10Dir = join(cacheBase, '1.0.0-rc.10', 'dist', 'hud');
@@ -251,7 +251,7 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
   it('case 8: cache step falls back to older built version when latest built version fails to import', () => {
     const s = staged!;
     const configDir = join(s.dir, 'isolated-config-cache-fallback');
-    const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const cacheBase = join(configDir, 'plugins', 'cache', 'lazycc', 'lazycc');
 
     const latestBrokenDir = join(cacheBase, '4.11.3', 'dist', 'hud');
     const olderWorkingDir = join(cacheBase, '4.11.2', 'dist', 'hud');
@@ -299,8 +299,8 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
     // Spot-check: critical invariants of the new wrapper
     expect(txt).toContain('OMC_PLUGIN_ROOT');
     expect(txt).not.toContain('OMC_DEV');
-    expect(txt).not.toContain('Workspace/oh-my-claudecode');
-    expect(txt).not.toContain('projects/oh-my-claudecode');
+    expect(txt).not.toContain('Workspace/lazycc');
+    expect(txt).not.toContain('projects/lazycc');
   });
 });
 

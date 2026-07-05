@@ -55,10 +55,10 @@ export declare function getLegacyOmcPath(...segments: string[]): string;
 export declare function getGlobalOmcConfigCandidates(...segments: string[]): string[];
 export declare function getGlobalOmcStateCandidates(...segments: string[]): string[];
 /**
- * Get the plugin cache base directory for oh-my-claudecode.
+ * Get the plugin cache base directory for lazycc.
  * This is the directory containing version subdirectories.
  *
- * Structure: <configDir>/plugins/cache/omc/oh-my-claudecode/
+ * Structure: <configDir>/plugins/cache/lazycc/lazycc/
  */
 export declare function getPluginCacheBase(): string;
 /**

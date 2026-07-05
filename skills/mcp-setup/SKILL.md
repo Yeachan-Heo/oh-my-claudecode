@@ -123,10 +123,10 @@ TROUBLESHOOTING:
 - If MCP servers don't appear, run `claude mcp list` to check status
 - Ensure you have Node.js 18+ installed for npx-based servers
 - For GitHub Docker option, ensure Docker is installed and running
-- Run /oh-my-claudecode:omc-doctor to diagnose issues
+- Run /lazycc:omc-doctor to diagnose issues
 
 MANAGING MCP SERVERS:
-- Add more servers: /oh-my-claudecode:mcp-setup or `claude mcp add ...`
+- Add more servers: /lazycc:mcp-setup or `claude mcp add ...`
 - List servers: `claude mcp list`
 - Remove a server: `claude mcp remove <server-name>`
 ```

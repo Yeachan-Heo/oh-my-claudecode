@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { formatSessionSearchReport, sessionSearchCommand, } from '../commands/session-search.js';
 function encodeProjectPath(projectPath) {
-    return projectPath.replace(/[\\/]/g, '-');
+    return projectPath.replace(/[/\\.]/g, '-');
 }
 function writeTranscript(filePath, entries) {
     mkdirSync(join(filePath, '..'), { recursive: true });

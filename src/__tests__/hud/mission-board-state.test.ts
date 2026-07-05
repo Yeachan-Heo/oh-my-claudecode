@@ -32,7 +32,7 @@ describe('mission board state tracking', () => {
     recordMissionAgentStart(cwd, {
       sessionId: 'sess-1234',
       agentId: 'agent-1',
-      agentType: 'oh-my-claudecode:executor',
+      agentType: 'lazycc:executor',
       parentMode: 'ultrawork',
       taskDescription: 'Implement mission board renderer',
       at: '2026-03-09T07:00:00.000Z',
@@ -65,7 +65,7 @@ describe('mission board state tracking', () => {
     recordMissionAgentStart(cwd, {
       sessionId: 'sess-merge',
       agentId: 'agent-9',
-      agentType: 'oh-my-claudecode:architect',
+      agentType: 'lazycc:architect',
       parentMode: 'ralph',
       taskDescription: 'Review mission board architecture',
       at: '2026-03-09T07:00:00.000Z',

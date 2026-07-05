@@ -56,9 +56,9 @@ description: Setup router
 
 ## Routing
 
-- doctor -> /oh-my-claudecode:omc-doctor with remaining args
-- mcp -> /oh-my-claudecode:mcp-setup with remaining args
-- otherwise -> /oh-my-claudecode:omc-setup with remaining args`
+- doctor -> /lazycc:omc-doctor with remaining args
+- mcp -> /lazycc:mcp-setup with remaining args
+- otherwise -> /lazycc:omc-setup with remaining args`
     );
 
     const { executeSlashCommand } = await loadExecutor();
@@ -69,7 +69,7 @@ description: Setup router
     });
 
     expect(result.success).toBe(true);
-    expect(result.replacementText).toContain('doctor -> /oh-my-claudecode:omc-doctor with remaining args');
+    expect(result.replacementText).toContain('doctor -> /lazycc:omc-doctor with remaining args');
     expect(result.replacementText).not.toContain('{{ARGUMENTS_AFTER_DOCTOR}}');
     expect(result.replacementText).not.toContain('{{ARGUMENTS_AFTER_MCP}}');
   });
@@ -152,7 +152,7 @@ Deep interview body`
     expect(result.replacementText).toContain('## Skill Pipeline');
     expect(result.replacementText).toContain('Pipeline: `deep-interview → omc-plan → autopilot`');
     expect(result.replacementText).toContain('Next skill arguments: `--consensus --direct`');
-    expect(result.replacementText).toContain('Skill("oh-my-claudecode:omc-plan")');
+    expect(result.replacementText).toContain('Skill("lazycc:omc-plan")');
     expect(result.replacementText).toContain('`.omc/specs/deep-interview-{slug}.md`');
   });
 

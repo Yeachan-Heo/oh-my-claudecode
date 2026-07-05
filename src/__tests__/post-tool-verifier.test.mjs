@@ -438,7 +438,7 @@ describe('OMC_QUIET hook message suppression (issue #1646)', () => {
       writeFileSync(
         join(tempDir, '.omc', 'state', 'subagent-tracking.json'),
         JSON.stringify({
-          agents: [{ status: 'running', agent_type: 'oh-my-claudecode:executor' }],
+          agents: [{ status: 'running', agent_type: 'lazycc:executor' }],
           total_completed: 1,
           total_failed: 0,
         }),
@@ -467,7 +467,7 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
 
       const out = runPostToolVerifier({
         tool_name: 'Skill',
-        tool_input: { skill: 'oh-my-claudecode:plan' },
+        tool_input: { skill: 'lazycc:plan' },
         tool_response: { ok: true },
         session_id: sessionId,
         cwd: tempDir,
@@ -486,7 +486,7 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
 
       const out = runPostToolVerifier({
         tool_name: 'Skill',
-        tool_input: { skill: 'oh-my-claudecode:mcp-setup' },
+        tool_input: { skill: 'lazycc:mcp-setup' },
         tool_response: { ok: true },
         session_id: sessionId,
         cwd: tempDir,
@@ -505,7 +505,7 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
 
       const out = runHookScript(TEMPLATE_HOOK_PATH, {
         tool_name: 'Skill',
-        tool_input: { skill: 'oh-my-claudecode:plan' },
+        tool_input: { skill: 'lazycc:plan' },
         tool_response: { ok: true },
         session_id: sessionId,
         cwd: tempDir,
@@ -524,7 +524,7 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
 
       const out = runPostToolVerifier({
         tool_name: 'Skill',
-        tool_input: { skill: 'oh-my-claudecode:ralplan' },
+        tool_input: { skill: 'lazycc:ralplan' },
         tool_response: { ok: true },
         session_id: sessionId,
         cwd: tempDir,
@@ -548,7 +548,7 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
       const out = runHookScript(TEMPLATE_HOOK_PATH, {
         tool_name: 'Skill',
         tool_input: {
-          skill: 'oh-my-claudecode:plan',
+          skill: 'lazycc:plan',
           args: '--consensus issue #2368',
         },
         tool_response: { ok: true },

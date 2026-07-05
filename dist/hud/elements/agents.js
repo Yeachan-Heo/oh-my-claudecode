@@ -96,7 +96,7 @@ const AGENT_TYPE_CODES = {
  * Get single-character code for an agent type.
  */
 function getAgentCode(agentType, model) {
-    // Extract the short name from full type (e.g., "oh-my-claudecode:architect" -> "architect")
+    // Extract the short name from full type (e.g., "lazycc:architect" -> "architect")
     const parts = agentType.split(':');
     const shortName = parts[parts.length - 1] || agentType;
     // Look up the code
@@ -230,7 +230,7 @@ export function renderAgentsDetailed(agents) {
     const now = Date.now();
     // Extract short agent type names with duration
     const names = running.map((a) => {
-        // Extract last part of agent type (e.g., "oh-my-claudecode:explore" -> "explore")
+        // Extract last part of agent type (e.g., "lazycc:explore" -> "explore")
         const parts = a.type.split(':');
         let name = parts[parts.length - 1] || a.type;
         // Abbreviate common names

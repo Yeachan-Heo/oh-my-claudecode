@@ -151,7 +151,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         description: 'Fix type errors',
         prompt: 'Fix all type errors in src/auth/',
       },
@@ -180,7 +180,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         team_name: 'fix-ts-errors',
         name: 'worker-1',
         description: 'Fix type errors',
@@ -201,7 +201,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         description: 'Fix type errors',
         prompt: 'Fix all type errors in src/auth/',
       },
@@ -224,7 +224,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         description: 'Fix something',
         prompt: 'Fix it',
       },
@@ -260,7 +260,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         description: 'Fix type errors',
         prompt: 'Fix all type errors in src/auth/',
       },
@@ -287,7 +287,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Task',
       toolInput: {
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         description: 'Fix something',
         prompt: 'Fix it',
       },
@@ -376,7 +376,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Task',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:executor',
+          subagent_type: 'lazycc:executor',
           description: 'Fix type errors',
           prompt: 'Fix all type errors in src/auth/',
         },
@@ -395,7 +395,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Task',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:executor',
+          subagent_type: 'lazycc:executor',
           description: 'Fix type errors',
           prompt: 'Fix all type errors in src/auth/',
         },
@@ -472,7 +472,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcer({
       tool_name: 'Skill',
       toolInput: {
-        skill: 'oh-my-claudecode:ralph',
+        skill: 'lazycc:ralph',
       },
       cwd: tempDir,
       session_id: sessionId,
@@ -496,7 +496,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
-        toolInput: { subagent_type: 'oh-my-claudecode:architect', model: 'sonnet' },
+        toolInput: { subagent_type: 'lazycc:architect', model: 'sonnet' },
         cwd: tempDir,
         session_id: 'session-tier-alias',
       },
@@ -515,7 +515,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
-        toolInput: { subagent_type: 'oh-my-claudecode:architect', model: 'sonnet' },
+        toolInput: { subagent_type: 'lazycc:architect', model: 'sonnet' },
         cwd: tempDir,
         session_id: 'session-tier-alias-no-subagent',
       },
@@ -533,7 +533,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
-        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'sonnet' },
+        toolInput: { subagent_type: 'lazycc:executor', model: 'sonnet' },
         cwd: tempDir,
         session_id: 'session-tier-alias-bare',
       },
@@ -551,7 +551,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
-        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'opus' },
+        toolInput: { subagent_type: 'lazycc:executor', model: 'opus' },
         cwd: tempDir,
         session_id: 'session-tier-alias-lm',
       },
@@ -570,7 +570,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     const output = runPreToolEnforcerWithEnv(
       {
         tool_name: 'Agent',
-        toolInput: { subagent_type: 'oh-my-claudecode:executor', model: 'claude-sonnet-4-6' },
+        toolInput: { subagent_type: 'lazycc:executor', model: 'claude-sonnet-4-6' },
         cwd: tempDir,
         session_id: 'session-bare-anthropic',
       },
@@ -591,7 +591,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -616,7 +616,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Task',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:executor',
+          subagent_type: 'lazycc:executor',
           description: 'Implement feature',
           prompt: 'Do the thing',
         },
@@ -640,7 +640,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -664,7 +664,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           model: 'opus',
           description: 'Review spec',
           prompt: 'Review this spec',
@@ -687,7 +687,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           model: 'opus',
           description: 'Review spec',
           prompt: 'Review this spec',
@@ -711,7 +711,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -755,7 +755,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:../docs/CLAUDE',
+          subagent_type: 'lazycc:../docs/CLAUDE',
           description: 'Some task',
           prompt: 'Do something',
         },
@@ -777,7 +777,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -811,7 +811,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:critic',
+          subagent_type: 'lazycc:critic',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -847,7 +847,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:body-hr-agent',
+          subagent_type: 'lazycc:body-hr-agent',
           description: 'Some task',
           prompt: 'Do something',
         },
@@ -880,7 +880,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:body-model-agent',
+          subagent_type: 'lazycc:body-model-agent',
           description: 'Some task',
           prompt: 'Do something',
         },
@@ -913,7 +913,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:quoted-model-agent',
+          subagent_type: 'lazycc:quoted-model-agent',
           description: 'Review spec',
           prompt: 'Review this spec',
         },
@@ -949,7 +949,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:bedrock-quoted-agent',
+          subagent_type: 'lazycc:bedrock-quoted-agent',
           description: 'Do something',
           prompt: 'Do it',
         },
@@ -981,7 +981,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:bom-agent',
+          subagent_type: 'lazycc:bom-agent',
           description: 'BOM test',
           prompt: 'Test BOM handling',
         },
@@ -1029,7 +1029,7 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
       {
         tool_name: 'Agent',
         toolInput: {
-          subagent_type: 'oh-my-claudecode:nonexistent-agent-xyz',
+          subagent_type: 'lazycc:nonexistent-agent-xyz',
           description: 'Some task',
           prompt: 'Do something',
         },

@@ -12,6 +12,7 @@ export { buildOpenClawSignal } from "./signal.js";
 import { getOpenClawConfig, resolveGateway } from "./config.js";
 import { wakeGateway, wakeCommandGateway, interpolateInstruction, isCommandGateway } from "./dispatcher.js";
 import { buildOpenClawSignal } from "./signal.js";
+import { shouldCollapseOpenClawBurst } from "./dedupe.js";
 import { basename } from "path";
 import { getCurrentTmuxSession } from "../notifications/tmux.js";
 /** Whether debug logging is enabled */
@@ -72,6 +73,24 @@ export async function wakeOpenClaw(event, context) {
         const now = new Date().toISOString();
         // Auto-detect tmux session if not provided in context
         const tmuxSession = context.tmuxSession ?? getCurrentTmuxSession() ?? undefined;
+        // Read reply channel context from environment variables
+        const replyChannel = context.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? undefined;
+        const replyTarget = context.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? undefined;
+        const replyThread = context.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? undefined;
+        // Enrich context with reply channel from env vars
+        const enrichedContext = {
+            ...context,
+            ...(replyChannel && { replyChannel }),
+            ...(replyTarget && { replyTarget }),
+            ...(replyThread && { replyThread }),
+        };
+        const signal = buildOpenClawSignal(event, enrichedContext);
+        if (shouldCollapseOpenClawBurst(event, signal, enrichedContext, tmuxSession)) {
+            if (DEBUG) {
+                console.error(`[openclaw] deduped ${event} (${signal.routeKey}) for tmux session ${tmuxSession}`);
+            }
+            return { gateway: gatewayName, success: true, skipped: "deduped" };
+        }
         // Auto-capture tmux pane content for stop/session-end events (best-effort)
         let tmuxTail = context.tmuxTail;
         if (!tmuxTail && (event === "stop" || event === "session-end") && process.env.TMUX) {
@@ -86,18 +105,6 @@ export async function wakeOpenClaw(event, context) {
                 // Non-blocking: tmux capture is best-effort
             }
         }
-        // Read reply channel context from environment variables
-        const replyChannel = context.replyChannel ?? process.env.OPENCLAW_REPLY_CHANNEL ?? undefined;
-        const replyTarget = context.replyTarget ?? process.env.OPENCLAW_REPLY_TARGET ?? undefined;
-        const replyThread = context.replyThread ?? process.env.OPENCLAW_REPLY_THREAD ?? undefined;
-        // Enrich context with reply channel from env vars
-        const enrichedContext = {
-            ...context,
-            ...(replyChannel && { replyChannel }),
-            ...(replyTarget && { replyTarget }),
-            ...(replyThread && { replyThread }),
-        };
-        const signal = buildOpenClawSignal(event, enrichedContext);
         // Build template variables from whitelisted context fields
         const variables = {
             sessionId: context.sessionId,

@@ -187,7 +187,7 @@ describe('HUD CLI diagnostic (no stdin, no watch mode)', () => {
 
     const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
     expect(output).toContain('NOT configured');
-    expect(output).toContain('Run /oh-my-claudecode:hud setup to fix.');
+    expect(output).toContain('Run /lazycc:hud setup to fix.');
   });
 
   it('handles legacy string statusLine format', async () => {
@@ -216,6 +216,6 @@ describe('HUD CLI diagnostic (no stdin, no watch mode)', () => {
     await hud.main(false, false);
 
     const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
-    expect(output).toContain('Run /oh-my-claudecode:hud setup to fix.');
+    expect(output).toContain('Run /lazycc:hud setup to fix.');
   });
 });

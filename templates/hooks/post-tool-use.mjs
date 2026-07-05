@@ -249,7 +249,7 @@ async function main() {
     if (String(toolName).toLowerCase() === 'skill') {
       const skillName = getInvokedSkillName(toolInput);
       const currentState = readSkillActiveState(directory, sessionId);
-      const completingSkill = (skillName || '').replace(/^oh-my-claudecode:/, '');
+      const completingSkill = (skillName || '').replace(/^lazycc:/, '');
       if (!currentState || !currentState.active || currentState.skill_name === completingSkill) {
         clearSkillActiveState(directory, sessionId);
       }

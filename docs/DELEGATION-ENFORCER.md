@@ -24,13 +24,13 @@ The enforcer runs as a pre-tool-use hook that intercepts `Task` and `Agent` tool
 ```typescript
 // Before enforcement
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   prompt="Implement feature X"
 )
 
 // After enforcement (automatic)
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   model="sonnet",  // ← Automatically injected
   prompt="Implement feature X"
 )
@@ -59,7 +59,7 @@ If you explicitly specify a model, it's always preserved:
 ```typescript
 // Explicit model is never overridden
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   model="haiku",  // ← Explicitly using haiku instead of default sonnet
   prompt="Quick lookup"
 )
@@ -74,7 +74,7 @@ Task(
 Enforces model parameter for a single agent delegation call.
 
 ```typescript
-import { enforceModel } from 'oh-my-claudecode';
+import { enforceModel } from 'lazycc';
 
 const input = {
   description: 'Implement feature',
@@ -92,7 +92,7 @@ console.log(result.injected); // true
 Get the default model for an agent type.
 
 ```typescript
-import { getModelForAgent } from 'oh-my-claudecode';
+import { getModelForAgent } from 'lazycc';
 
 getModelForAgent('executor'); // 'sonnet'
 getModelForAgent('executor-low'); // 'haiku'
@@ -104,7 +104,7 @@ getModelForAgent('executor-high'); // 'opus'
 Check if a tool invocation is an agent delegation call.
 
 ```typescript
-import { isAgentCall } from 'oh-my-claudecode';
+import { isAgentCall } from 'lazycc';
 
 isAgentCall('Task', { subagent_type: 'executor', ... }); // true
 isAgentCall('Bash', { command: 'ls' }); // false
@@ -115,7 +115,7 @@ isAgentCall('Bash', { command: 'ls' }); // false
 The enforcer automatically integrates with the pre-tool-use hook:
 
 ```typescript
-import { processHook } from 'oh-my-claudecode';
+import { processHook } from 'lazycc';
 
 const hookInput = {
   toolName: 'Task',
@@ -177,13 +177,13 @@ When enabled, you'll see warnings like:
 ```typescript
 // Every delegation needs explicit model
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   model="sonnet",
   prompt="Implement X"
 )
 
 Task(
-  subagent_type="oh-my-claudecode:executor-low",
+  subagent_type="lazycc:executor-low",
   model="haiku",
   prompt="Quick lookup"
 )
@@ -194,12 +194,12 @@ Task(
 ```typescript
 // Model automatically injected from definition
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   prompt="Implement X"
 )
 
 Task(
-  subagent_type="oh-my-claudecode:executor-low",
+  subagent_type="lazycc:executor-low",
   prompt="Quick lookup"
 )
 ```
@@ -209,7 +209,7 @@ Task(
 ```typescript
 // Use haiku for a simple executor task
 Task(
-  subagent_type="oh-my-claudecode:executor",
+  subagent_type="lazycc:executor",
   model="haiku",  // Override default sonnet
   prompt="Find definition of X"
 )

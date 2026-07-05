@@ -38,7 +38,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'haiku'
             };
             const result = enforceModel(input);
@@ -49,7 +49,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'claude-sonnet-4-6'
             };
             const result = enforceModel(input);
@@ -60,7 +60,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'us.anthropic.claude-sonnet-4-6-v1:0'
             };
             const result = enforceModel(input);
@@ -71,7 +71,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor'
+                subagent_type: 'lazycc:executor'
             };
             const result = enforceModel(input);
             expect(result.injected).toBe(true);
@@ -92,11 +92,11 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:build-fixer'
+                subagent_type: 'lazycc:build-fixer'
             };
             const result = enforceModel(input);
             expect(result.injected).toBe(true);
-            expect(result.modifiedInput.subagent_type).toBe('oh-my-claudecode:debugger');
+            expect(result.modifiedInput.subagent_type).toBe('lazycc:debugger');
             expect(result.modifiedInput.model).toBe('sonnet');
         });
         it('throws error for unknown agent type', () => {
@@ -250,9 +250,9 @@ describe('delegation-enforcer', () => {
     });
     describe('getModelForAgent', () => {
         it('returns correct model for agent with prefix', () => {
-            expect(getModelForAgent('oh-my-claudecode:executor')).toBe('sonnet');
-            expect(getModelForAgent('oh-my-claudecode:debugger')).toBe('sonnet');
-            expect(getModelForAgent('oh-my-claudecode:architect')).toBe('opus');
+            expect(getModelForAgent('lazycc:executor')).toBe('sonnet');
+            expect(getModelForAgent('lazycc:debugger')).toBe('sonnet');
+            expect(getModelForAgent('lazycc:architect')).toBe('opus');
         });
         it('returns correct model for agent without prefix', () => {
             expect(getModelForAgent('executor')).toBe('sonnet');
@@ -439,7 +439,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'sonnet'
             };
             const result = enforceModel(input);
@@ -452,7 +452,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'sonnet'
             };
             const result = enforceModel(input);
@@ -464,7 +464,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:architect',
+                subagent_type: 'lazycc:architect',
                 model: 'opus'
             };
             const result = enforceModel(input);
@@ -475,7 +475,7 @@ describe('delegation-enforcer', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'haiku'
             };
             const result = enforceModel(input);

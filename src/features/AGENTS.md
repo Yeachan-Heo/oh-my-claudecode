@@ -3,7 +3,7 @@
 
 # features
 
-Core feature modules for oh-my-claudecode - model routing, state management, verification, and more.
+Core feature modules for lazycc - model routing, state management, verification, and more.
 
 ## Purpose
 

@@ -348,7 +348,7 @@ describe("default template parity with formatter.ts", () => {
     incompleteTasks: 2,
     question: "What should I do next?",
     agentName: "executor",
-    agentType: "oh-my-claudecode:executor",
+    agentType: "lazycc:executor",
   });
 
   it("session-start matches formatSessionStart", () => {

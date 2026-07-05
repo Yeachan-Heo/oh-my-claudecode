@@ -18,7 +18,7 @@ const DEFAULT_FACTCHECK_POLICY: FactcheckPolicy = {
   enabled: false,
   mode: 'quick',
   strict_project_patterns: [],
-  forbidden_path_prefixes: ['${CLAUDE_CONFIG_DIR}/plugins/cache/omc/'],
+  forbidden_path_prefixes: ['${CLAUDE_CONFIG_DIR}/plugins/cache/lazycc/'],
   forbidden_path_substrings: ['/.omc/', '.omc-config.json'],
   readonly_command_prefixes: [
     'ls ', 'cat ', 'find ', 'grep ', 'head ', 'tail ', 'stat ', 'echo ', 'wc ',

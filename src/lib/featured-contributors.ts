@@ -102,7 +102,7 @@ function getGitHubHeaders(): Record<string, string> {
 
   return {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'oh-my-claudecode-featured-contributors-generator',
+    'User-Agent': 'lazycc-featured-contributors-generator',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }

@@ -161,7 +161,7 @@ describe('HUD CLI diagnostic (no stdin, no watch mode)', () => {
         await hud.main(false, false);
         const output = consoleLogSpy.mock.calls.map((c) => c[0]).join('\n');
         expect(output).toContain('NOT configured');
-        expect(output).toContain('Run /oh-my-claudecode:hud setup to fix.');
+        expect(output).toContain('Run /lazycc:hud setup to fix.');
     });
     it('handles legacy string statusLine format', async () => {
         writeFileSync(join(tempConfigDir, 'hud', 'omc-hud.mjs'), '// stub');
@@ -181,7 +181,7 @@ describe('HUD CLI diagnostic (no stdin, no watch mode)', () => {
         const hud = await importHudModule();
         await hud.main(false, false);
         const output = consoleLogSpy.mock.calls.map((c) => c[0]).join('\n');
-        expect(output).toContain('Run /oh-my-claudecode:hud setup to fix.');
+        expect(output).toContain('Run /lazycc:hud setup to fix.');
     });
 });
 //# sourceMappingURL=cli-diagnostic.test.js.map

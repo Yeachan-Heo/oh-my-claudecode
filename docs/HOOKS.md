@@ -4,7 +4,7 @@
 
 ## What Are Hooks?
 
-Hooks are scripts that execute automatically in response to Claude Code lifecycle events. oh-my-claudecode extends Claude Code's default behavior with 20 hooks.
+Hooks are scripts that execute automatically in response to Claude Code lifecycle events. lazycc extends Claude Code's default behavior with 20 hooks.
 
 When a user submits a prompt, a tool runs, or a session starts/ends, hooks fire automatically to inject additional context, activate modes, and manage state.
 
@@ -232,7 +232,7 @@ Enforces continuation when an execution mode is active. This is the hook that ke
 - **Reinforcement message**: "The boulder never stops" — prompts Claude to continue working
 - **Staleness check**: States older than 2 hours are treated as inactive to prevent stale state from blocking new sessions
 - **Notification**: Sends Discord/Telegram/Slack notification on first stop (if configured)
-- **Cancel**: Use `/oh-my-claudecode:cancel` to deactivate modes
+- **Cancel**: Use `/lazycc:cancel` to deactivate modes
 
 > **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (invoked via keyword-detector), not hooks. The persistent-mode hook is what enforces their continuation by blocking the Stop event.
 
@@ -265,7 +265,7 @@ cancelomc
 or
 
 ```
-/oh-my-claudecode:cancel
+/lazycc:cancel
 ```
 
 `cancel` removes state files for all active modes: ralph, autopilot, ultrawork, and any others.
@@ -458,5 +458,5 @@ stopomc
 `team` is not auto-detected. It must be invoked explicitly via the `/team` slash command to prevent infinite spawning.
 
 ```
-/oh-my-claudecode:team 3:executor "build a fullstack todo app"
+/lazycc:team 3:executor "build a fullstack todo app"
 ```

@@ -15,7 +15,7 @@
  * - ttl: optional time-to-live in seconds
  * - expiresAt: optional ISO timestamp (computed from ttl)
  *
- * @see https://github.com/anthropics/oh-my-claudecode/issues/1119
+ * @see https://github.com/anthropics/lazycc/issues/1119
  */
 export interface SharedMemoryEntry {
     key: string;

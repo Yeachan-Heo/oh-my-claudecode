@@ -2,15 +2,15 @@
 
 > Quick start guide: from installation to your first OMC session.
 
-If you're new to Oh My ClaudeCode (OMC), follow the steps below in order.
+If you're new to LazyCC, follow the steps below in order.
 
-1. [Installation](#installation) - Install the OMC plugin and run initial setup
+1. [Installation](#installation) - Install the LazyCC plugin and run initial setup
 2. [First Session](#first-session) - Run your first task with autopilot
 3. [Configuration](#configuration) - Customize settings and agent models per project
 
 ### What this guide covers
 
-- How to install the OMC plugin
+- How to install the LazyCC plugin
 - Running your first autopilot session and understanding the flow
 - Configuring per-user and per-project settings
 
@@ -23,23 +23,23 @@ If you're new to Oh My ClaudeCode (OMC), follow the steps below in order.
 
 ## Installation
 
-OMC ships two surfaces and they are designed to coexist:
+LazyCC ships two surfaces and they are designed to coexist:
 
 | Surface | What you get | Recommended install |
 |---|---|---|
-| **Claude Code plugin** (`oh-my-claudecode@omc`) | In-session skills, agents, hooks, statusline, MCP servers — the `/autopilot`, `/ralph`, `/ultrawork`, `/team` slash commands | Marketplace plugin install (Step 1–2 below) |
-| **Terminal CLI** (`omc` binary, package `oh-my-claude-sisyphus`) | Shell commands: `omc setup`, `omc update`, `omc team`, `omc ask`, `omc autoresearch`, etc. | `npm i -g oh-my-claude-sisyphus@latest` |
+| **Claude Code plugin** (`lazycc@lazycc`) | In-session skills, agents, hooks, statusline, MCP servers — the `/autopilot`, `/ralph`, `/ultrawork`, `/team` slash commands | Marketplace plugin install (Step 1–2 below) |
+| **Terminal CLI** (`omc` binary, package `lazycc`) | Shell commands: `omc setup`, `omc update`, `omc team`, `omc ask`, `omc autoresearch`, etc. | `npm i -g lazycc@latest` |
 
 Most users want **both**: the plugin for the in-session experience, and the npm CLI for shell-side automation and updates. Running them in parallel is fully supported — `omc update` and `omc setup` are idempotent and detect the plugin install to avoid duplicating in-session skills (#2252).
 
-> Older versions of this doc said OMC was "plugin-only". That was incorrect: the `omc` CLI is the canonical entry point for `omc setup`/`omc update` and is published on npm as `oh-my-claude-sisyphus`. See the [Quick Start in README.md](../README.md#quick-start) for the same two-path layout.
+> Older versions of this doc said OMC was "plugin-only". That was incorrect: the `omc` CLI is the canonical entry point for `omc setup`/`omc update` and is published on npm as `lazycc`. See the [Quick Start in README.md](../README.md#quick-start) for the same two-path layout.
 
 ### Step 1: Add the marketplace source
 
 Run the following command inside Claude Code:
 
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
 ```
 
 ### Step 2: Install the plugin
@@ -47,7 +47,7 @@ Run the following command inside Claude Code:
 After adding the marketplace, install the plugin:
 
 ```bash
-/plugin install oh-my-claudecode
+/plugin install lazycc
 ```
 
 ### Step 2b (optional but recommended): install the terminal CLI
@@ -55,7 +55,7 @@ After adding the marketplace, install the plugin:
 If you want `omc setup`, `omc update`, `omc team`, `omc ask`, etc. on your shell:
 
 ```bash
-npm i -g oh-my-claude-sisyphus@latest
+npm i -g lazycc@latest
 ```
 
 Both can be installed at the same time. The CLI auto-detects the plugin install and will not double-register skills under `~/.claude/skills/` (if you previously hit the duplicate-skill bug, run `omc update` once on 4.11.2+ — it self-heals leftover standalone skills that the plugin now provides via `prunePluginDuplicateSkills`).
@@ -69,7 +69,7 @@ After installation, enter one of the following in Claude Code:
 setup omc
 
 # Option 2: skill command
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 ### Prerequisites summary
@@ -86,7 +86,7 @@ setup omc
 Applies OMC only to the current project:
 
 ```bash
-/oh-my-claudecode:omc-setup --local
+/lazycc:omc-setup --local
 ```
 
 - Settings are saved to `./.claude/CLAUDE.md`
@@ -98,7 +98,7 @@ Applies OMC only to the current project:
 Applies OMC to all Claude Code sessions:
 
 ```bash
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 - Settings are saved to `~/.claude/CLAUDE.md`
@@ -111,7 +111,7 @@ Applies OMC to all Claude Code sessions:
 To confirm everything is working, run the diagnostics tool:
 
 ```bash
-/oh-my-claudecode:omc-doctor
+/lazycc:omc-doctor
 ```
 
 This checks the following:
@@ -127,7 +127,7 @@ This checks the following:
 If you're developing OMC or want to test unreleased features from a specific branch, you can launch Claude Code with your local checkout as the plugin:
 
 ```bash
-omc --plugin-dir /path/to/oh-my-claudecode setup --plugin-dir-mode
+omc --plugin-dir /path/to/lazycc setup --plugin-dir-mode
 ```
 
 This loads agents, skills, and commands directly from your checkout without copying them to `~/.claude/`. For detailed instructions and alternative flows, see [LOCAL_PLUGIN_INSTALL.md](./LOCAL_PLUGIN_INSTALL.md). For a complete decision matrix of plugin-dir flags and modes, see the [Plugin directory flags section in REFERENCE.md](./REFERENCE.md#plugin-directory-flags).
@@ -146,12 +146,12 @@ This loads agents, skills, and commands directly from your checkout without copy
 
 OMC automatically checks for updates every 24 hours. To update manually, re-run the plugin install command.
 
-> ⚠️ **Warning:** After a plugin update, run `/oh-my-claudecode:omc-setup` again to apply the latest configuration.
+> ⚠️ **Warning:** After a plugin update, run `/lazycc:omc-setup` again to apply the latest configuration.
 
 ### Uninstalling
 
 ```bash
-/plugin uninstall oh-my-claudecode@oh-my-claudecode
+/plugin uninstall lazycc@lazycc
 ```
 
 ---
@@ -208,7 +208,7 @@ While work is in progress, you can monitor the current state in the Claude Code 
 To configure the HUD display, run:
 
 ```bash
-/oh-my-claudecode:hud setup
+/lazycc:hud setup
 ```
 
 ### Starting smaller
@@ -375,7 +375,7 @@ OMC automatically selects a model tier based on task complexity:
 
 ### CLAUDE.md configuration
 
-OMC's default behavior is also configured via `CLAUDE.md` files. Running `/oh-my-claudecode:omc-setup` generates this file automatically.
+OMC's default behavior is also configured via `CLAUDE.md` files. Running `/lazycc:omc-setup` generates this file automatically.
 
 | Scope | File | Description |
 |-------|------|-------------|

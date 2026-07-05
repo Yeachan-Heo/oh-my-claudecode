@@ -5,7 +5,7 @@
 ## Step 3.1: Verify Plugin Installation
 
 ```bash
-grep -q "oh-my-claudecode" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"
+grep -q "lazycc" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" && echo "Plugin verified" || echo "Plugin NOT found - run: claude /install-plugin lazycc"
 ```
 
 ## Step 3.2: Offer MCP Server Configuration
@@ -16,7 +16,7 @@ Use AskUserQuestion: "Would you like to configure MCP servers for enhanced capab
 
 If yes, invoke the mcp-setup skill:
 ```
-/oh-my-claudecode:mcp-setup
+/lazycc:mcp-setup
 ```
 
 If no, skip to next step.
@@ -182,7 +182,7 @@ Skip this step. Agent teams will remain disabled. User can enable later by addin
 }
 ```
 
-Or by running `/oh-my-claudecode:omc-setup --force` and choosing to enable teams.
+Or by running `/lazycc:omc-setup --force` and choosing to enable teams.
 
 ## Save Progress
 

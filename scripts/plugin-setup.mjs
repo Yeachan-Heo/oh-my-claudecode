@@ -5,12 +5,11 @@
  * Configures HUD statusline when plugin is installed.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, copyFileSync } from 'node:fs';
-import { execFileSync, execSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, copyFileSync, realpathSync, readdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { buildHudWrapper } from './lib/hud-wrapper-template.mjs';
 
@@ -21,9 +20,90 @@ const CLAUDE_DIR = getClaudeConfigDir();
 const HUD_DIR = join(CLAUDE_DIR, 'hud');
 const HUD_LIB_DIR = join(HUD_DIR, 'lib');
 const SETTINGS_FILE = join(CLAUDE_DIR, 'settings.json');
-// Use the absolute node binary path so nvm/fnm users don't get
-// "node not found" errors in non-interactive shells (issue #892).
-const nodeBin = process.execPath || 'node';
+const EPHEMERAL_NODE_PATH_MARKERS = ['hostedtoolcache', '/runner/', '\\runner\\'];
+
+function isKnownEphemeralNodePath(nodePath) {
+  return EPHEMERAL_NODE_PATH_MARKERS.some((marker) => nodePath.includes(marker));
+}
+
+function pickLatestVersion(versions) {
+  return versions
+    .filter((version) => /^v?\d/.test(version))
+    .sort((a, b) => {
+      const left = a.replace(/^v/, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+      const right = b.replace(/^v/, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+      for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+        const diff = (right[index] ?? 0) - (left[index] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    })[0];
+}
+
+function resolveNodeBinary() {
+  try {
+    const cmd = process.platform === 'win32' ? 'where node' : 'which node';
+    const result = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' })
+      .trim()
+      .split('\n')[0]
+      .trim();
+    if (result && existsSync(result)) {
+      return result;
+    }
+  } catch {
+    // node is not on PATH; continue through non-interactive shell fallbacks.
+  }
+
+  if (process.execPath && existsSync(process.execPath) && !isKnownEphemeralNodePath(process.execPath)) {
+    return process.execPath;
+  }
+
+  if (process.platform === 'win32') {
+    return 'node';
+  }
+
+  const home = homedir();
+  const nvmBase = join(home, '.nvm', 'versions', 'node');
+  if (existsSync(nvmBase)) {
+    try {
+      const latest = pickLatestVersion(readdirSync(nvmBase));
+      if (latest) {
+        const nodePath = join(nvmBase, latest, 'bin', 'node');
+        if (existsSync(nodePath)) return nodePath;
+      }
+    } catch {
+      // ignore unreadable version directories
+    }
+  }
+
+  const fnmBases = [
+    join(home, '.fnm', 'node-versions'),
+    join(home, 'Library', 'Application Support', 'fnm', 'node-versions'),
+    join(home, '.local', 'share', 'fnm', 'node-versions'),
+  ];
+  for (const fnmBase of fnmBases) {
+    if (!existsSync(fnmBase)) continue;
+    try {
+      const latest = pickLatestVersion(readdirSync(fnmBase));
+      if (latest) {
+        const nodePath = join(fnmBase, latest, 'installation', 'bin', 'node');
+        if (existsSync(nodePath)) return nodePath;
+      }
+    } catch {
+      // ignore unreadable version directories
+    }
+  }
+
+  for (const nodePath of ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']) {
+    if (existsSync(nodePath)) return nodePath;
+  }
+
+  return 'node';
+}
+
+// Use the resolver shared by the TypeScript installer path: prefer PATH's
+// stable node symlink, then fall back to process.execPath and manager paths.
+const nodeBin = resolveNodeBinary();
 
 console.log('[OMC] Running post-install setup...');
 
@@ -46,6 +126,43 @@ try {
   chmodSync(hudScriptPath, 0o755);
 } catch { /* Windows doesn't need this */ }
 console.log('[OMC] Installed HUD wrapper script');
+
+function quoteCommandPath(value) {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function patchInstalledPluginHookCommands(packageDir) {
+  const rawPackageDir = resolve(packageDir);
+  const resolvedPackageDir = existsSync(rawPackageDir) ? realpathSync(rawPackageDir) : rawPackageDir;
+  if (existsSync(join(resolvedPackageDir, 'src'))) {
+    return;
+  }
+
+  const hooksJsonPath = join(resolvedPackageDir, 'hooks', 'hooks.json');
+  if (!existsSync(hooksJsonPath)) {
+    return;
+  }
+
+  const parsed = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
+  let patched = false;
+  for (const groups of Object.values(parsed.hooks ?? {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!Array.isArray(group?.hooks)) continue;
+      for (const hook of group.hooks) {
+        if (typeof hook?.command !== 'string') continue;
+        if (!hook.command.startsWith('node ')) continue;
+        hook.command = `${quoteCommandPath(nodeBin)} ${hook.command.slice('node '.length)}`;
+        patched = true;
+      }
+    }
+  }
+
+  if (patched) {
+    writeFileSync(hooksJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
+    console.log('[OMC] Patched plugin hook commands to current Node executable');
+  }
+}
 
 // 3. Configure settings.json
 try {
@@ -80,88 +197,13 @@ try {
   console.log('[OMC] Warning: Could not configure settings.json:', e.message);
 }
 
-// Patch hooks.json to use the absolute node binary path so hooks work on all
-// platforms: Windows (no `sh`), nvm/fnm users (node not on PATH in hooks), etc.
-//
-// The source hooks.json uses shell-expanded `$CLAUDE_PLUGIN_ROOT` path segments
-// so bash preserves spaces in Windows profile paths; this step only substitutes
-// the real process.execPath so Claude Code always invokes the same Node binary
-// that ran this setup script.
-//
-// Two patterns are handled:
-//  1. New format  – node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ... (all platforms)
-//  2. Old format  – sh  "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" ... (Windows
-//     backward-compat: migrates old installs to the new run.cjs chain)
-//
-// Fixes issues #909, #899, #892, #869.
 try {
-  const hooksJsonPath = join(__dirname, '..', 'hooks', 'hooks.json');
-  if (existsSync(hooksJsonPath)) {
-    const data = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-    let patched = false;
-
-    // Pattern 2 (old, Windows backward-compat): sh find-node.sh <target> [args]
-    const findNodePattern =
-      /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
-
-    for (const groups of Object.values(data.hooks ?? {})) {
-      for (const group of groups) {
-        for (const hook of (group.hooks ?? [])) {
-          if (typeof hook.command !== 'string') continue;
-
-          // New run.cjs format — replace bare `node` with absolute path (all platforms)
-          if (hook.command.startsWith('node ') && hook.command.includes('/scripts/run.cjs')) {
-            hook.command = hook.command.replace(/^node\b/, `"${nodeBin}"`);
-            patched = true;
-            continue;
-          }
-
-          // Self-healing: if hooks.json already contains an absolute node path
-          // from a previous patch (possibly on a different machine, e.g. the
-          // GitHub Actions runner at publish time — see issue #2348), and that
-          // path is either missing on this machine or differs from the current
-          // node binary, rewrite it to the current `nodeBin`.  Without this
-          // users who install a tarball that was accidentally published with a
-          // stale absolute path (e.g. /opt/hostedtoolcache/node/.../bin/node)
-          // can never self-heal, because the bare-`node` branch above no longer
-          // matches.
-          const absNodeMatch = hook.command.match(
-            /^"([^"]*\/node|[A-Za-z]:\\[^"]*\\node(?:\.exe)?)"\s+.*\/scripts\/run\.cjs/,
-          );
-          if (absNodeMatch) {
-            const currentBin = absNodeMatch[1];
-            if (currentBin !== nodeBin && (!existsSync(currentBin) || currentBin.includes('/hostedtoolcache/'))) {
-              hook.command = hook.command.replace(
-                /^"[^"]*"/,
-                `"${nodeBin}"`,
-              );
-              patched = true;
-            }
-            continue;
-          }
-
-          // Old find-node.sh format — migrate to run.cjs + absolute path (Windows only)
-          if (process.platform === 'win32') {
-            const m2 = hook.command.match(findNodePattern);
-            if (m2) {
-              hook.command = `"${nodeBin}" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m2[1]}${m2[2]}`;
-              patched = true;
-            }
-          }
-        }
-      }
-    }
-
-    if (patched) {
-      writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2) + '\n');
-      console.log(`[OMC] Patched hooks.json with absolute node path (${nodeBin}), fixes issues #909, #899, #892`);
-    }
-  }
+  patchInstalledPluginHookCommands(join(__dirname, '..'));
 } catch (e) {
-  console.log('[OMC] Warning: Could not patch hooks.json:', e.message);
+  console.log('[OMC] Warning: Could not patch plugin hook commands (non-fatal):', e.message);
 }
 
-// 5. Ensure runtime dependencies are installed in the plugin cache directory.
+// 4. Ensure runtime dependencies are installed in the plugin cache directory.
 //    The npm-published tarball includes only the files listed in "files" (package.json),
 //    which does NOT include node_modules.  When Claude Code extracts the plugin into its
 //    cache the dependencies are therefore missing, causing ERR_MODULE_NOT_FOUND at runtime.

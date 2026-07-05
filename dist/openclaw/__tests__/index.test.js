@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+const mockGetCurrentTmuxSession = vi.fn(() => null);
+vi.mock("../../notifications/tmux.js", () => ({
+    getCurrentTmuxSession: () => mockGetCurrentTmuxSession(),
+}));
 // Mock config and dispatcher modules
 vi.mock("../config.js", () => ({
     getOpenClawConfig: vi.fn(),
@@ -48,6 +55,7 @@ describe("wakeOpenClaw", () => {
             success: true,
             statusCode: 200,
         });
+        mockGetCurrentTmuxSession.mockReturnValue(null);
     });
     afterEach(() => {
         vi.unstubAllEnvs();
@@ -283,6 +291,7 @@ describe("reply channel context", () => {
             success: true,
             statusCode: 200,
         });
+        mockGetCurrentTmuxSession.mockReturnValue(null);
     });
     afterEach(() => {
         vi.unstubAllEnvs();
@@ -354,6 +363,81 @@ describe("reply channel context", () => {
         const call = vi.mocked(wakeGateway).mock.calls[0];
         const payload = call[2];
         expect(payload.channel).toBe("#from-context");
+    });
+});
+describe("burst dedupe for attached multi-pane sessions", () => {
+    let projectDir;
+    beforeEach(() => {
+        projectDir = mkdtempSync(join(tmpdir(), "omc-openclaw-dedupe-"));
+        vi.mocked(getOpenClawConfig).mockReturnValue(mockConfig);
+        vi.mocked(resolveGateway).mockReturnValue(mockResolvedGateway);
+        vi.mocked(wakeGateway).mockResolvedValue({
+            gateway: "my-gateway",
+            success: true,
+            statusCode: 200,
+        });
+        mockGetCurrentTmuxSession.mockReturnValue(null);
+        mockGetCurrentTmuxSession.mockReturnValue("dev-session");
+    });
+    afterEach(() => {
+        rmSync(projectDir, { recursive: true, force: true });
+        vi.clearAllMocks();
+    });
+    it("collapses repeated session-start bursts for the same tmux session", async () => {
+        const first = await wakeOpenClaw("session-start", {
+            sessionId: "sid-1",
+            projectPath: projectDir,
+        });
+        const second = await wakeOpenClaw("session-start", {
+            sessionId: "sid-2",
+            projectPath: projectDir,
+        });
+        expect(first).toMatchObject({ success: true });
+        expect(second).toMatchObject({ success: true, skipped: "deduped" });
+        expect(wakeGateway).toHaveBeenCalledTimes(1);
+    });
+    it("collapses repeated prompt-submitted bursts only when the prompt matches", async () => {
+        await wakeOpenClaw("keyword-detector", {
+            sessionId: "sid-1",
+            projectPath: projectDir,
+            prompt: "Ship it now",
+        });
+        const deduped = await wakeOpenClaw("keyword-detector", {
+            sessionId: "sid-2",
+            projectPath: projectDir,
+            prompt: "  Ship   it now  ",
+        });
+        await wakeOpenClaw("keyword-detector", {
+            sessionId: "sid-3",
+            projectPath: projectDir,
+            prompt: "Ship a different change",
+        });
+        expect(deduped).toMatchObject({ success: true, skipped: "deduped" });
+        expect(wakeGateway).toHaveBeenCalledTimes(2);
+    });
+    it("collapses repeated stop bursts for the same tmux session", async () => {
+        await wakeOpenClaw("stop", {
+            sessionId: "sid-1",
+            projectPath: projectDir,
+        });
+        const deduped = await wakeOpenClaw("stop", {
+            sessionId: "sid-2",
+            projectPath: projectDir,
+        });
+        expect(deduped).toMatchObject({ success: true, skipped: "deduped" });
+        expect(wakeGateway).toHaveBeenCalledTimes(1);
+    });
+    it("does not collapse lifecycle events when no tmux session is available", async () => {
+        mockGetCurrentTmuxSession.mockReturnValue(null);
+        await wakeOpenClaw("session-start", {
+            sessionId: "sid-1",
+            projectPath: projectDir,
+        });
+        await wakeOpenClaw("session-start", {
+            sessionId: "sid-2",
+            projectPath: projectDir,
+        });
+        expect(wakeGateway).toHaveBeenCalledTimes(2);
     });
 });
 //# sourceMappingURL=index.test.js.map

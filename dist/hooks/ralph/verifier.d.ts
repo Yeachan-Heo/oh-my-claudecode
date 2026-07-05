@@ -8,7 +8,7 @@
  * 1. Ralph claims task is complete
  * 2. System enters verification mode
  * 3. Architect agent is invoked to verify the work
- * 4. If architect approves -> truly complete, use /oh-my-claudecode:cancel to exit
+ * 4. If architect approves -> truly complete, use /lazycc:cancel to exit
  * 5. If architect finds flaws -> continue ralph with architect feedback
  */
 import type { UserStory } from './prd.js';

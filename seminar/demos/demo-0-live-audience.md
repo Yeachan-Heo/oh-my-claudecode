@@ -26,7 +26,7 @@
 ### 3. OMC 실행 (7분)
 ```bash
 # 터미널 전체 화면으로
-/oh-my-claudecode:omc
+/lazycc:omc
 
 # 청중 요청 입력
 "Build a [청중 아이디어] with:

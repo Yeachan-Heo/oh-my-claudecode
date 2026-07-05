@@ -405,7 +405,7 @@ const OMC_STARTUP_COMPACTABLE_SECTIONS = [
 ];
 function looksLikeOmcGuidance(content) {
     return (content.includes("<guidance_schema_contract>") &&
-        /oh-my-(claudecode|codex)/i.test(content) &&
+        /(lazycc|oh-my-(claudecode|codex))/i.test(content) &&
         OMC_STARTUP_COMPACTABLE_SECTIONS.some((section) => content.includes(`<${section}>`) && content.includes(`</${section}>`)));
 }
 export function compactOmcStartupGuidance(content) {

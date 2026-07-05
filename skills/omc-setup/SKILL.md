@@ -1,6 +1,6 @@
 ---
 name: omc-setup
-description: Install or refresh oh-my-claudecode for plugin, npm, and local-dev setups from the canonical setup flow
+description: Install or refresh lazycc for plugin, npm, and local-dev setups from the canonical setup flow
 level: 2
 ---
 
@@ -16,8 +16,8 @@ Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when t
 
 Choose this setup flow when the user wants to **install, refresh, or repair OMC itself**.
 
-- Marketplace/plugin install users should land here after `/plugin install oh-my-claudecode`
-- npm users should land here after `npm i -g oh-my-claude-sisyphus@latest`
+- Marketplace/plugin install users should land here after `/plugin install lazycc`
+- npm users should land here after `npm i -g lazycc@latest`
 - local-dev and worktree users should land here after updating the checked-out repo and rerunning setup
 
 ## Flag Parsing
@@ -34,14 +34,14 @@ Check for flags in the user's invocation:
 When user runs with `--help`, display this and stop:
 
 ```
-OMC Setup - Configure oh-my-claudecode
+OMC Setup - Configure lazycc
 
 USAGE:
-  /oh-my-claudecode:omc-setup           Run initial setup wizard (or update if already configured)
-  /oh-my-claudecode:omc-setup --local   Configure local project (.claude/CLAUDE.md)
-  /oh-my-claudecode:omc-setup --global  Configure global settings (~/.claude/CLAUDE.md)
-  /oh-my-claudecode:omc-setup --force   Force full setup wizard even if already configured
-  /oh-my-claudecode:omc-setup --help    Show this help
+  /lazycc:omc-setup           Run initial setup wizard (or update if already configured)
+  /lazycc:omc-setup --local   Configure local project (.claude/CLAUDE.md)
+  /lazycc:omc-setup --global  Configure global settings (~/.claude/CLAUDE.md)
+  /lazycc:omc-setup --force   Force full setup wizard even if already configured
+  /lazycc:omc-setup --help    Show this help
 
 MODES:
   Initial Setup (no flags)
@@ -74,12 +74,12 @@ MODES:
     - Use when you want to reconfigure preferences
 
 EXAMPLES:
-  /oh-my-claudecode:omc-setup           # First time setup (or update CLAUDE.md if configured)
-  /oh-my-claudecode:omc-setup --local   # Update this project
-  /oh-my-claudecode:omc-setup --global  # Update all projects
-  /oh-my-claudecode:omc-setup --force   # Re-run full setup wizard
+  /lazycc:omc-setup           # First time setup (or update CLAUDE.md if configured)
+  /lazycc:omc-setup --local   # Update this project
+  /lazycc:omc-setup --global  # Update all projects
+  /lazycc:omc-setup --force   # Re-run full setup wizard
 
-For more info: https://github.com/Yeachan-Heo/oh-my-claudecode
+For more info: https://github.com/Yeachan-Heo/lazycc
 ```
 
 ## Pre-Setup Check: Already Configured?
@@ -176,13 +176,13 @@ Execute phases sequentially. For each phase, read the corresponding file and fol
 
 ## Keeping Up to Date
 
-After installing oh-my-claudecode updates (via npm or plugin update):
+After installing lazycc updates (via npm or plugin update):
 
-**Automatic**: Just run `/oh-my-claudecode:omc-setup` - it will detect you've already configured and offer a quick "Update CLAUDE.md only" option that skips the full wizard.
+**Automatic**: Just run `/lazycc:omc-setup` - it will detect you've already configured and offer a quick "Update CLAUDE.md only" option that skips the full wizard.
 
 **Manual options**:
-- `/oh-my-claudecode:omc-setup --local` to update project config only
-- `/oh-my-claudecode:omc-setup --global` to update global config only
-- `/oh-my-claudecode:omc-setup --force` to re-run the full wizard (reconfigure preferences)
+- `/lazycc:omc-setup --local` to update project config only
+- `/lazycc:omc-setup --global` to update global config only
+- `/lazycc:omc-setup --force` to re-run the full wizard (reconfigure preferences)
 
 This ensures you have the newest features and agent configurations without the token cost of repeating the full setup.

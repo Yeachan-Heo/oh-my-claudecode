@@ -11,7 +11,20 @@
 import type { AgentConfig, PluginConfig } from '../shared/types.js';
 import { loadAgentPrompt, parseDisallowedTools } from './utils.js';
 import { loadConfig } from '../config/loader.js';
+import { getConfiguredAgentModel } from './registry-config.js';
 import { appendSkininthegamebrosGuidance } from './skininthegamebros-guidance.js';
+import {
+  codeReviewerAgent,
+  codeSimplifierAgent,
+  debuggerAgent,
+  gitMasterAgent,
+  securityReviewerAgent,
+  testEngineerAgent,
+  verifierAgent,
+} from './registry-agents.js';
+import {
+  LAZYCODEX_COMPATIBLE_AGENT_DEFINITIONS,
+} from './lazycodex-compatible.js';
 
 // Re-export base agents from individual files (rebranded names)
 export { architectAgent } from './architect.js';
@@ -52,25 +65,6 @@ export { loadAgentPrompt };
 /**
  * Debugger Agent - Root-Cause Analysis & Debugging (Sonnet)
  */
-export const debuggerAgent: AgentConfig = {
-  name: 'debugger',
-  description: 'Root-cause analysis, regression isolation, failure diagnosis (Sonnet).',
-  prompt: loadAgentPrompt('debugger'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
-
-/**
- * Verifier Agent - Completion Evidence & Test Validation (Sonnet)
- */
-export const verifierAgent: AgentConfig = {
-  name: 'verifier',
-  description: 'Completion evidence, claim validation, test adequacy (Sonnet).',
-  prompt: loadAgentPrompt('verifier'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
-
 // ============================================================
 // REFORMED AGENTS (REVIEW LANE)
 // ============================================================
@@ -83,62 +77,9 @@ export const verifierAgent: AgentConfig = {
  * Test-Engineer Agent - Test Strategy & Coverage (Sonnet)
  * Replaces: tdd-guide agent
  */
-export const testEngineerAgent: AgentConfig = {
-  name: 'test-engineer',
-  description: 'Test strategy, coverage, flaky test hardening (Sonnet).',
-  prompt: loadAgentPrompt('test-engineer'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
-
 // ============================================================
 // SPECIALIZED AGENTS (Security, Build, TDD, Code Review)
 // ============================================================
-
-/**
- * Security-Reviewer Agent - Security Vulnerability Detection (Sonnet)
- */
-export const securityReviewerAgent: AgentConfig = {
-  name: 'security-reviewer',
-  description: 'Security vulnerability detection specialist (Sonnet). Use for security audits and OWASP detection.',
-  prompt: loadAgentPrompt('security-reviewer'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
-
-/**
- * Code-Reviewer Agent - Expert Code Review (Opus)
- */
-export const codeReviewerAgent: AgentConfig = {
-  name: 'code-reviewer',
-  description: 'Expert code review specialist (Opus). Use for comprehensive code quality review.',
-  prompt: loadAgentPrompt('code-reviewer'),
-  model: 'opus',
-  defaultModel: 'opus'
-};
-
-
-/**
- * Git-Master Agent - Git Operations Expert (Sonnet)
- */
-export const gitMasterAgent: AgentConfig = {
-  name: 'git-master',
-  description: 'Git expert for atomic commits, rebasing, and history management with style detection',
-  prompt: loadAgentPrompt('git-master'),
-  model: 'sonnet',
-  defaultModel: 'sonnet'
-};
-
-/**
- * Code-Simplifier Agent - Code Simplification & Refactoring (Opus)
- */
-export const codeSimplifierAgent: AgentConfig = {
-  name: 'code-simplifier',
-  description: 'Simplifies and refines code for clarity, consistency, and maintainability (Opus).',
-  prompt: loadAgentPrompt('code-simplifier'),
-  model: 'opus',
-  defaultModel: 'opus'
-};
 
 // ============================================================
 // DEPRECATED ALIASES (Backward Compatibility)
@@ -147,34 +88,17 @@ export const codeSimplifierAgent: AgentConfig = {
 /**
  * @deprecated Use test-engineer agent instead
  */
-export const tddGuideAgentAlias = testEngineerAgent;
+export { tddGuideAgentAlias } from './registry-agents.js';
 
-const AGENT_CONFIG_KEY_MAP = {
-  explore: 'explore',
-  analyst: 'analyst',
-  planner: 'planner',
-  architect: 'architect',
-  debugger: 'debugger',
-  executor: 'executor',
-  verifier: 'verifier',
-  'security-reviewer': 'securityReviewer',
-  'code-reviewer': 'codeReviewer',
-  'test-engineer': 'testEngineer',
-  designer: 'designer',
-  writer: 'writer',
-  'qa-tester': 'qaTester',
-  scientist: 'scientist',
-  tracer: 'tracer',
-  'git-master': 'gitMaster',
-  'code-simplifier': 'codeSimplifier',
-  critic: 'critic',
-  'document-specialist': 'documentSpecialist',
-} as const satisfies Partial<Record<string, keyof NonNullable<PluginConfig['agents']>>>;
-
-function getConfiguredAgentModel(name: string, config: PluginConfig): string | undefined {
-  const key = AGENT_CONFIG_KEY_MAP[name as keyof typeof AGENT_CONFIG_KEY_MAP];
-  return key ? config.agents?.[key]?.model : undefined;
-}
+export {
+  codeReviewerAgent,
+  codeSimplifierAgent,
+  debuggerAgent,
+  gitMasterAgent,
+  securityReviewerAgent,
+  testEngineerAgent,
+  verifierAgent,
+} from './registry-agents.js';
 
 // ============================================================
 // AGENT REGISTRY
@@ -239,6 +163,8 @@ export function getAgentDefinitions(options?: {
     'git-master': gitMasterAgent,
     'code-simplifier': codeSimplifierAgent,
 
+    ...LAZYCODEX_COMPATIBLE_AGENT_DEFINITIONS,
+
     // ============================================================
     // COORDINATION
     // ============================================================
@@ -295,7 +221,7 @@ You are BOUND to your task list. You do not stop. You do not quit. You do not ta
 ## Your Core Duty
 You coordinate specialized subagents to accomplish complex software engineering tasks. Abandoning work mid-task is not an option. If you stop without completing ALL tasks, you have failed.
 
-## Available Subagents (19 Agents)
+## Available Subagents (27 Agents)
 
 ### Build/Analysis Lane
 - **explore**: Internal codebase discovery (haiku) — fast pattern matching
@@ -323,6 +249,16 @@ You coordinate specialized subagents to accomplish complex software engineering 
 
 ### Coordination
 - **critic**: Plan review + thorough gap analysis (opus) — critical challenge, multi-perspective investigation, structured "What's Missing" analysis
+
+### LazyCodex Compatibility
+- **explorer**: LazyCodex-compatible repository search (haiku) — read-only file and symbol discovery
+- **plan**: LazyCodex-compatible Prometheus planner (opus) — LazyCodex execution plans
+- **lazycodex-executor**: LazyCodex-compatible implementation executor (sonnet) — scoped code changes with evidence
+- **lazycodex-code-reviewer**: LazyCodex-compatible code reviewer (opus) — read-only diff and evidence review
+- **metis**: LazyCodex-compatible pre-planning analyst (opus) — ambiguity, contradictions, constraints, risks
+- **momus**: LazyCodex-compatible plan reviewer (opus) — executability and concrete QA checks
+- **lazycodex-qa-executor**: LazyCodex-compatible manual QA executor (sonnet) — real scenario artifacts
+- **lazycodex-gate-reviewer**: LazyCodex-compatible final gate reviewer (opus) — completion evidence audit
 
 ### Deprecated Aliases
 - **api-reviewer** → code-reviewer

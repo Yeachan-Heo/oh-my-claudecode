@@ -11,9 +11,9 @@ const TASK_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
  * Add a background task to HUD state.
  * Called when a Task tool starts with run_in_background=true.
  */
-export function addBackgroundTask(id, description, agentType, directory) {
+export function addBackgroundTask(id, description, agentType, directory, sessionId) {
     try {
-        let state = readHudState(directory) || createEmptyHudState();
+        let state = readHudState(directory, sessionId) || createEmptyHudState();
         // Clean up old/expired tasks
         state = cleanupTasks(state);
         // Add new task
@@ -26,7 +26,7 @@ export function addBackgroundTask(id, description, agentType, directory) {
         };
         state.backgroundTasks.push(task);
         state.timestamp = new Date().toISOString();
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;
@@ -36,9 +36,9 @@ export function addBackgroundTask(id, description, agentType, directory) {
  * Mark a background task as completed.
  * Called when a Task tool completes.
  */
-export function completeBackgroundTask(id, directory, failed = false) {
+export function completeBackgroundTask(id, directory, failed = false, sessionId) {
     try {
-        const state = readHudState(directory);
+        const state = readHudState(directory, sessionId);
         if (!state) {
             return false;
         }
@@ -49,7 +49,7 @@ export function completeBackgroundTask(id, directory, failed = false) {
         task.status = failed ? 'failed' : 'completed';
         task.completedAt = new Date().toISOString();
         state.timestamp = new Date().toISOString();
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;
@@ -59,12 +59,12 @@ export function completeBackgroundTask(id, directory, failed = false) {
  * Remap a running background task from its launch-time hook id to the
  * async task id reported after launch.
  */
-export function remapBackgroundTaskId(currentId, nextId, directory) {
+export function remapBackgroundTaskId(currentId, nextId, directory, sessionId) {
     try {
         if (currentId === nextId) {
             return true;
         }
-        const state = readHudState(directory);
+        const state = readHudState(directory, sessionId);
         if (!state) {
             return false;
         }
@@ -78,7 +78,7 @@ export function remapBackgroundTaskId(currentId, nextId, directory) {
         }
         task.id = nextId;
         state.timestamp = new Date().toISOString();
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;
@@ -91,9 +91,9 @@ function findMostRecentMatchingRunningTask(state, description, agentType) {
         && (agentType === undefined || task.agentType === agentType))
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
 }
-export function completeMostRecentMatchingBackgroundTask(description, directory, failed = false, agentType) {
+export function completeMostRecentMatchingBackgroundTask(description, directory, failed = false, agentType, sessionId) {
     try {
-        const state = readHudState(directory);
+        const state = readHudState(directory, sessionId);
         if (!state) {
             return false;
         }
@@ -104,15 +104,15 @@ export function completeMostRecentMatchingBackgroundTask(description, directory,
         task.status = failed ? 'failed' : 'completed';
         task.completedAt = new Date().toISOString();
         state.timestamp = new Date().toISOString();
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;
     }
 }
-export function remapMostRecentMatchingBackgroundTaskId(description, nextId, directory, agentType) {
+export function remapMostRecentMatchingBackgroundTaskId(description, nextId, directory, agentType, sessionId) {
     try {
-        const state = readHudState(directory);
+        const state = readHudState(directory, sessionId);
         if (!state) {
             return false;
         }
@@ -126,7 +126,7 @@ export function remapMostRecentMatchingBackgroundTaskId(description, nextId, dir
         }
         task.id = nextId;
         state.timestamp = new Date().toISOString();
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;
@@ -171,8 +171,8 @@ function cleanupTasks(state) {
 /**
  * Get count of running background tasks.
  */
-export function getRunningTaskCount(directory) {
-    const state = readHudState(directory);
+export function getRunningTaskCount(directory, sessionId) {
+    const state = readHudState(directory, sessionId);
     if (!state)
         return 0;
     return state.backgroundTasks.filter((t) => t.status === 'running').length;
@@ -181,16 +181,16 @@ export function getRunningTaskCount(directory) {
  * Clear all background tasks.
  * Useful for cleanup or reset.
  */
-export function clearBackgroundTasks(directory) {
+export function clearBackgroundTasks(directory, sessionId) {
     try {
         // Read existing state to preserve session fields (sessionStartTimestamp, sessionId)
-        const existing = readHudState(directory);
+        const existing = readHudState(directory, sessionId);
         const state = createEmptyHudState();
         if (existing) {
             state.sessionStartTimestamp = existing.sessionStartTimestamp;
             state.sessionId = existing.sessionId;
         }
-        return writeHudState(state, directory);
+        return writeHudState(state, directory, sessionId);
     }
     catch {
         return false;

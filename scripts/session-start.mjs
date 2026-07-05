@@ -47,6 +47,48 @@ function readJsonFile(path) {
   }
 }
 
+function parseLazyCodexBoolean(value) {
+  if (typeof value !== 'string') return null;
+
+  switch (value.trim().toLowerCase()) {
+    case '1':
+    case 'true':
+    case 'yes':
+    case 'on':
+      return true;
+    case '0':
+    case 'false':
+    case 'no':
+    case 'off':
+      return false;
+    default:
+      return null;
+  }
+}
+
+function getLazyCodexConfig() {
+  const config = readJsonFile(join(configDir, '.omc-config.json'));
+  return config && typeof config === 'object' && config.lazycodex && typeof config.lazycodex === 'object'
+    ? config.lazycodex
+    : null;
+}
+
+function isLazyCodexAutoUpdateEnabled() {
+  const envValue = parseLazyCodexBoolean(process.env.OMC_LAZYCODEX_AUTO_UPDATE);
+  if (envValue !== null) return envValue;
+
+  const configValue = getLazyCodexConfig()?.autoUpdate;
+  return typeof configValue === 'boolean' ? configValue : false;
+}
+
+function isLazyCodexGlobalClaudeMutationEnabled() {
+  const envValue = parseLazyCodexBoolean(process.env.OMC_LAZYCODEX_GLOBAL_CLAUDE_MUTATION);
+  if (envValue !== null) return envValue;
+
+  const configValue = getLazyCodexConfig()?.globalClaudeMutation;
+  return typeof configValue === 'boolean' ? configValue : false;
+}
+
 function getRuntimeBaseDir() {
   return process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
 }
@@ -259,7 +301,7 @@ async function checkNpmUpdate(currentVersion) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 2000);
   try {
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
+    const response = await fetch('https://registry.npmjs.org/lazycc/latest', {
       signal: controller.signal
     });
     if (!response.ok) return null;
@@ -327,7 +369,7 @@ async function checkHudInstallation(retryCount = 0) {
 
       // If OMC HUD wrapper is configured, ensure at least one plugin cache version is built.
       if (statusLineCommand?.includes('omc-hud')) {
-        const pluginCacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const pluginCacheBase = join(configDir, 'plugins', 'cache', 'lazycc', 'lazycc');
         if (existsSync(pluginCacheBase)) {
           const versions = readdirSync(pluginCacheBase)
             .filter(version => !version.startsWith('.'))
@@ -388,15 +430,17 @@ async function main() {
     }
 
     // Check npm registry for available update (with 24h cache)
-    try {
-      const pluginVersion = getPluginVersion();
-      if (pluginVersion) {
-        const updateInfo = await checkNpmUpdate(pluginVersion);
-        if (updateInfo) {
-          messages.push(`<session-restore>\n\n[OMC UPDATE AVAILABLE]\n\nA new version of oh-my-claudecode is available: v${updateInfo.latestVersion} (current: v${updateInfo.currentVersion})\n\nTo update, run: omc update\n(This syncs plugin, npm package, and CLAUDE.md together)\n\n</session-restore>\n\n---\n`);
+    if (isLazyCodexAutoUpdateEnabled()) {
+      try {
+        const pluginVersion = getPluginVersion();
+        if (pluginVersion) {
+          const updateInfo = await checkNpmUpdate(pluginVersion);
+          if (updateInfo) {
+            messages.push(`<session-restore>\n\n[OMC UPDATE AVAILABLE]\n\nA new version of lazycc is available: v${updateInfo.latestVersion} (current: v${updateInfo.currentVersion})\n\nTo update, run: lazycc update\n(This syncs plugin, npm package, and CLAUDE.md together)\n\n</session-restore>\n\n---\n`);
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
     if (process.env.CLAUDE_PLUGIN_ROOT) {
@@ -404,7 +448,7 @@ async function main() {
         const omcConfigPath = join(configDir, '.omc-config.json');
         const omcConfig = readJsonFile(omcConfigPath);
         if (omcConfig?.silentAutoUpdate) {
-          messages.push(`<session-restore>\n\n[OMC] silentAutoUpdate is enabled in .omc-config.json but has no effect in plugin mode.\nTo update, use: /plugin marketplace update omc && /omc-setup\nOr run manually: omc update\n\n</session-restore>\n\n---\n`);
+          messages.push(`<session-restore>\n\n[OMC] silentAutoUpdate is enabled in .omc-config.json but has no effect in plugin mode.\nTo update, use: /plugin marketplace update lazycc && /lazycc:omc-setup\nOr run manually: lazycc update\n\n</session-restore>\n\n---\n`);
         }
       } catch {}
     }
@@ -559,12 +603,13 @@ ${cleanContent}
       }
     }
 
-    // Cleanup old plugin cache versions (keep latest 2, symlink the rest)
-    // Instead of deleting old versions, replace them with symlinks to the latest.
-    // This prevents "Cannot find module" errors for sessions started before a
-    // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
-    try {
-      const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    if (isLazyCodexGlobalClaudeMutationEnabled()) {
+      // Cleanup old plugin cache versions (keep latest 2, symlink the rest)
+      // Instead of deleting old versions, replace them with symlinks to the latest.
+      // This prevents "Cannot find module" errors for sessions started before a
+      // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
+      try {
+      const cacheBase = join(configDir, 'plugins', 'cache', 'lazycc', 'lazycc');
       if (existsSync(cacheBase)) {
         const versions = readdirSync(cacheBase)
           .filter(v => /^\d+\.\d+\.\d+/.test(v))
@@ -623,7 +668,8 @@ ${cleanContent}
           }
         }
       }
-    } catch {}
+      } catch {}
+    }
 
     // Send session-start notification (non-blocking, fire-and-forget)
     try {

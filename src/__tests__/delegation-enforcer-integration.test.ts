@@ -32,7 +32,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test task',
           prompt: 'Do something',
-          subagent_type: 'oh-my-claudecode:executor'
+          subagent_type: 'lazycc:executor'
         }
       };
 
@@ -59,7 +59,7 @@ describe.skip('delegation-enforcer integration', () => {
         toolInput: {
           description: 'Test task',
           prompt: 'Do something',
-          subagent_type: 'oh-my-claudecode:executor',
+          subagent_type: 'lazycc:executor',
           model: 'haiku'
         }
       };

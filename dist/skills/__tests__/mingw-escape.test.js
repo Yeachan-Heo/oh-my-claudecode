@@ -111,6 +111,15 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
             expect(content).not.toContain('"command": "node /home/username/.claude/hud/omc-hud.mjs"');
             expect(content).not.toContain('The command must use an absolute path, not `~`');
         });
+        it('hud SKILL.md cleanup step removes only the legacy HUD wrapper filename', () => {
+            const content = readFileSync(join(REPO_ROOT, 'skills', 'hud', 'SKILL.md'), 'utf-8');
+            const cleanupLine = content
+                .split('\n')
+                .find(l => l.includes('Removed legacy omc-hud.js') && l.startsWith('node -e'));
+            expect(cleanupLine).toBeDefined();
+            expect(cleanupLine).toContain("t=p.join(d,'hud','omc-hud.js')");
+            expect(cleanupLine).not.toContain("t=p.join(d,'hud','omc-hud.mjs')");
+        });
         it("omc-setup version-detect script uses v==='' not !v", () => {
             const setupDir = join(REPO_ROOT, 'skills', 'omc-setup');
             const files = [
@@ -130,7 +139,7 @@ describe('MINGW64 escape safety: no "!" in node -e inline scripts (issue #729)',
             ].filter(f => f.endsWith('.md') || f.endsWith('.sh'));
             const combined = files.map(f => readFileSync(f, 'utf-8')).join('\n');
             expect(combined).toContain("grep -m1 'OMC:VERSION:'");
-            expect(combined).not.toContain('grep -m1 "^# oh-my-claudecode"');
+            expect(combined).not.toContain('grep -m1 "^# lazycc"');
         });
         it('omc-setup SKILL.md explicitly tells the agent to execute immediately', () => {
             const content = readFileSync(join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md'), 'utf-8');

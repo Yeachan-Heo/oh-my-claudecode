@@ -1,6 +1,6 @@
-# Contributing to oh-my-claudecode
+# Contributing to lazycc
 
-Thank you for your interest in contributing to oh-my-claudecode (OMC). This guide covers everything from forking to submitting your PR.
+Thank you for your interest in contributing to lazycc (OMC). This guide covers everything from forking to submitting your PR.
 
 ## 1. Audience & Prerequisites
 
@@ -18,26 +18,26 @@ This guide assumes you're comfortable with terminal commands and git branching.
 
 ## 2. Fork & Clone
 
-1. **Fork the repository** on GitHub by clicking the "Fork" button at https://github.com/Yeachan-Heo/oh-my-claudecode
+1. **Fork the repository** on GitHub by clicking the "Fork" button at https://github.com/Yeachan-Heo/lazycc
 
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/<your-username>/oh-my-claudecode.git
-   cd oh-my-claudecode
+   git clone https://github.com/<your-username>/lazycc.git
+   cd lazycc
    ```
 
 3. **Add the upstream remote** so you can sync with the main repository:
    ```bash
-   git remote add upstream https://github.com/Yeachan-Heo/oh-my-claudecode.git
+   git remote add upstream https://github.com/Yeachan-Heo/lazycc.git
    ```
 
 4. **Verify your remotes**:
    ```bash
    git remote -v
-   # origin    https://github.com/<your-username>/oh-my-claudecode.git (fetch)
-   # origin    https://github.com/<your-username>/oh-my-claudecode.git (push)
-   # upstream  https://github.com/Yeachan-Heo/oh-my-claudecode.git (fetch)
-   # upstream  https://github.com/Yeachan-Heo/oh-my-claudecode.git (read-only)
+   # origin    https://github.com/<your-username>/lazycc.git (fetch)
+   # origin    https://github.com/<your-username>/lazycc.git (push)
+   # upstream  https://github.com/Yeachan-Heo/lazycc.git (fetch)
+   # upstream  https://github.com/Yeachan-Heo/lazycc.git (read-only)
    ```
 
 5. **Check available branches**:
@@ -92,7 +92,7 @@ Once built, you need to tell Claude Code to use your local checkout. Here are th
 
 ### Bootstrap: make the `omc` command available
 
-All three flows below use the `omc` CLI. If you don't have it installed globally (via `npm i -g oh-my-claude-sisyphus`), create a symlink from your checkout:
+All three flows below use the `omc` CLI. If you don't have it installed globally (via `npm i -g lazycc`), create a symlink from your checkout:
 
 ```bash
 # Create ~/.local/bin if it doesn't exist
@@ -143,10 +143,10 @@ omc setup --plugin-dir-mode  # or just re-run build and restart Claude Code
 
 ```bash
 # Add local directory as a marketplace source
-claude plugin marketplace add /path/to/oh-my-claudecode
+claude plugin marketplace add /path/to/lazycc
 
 # Install the plugin
-claude plugin install oh-my-claudecode@oh-my-claudecode
+claude plugin install lazycc@lazycc
 
 # Run setup
 /setup
@@ -155,8 +155,8 @@ claude plugin install oh-my-claudecode@oh-my-claudecode
 **Rebuilding**: After code changes:
 ```bash
 npm run build
-claude plugin marketplace update oh-my-claudecode
-claude plugin update oh-my-claudecode@oh-my-claudecode
+claude plugin marketplace update lazycc
+claude plugin update lazycc@lazycc
 /setup
 ```
 
@@ -186,7 +186,7 @@ Add these to your `.bashrc` / `.zshrc` for a smoother dev workflow:
 
 ```bash
 # Your OMC dev root (change path as needed)
-export OMC_DEV_ROOT="$HOME/_Git/_Claude/oh-my-claudecode"
+export OMC_DEV_ROOT="$HOME/_Git/_Claude/lazycc"
 
 # Run OMC from your local checkout
 alias omcdev='omc --plugin-dir "$OMC_DEV_ROOT"'
@@ -331,7 +331,7 @@ npm run test:run
    ```
 
 2. **Open a PR** on GitHub:
-   - Go to https://github.com/Yeachan-Heo/oh-my-claudecode/pulls
+   - Go to https://github.com/Yeachan-Heo/lazycc/pulls
    - Click "New pull request"
    - Select your fork and branch
    - Fill in the PR title and description
@@ -342,7 +342,7 @@ npm run test:run
    - GitHub will auto-populate the template when you open the PR
 
 4. **Release workflow** (advanced):
-   - If your PR should trigger a release, you can invoke the `/oh-my-claudecode:release` skill
+   - If your PR should trigger a release, you can invoke the `/lazycc:release` skill
    - This is typically for maintainers; ask in the PR if unsure
 
 5. **What happens next**:
@@ -360,14 +360,14 @@ npm run test:run
 You're using `claude --plugin-dir` directly without the `omc` shim. Export it:
 
 ```bash
-export OMC_PLUGIN_ROOT=/path/to/oh-my-claudecode
-claude --plugin-dir /path/to/oh-my-claudecode
+export OMC_PLUGIN_ROOT=/path/to/lazycc
+claude --plugin-dir /path/to/lazycc
 ```
 
 Or use the `omc` shim which sets it automatically:
 
 ```bash
-omc --plugin-dir /path/to/oh-my-claudecode
+omc --plugin-dir /path/to/lazycc
 ```
 
 ### "Skills/agents not showing up after rebuild"
@@ -420,7 +420,7 @@ Run the diagnostics tool:
 ```bash
 omc doctor
 omc doctor conflicts
-omc doctor --plugin-dir /path/to/oh-my-claudecode
+omc doctor --plugin-dir /path/to/lazycc
 ```
 
 Or check the troubleshooting sections in:
@@ -436,7 +436,7 @@ Or check the troubleshooting sections in:
 - **Reference Docs**: [docs/REFERENCE.md](./docs/REFERENCE.md)
 - **Local Plugin Install**: [docs/LOCAL_PLUGIN_INSTALL.md](./docs/LOCAL_PLUGIN_INSTALL.md)
 - **Getting Started**: [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md)
-- **GitHub Issues**: https://github.com/Yeachan-Heo/oh-my-claudecode/issues
+- **GitHub Issues**: https://github.com/Yeachan-Heo/lazycc/issues
 - **Discord Community**: https://discord.gg/PUwSMR9XNk
 
 Happy contributing!

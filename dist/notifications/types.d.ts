@@ -158,7 +158,7 @@ export interface NotificationPayload {
     tmuxPaneId?: string;
     /** Agent name for agent-call events (e.g., "executor", "architect") */
     agentName?: string;
-    /** Agent type for agent-call events (e.g., "oh-my-claudecode:executor") */
+    /** Agent type for agent-call events (e.g., "lazycc:executor") */
     agentType?: string;
     /** Captured tmux pane content (last N lines) */
     tmuxTail?: string;

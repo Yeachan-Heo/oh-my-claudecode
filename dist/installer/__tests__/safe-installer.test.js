@@ -32,24 +32,24 @@ describe('isOmcHook', () => {
         expect(isOmcHook('bash $HOME/.claude/hooks/omc-detector.sh')).toBe(true);
         expect(isOmcHook('/usr/bin/omc-tool')).toBe(true);
     });
-    it('returns true for commands containing "oh-my-claudecode"', () => {
-        expect(isOmcHook('node ~/.claude/hooks/oh-my-claudecode-hook.mjs')).toBe(true);
-        expect(isOmcHook('bash $HOME/.claude/hooks/oh-my-claudecode.sh')).toBe(true);
+    it('returns true for commands containing "lazycc"', () => {
+        expect(isOmcHook('node ~/.claude/hooks/lazycc-hook.mjs')).toBe(true);
+        expect(isOmcHook('bash $HOME/.claude/hooks/lazycc.sh')).toBe(true);
     });
-    it('returns false for commands not containing omc or oh-my-claudecode', () => {
+    it('returns false for commands not containing omc or lazycc', () => {
         expect(isOmcHook('node ~/.claude/hooks/other-plugin.mjs')).toBe(false);
         expect(isOmcHook('bash $HOME/.claude/hooks/beads-hook.sh')).toBe(false);
         expect(isOmcHook('python /usr/bin/custom-hook.py')).toBe(false);
     });
     it('is case-insensitive', () => {
         expect(isOmcHook('node ~/.claude/hooks/OMC-hook.mjs')).toBe(true);
-        expect(isOmcHook('bash $HOME/.claude/hooks/OH-MY-CLAUDECODE.sh')).toBe(true);
+        expect(isOmcHook('bash $HOME/.claude/hooks/LAZYCC.sh')).toBe(true);
     });
 });
 describe('isOmcHook detection', () => {
     it('detects real OMC hooks correctly', () => {
         expect(isOmcHook('node ~/.claude/hooks/omc-hook.mjs')).toBe(true);
-        expect(isOmcHook('node ~/.claude/hooks/oh-my-claudecode-hook.mjs')).toBe(true);
+        expect(isOmcHook('node ~/.claude/hooks/lazycc-hook.mjs')).toBe(true);
         expect(isOmcHook('node ~/.claude/hooks/omc-pre-tool-use.mjs')).toBe(true);
         expect(isOmcHook('/usr/local/bin/omc')).toBe(true);
     });
@@ -82,7 +82,7 @@ describe('isOmcHook detection', () => {
     });
     it('uses case-insensitive matching', () => {
         expect(isOmcHook('node ~/.claude/hooks/OMC-hook.mjs')).toBe(true);
-        expect(isOmcHook('OH-MY-CLAUDECODE-detector.sh')).toBe(true);
+        expect(isOmcHook('LAZYCC-detector.sh')).toBe(true);
     });
 });
 describe('Safe Installer - Hook Conflict Detection', () => {

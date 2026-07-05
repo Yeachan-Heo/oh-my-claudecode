@@ -480,7 +480,7 @@ function createSkillInvocation(skillName, originalPrompt, args = '') {
 
 You MUST invoke the skill using the Skill tool:
 
-Skill: oh-my-claudecode:${skillName}${argsSection}
+Skill: lazycc:${skillName}${argsSection}
 
 User request:
 ${originalPrompt}
@@ -503,7 +503,7 @@ function createMultiSkillInvocation(skills, originalPrompt) {
     if (content) {
       return `### Skill ${i + 1}: ${s.name.toUpperCase()}\n\n${content}${argsSection}`;
     }
-    return `### Skill ${i + 1}: ${s.name.toUpperCase()}\nSkill: oh-my-claudecode:${s.name}${argsSection}`;
+    return `### Skill ${i + 1}: ${s.name.toUpperCase()}\nSkill: lazycc:${s.name}${argsSection}`;
   }).join('\n\n');
 
   const hasDirectContent = skills.some(s => loadSkillContent(s.name));

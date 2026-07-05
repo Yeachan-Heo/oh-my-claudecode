@@ -16,7 +16,7 @@ function truncate(str, maxWidth) {
 }
 /**
  * Extract the display name from a skill name.
- * For namespaced skills (e.g., "oh-my-claudecode:plan"), returns only the last segment ("plan").
+ * For namespaced skills (e.g., "lazycc:plan"), returns only the last segment ("plan").
  * For non-namespaced skills, returns the name unchanged.
  */
 function getSkillDisplayName(skillName) {

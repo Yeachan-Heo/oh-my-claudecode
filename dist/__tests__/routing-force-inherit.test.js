@@ -95,7 +95,7 @@ describe('routing.forceInherit (issue #1135)', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'opus',
             };
             const result = enforceModel(input);
@@ -110,7 +110,7 @@ describe('routing.forceInherit (issue #1135)', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
             };
             const result = enforceModel(input);
             expect(result.modifiedInput.model).toBeUndefined();
@@ -123,7 +123,7 @@ describe('routing.forceInherit (issue #1135)', () => {
             const input = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
             };
             const result = enforceModel(input);
             expect(result.modifiedInput.model).toBe('sonnet');
@@ -143,14 +143,14 @@ describe('routing.forceInherit (issue #1135)', () => {
             const toolInput = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'opus',
             };
             const result = processPreToolUse('Task', toolInput);
             const modified = result.modifiedInput;
             expect(modified.model).toBeUndefined();
             expect(modified.prompt).toBe('Do something');
-            expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+            expect(modified.subagent_type).toBe('lazycc:executor');
         });
         it('strips model from Agent calls when forceInherit is true', () => {
             mockedLoadConfig.mockReturnValue({
@@ -159,14 +159,14 @@ describe('routing.forceInherit (issue #1135)', () => {
             const toolInput = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'opus',
             };
             const result = processPreToolUse('Agent', toolInput);
             const modified = result.modifiedInput;
             expect(modified.model).toBeUndefined();
             expect(modified.prompt).toBe('Do something');
-            expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+            expect(modified.subagent_type).toBe('lazycc:executor');
         });
         it('strips model from lowercase agent calls when forceInherit is true', () => {
             mockedLoadConfig.mockReturnValue({
@@ -175,13 +175,13 @@ describe('routing.forceInherit (issue #1135)', () => {
             const toolInput = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'opus',
             };
             const result = processPreToolUse('agent', toolInput);
             const modified = result.modifiedInput;
             expect(modified.model).toBeUndefined();
-            expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+            expect(modified.subagent_type).toBe('lazycc:executor');
         });
         it('does not strip model when forceInherit is false', () => {
             mockedLoadConfig.mockReturnValue({
@@ -190,7 +190,7 @@ describe('routing.forceInherit (issue #1135)', () => {
             const toolInput = {
                 description: 'Test task',
                 prompt: 'Do something',
-                subagent_type: 'oh-my-claudecode:executor',
+                subagent_type: 'lazycc:executor',
                 model: 'haiku',
             };
             const result = processPreToolUse('Task', toolInput);

@@ -48,7 +48,7 @@ model: claude-opus-4-6
     - Use ast_grep_search to find structural anti-patterns (e.g., functions > 50 lines, deeply nested conditionals).
     <External_Consultation>
       When a second opinion would improve quality, spawn a Claude Task agent:
-      - Use `Task(subagent_type="oh-my-claudecode:quality-reviewer", ...)` for cross-validation
+      - Use `Task(subagent_type="lazycc:quality-reviewer", ...)` for cross-validation
       - Use `/team` to spin up a CLI worker for large-scale quality analysis tasks
       Skip silently if delegation is unavailable. Never block on external consultation.
     </External_Consultation>

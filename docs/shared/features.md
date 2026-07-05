@@ -10,11 +10,11 @@ Compaction-resilient memory system at `.omc/notepad.md` with three tiers:
 | **Working Memory** | Timestamped entries, auto-pruned after 7 days | Debugging breadcrumbs, temporary findings |
 | **MANUAL** | Never auto-pruned | Team contacts, deployment info, permanent notes |
 
-**User skill:** `/oh-my-claudecode:note`
-- `/oh-my-claudecode:note <content>` - Add to Working Memory
-- `/oh-my-claudecode:note --priority <content>` - Add to Priority Context
-- `/oh-my-claudecode:note --manual <content>` - Add to MANUAL section
-- `/oh-my-claudecode:note --show` - Display notepad contents
+**User skill:** `/lazycc:note`
+- `/lazycc:note <content>` - Add to Working Memory
+- `/lazycc:note --priority <content>` - Add to Priority Context
+- `/lazycc:note --manual <content>` - Add to MANUAL section
+- `/lazycc:note --show` - Display notepad contents
 
 **Automatic capture:** `<remember>` tags in Task agent output are automatically captured:
 - `<remember>content</remember>` → Working Memory with timestamp

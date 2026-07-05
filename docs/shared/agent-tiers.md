@@ -77,7 +77,7 @@ This is the single source of truth for all agent tier information. All skill fil
 When delegating, always specify the model explicitly:
 
 ```
-Task(subagent_type="oh-my-claudecode:executor",
+Task(subagent_type="lazycc:executor",
      model="sonnet",
      prompt="...")
 ```

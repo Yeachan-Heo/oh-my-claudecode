@@ -1033,7 +1033,7 @@ describe("Stop Hook Blocking Contract", () => {
 
       expect(output.decision).toBe("block");
       expect(output.reason).toContain("AUTOPILOT");
-      expect(output.reason).not.toContain('/oh-my-claudecode:cancel');
+      expect(output.reason).not.toContain('/lazycc:cancel');
     });
 
     it("auto-deactivates ultrawork state when no incomplete work remains in cjs script", () => {

@@ -80,7 +80,7 @@ describe('background-tasks', () => {
                 sessionId: 'dir-session',
             });
             clearBackgroundTasks('/some/dir');
-            expect(mockReadHudState).toHaveBeenCalledWith('/some/dir');
+            expect(mockReadHudState).toHaveBeenCalledWith('/some/dir', undefined);
             const writtenState = mockWriteHudState.mock.calls[0][0];
             expect(writtenState.sessionStartTimestamp).toBe(sessionStart);
             expect(writtenState.sessionId).toBe('dir-session');

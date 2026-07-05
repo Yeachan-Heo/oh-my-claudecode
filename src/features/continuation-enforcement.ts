@@ -113,7 +113,7 @@ If ANY box is unchecked, CONTINUE WORKING.
 You may ONLY stop when:
 1. **100% Complete**: Every single task is marked 'completed'
 2. **User Override**: User explicitly says "stop", "cancel", or "that's enough"
-3. **Clean Exit**: You run \`/oh-my-claudecode:cancel\` to properly exit the active mode and clean up state files
+3. **Clean Exit**: You run \`/lazycc:cancel\` to properly exit the active mode and clean up state files
 
 ### ANTI-STOPPING MECHANISMS
 

@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | 中文 | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -15,7 +15,7 @@
 
 *无需学习 Claude Code，直接使用 OMC。*
 
-[快速开始](#快速开始) • [文档](https://yeachan-heo.github.io/oh-my-claudecode-website) • [CLI 参考](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference) • [工作流](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows) • [迁移指南](docs/MIGRATION.md)
+[快速开始](#快速开始) • [文档](https://yeachan-heo.github.io/lazycc-website) • [CLI 参考](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference) • [工作流](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows) • [迁移指南](docs/MIGRATION.md)
 
 ---
 
@@ -23,8 +23,8 @@
 
 **第一步：安装**
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **第二步：配置**
@@ -102,19 +102,19 @@ Team 按阶段化流水线运行：
 
 工作者按需生成，任务完成后自动退出 — 无空闲资源浪费。需要安装 `codex` / `gemini` CLI 并有活跃的 tmux 会话。
 
-> **注意：包命名** — 项目品牌名为 **oh-my-claudecode**（仓库、插件、命令），但 npm 包以 [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g oh-my-claude-sisyphus`。
+> **注意：包命名** — 项目品牌名为 **lazycc**（仓库、插件、命令），但 npm 包以 [`lazycc`](https://www.npmjs.com/package/lazycc) 发布。通过 npm/bun 安装 CLI 工具时，请使用 `npm install -g lazycc`。
 
 ### 更新
 
 ```bash
 # 1. 更新 marketplace 克隆
-/plugin marketplace update omc
+/plugin marketplace update lazycc
 
 # 2. 重新运行设置以刷新配置
 /omc-setup
 ```
 
-> **注意：** 如果 marketplace 自动更新未启用，您需要在运行设置之前手动执行 `/plugin marketplace update omc` 来同步最新版本。
+> **注意：** 如果 marketplace 自动更新未启用，您需要在运行设置之前手动执行 `/plugin marketplace update lazycc` 来同步最新版本。
 
 如果更新后遇到问题，清除旧的插件缓存：
 
@@ -125,12 +125,12 @@ Team 按阶段化流水线运行：
 <h1 align="center">你的 Claude 已被注入超能力。</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## 为什么选择 oh-my-claudecode？
+## 为什么选择 lazycc？
 
 - **无需配置** - 开箱即用，智能默认设置
 - **Team 优先编排** - Team 是标准的多智能体界面（swarm/ultrapilot 是兼容性外观）
@@ -146,7 +146,7 @@ Team 按阶段化流水线运行：
 ## 功能特性
 
 ### 执行模式
-针对不同场景的多种策略 - 从全自动构建到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+针对不同场景的多种策略 - 从全自动构建到 token 高效重构。[了解更多 →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | 模式 | 特点 | 适用场景 |
 |------|---------|---------|
@@ -277,7 +277,7 @@ omc config-stop-callback discord --clear-tags
 **快速设置（推荐）：**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → 提示时输入 "openclaw" → 选择 "OpenClaw Gateway"
 ```
 
@@ -335,11 +335,11 @@ omc config-stop-callback discord --clear-tags
 ## 文档
 
 - **[完整参考](docs/REFERENCE.md)** - 完整功能文档
-- **[CLI 参考](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#cli-reference)** - 所有 `omc` 命令、标志和工具
-- **[通知指南](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#notifications)** - Discord、Telegram、Slack 和 webhook 设置
-- **[推荐工作流](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#workflows)** - 常见任务的经过实战检验的技能链
-- **[发布说明](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#release-notes)** - 每个版本的新内容
-- **[网站](https://yeachan-heo.github.io/oh-my-claudecode-website)** - 交互式指南和示例
+- **[CLI 参考](https://yeachan-heo.github.io/lazycc-website/docs.html#cli-reference)** - 所有 `omc` 命令、标志和工具
+- **[通知指南](https://yeachan-heo.github.io/lazycc-website/docs.html#notifications)** - Discord、Telegram、Slack 和 webhook 设置
+- **[推荐工作流](https://yeachan-heo.github.io/lazycc-website/docs.html#workflows)** - 常见任务的经过实战检验的技能链
+- **[发布说明](https://yeachan-heo.github.io/lazycc-website/docs.html#release-notes)** - 每个版本的新内容
+- **[网站](https://yeachan-heo.github.io/lazycc-website)** - 交互式指南和示例
 - **[迁移指南](docs/MIGRATION.md)** - 从 v2.x 升级
 - **[架构](docs/ARCHITECTURE.md)** - 底层工作原理
 - **[性能监控](docs/PERFORMANCE-MONITORING.md)** - 智能体追踪、调试和优化
@@ -380,7 +380,7 @@ MIT
 
 ## Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 支持本项目
 

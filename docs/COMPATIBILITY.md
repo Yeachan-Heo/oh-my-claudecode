@@ -1,6 +1,6 @@
 # MCP/Plugin Compatibility Layer
 
-The Compatibility Layer enables oh-my-claudecode to discover, register, and use external plugins, MCP servers, and tools. It provides a unified interface for managing external tools while maintaining security through an integrated permission system.
+The Compatibility Layer enables lazycc to discover, register, and use external plugins, MCP servers, and tools. It provides a unified interface for managing external tools while maintaining security through an integrated permission system.
 
 ## Table of Contents
 
@@ -898,7 +898,7 @@ registerCustomPatterns();
 **Checklist:**
 - Plugins are in `~/.claude/plugins/` or `~/.claude/installed-plugins/`
 - Each plugin has a `plugin.json` in the root or `.claude-plugin/` subdirectory
-- Plugin name doesn't conflict with reserved names (e.g., 'oh-my-claudecode')
+- Plugin name doesn't conflict with reserved names (e.g., 'lazycc')
 - File permissions allow reading the directory
 
 **Debug:**

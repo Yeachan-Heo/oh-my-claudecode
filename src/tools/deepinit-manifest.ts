@@ -10,7 +10,7 @@
  * - save: Write current filesystem state as manifest
  * - check: Return whether manifest exists and is valid
  *
- * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1719
+ * @see https://github.com/Yeachan-Heo/lazycc/issues/1719
  */
 
 import { z } from 'zod';

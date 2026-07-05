@@ -147,7 +147,7 @@ await runVerification(checklist);
 
 if (checklist.summary?.verdict === 'approved') {
   // All checks passed - use cancel to cleanly exit
-  console.log('[RALPH VERIFIED] Run /oh-my-claudecode:cancel to exit.');
+  console.log('[RALPH VERIFIED] Run /lazycc:cancel to exit.');
 }
 ```
 

@@ -7,7 +7,7 @@
  * Dual trigger: idle detection (30s) + periodic poll (2min).
  * Terminates after N consecutive hardening waves with no new issues.
  */
-import { execFileSync } from 'child_process';
+import { tmuxExec } from '../cli/tmux-utils.js';
 import { writeModeState, readModeState, clearModeStateFile, } from '../lib/mode-state-io.js';
 import { readRalphthonPrd, getRalphthonPrdStatus, formatTaskPrompt, formatHardeningTaskPrompt, formatHardeningGenerationPrompt, } from './prd.js';
 import { RALPHTHON_DEFAULTS } from './types.js';
@@ -46,7 +46,7 @@ export function clearRalphthonState(directory, sessionId) {
  */
 export function isPaneIdle(paneId) {
     try {
-        const output = execFileSync('tmux', ['display-message', '-t', paneId, '-p', '#{pane_current_command}'], { encoding: 'utf-8', timeout: 5000 }).trim();
+        const output = tmuxExec(['display-message', '-t', paneId, '-p', '#{pane_current_command}'], { timeout: 5000 }).trim();
         const shellNames = ['bash', 'zsh', 'fish', 'sh', 'dash'];
         return shellNames.includes(output);
     }
@@ -59,7 +59,7 @@ export function isPaneIdle(paneId) {
  */
 export function paneExists(paneId) {
     try {
-        execFileSync('tmux', ['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
+        tmuxExec(['has-session', '-t', paneId], { timeout: 5000, stdio: 'pipe' });
         return true;
     }
     catch {
@@ -71,7 +71,7 @@ export function paneExists(paneId) {
  */
 export function sendKeysToPane(paneId, text) {
     try {
-        execFileSync('tmux', ['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
+        tmuxExec(['send-keys', '-t', paneId, text, 'Enter'], { timeout: 10000 });
         return true;
     }
     catch {
@@ -83,7 +83,7 @@ export function sendKeysToPane(paneId, text) {
  */
 export function capturePaneContent(paneId, lines = 50) {
     try {
-        return execFileSync('tmux', ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`], { encoding: 'utf-8', timeout: 5000 }).trim();
+        return tmuxExec(['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`], { timeout: 5000 }).trim();
     }
     catch {
         return '';

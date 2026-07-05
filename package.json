@@ -1,7 +1,7 @@
 {
-  "name": "oh-my-claude-sisyphus",
+  "name": "lazycc",
   "version": "4.11.5",
-  "description": "Multi-agent orchestration system for Claude Code - Inspired by oh-my-opencode",
+  "description": "LazyCC multi-agent orchestration system for Claude Code",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "oh-my-claudecode": "bridge/cli.cjs",
+    "lazycc": "bridge/cli.cjs",
     "omc": "bridge/cli.cjs",
     "omc-cli": "bridge/cli.cjs"
   },
@@ -37,11 +37,36 @@
     "README.md",
     "LICENSE"
   ],
+  "lazyccCompatibility": {
+    "manifest": ".claude-plugin/plugin.json",
+    "marketplace": ".claude-plugin/marketplace.json",
+    "skillsPath": "skills",
+    "mcpPath": ".mcp.json",
+    "lazycodexSource": {
+      "version": "4.15.1",
+      "docs": "docs/lazycodex-port/contract-inventory.md",
+      "stateFallback": ".lazycodex"
+    },
+    "versionedDocs": [
+      "docs/lazycodex-port/contract-inventory.md"
+    ],
+    "packagedFiles": [
+      ".claude-plugin",
+      ".mcp.json",
+      "skills",
+      "docs",
+      "bridge",
+      "bridge/mcp-server.cjs",
+      "README.md",
+      "LICENSE"
+    ]
+  },
   "scripts": {
     "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
     "build:bridge-entry": "node scripts/build-bridge-entry.mjs",
     "build:cli": "node scripts/build-cli.mjs",
+    "check:lazycodex-plugin-contract": "vitest run --run src/interop/__tests__/lazycodex-plugin-contract.test.ts",
     "build:runtime-cli": "node scripts/build-runtime-cli.mjs",
     "build:team-server": "node scripts/build-team-server.mjs",
     "compose-docs": "node scripts/compose-docs.mjs",
@@ -102,11 +127,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Yeachan-Heo/oh-my-claudecode.git"
+    "url": "git+https://github.com/Yeachan-Heo/lazycc.git"
   },
-  "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode#readme",
+  "homepage": "https://github.com/Yeachan-Heo/lazycc#readme",
   "bugs": {
-    "url": "https://github.com/Yeachan-Heo/oh-my-claudecode/issues"
+    "url": "https://github.com/Yeachan-Heo/lazycc/issues"
   },
   "author": "Yeachan Heo",
   "license": "MIT",

@@ -59,7 +59,7 @@ export { install, isInstalled, getInstallInfo, isClaudeInstalled, CLAUDE_CONFIG_
  *
  * @example
  * ```typescript
- * import { createOmcSession } from 'oh-my-claudecode';
+ * import { createOmcSession } from 'lazycc';
  * import { query } from '@anthropic-ai/claude-agent-sdk';
  *
  * const session = createOmcSession();

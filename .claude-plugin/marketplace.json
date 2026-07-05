@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "omc",
-  "description": "Claude Code native multi-agent orchestration - intelligent model routing, 28 agents, 32 skills",
+  "name": "lazycc",
+  "description": "LazyCC Claude Code multi-agent orchestration with LazyCodex compatibility",
   "owner": {
     "name": "Yeachan Heo",
     "email": "hurrc04@gmail.com"
   },
   "plugins": [
     {
-      "name": "oh-my-claudecode",
-      "description": "Claude Code native multi-agent orchestration with intelligent model routing, 28 agent variants, and 32 powerful skills. Zero learning curve. Maximum power.",
+      "name": "lazycc",
+      "description": "LazyCC Claude Code multi-agent orchestration with intelligent model routing, LazyCodex-compatible skills, and evidence-bound workflows.",
       "version": "4.11.5",
       "author": {
         "name": "Yeachan Heo",

@@ -100,7 +100,7 @@ describe('purgeStalePluginCacheVersions', () => {
   it('handles multiple marketplaces and plugins', () => {
     const cacheDir = '/mock/.claude/plugins/cache';
     const active1 = join(cacheDir, 'official/hookify/aa11');
-    const active2 = join(cacheDir, 'omc/oh-my-claudecode/4.3.0');
+    const active2 = join(cacheDir, 'omc/lazycc/4.3.0');
     const stale1 = join(cacheDir, 'official/hookify/bb22');
     const stale2 = join(cacheDir, 'official/hookify/cc33');
 
@@ -116,7 +116,7 @@ describe('purgeStalePluginCacheVersions', () => {
       version: 2,
       plugins: {
         'hookify@official': [{ installPath: active1 }],
-        'oh-my-claudecode@omc': [{ installPath: active2 }],
+        'lazycc@lazycc': [{ installPath: active2 }],
       },
     }));
 
@@ -125,8 +125,8 @@ describe('purgeStalePluginCacheVersions', () => {
       if (ps === cacheDir) return [dirent('official'), dirent('omc')] as any;
       if (ps.endsWith('official')) return [dirent('hookify')] as any;
       if (ps.endsWith('hookify')) return [dirent('aa11'), dirent('bb22'), dirent('cc33')] as any;
-      if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
-      if (ps.endsWith('oh-my-claudecode')) return [dirent('4.3.0')] as any;
+      if (ps.endsWith('omc')) return [dirent('lazycc')] as any;
+      if (ps.endsWith('lazycc')) return [dirent('4.3.0')] as any;
       return [] as any;
     });
 
@@ -138,7 +138,7 @@ describe('purgeStalePluginCacheVersions', () => {
 
   it('does nothing when all cache versions are active', () => {
     const cacheDir = '/mock/.claude/plugins/cache';
-    const active = join(cacheDir, 'omc/oh-my-claudecode/4.3.0');
+    const active = join(cacheDir, 'omc/lazycc/4.3.0');
 
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
@@ -150,15 +150,15 @@ describe('purgeStalePluginCacheVersions', () => {
     mockedReadFileSync.mockReturnValue(JSON.stringify({
       version: 2,
       plugins: {
-        'oh-my-claudecode@omc': [{ installPath: active }],
+        'lazycc@lazycc': [{ installPath: active }],
       },
     }));
 
     mockedReaddirSync.mockImplementation((p, _opts?) => {
       const ps = String(p);
       if (ps === cacheDir) return [dirent('omc')] as any;
-      if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
-      if (ps.endsWith('oh-my-claudecode')) return [dirent('4.3.0')] as any;
+      if (ps.endsWith('omc')) return [dirent('lazycc')] as any;
+      if (ps.endsWith('lazycc')) return [dirent('4.3.0')] as any;
       return [] as any;
     });
 

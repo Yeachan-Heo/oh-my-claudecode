@@ -248,7 +248,7 @@ I noticed this conversation contains ${typeDescriptions[detection.patternType]} 
 **Confidence:** ${detection.confidence}%
 **Suggested triggers:** ${detection.suggestedTriggers.join(', ') || 'None detected'}
 
-Would you like me to extract this as a learned skill? Type \`/oh-my-claudecode:learner\` to save it, or continue with your current task.
+Would you like me to extract this as a learned skill? Type \`/lazycc:learner\` to save it, or continue with your current task.
 `.trim();
 }
 //# sourceMappingURL=detector.js.map

@@ -64,7 +64,7 @@ export interface InstallOptions {
  */
 export declare function isHudEnabledInConfig(): boolean;
 /**
- * Detect whether a statusLine config belongs to oh-my-claudecode.
+ * Detect whether a statusLine config belongs to lazycc.
  *
  * Checks the command string for known OMC HUD paths so that custom
  * (non-OMC) statusLine configurations are preserved during forced
@@ -75,11 +75,11 @@ export declare function isHudEnabledInConfig(): boolean;
  */
 export declare function isOmcStatusLine(statusLine: unknown): boolean;
 /**
- * Detect whether a hook command belongs to oh-my-claudecode.
+ * Detect whether a hook command belongs to lazycc.
  *
  * Recognition strategy (any match is sufficient):
  * 1. Command path contains "omc" as a path/word segment (e.g. `omc-hook.mjs`, `/omc/`)
- * 2. Command path contains "oh-my-claudecode"
+ * 2. Command path contains "lazycc"
  * 3. Command references a known OMC hook filename inside .claude/hooks/
  *
  * @param command - The hook command string

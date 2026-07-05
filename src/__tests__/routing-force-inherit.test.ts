@@ -137,7 +137,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         model: 'opus',
       };
 
@@ -156,7 +156,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
       };
 
       const result = enforceModel(input);
@@ -173,7 +173,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const input: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
       };
 
       const result = enforceModel(input);
@@ -198,7 +198,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const toolInput: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         model: 'opus',
       };
 
@@ -207,7 +207,7 @@ describe('routing.forceInherit (issue #1135)', () => {
 
       expect(modified.model).toBeUndefined();
       expect(modified.prompt).toBe('Do something');
-      expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+      expect(modified.subagent_type).toBe('lazycc:executor');
     });
 
     it('strips model from Agent calls when forceInherit is true', () => {
@@ -218,7 +218,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const toolInput: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         model: 'opus',
       };
 
@@ -227,7 +227,7 @@ describe('routing.forceInherit (issue #1135)', () => {
 
       expect(modified.model).toBeUndefined();
       expect(modified.prompt).toBe('Do something');
-      expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+      expect(modified.subagent_type).toBe('lazycc:executor');
     });
 
     it('strips model from lowercase agent calls when forceInherit is true', () => {
@@ -238,7 +238,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const toolInput: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         model: 'opus',
       };
 
@@ -246,7 +246,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const modified = result.modifiedInput as AgentInput;
 
       expect(modified.model).toBeUndefined();
-      expect(modified.subagent_type).toBe('oh-my-claudecode:executor');
+      expect(modified.subagent_type).toBe('lazycc:executor');
     });
 
     it('does not strip model when forceInherit is false', () => {
@@ -257,7 +257,7 @@ describe('routing.forceInherit (issue #1135)', () => {
       const toolInput: AgentInput = {
         description: 'Test task',
         prompt: 'Do something',
-        subagent_type: 'oh-my-claudecode:executor',
+        subagent_type: 'lazycc:executor',
         model: 'haiku',
       };
 

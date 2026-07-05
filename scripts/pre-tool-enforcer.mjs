@@ -48,7 +48,7 @@ function normalizeToCcAlias(model) {
 function readAgentDefinitionModel(subagentType) {
   // Guard: subagent_type must be a string — non-string payloads would throw on .replace()
   // and the catch block would silently return {continue:true}, bypassing enforcement.
-  const agentType = (typeof subagentType === 'string' ? subagentType : '').replace(/^oh-my-claudecode:/, '');
+  const agentType = (typeof subagentType === 'string' ? subagentType : '').replace(/^lazycc:/, '');
   if (!agentType) return null;
   // Reject path traversal: agent names are simple identifiers; no path separators allowed.
   if (!/^[a-zA-Z0-9_-]+$/.test(agentType)) return null;
@@ -479,12 +479,12 @@ const SKILL_PROTECTION_MAP = {
 function getSkillProtectionLevel(skillName, rawSkillName) {
   // When rawSkillName is provided, only apply protection to OMC-prefixed skills.
   // Non-prefixed skills are project custom skills or other plugins — no protection.
-  // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1581
+  // See: https://github.com/Yeachan-Heo/lazycc/issues/1581
   if (rawSkillName != null && typeof rawSkillName === 'string' &&
-      !rawSkillName.toLowerCase().startsWith('oh-my-claudecode:')) {
+      !rawSkillName.toLowerCase().startsWith('lazycc:')) {
     return 'none';
   }
-  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+  const normalized = (skillName || '').toLowerCase().replace(/^lazycc:/, '');
   return SKILL_PROTECTION_MAP[normalized] || 'none';
 }
 
@@ -525,7 +525,7 @@ function writeSkillActiveState(directory, skillName, sessionId, rawSkillName) {
 
   const config = SKILL_PROTECTION_CONFIGS[protection];
   const now = new Date().toISOString();
-  const normalized = (skillName || '').toLowerCase().replace(/^oh-my-claudecode:/, '');
+  const normalized = (skillName || '').toLowerCase().replace(/^lazycc:/, '');
 
   const stateDir = join(directory, '.omc', 'state');
   const safeSessionId = sessionId && SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
@@ -776,7 +776,7 @@ async function main() {
               : (subagentModel
                   ? `Add model="${subagentModel}" (your configured OMC_SUBAGENT_MODEL) explicitly to this ${toolName} call.`
                   : `Set OMC_SUBAGENT_MODEL=<valid-bedrock-id> and add it as the model parameter on this ${toolName} call.`);
-            const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
+            const agentType = (toolInput.subagent_type).replace(/^lazycc:/, '');
             console.log(JSON.stringify({
               continue: true,
               hookSpecificOutput: {

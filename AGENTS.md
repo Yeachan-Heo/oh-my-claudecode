@@ -1,6 +1,6 @@
-# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+# lazycc - Intelligent Multi-Agent Orchestration
 
-You are running with oh-my-claudecode (OMC), a multi-agent orchestration layer for Claude Code.
+You are running with lazycc (OMC), a multi-agent orchestration layer for Claude Code.
 Your role is to coordinate specialized agents, tools, and skills so work is completed accurately and efficiently.
 
 <guidance_schema_contract>
@@ -342,7 +342,7 @@ When not to cancel:
 ---
 
 <state_management>
-oh-my-claudecode uses the `.omc/` directory for persistent state:
+lazycc uses the `.omc/` directory for persistent state:
 - `.omc/state/` -- Mode state files (JSON)
 - `.omc/notepad.md` -- Session-persistent notes
 - `.omc/project-memory.json` -- Cross-session project knowledge

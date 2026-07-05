@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md) | Русский | [Türkçe](README.tr.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Italiano](README.it.md)
 
-# oh-my-claudecode
+# lazycc
 
-[![npm version](https://img.shields.io/npm/v/oh-my-claude-sisyphus?color=cb3837)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![npm downloads](https://img.shields.io/npm/dm/oh-my-claude-sisyphus?color=blue)](https://www.npmjs.com/package/oh-my-claude-sisyphus)
-[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/oh-my-claudecode?style=flat&color=yellow)](https://github.com/Yeachan-Heo/oh-my-claudecode/stargazers)
+[![npm version](https://img.shields.io/npm/v/lazycc?color=cb3837)](https://www.npmjs.com/package/lazycc)
+[![npm downloads](https://img.shields.io/npm/dm/lazycc?color=blue)](https://www.npmjs.com/package/lazycc)
+[![GitHub stars](https://img.shields.io/github/stars/Yeachan-Heo/lazycc?style=flat&color=yellow)](https://github.com/Yeachan-Heo/lazycc/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-red?style=flat&logo=github)](https://github.com/sponsors/Yeachan-Heo)
 [![Discord](https://img.shields.io/discord/1452487457085063218?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/PUwSMR9XNk)
@@ -13,7 +13,7 @@
 
 _Не изучайте Claude Code. Просто используйте OMC._
 
-[Начать](#быстрый-старт) • [Документация](https://yeachan-heo.github.io/oh-my-claudecode-website) • [Руководство по миграции](docs/MIGRATION.md)
+[Начать](#быстрый-старт) • [Документация](https://yeachan-heo.github.io/lazycc-website) • [Руководство по миграции](docs/MIGRATION.md)
 
 ---
 
@@ -22,14 +22,14 @@ _Не изучайте Claude Code. Просто используйте OMC._
 **Шаг 1: Установка**
 
 ```bash
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
+/plugin install lazycc
 ```
 
 **Шаг 2: Настройка**
 
 ```bash
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 Если вы запускаете OMC через `omc --plugin-dir <path>` или `claude --plugin-dir <path>`, добавьте `--plugin-dir-mode` к `omc setup` (или экспортируйте `OMC_PLUGIN_ROOT` заранее) чтобы избежать дублирования умений/агентов, которые плагин уже предоставляет во время выполнения. Полную матрицу решений и все доступные флаги см. в [разделе Plugin directory flags в REFERENCE.md](./docs/REFERENCE.md#plugin-directory-flags).
@@ -49,7 +49,7 @@ autopilot: build a REST API for managing tasks
 Начиная с **v4.1.7**, **Team** — это каноническая поверхность оркестрации в OMC. Устаревшие точки входа, такие как **swarm** и **ultrapilot**, по-прежнему поддерживаются, но теперь **направляются в Team под капотом**.
 
 ```bash
-/oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+/lazycc:team 3:executor "fix all TypeScript errors"
 ```
 
 Team работает как поэтапный pipeline:
@@ -68,33 +68,33 @@ Team работает как поэтапный pipeline:
 
 > Если teams отключены, OMC предупредит вас и переключится на выполнение без Team, если это возможно.
 
-> **Примечание: Название пакета** — Проект использует бренд **oh-my-claudecode** (репозиторий, плагин, команды), но npm-пакет публикуется как [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). Если вы устанавливаете CLI-инструменты через npm/bun, используйте `npm install -g oh-my-claude-sisyphus`.
+> **Примечание: Название пакета** — Проект использует бренд **lazycc** (репозиторий, плагин, команды), но npm-пакет публикуется как [`lazycc`](https://www.npmjs.com/package/lazycc). Если вы устанавливаете CLI-инструменты через npm/bun, используйте `npm install -g lazycc`.
 
 ### Обновление
 
 ```bash
 # 1. Обновите плагин
-/plugin install oh-my-claudecode
+/plugin install lazycc
 
 # 2. Перезапустите setup для обновления конфигурации
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 Если после обновления возникли проблемы, очистите старый кэш плагина:
 
 ```bash
-/oh-my-claudecode:omc-doctor
+/lazycc:omc-doctor
 ```
 
 <h1 align="center">Ваш Claude только что получил суперсилу.</h1>
 
 <p align="center">
-  <img src="assets/omc-character.jpg" alt="oh-my-claudecode" width="400" />
+  <img src="assets/omc-character.jpg" alt="lazycc" width="400" />
 </p>
 
 ---
 
-## Почему oh-my-claudecode?
+## Почему lazycc?
 
 - **Настройка не требуется** — Работает сразу из коробки с умными значениями по умолчанию
 - **Team-first оркестрация** — Team является каноническим мультиагентным интерфейсом (swarm/ultrapilot — фасады совместимости)
@@ -111,7 +111,7 @@ Team работает как поэтапный pipeline:
 
 ### Режимы оркестрации
 
-Множество стратегий для разных сценариев — от оркестрации через Team до рефакторинга с экономией токенов. [Подробнее →](https://yeachan-heo.github.io/oh-my-claudecode-website/docs.html#execution-modes)
+Множество стратегий для разных сценариев — от оркестрации через Team до рефакторинга с экономией токенов. [Подробнее →](https://yeachan-heo.github.io/lazycc-website/docs.html#execution-modes)
 
 | Режим                               | Описание                                                                                      | Применение                                                                        |
 | ----------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -180,7 +180,7 @@ source: extracted
 
 | Ключевое слово | Эффект                                          | Пример                                                          |
 | -------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| `team`         | Каноническая Team-оркестрация                   | `/oh-my-claudecode:team 3:executor "fix all TypeScript errors"` |
+| `team`         | Каноническая Team-оркестрация                   | `/lazycc:team 3:executor "fix all TypeScript errors"` |
 | `autopilot`    | Полностью автономное выполнение                 | `autopilot: build a todo app`                                   |
 | `ralph`        | Режим настойчивости                             | `ralph: refactor auth`                                          |
 | `ulw`          | Максимальный параллелизм                        | `ulw fix all errors`                                            |
@@ -237,7 +237,7 @@ omc config-stop-callback discord --clear-tags
 **Быстрая настройка (рекомендуется):**
 
 ```bash
-/oh-my-claudecode:configure-notifications
+/lazycc:configure-notifications
 # → При запросе введите "openclaw" → выберите "OpenClaw Gateway"
 ```
 
@@ -296,7 +296,7 @@ omc config-stop-callback discord --clear-tags
 
 - **[Полный справочник](docs/REFERENCE.md)** — Полная документация по функциям
 - **[Мониторинг производительности](docs/PERFORMANCE-MONITORING.md)** — Отслеживание агентов, отладка и оптимизация
-- **[Веб-сайт](https://yeachan-heo.github.io/oh-my-claudecode-website)** — Интерактивные руководства и примеры
+- **[Веб-сайт](https://yeachan-heo.github.io/lazycc-website)** — Интерактивные руководства и примеры
 - **[Руководство по миграции](docs/MIGRATION.md)** — Обновление с v2.x
 - **[Архитектура](docs/ARCHITECTURE.md)** — Как это работает под капотом
 
@@ -336,7 +336,7 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/oh-my-claudecode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=Yeachan-Heo/lazycc&type=date&legend=top-left)](https://www.star-history.com/#Yeachan-Heo/lazycc&type=date&legend=top-left)
 
 ## 💖 Поддержите этот проект
 

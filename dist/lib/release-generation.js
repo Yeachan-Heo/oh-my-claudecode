@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-const DEFAULT_REPO_URL = 'https://github.com/Yeachan-Heo/oh-my-claudecode';
+const DEFAULT_REPO_URL = 'https://github.com/Yeachan-Heo/lazycc';
 const CONVENTIONAL_RE = /^(?<type>[a-z]+)(?:\((?<scope>[^)]*)\))?:\s*(?<desc>.+)$/;
 function parseConventionalSubject(raw) {
     const match = raw.match(CONVENTIONAL_RE);
@@ -184,7 +184,7 @@ export function generateChangelog(version, categories, prCount) {
     const secCount = categories.get('security')?.length ?? 0;
     const otherCount = categories.get('other')?.length ?? 0;
     const statsLine = `- **${pluralize(prCount, 'PR merged', 'PRs merged')}** | **${pluralize(featCount, 'new feature')}** | **${pluralize(fixCount, 'bug fix', 'bug fixes')}** | **${pluralize(secCount, 'security/hardening improvement')}** | **${pluralize(otherCount, 'other change')}**`;
-    let md = `# oh-my-claudecode v${version}: ${title}\n\n`;
+    let md = `# lazycc v${version}: ${title}\n\n`;
     md += `## Release Notes\n\n${summary}\n`;
     for (const section of sections) {
         md += `\n### ${section.title}\n\n`;
@@ -197,9 +197,9 @@ export function generateReleaseBody(version, changelog, contributors, prevTag, r
     let body = changelog;
     body += `\n### Install / Update\n\n`;
     body += '```bash\n';
-    body += `npm install -g oh-my-claude-sisyphus@${version}\n`;
+    body += `npm install -g lazycc@${version}\n`;
     body += '```\n\n';
-    body += 'Or reinstall the plugin:\n```bash\nclaude /install-plugin oh-my-claudecode\n```\n';
+    body += 'Or reinstall the plugin:\n```bash\nclaude /install-plugin lazycc\n```\n';
     if (prevTag) {
         body += `\n**Full Changelog**: ${repoUrl}/compare/${prevTag}...v${version}\n`;
     }

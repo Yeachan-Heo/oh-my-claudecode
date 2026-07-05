@@ -40,12 +40,12 @@ Just include these words naturally in your request:
 
 TEAMS:
 Spawn coordinated agents with shared task lists and real-time messaging:
-- /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
-- /oh-my-claudecode:team 5:debugger "fix build errors in src/"
+- /lazycc:team 3:executor "fix all TypeScript errors"
+- /lazycc:team 5:debugger "fix build errors in src/"
 Teams use Claude Code native tools (TeamCreate/SendMessage/TaskCreate).
 
 MCP SERVERS:
-Run /oh-my-claudecode:mcp-setup to add tools like web search, GitHub, etc.
+Run /lazycc:mcp-setup to add tools like web search, GitHub, etc.
 
 HUD STATUSLINE:
 The status bar now shows OMC state. Restart Claude Code to see it.
@@ -85,7 +85,7 @@ MAGIC KEYWORDS (power-user shortcuts):
 
 TEAMS (NEW!):
 Spawn coordinated agents with shared task lists and real-time messaging:
-- /oh-my-claudecode:team 3:executor "fix all TypeScript errors"
+- /lazycc:team 3:executor "fix all TypeScript errors"
 - Uses Claude Code native tools (TeamCreate/SendMessage/TaskCreate)
 
 HUD STATUSLINE:
@@ -134,7 +134,7 @@ gh auth status &>/dev/null
 **Before prompting, check if the repository is already starred:**
 
 ```bash
-gh api user/starred/Yeachan-Heo/oh-my-claudecode &>/dev/null
+gh api user/starred/Yeachan-Heo/lazycc &>/dev/null
 ```
 
 **If already starred (exit code 0):**
@@ -145,7 +145,7 @@ gh api user/starred/Yeachan-Heo/oh-my-claudecode &>/dev/null
 
 Use AskUserQuestion:
 
-**Question:** "If you're enjoying oh-my-claudecode, would you like to support the project by starring it on GitHub?"
+**Question:** "If you're enjoying lazycc, would you like to support the project by starring it on GitHub?"
 
 **Options:**
 1. **Yes, star it!** - Star the repository
@@ -155,7 +155,7 @@ Use AskUserQuestion:
 If user chooses "Yes, star it!":
 
 ```bash
-gh api -X PUT /user/starred/Yeachan-Heo/oh-my-claudecode 2>/dev/null && echo "Thanks for starring!" || true
+gh api -X PUT /user/starred/Yeachan-Heo/lazycc 2>/dev/null && echo "Thanks for starring!" || true
 ```
 
 **Note:** Fail silently if the API call doesn't work - never block setup completion.
@@ -164,8 +164,8 @@ gh api -X PUT /user/starred/Yeachan-Heo/oh-my-claudecode 2>/dev/null && echo "Th
 
 ```bash
 echo ""
-echo "If you enjoy oh-my-claudecode, consider starring the repo:"
-echo "  https://github.com/Yeachan-Heo/oh-my-claudecode"
+echo "If you enjoy lazycc, consider starring the repo:"
+echo "  https://github.com/Yeachan-Heo/lazycc"
 echo ""
 ```
 

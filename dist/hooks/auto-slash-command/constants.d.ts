@@ -13,7 +13,7 @@ export declare const AUTO_SLASH_COMMAND_TAG_CLOSE = "</auto-slash-command>";
 export declare const SLASH_COMMAND_PATTERN: RegExp;
 /**
  * Commands that should NOT be auto-expanded
- * (they have special handling elsewhere or are now skills with oh-my-claudecode: prefix)
+ * (they have special handling elsewhere or are now skills with lazycc: prefix)
  */
 export declare const EXCLUDED_COMMANDS: Set<string>;
 //# sourceMappingURL=constants.d.ts.map

@@ -8,11 +8,11 @@ import type { OmcHudState, BackgroundTask, HudConfig } from "./types.js";
 /**
  * Read HUD state from disk (checks new local and legacy local only)
  */
-export declare function readHudState(directory?: string): OmcHudState | null;
+export declare function readHudState(directory?: string, sessionId?: string): OmcHudState | null;
 /**
  * Write HUD state to disk (local only)
  */
-export declare function writeHudState(state: OmcHudState, directory?: string): boolean;
+export declare function writeHudState(state: OmcHudState, directory?: string, sessionId?: string): boolean;
 /**
  * Create a new empty HUD state
  */
@@ -45,5 +45,5 @@ export declare function applyPreset(preset: HudConfig["preset"]): HudConfig;
  * Initialize HUD state with cleanup of stale/orphaned tasks.
  * Should be called on HUD startup.
  */
-export declare function initializeHUDState(directory?: string): Promise<void>;
+export declare function initializeHUDState(directory?: string, sessionId?: string): Promise<void>;
 //# sourceMappingURL=state.d.ts.map

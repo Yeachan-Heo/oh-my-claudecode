@@ -22,8 +22,8 @@ function getTaskStartMs(task) {
  * @param thresholdMs Age threshold in milliseconds (default: 30 minutes)
  * @returns Number of tasks removed
  */
-export async function cleanupStaleBackgroundTasks(thresholdMs = STALE_TASK_THRESHOLD_MS, directory) {
-    const state = readHudState(directory);
+export async function cleanupStaleBackgroundTasks(thresholdMs = STALE_TASK_THRESHOLD_MS, directory, sessionId) {
+    const state = readHudState(directory, sessionId);
     if (!state || !state.backgroundTasks) {
         return 0;
     }
@@ -79,7 +79,7 @@ export async function cleanupStaleBackgroundTasks(thresholdMs = STALE_TASK_THRES
     const removedCount = originalCount - state.backgroundTasks.length;
     if (removedCount > 0 || statusChanged) {
         state.timestamp = new Date().toISOString();
-        writeHudState(state, directory);
+        writeHudState(state, directory, sessionId);
     }
     return removedCount;
 }
@@ -89,8 +89,8 @@ export async function cleanupStaleBackgroundTasks(thresholdMs = STALE_TASK_THRES
  *
  * @returns Array of orphaned tasks
  */
-export async function detectOrphanedTasks(directory) {
-    const state = readHudState(directory);
+export async function detectOrphanedTasks(directory, sessionId) {
+    const state = readHudState(directory, sessionId);
     if (!state || !state.backgroundTasks) {
         return [];
     }
@@ -115,12 +115,12 @@ export async function detectOrphanedTasks(directory) {
  *
  * @returns Number of tasks marked
  */
-export async function markOrphanedTasksAsStale(directory) {
-    const state = readHudState(directory);
+export async function markOrphanedTasksAsStale(directory, sessionId) {
+    const state = readHudState(directory, sessionId);
     if (!state || !state.backgroundTasks) {
         return 0;
     }
-    const orphaned = await detectOrphanedTasks(directory);
+    const orphaned = await detectOrphanedTasks(directory, sessionId);
     let marked = 0;
     for (const orphanedTask of orphaned) {
         const task = state.backgroundTasks.find(t => t.id === orphanedTask.id);
@@ -130,7 +130,7 @@ export async function markOrphanedTasksAsStale(directory) {
         }
     }
     if (marked > 0) {
-        writeHudState(state, directory);
+        writeHudState(state, directory, sessionId);
     }
     return marked;
 }

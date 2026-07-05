@@ -79,7 +79,7 @@ Syncs all files. Output:
 ========================
 
 Version: 3.5.0
-Package: oh-my-claudecode
+Package: lazycc
 Agents: 32
 Skills: 45
 

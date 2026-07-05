@@ -773,7 +773,7 @@ Examples:
         console.log(chalk.gray('  (Run the install script to create version metadata)'));
     }
     console.log(chalk.gray('\n━'.repeat(50)));
-    console.log(chalk.gray('\nTo check for updates, run: oh-my-claudecode update --check'));
+    console.log(chalk.gray('\nTo check for updates, run: lazycc update --check'));
 });
 /**
  * Install command - Install agents and commands (default: ~/.claude/)
@@ -1186,7 +1186,7 @@ Examples:
         if (reportedVersion !== version) {
             console.log(chalk.gray(`CLI package version: ${version}`));
         }
-        console.log(chalk.gray('Start Claude Code and use /oh-my-claudecode:omc-setup for interactive setup.'));
+        console.log(chalk.gray('Start Claude Code and use /lazycc:omc-setup for interactive setup.'));
     }
 });
 /**
@@ -1204,13 +1204,13 @@ program
     });
     if (result.success) {
         console.log(chalk.green('✓ Oh-My-ClaudeCode installed successfully!'));
-        console.log(chalk.gray('  Run "oh-my-claudecode info" to see available agents.'));
+        console.log(chalk.gray('  Run "lazycc info" to see available agents.'));
         console.log(chalk.yellow('  Run "/omc-default" (project) or "/omc-default-global" (global) in Claude Code.'));
     }
     else {
         // Don't fail the npm install, just warn
         console.warn(chalk.yellow('⚠ Could not complete OMC setup:'), result.message);
-        console.warn(chalk.gray('  Run "oh-my-claudecode install" manually to complete setup.'));
+        console.warn(chalk.gray('  Run "lazycc install" manually to complete setup.'));
     }
 });
 /**

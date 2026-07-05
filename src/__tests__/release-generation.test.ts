@@ -118,13 +118,13 @@ describe('release generation', () => {
   it('assembles a single custom release body with compare link and contributors', () => {
     const body = generateReleaseBody(
       '4.10.2',
-      '# oh-my-claudecode v4.10.2: Bug Fixes',
+      '# lazycc v4.10.2: Bug Fixes',
       ['blue-int', 'DdangJin', 'Yeachan-Heo'],
       'v4.10.1',
     );
 
-    expect(body).toContain('npm install -g oh-my-claude-sisyphus@4.10.2');
-    expect(body).toContain('https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.10.1...v4.10.2');
+    expect(body).toContain('npm install -g lazycc@4.10.2');
+    expect(body).toContain('https://github.com/Yeachan-Heo/lazycc/compare/v4.10.1...v4.10.2');
     expect(body).toContain('@blue-int @DdangJin @Yeachan-Heo');
     expect(body.match(/## Contributors/g)).toHaveLength(1);
   });

@@ -1,6 +1,6 @@
 /**
  * Integration test for rate-limit stop guard in checkPersistentModes
- * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/777
+ * Fix for: https://github.com/Yeachan-Heo/lazycc/issues/777
  *
  * Verifies that when Claude Code stops due to a rate limit (HTTP 429),
  * the persistent-mode hook does NOT block the stop — preventing an

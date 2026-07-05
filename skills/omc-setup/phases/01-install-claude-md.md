@@ -7,7 +7,7 @@ If `--global` flag was passed, set `CONFIG_TARGET=global`.
 
 Otherwise (initial setup wizard), use AskUserQuestion to prompt:
 
-**Question:** "Where should I configure oh-my-claudecode?"
+**Question:** "Where should I configure lazycc?"
 
 **Options:**
 1. **Local (this project)** - Creates `.claude/CLAUDE.md` in current project directory. Best for project-specific configurations.
@@ -46,7 +46,7 @@ For `local` installs inside a git repository, the script also seeds `.git/info/e
 
 **FALLBACK** if curl fails:
 Tell user to manually download from:
-https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md
+https://raw.githubusercontent.com/Yeachan-Heo/lazycc/main/docs/CLAUDE.md
 
 **Note**: The downloaded CLAUDE.md includes Context Persistence instructions with `<remember>` tags for surviving conversation compaction.
 

@@ -21,8 +21,8 @@ function makeRalphSession(tempDir, sessionId) {
 }
 describe('persistent-mode cancel race guard (issue #921)', () => {
     it.each([
-        '/oh-my-claudecode:cancel',
-        '/oh-my-claudecode:cancel --force'
+        '/lazycc:cancel',
+        '/lazycc:cancel --force'
     ])('should not re-enforce while explicit cancel prompt is "%s"', async (cancelPrompt) => {
         const sessionId = `session-921-${cancelPrompt.includes('force') ? 'force' : 'normal'}`;
         const tempDir = mkdtempSync(join(tmpdir(), 'persistent-cancel-race-'));

@@ -100,8 +100,8 @@ describe('isOmcHook()', () => {
         expect(isOmcHook('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/keyword-detector.mjs"')).toBe(true);
         expect(isOmcHook('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"')).toBe(true);
     });
-    it('recognises oh-my-claudecode in command path', () => {
-        expect(isOmcHook('/path/to/oh-my-claudecode/hook.mjs')).toBe(true);
+    it('recognises lazycc in command path', () => {
+        expect(isOmcHook('/path/to/lazycc/hook.mjs')).toBe(true);
     });
     it('recognises omc as a path segment', () => {
         expect(isOmcHook('/usr/local/bin/omc-hook.sh')).toBe(true);

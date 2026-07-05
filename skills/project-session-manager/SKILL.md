@@ -19,7 +19,7 @@ level: 2
 
 Automate isolated development environments using git worktrees and tmux sessions with Claude Code. Enables parallel work across multiple tasks, projects, and repositories.
 
-Canonical slash command: `/oh-my-claudecode:project-session-manager` (alias: `/oh-my-claudecode:psm`).
+Canonical slash command: `/lazycc:project-session-manager` (alias: `/lazycc:psm`).
 
 ## Commands
 
@@ -50,8 +50,8 @@ Supported formats:
 {
   "aliases": {
     "omc": {
-      "repo": "Yeachan-Heo/oh-my-claudecode",
-      "local": "~/Workspace/oh-my-claudecode",
+      "repo": "Yeachan-Heo/lazycc",
+      "local": "~/Workspace/lazycc",
       "default_base": "main"
     }
   },
@@ -544,8 +544,8 @@ if [[ ! -f ~/.psm/projects.json ]]; then
 {
   "aliases": {
     "omc": {
-      "repo": "Yeachan-Heo/oh-my-claudecode",
-      "local": "~/Workspace/oh-my-claudecode",
+      "repo": "Yeachan-Heo/lazycc",
+      "local": "~/Workspace/lazycc",
       "default_base": "main"
     }
   },

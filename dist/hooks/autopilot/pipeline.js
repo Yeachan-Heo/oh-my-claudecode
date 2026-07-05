@@ -8,7 +8,7 @@
  * via PipelineConfig. The orchestrator manages state transitions, signal
  * detection, and prompt generation.
  *
- * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1130
+ * @see https://github.com/Yeachan-Heo/lazycc/issues/1130
  */
 import { DEFAULT_PIPELINE_CONFIG, STAGE_ORDER, DEPRECATED_MODE_ALIASES, } from "./pipeline-types.js";
 import { ALL_ADAPTERS, getAdapterById } from "./adapters/index.js";

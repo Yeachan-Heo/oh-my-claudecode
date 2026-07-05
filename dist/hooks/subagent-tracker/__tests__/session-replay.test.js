@@ -50,7 +50,7 @@ describe('session-replay', () => {
     });
     describe('event helpers', () => {
         it('recordAgentStart should record start event', () => {
-            recordAgentStart(testDir, 'sess3', 'agent-123', 'oh-my-claudecode:executor', 'Fix the bug', 'ultrawork', 'sonnet');
+            recordAgentStart(testDir, 'sess3', 'agent-123', 'lazycc:executor', 'Fix the bug', 'ultrawork', 'sonnet');
             const events = readReplayEvents(testDir, 'sess3');
             expect(events).toHaveLength(1);
             expect(events[0].event).toBe('agent_start');
@@ -59,7 +59,7 @@ describe('session-replay', () => {
             expect(events[0].parent_mode).toBe('ultrawork');
         });
         it('recordAgentStop should record stop event', () => {
-            recordAgentStop(testDir, 'sess4', 'agent-456', 'oh-my-claudecode:architect', true, 5000);
+            recordAgentStop(testDir, 'sess4', 'agent-456', 'lazycc:architect', true, 5000);
             const events = readReplayEvents(testDir, 'sess4');
             expect(events).toHaveLength(1);
             expect(events[0].event).toBe('agent_stop');

@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 
 const OMC_CLI_BINARY = 'omc';
 const OMC_PLUGIN_BRIDGE_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs';
+const commandExistsCache = new Map<string, boolean>();
 
 export interface OmcCliRenderOptions {
   env?: NodeJS.ProcessEnv;
@@ -10,11 +11,21 @@ export interface OmcCliRenderOptions {
 
 function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
   const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
+  const pathValue = env.PATH ?? env.Path ?? '';
+  const pathExtValue = process.platform === 'win32' ? env.PATHEXT ?? '' : '';
+  const cacheKey = [process.platform, lookupCommand, command, pathValue, pathExtValue].join('\0');
+  const cached = commandExistsCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const result = spawnSync(lookupCommand, [command], {
     stdio: 'ignore',
     env,
   });
-  return result.status === 0;
+  const exists = result.status === 0;
+  commandExistsCache.set(cacheKey, exists);
+  return exists;
 }
 
 export function resolveOmcCliPrefix(options: OmcCliRenderOptions = {}): string {

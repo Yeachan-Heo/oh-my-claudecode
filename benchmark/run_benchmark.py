@@ -2,7 +2,7 @@
 """
 SWE-bench Benchmark Runner for Claude Code (Vanilla vs OMC)
 
-This script evaluates Claude Code with and without oh-my-claudecode orchestration
+This script evaluates Claude Code with and without lazycc orchestration
 on the SWE-bench Verified dataset.
 
 Usage:
@@ -278,7 +278,7 @@ Instructions:
                 "--print",
                 "--model",
                 self.config.model,
-                f"/oh-my-claudecode:autopilot Fix this issue:\n\n{problem}",
+                f"/lazycc:autopilot Fix this issue:\n\n{problem}",
             ]
 
         token_usage = {}

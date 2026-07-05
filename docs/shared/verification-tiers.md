@@ -103,5 +103,5 @@ const tier = selectVerificationTier(changeMetadata);
 const { agent, model } = getVerificationAgent(tier);
 
 // Spawn appropriate verification agent
-Task(subagent_type=`oh-my-claudecode:${agent}`, model, prompt="Verify...")
+Task(subagent_type=`lazycc:${agent}`, model, prompt="Verify...")
 ```

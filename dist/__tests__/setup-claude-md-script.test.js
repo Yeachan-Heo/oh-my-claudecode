@@ -74,7 +74,7 @@ Use the real docs file.
         expect(readFileSync(installedSkillPath, 'utf-8')).toContain('# Test OMC Reference');
     });
     it('refuses to install a canonical source that lacks OMC markers', () => {
-        const fixture = createPluginFixture(`# oh-my-claudecode (OMC) v9.9.9 Summary
+        const fixture = createPluginFixture(`# lazycc (OMC) v9.9.9 Summary
 
 This is a summarized CLAUDE.md without markers.
 `);
@@ -174,7 +174,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(join(configDir, 'hooks'), { recursive: true });
         writeFileSync(join(configDir, 'hooks', 'keyword-detector.sh'), 'legacy');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
             cwd: fixture.projectRoot,
             env: {
@@ -201,7 +201,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
             cwd: fixture.projectRoot,
             env: {
@@ -230,7 +230,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [fixture.scriptPath, 'global', 'preserve'], {
             cwd: fixture.projectRoot,
             env: {
@@ -265,7 +265,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const env = {
             ...process.env,
             HOME: fixture.homeRoot,
@@ -299,7 +299,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const env = {
             ...process.env,
             HOME: fixture.homeRoot,
@@ -343,7 +343,7 @@ Use the real docs file.
         const configDir = join(fixture.homeRoot, 'custom-profile');
         mkdirSync(configDir, { recursive: true });
         writeFileSync(join(configDir, 'CLAUDE.md'), '# User CLAUDE\nKeep my base config.\n');
-        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const realTarget = join(fixture.homeRoot, 'outside-target.md');
         writeFileSync(realTarget, 'outside target');
         symlinkSync(realTarget, join(configDir, 'CLAUDE-omc.md'));
@@ -365,7 +365,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     it('does not prefer a newer cache directory when it is missing required plugin assets', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-invalid-newer-cache-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newerInvalid = join(cacheBase, '4.9.0');
         const projectRoot = join(root, 'project');
@@ -380,7 +380,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         mkdirSync(newerInvalid, { recursive: true });
         mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
         writeFileSync(join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({
-            'oh-my-claudecode@omc': [
+            'lazycc@lazycc': [
                 {
                     installPath: oldVersion,
                     version: '4.8.2',
@@ -389,7 +389,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         }));
         mkdirSync(projectRoot, { recursive: true });
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
             env: {
@@ -407,7 +407,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     it('ignores non-semver cache directories when selecting latest fallback version', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-ignore-non-semver-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newVersion = join(cacheBase, '4.9.0');
         const suffixedInvalid = join(cacheBase, '4.10.0.tmp');
@@ -426,7 +426,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         writeFileSync(join(suffixedInvalid, 'junk.txt'), 'not a plugin root');
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
         mkdirSync(projectRoot, { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         // No installed_plugins.json => fallback scan path
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
@@ -445,7 +445,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     it('prefers newer cache version when installed_plugins.json points to an existing but stale older version', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-json-old-version-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newVersion = join(cacheBase, '4.9.0');
         const projectRoot = join(root, 'project');
@@ -463,7 +463,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         // installed_plugins.json still points at the old but existing path
         mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
         writeFileSync(join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({
-            'oh-my-claudecode@omc': [
+            'lazycc@lazycc': [
                 {
                     installPath: oldVersion,
                     version: '4.8.2',
@@ -472,7 +472,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         }));
         mkdirSync(projectRoot, { recursive: true });
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
             env: {
@@ -492,7 +492,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         // Simulate: script lives at old version (4.8.2), but installed_plugins.json points to new version (4.9.0)
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-root-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newVersion = join(cacheBase, '4.9.0');
         const projectRoot = join(root, 'project');
@@ -510,7 +510,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         // Create installed_plugins.json pointing to the new version
         mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
         writeFileSync(join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({
-            'oh-my-claudecode@omc': [
+            'lazycc@lazycc': [
                 {
                     installPath: newVersion,
                     version: '4.9.0',
@@ -520,7 +520,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         // Create project dir and settings.json (needed for plugin verification)
         mkdirSync(projectRoot, { recursive: true });
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         // Run the OLD version's script — it should resolve to the NEW version's docs/CLAUDE.md
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
@@ -541,7 +541,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     it('uses docs/CLAUDE.md from the active version when installed_plugins.json wraps plugins under a plugins key', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-wrapped-root-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newVersion = join(cacheBase, '4.9.0');
         const projectRoot = join(root, 'project');
@@ -557,7 +557,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
         writeFileSync(join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({
             plugins: {
-                'oh-my-claudecode@omc': [
+                'lazycc@lazycc': [
                     {
                         installPath: newVersion,
                         version: '4.9.0',
@@ -567,7 +567,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         }));
         mkdirSync(projectRoot, { recursive: true });
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
             env: {
@@ -586,7 +586,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     it('falls back to scanning cache for latest version when installed_plugins.json is unavailable', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-stale-fallback-'));
         tempRoots.push(root);
-        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const cacheBase = join(root, '.claude', 'plugins', 'cache', 'lazycc', 'lazycc');
         const oldVersion = join(cacheBase, '4.8.2');
         const newVersion = join(cacheBase, '4.9.0');
         const projectRoot = join(root, 'project');
@@ -604,7 +604,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
         // No installed_plugins.json — fallback to cache scan
         mkdirSync(join(homeRoot, '.claude'), { recursive: true });
         mkdirSync(projectRoot, { recursive: true });
-        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['lazycc'] }));
         const result = spawnSync('bash', [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
             cwd: projectRoot,
             env: {

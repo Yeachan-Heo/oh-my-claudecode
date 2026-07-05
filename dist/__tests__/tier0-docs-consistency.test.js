@@ -21,7 +21,7 @@ describe('Tier-0 contract docs consistency', () => {
     });
     it('documents all Tier-0 slash commands in REFERENCE.md', () => {
         for (const skillName of ['autopilot', 'ultrawork', 'ralph', 'team', 'ralplan']) {
-            expect(referenceDoc).toContain(`/oh-my-claudecode:${skillName}`);
+            expect(referenceDoc).toContain(`/lazycc:${skillName}`);
         }
     });
     it('documents all Tier-0 keywords in CLAUDE.md', () => {
@@ -31,7 +31,7 @@ describe('Tier-0 contract docs consistency', () => {
     });
     it('does not contain blank placeholder rows in core skill/command docs', () => {
         expect(referenceDoc).not.toContain('| `` |');
-        expect(referenceDoc).not.toContain('/oh-my-claudecode: <task>');
+        expect(referenceDoc).not.toContain('/lazycc: <task>');
         expect(referenceDoc).not.toContain('incl. )');
     });
     it('keeps ralplan documented as a keyword trigger', () => {
@@ -43,8 +43,8 @@ describe('Tier-0 contract docs consistency', () => {
         expect(referenceDoc).toContain('`psm` | **Deprecated** compatibility alias for `project-session-manager`');
     });
     it('does not document removed wrapper slash commands as installed skills', () => {
-        expect(referenceDoc).not.toContain('/oh-my-claudecode:analyze <target>');
-        expect(referenceDoc).not.toContain('/oh-my-claudecode:tdd <feature>');
+        expect(referenceDoc).not.toContain('/lazycc:analyze <target>');
+        expect(referenceDoc).not.toContain('/lazycc:tdd <feature>');
     });
     it('documents team as explicit-only rather than an auto-triggered keyword', () => {
         expect(claudeDoc).toContain('Team orchestration is explicit via `/team`.');
@@ -52,15 +52,15 @@ describe('Tier-0 contract docs consistency', () => {
     });
     it('keeps install and update guidance aligned on canonical setup entrypoints', () => {
         const localPluginDoc = readProjectFile('docs', 'LOCAL_PLUGIN_INSTALL.md');
-        expect(claudeDoc).toContain('Say "setup omc" or run `/oh-my-claudecode:omc-setup`.');
-        expect(referenceDoc).toContain('/oh-my-claudecode:setup');
+        expect(claudeDoc).toContain('Say "setup omc" or run `/lazycc:omc-setup`.');
+        expect(referenceDoc).toContain('/lazycc:setup');
         expect(localPluginDoc).toContain('/setup');
         expect(localPluginDoc).toContain('git worktrees');
     });
     it('keeps root AGENTS.md aligned with OMC branding and state paths', () => {
         const agentsDoc = readProjectFile('AGENTS.md');
-        expect(agentsDoc).toContain('# oh-my-claudecode - Intelligent Multi-Agent Orchestration');
-        expect(agentsDoc).toContain('You are running with oh-my-claudecode (OMC), a multi-agent orchestration layer for Claude Code.');
+        expect(agentsDoc).toContain('# lazycc - Intelligent Multi-Agent Orchestration');
+        expect(agentsDoc).toContain('You are running with lazycc (OMC), a multi-agent orchestration layer for Claude Code.');
         expect(agentsDoc).toContain('`.omc/state/`');
         expect(agentsDoc).toContain('Run `omc setup` to install all components. Run `omc doctor` to verify installation.');
         expect(agentsDoc).not.toContain('oh-my-codex');

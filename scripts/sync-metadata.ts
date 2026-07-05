@@ -72,7 +72,7 @@ function loadMetadata(): Metadata {
     keywords: packageJson.keywords || [],
     repository: packageJson.repository?.url?.replace(/^git\+/, '').replace(/\.git$/, '') || '',
     homepage: packageJson.homepage || '',
-    npmPackage: packageJson.name || 'oh-my-claude-sisyphus',
+    npmPackage: packageJson.name || 'lazycc',
   };
 }
 

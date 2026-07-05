@@ -206,6 +206,9 @@ Final draft.`);
             it('should NOT detect help-style use questions for autopilot', () => {
                 expect(detectKeywordsWithType('How do I use autopilot?')).toEqual([]);
             });
+            it('should NOT detect what-is plus how-to-use phrasing for autopilot', () => {
+                expect(detectKeywordsWithType("What's autopilot and how to use it?")).toEqual([]);
+            });
             it('should detect explicit activation even when a nearby help question exists', () => {
                 const result = detectKeywordsWithType('Use autopilot to fix bug in payments. What is the expected output?');
                 expect(result.find((r) => r.type === 'autopilot')).toBeDefined();

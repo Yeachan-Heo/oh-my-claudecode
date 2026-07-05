@@ -12,6 +12,10 @@ export function generateTriggerMessage(teamName, workerName, teamStateRoot = '.o
     }
     return `Read ${inboxPath}, start work now, report concrete progress (not ACK-only), and keep executing your assigned or next feasible work.`;
 }
+export function generatePromptModeStartupPrompt(teamName, workerName, teamStateRoot = '.omc/state') {
+    const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
+    return `Open ${inboxPath}. Follow it and begin the assigned work.`;
+}
 export function generateMailboxTriggerMessage(teamName, workerName, count = 1, teamStateRoot = '.omc/state') {
     const normalizedCount = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
     const mailboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'mailbox', `${workerName}.json`);

@@ -547,18 +547,18 @@ function generatePromptForComponent(component, analysis, _context) {
 }
 function selectAgentType(component) {
     const roleToAgent = {
-        frontend: 'oh-my-claudecode:designer',
-        backend: 'oh-my-claudecode:executor',
-        database: 'oh-my-claudecode:executor',
-        api: 'oh-my-claudecode:executor',
-        ui: 'oh-my-claudecode:designer',
-        shared: 'oh-my-claudecode:executor',
-        testing: 'oh-my-claudecode:qa-tester',
-        docs: 'oh-my-claudecode:writer',
-        config: 'oh-my-claudecode:executor',
-        module: 'oh-my-claudecode:executor'
+        frontend: 'lazycc:designer',
+        backend: 'lazycc:executor',
+        database: 'lazycc:executor',
+        api: 'lazycc:executor',
+        ui: 'lazycc:designer',
+        shared: 'lazycc:executor',
+        testing: 'lazycc:qa-tester',
+        docs: 'lazycc:writer',
+        config: 'lazycc:executor',
+        module: 'lazycc:executor'
     };
-    return roleToAgent[component.role] || 'oh-my-claudecode:executor';
+    return roleToAgent[component.role] || 'lazycc:executor';
 }
 function selectModelTier(component) {
     if (component.effort < 0.3)

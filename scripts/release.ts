@@ -35,7 +35,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
-const DEFAULT_REPO_SLUG = 'Yeachan-Heo/oh-my-claudecode';
+const DEFAULT_REPO_SLUG = 'Yeachan-Heo/lazycc';
 const REPO_SLUG = process.env.GITHUB_REPOSITORY || DEFAULT_REPO_SLUG;
 const REPO_URL = `https://github.com/${REPO_SLUG}`;
 const GITHUB_API_URL = process.env.GITHUB_API_URL || 'https://api.github.com';
@@ -160,7 +160,7 @@ function toReleaseNoteEntryFromCommit(commit: ParsedCommit): ReleaseNoteEntry {
 function getGitHubApiHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'oh-my-claudecode-release-script',
+    'User-Agent': 'lazycc-release-script',
   };
 
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;

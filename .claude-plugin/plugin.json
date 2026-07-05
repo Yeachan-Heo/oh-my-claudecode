@@ -1,9 +1,9 @@
 {
-  "name": "oh-my-claudecode",
+  "name": "lazycc",
   "version": "4.11.5",
-  "description": "Multi-agent orchestration system for Claude Code",
+  "description": "LazyCC multi-agent orchestration system for Claude Code",
   "author": {
-    "name": "oh-my-claudecode contributors"
+    "name": "lazycc contributors"
   },
   "repository": "https://github.com/Yeachan-Heo/oh-my-claudecode",
   "homepage": "https://github.com/Yeachan-Heo/oh-my-claudecode",

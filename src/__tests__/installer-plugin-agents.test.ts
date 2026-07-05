@@ -91,7 +91,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
       'plugins',
       'cache',
       'omc',
-      'oh-my-claudecode',
+      'lazycc',
       '9.9.9'
     );
     const pluginAgentsDir = join(pluginInstallPath, 'agents');
@@ -102,7 +102,7 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
     writeFileSync(installedPluginsPath, JSON.stringify({
       plugins: {
-        'oh-my-claudecode@omc': [
+        'lazycc@lazycc': [
           { installPath: pluginInstallPath }
         ]
       }

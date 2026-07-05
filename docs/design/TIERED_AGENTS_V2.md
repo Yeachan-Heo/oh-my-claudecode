@@ -283,7 +283,7 @@ Escalate when: [specific conditions]
 
 <Escalation_Protocol>
 When you detect tasks beyond your scope, output:
-**ESCALATION RECOMMENDED**: [reason] → Use oh-my-claudecode:[higher-tier]
+**ESCALATION RECOMMENDED**: [reason] → Use lazycc:[higher-tier]
 </Escalation_Protocol>
 ```
 

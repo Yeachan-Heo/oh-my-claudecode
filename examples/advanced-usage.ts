@@ -153,7 +153,7 @@ Always:
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { createOmcSession } from 'oh-my-claudecode';
+import { createOmcSession } from 'lazycc';
 
 // Create custom MCP server with your tools
 const customTools = createSdkMcpServer({

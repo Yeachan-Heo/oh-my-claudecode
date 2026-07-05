@@ -17,7 +17,7 @@ function defaultPolicy() {
         enabled: true,
         mode: 'quick',
         strict_project_patterns: [],
-        forbidden_path_prefixes: [join(getClaudeConfigDir(), 'plugins/cache/omc/')],
+        forbidden_path_prefixes: [join(getClaudeConfigDir(), 'plugins/cache/lazycc/')],
         forbidden_path_substrings: ['/.omc/', '.omc-config.json'],
         readonly_command_prefixes: [
             'ls ', 'cat ', 'find ', 'grep ', 'head ', 'tail ', 'stat ', 'echo ', 'wc ',
@@ -88,7 +88,7 @@ describe('Factcheck Guard (issue #1155)', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
         claims.files_created = [
-            join(getClaudeConfigDir(), 'plugins/cache/omc/touched.txt'),
+            join(getClaudeConfigDir(), 'plugins/cache/lazycc/touched.txt'),
         ];
         const result = runChecks(claims, 'declared', policy, '/tmp/original');
         expect(result.verdict).toBe('FAIL');
@@ -118,7 +118,7 @@ describe('Factcheck Guard (issue #1155)', () => {
     it('forbidden command in mutating context is FAIL', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
-        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/omc/');
+        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/lazycc/');
         claims.commands_executed = [
             `rm -rf ${forbiddenPath}data`,
         ];
@@ -129,7 +129,7 @@ describe('Factcheck Guard (issue #1155)', () => {
     it('readonly command in forbidden path is allowed', () => {
         const policy = defaultPolicy();
         const claims = baseClaims();
-        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/omc/');
+        const forbiddenPath = join(getClaudeConfigDir(), 'plugins/cache/lazycc/');
         claims.commands_executed = [
             `ls ${forbiddenPath}`,
             `cat ${forbiddenPath}file.txt`,

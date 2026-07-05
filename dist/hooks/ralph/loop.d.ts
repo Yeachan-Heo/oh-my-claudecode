@@ -1,7 +1,7 @@
 /**
  * Ralph Hook
  *
- * Self-referential work loop that continues until cancelled via /oh-my-claudecode:cancel.
+ * Self-referential work loop that continues until cancelled via /lazycc:cancel.
  * Named after the character who keeps working until the job is done.
  *
  * Enhanced with PRD (Product Requirements Document) support for structured task tracking.

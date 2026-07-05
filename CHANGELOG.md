@@ -1,4 +1,4 @@
-# oh-my-claudecode v4.11.3: Bug Fixes
+# lazycc v4.11.3: Bug Fixes
 
 ## Release Notes
 

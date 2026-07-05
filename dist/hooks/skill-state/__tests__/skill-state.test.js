@@ -66,23 +66,23 @@ describe('skill-state', () => {
             expect(getSkillProtection('unknown-skill')).toBe('none');
             expect(getSkillProtection('my-custom-skill')).toBe('none');
         });
-        it('strips oh-my-claudecode: prefix', () => {
-            expect(getSkillProtection('oh-my-claudecode:plan')).toBe('medium');
-            expect(getSkillProtection('oh-my-claudecode:ralph')).toBe('none');
+        it('strips lazycc: prefix', () => {
+            expect(getSkillProtection('lazycc:plan')).toBe('medium');
+            expect(getSkillProtection('lazycc:ralph')).toBe('none');
         });
         it('is case-insensitive', () => {
             expect(getSkillProtection('SKILL')).toBe('light');
             expect(getSkillProtection('Plan')).toBe('medium');
         });
         it('returns none for project custom skills with same name as OMC skills (issue #1581)', () => {
-            // rawSkillName without oh-my-claudecode: prefix → project custom skill
+            // rawSkillName without lazycc: prefix → project custom skill
             expect(getSkillProtection('plan', 'plan')).toBe('none');
             expect(getSkillProtection('review', 'review')).toBe('none');
             expect(getSkillProtection('tdd', 'tdd')).toBe('none');
         });
         it('returns protection for OMC skills when rawSkillName has prefix', () => {
-            expect(getSkillProtection('plan', 'oh-my-claudecode:plan')).toBe('medium');
-            expect(getSkillProtection('deepinit', 'oh-my-claudecode:deepinit')).toBe('heavy');
+            expect(getSkillProtection('plan', 'lazycc:plan')).toBe('medium');
+            expect(getSkillProtection('deepinit', 'lazycc:deepinit')).toBe('heavy');
         });
         it('returns none for other plugin skills with rawSkillName', () => {
             // ouroboros:plan, claude-mem:make-plan etc. should not get OMC protection
@@ -150,7 +150,7 @@ describe('skill-state', () => {
             expect(files).toBe(true);
         });
         it('strips namespace prefix from skill name', () => {
-            const state = writeSkillActiveState(tempDir, 'oh-my-claudecode:plan', 'session-1');
+            const state = writeSkillActiveState(tempDir, 'lazycc:plan', 'session-1');
             expect(state.skill_name).toBe('plan');
         });
         it('does not write state for project custom skills with same name as OMC skills (issue #1581)', () => {
@@ -160,7 +160,7 @@ describe('skill-state', () => {
             expect(readSkillActiveState(tempDir, 'session-1')).toBeNull();
         });
         it('writes state for OMC skills when rawSkillName has prefix', () => {
-            const state = writeSkillActiveState(tempDir, 'plan', 'session-1', 'oh-my-claudecode:plan');
+            const state = writeSkillActiveState(tempDir, 'plan', 'session-1', 'lazycc:plan');
             expect(state).not.toBeNull();
             expect(state.skill_name).toBe('plan');
             expect(state.max_reinforcements).toBe(5);

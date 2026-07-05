@@ -7,7 +7,7 @@ level: 2
 
 # Skill Management CLI
 
-Meta-skill for managing oh-my-claudecode skills via CLI-like commands.
+Meta-skill for managing lazycc skills via CLI-like commands.
 
 ## Subcommands
 
@@ -23,7 +23,7 @@ Show all available skills organized by scope.
 5. Display in organized table format:
 
 ```
-BUILT-IN SKILLS (bundled with oh-my-claudecode):
+BUILT-IN SKILLS (bundled with lazycc):
 | Name              | Description                    | Scope    |
 |-------------------|--------------------------------|----------|
 | visual-verdict    | Structured visual QA verdicts  | built-in |
@@ -43,7 +43,7 @@ PROJECT SKILLS (.omc/skills/):
 
 **Fallback:** If quality/usage stats not available, show "N/A"
 
-**Built-in skill note:** Built-in skills are bundled with oh-my-claudecode and are discoverable/readable, but not removed or edited through `/skill remove` or `/skill edit`.
+**Built-in skill note:** Built-in skills are bundled with lazycc and are discoverable/readable, but not removed or edited through `/skill remove` or `/skill edit`.
 
 ---
 
@@ -94,7 +94,7 @@ argument-hint: "<args>"
 ## Examples
 
 ```
-/oh-my-claudecode:<name> example-arg
+/lazycc:<name> example-arg
 ```
 
 ## Notes
@@ -711,9 +711,9 @@ How to work with this integration correctly:
 
 When invoked with an argument, skip the interactive wizard:
 
-- `/oh-my-claudecode:skill list` - Show detailed skill inventory
-- `/oh-my-claudecode:skill add` - Start skill creation (invoke learner)
-- `/oh-my-claudecode:skill scan` - Scan both skill directories
+- `/lazycc:skill list` - Show detailed skill inventory
+- `/lazycc:skill add` - Start skill creation (invoke learner)
+- `/lazycc:skill scan` - Scan both skill directories
 
 ### Interactive Mode
 
@@ -759,16 +759,16 @@ Good skills are:
 
 ## Related Skills
 
-- `/oh-my-claudecode:learner` - Extract a skill from current conversation
-- `/oh-my-claudecode:note` - Save quick notes (less formal than skills)
-- `/oh-my-claudecode:deepinit` - Generate AGENTS.md codebase hierarchy
+- `/lazycc:learner` - Extract a skill from current conversation
+- `/lazycc:note` - Save quick notes (less formal than skills)
+- `/lazycc:deepinit` - Generate AGENTS.md codebase hierarchy
 
 ---
 
 ## Example Session
 
 ```
-> /oh-my-claudecode:skill list
+> /lazycc:skill list
 
 Checking skill directories...
 ✓ User skills directory exists: ~/.claude/skills/omc-learned/
@@ -811,7 +811,7 @@ What would you like to do?
 
 ## Tips for Users
 
-- Run `/oh-my-claudecode:skill list` periodically to review your skill library
+- Run `/lazycc:skill list` periodically to review your skill library
 - After solving a tricky bug, immediately run learner to capture it
 - Use project-level skills for codebase-specific knowledge
 - Use user-level skills for general patterns that apply everywhere
@@ -832,9 +832,9 @@ What would you like to do?
 
 ## Related Skills
 
-- `/oh-my-claudecode:learner` - Extract a skill from current conversation
-- `/oh-my-claudecode:note` - Save quick notes (less formal than skills)
-- `/oh-my-claudecode:deepinit` - Generate AGENTS.md codebase hierarchy
+- `/lazycc:learner` - Extract a skill from current conversation
+- `/lazycc:note` - Save quick notes (less formal than skills)
+- `/lazycc:deepinit` - Generate AGENTS.md codebase hierarchy
 
 ---
 

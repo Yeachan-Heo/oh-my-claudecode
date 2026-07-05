@@ -1,6 +1,6 @@
 # Reference Documentation
 
-Complete reference for oh-my-claudecode. For quick start, see the main [README.md](../README.md).
+Complete reference for lazycc. For quick start, see the main [README.md](../README.md).
 
 ---
 
@@ -31,10 +31,10 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 ```bash
 # Step 1: Add the marketplace
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
+/plugin marketplace add https://github.com/Yeachan-Heo/lazycc
 
 # Step 2: Install the plugin
-/plugin install oh-my-claudecode
+/plugin install lazycc
 ```
 
 This integrates directly with Claude Code's plugin system and uses Node.js hooks.
@@ -57,7 +57,7 @@ This integrates directly with Claude Code's plugin system and uses Node.js hooks
 Configure omc for the current project only:
 
 ```
-/oh-my-claudecode:omc-setup --local
+/lazycc:omc-setup --local
 ```
 
 - Creates `./.claude/CLAUDE.md` in your current project
@@ -70,7 +70,7 @@ Configure omc for the current project only:
 Configure omc for all Claude Code sessions:
 
 ```
-/oh-my-claudecode:omc-setup
+/lazycc:omc-setup
 ```
 
 - Creates `~/.claude/CLAUDE.md` globally
@@ -127,9 +127,9 @@ If both a legacy `{worktree}/.omc/` directory and a centralized directory exist,
 - **First time**: Run after installation (choose project or global)
 - **After updates**: Re-run to get the latest configuration
 - **Different machines**: Run on each machine where you use Claude Code
-- **New projects**: Run `/oh-my-claudecode:omc-setup --local` in each project that needs omc
+- **New projects**: Run `/lazycc:omc-setup --local` in each project that needs omc
 
-> **NOTE**: After updating the plugin (via `npm update`, `git pull`, or Claude Code's plugin update), you MUST re-run `/oh-my-claudecode:omc-setup` to apply the latest CLAUDE.md changes.
+> **NOTE**: After updating the plugin (via `npm update`, `git pull`, or Claude Code's plugin update), you MUST re-run `/lazycc:omc-setup` to apply the latest CLAUDE.md changes.
 
 ### Remote OMC / Remote MCP Access
 
@@ -230,7 +230,7 @@ When you launch OMC via a local development checkout instead of the marketplace 
 **Usage**: Non-consuming launcher flag that captures your local checkout path.
 
 ```bash
-omc --plugin-dir /path/to/oh-my-claudecode setup --plugin-dir-mode
+omc --plugin-dir /path/to/lazycc setup --plugin-dir-mode
 ```
 
 - **What it does**: Parses `--plugin-dir <path>` (or `--plugin-dir=<path>`), resolves it to an absolute path, sets `OMC_PLUGIN_ROOT` environment variable, then passes the flag through to Claude Code untouched.
@@ -244,8 +244,8 @@ omc --plugin-dir /path/to/oh-my-claudecode setup --plugin-dir-mode
 **Usage**: When you launch Claude Code directly without the `omc` shim.
 
 ```bash
-export OMC_PLUGIN_ROOT=/path/to/oh-my-claudecode
-claude --plugin-dir /path/to/oh-my-claudecode
+export OMC_PLUGIN_ROOT=/path/to/lazycc
+claude --plugin-dir /path/to/lazycc
 ```
 
 - **Requirement**: You must manually set `OMC_PLUGIN_ROOT` environment variable so the HUD wrapper and other env-aware components can resolve the same path as the plugin loader.
@@ -274,8 +274,8 @@ omc setup --plugin-dir-mode
 **Usage**: Run diagnostics with a specific plugin directory.
 
 ```bash
-omc doctor --plugin-dir /path/to/oh-my-claudecode
-omc doctor conflicts --plugin-dir /path/to/oh-my-claudecode
+omc doctor --plugin-dir /path/to/lazycc
+omc doctor conflicts --plugin-dir /path/to/lazycc
 ```
 
 - **What it does**: Resolves the provided path to absolute, sets `OMC_PLUGIN_ROOT` before the doctor action runs, matching `launch.ts` semantics.
@@ -288,8 +288,8 @@ omc doctor conflicts --plugin-dir /path/to/oh-my-claudecode
 **Usage**: Authoritative source for the active plugin root when launching Claude Code.
 
 ```bash
-export OMC_PLUGIN_ROOT=/path/to/oh-my-claudecode
-claude --plugin-dir /path/to/oh-my-claudecode
+export OMC_PLUGIN_ROOT=/path/to/lazycc
+claude --plugin-dir /path/to/lazycc
 ```
 
 - **Set by**: `omc --plugin-dir <path>` launcher (via `src/cli/launch.ts`).
@@ -324,7 +324,7 @@ omc ask claude --agent-prompt executor --prompt "create an implementation plan"
 - Artifacts: `.omc/artifacts/ask/{provider}-{slug}-{timestamp}.md`
 - Canonical env vars: `OMC_ASK_ADVISOR_SCRIPT`, `OMC_ASK_ORIGINAL_TASK`
 - Phase-1 aliases (deprecated warning): `OMX_ASK_ADVISOR_SCRIPT`, `OMX_ASK_ORIGINAL_TASK`
-- Skill entrypoint: `/oh-my-claudecode:ask <claude|codex|gemini> <prompt>` routes to this command
+- Skill entrypoint: `/lazycc:ask <claude|codex|gemini> <prompt>` routes to this command
 
 ### `omc team` (CLI runtime surface)
 
@@ -428,7 +428,7 @@ Bounded handoff policy:
 
 ## Agents (29 Total)
 
-Always use `oh-my-claudecode:` prefix when calling via Task tool.
+Always use `lazycc:` prefix when calling via Task tool.
 
 ### By Domain and Tier
 
@@ -498,72 +498,72 @@ Includes **31 canonical skills + 1 deprecated alias** (`psm`). Runtime truth com
 
 | Skill                     | Description                                                      | Manual Command                              |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass | `/oh-my-claudecode:ai-slop-cleaner`         |
-| `ask`                     | Ask Claude, Codex, or Gemini via local CLI and capture a reusable artifact | `/oh-my-claudecode:ask`               |
-| `autopilot`               | Full autonomous execution from idea to working code              | `/oh-my-claudecode:autopilot`               |
-| `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
-| `ccg`                     | Tri-model workflow via `ask codex` + `ask gemini`, then Claude synthesis | `/oh-my-claudecode:ccg`                     |
-| `configure-notifications` | Configure notification integrations (Telegram, Discord, Slack) via natural language | `/oh-my-claudecode:configure-notifications` |
-| `deep-dive`               | Two-stage trace → deep-interview pipeline with context handoff   | `/oh-my-claudecode:deep-dive`               |
-| `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/oh-my-claudecode:deep-interview`          |
-| `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/oh-my-claudecode:deepinit`                |
-| `external-context`        | Parallel document-specialist research                            | `/oh-my-claudecode:external-context`        |
-| `hud`                     | Configure HUD/statusline                                         | `/oh-my-claudecode:hud`                     |
-| `learner`                 | Extract reusable skill from session                              | `/oh-my-claudecode:learner`                 |
-| `mcp-setup`               | Configure MCP servers                                            | `/oh-my-claudecode:mcp-setup`               |
-| `omc-doctor`              | Diagnose and fix installation issues                             | `/oh-my-claudecode:omc-doctor`              |
-| `omc-plan`                | Planning workflow (`/plan` safe alias)                           | `/oh-my-claudecode:omc-plan`                |
+| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass | `/lazycc:ai-slop-cleaner`         |
+| `ask`                     | Ask Claude, Codex, or Gemini via local CLI and capture a reusable artifact | `/lazycc:ask`               |
+| `autopilot`               | Full autonomous execution from idea to working code              | `/lazycc:autopilot`               |
+| `cancel`                  | Unified cancellation for active modes                            | `/lazycc:cancel`                  |
+| `ccg`                     | Tri-model workflow via `ask codex` + `ask gemini`, then Claude synthesis | `/lazycc:ccg`                     |
+| `configure-notifications` | Configure notification integrations (Telegram, Discord, Slack) via natural language | `/lazycc:configure-notifications` |
+| `deep-dive`               | Two-stage trace → deep-interview pipeline with context handoff   | `/lazycc:deep-dive`               |
+| `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/lazycc:deep-interview`          |
+| `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/lazycc:deepinit`                |
+| `external-context`        | Parallel document-specialist research                            | `/lazycc:external-context`        |
+| `hud`                     | Configure HUD/statusline                                         | `/lazycc:hud`                     |
+| `learner`                 | Extract reusable skill from session                              | `/lazycc:learner`                 |
+| `mcp-setup`               | Configure MCP servers                                            | `/lazycc:mcp-setup`               |
+| `omc-doctor`              | Diagnose and fix installation issues                             | `/lazycc:omc-doctor`              |
+| `omc-plan`                | Planning workflow (`/plan` safe alias)                           | `/lazycc:omc-plan`                |
 | `omc-reference`           | Detailed OMC agent/tools/team/commit reference skill             | Auto-loaded reference only                  |
-| `omc-setup`               | One-time setup wizard                                            | `/oh-my-claudecode:omc-setup`               |
-| `omc-teams`               | Spawn `claude`/`codex`/`gemini` tmux workers for parallel execution | `/oh-my-claudecode:omc-teams`             |
-| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux)          | `/oh-my-claudecode:project-session-manager` |
-| `psm` | **Deprecated** compatibility alias for `project-session-manager` | `/oh-my-claudecode:psm` |
-| `ralph`                   | Persistence loop until verified completion                       | `/oh-my-claudecode:ralph`                   |
-| `ralplan`                 | Consensus planning alias for `/omc-plan --consensus`             | `/oh-my-claudecode:ralplan`                 |
-| `release`                 | Automated release workflow                                       | `/oh-my-claudecode:release`                 |
-| `setup`                   | Unified setup entrypoint for install, diagnostics, and MCP configuration | `/oh-my-claudecode:setup`              |
-| `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
-| `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
-| `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
-| `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/oh-my-claudecode:trace`                   |
-| `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |
-| `ultrawork`               | Maximum parallel throughput mode                                 | `/oh-my-claudecode:ultrawork`               |
-| `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons | `/oh-my-claudecode:visual-verdict`          |
-| `writer-memory`           | Agentic memory system for writing projects                       | `/oh-my-claudecode:writer-memory`           |
+| `omc-setup`               | One-time setup wizard                                            | `/lazycc:omc-setup`               |
+| `omc-teams`               | Spawn `claude`/`codex`/`gemini` tmux workers for parallel execution | `/lazycc:omc-teams`             |
+| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux)          | `/lazycc:project-session-manager` |
+| `psm` | **Deprecated** compatibility alias for `project-session-manager` | `/lazycc:psm` |
+| `ralph`                   | Persistence loop until verified completion                       | `/lazycc:ralph`                   |
+| `ralplan`                 | Consensus planning alias for `/omc-plan --consensus`             | `/lazycc:ralplan`                 |
+| `release`                 | Automated release workflow                                       | `/lazycc:release`                 |
+| `setup`                   | Unified setup entrypoint for install, diagnostics, and MCP configuration | `/lazycc:setup`              |
+| `sciomc`                  | Parallel scientist orchestration                                 | `/lazycc:sciomc`                  |
+| `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/lazycc:skill`                   |
+| `team`                    | Coordinated multi-agent workflow                                 | `/lazycc:team`                    |
+| `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/lazycc:trace`                   |
+| `ultraqa`                 | QA cycle until goal is met                                       | `/lazycc:ultraqa`                 |
+| `ultrawork`               | Maximum parallel throughput mode                                 | `/lazycc:ultrawork`               |
+| `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons | `/lazycc:visual-verdict`          |
+| `writer-memory`           | Agentic memory system for writing projects                       | `/lazycc:writer-memory`           |
 
 
 ---
 
 ## Slash Commands
 
-Each installed skill is exposed as `/oh-my-claudecode:<skill-name>`. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands.
+Each installed skill is exposed as `/lazycc:<skill-name>`. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands.
 
 | Command                                     | Description                                                                                   |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/oh-my-claudecode:ai-slop-cleaner <target>`    | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                    |
-| `/oh-my-claudecode:ask <claude|codex|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact         |
-| `/oh-my-claudecode:autopilot <task>`            | Full autonomous execution                                                                  |
-| `/oh-my-claudecode:configure-notifications`     | Configure notification integrations                                                       |
-| `/oh-my-claudecode:deep-dive <problem>`         | Run the trace → deep-interview pipeline                                                   |
-| `/oh-my-claudecode:deep-interview <idea>`       | Socratic interview with ambiguity scoring before execution                                 |
-| `/oh-my-claudecode:deepinit [path]`             | Index codebase with hierarchical AGENTS.md files                                           |
-| `/oh-my-claudecode:mcp-setup`                   | Configure MCP servers                                                                      |
-| `/oh-my-claudecode:omc-doctor`                  | Diagnose and fix installation issues                                                       |
-| `/oh-my-claudecode:omc-plan <description>`      | Start planning session (supports consensus structured deliberation)                        |
-| `/oh-my-claudecode:omc-setup`                   | One-time setup wizard                                                                      |
-| `/oh-my-claudecode:omc-teams <N>:<agent> <task>`       | Spawn `claude`/`codex`/`gemini` tmux workers for legacy parallel execution                |
-| `/oh-my-claudecode:project-session-manager <arguments>` | Manage isolated dev environments with git worktrees + tmux                         |
-| `/oh-my-claudecode:psm <arguments>`             | Deprecated alias for project session manager                                               |
-| `/oh-my-claudecode:ralph <task>`                | Self-referential loop until task completion (`--critic=architect|critic|codex`)           |
-| `/oh-my-claudecode:ralplan <description>`       | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
-| `/oh-my-claudecode:release`                     | Automated release workflow                                                                 |
-| `/oh-my-claudecode:setup`                       | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                           |
-| `/oh-my-claudecode:sciomc <topic>`              | Parallel research orchestration                                                            |
-| `/oh-my-claudecode:team <N>:<agent> <task>`     | Coordinated native team workflow                                                           |
-| `/oh-my-claudecode:trace`                       | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode     |
-| `/oh-my-claudecode:ultraqa <goal>`              | Autonomous QA cycling workflow                                                             |
-| `/oh-my-claudecode:ultrawork <task>`            | Maximum performance mode with parallel agents                                              |
-| `/oh-my-claudecode:visual-verdict <task>`       | Structured visual QA verdict for screenshot/reference comparisons                          |
+| `/lazycc:ai-slop-cleaner <target>`    | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                    |
+| `/lazycc:ask <claude|codex|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact         |
+| `/lazycc:autopilot <task>`            | Full autonomous execution                                                                  |
+| `/lazycc:configure-notifications`     | Configure notification integrations                                                       |
+| `/lazycc:deep-dive <problem>`         | Run the trace → deep-interview pipeline                                                   |
+| `/lazycc:deep-interview <idea>`       | Socratic interview with ambiguity scoring before execution                                 |
+| `/lazycc:deepinit [path]`             | Index codebase with hierarchical AGENTS.md files                                           |
+| `/lazycc:mcp-setup`                   | Configure MCP servers                                                                      |
+| `/lazycc:omc-doctor`                  | Diagnose and fix installation issues                                                       |
+| `/lazycc:omc-plan <description>`      | Start planning session (supports consensus structured deliberation)                        |
+| `/lazycc:omc-setup`                   | One-time setup wizard                                                                      |
+| `/lazycc:omc-teams <N>:<agent> <task>`       | Spawn `claude`/`codex`/`gemini` tmux workers for legacy parallel execution                |
+| `/lazycc:project-session-manager <arguments>` | Manage isolated dev environments with git worktrees + tmux                         |
+| `/lazycc:psm <arguments>`             | Deprecated alias for project session manager                                               |
+| `/lazycc:ralph <task>`                | Self-referential loop until task completion (`--critic=architect|critic|codex`)           |
+| `/lazycc:ralplan <description>`       | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
+| `/lazycc:release`                     | Automated release workflow                                                                 |
+| `/lazycc:setup`                       | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                           |
+| `/lazycc:sciomc <topic>`              | Parallel research orchestration                                                            |
+| `/lazycc:team <N>:<agent> <task>`     | Coordinated native team workflow                                                           |
+| `/lazycc:trace`                       | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode     |
+| `/lazycc:ultraqa <goal>`              | Autonomous QA cycling workflow                                                             |
+| `/lazycc:ultrawork <task>`            | Maximum performance mode with parallel agents                                              |
+| `/lazycc:visual-verdict <task>`       | Structured visual QA verdict for screenshot/reference comparisons                          |
 
 ### Skill Pipeline Metadata (Preview)
 
@@ -576,7 +576,7 @@ next-skill-args: --consensus --direct
 handoff: .omc/specs/deep-interview-{slug}.md
 ```
 
-When present, OMC appends a standardized **Skill Pipeline** section to the rendered skill prompt so the current stage, handoff artifact, and explicit next `Skill("oh-my-claudecode:...")` invocation are carried forward consistently.
+When present, OMC appends a standardized **Skill Pipeline** section to the rendered skill prompt so the current stage, handoff artifact, and explicit next `Skill("lazycc:...")` invocation are carried forward consistently.
 
 ### Skills 2.0 Compatibility (MVP)
 
@@ -776,7 +776,7 @@ stopomc
 
 ## Performance Monitoring
 
-oh-my-claudecode includes comprehensive monitoring for agent performance, token usage, and debugging parallel workflows.
+lazycc includes comprehensive monitoring for agent performance, token usage, and debugging parallel workflows.
 
 For complete documentation, see **[Performance Monitoring Guide](./PERFORMANCE-MONITORING.md)**.
 
@@ -822,7 +822,7 @@ Enable a supported preset for agent and context visibility in your status line:
 ### Diagnose Installation Issues
 
 ```bash
-/oh-my-claudecode:omc-doctor
+/lazycc:omc-doctor
 ```
 
 Checks for:
@@ -836,7 +836,7 @@ Checks for:
 ### Configure HUD Statusline
 
 ```bash
-/oh-my-claudecode:hud setup
+/lazycc:hud setup
 ```
 
 Installs or repairs the HUD statusline for real-time status updates.
@@ -885,11 +885,11 @@ Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode
 
 | Issue                 | Solution                                                                         |
 | --------------------- | -------------------------------------------------------------------------------- |
-| Commands not found    | Re-run `/oh-my-claudecode:omc-setup`                                             |
+| Commands not found    | Re-run `/lazycc:omc-setup`                                             |
 | Hooks not executing   | Check hook permissions: `chmod +x ~/.claude/hooks/**/*.sh`                       |
 | Agents not delegating | Verify CLAUDE.md is loaded: check `./.claude/CLAUDE.md` or `~/.claude/CLAUDE.md` |
 | LSP tools not working | Install language servers: `npm install -g typescript-language-server`            |
-| Token limit errors    | Use `/oh-my-claudecode:` for token-efficient execution                           |
+| Token limit errors    | Use `/lazycc:` for token-efficient execution                           |
 
 ### Auto-Update
 
@@ -908,7 +908,7 @@ To manually update, re-run the plugin install command or use Claude Code's built
 Use Claude Code's plugin management:
 
 ```
-/plugin uninstall oh-my-claudecode@oh-my-claudecode
+/plugin uninstall lazycc@lazycc
 ```
 
 Or manually remove the installed files:

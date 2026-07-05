@@ -944,7 +944,7 @@ export function getAgentDashboard(directory: string): string {
     const elapsed = Math.round(
       (now - new Date(agent.started_at).getTime()) / 1000,
     );
-    const shortType = agent.agent_type.replace("oh-my-claudecode:", "");
+    const shortType = agent.agent_type.replace("lazycc:", "");
     const toolCount = agent.tool_usage?.length || 0;
     const lastTool =
       agent.tool_usage?.[agent.tool_usage.length - 1]?.tool_name || "-";
@@ -993,7 +993,7 @@ export function getAgentObservatory(directory: string): {
     const elapsed = Math.round(
       (now - new Date(agent.started_at).getTime()) / 1000,
     );
-    const shortType = agent.agent_type.replace("oh-my-claudecode:", "");
+    const shortType = agent.agent_type.replace("lazycc:", "");
     const toolCount = agent.tool_usage?.length || 0;
 
     // Token and cost info
@@ -1031,7 +1031,7 @@ export function getAgentObservatory(directory: string): {
 
   // Add intervention warnings at the end
   for (const intervention of interventions.slice(0, 3)) {
-    const shortType = intervention.agent_type.replace("oh-my-claudecode:", "");
+    const shortType = intervention.agent_type.replace("lazycc:", "");
     lines.push(`⚠ ${shortType}: ${intervention.reason}`);
   }
 
@@ -1113,7 +1113,7 @@ export function suggestInterventions(directory: string): AgentIntervention[] {
           type: "file_conflict",
           agent_id: agents[i].id,
           agent_type: agents[i].type,
-          reason: `File conflict on ${file} with ${agents[0].type.replace("oh-my-claudecode:", "")}`,
+          reason: `File conflict on ${file} with ${agents[0].type.replace("lazycc:", "")}`,
           suggested_action: "warn",
           auto_execute: false,
         });
@@ -1206,7 +1206,7 @@ export function detectFileConflicts(directory: string): Array<{
       }
       fileToAgents
         .get(file)!
-        .push(agent.agent_type.replace("oh-my-claudecode:", ""));
+        .push(agent.agent_type.replace("lazycc:", ""));
     }
   }
 
@@ -1229,7 +1229,7 @@ export function getFileOwnershipMap(directory: string): Map<string, string> {
   const map = new Map<string, string>();
 
   for (const agent of running) {
-    const shortType = agent.agent_type.replace("oh-my-claudecode:", "");
+    const shortType = agent.agent_type.replace("lazycc:", "");
     for (const file of agent.file_ownership || []) {
       map.set(file, shortType);
     }

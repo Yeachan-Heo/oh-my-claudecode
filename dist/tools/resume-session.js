@@ -24,7 +24,7 @@ import { getBackgroundManager } from '../features/background-agent/manager.js';
  * if (result.success && result.context) {
  *   // Use result.context.continuationPrompt in your next Task delegation
  *   Task({
- *     subagent_type: "oh-my-claudecode:executor",
+ *     subagent_type: "lazycc:executor",
  *     model: "sonnet",
  *     prompt: result.context.continuationPrompt
  *   });

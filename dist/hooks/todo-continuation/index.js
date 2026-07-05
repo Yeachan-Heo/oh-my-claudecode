@@ -67,7 +67,13 @@ function getStopReasonFields(context) {
  * - user_cancel, user_interrupt: Likely user-initiated via UI
  * - ctrl_c: Terminal interrupt (Ctrl+C)
  * - manual_stop: Explicit stop button
- * - abort, cancel, interrupt: Generic abort patterns
+ * - abort, cancel: Generic abort patterns
+ *
+ * Plain `interrupt` is intentionally NOT treated as an explicit user abort.
+ * In practice it can also describe a turn interruption caused by a new user
+ * message arriving during long-running tool execution (issue #2478). Those
+ * interrupted turns should still allow Ralph/persistent-mode resume on the
+ * next stop-hook opportunity unless stronger explicit-cancel signals exist.
  *
  * NOTE: Per official Anthropic docs, the Stop hook "Does not run if
  * the stoppage occurred due to a user interrupt." This means this
@@ -85,7 +91,7 @@ export function isUserAbort(context) {
         return true;
     // Check stop_reason patterns indicating user abort
     // Exact-match patterns: short generic words that cause false positives with .includes()
-    const exactPatterns = ['aborted', 'abort', 'cancel', 'interrupt'];
+    const exactPatterns = ['aborted', 'abort', 'cancel'];
     // Substring patterns: compound words safe for .includes() matching
     const substringPatterns = ['user_cancel', 'user_interrupt', 'ctrl_c', 'manual_stop'];
     // Support both snake_case and camelCase field names
@@ -106,7 +112,7 @@ export function isExplicitCancelCommand(context) {
         return false;
     const prompt = (context.prompt ?? '').trim();
     if (prompt) {
-        const slashCancelPattern = /^\/(?:oh-my-claudecode:)?cancel(?:\s+--force)?\s*$/i;
+        const slashCancelPattern = /^\/(?:lazycc:)?cancel(?:\s+--force)?\s*$/i;
         const keywordCancelPattern = /^(?:cancelomc|stopomc)\s*$/i;
         if (slashCancelPattern.test(prompt) || keywordCancelPattern.test(prompt)) {
             return true;
@@ -129,7 +135,7 @@ export function isExplicitCancelCommand(context) {
     const toolInput = (context.tool_input ?? context.toolInput);
     if (toolName.includes('skill') && toolInput && typeof toolInput.skill === 'string') {
         const skill = toolInput.skill.toLowerCase();
-        if (skill === 'oh-my-claudecode:cancel' || skill.endsWith(':cancel')) {
+        if (skill === 'lazycc:cancel' || skill.endsWith(':cancel')) {
             return true;
         }
     }
@@ -141,7 +147,7 @@ export function isExplicitCancelCommand(context) {
  * Blocking these stops causes a deadlock: can't compact because can't stop,
  * can't continue because context is full.
  *
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
+ * See: https://github.com/Yeachan-Heo/lazycc/issues/213
  */
 export function isContextLimitStop(context) {
     const contextPatterns = [
@@ -157,7 +163,7 @@ export function isContextLimitStop(context) {
  * injects a continuation prompt, Claude immediately hits the rate limit again,
  * stops again, and the cycle repeats indefinitely.
  *
- * Fix for: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/777
+ * Fix for: https://github.com/Yeachan-Heo/lazycc/issues/777
  */
 export function isRateLimitStop(context) {
     if (!context)

@@ -220,7 +220,7 @@ function latest(...values: Array<string | undefined | null>): string | undefined
 }
 
 function shortAgentType(agentType: string): string {
-  return agentType.replace(/^oh-my-claudecode:/, '').trim() || 'agent';
+  return agentType.replace(/^lazycc:/, '').trim() || 'agent';
 }
 
 function sessionAgentName(agentType: string, agentId: string): string {
