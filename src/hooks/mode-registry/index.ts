@@ -73,6 +73,13 @@ const MODE_CONFIGS: Record<ExecutionMode, ModeConfig> = {
     activeProperty: "active",
     hasGlobalState: false,
   },
+  [MODE_NAMES.NIKOFLOW]: {
+    name: "Nikoflow",
+    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.NIKOFLOW],
+    markerFile: "nikoflow-verification.json",
+    activeProperty: "active",
+    hasGlobalState: false,
+  },
   [MODE_NAMES.ULTRAWORK]: {
     name: "Ultrawork",
     stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK],

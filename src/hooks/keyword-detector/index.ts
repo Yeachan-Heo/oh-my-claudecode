@@ -17,6 +17,7 @@ import {
 export type KeywordType =
   | 'cancel'      // Priority 1
   | 'ralph'       // Priority 2
+  | 'nikoflow'    // Priority 2.5 (Niko Flow v2.1 methodology mode)
   | 'autopilot'   // Priority 3
   | 'team'        // Priority 4.5 (team mode)
   | 'ultrawork'   // Priority 5
@@ -46,6 +47,7 @@ export interface DetectedKeyword {
 const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   cancel: /\b(cancelomc|stopomc)\b/i,
   ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
+  nikoflow: /\b(nikoflow|niko[\s-]?flow|nflow)\b|(никофлоу)/i,
   autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i,
   ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i,
   // Team keyword detection disabled — team mode is now explicit-only via /team skill.
@@ -65,6 +67,26 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
   antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
 };
+
+export const KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES = {
+  cancel: ['cancelomc', 'stopomc'],
+  ralph: ['ralph'],
+  autopilot: ['autopilot', 'auto pilot', 'auto-pilot', 'fullsend', 'full auto'],
+  ultrawork: ['ultrawork', 'ulw'],
+  'deep-interview': ['deep-interview', 'deep interview'],
+} as const satisfies Partial<Record<KeywordType, readonly string[]>>;
+
+export const KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES = {
+  ...KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES,
+  ccg: ['ccg', 'claude-codex-gemini'],
+  ralplan: ['ralplan'],
+  tdd: ['tdd', 'test first'],
+  'code-review': ['code review', 'review code'],
+  'security-review': ['security review', 'review security'],
+  ultrathink: ['ultrathink'],
+  deepsearch: ['deepsearch', 'search the codebase', 'find in codebase'],
+  analyze: ['deepanalyze', 'deep-analyze'],
+} as const satisfies Partial<Record<KeywordType, readonly string[]>>;
 
 /**
  * Matches the upstream Ouroboros CLI invocation form at the start of the
@@ -92,7 +114,7 @@ const KEYWORD_SKIP_PREDICATES: Partial<Record<KeywordType, (text: string) => boo
  * Priority order for keyword detection
  */
 const KEYWORD_PRIORITY: KeywordType[] = [
-  'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
+  'cancel', 'ralph', 'nikoflow', 'autopilot', 'team', 'ultrawork',
   'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
   'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
@@ -106,6 +128,7 @@ const KEYWORD_PRIORITY: KeywordType[] = [
 const CANONICAL_WORKFLOW_SLASH_SKILLS = [
   'autopilot',
   'ralph',
+  'nikoflow',
   'team',
   'ultrawork',
   'ultraqa',
@@ -129,6 +152,7 @@ const SLASH_SKILL_TO_KEYWORD_TYPE: Partial<
 > = {
   autopilot: 'autopilot',
   ralph: 'ralph',
+  nikoflow: 'nikoflow',
   team: 'team',
   ultrawork: 'ultrawork',
   'deep-interview': 'deep-interview',
@@ -963,6 +987,7 @@ export function getPrimaryKeyword(text: string): DetectedKeyword | null {
  */
 export const EXECUTION_GATE_KEYWORDS = new Set<KeywordType>([
   'ralph',
+  'nikoflow',
   'autopilot',
   'team',
   'ultrawork',

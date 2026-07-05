@@ -47,6 +47,44 @@ import {
   clearVerificationState,
   type VerificationState,
 } from '../ralph/index.js';
+import {
+  readNikoflowState,
+  incrementNikoflowIteration,
+  getCurrentPhase,
+  isNikoflowComplete,
+  getDepthSelectionPrompt,
+  getPhasePrompt,
+  setNikoflowDepth,
+  advanceNikoflowPhase,
+  mintGateRequest,
+  rotateGateRequest,
+  clearGateRequest,
+  userRepliedAfterMint,
+  isNikoflowUserTurnFresh,
+  detectNikoflowGate,
+  HUMAN_GATE_PHASES,
+  readTickets,
+  validateTicketDag,
+  lintTicketsFile,
+  getNextTicket,
+  allTicketsDone,
+  isTicketDeadlock,
+  markTicketStatus,
+  getExecuteTicketPrompt,
+  getVerifyPrompt,
+  pbtObligation,
+  recordVerifyPass,
+  bumpVerifyNoVerdict,
+  resetVerifyNoVerdict,
+  bumpExecuteStall,
+  resetExecuteStall,
+  NIKOFLOW_VERIFY_SCORE_THRESHOLD,
+  NIKOFLOW_VERIFY_MAX_PASSES,
+  NIKOFLOW_VERIFY_MAX_NO_VERDICT,
+  NIKOFLOW_EXECUTE_MAX_STALL,
+  type NikoflowState,
+  type GateMatch,
+} from '../nikoflow/index.js';
 import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
@@ -74,7 +112,7 @@ export interface PersistentModeResult {
   /** Message to inject into context */
   message: string;
   /** Which mode triggered the block */
-  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+  mode: 'ralph' | 'nikoflow' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
   /** Additional metadata */
   metadata?: {
     todoCount?: number;
@@ -607,6 +645,10 @@ export function recordIdleNotificationSent(
 
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
+/** Larger window for nikoflow reviewer-authored gates: a reviewer subagent's
+ *  tool_use line + its (possibly long) tool_result must both fit, or the gate
+ *  never matches → livelock (Fable QA R1). */
+const NIKOFLOW_REVIEWER_TAIL_BYTES = 512 * 1024; // 512 KB
 const CRITICAL_CONTEXT_STOP_PERCENT = 95;
 const RALPLAN_TERMINAL_PHASES = new Set([
   'completed',
@@ -633,28 +675,28 @@ const RALPLAN_TERMINAL_PHASES = new Set([
  * Architect approval/rejection markers appear near the end of the conversation,
  * so reading only the last N bytes avoids loading megabyte-sized transcripts.
  */
-function readTranscriptTail(transcriptPath: string): string {
+function readTranscriptTail(transcriptPath: string, maxBytes: number = TRANSCRIPT_TAIL_BYTES): string {
   const size = statSync(transcriptPath).size;
-  if (size <= TRANSCRIPT_TAIL_BYTES) {
+  if (size <= maxBytes) {
     return readFileSync(transcriptPath, 'utf-8');
   }
   const fd = openSync(transcriptPath, 'r');
   try {
-    const offset = size - TRANSCRIPT_TAIL_BYTES;
-    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
-    const bytesRead = readSync(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    const offset = size - maxBytes;
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = readSync(fd, buf, 0, maxBytes, offset);
     return buf.subarray(0, bytesRead).toString('utf-8');
   } finally {
     closeSync(fd);
   }
 }
 
-function readTranscriptTailLines(transcriptPath: string): string[] {
-  const content = readTranscriptTail(transcriptPath);
+function readTranscriptTailLines(transcriptPath: string, maxBytes: number = TRANSCRIPT_TAIL_BYTES): string[] {
+  const content = readTranscriptTail(transcriptPath, maxBytes);
   const lines = content.split('\n');
 
   try {
-    if (statSync(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
+    if (statSync(transcriptPath).size > maxBytes && lines.length > 0) {
       lines.shift();
     }
   } catch {
@@ -683,8 +725,16 @@ type ReviewerApprovalPath = 'architect' | 'critic' | 'codex';
 
 const REVIEWER_TASK_TOOL_NAMES = new Set(['Task', 'proxy_Task', 'Agent']);
 const REVIEWER_COMMAND_TOOL_NAMES = new Set(['Bash', 'proxy_Bash']);
+const NIKOFLOW_REVIEWER_SUBAGENT_BASE_NAMES = new Set([
+  'code-reviewer',
+  'security-reviewer',
+  'security-reviewer-low',
+  'verifier',
+  'critic',
+  'codex-rescue',
+]);
 
-function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | null {
+function normalizeSubagentBaseName(subagentType: unknown): string | null {
   if (typeof subagentType !== 'string') {
     return null;
   }
@@ -698,6 +748,15 @@ function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | nu
     ? normalized.slice(normalized.lastIndexOf(':') + 1)
     : normalized;
 
+  return baseName || null;
+}
+
+function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | null {
+  const baseName = normalizeSubagentBaseName(subagentType);
+  if (!baseName) {
+    return null;
+  }
+
   if (baseName === 'architect' || baseName.startsWith('architect-')) {
     return 'architect';
   }
@@ -707,6 +766,29 @@ function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | nu
   }
 
   return null;
+}
+
+function getToolUseSubagentType(input: unknown): unknown {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  return record.subagent_type ?? record.agent_type;
+}
+
+function isNikoflowReviewerSubagentType(subagentType: unknown): boolean {
+  const baseName = normalizeSubagentBaseName(subagentType);
+  return baseName ? NIKOFLOW_REVIEWER_SUBAGENT_BASE_NAMES.has(baseName) : false;
+}
+
+function isNikoflowReviewerToolUse(block: TranscriptContentBlock): boolean {
+  return Boolean(
+    block.id
+    && block.name
+    && REVIEWER_TASK_TOOL_NAMES.has(block.name)
+    && isNikoflowReviewerSubagentType(getToolUseSubagentType(block.input)),
+  );
 }
 
 function isCodexReviewerCommand(command: unknown): boolean {
@@ -767,7 +849,7 @@ function checkReviewerAuthoredApprovalInMessages(
     for (const block of content) {
       if (block?.type === 'tool_use' && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
-          const reviewerPath = normalizeReviewerPath((block.input as Record<string, unknown> | undefined)?.subagent_type);
+          const reviewerPath = normalizeReviewerPath(getToolUseSubagentType(block.input));
           if (reviewerPath && matchesVerificationReviewerPath(reviewerPath, verificationState)) {
             reviewerToolUses.set(block.id, reviewerPath);
           }
@@ -923,6 +1005,493 @@ function checkArchitectRejectionInTranscript(sessionId: string): { rejected: boo
 }
 
 /**
+ * Check Nikoflow state and determine if the Stop event should be blocked.
+ *
+ * TSK-001 skeleton: while the mode is active it hard-blocks Stop with a
+ * continuation banner (mirroring ralph) until `/oh-my-claudecode:cancel`
+ * clears the state. Phase-gate enforcement (per-phase advance conditions,
+ * human gates, reviewer convergence) lands in TSK-002+.
+ */
+/** Gates wired for auto-advance in TSK-003. execute/verify advance in TSK-005/006. */
+const NIKOFLOW_ADVANCING_GATES = new Set(['depth', 'interview', 'adr', 'prd', 'tickets']);
+
+/**
+ * Artifact precondition a gate requires beyond the confirmation tag. Returns an
+ * error string when the required artifact is missing/invalid (block, don't
+ * advance), or null when the gate may proceed. TSK-004: the tickets gate needs
+ * a valid tickets.json (present, acyclic, no dangling deps) before "APPROVED".
+ */
+function nikoflowGatePrecondition(
+  gate: string,
+  workingDir: string,
+  sessionId?: string,
+): string | null {
+  if (gate !== 'tickets') return null;
+  // Lint the RAW file first so shape errors (blocked_by as a string, bad status)
+  // are surfaced instead of being silently laundered into a valid-looking graph.
+  const lint = lintTicketsFile(workingDir, sessionId);
+  if (lint.length > 0) {
+    return `tickets.json has shape problems: ${lint.join('; ')}. Fix them before approving.`;
+  }
+  const tickets = readTickets(workingDir, sessionId);
+  if (!tickets) {
+    return 'tickets.json not found — write the atomic ticket breakdown (TSK-001…) before approving.';
+  }
+  const dag = validateTicketDag(tickets);
+  if (!dag.ok) {
+    return `tickets.json is invalid: ${dag.errors.join('; ')}. Fix the breakdown before approving.`;
+  }
+  return null;
+}
+
+/** Extract decoded text (assistant + user message text blocks) from a JSONL transcript tail. */
+function readNikoflowGateText(transcriptPath: string): string {
+  const parts: string[] = [];
+  for (const line of readTranscriptTailLines(transcriptPath)) {
+    if (!line.trim()) continue;
+    let entry: { message?: { content?: unknown } };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const content = entry?.message?.content;
+    if (typeof content === 'string') {
+      parts.push(content);
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        const b = block as { type?: unknown; text?: unknown };
+        if (b?.type === 'text' && typeof b.text === 'string') {
+          parts.push(b.text);
+        }
+      }
+    }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Detect a nikoflow gate that was authored by an INDEPENDENT reviewer, not the
+ * main thread: the tag must appear inside the tool_result of a Task/Agent
+ * (reviewer subagent) tool_use, correlated by request-id. Mirrors ralph's
+ * checkReviewerAuthoredApprovalInMessages so the model cannot self-approve by
+ * echoing the tag. Returns the matched GateMatch (with payload/score) or a
+ * non-match.
+ */
+function nikoflowReviewerAuthoredGate(
+  transcriptPath: string,
+  phase: string,
+  requestId: string | undefined,
+  expectedPayloads: string[],
+): GateMatch {
+  let tail: string;
+  try {
+    tail = readTranscriptTail(transcriptPath, NIKOFLOW_REVIEWER_TAIL_BYTES);
+  } catch {
+    return { matched: false };
+  }
+  // Cheap pre-filter (perf F3): a reviewer-authored gate can only match if the raw
+  // tail carries the gate tag AND the correlating request-id. In the common case
+  // (model still working the ticket, no reviewer tag yet) this short-circuits the
+  // full 512KB per-line JSON parse. Gate on the request-id — the exact token the
+  // parse requires — so a real gate is never skipped. Reading the raw tail also
+  // drops the second statSync that readTranscriptTailLines did (perf F2). The
+  // partial first line (if truncated) simply fails JSON.parse below.
+  if (!tail.includes('nikoflow-gate')) return { matched: false };
+  if (requestId && !tail.includes(requestId)) return { matched: false };
+  const reviewerToolUses = new Set<string>();
+  for (const line of tail.split('\n')) {
+    if (!line.trim()) continue;
+    let entry: TranscriptApprovalEntry;
+    try {
+      entry = JSON.parse(line) as TranscriptApprovalEntry;
+    } catch {
+      continue;
+    }
+    const content = entry.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block?.type === 'tool_use' && block.id && block.name) {
+        if (isNikoflowReviewerToolUse(block)) {
+          reviewerToolUses.add(block.id);
+        }
+        continue;
+      }
+      if (block?.type !== 'tool_result' || !block.tool_use_id) continue;
+      if (!reviewerToolUses.has(block.tool_use_id)) continue;
+      const reviewerOutput = extractTranscriptText(block.content);
+      if (!reviewerOutput) continue;
+      const match = detectNikoflowGate(reviewerOutput, { phase, requestId, expectedPayloads });
+      if (match.matched) return match;
+    }
+  }
+  return { matched: false };
+}
+
+function nikoflowCompleteResult(iteration: number): PersistentModeResult {
+  return {
+    shouldBlock: true,
+    message:
+      `<nikoflow-continuation phase="complete" iteration="${iteration}">\n` +
+      `All Niko Flow phases have passed. Run \`/oh-my-claudecode:cancel\` to exit and clean up state.\n` +
+      `</nikoflow-continuation>`,
+    mode: 'nikoflow',
+  };
+}
+
+/**
+ * Block-with-error helper for the execute phase. Emits a plain error prompt with
+ * NO gate tag and does NOT mint a gate — so it neither teaches the model a dead
+ * tag nor churns the ticket's awaiting_gate / request-id.
+ */
+function nikoflowExecuteError(
+  current: NikoflowState,
+  error: string,
+): PersistentModeResult {
+  return {
+    shouldBlock: true,
+    message:
+      `<nikoflow-continuation phase="execute" iteration="${current.iteration}">\n` +
+      `Execute phase is blocked: ${error}\n` +
+      `Fix it, then continue driving the ticket loop.\n` +
+      `</nikoflow-continuation>`,
+    mode: 'nikoflow',
+  };
+}
+
+/** Advance out of execute → verify (or complete) and emit the next prompt. */
+function nikoflowAdvanceFromExecute(
+  workingDir: string,
+  sessionId: string | undefined,
+  current: NikoflowState,
+): PersistentModeResult {
+  advanceNikoflowPhase(workingDir, sessionId);
+  clearGateRequest(workingDir, sessionId);
+  const next = readNikoflowState(workingDir, sessionId) ?? current;
+  if (isNikoflowComplete(next)) return nikoflowCompleteResult(next.iteration);
+  const nextPhase = getCurrentPhase(next);
+  const nextRid = mintGateRequest(workingDir, nextPhase ?? 'depth', sessionId) ?? undefined;
+  // Verify needs its score-bearing loop-review prompt, not the generic phase body.
+  if (nextPhase === 'verify') {
+    return { shouldBlock: true, message: getVerifyPrompt(next, nextRid, (next.verify_pass ?? 0) + 1), mode: 'nikoflow' };
+  }
+  return {
+    shouldBlock: true,
+    message: nextPhase
+      ? getPhasePrompt(nextPhase, next, nextRid)
+      : getDepthSelectionPrompt(next, nextRid),
+    mode: 'nikoflow',
+  };
+}
+
+/**
+ * Execute phase: drive tickets one at a time (red→green→review→done). Each ticket
+ * is gated by a reviewer-authored ticket-scoped tag; when all are done, advance
+ * to verify. Re-validates the DAG every iteration and surfaces deadlock as an
+ * error (never silent completion) — per TSK-004 carry-forward.
+ */
+export function handleNikoflowExecute(
+  workingDir: string,
+  sessionId: string | undefined,
+  current: NikoflowState,
+  transcriptPath?: string,
+): PersistentModeResult {
+  // Lint first so "missing" vs "invalid JSON" vs shape problems are distinguished.
+  const lint = lintTicketsFile(workingDir, sessionId);
+  if (lint.length > 0) {
+    return nikoflowExecuteError(current, `tickets.json problem(s): ${lint.join('; ')}`);
+  }
+  const tickets = readTickets(workingDir, sessionId);
+  if (!tickets) {
+    return nikoflowExecuteError(current, 'tickets.json could not be read.');
+  }
+  const dag = validateTicketDag(tickets);
+  if (!dag.ok) {
+    return nikoflowExecuteError(current, `invalid ticket DAG: ${dag.errors.join('; ')}`);
+  }
+  if (allTicketsDone(tickets)) {
+    return nikoflowAdvanceFromExecute(workingDir, sessionId, current);
+  }
+  if (isTicketDeadlock(tickets)) {
+    return nikoflowExecuteError(current, 'ticket deadlock: no ticket is startable yet not all are done — a blocker chain or cycle was introduced. Fix blocked_by.');
+  }
+
+  const pbt = pbtObligation(workingDir, current.pbt_enabled ?? false);
+  const ticket = getNextTicket(tickets)!; // non-null: not all done and not deadlocked
+  const gate = `execute:${ticket.id}`;
+  const requestId = mintGateRequest(workingDir, gate, sessionId) ?? undefined;
+
+  // The ticket advances ONLY on a reviewer-subagent-authored TICKET_DONE tag.
+  if (
+    requestId && // fail closed: no correlation id → don't accept any tag
+    transcriptPath &&
+    existsSync(transcriptPath) &&
+    nikoflowReviewerAuthoredGate(transcriptPath, gate, requestId, ['TICKET_DONE']).matched
+  ) {
+    if (!markTicketStatus(workingDir, ticket.id, 'done', sessionId)) {
+      // Persistence failed — surface it instead of silently re-looping forever.
+      return nikoflowExecuteError(current, `failed to persist ${ticket.id} status; check .omc/state is writable.`);
+    }
+    clearGateRequest(workingDir, sessionId);
+    resetExecuteStall(workingDir, sessionId); // a ticket advanced → clear stall guard
+
+    const after = readTickets(workingDir, sessionId);
+    if (!after || allTicketsDone(after)) {
+      return nikoflowAdvanceFromExecute(workingDir, sessionId, current);
+    }
+    const nextTicket = getNextTicket(after);
+    if (nextTicket) {
+      const nrid = mintGateRequest(workingDir, `execute:${nextTicket.id}`, sessionId) ?? undefined;
+      return { shouldBlock: true, message: getExecuteTicketPrompt(nextTicket, current, nrid, pbt), mode: 'nikoflow' };
+    }
+    // Completed a ticket but nothing is startable and not all done → deadlock.
+    return nikoflowExecuteError(current, 'ticket deadlock after completing a ticket — check blocked_by.');
+  }
+
+  // No reviewer verdict for this ticket yet. Bound it: if a ticket never gets a
+  // reviewer-authored TICKET_DONE for many Stops, surface it instead of looping
+  // forever (Fable QA R1 — the per-ticket gate otherwise has no cap).
+  const stall = bumpExecuteStall(workingDir, ticket.id, sessionId);
+  if (stall >= NIKOFLOW_EXECUTE_MAX_STALL) {
+    return nikoflowExecuteError(
+      current,
+      `ticket ${ticket.id} has not been reviewer-approved after ${stall} attempts. ` +
+        `Confirm an independent reviewer actually ran, or ask the user how to proceed.`,
+    );
+  }
+
+  return { shouldBlock: true, message: getExecuteTicketPrompt(ticket, current, requestId, pbt), mode: 'nikoflow' };
+}
+
+/**
+ * Verify phase: loop-review convergence. Each pass requires a fresh, independent
+ * reviewer subagent to emit VERIFIED (score ≥ threshold) or NO_ACTIONABLE_FINDINGS
+ * from its own tool_result. A sub-threshold review rotates the request-id (fresh
+ * reviewer next pass) and, after a cap, escalates to the user rather than looping.
+ */
+/** Verify cap reached: escalate to the user (idempotent, no reviewer re-loop). */
+function nikoflowVerifyEscalation(current: NikoflowState, passes: number): PersistentModeResult {
+  return {
+    shouldBlock: true,
+    message:
+      `<nikoflow-continuation phase="verify" iteration="${current.iteration}">\n` +
+      `Verification did not converge after ${passes} reviewer passes (score stayed below ` +
+      `${NIKOFLOW_VERIFY_SCORE_THRESHOLD}). Stop auto-looping: summarize the outstanding findings ` +
+      `for the user and ask them to decide — accept as-is (get a genuine passing review), keep ` +
+      `iterating, or \`/oh-my-claudecode:cancel\`. A real reviewer pass ≥ 9.5 still completes.\n` +
+      `</nikoflow-continuation>`,
+    mode: 'nikoflow',
+  };
+}
+
+export function handleNikoflowVerify(
+  workingDir: string,
+  sessionId: string | undefined,
+  current: NikoflowState,
+  transcriptPath?: string,
+): PersistentModeResult {
+  const passSoFar = current.verify_pass ?? 0;
+  const atCap = passSoFar >= NIKOFLOW_VERIFY_MAX_PASSES;
+
+  const requestId = mintGateRequest(workingDir, 'verify', sessionId) ?? undefined;
+  // Fail closed: without a correlation id we cannot safely accept any tag.
+  if (!requestId) {
+    return atCap
+      ? nikoflowVerifyEscalation(current, passSoFar)
+      : { shouldBlock: true, message: getVerifyPrompt(current, undefined, passSoFar + 1), mode: 'nikoflow' };
+  }
+
+  if (transcriptPath && existsSync(transcriptPath)) {
+    const match: GateMatch = nikoflowReviewerAuthoredGate(
+      transcriptPath,
+      'verify',
+      requestId,
+      ['VERIFIED', 'NO_ACTIONABLE_FINDINGS'],
+    );
+    if (match.matched) {
+      resetVerifyNoVerdict(workingDir, sessionId); // a verdict was parsed → clear livelock guard
+      const passed =
+        match.payload === 'NO_ACTIONABLE_FINDINGS' ||
+        (match.score !== undefined && match.score >= NIKOFLOW_VERIFY_SCORE_THRESHOLD);
+
+      if (passed) {
+        // A genuine passing review completes the flow even past the cap.
+        advanceNikoflowPhase(workingDir, sessionId); // verify is last → complete
+        clearGateRequest(workingDir, sessionId);
+        const next = readNikoflowState(workingDir, sessionId) ?? current;
+        return nikoflowCompleteResult(next.iteration);
+      }
+
+      // Sub-threshold with actionable findings. Past the cap, stop counting/looping.
+      if (atCap) {
+        return nikoflowVerifyEscalation(current, passSoFar);
+      }
+      const passes = recordVerifyPass(workingDir, sessionId);
+      rotateGateRequest(workingDir, 'verify', sessionId); // fresh reviewer next pass
+      if (passes >= NIKOFLOW_VERIFY_MAX_PASSES) {
+        return nikoflowVerifyEscalation(current, passes);
+      }
+      const freshRid = readNikoflowState(workingDir, sessionId)?.request_id;
+      return { shouldBlock: true, message: getVerifyPrompt(current, freshRid, passes + 1), mode: 'nikoflow' };
+    }
+  }
+
+  // No reviewer verdict yet. Bound the loop: if a parseable verdict never
+  // appears (e.g. the reviewer tag keeps scrolling out of the scan window),
+  // escalate instead of spawning reviewers forever (Fable QA R1 livelock).
+  if (atCap) {
+    return nikoflowVerifyEscalation(current, passSoFar);
+  }
+  const noVerdict = bumpVerifyNoVerdict(workingDir, sessionId);
+  if (noVerdict >= NIKOFLOW_VERIFY_MAX_NO_VERDICT) {
+    return nikoflowVerifyEscalation(current, passSoFar);
+  }
+  return { shouldBlock: true, message: getVerifyPrompt(current, requestId, passSoFar + 1), mode: 'nikoflow' };
+}
+
+export async function checkNikoflowLoop(
+  sessionId?: string,
+  directory?: string,
+  cancelInProgress?: boolean,
+  transcriptPath?: string,
+): Promise<PersistentModeResult | null> {
+  const workingDir = resolveToWorktreeRoot(directory);
+  const state = readNikoflowState(workingDir, sessionId);
+
+  // Ignore inactive or stale (crashed/legacy) state so it can't hard-block Stop
+  // forever. A recent real user turn (sidecar) keeps a flow parked at a human
+  // gate alive past the timer (Fable QA R4), since last_checked_at only advances
+  // on Stop iterations.
+  if (
+    !state ||
+    !state.active ||
+    (isStaleState(state) &&
+      !isNikoflowUserTurnFresh(workingDir, sessionId, STALE_STATE_THRESHOLD_MS))
+  ) {
+    return null;
+  }
+
+  // Respect an in-flight cancel: let the Stop through so cleanup can settle.
+  if (cancelInProgress) {
+    return null;
+  }
+
+  // Advance the iteration counter first so the emitted prompt reflects the
+  // current iteration (and refreshes last_checked_at to keep the session live).
+  const current = incrementNikoflowIteration(workingDir, sessionId) ?? state;
+
+  if (isNikoflowComplete(current)) {
+    return nikoflowCompleteResult(current.iteration);
+  }
+
+  // The active gate is "depth" until a tier is chosen, then the current phase.
+  const phase = getCurrentPhase(current);
+
+  // Execute phase runs its own per-ticket loop (red→green→review→done).
+  if (phase === 'execute') {
+    return handleNikoflowExecute(workingDir, sessionId, current, transcriptPath);
+  }
+
+  // Verify phase runs the loop-review convergence gate.
+  if (phase === 'verify') {
+    return handleNikoflowVerify(workingDir, sessionId, current, transcriptPath);
+  }
+
+  const gate = phase ?? 'depth';
+  const requestId = mintGateRequest(workingDir, gate, sessionId) ?? undefined;
+
+  // Gate satisfaction: a correlated confirmation tag in the transcript, plus —
+  // for human gates — proof that a real user turn arrived after the request was
+  // minted (the model cannot self-confirm a human gate).
+  if (
+    NIKOFLOW_ADVANCING_GATES.has(gate) &&
+    transcriptPath &&
+    existsSync(transcriptPath)
+  ) {
+    let gateText = '';
+    try {
+      gateText = readNikoflowGateText(transcriptPath);
+    } catch {
+      gateText = '';
+    }
+    const match = detectNikoflowGate(gateText, { phase: gate, requestId });
+    const isHumanGate = HUMAN_GATE_PHASES.has(gate);
+    const humanOk = !isHumanGate || userRepliedAfterMint(current, workingDir, sessionId);
+
+    if (match.matched && humanOk) {
+      // Gate confirmed by the user, but some gates also need a valid artifact
+      // (e.g. tickets.json). If missing/invalid, block with the error instead of
+      // advancing, keeping the same request-id so the fixed artifact re-passes.
+      const preconditionError = nikoflowGatePrecondition(gate, workingDir, sessionId);
+      if (preconditionError) {
+        // The user approved, but the required artifact is missing/invalid. Rotate
+        // the request-id so this approval cannot silently ratify a DIFFERENT
+        // artifact the model writes afterward — the corrected artifact must be
+        // re-approved by the user. (Closes the "approve garbage, swap in secretly"
+        // window; the model still owns the file, this just re-gates the human bit.)
+        const rotated = rotateGateRequest(workingDir, gate, sessionId) ?? requestId;
+        const rotatedState = readNikoflowState(workingDir, sessionId) ?? current;
+        const base = phase
+          ? getPhasePrompt(phase, rotatedState, rotated)
+          : getDepthSelectionPrompt(rotatedState, rotated);
+        return {
+          shouldBlock: true,
+          message:
+            `${base}\n<nikoflow-blocked>${preconditionError} ` +
+            `After fixing, present the corrected breakdown and get the user to approve again.` +
+            `</nikoflow-blocked>`,
+          mode: 'nikoflow',
+        };
+      }
+
+      if (gate === 'depth') {
+        if (match.depth) {
+          setNikoflowDepth(workingDir, match.depth, sessionId);
+        }
+      } else {
+        advanceNikoflowPhase(workingDir, sessionId);
+      }
+      clearGateRequest(workingDir, sessionId);
+
+      // Emit the NEXT gate's prompt in the same block so the flow keeps moving.
+      const next = readNikoflowState(workingDir, sessionId) ?? current;
+      if (isNikoflowComplete(next)) {
+        return nikoflowCompleteResult(next.iteration);
+      }
+      const nextPhase = getCurrentPhase(next);
+      const nextGate = nextPhase ?? 'depth';
+      const nextRid = mintGateRequest(workingDir, nextGate, sessionId) ?? undefined;
+      return {
+        shouldBlock: true,
+        message: nextPhase
+          ? getPhasePrompt(nextPhase, next, nextRid)
+          : getDepthSelectionPrompt(next, nextRid),
+        mode: 'nikoflow',
+      };
+    }
+
+    // A correlated tag emitted BEFORE a real user turn is a self-approval
+    // attempt. Rotate the request-id so the premature tag goes stale — the
+    // model must re-emit only after the user has actually replied.
+    if (match.matched && isHumanGate && !humanOk) {
+      rotateGateRequest(workingDir, gate, sessionId);
+    }
+  }
+
+  // Gate not satisfied → block with the current gate's prompt (carrying the
+  // current request-id, which may have just been rotated above).
+  const blockState = readNikoflowState(workingDir, sessionId) ?? current;
+  const blockRid = blockState.request_id;
+  return {
+    shouldBlock: true,
+    message: phase
+      ? getPhasePrompt(phase, blockState, blockRid)
+      : getDepthSelectionPrompt(blockState, blockRid),
+    mode: 'nikoflow',
+  };
+}
+
+/**
  * Check Ralph Loop state and determine if it should continue
  * Now includes Architect verification for completion claims
  */
@@ -1074,8 +1643,8 @@ async function checkRalphLoop(
           markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback, sessionId);
         }
         // Architect rejected - continue with feedback
-        recordArchitectFeedback(workingDir, false, rejection.feedback, sessionId);
-        const updatedVerification = readVerificationState(workingDir, sessionId);
+        const feedbackState = recordArchitectFeedback(workingDir, false, rejection.feedback, sessionId);
+        const updatedVerification = readVerificationState(workingDir, sessionId) ?? feedbackState;
         verificationState = updatedVerification;
 
         if (updatedVerification) {
@@ -2291,6 +2860,15 @@ async function resolvePersistentModeBlock(
     if (ralphResult) return ralphResult;
     const autopilotResult = await runAutopilotPriority();
     if (autopilotResult) return autopilotResult;
+  }
+
+  // Priority 1.5: Nikoflow (phase-gated methodology loop, sibling of ralph)
+  if (!tombstonedWorkflowModes.has('nikoflow') && isModeActive('nikoflow', workingDir, sessionId)) {
+    const nikoflowTranscript = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+    const nikoflowResult = await checkNikoflowLoop(sessionId, workingDir, cancelInProgress, nikoflowTranscript);
+    if (nikoflowResult) {
+      return nikoflowResult;
+    }
   }
 
   // Priority 1.6: Autoresearch (stateful single-mission runtime)

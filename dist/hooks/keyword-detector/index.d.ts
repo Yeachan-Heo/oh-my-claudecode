@@ -7,19 +7,41 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 import { type TaskSizeResult } from '../task-size-detector/index.js';
-export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'team' | 'ultrawork' | 'ralplan' | 'tdd' | 'code-review' | 'security-review' | 'ultrathink' | 'deepsearch' | 'deep-interview' | 'analyze' | 'codex' | 'gemini' | 'cursor' | 'antigravity' | 'ccg';
+export type KeywordType = 'cancel' | 'ralph' | 'nikoflow' | 'autopilot' | 'team' | 'ultrawork' | 'ralplan' | 'tdd' | 'code-review' | 'security-review' | 'ultrathink' | 'deepsearch' | 'deep-interview' | 'analyze' | 'codex' | 'gemini' | 'cursor' | 'antigravity' | 'ccg';
 export interface DetectedKeyword {
     type: KeywordType;
     keyword: string;
     position: number;
 }
+export declare const KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES: {
+    readonly cancel: readonly ["cancelomc", "stopomc"];
+    readonly ralph: readonly ["ralph"];
+    readonly autopilot: readonly ["autopilot", "auto pilot", "auto-pilot", "fullsend", "full auto"];
+    readonly ultrawork: readonly ["ultrawork", "ulw"];
+    readonly 'deep-interview': readonly ["deep-interview", "deep interview"];
+};
+export declare const KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES: {
+    readonly ccg: readonly ["ccg", "claude-codex-gemini"];
+    readonly ralplan: readonly ["ralplan"];
+    readonly tdd: readonly ["tdd", "test first"];
+    readonly 'code-review': readonly ["code review", "review code"];
+    readonly 'security-review': readonly ["security review", "review security"];
+    readonly ultrathink: readonly ["ultrathink"];
+    readonly deepsearch: readonly ["deepsearch", "search the codebase", "find in codebase"];
+    readonly analyze: readonly ["deepanalyze", "deep-analyze"];
+    readonly cancel: readonly ["cancelomc", "stopomc"];
+    readonly ralph: readonly ["ralph"];
+    readonly autopilot: readonly ["autopilot", "auto pilot", "auto-pilot", "fullsend", "full auto"];
+    readonly ultrawork: readonly ["ultrawork", "ulw"];
+    readonly 'deep-interview': readonly ["deep-interview", "deep interview"];
+};
 /**
  * Canonical workflow skills detected via explicit slash invocation.
  * Mirrors `CANONICAL_WORKFLOW_SKILLS` in `skill-state/index.ts`. Listed here
  * (rather than imported) to keep the keyword-detector free of cross-module
  * dependencies on skill-state.
  */
-declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "team", "ultrawork", "ultraqa", "deep-interview", "ralplan", "self-improve"];
+declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "nikoflow", "team", "ultrawork", "ultraqa", "deep-interview", "ralplan", "self-improve"];
 export type CanonicalWorkflowSlashSkill = (typeof CANONICAL_WORKFLOW_SLASH_SKILLS)[number];
 export interface ExplicitWorkflowSlashInvocation {
     /** Canonical workflow skill name (lowercase, no `oh-my-claudecode:` prefix). */

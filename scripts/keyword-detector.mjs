@@ -900,6 +900,55 @@ function activateState(directory, prompt, stateName, sessionId, omcRoot) {
       awaiting_confirmation_set_at: now,
       last_checked_at: now
     };
+  } else if (stateName === 'nikoflow') {
+    // Nikoflow skeleton state; the compiled TS engine (dist) drives the phase
+    // machine on Stop. Depth starts null → the flow opens with depth-selection
+    // during Grilling. Shape must match NikoflowState in src/hooks/nikoflow/loop.ts.
+    // Must mirror the TS engine: NIKOFLOW_DEFAULT_ROLES, detectRoleFlags,
+    // detectDepthFlag, NIKOFLOW_PHASES, stripNikoflowFlags (src/hooks/nikoflow/loop.ts).
+    const NF_VALID = ['sonnet', 'opus', 'haiku', 'fable', 'codex', 'gpt-5.5', 'gpt5.5'];
+    const NF_PHASES = {
+      tactical: ['interview', 'execute', 'verify'],
+      standard: ['interview', 'adr', 'prd', 'tickets', 'execute', 'verify'],
+      deep: ['interview', 'adr', 'prd', 'tickets', 'execute', 'verify'],
+    };
+    const roles = { executor: 'sonnet', architect: 'fable', reviewer: 'fable', verifier: 'fable', panel: ['fable', 'gpt-5.5'] };
+    const rf = (re) => { const m = prompt.match(re); const v = m && m[1] ? m[1].toLowerCase() : null; return v && NF_VALID.includes(v) ? v : null; };
+    const _ex = rf(/--(?:exec|executor)(?:=|\s+)(\S+)/i); if (_ex) roles.executor = _ex;
+    const _ar = rf(/--(?:architect|arch)(?:=|\s+)(\S+)/i); if (_ar) roles.architect = _ar;
+    const _qa = rf(/--qa(?:=|\s+)(\S+)/i); if (_qa) { roles.reviewer = _qa; roles.verifier = _qa; }
+    const _rv = rf(/--reviewer(?:=|\s+)(\S+)/i); if (_rv) roles.reviewer = _rv;
+    const _vf = rf(/--verifier(?:=|\s+)(\S+)/i); if (_vf) roles.verifier = _vf;
+    const _pnRaw = prompt.match(/--panel(?:=|\s+)(\S+)/i); if (_pnRaw && _pnRaw[1]) { const p = _pnRaw[1].toLowerCase().split('+').filter(m => NF_VALID.includes(m)); if (p.length) roles.panel = p; }
+    // Depth flag
+    let depth = null;
+    const _dc = prompt.match(/nikoflow\s*:\s*(tactical|standard|deep)/i) || prompt.match(/--(?:tier|depth)(?:=|\s+)(tactical|standard|deep)/i);
+    if (_dc) depth = _dc[1].toLowerCase();
+    else if (/--deep\b/i.test(prompt)) depth = 'deep';
+    else if (/--tactical\b/i.test(prompt)) depth = 'tactical';
+    else if (/--standard\b/i.test(prompt)) depth = 'standard';
+    // Strip control flags from the stored prompt
+    const cleanPrompt = safePrompt
+      .replace(/nikoflow\s*:\s*(tactical|standard|deep)/gi, '')
+      .replace(/--(?:tier|depth)(?:=|\s+)(tactical|standard|deep)/gi, '')
+      .replace(/--(?:deep|tactical|standard)\b/gi, '')
+      .replace(/--(?:exec|executor|architect|arch|qa|reviewer|verifier|panel)(?:=|\s+)\S+/gi, '')
+      .replace(/\s+/g, ' ').trim();
+    state = {
+      active: true,
+      iteration: 1,
+      started_at: now,
+      last_checked_at: now,
+      last_user_prompt_at: now,
+      prompt: cleanPrompt,
+      session_id: sessionId || undefined,
+      project_path: directory,
+      depth,
+      phases: depth ? NF_PHASES[depth] : [],
+      phase_index: 0,
+      pbt_enabled: depth === 'deep',
+      roles
+    };
   } else if (stateName === 'ralplan') {
     // Ralplan needs active + session_id for stop-hook enforcement
     state = {
@@ -1158,7 +1207,7 @@ function resolveConflicts(matches) {
   // Team keyword detection removed — team is now explicit-only via /team skill.
 
   // Sort by priority order
-  const priorityOrder = ['cancel','ralph','ultragoal','autopilot','ultrawork',
+  const priorityOrder = ['cancel','ralph','nikoflow','ultragoal','autopilot','ultrawork',
     'ccg','ralplan','deep-interview','ai-slop-cleaner','tdd','code-review','security-review','ultrathink','deepsearch','analyze'];
   resolved.sort((a, b) => priorityOrder.indexOf(a.name) - priorityOrder.indexOf(b.name));
 
@@ -1208,6 +1257,24 @@ async function main() {
     const sessionId = data.session_id || data.sessionId || '';
     const omcRoot = await resolveOmcStateRoot(directory);
 
+    // Nikoflow anti-self-approval: stamp every real user turn to a DEDICATED
+    // sidecar (never RMW the shared nikoflow-state.json — that races the Stop
+    // hook's request-id rotation and could resurrect a rotated id, Fable QA R2).
+    // Atomic write; only when a nikoflow flow is active in this session.
+    if (sessionId) {
+      try {
+        const sessDir = join(omcRoot, 'state', 'sessions', sessionId);
+        if (existsSync(join(sessDir, 'nikoflow-state.json'))) {
+          // Filename must match TS resolveSessionStatePath('nikoflow-userturn') →
+          // it appends "-state.json", so the sidecar is nikoflow-userturn-state.json.
+          atomicWriteFileSync(
+            join(sessDir, 'nikoflow-userturn-state.json'),
+            JSON.stringify({ at: new Date().toISOString() }),
+          );
+        }
+      } catch { /* best-effort */ }
+    }
+
     const prompt = extractPrompt(input);
     if (!prompt) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -1251,8 +1318,13 @@ async function main() {
     }
 
     // Ralph keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(ralph|don't stop|must complete|until done)\b|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(ralph)\b|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i)) {
       matches.push({ name: 'ralph', args: '' });
+    }
+
+    // Nikoflow keywords (Niko Flow v2.1 phase-gated methodology mode)
+    if (hasActionableKeyword(cleanPrompt, /\b(nikoflow|niko[\s-]?flow|nflow)\b|(никофлоу)/i)) {
+      matches.push({ name: 'nikoflow', args: '' });
     }
 
     // Autopilot keywords
@@ -1260,13 +1332,7 @@ async function main() {
     // research prose (e.g. "autonomous driving", "autonomous agent") to be a
     // reliable trigger. Aligns with src/hooks/keyword-detector/index.ts and
     // templates/hooks/keyword-detector.mjs, which already exclude it.
-    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto pilot|auto-pilot|full auto|fullsend)\b|(오토파일럿)|(オートパイロット)/i) ||
-        hasActionableKeyword(cleanPrompt, /\b(build|create|make)\s+me\s+(an?\s+)?(app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b/i) ||
-        hasActionableKeyword(cleanPrompt, /\bi\s+want\s+a\s+/i) ||
-        hasActionableKeyword(cleanPrompt, /\bi\s+want\s+an\s+/i) ||
-        hasActionableKeyword(cleanPrompt, /\bhandle\s+it\s+all\b/i) ||
-        hasActionableKeyword(cleanPrompt, /\bend\s+to\s+end\b/i) ||
-        hasActionableKeyword(cleanPrompt, /\be2e\s+this\b/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i)) {
       matches.push({ name: 'autopilot', args: '' });
     }
 
@@ -1278,7 +1344,7 @@ async function main() {
     // Ultrapilot keywords removed — routed to team which is now explicit-only (/team).
 
     // Ultrawork keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(ultrawork|ulw|uw)\b|(울트라워크)|(ウルトラワーク)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i)) {
       matches.push({ name: 'ultrawork', args: '' });
     }
 
@@ -1296,8 +1362,12 @@ async function main() {
     }
 
     // Deep interview keywords
+    // Skip upstream Ouroboros CLI invocations such as `ouroboros auto` or
+    // `/ouroboros:auto`; mid-sentence routing requests still match.
     if (hasActionableKeyword(cleanPrompt, /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i)) {
-      matches.push({ name: 'deep-interview', args: '' });
+      if (!/^\s*\/?(?:ouroboros|ooo)\b/i.test(cleanPrompt)) {
+        matches.push({ name: 'deep-interview', args: '' });
+      }
     }
 
     // AI slop cleanup keywords
@@ -1307,8 +1377,7 @@ async function main() {
 
     // TDD keywords
     if (hasActionableKeyword(cleanPrompt, /\b(tdd)\b|(테스트\s?퍼스트)|(テスト\s?ファースト)/i) ||
-        hasActionableKeyword(cleanPrompt, /\btest\s+first\b/i) ||
-        hasActionableKeyword(cleanPrompt, /\bred\s+green\b/i)) {
+        hasActionableKeyword(cleanPrompt, /\btest\s+first\b/i)) {
       matches.push({ name: 'tdd', args: '' });
     }
 
@@ -1325,14 +1394,14 @@ async function main() {
     }
 
     // Ultrathink keywords
-    if (hasActionableKeyword(cleanPrompt, /\b(ultrathink|think hard|think deeply)\b|(울트라씽크)|(ウルトラシンク)/i)) {
+    if (hasActionableKeyword(cleanPrompt, /\b(ultrathink)\b|(울트라씽크)|(ウルトラシンク)/i)) {
       matches.push({ name: 'ultrathink', args: '' });
     }
 
     // Deepsearch keywords
     if (hasActionableKeyword(cleanPrompt, /\b(deepsearch)\b|(딥\s?서치)|(ディープ\s?サーチ)/i) ||
-        hasActionableKeyword(cleanPrompt, /\bsearch\s+(the\s+)?(codebase|code|files?|project)\b/i) ||
-        hasActionableKeyword(cleanPrompt, /\bfind\s+(in\s+)?(codebase|code|all\s+files?)\b/i)) {
+        hasActionableKeyword(cleanPrompt, /\bsearch\s+the\s+codebase\b/i) ||
+        hasActionableKeyword(cleanPrompt, /\bfind\s+in\s+(the\s+)?codebase\b/i)) {
       matches.push({ name: 'deepsearch', args: '' });
     }
 
@@ -1445,13 +1514,13 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'swarm', 'ralplan'], sessionId, omcRoot);
+      clearStateFiles(directory, ['ralph', 'nikoflow', 'ultragoal', 'autopilot', 'ultrawork', 'swarm', 'ralplan'], sessionId, omcRoot);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }
 
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
-    const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
+    const stateModes = resolved.filter(m => ['ralph', 'nikoflow', 'ultragoal', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
       activateState(directory, prompt, mode.name, sessionId, omcRoot);
     }

@@ -11,6 +11,7 @@ export declare const MODE_NAMES: {
     readonly AUTORESEARCH: "autoresearch";
     readonly TEAM: "team";
     readonly RALPH: "ralph";
+    readonly NIKOFLOW: "nikoflow";
     readonly ULTRAWORK: "ultrawork";
     readonly ULTRAQA: "ultraqa";
     readonly RALPLAN: "ralplan";

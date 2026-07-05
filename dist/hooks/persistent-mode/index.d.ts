@@ -9,6 +9,7 @@
  *
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
+import { type NikoflowState } from '../nikoflow/index.js';
 import { StopContext } from '../todo-continuation/index.js';
 import type { IdleNotificationRepoState } from './idle-repo-state.js';
 export interface ToolErrorState {
@@ -24,7 +25,7 @@ export interface PersistentModeResult {
     /** Message to inject into context */
     message: string;
     /** Which mode triggered the block */
-    mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+    mode: 'ralph' | 'nikoflow' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
     /** Additional metadata */
     metadata?: {
         todoCount?: number;
@@ -83,6 +84,15 @@ export declare function shouldSendIdleNotification(stateDir: string, sessionId?:
  * Record that the session-idle notification was sent at the current timestamp.
  */
 export declare function recordIdleNotificationSent(stateDir: string, sessionId?: string, repoState?: IdleNotificationRepoState | null): void;
+/**
+ * Execute phase: drive tickets one at a time (red→green→review→done). Each ticket
+ * is gated by a reviewer-authored ticket-scoped tag; when all are done, advance
+ * to verify. Re-validates the DAG every iteration and surfaces deadlock as an
+ * error (never silent completion) — per TSK-004 carry-forward.
+ */
+export declare function handleNikoflowExecute(workingDir: string, sessionId: string | undefined, current: NikoflowState, transcriptPath?: string): PersistentModeResult;
+export declare function handleNikoflowVerify(workingDir: string, sessionId: string | undefined, current: NikoflowState, transcriptPath?: string): PersistentModeResult;
+export declare function checkNikoflowLoop(sessionId?: string, directory?: string, cancelInProgress?: boolean, transcriptPath?: string): Promise<PersistentModeResult | null>;
 /**
  * Main persistent mode checker.
  * Resolves which mode (if any) should block, then applies the thinking-only

@@ -13,6 +13,7 @@ import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
 const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
     ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
+    nikoflow: /\b(nikoflow|niko[\s-]?flow|nflow)\b|(никофлоу)/i,
     autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i,
     ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i,
     // Team keyword detection disabled — team mode is now explicit-only via /team skill.
@@ -31,6 +32,24 @@ const KEYWORD_PATTERNS = {
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
     cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
     antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
+};
+export const KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES = {
+    cancel: ['cancelomc', 'stopomc'],
+    ralph: ['ralph'],
+    autopilot: ['autopilot', 'auto pilot', 'auto-pilot', 'fullsend', 'full auto'],
+    ultrawork: ['ultrawork', 'ulw'],
+    'deep-interview': ['deep-interview', 'deep interview'],
+};
+export const KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES = {
+    ...KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES,
+    ccg: ['ccg', 'claude-codex-gemini'],
+    ralplan: ['ralplan'],
+    tdd: ['tdd', 'test first'],
+    'code-review': ['code review', 'review code'],
+    'security-review': ['security review', 'review security'],
+    ultrathink: ['ultrathink'],
+    deepsearch: ['deepsearch', 'search the codebase', 'find in codebase'],
+    analyze: ['deepanalyze', 'deep-analyze'],
 };
 /**
  * Matches the upstream Ouroboros CLI invocation form at the start of the
@@ -56,7 +75,7 @@ const KEYWORD_SKIP_PREDICATES = {
  * Priority order for keyword detection
  */
 const KEYWORD_PRIORITY = [
-    'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
+    'cancel', 'ralph', 'nikoflow', 'autopilot', 'team', 'ultrawork',
     'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
     'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
@@ -69,6 +88,7 @@ const KEYWORD_PRIORITY = [
 const CANONICAL_WORKFLOW_SLASH_SKILLS = [
     'autopilot',
     'ralph',
+    'nikoflow',
     'team',
     'ultrawork',
     'ultraqa',
@@ -86,6 +106,7 @@ const CANONICAL_WORKFLOW_SLASH_SKILLS = [
 const SLASH_SKILL_TO_KEYWORD_TYPE = {
     autopilot: 'autopilot',
     ralph: 'ralph',
+    nikoflow: 'nikoflow',
     team: 'team',
     ultrawork: 'ultrawork',
     'deep-interview': 'deep-interview',
@@ -734,6 +755,7 @@ export function getPrimaryKeyword(text) {
  */
 export const EXECUTION_GATE_KEYWORDS = new Set([
     'ralph',
+    'nikoflow',
     'autopilot',
     'team',
     'ultrawork',

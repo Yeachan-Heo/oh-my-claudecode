@@ -9,6 +9,7 @@ export type ExecutionMode =
   | 'autoresearch'
   | 'team'
   | 'ralph'
+  | 'nikoflow'
   | 'ultrawork'
   | 'ultraqa'
   | 'deep-interview'

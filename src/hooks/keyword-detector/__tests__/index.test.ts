@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES,
+  KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES,
   removeCodeBlocks,
   sanitizeForKeywordDetection,
   extractPromptText,
@@ -12,6 +14,7 @@ import {
   applyRalplanGate,
   NON_LATIN_SCRIPT_PATTERN,
   parseExplicitWorkflowSlashInvocation,
+  type KeywordType,
 } from '../index.js';
 
 // Mock isTeamEnabled
@@ -23,6 +26,32 @@ import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
 
 describe('keyword-detector', () => {
+  describe('documented trigger examples', () => {
+    for (const [type, triggers] of Object.entries(KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES) as [
+      KeywordType,
+      readonly string[],
+    ][]) {
+      for (const trigger of triggers) {
+        it(`detects "${trigger}" as ${type}`, () => {
+          expect(detectKeywordsWithType(trigger).some((match) => match.type === type)).toBe(true);
+        });
+      }
+    }
+  });
+
+  describe('public documentation trigger examples', () => {
+    for (const [type, triggers] of Object.entries(KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES) as [
+      KeywordType,
+      readonly string[],
+    ][]) {
+      for (const trigger of triggers) {
+        it(`detects public doc example "${trigger}" as ${type}`, () => {
+          expect(detectKeywordsWithType(trigger).some((match) => match.type === type)).toBe(true);
+        });
+      }
+    }
+  });
+
   describe('removeCodeBlocks', () => {
     it('should remove fenced code blocks with triple backticks', () => {
       const text = 'Before ```code here``` after';

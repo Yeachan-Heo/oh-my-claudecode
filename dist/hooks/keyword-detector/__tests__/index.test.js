@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { removeCodeBlocks, sanitizeForKeywordDetection, extractPromptText, detectKeywordsWithType, hasKeyword, getPrimaryKeyword, getAllKeywords, getAllKeywordsWithSizeCheck, isUnderspecifiedForExecution, applyRalplanGate, NON_LATIN_SCRIPT_PATTERN, parseExplicitWorkflowSlashInvocation, } from '../index.js';
+import { KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES, KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES, removeCodeBlocks, sanitizeForKeywordDetection, extractPromptText, detectKeywordsWithType, hasKeyword, getPrimaryKeyword, getAllKeywords, getAllKeywordsWithSizeCheck, isUnderspecifiedForExecution, applyRalplanGate, NON_LATIN_SCRIPT_PATTERN, parseExplicitWorkflowSlashInvocation, } from '../index.js';
 // Mock isTeamEnabled
 vi.mock('../../../features/auto-update.js', () => ({
     isTeamEnabled: vi.fn(() => true),
@@ -7,6 +7,24 @@ vi.mock('../../../features/auto-update.js', () => ({
 import { isTeamEnabled } from '../../../features/auto-update.js';
 const mockedIsTeamEnabled = vi.mocked(isTeamEnabled);
 describe('keyword-detector', () => {
+    describe('documented trigger examples', () => {
+        for (const [type, triggers] of Object.entries(KEYWORD_DETECTOR_DOC_TRIGGER_EXAMPLES)) {
+            for (const trigger of triggers) {
+                it(`detects "${trigger}" as ${type}`, () => {
+                    expect(detectKeywordsWithType(trigger).some((match) => match.type === type)).toBe(true);
+                });
+            }
+        }
+    });
+    describe('public documentation trigger examples', () => {
+        for (const [type, triggers] of Object.entries(KEYWORD_DETECTOR_PUBLIC_DOC_TRIGGER_EXAMPLES)) {
+            for (const trigger of triggers) {
+                it(`detects public doc example "${trigger}" as ${type}`, () => {
+                    expect(detectKeywordsWithType(trigger).some((match) => match.type === type)).toBe(true);
+                });
+            }
+        }
+    });
     describe('removeCodeBlocks', () => {
         it('should remove fenced code blocks with triple backticks', () => {
             const text = 'Before ```code here``` after';
