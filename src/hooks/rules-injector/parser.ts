@@ -41,7 +41,10 @@ export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
  * Parse YAML content without external library.
  */
 function parseYamlContent(yamlContent: string): RuleMetadata {
-  const lines = yamlContent.split('\n');
+  // Split on CRLF or LF so a trailing "\r" from a Windows-authored rule file
+  // never leaks into a line. The multi-line array matcher (/^\s+-\s*(.*)$/)
+  // stops at "\r", which would otherwise collapse a "  - pattern" list to ''.
+  const lines = yamlContent.split(/\r?\n/);
   const metadata: RuleMetadata = {};
 
   let i = 0;
