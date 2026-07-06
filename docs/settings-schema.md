@@ -44,10 +44,10 @@ full interface, trust boundary, trigger stages, and residual risk, see
 ## `keywordDetector.disabled`
 
 Opt out of auto-routing for specific keyword-detector skills without turning the
-whole hook off. The UserPromptSubmit keyword detector maps keywords such as
-`wiki`, `plan`, `research`, or `deepsearch` to skills; in a project with its own
-same-named skill this auto-routing can hijack the word and shadow the intended
-skill. List the skill names to suppress here.
+whole hook off. The UserPromptSubmit keyword detector routes shipped skill names
+such as `ralph`, `autopilot`, `ralplan`, `deep-interview`, `ai-slop-cleaner`,
+`tdd`, `code-review`, `security-review`, `ultrathink`, `deepsearch`, and
+`analyze`. List the routed skill names to suppress here.
 
 Read from the OMC config surface above, project `.claude/omc.jsonc` first, then
 user `~/.config/claude-omc/config.jsonc` (project takes precedence).
@@ -55,8 +55,8 @@ user `~/.config/claude-omc/config.jsonc` (project takes precedence).
 ```jsonc
 {
   "keywordDetector": {
-    // skill keywords to stop auto-routing; "cancel" cannot be disabled
-    "disabled": ["wiki"]
+    // routed skill names to stop auto-routing; "cancel" cannot be disabled
+    "disabled": ["deepsearch"]
   }
 }
 ```
