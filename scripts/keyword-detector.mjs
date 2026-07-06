@@ -1075,6 +1075,34 @@ function isTeamEnabled() {
 }
 
 /**
+ * Skills the user opted out of via `keywordDetector.disabled` in
+ * .omc-config.json (project .omc/ first, then the active Claude config dir).
+ * Empty when unset, so default behavior is unchanged. `cancel` is never
+ * disableable: it is the emergency stop for active modes.
+ * @param {string} directory project working directory
+ * @returns {Set<string>} disabled skill names (never includes 'cancel')
+ */
+function loadDisabledKeywords(directory) {
+  const configPaths = [
+    join(directory, '.omc', '.omc-config.json'),
+    join(getClaudeConfigDir(), '.omc-config.json'),
+  ];
+  for (const configPath of configPaths) {
+    try {
+      if (!existsSync(configPath)) continue;
+      const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+      const disabled = raw?.keywordDetector?.disabled;
+      if (Array.isArray(disabled)) {
+        return new Set(disabled.filter((name) => name !== 'cancel'));
+      }
+    } catch {
+      // Ignore a missing/malformed config; fall through to defaults.
+    }
+  }
+  return new Set();
+}
+
+/**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
@@ -1346,10 +1374,15 @@ async function main() {
       matches.push({ name: 'wiki', args: '' });
     }
 
-    // Deduplicate matches by keyword name before conflict resolution
+    // Drop user-disabled keywords, then dedupe before conflict resolution.
+    // This chokepoint covers both magic-keyword and mode-injection keywords.
+    const disabledKeywords = loadDisabledKeywords(directory);
     const seen = new Set();
     const uniqueMatches = [];
     for (const m of matches) {
+      if (disabledKeywords.has(m.name)) {
+        continue;
+      }
       if (!seen.has(m.name)) {
         seen.add(m.name);
         uniqueMatches.push(m);
@@ -1427,11 +1460,11 @@ async function main() {
       }
     }
 
-    // No matches - pass through.
+    // Nothing left to act on (no keywords, or all opted out) - pass through.
     // Keep this after approved follow-up handling so short post-ralplan
     // prompts like "team" can launch the approved execution path even
     // though generic team keyword auto-detection is disabled.
-    if (matches.length === 0) {
+    if (resolved.length === 0) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
