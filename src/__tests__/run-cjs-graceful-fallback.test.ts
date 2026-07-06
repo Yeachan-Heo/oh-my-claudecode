@@ -37,14 +37,14 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     return versionDir;
   }
 
-  function runCjs(target: string, env: Record<string, string> = {}): { status: number; stdout: string; stderr: string } {
-    const result = spawnSync(NODE, [RUN_CJS_PATH, target], {
+  function runCjs(target: string, env: Record<string, string> = {}, args: string[] = []): { status: number; stdout: string; stderr: string } {
+    const result = spawnSync(NODE, [RUN_CJS_PATH, target, ...args], {
       encoding: 'utf-8',
       env: {
         ...process.env,
         ...env,
       },
-      timeout: 10000,
+      timeout: 30000,
       input: '{}',
     });
 
@@ -261,5 +261,164 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     expect(result.stderr).toContain('[run.cjs] Hook slow-stop-hook.cjs timed out after 1500ms; exiting fail-open.');
     expect(result.stderr).not.toContain('timed out after 2000ms');
     expect(elapsedMs).toBeLessThan(2000);
+  });
+
+  it('uses prompt-scoped inner timeout cushions for UserPromptSubmit hooks', () => {
+    const pluginRoot = join(tmpDir, 'prompt-plugin-root');
+    const scriptsDir = join(pluginRoot, 'scripts');
+    const hooksDir = join(pluginRoot, 'hooks');
+    mkdirSync(scriptsDir, { recursive: true });
+    mkdirSync(hooksDir, { recursive: true });
+
+    const tenSecondTarget = join(scriptsDir, 'prompt-ten.cjs');
+    const fifteenSecondTarget = join(scriptsDir, 'prompt-fifteen.cjs');
+    writeFileSync(
+      tenSecondTarget,
+      'setTimeout(() => { process.stdout.write("prompt-ten-done\\n"); process.exit(0); }, 9000);',
+    );
+    writeFileSync(
+      fifteenSecondTarget,
+      'setTimeout(() => { process.stdout.write("prompt-fifteen-done\\n"); process.exit(0); }, 13000);',
+    );
+    writeFileSync(
+      join(hooksDir, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              matcher: '',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-ten.cjs',
+                  timeout: 10,
+                },
+                {
+                  type: 'command',
+                  command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-fifteen.cjs',
+                  timeout: 15,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    );
+
+    const tenStartedAt = Date.now();
+    const tenResult = runCjs(tenSecondTarget, {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+    });
+    const tenElapsedMs = Date.now() - tenStartedAt;
+
+    expect(tenResult.status).toBe(0);
+    expect(tenResult.stdout).not.toContain('prompt-ten-done');
+    expect(tenResult.stderr).toBe('');
+    expect(tenElapsedMs).toBeGreaterThanOrEqual(7500);
+    expect(tenElapsedMs).toBeLessThan(10000);
+
+    const fifteenStartedAt = Date.now();
+    const fifteenResult = runCjs(fifteenSecondTarget, {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+    });
+    const fifteenElapsedMs = Date.now() - fifteenStartedAt;
+
+    expect(fifteenResult.status).toBe(0);
+    expect(fifteenResult.stdout).not.toContain('prompt-fifteen-done');
+    expect(fifteenResult.stderr).toBe('');
+    expect(fifteenElapsedMs).toBeGreaterThanOrEqual(11500);
+    expect(fifteenElapsedMs).toBeLessThan(15000);
+  });
+
+  it('keeps the existing 500ms inner timeout cushion for non-prompt hooks', () => {
+    const pluginRoot = join(tmpDir, 'non-prompt-plugin-root');
+    const scriptsDir = join(pluginRoot, 'scripts');
+    const hooksDir = join(pluginRoot, 'hooks');
+    mkdirSync(scriptsDir, { recursive: true });
+    mkdirSync(hooksDir, { recursive: true });
+
+    const slowTarget = join(scriptsDir, 'non-prompt-slow.cjs');
+    writeFileSync(
+      slowTarget,
+      'setTimeout(() => { process.stdout.write("non-prompt-done\\n"); process.exit(0); }, 3000);',
+    );
+    writeFileSync(
+      join(hooksDir, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              matcher: '',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/non-prompt-slow.cjs',
+                  timeout: 2,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    );
+
+    const startedAt = Date.now();
+    const result = runCjs(slowTarget, {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('non-prompt-done');
+    expect(result.stderr).toContain('[run.cjs] Hook non-prompt-slow.cjs timed out after 1500ms; exiting fail-open.');
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+
+  it('keeps prompt hook timeout diagnostics quiet by default and visible in hook debug mode', () => {
+    const pluginRoot = join(tmpDir, 'prompt-debug-plugin-root');
+    const scriptsDir = join(pluginRoot, 'scripts');
+    const hooksDir = join(pluginRoot, 'hooks');
+    mkdirSync(scriptsDir, { recursive: true });
+    mkdirSync(hooksDir, { recursive: true });
+
+    const slowTarget = join(scriptsDir, 'prompt-debug-slow.cjs');
+    writeFileSync(
+      slowTarget,
+      'setTimeout(() => { process.stdout.write("prompt-debug-done\\n"); process.exit(0); }, 3000);',
+    );
+    writeFileSync(
+      join(hooksDir, 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              matcher: '',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-debug-slow.cjs',
+                  timeout: 1,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    );
+
+    const quietResult = runCjs(slowTarget, {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+    });
+    const debugResult = runCjs(slowTarget, {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+      OMC_DEBUG_HOOKS: '1',
+    });
+
+    expect(quietResult.status).toBe(0);
+    expect(quietResult.stdout).not.toContain('prompt-debug-done');
+    expect(quietResult.stderr).toBe('');
+    expect(debugResult.status).toBe(0);
+    expect(debugResult.stdout).not.toContain('prompt-debug-done');
+    expect(debugResult.stderr).toContain('[run.cjs] Hook prompt-debug-slow.cjs timed out after 1ms; exiting fail-open.');
   });
 });

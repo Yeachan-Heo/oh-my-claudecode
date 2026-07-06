@@ -96,14 +96,29 @@ function escapeRegex(value) {
 
 function flattenHookEntries(rawHooks) {
   if (!rawHooks || typeof rawHooks !== 'object') return [];
-  return Object.values(rawHooks).flatMap((entries) => Array.isArray(entries) ? entries : []);
+  return Object.entries(rawHooks).flatMap(([event, entries]) => {
+    if (!Array.isArray(entries)) return [];
+    return entries.map((entry) => ({ event, entry }));
+  });
+}
+
+function isDebugHooksEnabled() {
+  return process.env.OMC_DEBUG_HOOKS === '1' ||
+    process.env.OMC_DEBUG === '1' ||
+    process.env.OMC_DEBUG === 'true';
+}
+
+function resolveTimeoutCushionMs(manifestTimeoutMs, hookEvent) {
+  if (hookEvent !== 'UserPromptSubmit') return TIMEOUT_CUSHION_MS;
+  const promptCushion = Math.floor(manifestTimeoutMs * 0.2);
+  return Math.min(3000, Math.max(1000, promptCushion));
 }
 
 const TIMEOUT_CUSHION_MS = 500;
 
-function resolveInnerTimeoutMs(manifestTimeoutMs) {
-  if (manifestTimeoutMs == null) return null;
-  return Math.max(1, manifestTimeoutMs - TIMEOUT_CUSHION_MS);
+function resolveInnerTimeoutMs(manifestHook) {
+  if (!manifestHook) return null;
+  return Math.max(1, manifestHook.timeoutMs - resolveTimeoutCushionMs(manifestHook.timeoutMs, manifestHook.event));
 }
 
 function resolveHookTimeoutMs(targetPath, extraArgs) {
@@ -117,7 +132,7 @@ function resolveHookTimeoutMs(targetPath, extraArgs) {
     const scriptPattern = new RegExp(`[/\\\\]scripts[/\\\\]${escapeRegex(scriptName)}(?:\\s|$)`);
     const argNeedles = extraArgs.filter((arg) => typeof arg === 'string' && arg.length > 0);
 
-    for (const entry of flattenHookEntries(hooksJson?.hooks)) {
+    for (const { event, entry } of flattenHookEntries(hooksJson?.hooks)) {
       const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
       for (const hook of hooks) {
         const command = typeof hook?.command === 'string' ? hook.command : '';
@@ -125,7 +140,7 @@ function resolveHookTimeoutMs(targetPath, extraArgs) {
         if (!scriptPattern.test(command)) continue;
         if (!Number.isFinite(timeout) || timeout <= 0) continue;
         if (!argNeedles.every((arg) => command.includes(` ${arg}`) || command.endsWith(` ${arg}`))) continue;
-        return Math.floor(timeout * 1000);
+        return { event, timeoutMs: Math.floor(timeout * 1000) };
       }
     }
   } catch {
@@ -142,8 +157,8 @@ if (!resolved) {
   process.exit(0);
 }
 
-const manifestTimeoutMs = resolveHookTimeoutMs(resolved, process.argv.slice(3));
-const timeoutMs = resolveInnerTimeoutMs(manifestTimeoutMs);
+const manifestHook = resolveHookTimeoutMs(resolved, process.argv.slice(3));
+const timeoutMs = resolveInnerTimeoutMs(manifestHook);
 
 const result = spawnSync(
   process.execPath,
@@ -160,7 +175,10 @@ const result = spawnSync(
 );
 
 if (result.error?.code === 'ETIMEDOUT' && timeoutMs) {
-  process.stderr.write(`[run.cjs] Hook ${basename(resolved)} timed out after ${timeoutMs}ms; exiting fail-open.\n`);
+  const message = `[run.cjs] Hook ${basename(resolved)} timed out after ${timeoutMs}ms; exiting fail-open.\n`;
+  if (manifestHook?.event !== 'UserPromptSubmit' || isDebugHooksEnabled()) {
+    process.stderr.write(message);
+  }
 }
 
 // Propagate the child exit code (null → 0 to avoid blocking hooks).
