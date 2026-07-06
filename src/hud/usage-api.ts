@@ -182,9 +182,11 @@ interface MinimaxModelRemain {
   current_weekly_total_count: number;
   /** Remaining request count in the current weekly window */
   current_weekly_usage_count: number;
+  current_interval_remaining_percent?: number;
   weekly_start_time: number;
   weekly_end_time: number;
   weekly_remains_time: number;
+  current_weekly_remaining_percent?: number;
 }
 
 interface MinimaxCodingPlanResponse {
@@ -1197,25 +1199,31 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
   const models = response.model_remains;
   if (!models || models.length === 0) return null;
 
-  // Find the primary coding model (first match, case-insensitive)
-  const codingModel = models.find(m => m.model_name.toLowerCase().startsWith('minimax-m'));
-  if (!codingModel) {
-    if (process.env.OMC_DEBUG) {
-      console.error('[usage-api] No MiniMax-M* model found in coding plan response');
-    }
-    return null;
-  }
+  // Prefer the primary coding model when present. MiniMax's billing API can
+  // return plan names like "general" instead of Claude-side MiniMax-M aliases.
+  const codingModel =
+    models.find(m => m.model_name.toLowerCase().startsWith('minimax-m')) ??
+    models.find(m => m.model_name.toLowerCase() === 'general') ??
+    models[0];
+  if (!codingModel) return null;
 
-  // MiniMax's "remains" endpoint reports remaining quota, not consumed quota.
-  // Convert remaining-count fields to used percentages for the HUD.
+  const percentFromRemaining = (remainingPercent: number | undefined): number | undefined => {
+    if (remainingPercent == null || !isFinite(remainingPercent)) return undefined;
+    return clamp(100 - remainingPercent);
+  };
+
+  // MiniMax's "remains" endpoint reports remaining quota. Prefer direct
+  // remaining-percent fields when present because plan-style rows can report
+  // total_count=0 while still exposing useful remaining quota percentages.
+  const directIntervalPercent = percentFromRemaining(codingModel.current_interval_remaining_percent);
   const intervalTotal = codingModel.current_interval_total_count;
   const intervalUsed = intervalTotal - codingModel.current_interval_usage_count;
-  const intervalPercent = intervalTotal > 0 ? (intervalUsed / intervalTotal) * 100 : 0;
+  const intervalPercent = directIntervalPercent ?? (intervalTotal > 0 ? (intervalUsed / intervalTotal) * 100 : 0);
 
-  // Calculate weekly usage percentage from remaining weekly quota
+  const directWeeklyPercent = percentFromRemaining(codingModel.current_weekly_remaining_percent);
   const weeklyTotal = codingModel.current_weekly_total_count;
   const weeklyUsed = weeklyTotal - codingModel.current_weekly_usage_count;
-  const weeklyPercent = weeklyTotal > 0 ? (weeklyUsed / weeklyTotal) * 100 : 0;
+  const weeklyPercent = directWeeklyPercent ?? (weeklyTotal > 0 ? (weeklyUsed / weeklyTotal) * 100 : 0);
 
   // Parse reset times from Unix ms timestamps
   const parseResetTime = (timestamp: number | undefined): Date | null => {

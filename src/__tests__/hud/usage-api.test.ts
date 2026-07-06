@@ -1145,25 +1145,29 @@ describe('parseMinimaxResponse', () => {
     expect(parseMinimaxResponse(response)).toBeNull();
   });
 
-  it('returns null when no MiniMax-M* model exists', () => {
+  it('falls back to the first row when no MiniMax-M* or general model exists', () => {
     const response = {
       model_remains: [
         {
           model_name: 'speech-hd',
           current_interval_total_count: 100,
-          current_interval_usage_count: 50,
+          current_interval_usage_count: 75,
           start_time: Date.now(),
           end_time: Date.now() + 3600_000,
           remains_time: 3600_000,
           current_weekly_total_count: 700,
-          current_weekly_usage_count: 350,
+          current_weekly_usage_count: 525,
           weekly_start_time: Date.now(),
           weekly_end_time: Date.now() + 86400_000,
           weekly_remains_time: 86400_000,
         },
       ],
     };
-    expect(parseMinimaxResponse(response)).toBeNull();
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(25);
+    expect(result!.weeklyPercent).toBe(25);
   });
 
   it('parses MiniMax-M* remaining counts as used fiveHourPercent and weeklyPercent', () => {
@@ -1247,6 +1251,115 @@ describe('parseMinimaxResponse', () => {
     expect(result).not.toBeNull();
     expect(result!.fiveHourPercent).toBe(0);
     expect(result!.weeklyPercent).toBe(0);
+  });
+
+  it('uses direct remaining-percent fields as HUD used percentages', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'MiniMax-M1',
+          current_interval_total_count: 0,
+          current_interval_usage_count: 0,
+          current_interval_remaining_percent: 44,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 0,
+          current_weekly_usage_count: 0,
+          current_weekly_remaining_percent: 88,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(56);
+    expect(result!.weeklyPercent).toBe(12);
+  });
+
+  it('accepts a general plan row when no MiniMax-M* model exists', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'video',
+          current_interval_total_count: 5,
+          current_interval_usage_count: 5,
+          current_interval_remaining_percent: 100,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 5,
+          current_weekly_usage_count: 5,
+          current_weekly_remaining_percent: 100,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+        {
+          model_name: 'general',
+          current_interval_total_count: 0,
+          current_interval_usage_count: 0,
+          current_interval_remaining_percent: 44,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 0,
+          current_weekly_usage_count: 0,
+          current_weekly_remaining_percent: 88,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(56);
+    expect(result!.weeklyPercent).toBe(12);
+  });
+
+  it('preserves MiniMax-M* model preference over plan-style rows', () => {
+    const response = {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_total_count: 0,
+          current_interval_usage_count: 0,
+          current_interval_remaining_percent: 44,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 0,
+          current_weekly_usage_count: 0,
+          current_weekly_remaining_percent: 88,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+        {
+          model_name: 'MiniMax-M3',
+          current_interval_total_count: 100,
+          current_interval_usage_count: 75,
+          start_time: Date.now(),
+          end_time: Date.now() + 3600_000,
+          remains_time: 3600_000,
+          current_weekly_total_count: 200,
+          current_weekly_usage_count: 150,
+          weekly_start_time: Date.now(),
+          weekly_end_time: Date.now() + 86400_000,
+          weekly_remains_time: 86400_000,
+        },
+      ],
+    };
+
+    const result = parseMinimaxResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(25);
+    expect(result!.weeklyPercent).toBe(25);
   });
 
   it('uses first MiniMax-M* model when multiple exist', () => {
