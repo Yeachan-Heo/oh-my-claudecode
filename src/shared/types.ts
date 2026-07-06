@@ -102,6 +102,12 @@ export interface PluginConfig {
     onError?: "warn" | "silent" | "fail";
   };
 
+  // UserPromptSubmit keyword-detector opt-outs
+  keywordDetector?: {
+    // Skill keywords to stop auto-routing (e.g. "wiki"); "cancel" is never disabled.
+    disabled?: string[];
+  };
+
   // Permission settings
   permissions?: {
     allowBash?: boolean;

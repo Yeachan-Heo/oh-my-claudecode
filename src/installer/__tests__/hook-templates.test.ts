@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -223,6 +223,51 @@ OMC Ultrawork = "특수부대 작전 반"
     const pluginRalphProblem = runKeywordHook(pluginPath, 'run ralph on parser state issue');
     expect(JSON.stringify(templateRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
     expect(JSON.stringify(pluginRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
+  });
+
+  it('honors keywordDetector.disabled from .claude/omc.jsonc in both packaged artifacts', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+
+    // Isolate from any real user config at ~/.config/claude-omc/config.jsonc.
+    const emptyXdg = mkdtempSync(join(tmpdir(), 'keyword-hook-xdg-'));
+    const disabledDir = mkdtempSync(join(tmpdir(), 'keyword-hook-disabled-'));
+    const controlDir = mkdtempSync(join(tmpdir(), 'keyword-hook-control-'));
+
+    const runInDir = (scriptPath: string, prompt: string, dir: string) =>
+      JSON.parse(
+        execFileSync('node', [scriptPath], {
+          cwd: packageRoot,
+          env: { ...process.env, XDG_CONFIG_HOME: emptyXdg },
+          input: JSON.stringify({ prompt, cwd: dir, directory: dir }),
+          encoding: 'utf-8',
+        }),
+      ) as Record<string, unknown>;
+
+    try {
+      mkdirSync(join(disabledDir, '.claude'), { recursive: true });
+      // Canonical JSONC shape from the #3421 review: comment + trailing commas.
+      writeFileSync(
+        join(disabledDir, '.claude', 'omc.jsonc'),
+        '{\n  // disable tdd auto-routing\n  "keywordDetector": { "disabled": ["tdd",], },\n}',
+      );
+
+      for (const scriptPath of [templatePath, pluginPath]) {
+        // Opt-out is honored: the shipped hook does not route the disabled keyword.
+        expect(runInDir(scriptPath, 'tdd implement password validation', disabledDir)).toEqual({
+          continue: true,
+          suppressOutput: true,
+        });
+        // Control: without the opt-out the same prompt still routes.
+        expect(
+          JSON.stringify(runInDir(scriptPath, 'tdd implement password validation', controlDir)),
+        ).toContain('[TDD MODE ACTIVATED]');
+      }
+    } finally {
+      rmSync(emptyXdg, { recursive: true, force: true });
+      rmSync(disabledDir, { recursive: true, force: true });
+      rmSync(controlDir, { recursive: true, force: true });
+    }
   });
 });
 

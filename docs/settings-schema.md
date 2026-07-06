@@ -40,3 +40,30 @@ In the current OMC config surface, the same block is written as the top-level
 This remains a prompt-level workflow contract, not runtime enforcement. For the
 full interface, trust boundary, trigger stages, and residual risk, see
 [`company-context-interface.md`](./company-context-interface.md).
+
+## `keywordDetector.disabled`
+
+Opt out of auto-routing for specific keyword-detector skills without turning the
+whole hook off. The UserPromptSubmit keyword detector maps keywords such as
+`wiki`, `plan`, `research`, or `deepsearch` to skills; in a project with its own
+same-named skill this auto-routing can hijack the word and shadow the intended
+skill. List the skill names to suppress here.
+
+Read from the OMC config surface above, project `.claude/omc.jsonc` first, then
+user `~/.config/claude-omc/config.jsonc` (project takes precedence).
+
+```jsonc
+{
+  "keywordDetector": {
+    // skill keywords to stop auto-routing; "cancel" cannot be disabled
+    "disabled": ["wiki"]
+  }
+}
+```
+
+### Behavior
+
+- Omitted or empty array: no change, every keyword routes as before.
+- A listed skill is dropped before conflict resolution, so neither its magic-keyword invocation nor its mode-injection context is emitted.
+- `cancel` is never disableable, even if listed: it is the emergency stop for active modes.
+- To disable all keyword routing at once instead, set `OMC_SKIP_HOOKS=keyword-detector`.
