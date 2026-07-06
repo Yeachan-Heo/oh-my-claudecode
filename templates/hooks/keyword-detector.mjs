@@ -1086,6 +1086,116 @@ function isTeamEnabled() {
   } catch { return false; }
 }
 
+// Read the OMC JSONC config the way src/config/loader.ts does, inlined so the
+// standalone hook stays build-independent (mirrors scripts/lib/agent-model-config.mjs).
+function getOmcUserConfigDir() {
+  if (process.platform === 'win32') {
+    return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  }
+  return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips comments AND trailing commas)
+function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+
+function stripComments(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      while (i < content.length && content[i] !== '\n') i++;
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i += 2;
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+// Mirrors src/utils/jsonc.ts:stripTrailingCommas (comma before a closing } or ]).
+function stripTrailingCommas(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) j++;
+      if (content[j] === '}' || content[j] === ']') {
+        i++;
+        continue;
+      }
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+function loadJsoncConfig(path) {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(stripJsoncComments(readFileSync(path, 'utf-8')));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Skills the user opted out of via `keywordDetector.disabled` in the OMC
+ * config: project `.claude/omc.jsonc` first, then user
+ * `~/.config/claude-omc/config.jsonc`, the same JSONC surface
+ * src/config/loader.ts reads. Empty when unset, so default behavior is
+ * unchanged. `cancel` is never disableable: it is the emergency stop.
+ * @param {string} directory project working directory
+ * @returns {Set<string>} disabled skill names (never includes 'cancel')
+ */
+function loadDisabledKeywords(directory) {
+  const configPaths = [
+    join(directory || process.cwd(), '.claude', 'omc.jsonc'),
+    join(getOmcUserConfigDir(), 'claude-omc', 'config.jsonc'),
+  ];
+  for (const configPath of configPaths) {
+    const config = loadJsoncConfig(configPath);
+    const disabled = config?.keywordDetector?.disabled;
+    if (Array.isArray(disabled)) {
+      return new Set(disabled.filter((name) => name !== 'cancel'));
+    }
+  }
+  return new Set();
+}
+
 // Main
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
@@ -1222,8 +1332,14 @@ async function main() {
       matches.push({ name: 'analyze', args: '' });
     }
 
+    // Drop user-disabled keywords, then pass through if nothing is left.
+    const disabledKeywords = loadDisabledKeywords(directory);
+    const enabledMatches = disabledKeywords.size > 0
+      ? matches.filter((m) => !disabledKeywords.has(m.name))
+      : matches;
+
     // No matches - pass through
-    if (matches.length === 0) {
+    if (enabledMatches.length === 0) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -1231,7 +1347,7 @@ async function main() {
     // Deduplicate matches by keyword name before conflict resolution
     const seen = new Set();
     const uniqueMatches = [];
-    for (const m of matches) {
+    for (const m of enabledMatches) {
       if (!seen.has(m.name)) {
         seen.add(m.name);
         uniqueMatches.push(m);

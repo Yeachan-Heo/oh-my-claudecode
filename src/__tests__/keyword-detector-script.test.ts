@@ -1087,3 +1087,51 @@ diff --git a/a b/b
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
   });
 });
+
+describe('keyword-detector.mjs keywordDetector.disabled opt-out', () => {
+  function makeCwdWithDisabled(disabled: string[]) {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-disabled-'));
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    // Canonical JSONC shape: a comment and trailing commas, which parseJsonc supports.
+    const list = disabled.map((name) => `"${name}",`).join(' ');
+    writeFileSync(
+      join(cwd, '.claude', 'omc.jsonc'),
+      `{\n  // keyword-detector opt-out\n  "keywordDetector": { "disabled": [${list}] },\n}`,
+    );
+    return cwd;
+  }
+
+  it('activates wiki with no opt-out config (positive control)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-wiki-default-'));
+    const output = runKeywordDetector('wiki this auth finding', cwd);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: WIKI]');
+  });
+
+  it('does not activate wiki when it is in keywordDetector.disabled', () => {
+    const cwd = makeCwdWithDisabled(['wiki']);
+    const output = runKeywordDetector('wiki this auth finding', cwd);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: WIKI]');
+  });
+
+  it('only disables the listed keyword, leaving others active', () => {
+    const cwd = makeCwdWithDisabled(['wiki']);
+    const output = runKeywordDetector('deepsearch the codebase for keyword dispatch', cwd);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain('<search-mode>');
+  });
+
+  it('never disables cancel even when listed (emergency stop protection)', () => {
+    const cwd = makeCwdWithDisabled(['cancel']);
+    const output = runKeywordDetector('cancelomc', cwd);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(context).toContain('[MAGIC KEYWORD: CANCEL]');
+  });
+});
