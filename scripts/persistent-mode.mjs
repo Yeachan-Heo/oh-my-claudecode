@@ -31,6 +31,49 @@ import { resolveOmcStateRoot } from "./lib/state-root.mjs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const SAFE_CONTINUE = { continue: true, suppressOutput: true };
+const DEFAULT_SAFETY_TIMEOUT_MS = 10000;
+
+function getSafetyTimeoutMs() {
+  const parsed = Number.parseInt(process.env.OMC_PERSISTENT_MODE_TIMEOUT_MS || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SAFETY_TIMEOUT_MS;
+}
+
+function writeSafeContinue() {
+  try {
+    process.stdout.write(JSON.stringify(SAFE_CONTINUE) + "\n");
+  } catch {
+    // If stdout is unavailable, exiting still prevents a wedged Stop hook.
+  }
+}
+
+function shouldSkipPersistentModeHook() {
+  const skipHooks = (process.env.OMC_SKIP_HOOKS || "")
+    .split(",")
+    .map((hook) => hook.trim())
+    .filter(Boolean);
+
+  return (
+    process.env.DISABLE_OMC === "1" ||
+    process.env.DISABLE_OMC === "true" ||
+    skipHooks.includes("persistent-mode")
+  );
+}
+
+function forceSafeExit(message) {
+  try {
+    if (message) process.stderr.write(message + "\n");
+  } catch {
+    // Ignore stderr failures; the JSON decision is what matters.
+  }
+  writeSafeContinue();
+  process.exit(0);
+}
+
+const safetyTimeout = setTimeout(() => {
+  forceSafeExit("[persistent-mode] Safety timeout reached, forcing exit");
+}, getSafetyTimeoutMs());
+
 // Dynamic import for the shared stdin module
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
@@ -962,11 +1005,19 @@ function isScheduledWakeupStop(data) {
 
 async function main() {
   try {
+    if (shouldSkipPersistentModeHook()) {
+      writeSafeContinue();
+      return;
+    }
+
     const input = await readStdin();
     let data = {};
     try {
       data = JSON.parse(input);
-    } catch {}
+    } catch {
+      writeSafeContinue();
+      return;
+    }
 
     // Claude Code sets stop_hook_active when a Stop hook is already running.
     // Never emit another decision:block in that re-entrant path: doing so trips
@@ -1538,9 +1589,23 @@ async function main() {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
-    console.error(`[persistent-mode] Error: ${error.message}`);
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    try {
+      process.stderr.write(`[persistent-mode] Error: ${error?.message || error}\n`);
+    } catch {
+      // Ignore stderr errors - we just need to return valid JSON
+    }
+    writeSafeContinue();
   }
 }
 
-main();
+process.on("uncaughtException", (error) => {
+  forceSafeExit(`[persistent-mode] Uncaught exception: ${error?.message || error}`);
+});
+
+process.on("unhandledRejection", (error) => {
+  forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
+});
+
+main().finally(() => {
+  clearTimeout(safetyTimeout);
+});
