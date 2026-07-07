@@ -451,6 +451,50 @@ export function isOmcHook(command: string): boolean {
   return false;
 }
 
+function isStandaloneOmcHookCommand(command: string): boolean {
+  const lowerCommand = command.toLowerCase();
+  const containsHooksDir = /hooks[/\\]/.test(lowerCommand);
+  const hookFilenameMatch = lowerCommand.match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+  return !!(containsHooksDir && hookFilenameMatch && OMC_HOOK_FILENAMES.has(hookFilenameMatch[1]));
+}
+
+function getStandaloneOmcHookFilename(command: string): string | null {
+  if (!isStandaloneOmcHookCommand(command)) {
+    return null;
+  }
+  const hookFilenameMatch = command.toLowerCase().match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+  return hookFilenameMatch?.[1] ?? null;
+}
+
+function collectActiveStandaloneOmcHookFilenames(hooks: Record<string, unknown>): Set<string> {
+  const active = new Set<string>();
+
+  for (const groups of Object.values(hooks)) {
+    if (!Array.isArray(groups)) {
+      continue;
+    }
+
+    for (const group of groups as HookGroup[]) {
+      if (!Array.isArray(group.hooks)) {
+        continue;
+      }
+
+      for (const hook of group.hooks) {
+        if (hook.type !== 'command' || typeof hook.command !== 'string') {
+          continue;
+        }
+        const filename = getStandaloneOmcHookFilename(hook.command);
+        if (filename) {
+          active.add(filename);
+        }
+      }
+    }
+  }
+
+  return active;
+}
+
+
 /**
  * Check if the current Node.js version meets the minimum requirement
  */
@@ -526,7 +570,7 @@ export function isProjectScopedPlugin(): boolean {
 type HookEntry = { type: string; command: string };
 type HookGroup = { hooks: HookEntry[] };
 
-function pruneLegacyStandaloneHookScripts(log: (msg: string) => void): void {
+function pruneLegacyStandaloneHookScripts(log: (msg: string) => void, activeStandaloneOmcHookFilenames = new Set<string>()): void {
   if (!existsSync(HOOKS_DIR)) {
     return;
   }
@@ -540,7 +584,11 @@ function pruneLegacyStandaloneHookScripts(log: (msg: string) => void): void {
 
     const targetPath = join(HOOKS_DIR, filename);
     try {
-      if (statSync(targetPath).isFile() && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
+      if (
+        !activeStandaloneOmcHookFilenames.has(filename)
+        && statSync(targetPath).isFile()
+        && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')
+      ) {
         unlinkSync(targetPath);
         removed++;
       }
@@ -551,7 +599,8 @@ function pruneLegacyStandaloneHookScripts(log: (msg: string) => void): void {
   }
 
   const hooksLibDir = join(HOOKS_DIR, 'lib');
-  if (existsSync(hooksLibDir)) {
+  const preserveSharedHookLibPayload = activeStandaloneOmcHookFilenames.size > 0;
+  if (existsSync(hooksLibDir) && !preserveSharedHookLibPayload) {
     for (const filename of readdirSync(hooksLibDir)) {
       if (!listStandaloneHookLibPayloadFilenames().has(filename)) {
         continue;
@@ -605,8 +654,8 @@ function configureInstallerSettings(
       const filtered = groupList.filter(group => {
         const isLegacy = group.hooks.every(h =>
           h.type === 'command'
-          && (h.command.includes('/.claude/hooks/') || h.command.includes('\\.claude\\hooks\\'))
-          && isOmcHook(h.command)
+          && typeof h.command === 'string'
+          && isStandaloneOmcHookCommand(h.command)
         );
         if (isLegacy) legacyRemoved++;
         return !isLegacy;
@@ -625,7 +674,8 @@ function configureInstallerSettings(
     const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
     const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
     if (pluginHandlesHooks) {
-      pruneLegacyStandaloneHookScripts(context.log);
+      const activeStandaloneOmcHookFilenames = collectActiveStandaloneOmcHookFilenames(existingHooks);
+      pruneLegacyStandaloneHookScripts(context.log, activeStandaloneOmcHookFilenames);
     }
 
     const shouldConfigureSettingsHooks = (!context.runningAsPlugin || !!context.allowPluginHookRefresh) && !pluginHandlesHooks;

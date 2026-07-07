@@ -520,6 +520,101 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     expect(readFileSync(join(hooksDir, 'attention', 'notify.mjs'), 'utf-8')).toBe('user nested hook');
   });
 
+  it('preserves helpers when a default-format standalone OMC hook remains active in plugin mode', async () => {
+    setupPluginWithHooks();
+
+    const hooksDir = join(testClaudeDir, 'hooks');
+    const hooksLibDir = join(hooksDir, 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+
+    for (const filename of ['persistent-mode.mjs', 'keyword-detector.mjs']) {
+      writeFileSync(join(hooksDir, filename), shippedStandaloneHookPayload(filename, 'hooks'));
+    }
+    for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'model-routing-override-message.mjs', 'state-root.mjs', 'stdin.mjs']) {
+      writeFileSync(join(hooksLibDir, filename), shippedStandaloneHookPayload(filename, 'hooks/lib'));
+    }
+
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"',
+              },
+              {
+                type: 'command',
+                command: 'node $HOME/.claude/hooks/user-stop-hook.mjs',
+              },
+            ],
+          },
+        ],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    const writtenSettings = JSON.parse(
+      readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8'),
+    ) as { hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
+    const commands = writtenSettings.hooks?.Stop?.[0]?.hooks.map(hook => hook.command) ?? [];
+
+    expect(result.success).toBe(true);
+    expect(commands).toContain('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"');
+    expect(commands).toContain('node $HOME/.claude/hooks/user-stop-hook.mjs');
+    expect(existsSync(join(hooksDir, 'persistent-mode.mjs'))).toBe(true);
+    expect(existsSync(join(hooksDir, 'keyword-detector.mjs'))).toBe(false);
+    expect(existsSync(join(hooksLibDir, 'config-dir.mjs'))).toBe(true);
+    expect(existsSync(join(hooksLibDir, 'state-root.mjs'))).toBe(true);
+    expect(existsSync(join(hooksLibDir, 'model-routing-override-message.mjs'))).toBe(true);
+  });
+
+  it('removes default-format standalone OMC hook entries before plugin stale helper pruning', async () => {
+    setupPluginWithHooks();
+
+    const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    writeFileSync(join(hooksLibDir, 'config-dir.mjs'), shippedStandaloneHookPayload('config-dir.mjs', 'hooks/lib'));
+    writeFileSync(join(hooksLibDir, 'state-root.mjs'), shippedStandaloneHookPayload('state-root.mjs', 'hooks/lib'));
+
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [{
+              type: 'command',
+              command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/keyword-detector.mjs"',
+            }],
+          },
+        ],
+        Stop: [
+          {
+            hooks: [{
+              type: 'command',
+              command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/code-simplifier.mjs"',
+            }],
+          },
+        ],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    const writtenSettings = JSON.parse(
+      readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8'),
+    ) as { hooks?: Record<string, unknown> };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks).toBeUndefined();
+    expect(existsSync(join(hooksLibDir, 'config-dir.mjs'))).toBe(false);
+    expect(existsSync(join(hooksLibDir, 'state-root.mjs'))).toBe(false);
+  });
+
   it('preserves same-basename non-OMC hook files while pruning shipped OMC payloads', async () => {
     setupPluginWithHooks();
 
