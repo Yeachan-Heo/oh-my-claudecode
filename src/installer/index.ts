@@ -1417,6 +1417,7 @@ function isCacheInstalledPluginRoot(root: string): boolean {
 
 function resolveBestPluginSyncSource(targetRoots: string[]): { sourceRoot: string | null; errors: string[] } {
   const excludedRoots = new Set(targetRoots.map(normalizePath));
+  const excludedCanonicalRoots = new Set(targetRoots.map(canonicalizeExistingPath));
   const seen = new Set<string>();
   const globalPackageRoot = getGlobalInstalledPackageRoot();
   const candidates = [
@@ -1435,7 +1436,14 @@ function resolveBestPluginSyncSource(targetRoots: string[]): { sourceRoot: strin
     if (seen.has(normalizedCandidate) || excludedRoots.has(normalizedCandidate) || !existsSync(candidate)) {
       continue;
     }
+
+    const canonicalCandidate = canonicalizeExistingPath(candidate);
+    if (seen.has(canonicalCandidate) || excludedCanonicalRoots.has(canonicalCandidate)) {
+      continue;
+    }
+
     seen.add(normalizedCandidate);
+    seen.add(canonicalCandidate);
 
     const sourceValidationErrors = validatePluginSyncPayload(candidate);
     if (sourceValidationErrors.length > 0) {
@@ -1576,8 +1584,12 @@ export function copyPluginSyncPayload(sourceRoot: string, targetRoots: string[])
 
   let synced = false;
   const errors: string[] = [];
+  const canonicalSourceRoot = canonicalizeExistingPath(sourceRoot);
 
   for (const targetRoot of targetRoots) {
+    if (canonicalizeExistingPath(targetRoot) === canonicalSourceRoot) {
+      continue;
+    }
     let copiedToTarget = false;
     let copiedSkills = false;
 

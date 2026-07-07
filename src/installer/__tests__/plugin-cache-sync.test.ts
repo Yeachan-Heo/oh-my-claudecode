@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 
 const ORIG_ENV = { ...process.env };
 
@@ -94,6 +94,53 @@ describe('syncInstalledPluginPayload', () => {
     expect(existsSync(join(cacheRoot, 'scripts', 'run.cjs'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'commands', 'omc-setup.md'))).toBe(true);
     expect(JSON.parse(readFileSync(join(cacheRoot, 'package.json'), 'utf-8')).version).toBe('9.9.9-test');
+  });
+
+  it('excludes marketplace sources that canonicalize to an installed cache target', async () => {
+    const configDir = process.env.CLAUDE_CONFIG_DIR as string;
+    const cacheRoot = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.12.0');
+    const samePhysicalSourceRoot = `${cacheRoot}/../${basename(cacheRoot)}`;
+    const sourceRoot = join(tempRoot, 'alternate-marketplace-source');
+
+    writePayloadTree(sourceRoot);
+    mkdirSync(join(cacheRoot, 'agents'), { recursive: true });
+    writeFileSync(join(cacheRoot, 'agents', 'executor.md'), '# stale executor\n');
+    mkdirSync(join(configDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(configDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        version: 2,
+        plugins: {
+          'oh-my-claudecode@omc': [{ installPath: cacheRoot, version: '4.12.0' }],
+        },
+      }, null, 2),
+    );
+    writeFileSync(
+      join(configDir, 'plugins', 'known_marketplaces.json'),
+      JSON.stringify({
+        omc: {
+          installLocation: samePhysicalSourceRoot,
+          source: { source: 'directory', path: samePhysicalSourceRoot },
+        },
+        'oh-my-claudecode-local': {
+          installLocation: sourceRoot,
+          source: { source: 'directory', path: sourceRoot },
+        },
+      }, null, 2),
+    );
+
+    const installer = await freshInstaller();
+    const result = installer.syncInstalledPluginPayload();
+
+    expect(result.synced).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.sourceRoot).toBe(sourceRoot);
+    expect(result.sourceRoot).not.toBe(samePhysicalSourceRoot);
+    expect(existsSync(join(cacheRoot, 'package.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(cacheRoot, 'package.json'), 'utf-8')).version).toBe('9.9.9-test');
+
+    const selfCopyResult = installer.copyPluginSyncPayload(samePhysicalSourceRoot, [cacheRoot]);
+    expect(selfCopyResult).toEqual({ synced: false, errors: [] });
   });
 
   it('repairs incomplete cache installs during setup before plugin-provided file detection runs', async () => {
