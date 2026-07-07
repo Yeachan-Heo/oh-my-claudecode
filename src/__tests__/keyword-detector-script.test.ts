@@ -1086,6 +1086,53 @@ diff --git a/a b/b
     expect(context).toContain('[MAGIC KEYWORD: RALPH]');
     expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
   });
+
+  it('does not activate ralph for a leading proper-noun mention ("Ralph Step 0a wiring")', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-proper-noun-'));
+    const sessionId = 'session-ralph-proper-noun';
+    const output = runKeywordDetector('Ralph Step 0a wiring is advisory, not a hook.', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(false);
+  });
+
+  it('does not activate ralph for a hyphenated identifier mention ("wire ralph-step-0a.sh")', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-hyphen-'));
+    const sessionId = 'session-ralph-hyphen';
+    const output = runKeywordDetector('wire ralph-step-0a.sh into its callers', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(false);
+  });
+
+  it('does not activate ralph for a hyphenated state filename mention ("ralph-state.json")', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-state-file-'));
+    const sessionId = 'session-ralph-state-file';
+    const output = runKeywordDetector('inspect ralph-state.json without starting the hook', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+    const ralphStatePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+
+    expect(output.continue).toBe(true);
+    expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(ralphStatePath)).toBe(false);
+  });
+
+  it('still activates ralph for a leading imperative task ("ralph fix the tests")', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-leading-imperative-'));
+    const sessionId = 'session-ralph-leading-imperative';
+    const output = runKeywordDetector('ralph fix the tests', cwd, sessionId);
+    const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+    expect(output.continue).toBe(true);
+    expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+    expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(true);
+  });
 });
 
 describe('keyword-detector.mjs keywordDetector.disabled opt-out', () => {
