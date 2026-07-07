@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const TEMPLATE_HOOK_PATH = join(__dirname, '../../../../templates/hooks/persistent-mode.mjs');
@@ -59,6 +60,7 @@ describe('persistent-mode hook error handling (issue #319)', () => {
     const skipEnvs: Array<Record<string, string>> = [
       { DISABLE_OMC: '1' },
       { OMC_SKIP_HOOKS: 'other,persistent-mode' },
+      { OMC_SKIP_HOOKS: 'other,stop-continuation' },
     ];
     for (const hookPath of [TEMPLATE_HOOK_PATH, SCRIPT_HOOK_PATH]) {
       for (const env of skipEnvs) {
@@ -75,6 +77,32 @@ describe('persistent-mode hook error handling (issue #319)', () => {
       }
     }
   });
+
+  it('keeps the default safety timeout below the shipped Stop hook wrapper kill', () => {
+    const manifest = JSON.parse(readFileSync(join(__dirname, '../../../../hooks/hooks.json'), 'utf-8'));
+    const stopHook = manifest.hooks.Stop[0].hooks.find((hook: { command?: string }) =>
+      hook.command?.includes('/scripts/persistent-mode.mjs'),
+    );
+    expect(stopHook?.timeout).toBe(10);
+
+    const wrapperKillMs = stopHook.timeout * 1000 - 500;
+    for (const hookPath of [TEMPLATE_HOOK_PATH, SCRIPT_HOOK_PATH]) {
+      expect(readDefaultSafetyTimeoutMs(hookPath)).toBeLessThan(wrapperKillMs);
+    }
+  });
+
+  it('registers watchdog handlers before top-level awaited dynamic imports', () => {
+    for (const hookPath of [TEMPLATE_HOOK_PATH, SCRIPT_HOOK_PATH]) {
+      const source = readFileSync(hookPath, 'utf-8');
+      const timeoutIndex = source.indexOf('const safetyTimeout = setTimeout');
+      const handlerIndex = source.indexOf('process.on("uncaughtException"');
+      const dynamicImportIndex = source.indexOf('await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs"))');
+
+      expect(timeoutIndex).toBeGreaterThan(-1);
+      expect(handlerIndex).toBeGreaterThan(timeoutIndex);
+      expect(dynamicImportIndex).toBeGreaterThan(handlerIndex);
+    }
+  });
 });
 
 interface HookResult {
@@ -83,6 +111,13 @@ interface HookResult {
   exitCode: number | null;
   timedOut: boolean;
   duration: number;
+}
+
+function readDefaultSafetyTimeoutMs(hookPath: string): number {
+  const source = readFileSync(hookPath, 'utf-8');
+  const match = source.match(/const DEFAULT_SAFETY_TIMEOUT_MS = (\d+);/);
+  if (!match) throw new Error(`Missing DEFAULT_SAFETY_TIMEOUT_MS in ${hookPath}`);
+  return Number(match[1]);
 }
 
 function runHook(
