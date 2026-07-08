@@ -385,6 +385,25 @@ function paneCurrentCommandLooksReady(command: string): boolean {
     || ['cmd', 'powershell', 'pwsh', 'nu', 'elvish'].includes(normalized);
 }
 
+async function getPaneCurrentCommandStatus(paneId: string): Promise<{ dead: boolean; command: string } | null> {
+  try {
+    const result = await tmuxCmdAsync([
+      'display-message', '-p', '-t', paneId,
+      '#{pane_dead} #{pane_current_command}',
+    ], { timeout: 1000 });
+    const status = result.stdout.trim();
+    const [dead, ...commandParts] = status.split(/\s+/);
+    return { dead: dead === '1', command: commandParts.join(' ') };
+  } catch {
+    return null;
+  }
+}
+
+function paneCurrentCommandLooksSubmitted(command: string): boolean {
+  return command.length > 0 && !paneCurrentCommandLooksReady(command);
+}
+
+
 export interface WaitForShellReadyOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
@@ -403,20 +422,13 @@ async function waitForShellReady(paneId: string, opts: WaitForShellReadyOptions 
   const deadline = Date.now() + timeoutMs;
   let lastStatus = '';
   while (Date.now() < deadline) {
-    try {
-      const result = await tmuxCmdAsync([
-        'display-message', '-p', '-t', paneId,
-        '#{pane_dead} #{pane_current_command}',
-      ], { timeout: 1000 });
-      lastStatus = result.stdout.trim();
-      const [dead, ...commandParts] = lastStatus.split(/\s+/);
-      if (dead === '1') return false;
-      const currentCommand = commandParts.join(' ');
-      if (currentCommand && paneCurrentCommandLooksReady(currentCommand)) {
+    const status = await getPaneCurrentCommandStatus(paneId);
+    if (status) {
+      lastStatus = `${status.dead ? '1' : '0'} ${status.command}`.trim();
+      if (status.dead) return false;
+      if (paneCurrentCommandLooksReady(status.command)) {
         return true;
       }
-    } catch (error) {
-      lastStatus = error instanceof Error ? error.message : String(error);
     }
     await sleep(pollIntervalMs);
   }
@@ -482,6 +494,13 @@ async function verifyWorkerStartCommandSubmitted(
     const commandStillBuffered = normalizedCaptured.includes(expected)
       || (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected));
     if (!commandStillBuffered) {
+      return true;
+    }
+    const status = await getPaneCurrentCommandStatus(paneId);
+    if (status?.dead) {
+      return false;
+    }
+    if (status && paneCurrentCommandLooksSubmitted(status.command)) {
       return true;
     }
     const remainingMs = deadline - Date.now();
