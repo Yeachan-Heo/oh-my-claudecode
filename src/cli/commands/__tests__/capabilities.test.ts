@@ -7,6 +7,7 @@ import {
   capabilitiesCheckCommand,
   capabilitiesLockCommand,
   runDeterministicCapabilityFixtures,
+  skillNameFromSkillFilePath,
   type CapabilitiesLockfile,
 } from '../capabilities.js';
 
@@ -67,6 +68,32 @@ describe('capabilities lock/check', () => {
     expect(results.find((result) => result.kind === 'required_args')).toMatchObject({ ok: true, outcome: 'pass' });
     expect(results.find((result) => result.kind === 'no_hallucinated_tool')).toMatchObject({ ok: true, outcome: 'pass' });
     expect(results.find((result) => result.kind === 'tool_restraint')).toMatchObject({ ok: true, outcome: 'pass' });
+  });
+
+  it('fails check when the locked surface body is mutated without updating the digest', async () => {
+    await withTempCwd(async (cwd) => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const lockfilePath = join(cwd, 'capabilities.lock.json');
+      const lockfile = buildCapabilitiesLockfile();
+      lockfile.surface.schemaVersion = 'tampered';
+      await writeFile(lockfilePath, `${JSON.stringify(lockfile, null, 2)}\n`);
+
+      const exitCode = await capabilitiesCheckCommand({ json: true, lockfile: lockfilePath });
+
+      expect(exitCode).toBe(1);
+      const report = JSON.parse(String(logSpy.mock.calls[0]?.[0]));
+      expect(report.ok).toBe(false);
+      expect(report.failures).toContainEqual(expect.objectContaining({
+        code: 'lockfile_surface_digest_mismatch',
+        expected: lockfile.surfaceDigest,
+        actual: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }));
+    });
+  });
+
+  it('extracts skill names from win32-style SKILL.md paths without leaking parent paths', () => {
+    expect(skillNameFromSkillFilePath('C:\\repo\\skills\\deep-interview\\SKILL.md')).toBe('deep-interview');
+    expect(skillNameFromSkillFilePath('C:\\repo\\skills\\nested.skill\\SKILL.md')).toBe('nested.skill');
   });
 
   it('fails check when the locked deterministic surface digest regresses', async () => {

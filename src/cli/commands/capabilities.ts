@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { z } from 'zod';
 import { allCustomTools, toSdkToolFormat } from '../../tools/index.js';
 import { getAgentDefinitions } from '../../agents/definitions.js';
@@ -162,6 +162,11 @@ function readSkillTitle(markdown: string): string | null {
   const heading = markdown.split('\n').find((line) => line.startsWith('# '));
   return heading ? heading.slice(2).trim() : null;
 }
+export function skillNameFromSkillFilePath(skillFilePath: string): string {
+  const normalizedPath = skillFilePath.replace(/\\/g, '/');
+  return basename(dirname(normalizedPath)) || skillFilePath;
+}
+
 function normalizeToolSchema(schema: unknown): z.ZodRawShape {
   return schema instanceof z.ZodObject ? schema.shape : schema as z.ZodRawShape;
 }
@@ -197,7 +202,7 @@ export function collectCapabilitySurface(root = packageRoot()): CapabilitySurfac
     .map((path) => {
       const markdown = readFileSync(path, 'utf-8');
       return {
-        name: path.split('/').at(-2) ?? path,
+        name: skillNameFromSkillFilePath(path),
         digest: sha256(markdown),
         title: readSkillTitle(markdown),
       };
@@ -374,6 +379,16 @@ export function checkCapabilitiesLockfile(lockfilePath: string): CapabilitiesChe
   const surfaceDigest = digestCapabilitySurface(surface);
   const fixtureResults = runDeterministicCapabilityFixtures(locked.fixtures, surface);
   const failures: CapabilitiesCheckFailure[] = [];
+  const lockedSurfaceDigest = digestCapabilitySurface(locked.surface);
+
+  if (lockedSurfaceDigest !== locked.surfaceDigest) {
+    failures.push({
+      code: 'lockfile_surface_digest_mismatch',
+      message: 'Locked capability surface body digest differs from the recorded lockfile digest.',
+      expected: locked.surfaceDigest,
+      actual: lockedSurfaceDigest,
+    });
+  }
 
   if (surfaceDigest !== locked.surfaceDigest) {
     failures.push({
