@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { buildSync } from 'esbuild';
 import {
   copyFileSync,
   existsSync,
@@ -16,8 +18,51 @@ import { join } from 'node:path';
 const REPO_ROOT = join(__dirname, '..', '..');
 const SETUP_SCRIPT = join(REPO_ROOT, 'scripts', 'setup-claude-md.sh');
 const CONFIG_DIR_HELPER = join(REPO_ROOT, 'scripts', 'lib', 'config-dir.sh');
+const LEGACY_GUIDES_FIXTURE = join(REPO_ROOT, 'src', 'installer', '__tests__', 'fixtures', 'legacy-guides.json');
+
+interface LegacyGuideFixture {
+  id: string;
+  lineCount: number;
+  dataBase64: string;
+}
+
+function staticLegacyGuide(lineCount: number): string {
+  const fixture = JSON.parse(readFileSync(LEGACY_GUIDES_FIXTURE, 'utf-8')) as { variants: LegacyGuideFixture[] };
+  const variant = fixture.variants.find(candidate => candidate.lineCount === lineCount);
+  if (!variant) throw new Error(`Missing static ${lineCount}-line legacy guide fixture`);
+  return Buffer.from(variant.dataBase64, 'base64').toString('utf-8');
+}
+
+const LEGACY_583_LINE_GUIDE = staticLegacyGuide(583);
+const LEGACY_292_LINE_GUIDE = staticLegacyGuide(292);
 
 const tempRoots: string[] = [];
+
+function buildCoordinatorFixture(pluginRoot: string, claudeMdContent: string, version = '9.9.9') {
+  mkdirSync(join(pluginRoot, 'bridge'), { recursive: true });
+  buildSync({
+    entryPoints: [join(REPO_ROOT, 'src', 'cli', 'claude-md-coordinator.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    outfile: join(pluginRoot, 'bridge', 'claude-md-coordinator.cjs'),
+    external: ['node:crypto', 'node:fs', 'node:path'],
+    define: {
+      __OMC_COORDINATOR_ENGINE_VERSION__: JSON.stringify(version),
+      __OMC_COORDINATOR_SOURCE_SHA256__: JSON.stringify(createHash('sha256').update(claudeMdContent).digest('hex')),
+    },
+  });
+  mkdirSync(join(pluginRoot, 'skills', 'omc-reference'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'skills', 'omc-reference', 'SKILL.md'), `---
+name: omc-reference
+description: Test fixture reference skill
+user-invocable: false
+---
+
+# Test OMC Reference
+`);
+}
 
 function createPluginFixture(claudeMdContent: string) {
   const root = mkdtempSync(join(tmpdir(), 'omc-setup-claude-md-'));
@@ -29,21 +74,13 @@ function createPluginFixture(claudeMdContent: string) {
 
   mkdirSync(join(pluginRoot, 'scripts', 'lib'), { recursive: true });
   mkdirSync(join(pluginRoot, 'docs'), { recursive: true });
-  mkdirSync(join(pluginRoot, 'skills', 'omc-reference'), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   mkdirSync(homeRoot, { recursive: true });
 
   copyFileSync(SETUP_SCRIPT, join(pluginRoot, 'scripts', 'setup-claude-md.sh'));
   copyFileSync(CONFIG_DIR_HELPER, join(pluginRoot, 'scripts', 'lib', 'config-dir.sh'));
   writeFileSync(join(pluginRoot, 'docs', 'CLAUDE.md'), claudeMdContent);
-  writeFileSync(join(pluginRoot, 'skills', 'omc-reference', 'SKILL.md'), `---
-name: omc-reference
-description: Test fixture reference skill
-user-invocable: false
----
-
-# Test OMC Reference
-`);
+  buildCoordinatorFixture(pluginRoot, claudeMdContent);
 
   return {
     pluginRoot,
@@ -62,7 +99,7 @@ afterEach(() => {
   }
 });
 
-describe('setup-claude-md.sh (issue #1572)', () => {
+describe('setup-claude-md.sh (issue #3442)', () => {
   it('installs the canonical docs/CLAUDE.md content with OMC markers', () => {
     const fixture = createPluginFixture(`<!-- OMC:START -->
 <!-- OMC:VERSION:9.9.9 -->
@@ -95,6 +132,77 @@ Use the real docs file.
     const installedSkillPath = join(fixture.projectRoot, '.claude', 'skills', 'omc-reference', 'SKILL.md');
     expect(existsSync(installedSkillPath)).toBe(true);
     expect(readFileSync(installedSkillPath, 'utf-8')).toContain('# Test OMC Reference');
+  });
+
+  it('fails closed when a coordinator reports ok:false with exit status 0', () => {
+    const canonical = `<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Canonical CLAUDE
+<!-- OMC:END -->
+`;
+    const fixture = createPluginFixture(canonical);
+    const sourceSha256 = createHash('sha256').update(canonical).digest('hex');
+    writeFileSync(
+      join(fixture.pluginRoot, 'bridge', 'claude-md-coordinator.cjs'),
+      `const handshake = { schemaVersion: 1, engineVersion: "9.9.9", sourceSha256: "${sourceSha256}" };
+if (process.argv[2] === "--handshake") process.stdout.write(JSON.stringify(handshake));
+else process.stdout.write(JSON.stringify({ ok: false, exitCode: 0, error: "rejected" }));
+`,
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'local'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('ok/exit disagreement');
+    expect(existsSync(join(fixture.projectRoot, '.claude', 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('fails closed when the coordinator handshake is malformed', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Canonical CLAUDE
+<!-- OMC:END -->
+`);
+    writeFileSync(
+      join(fixture.pluginRoot, 'bridge', 'claude-md-coordinator.cjs'),
+      'if (process.argv[2] === "--handshake") process.stdout.write("not json");\n',
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'local'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Coordinator handshake validation failed');
+    expect(existsSync(join(fixture.projectRoot, '.claude'))).toBe(false);
+  });
+
+  it('fails closed when the coordinator handshake source hash differs from the canonical file', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Canonical CLAUDE
+<!-- OMC:END -->
+`);
+    writeFileSync(
+      join(fixture.pluginRoot, 'bridge', 'claude-md-coordinator.cjs'),
+      'if (process.argv[2] === "--handshake") process.stdout.write(JSON.stringify({ schemaVersion: 1, engineVersion: "9.9.9", sourceSha256: "0".repeat(64) }));\n',
+    );
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'local'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Coordinator handshake validation failed');
+    expect(existsSync(join(fixture.projectRoot, '.claude'))).toBe(false);
   });
 
   it('refuses to install a canonical source that lacks OMC markers', () => {
@@ -382,6 +490,39 @@ Use the real docs file.
     expect(excludeContents.match(/# BEGIN OMC local artifacts/g)).toHaveLength(1);
   });
 
+  it('removes only exact static 583/292-line legacy guides, preserves surrounding bytes, reports a byte-identical backup, and is idempotent', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Canonical CLAUDE
+<!-- OMC:END -->
+`);
+    const targetPath = join(fixture.projectRoot, '.claude', 'CLAUDE.md');
+    const before = 'before legacy\r\n';
+    const between = 'between legacy\r\n';
+    const after = 'after legacy';
+    const original = `${before}${LEGACY_583_LINE_GUIDE}${between}${LEGACY_292_LINE_GUIDE}${after}`;
+    mkdirSync(join(fixture.projectRoot, '.claude'), { recursive: true });
+    writeFileSync(targetPath, original, 'utf-8');
+
+    const env = { ...process.env, HOME: fixture.homeRoot };
+    const first = spawnSync('bash', [fixture.scriptPath, 'local'], { cwd: fixture.projectRoot, env, encoding: 'utf-8' });
+    expect(first.status).toBe(0);
+    const backup = `${first.stdout}\n${first.stderr}`.match(/Coordinator backup: (.+)/)?.[1];
+    expect(backup).toBeTruthy();
+    expect(readFileSync(backup!, 'utf-8')).toBe(original);
+
+    const installed = readFileSync(targetPath, 'utf-8');
+    const preservedUserBytes = `${before}${between}${after}`;
+    expect(installed).toContain('<!-- OMC:START -->');
+    expect(installed).toContain('<!-- User customizations -->\n' + preservedUserBytes);
+    expect(installed).not.toContain(LEGACY_583_LINE_GUIDE);
+    expect(installed).not.toContain(LEGACY_292_LINE_GUIDE);
+
+    const second = spawnSync('bash', [fixture.scriptPath, 'local'], { cwd: fixture.projectRoot, env, encoding: 'utf-8' });
+    expect(second.status).toBe(0);
+    expect(readFileSync(targetPath, 'utf-8')).toBe(installed);
+  });
+
   it('uses CLAUDE_CONFIG_DIR for global setup targets and plugin verification', () => {
     const fixture = createPluginFixture(`<!-- OMC:START -->
 <!-- OMC:VERSION:9.9.9 -->
@@ -409,8 +550,9 @@ Use the real docs file.
     expect(result.status).toBe(0);
     expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(true);
     expect(existsSync(join(configDir, 'skills', 'omc-reference', 'SKILL.md'))).toBe(true);
-    expect(existsSync(join(configDir, 'hooks', 'keyword-detector.sh'))).toBe(false);
+    expect(existsSync(join(configDir, 'hooks', 'keyword-detector.sh'))).toBe(true);
     expect(`${result.stdout}\n${result.stderr}`).toContain('Plugin verified');
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Preserved unverified legacy hook');
   });
 
   it('does not warn for third-party-only settings hooks', () => {
@@ -568,7 +710,7 @@ Use the real docs file.
     const baseClaude = readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8');
     expect(baseClaude).toContain('<!-- OMC:START -->');
     expect(baseClaude).toContain('<!-- OMC:END -->');
-    expect(baseClaude).toContain('<!-- User customizations (migrated from previous CLAUDE.md) -->');
+    expect(baseClaude).toContain('<!-- User customizations -->');
     expect(baseClaude).toContain('# User CLAUDE');
     expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
   });
@@ -736,7 +878,7 @@ Use the real docs file.
     });
 
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).toContain('Refusing to write OMC companion CLAUDE.md');
+    expect(`${result.stdout}\n${result.stderr}`).toContain('Refusing symlink');
     expect(readFileSync(realTarget, 'utf-8')).toBe('outside target');
   });
 });
@@ -761,6 +903,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(oldVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n\n# Old Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     // Newer directory exists but is missing docs/CLAUDE.md
     mkdirSync(newerInvalid, { recursive: true });
@@ -816,9 +959,11 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     mkdirSync(join(oldVersion, 'scripts', 'lib'), { recursive: true });
     copyFileSync(CONFIG_DIR_HELPER, join(oldVersion, 'scripts', 'lib', 'config-dir.sh'));
     writeFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n# Old\n<!-- OMC:END -->\n`);
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     mkdirSync(join(newVersion, 'docs'), { recursive: true });
     writeFileSync(join(newVersion, 'docs', 'CLAUDE.md'), `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n# New\n<!-- OMC:END -->\n`);
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
 
     // Should be ignored by strict semver selection.
     mkdirSync(suffixedInvalid, { recursive: true });
@@ -866,6 +1011,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(oldVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n\n# Old Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     // Newer cache version exists
     mkdirSync(join(newVersion, 'docs'), { recursive: true });
@@ -873,6 +1019,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(newVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# New Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
 
     // installed_plugins.json still points at the old but existing path
     mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
@@ -938,6 +1085,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(oldVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n\n# Old Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     // Create new version (the active one)
     mkdirSync(join(newVersion, 'docs'), { recursive: true });
@@ -945,6 +1093,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(newVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# New Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
 
     // Create installed_plugins.json pointing to the new version
     mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
@@ -1011,12 +1160,14 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(oldVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n\n# Old Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     mkdirSync(join(newVersion, 'docs'), { recursive: true });
     writeFileSync(
       join(newVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# New Version\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
 
     mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
     writeFileSync(
@@ -1082,6 +1233,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(oldVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.8.2 -->\n\n# Old\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(oldVersion, readFileSync(join(oldVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.8.2');
 
     // Create new version (no installed_plugins.json, relies on cache scan)
     mkdirSync(join(newVersion, 'docs'), { recursive: true });
@@ -1089,6 +1241,7 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
       join(newVersion, 'docs', 'CLAUDE.md'),
       `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# New\n<!-- OMC:END -->\n`,
     );
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
 
     // No installed_plugins.json — fallback to cache scan
     mkdirSync(join(homeRoot, '.claude'), { recursive: true });

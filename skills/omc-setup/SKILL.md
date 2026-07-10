@@ -54,18 +54,18 @@ MODES:
     - If already configured, offers quick update option
 
   Local Configuration (--local)
-    - Downloads fresh CLAUDE.md to ./.claude/
-    - Backs up existing CLAUDE.md to .claude/CLAUDE.md.backup.YYYY-MM-DD
+    - Invokes the plugin-local coordinator through `scripts/setup-claude-md.sh`; the shell validates the coordinator response and its exit status before any post-install work
+    - Reports coordinator-created byte-identical backups only for files that required mutation
     - Project-specific settings
     - Use this to update project config after OMC upgrades
 
   Global Configuration (--global)
-    - Downloads fresh CLAUDE.md to ~/.claude/
-    - Backs up existing CLAUDE.md to ~/.claude/CLAUDE.md.backup.YYYY-MM-DD
+    - Invokes the plugin-local coordinator through `scripts/setup-claude-md.sh`; the shell validates the coordinator response and its exit status before any post-install work
+    - Reports coordinator-created byte-identical backups only for changed global files
     - Default: explicitly overwrites ~/.claude/CLAUDE.md so plain `claude` also uses OMC
     - Optional preserve mode keeps the user's base `CLAUDE.md` and installs OMC into `CLAUDE-omc.md` for `omc` launches
     - Applies to all Claude Code sessions
-    - Cleans up legacy hooks
+    - Preserves same-named legacy hook files unless their exact historical contents are independently verified
     - Use this to update global config after OMC upgrades
 
   Force Full Setup (--force)
@@ -83,20 +83,15 @@ For more info: https://github.com/Yeachan-Heo/oh-my-claudecode
 ```
 
 
-## Active Plugin Root Resolution
+## Setup Invocation
 
-Before running setup shell commands or reading phase files, resolve the current OMC plugin root. This prevents an already-running Claude Code session from continuing to use a stale `CLAUDE_PLUGIN_ROOT` after `/plugin marketplace update omc` installs a newer cache version.
-
-```bash
-OMC_SETUP_PLUGIN_ROOT=$(node -e "const f=require('fs'),p=require('path'),h=require('os').homedir(),d=(process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude')).replace(/[\\/]+$/,''),b=p.join(d,'plugins','cache','omc','oh-my-claudecode'),valid=r=>f.existsSync(p.join(r,'skills','omc-setup','SKILL.md'))||f.existsSync(p.join(r,'hooks','hooks.json'))||f.existsSync(p.join(r,'docs','CLAUDE.md'));try{const vs=f.readdirSync(b,{withFileTypes:true}).filter(e=>(e.isDirectory()||e.isSymbolicLink())&&/^\d+\.\d+\.\d+/.test(e.name)).map(e=>e.name).sort((a,c)=>c.localeCompare(a,void 0,{numeric:true}));const hit=vs.map(v=>p.join(b,v)).find(valid);if(hit)console.log(hit);else if(process.env.CLAUDE_PLUGIN_ROOT)console.log(process.env.CLAUDE_PLUGIN_ROOT)}catch{if(process.env.CLAUDE_PLUGIN_ROOT)console.log(process.env.CLAUDE_PLUGIN_ROOT)}")
-export OMC_SETUP_PLUGIN_ROOT
-```
-
-Use `${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` for all setup script and phase paths, then immediately repair stale cache references before any prompts or phase work:
+Do not independently scan plugin cache directories or select a plugin root in this skill. Invoke the setup script from the plugin root supplied by the running plugin environment:
 
 ```bash
-node "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/repair-plugin-cache.mjs"
+bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" <local|global> [overwrite|preserve]
 ```
+
+The script is the sole cache resolver. It accepts only complete plugin roots (canonical `docs/CLAUDE.md`, coordinator artifact, and `omc-reference` skill), chooses a strict full-SemVer cache version, verifies the compiled-source handshake, and fails closed on coordinator protocol or status disagreement. Do not download configuration or mutate `CLAUDE.md` outside that coordinator.
 
 ## Pre-Setup Check: Already Configured?
 
@@ -127,7 +122,7 @@ Use AskUserQuestion to prompt:
 **Question:** "OMC is already configured. What would you like to do?"
 
 **Options:**
-1. **Update CLAUDE.md only** - Download latest CLAUDE.md without re-running full setup
+1. **Update CLAUDE.md only** - Install the active plugin's canonical CLAUDE.md without re-running full setup
 2. **Run full setup again** - Go through the complete setup wizard
 3. **Cancel** - Exit without changes
 

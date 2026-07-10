@@ -177,12 +177,14 @@ function getPackedFiles(): Set<string> {
     return packedFilesCache;
   }
 
-  const stdout = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+  const stdout = execFileSync('npm', ['pack', '--dry-run', '--json', '--silent'], {
     cwd: PACKAGE_ROOT,
     encoding: 'utf-8',
   });
 
-  const results = JSON.parse(stdout) as NpmPackDryRunResult[];
+  const jsonStart = stdout.search(/^\[\r?$/m);
+  if (jsonStart < 0) throw new Error('npm pack did not emit a JSON payload');
+  const results = JSON.parse(stdout.slice(jsonStart)) as NpmPackDryRunResult[];
   packedFilesCache = new Set((results[0]?.files ?? []).map(file => file.path));
   return packedFilesCache;
 }
@@ -196,6 +198,17 @@ function listTemplateHookLibFiles(): string[] {
 }
 
 describe('npm package hook surface regression', () => {
+  it('builds the coordinator for full builds and packaging without mutating ordinary tests', () => {
+    const packageJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf-8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.build).toMatch(/npm run compose-docs && npm run build:claude-md-coordinator/);
+    for (const entrypoint of ['test', 'test:ui', 'test:run', 'test:coverage']) {
+      expect(packageJson.scripts?.[entrypoint], entrypoint).not.toContain('build:claude-md-coordinator');
+    }
+    expect(packageJson.scripts?.prepack).toBe('npm run build');
+  });
   it('does not explicitly reference the auto-loaded standard hooks manifest from plugin.json', () => {
     const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
     expect(referencesStandardHooksManifest(pluginJson.hooks)).toBe(false);
@@ -209,6 +222,7 @@ describe('npm package hook surface regression', () => {
     expect(packedFiles.has('commands/omc-setup.md')).toBe(true);
     expect(packedFiles.has('dist/hooks/skill-bridge.cjs')).toBe(true);
     expect(packedFiles.has('bridge/cli.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/claude-md-coordinator.cjs')).toBe(true);
     expect(packedFiles.has('.claude-plugin/plugin.json')).toBe(true);
   });
 

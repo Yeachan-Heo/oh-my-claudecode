@@ -1,127 +1,118 @@
 #!/usr/bin/env bash
-# setup-claude-md.sh - Unified CLAUDE.md download/merge script
+# setup-claude-md.sh - install CLAUDE.md through the plugin-local coordinator
 # Usage: setup-claude-md.sh <local|global> [overwrite|preserve]
-#
-# Handles: version extraction, backup, download, marker stripping, merge, version reporting.
-# For global mode, defaults to overwrite; preserve mode keeps the user's base
-# CLAUDE.md and writes OMC content to a companion file for `omc` launch.
 
 set -euo pipefail
 
 MODE="${1:?Usage: setup-claude-md.sh <local|global> [overwrite|preserve]}"
 INSTALL_STYLE="${2:-overwrite}"
-DOWNLOAD_URL="https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 . "$SCRIPT_DIR/lib/config-dir.sh"
 
-# Resolve active plugin root from installed_plugins.json.
-# Handles stale CLAUDE_PLUGIN_ROOT when a session was started before a plugin
-# update (e.g. 4.8.2 session invoking setup after updating to 4.9.0).
-# Same pattern as run.cjs resolveTarget() fallback.
+# Resolve the current cached plugin rather than trusting a root captured when
+# Claude Code started. A candidate is usable only when it contains the complete
+# coordinator handshake surface; setup must never fall back to shell merging.
 resolve_active_plugin_root() {
   is_valid_plugin_root() {
     local candidate="$1"
-    [ -d "$candidate" ] && [ -f "${candidate}/docs/CLAUDE.md" ]
+    [ -d "$candidate" ] \
+      && [ -f "${candidate}/docs/CLAUDE.md" ] \
+      && [ -f "${candidate}/bridge/claude-md-coordinator.cjs" ] \
+      && [ -s "${candidate}/skills/omc-reference/SKILL.md" ]
+  }
+
+  select_latest_semver() {
+    node -e '
+      const fs = require("node:fs");
+      const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]+)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]+))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+      const parse = value => {
+        const match = value.match(semver);
+        const pre = match?.[4]?.split(".") ?? [];
+        return match && !pre.some(identifier => /^\d+$/.test(identifier) && !/^(0|[1-9]\d*)$/.test(identifier))
+          ? { value, core: match.slice(1, 4).map(Number), pre }
+          : null;
+      };
+      const compare = (left, right) => {
+        for (let index = 0; index < 3; index += 1) if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];
+        if (!left.pre.length || !right.pre.length) return left.pre.length ? -1 : right.pre.length ? 1 : 0;
+        for (let index = 0; index < Math.max(left.pre.length, right.pre.length); index += 1) {
+          if (left.pre[index] === undefined) return -1;
+          if (right.pre[index] === undefined) return 1;
+          if (left.pre[index] === right.pre[index]) continue;
+          const numericLeft = /^\d+$/.test(left.pre[index]);
+          const numericRight = /^\d+$/.test(right.pre[index]);
+          if (numericLeft && numericRight) return Number(left.pre[index]) - Number(right.pre[index]);
+          if (numericLeft !== numericRight) return numericLeft ? -1 : 1;
+          return left.pre[index] < right.pre[index] ? -1 : 1;
+        }
+        return 0;
+      };
+      const versions = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean).map(parse).filter(Boolean);
+      versions.sort(compare);
+      if (versions.length) process.stdout.write(`${versions.at(-1).value}\n`);
+    '
   }
 
   list_cache_versions() {
     local base="$1"
-    ls -1 "$base" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+    [ -d "$base" ] || return 0
+    local entry
+    for entry in "$base"/*; do
+      entry="${entry##*/}"
+      printf '%s\n' "$entry"
+    done
   }
 
-  local config_dir
+  local config_dir installed_plugins cache_base active_path latest newest
   config_dir="$(resolve_claude_config_dir)"
-  local installed_plugins="${config_dir}/plugins/installed_plugins.json"
-  local cache_base
+  installed_plugins="${config_dir}/plugins/installed_plugins.json"
   cache_base="$(dirname "$SCRIPT_PLUGIN_ROOT")"
 
+  latest=$(list_cache_versions "$cache_base" | while IFS= read -r version; do
+    is_valid_plugin_root "${cache_base}/${version}" && printf '%s\n' "$version"
+  done | select_latest_semver)
+
   if [ -f "$installed_plugins" ] && command -v jq >/dev/null 2>&1; then
-    local active_path
-    active_path=$(jq -r '
-      (.plugins // .)
-      | to_entries[]
-      | select(.key | startswith("oh-my-claudecode"))
-      | .value[0].installPath // empty
-    ' "$installed_plugins" 2>/dev/null)
-
+    active_path=$(jq -r '(.plugins // .) | to_entries[] | select(.key | startswith("oh-my-claudecode")) | .value[0].installPath // empty' "$installed_plugins" 2>/dev/null || true)
     if [ -n "$active_path" ] && is_valid_plugin_root "$active_path"; then
-      # Guard against stale installed_plugins.json after plugin update:
-      # if cache contains a newer valid version, prefer it.
-      if [ -d "$cache_base" ]; then
-        local active_version latest_cache_version preferred_version
-        active_version="$(basename "$active_path")"
-        latest_cache_version=$(list_cache_versions "$cache_base" | while IFS= read -r v; do
-          if is_valid_plugin_root "${cache_base}/${v}"; then
-            echo "$v"
-          fi
-        done | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
-
-        if [ -n "$latest_cache_version" ] && [ -d "${cache_base}/${latest_cache_version}" ]; then
-          preferred_version=$(printf '%s\n%s\n' "$active_version" "$latest_cache_version" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
-          if [ "$preferred_version" = "$latest_cache_version" ] && [ "$latest_cache_version" != "$active_version" ]; then
-            echo "${cache_base}/${latest_cache_version}"
-            return 0
-          fi
-        fi
+      newest=$(printf '%s\n%s\n' "$(basename "$active_path")" "$latest" | select_latest_semver)
+      if [ -n "$latest" ] && [ "$newest" = "$latest" ]; then
+        printf '%s\n' "${cache_base}/${latest}"
+      else
+        printf '%s\n' "$active_path"
       fi
-
-      echo "$active_path"
       return 0
     fi
   fi
 
-  # Fallback: scan sibling version directories for the latest (mirrors run.cjs)
-  if [ -d "$cache_base" ]; then
-    local latest
-    latest=$(list_cache_versions "$cache_base" | while IFS= read -r v; do
-      if is_valid_plugin_root "${cache_base}/${v}"; then
-        echo "$v"
-      fi
-    done | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
-    if [ -n "$latest" ] && is_valid_plugin_root "${cache_base}/${latest}"; then
-      echo "${cache_base}/${latest}"
-      return 0
-    fi
+  if [ -n "$latest" ]; then
+    printf '%s\n' "${cache_base}/${latest}"
+  elif is_valid_plugin_root "$SCRIPT_PLUGIN_ROOT"; then
+    printf '%s\n' "$SCRIPT_PLUGIN_ROOT"
+  else
+    return 1
   fi
-
-  echo "$SCRIPT_PLUGIN_ROOT"
 }
-
-ACTIVE_PLUGIN_ROOT="$(resolve_active_plugin_root)"
-CANONICAL_CLAUDE_MD="${ACTIVE_PLUGIN_ROOT}/docs/CLAUDE.md"
-CANONICAL_OMC_REFERENCE_SKILL="${ACTIVE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
 
 ensure_local_omc_git_exclude() {
   local exclude_path
-
   if ! exclude_path=$(git rev-parse --git-path info/exclude 2>/dev/null); then
     echo "Skipped OMC git exclude setup (not a git repository)"
     return 0
   fi
-
   mkdir -p "$(dirname "$exclude_path")"
-
-  local block_start="# BEGIN OMC local artifacts"
-
-  if [ -f "$exclude_path" ] && grep -Fq "$block_start" "$exclude_path"; then
-    if grep -Fxq ".omx/" "$exclude_path"; then
+  if [ -f "$exclude_path" ] && grep -Fq '# BEGIN OMC local artifacts' "$exclude_path"; then
+    if grep -Fxq '.omx/' "$exclude_path"; then
       echo "OMC git exclude already configured"
       return 0
     fi
-
-    if [ -s "$exclude_path" ]; then
-      printf '\n' >> "$exclude_path"
-    fi
+    [ ! -s "$exclude_path" ] || printf '\n' >> "$exclude_path"
     printf '.omx/\n' >> "$exclude_path"
     echo "Updated OMC git exclude for local OMX artifacts"
     return 0
   fi
-
-  if [ -f "$exclude_path" ] && [ -s "$exclude_path" ]; then
-    printf '\n' >> "$exclude_path"
-  fi
-
+  [ ! -f "$exclude_path" ] || [ ! -s "$exclude_path" ] || printf '\n' >> "$exclude_path"
   cat >> "$exclude_path" <<'EOF'
 # BEGIN OMC local artifacts
 !.omc/
@@ -131,302 +122,133 @@ ensure_local_omc_git_exclude() {
 .omx/
 # END OMC local artifacts
 EOF
-
   echo "Configured git exclude for local OMC/OMX artifacts (preserving .omc/skills/)"
 }
 
-# Determine target path
-CONFIG_DIR="$(resolve_claude_config_dir)"
-if [ "$MODE" = "local" ]; then
-  mkdir -p .claude/skills/omc-reference
-  TARGET_PATH=".claude/CLAUDE.md"
-  SKILL_TARGET_PATH=".claude/skills/omc-reference/SKILL.md"
-elif [ "$MODE" = "global" ]; then
-  mkdir -p "$CONFIG_DIR/skills/omc-reference"
-  TARGET_PATH="$CONFIG_DIR/CLAUDE.md"
-  SKILL_TARGET_PATH="$CONFIG_DIR/skills/omc-reference/SKILL.md"
-else
+install_omc_reference_skill() {
+  local source="$1"
+  [ -s "$source" ] || { echo "Skipped omc-reference skill install (canonical skill source unavailable)"; return 0; }
+  mkdir -p "$(dirname "$SKILL_TARGET_PATH")"
+  cp "$source" "$SKILL_TARGET_PATH"
+  echo "Installed omc-reference skill to $SKILL_TARGET_PATH"
+}
+
+if [ "$MODE" != "local" ] && [ "$MODE" != "global" ]; then
   echo "ERROR: Invalid mode '$MODE'. Use 'local' or 'global'." >&2
   exit 1
 fi
-
 if [ "$INSTALL_STYLE" != "overwrite" ] && [ "$INSTALL_STYLE" != "preserve" ]; then
   echo "ERROR: Invalid install style '$INSTALL_STYLE'. Use 'overwrite' or 'preserve'." >&2
   exit 1
 fi
 
-
-install_omc_reference_skill() {
-  local source_label=""
-  local temp_skill
-  temp_skill=$(mktemp /tmp/omc-reference-skill-XXXXXX.md)
-
-  if [ -f "$CANONICAL_OMC_REFERENCE_SKILL" ]; then
-    cp "$CANONICAL_OMC_REFERENCE_SKILL" "$temp_skill"
-    source_label="$CANONICAL_OMC_REFERENCE_SKILL"
-  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md" ]; then
-    cp "${CLAUDE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md" "$temp_skill"
-    source_label="${CLAUDE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
-  else
-    rm -f "$temp_skill"
-    echo "Skipped omc-reference skill install (canonical skill source unavailable)"
-    return 0
-  fi
-
-  if [ ! -s "$temp_skill" ]; then
-    rm -f "$temp_skill"
-    echo "Skipped omc-reference skill install (empty canonical skill source: $source_label)"
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$SKILL_TARGET_PATH")"
-  cp "$temp_skill" "$SKILL_TARGET_PATH"
-  rm -f "$temp_skill"
-  echo "Installed omc-reference skill to $SKILL_TARGET_PATH"
-}
-
-# Extract old version before download
-OLD_VERSION=$(grep -m1 'OMC:VERSION:' "$TARGET_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
-if [ -z "$OLD_VERSION" ]; then
-  OLD_VERSION=$(omc --version 2>/dev/null | head -1 || true)
+if ! ACTIVE_PLUGIN_ROOT="$(resolve_active_plugin_root)"; then
+  echo "ERROR: Active plugin root lacks the required coordinator artifact and canonical source; refusing setup." >&2
+  exit 1
 fi
-if [ -z "$OLD_VERSION" ]; then
-  OLD_VERSION="none"
+COORDINATOR="${ACTIVE_PLUGIN_ROOT}/bridge/claude-md-coordinator.cjs"
+CANONICAL_CLAUDE_MD="${ACTIVE_PLUGIN_ROOT}/docs/CLAUDE.md"
+CANONICAL_OMC_REFERENCE_SKILL="${ACTIVE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
+if [ ! -f "$COORDINATOR" ] || [ ! -f "$CANONICAL_CLAUDE_MD" ] || [ ! -s "$CANONICAL_OMC_REFERENCE_SKILL" ]; then
+  echo "ERROR: Coordinator artifact or canonical source is unavailable; refusing setup." >&2
+  exit 1
 fi
 
-# Backup existing
-BACKUP_DATE=""
-if [ -f "$TARGET_PATH" ]; then
-  BACKUP_DATE=$(date +%Y-%m-%d_%H%M%S)
-  BACKUP_PATH="${TARGET_PATH}.backup.${BACKUP_DATE}"
-  cp "$TARGET_PATH" "$BACKUP_PATH"
-  echo "Backed up existing CLAUDE.md to $BACKUP_PATH"
+CONFIG_DIR="$(resolve_claude_config_dir)"
+if [ "$MODE" = "local" ]; then
+  CONFIG_ROOT="$(pwd)/.claude"
+  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/omc-reference/SKILL.md"
+  COORDINATOR_MODE="local"
+else
+  CONFIG_ROOT="$CONFIG_DIR"
+  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/omc-reference/SKILL.md"
+  if [ "$INSTALL_STYLE" = "preserve" ]; then COORDINATOR_MODE="global-preserve"; else COORDINATOR_MODE="global-overwrite"; fi
 fi
+# The coordinator owns the build handshake. Independently hashing the canonical
+# source binds its authority to the exact bytes this invocation will request.
+set +e
+HANDSHAKE=$(node "$COORDINATOR" --handshake)
+HANDSHAKE_STATUS=$?
+set -e
+if [ "$HANDSHAKE_STATUS" -ne 0 ]; then
+  echo "ERROR: Coordinator handshake is unavailable; refusing setup." >&2
+  exit "$HANDSHAKE_STATUS"
+fi
+if ! HANDSHAKE=$(node - "$HANDSHAKE" "$CANONICAL_CLAUDE_MD" <<'NODE'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [raw, source] = process.argv.slice(2);
+try {
+  const handshake = JSON.parse(raw);
+  if (!handshake || typeof handshake !== 'object' || handshake.schemaVersion !== 1 || typeof handshake.engineVersion !== 'string' || !handshake.engineVersion || typeof handshake.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(handshake.sourceSha256)) {
+    throw new Error('invalid coordinator handshake response');
+  }
+  const sourceSha256 = crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex');
+  if (sourceSha256 !== handshake.sourceSha256) throw new Error('canonical source hash does not match coordinator handshake');
+  process.stdout.write(JSON.stringify({ engineVersion: handshake.engineVersion, sourceSha256 }));
+} catch (error) { process.stderr.write(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }
+NODE
+); then
+  echo "ERROR: Coordinator handshake validation failed; refusing setup." >&2
+  exit 1
+fi
+mkdir -p "$CONFIG_ROOT"
 
-# Load canonical OMC content to temp file
-TEMP_OMC=$(mktemp /tmp/omc-claude-XXXXXX.md)
-trap 'rm -f "$TEMP_OMC"' EXIT
-
-OMC_IMPORT_START='<!-- OMC:IMPORT:START -->'
-OMC_IMPORT_END='<!-- OMC:IMPORT:END -->'
-COMPANION_FILENAME='CLAUDE-omc.md'
-
-write_wrapped_omc_file() {
-  local destination="$1"
-  mkdir -p "$(dirname "$destination")"
-  {
-    echo '<!-- OMC:START -->'
-    cat "$TEMP_OMC"
-    echo '<!-- OMC:END -->'
-  } > "$destination"
-}
-
-ensure_managed_companion_import() {
-  local target_path="$1"
-  local companion_name="$2"
-  local import_block
-  import_block=$(cat <<EOF
-$OMC_IMPORT_START
-@${companion_name}
-$OMC_IMPORT_END
-EOF
+REQUEST=$(node - "$HANDSHAKE" "$COORDINATOR_MODE" "$CONFIG_ROOT" "$ACTIVE_PLUGIN_ROOT" "$CANONICAL_CLAUDE_MD" <<'NODE'
+const [handshakeJson, mode, configRoot, pluginRoot, sourcePath] = process.argv.slice(2);
+const handshake = JSON.parse(handshakeJson);
+process.stdout.write(JSON.stringify({ schemaVersion: 1, engineVersion: handshake.engineVersion, mode, configRoot, pluginRoot, sourcePath, sourceSha256: handshake.sourceSha256, sourceVersion: handshake.engineVersion }));
+NODE
 )
 
-  if grep -Fq "$OMC_IMPORT_START" "$target_path"; then
-    perl -0pe 's/^<!-- OMC:IMPORT:START -->\R[\s\S]*?^<!-- OMC:IMPORT:END -->(?:\R)?//msg' "$target_path" > "${target_path}.importless"
-    mv "${target_path}.importless" "$target_path"
-  fi
-
-  if [ -s "$target_path" ]; then
-    printf '\n\n%s\n' "$import_block" >> "$target_path"
-  else
-    printf '%s\n' "$import_block" > "$target_path"
-  fi
+set +e
+RESPONSE=$(printf '%s' "$REQUEST" | node "$COORDINATOR")
+COORDINATOR_STATUS=$?
+node - "$RESPONSE" "$COORDINATOR_STATUS" <<'NODE'
+const [raw, status] = process.argv.slice(2);
+try {
+  const response = JSON.parse(raw);
+  const exitCode = Number(status);
+  if (!response || typeof response !== 'object' || typeof response.ok !== 'boolean' || response.exitCode !== exitCode || response.ok !== (exitCode === 0)) {
+    throw new Error('malformed coordinator response, ok/exit disagreement, or exit-code mismatch');
+  }
+  const print = (label, values) => Array.isArray(values) && values.forEach(value => console.log(`${label}: ${typeof value === 'string' ? value : value.path}`));
+  print('Coordinator backup', response.backups);
+  print('Coordinator mutated path', response.mutatedPaths);
+  if (!response.ok) {
+    console.error(`Coordinator failure: ${response.error || 'unspecified failure'}`);
+    if (response.failedPath) console.error(`Coordinator failure path: ${response.failedPath}`);
+    if (Array.isArray(response.rollback)) response.rollback.forEach(item => console.error(`Coordinator rollback path: ${item.path} (${item.ok ? 'restored' : `failed: ${item.error || 'unspecified failure'}`})`));
+    process.exitCode = 1;
+  }
+} catch (error) {
+  console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 }
-
-ensure_not_symlink_path() {
-  local target_path="$1"
-  local label="$2"
-
-  if [ -L "$target_path" ]; then
-    echo "ERROR: Refusing to write $label because the destination is a symlink: $target_path" >&2
-    exit 1
-  fi
-}
-
-VALIDATION_PATH="$TARGET_PATH"
-
-SOURCE_LABEL=""
-if [ -f "$CANONICAL_CLAUDE_MD" ]; then
-  cp "$CANONICAL_CLAUDE_MD" "$TEMP_OMC"
-  SOURCE_LABEL="$CANONICAL_CLAUDE_MD"
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/docs/CLAUDE.md" ]; then
-  cp "${CLAUDE_PLUGIN_ROOT}/docs/CLAUDE.md" "$TEMP_OMC"
-  SOURCE_LABEL="${CLAUDE_PLUGIN_ROOT}/docs/CLAUDE.md"
-else
-  curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_OMC"
-  SOURCE_LABEL="$DOWNLOAD_URL"
+NODE
+VALIDATOR_STATUS=$?
+set -e
+if [ "$VALIDATOR_STATUS" -ne 0 ]; then
+  exit "$VALIDATOR_STATUS"
 fi
 
-if [ ! -s "$TEMP_OMC" ]; then
-  echo "ERROR: Failed to download CLAUDE.md. Aborting."
-  echo "FALLBACK: Manually download from: $DOWNLOAD_URL"
-  rm -f "$TEMP_OMC"
-  exit 1
-fi
+install_omc_reference_skill "$CANONICAL_OMC_REFERENCE_SKILL"
+if [ "$MODE" = "local" ]; then ensure_local_omc_git_exclude; fi
 
-if ! grep -q '<!-- OMC:START -->' "$TEMP_OMC" || ! grep -q '<!-- OMC:END -->' "$TEMP_OMC"; then
-  echo "ERROR: Canonical CLAUDE.md source is missing required OMC markers: $SOURCE_LABEL" >&2
-  echo "Refusing to install a summarized or malformed CLAUDE.md." >&2
-  exit 1
-fi
-
-# Strip existing markers from downloaded content (idempotency)
-# Use awk for cross-platform compatibility (GNU/BSD)
-if grep -q '<!-- OMC:START -->' "$TEMP_OMC"; then
-  awk '/<!-- OMC:END -->/{p=0} p; /<!-- OMC:START -->/{p=1}' "$TEMP_OMC" > "${TEMP_OMC}.clean"
-  mv "${TEMP_OMC}.clean" "$TEMP_OMC"
-fi
-
-if [ ! -f "$TARGET_PATH" ]; then
-  # Fresh install: wrap in markers
-  write_wrapped_omc_file "$TARGET_PATH"
-  rm -f "$TEMP_OMC"
-  echo "Installed CLAUDE.md (fresh)"
-else
-  # Merge: preserve user content outside OMC markers
-  if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
-    # Has markers: remove ALL complete OMC blocks, preserve only real user text
-    # Use perl -0 for a global multiline regex replace (portable across GNU/BSD environments)
-    perl -0pe 's/^<!-- OMC:START -->\R[\s\S]*?^<!-- OMC:END -->(?:\R)?//msg; s/^<!-- User customizations(?: \([^)]+\))? -->\R?//mg; s/\A(?:[ \t]*\R)+//; s/(?:\R[ \t]*)+\z//;' \
-      "$TARGET_PATH" > "${TARGET_PATH}.preserved"
-
-    if grep -Eq '^<!-- OMC:(START|END) -->$' "${TARGET_PATH}.preserved"; then
-      # Corrupted/unmatched markers remain: preserve the whole original file for manual recovery
-      OLD_CONTENT=$(cat "$TARGET_PATH")
-      {
-        echo '<!-- OMC:START -->'
-        cat "$TEMP_OMC"
-        echo '<!-- OMC:END -->'
-        echo ""
-        echo "<!-- User customizations (recovered from corrupted markers) -->"
-        printf '%s\n' "$OLD_CONTENT"
-      } > "${TARGET_PATH}.tmp"
-    else
-      PRESERVED_CONTENT=$(cat "${TARGET_PATH}.preserved")
-      {
-        echo '<!-- OMC:START -->'
-        cat "$TEMP_OMC"
-        echo '<!-- OMC:END -->'
-        if printf '%s' "$PRESERVED_CONTENT" | grep -q '[^[:space:]]'; then
-          echo ""
-          echo "<!-- User customizations -->"
-          printf '%s\n' "$PRESERVED_CONTENT"
-        fi
-      } > "${TARGET_PATH}.tmp"
-    fi
-
-    mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
-    rm -f "${TARGET_PATH}.preserved"
-    echo "Updated OMC section (user customizations preserved)"
-  elif [ "$MODE" = "global" ] && [ "$INSTALL_STYLE" = "preserve" ]; then
-    COMPANION_TARGET_PATH="$CONFIG_DIR/$COMPANION_FILENAME"
-    ensure_not_symlink_path "$COMPANION_TARGET_PATH" "OMC companion CLAUDE.md"
-    ensure_not_symlink_path "$TARGET_PATH" "base CLAUDE.md import block"
-    if [ -f "$COMPANION_TARGET_PATH" ] && [ -n "$BACKUP_DATE" ]; then
-      cp "$COMPANION_TARGET_PATH" "${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
-      echo "Backed up existing companion CLAUDE.md to ${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
-    fi
-    write_wrapped_omc_file "$COMPANION_TARGET_PATH"
-    ensure_managed_companion_import "$TARGET_PATH" "$COMPANION_FILENAME"
-    VALIDATION_PATH="$COMPANION_TARGET_PATH"
-    echo "Installed OMC companion file and preserved existing CLAUDE.md"
-  else
-    # No markers: wrap new content in markers, append old content as user section
-    # Strip any preserve-mode import block left by a prior preserve install
-    if grep -Fq "$OMC_IMPORT_START" "$TARGET_PATH"; then
-      perl -0pe 's/^<!-- OMC:IMPORT:START -->\R[\s\S]*?^<!-- OMC:IMPORT:END -->(?:\R)?//msg' "$TARGET_PATH" > "${TARGET_PATH}.importless"
-      mv "${TARGET_PATH}.importless" "$TARGET_PATH"
-    fi
-    OLD_CONTENT=$(cat "$TARGET_PATH")
-    {
-      echo '<!-- OMC:START -->'
-      cat "$TEMP_OMC"
-      echo '<!-- OMC:END -->'
-      echo ""
-      echo "<!-- User customizations (migrated from previous CLAUDE.md) -->"
-      printf '%s\n' "$OLD_CONTENT"
-    } > "${TARGET_PATH}.tmp"
-    mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
-    echo "Migrated existing CLAUDE.md (added OMC markers, preserved old content)"
-  fi
-  rm -f "$TEMP_OMC"
-
-  # Clean up orphaned companion file from a prior preserve-mode install.
-  # If left behind, prepareOmcLaunchConfigDir reads stale companion content
-  # instead of the freshly-updated CLAUDE.md during omc launches.
-  if [ "$MODE" = "global" ] && [ "$INSTALL_STYLE" = "overwrite" ]; then
-    COMPANION_TARGET_PATH="$CONFIG_DIR/$COMPANION_FILENAME"
-    if [ -f "$COMPANION_TARGET_PATH" ]; then
-      if [ -n "$BACKUP_DATE" ]; then
-        cp "$COMPANION_TARGET_PATH" "${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
-      fi
-      rm -f "$COMPANION_TARGET_PATH"
-      echo "Removed orphaned companion file from prior preserve-mode install"
-    fi
-  fi
-fi
-
-if ! grep -q '<!-- OMC:START -->' "$VALIDATION_PATH" || ! grep -q '<!-- OMC:END -->' "$VALIDATION_PATH"; then
-  echo "ERROR: Installed CLAUDE.md is missing required OMC markers: $VALIDATION_PATH" >&2
-  exit 1
-fi
-
-install_omc_reference_skill
-
-if [ "$MODE" = "local" ]; then
-  ensure_local_omc_git_exclude
-fi
-
-# Extract new version and report
-NEW_VERSION=$(grep -m1 'OMC:VERSION:' "$VALIDATION_PATH" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
-if [ -z "$NEW_VERSION" ]; then
-  NEW_VERSION=$(omc --version 2>/dev/null | head -1 || true)
-fi
-if [ -z "$NEW_VERSION" ]; then
-  NEW_VERSION="unknown"
-fi
-if [ "$OLD_VERSION" = "none" ]; then
-  echo "Installed CLAUDE.md: $NEW_VERSION"
-elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
-  echo "CLAUDE.md unchanged: $NEW_VERSION"
-else
-  echo "Updated CLAUDE.md: $OLD_VERSION -> $NEW_VERSION"
-fi
-
-# Legacy hooks cleanup (global mode only)
 if [ "$MODE" = "global" ]; then
-  rm -f "$CONFIG_DIR/hooks/keyword-detector.sh"
-  rm -f "$CONFIG_DIR/hooks/stop-continuation.sh"
-  rm -f "$CONFIG_DIR/hooks/persistent-mode.sh"
-  rm -f "$CONFIG_DIR/hooks/session-start.sh"
-  echo "Legacy hooks cleaned"
-
-  # Check for manual legacy OMC hook entries in settings.json
-  SETTINGS_FILE="$CONFIG_DIR/settings.json"
-  if [ -f "$SETTINGS_FILE" ]; then
-    if jq -e 'any(.. | objects | .command? | strings; test("(^|[^[:alnum:]_-])(keyword-detector|stop-continuation|persistent-mode|session-start)(\\.(sh|mjs|cjs|js))?([^[:alnum:]_-]|$)"))' "$SETTINGS_FILE" > /dev/null 2>&1; then
-      echo ""
-      echo "NOTE: Found legacy OMC hook entries in settings.json. These should be removed since"
-      echo "the plugin now provides OMC hooks automatically. Remove only the legacy OMC"
-      echo "hook entries from $SETTINGS_FILE to prevent duplicate hook execution;"
-      echo "third-party hook entries can remain."
+  for legacy_hook in keyword-detector.sh stop-continuation.sh persistent-mode.sh session-start.sh; do
+    legacy_hook_path="$CONFIG_DIR/hooks/$legacy_hook"
+    if [ -f "$legacy_hook_path" ]; then
+      echo "NOTE: Preserved unverified legacy hook at $legacy_hook_path; only coordinator-verified configuration is mutated."
     fi
+  done
+  SETTINGS_FILE="$CONFIG_DIR/settings.json"
+  if [ -f "$SETTINGS_FILE" ] && jq -e 'any(.. | objects | .command? | strings; test("(^|[^[:alnum:]_-])(keyword-detector|stop-continuation|persistent-mode|session-start)(\\.(sh|mjs|cjs|js))?([^[:alnum:]_-]|$)"))' "$SETTINGS_FILE" >/dev/null 2>&1; then
+    echo "NOTE: Found legacy OMC hook entries in settings.json. Remove only the legacy OMC hook entries from $SETTINGS_FILE; third-party hook entries can remain."
   fi
 fi
 
-# Verify plugin installation
-if [ -f "$CONFIG_DIR/settings.json" ] && grep -q "oh-my-claudecode" "$CONFIG_DIR/settings.json"; then
+if [ -f "$CONFIG_DIR/settings.json" ] && grep -q 'oh-my-claudecode' "$CONFIG_DIR/settings.json"; then
   echo "Plugin verified"
 else
   echo "Plugin NOT found - run: claude /install-plugin oh-my-claudecode"

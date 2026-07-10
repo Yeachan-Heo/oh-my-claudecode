@@ -29,6 +29,8 @@ import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compat.js';
+import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
+import { executeClaudeMdTransaction } from './claude-md-transaction.js';
 
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -151,37 +153,6 @@ function getNewestInstalledVersionHint(): string | null {
   );
 }
 
-/**
- * Find a marker that appears at the start of a line (line-anchored).
- * This prevents matching markers inside code blocks.
- * @param content - The content to search in
- * @param marker - The marker string to find
- * @param fromEnd - If true, finds the LAST occurrence instead of first
- * @returns The index of the marker, or -1 if not found
- */
-function findLineAnchoredMarker(content: string, marker: string, fromEnd: boolean = false): number {
-  // Escape special regex characters in marker
-  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`^${escapedMarker}$`, 'gm');
-
-  if (fromEnd) {
-    // Find the last occurrence
-    let lastIndex = -1;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      lastIndex = match.index;
-    }
-    return lastIndex;
-  } else {
-    // Find the first occurrence
-    const match = regex.exec(content);
-    return match ? match.index : -1;
-  }
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -238,26 +209,19 @@ function buildStatusLineCommand(
   return `node ${quoteShellArg(normalizedHudScriptPath)}`;
 }
 
-function createLineAnchoredMarkerRegex(marker: string, flags: string = 'gm'): RegExp {
-  return new RegExp(`^${escapeRegex(marker)}$`, flags);
-}
 
-function stripGeneratedUserCustomizationHeaders(content: string): string {
-  return content.replace(
-    /^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm,
-    ''
-  );
-}
-
-function trimClaudeUserContent(content: string): string {
-  if (content.trim().length === 0) {
-    return '';
+function generatedUserCustomizationHeaderRanges(markers: ReturnType<typeof parseClaudeMdMarkers>): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const generatedHeaders = new Set(['<!-- User customizations -->', '<!-- User customizations (recovered from corrupted markers) -->']);
+  for (let index = 1; index < markers.lines.length; index += 1) {
+    const header = markers.lines[index];
+    const separator = markers.lines[index - 1];
+    if (!generatedHeaders.has(header.text) || separator.text !== '') continue;
+    if (markers.managedRanges.some(range => range.end === separator.start)) {
+      ranges.push({ start: separator.start, end: header.eolEnd });
+    }
   }
-
-  return content
-    .replace(/^(?:[ \t]*\r?\n)+/, '')
-    .replace(/(?:\r?\n[ \t]*)+$/, '')
-    .replace(/(?:\r?\n){3,}/g, '\n\n');
+  return ranges;
 }
 
 /** Installation result */
@@ -1205,6 +1169,7 @@ const REQUIRED_PLUGIN_PAYLOAD_FILES = [
   '.claude-plugin/plugin.json',
   'package.json',
   'dist/hooks/skill-bridge.cjs',
+  'bridge/claude-md-coordinator.cjs',
   'bridge/cli.cjs',
   'hooks/hooks.json',
 ] as const;
@@ -1644,6 +1609,9 @@ export function syncInstalledPluginPayload(): {
   const sourceResolution = resolveBestPluginSyncSource(targetRoots);
   const sourceRoot = sourceResolution.sourceRoot;
   if (!sourceRoot) {
+    if (targetRoots.every(root => validatePluginSyncPayload(root).length === 0)) {
+      return { synced: false, errors: [], sourceRoot: null, targetRoots };
+    }
     return {
       synced: false,
       errors: [
@@ -1905,16 +1873,6 @@ function syncUserSkillCompatShims(log: (msg: string) => void): string[] {
   return synced;
 }
 
-function loadClaudeMdContent(): string {
-  const claudeMdPath = join(getPackageDir(), 'docs', 'CLAUDE.md');
-
-  if (!existsSync(claudeMdPath)) {
-    console.error(`FATAL: CLAUDE.md not found: ${claudeMdPath}`);
-    process.exit(1);
-  }
-
-  return readFileSync(claudeMdPath, 'utf-8');
-}
 
 /**
  * Extract the embedded OMC version from a CLAUDE.md file.
@@ -1996,62 +1954,41 @@ export function syncPersistedSetupVersion(options?: {
  * @returns Merged content with markers
  */
 export function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string {
-  const START_MARKER = '<!-- OMC:START -->';
-  const END_MARKER = '<!-- OMC:END -->';
+  const START_MARKER = OMC_START_MARKER;
+  const END_MARKER = OMC_END_MARKER;
   const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-  const OMC_BLOCK_PATTERN = new RegExp(
-    `^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`,
-    'gm'
-  );
-  const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
-  const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
 
-  // Idempotency guard: strip markers from omcContent if already present
-  // This handles the case where docs/CLAUDE.md ships with markers
+  // Idempotency guard: accept the current managed representation as input.
   let cleanOmcContent = omcContent;
-  const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
-  const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
-  if (omcStartIdx !== -1 && omcEndIdx !== -1 && omcStartIdx < omcEndIdx) {
-    // Extract content between markers, trimming any surrounding whitespace
-    cleanOmcContent = omcContent
-      .substring(omcStartIdx + START_MARKER.length, omcEndIdx)
-      .trim();
+  const sourceMarkers = parseClaudeMdMarkers(omcContent);
+  if (sourceMarkers.state === 'corrupt' || sourceMarkers.managedRanges.length > 1) {
+    throw new Error('OMC content must contain at most one complete managed block');
+  }
+  if (sourceMarkers.managedRanges.length === 1) {
+    const managed = sourceMarkers.managedRanges[0];
+    cleanOmcContent = omcContent.slice(managed.contentStart, managed.contentEnd).trim();
   }
 
-  // Strip any existing version marker from content and inject current version
   cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
   const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
-
-  // Case 1: No existing content - wrap omcContent in markers
   if (!existingContent) {
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
 
-  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
-  const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
-  const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
-
-  // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
-  if (hasResidualStartMarker || hasResidualEndMarker) {
-    // Handle corrupted state - backup will be created by caller
-    // Strip unmatched OMC markers from recovered content to prevent unbounded
-    // growth on repeated calls (each call would re-detect corruption and append again)
-    const recoveredContent = strippedExistingContent
-      .replace(markerStartRegex, '')
-      .replace(markerEndRegex, '')
-      .trim();
-    return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
+  const existingMarkers = parseClaudeMdMarkers(existingContent);
+  if (existingMarkers.state === 'corrupt') {
+    throw new Error(`Existing CLAUDE.md has corrupt OMC markers: ${existingMarkers.diagnostics.join(', ')}`);
   }
 
-  const preservedUserContent = trimClaudeUserContent(
-    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
-  );
-
-  if (!preservedUserContent) {
+  const legacy = analyzeLegacyClaudeMd(existingContent);
+  const preservedUserContent = removeClaudeMdRanges(existingContent, [
+    ...existingMarkers.managedRanges,
+    ...legacy.exactMatches,
+    ...generatedUserCustomizationHeaderRanges(existingMarkers),
+  ]);
+  if (preservedUserContent.trim().length === 0) {
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
-
-  // Case 3: Preserve only user-authored content that lives outside OMC markers
   return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${preservedUserContent}`;
 }
 
@@ -2308,38 +2245,22 @@ export function install(options: InstallOptions = {}): InstallResult {
       }
     }
 
-    // Install CLAUDE.md with merge support.
-    // This runs regardless of plugin context so that `omc update` (which re-execs
-    // as `update-reconcile` with CLAUDE_PLUGIN_ROOT still set) always keeps the
-    // version marker and OMC instructions in ~/.claude/CLAUDE.md up to date.
-    // Skipped only for project-scoped plugins to avoid mutating global config.
+    // Keep the public installer on the same raw-byte transaction path as setup.
+    // The public string merger remains exported for callers that use it directly.
     if (!projectScoped) {
       const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
-      const omcContent = loadClaudeMdContent();
-
-      // Read existing content if it exists
-      let existingContent: string | null = null;
-      if (existsSync(claudeMdPath)) {
-        existingContent = readFileSync(claudeMdPath, 'utf-8');
-      }
-
-      // Always create backup before modification (if file exists)
-      if (existingContent !== null) {
-        const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
-        const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
-        writeFileSync(backupPath, existingContent);
-        log(`Backed up existing CLAUDE.md to ${backupPath}`);
-      }
-
-      // Merge OMC content with existing content
-      const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
-      writeFileSync(claudeMdPath, mergedContent);
-
-      if (existingContent) {
-        log('Updated CLAUDE.md (merged with existing content)');
-      } else {
-        log('Created CLAUDE.md');
-      }
+      const transaction = executeClaudeMdTransaction({
+        mode: 'global-overwrite',
+        root: CLAUDE_CONFIG_DIR,
+        source: join(getPackageDir(), 'docs', 'CLAUDE.md'),
+        sourceRoot: getPackageDir(),
+        version: targetVersion,
+      });
+      if (!transaction.ok) throw new Error(transaction.error ?? 'CLAUDE.md transaction failed');
+      for (const backupPath of transaction.backups) log(`Backed up existing CLAUDE.md to ${backupPath}`);
+      log(transaction.operations.some(operation => operation.existedBefore && operation.path === claudeMdPath)
+        ? 'Updated CLAUDE.md (merged with existing content)'
+        : 'Created CLAUDE.md');
     }
 
     // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)

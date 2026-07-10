@@ -25,6 +25,7 @@
     "bridge/team-bridge.cjs",
     "bridge/team-mcp.cjs",
     "bridge/team.js",
+    "bridge/claude-md-coordinator.cjs",
     "bridge/cli.cjs",
     "bridge/runtime-cli.cjs",
     "commands",
@@ -39,9 +40,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
+    "build": "tsc && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs && npm run build:claude-md-coordinator && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
     "build:bridge-entry": "node scripts/build-bridge-entry.mjs",
+    "build:claude-md-coordinator": "node scripts/build-claude-md-coordinator.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "build:runtime-cli": "node scripts/build-runtime-cli.mjs",
     "build:team-server": "node scripts/build-team-server.mjs",
@@ -56,6 +58,7 @@
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "prepack": "npm run build",
     "lint": "eslint src",
     "format": "prettier --write src/**/*.ts",
     "sync-featured-contributors": "tsx scripts/generate-featured-contributors.ts",
@@ -65,7 +68,7 @@
     "sync-metadata:verify": "tsx scripts/sync-metadata.ts --verify",
     "sync-metadata:dry-run": "tsx scripts/sync-metadata.ts --dry-run",
     "release": "tsx scripts/release.ts",
-    "prepublishOnly": "npm run build && npm run compose-docs",
+    "prepublishOnly": "npm run build",
     "version": "bash scripts/sync-version.sh"
   },
   "dependencies": {

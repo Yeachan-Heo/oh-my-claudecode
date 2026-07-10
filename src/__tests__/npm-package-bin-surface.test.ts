@@ -50,7 +50,9 @@ function getPackedPackage(): PackedPackage {
       encoding: 'utf-8',
     },
   );
-  const results = JSON.parse(stdout) as NpmPackResult[];
+  const jsonStart = stdout.search(/^\[\r?$/m);
+  if (jsonStart < 0) throw new Error('npm pack did not emit a JSON payload');
+  const results = JSON.parse(stdout.slice(jsonStart)) as NpmPackResult[];
   const tarballName = results[0]?.filename;
 
   if (!tarballName) {

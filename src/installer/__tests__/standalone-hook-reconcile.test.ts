@@ -24,6 +24,7 @@ function writePluginFile(path: string, content: string): void {
 function writeCompletePluginPayload(root: string): void {
   writePluginFile(join(root, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
   writePluginFile(join(root, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  writePluginFile(join(root, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("CLAUDE.md coordinator");\n');
   writePluginFile(join(root, 'hooks', 'hooks.json'), JSON.stringify({
     hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node test.mjs' }] }] },
   }));
@@ -35,6 +36,10 @@ function writeCompletePluginPayload(root: string): void {
     skills: ['./skills/plan/'],
   }, null, 2));
   writePluginFile(join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }, null, 2));
+  writePluginFile(
+    join(root, 'docs', 'CLAUDE.md'),
+    readFileSync(join(process.cwd(), 'docs', 'CLAUDE.md'), 'utf-8'),
+  );
 }
 
 function shippedStandaloneHookPayload(filename: string, location: 'hooks' | 'hooks/lib'): string {
@@ -289,7 +294,7 @@ describe('install() standalone hook reconciliation', () => {
       '4.1.5',
     );
 
-    mkdirSync(pluginRoot, { recursive: true });
+    writeCompletePluginPayload(pluginRoot);
     mkdirSync(testClaudeDir, { recursive: true });
     writeFileSync(settingsPath, JSON.stringify({
       hooks: {

@@ -15,6 +15,7 @@ function writePayloadTree(root: string, version = '9.9.9-test'): void {
   writeFile(join(root, 'dist', 'lib', 'worktree-paths.js'), 'export const test = true;\n');
   writeFile(join(root, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
   writeFile(join(root, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  writeFile(join(root, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("CLAUDE.md coordinator");\n');
   writeFile(join(root, 'hooks', 'hooks.json'), '{}\n');
   writeFile(join(root, 'scripts', 'run.cjs'), 'console.log("run");\n');
   writeFile(join(root, 'skills', 'plan', 'SKILL.md'), '# plan\n');
@@ -324,6 +325,8 @@ describe('syncInstalledPluginPayload', () => {
     writePayloadTree(cacheRoot, '4.14.4');
     rmSync(join(cacheRoot, 'dist', 'hooks', 'skill-bridge.cjs'), { force: true });
     mkdirSync(join(cacheRoot, 'dist', 'hooks', 'skill-bridge.cjs'), { recursive: true });
+    rmSync(join(cacheRoot, 'bridge', 'claude-md-coordinator.cjs'), { force: true });
+    mkdirSync(join(cacheRoot, 'bridge', 'claude-md-coordinator.cjs'), { recursive: true });
     rmSync(join(cacheRoot, 'commands', 'omc-setup.md'), { force: true });
     mkdirSync(join(cacheRoot, 'commands', 'omc-setup.md'), { recursive: true });
     rmSync(join(cacheRoot, 'skills', 'plan', 'SKILL.md'), { force: true });
@@ -335,12 +338,13 @@ describe('syncInstalledPluginPayload', () => {
     expect(validation.valid).toBe(false);
     expect(validation.errors).toEqual(expect.arrayContaining([
       'Missing required plugin payload file: dist/hooks/skill-bridge.cjs',
+      'Missing required plugin payload file: bridge/claude-md-coordinator.cjs',
       'Missing required plugin command file: commands/omc-setup.md',
       'Missing declared plugin skill file: skills/plan/SKILL.md',
     ]));
   });
 
-  it('repairs cache roots missing commands, runtime dist hook, and bridge from a complete source', async () => {
+  it('repairs cache roots missing commands, runtime dist hook, and bridge coordinator from a complete source', async () => {
     const configDir = process.env.CLAUDE_CONFIG_DIR as string;
     const cacheRoot = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.14.4');
     const sourceRoot = join(tempRoot, 'complete-marketplace-source');
@@ -379,9 +383,10 @@ describe('syncInstalledPluginPayload', () => {
     expect(existsSync(join(cacheRoot, 'commands', 'omc-setup.md'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'dist', 'hooks', 'skill-bridge.cjs'))).toBe(true);
     expect(existsSync(join(cacheRoot, 'bridge', 'cli.cjs'))).toBe(true);
+    expect(existsSync(join(cacheRoot, 'bridge', 'claude-md-coordinator.cjs'))).toBe(true);
   });
 
-  it('rejects package sources missing runtime-critical dist hook or bridge files', async () => {
+  it('rejects package sources missing runtime-critical dist hook or bridge payload files', async () => {
     const configDir = process.env.CLAUDE_CONFIG_DIR as string;
     const cacheRoot = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.14.4');
     const incompleteSourceRoot = join(tempRoot, 'incomplete-marketplace-source');
@@ -417,6 +422,7 @@ describe('syncInstalledPluginPayload', () => {
     expect(result.errors).toEqual(expect.arrayContaining([
       `${incompleteSourceRoot}: Missing required plugin payload file: dist/hooks/skill-bridge.cjs`,
       `${incompleteSourceRoot}: Missing required plugin payload file: bridge/cli.cjs`,
+      `${incompleteSourceRoot}: Missing required plugin payload file: bridge/claude-md-coordinator.cjs`,
     ]));
 
     expect(existsSync(join(cacheRoot, 'package.json'))).toBe(false);
