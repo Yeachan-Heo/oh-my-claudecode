@@ -171,6 +171,11 @@ afterAll(() => {
   }
 });
 
+// Build the single lifecycle tarball during file setup so individual assertions
+// retain the repository-wide 30-second test budget. Any setup failure still
+// aborts this file and is cached to prevent a second pack attempt.
+const packedPackageFixture = getPackedPackage();
+
 function expectedNpmShimNames(binName: string): string[] {
   return [binName, `${binName}.cmd`, `${binName}.ps1`];
 }
@@ -185,7 +190,7 @@ describe('npm package bin surface regression', () => {
   });
 
   it('packs the CLI bin target and generated runtime entrypoints', () => {
-    const packedFiles = getPackedPackage().files;
+    const packedFiles = packedPackageFixture.files;
 
     expect(packedFiles.has(CLI_BIN_TARGET)).toBe(true);
     expect(packedFiles.has('dist/hooks/skill-bridge.cjs')).toBe(true);
@@ -201,7 +206,7 @@ describe('npm package bin surface regression', () => {
   });
 
   it('packs the complete source-controlled plugin and hook payload', () => {
-    const packedFiles = getPackedPackage().files;
+    const packedFiles = packedPackageFixture.files;
     const missing = listSourceControlledPackageFiles().filter(
       (file) => !packedFiles.has(file),
     );
@@ -245,7 +250,7 @@ describe('npm package bin surface regression', () => {
   });
 
   it('keeps the packed package metadata aligned with the source bin aliases and installed npm shims', () => {
-    const { packageJson: packedPackageJson } = getPackedPackage();
+    const { packageJson: packedPackageJson } = packedPackageFixture;
 
     for (const alias of SUPPORTED_CLI_ALIASES) {
       expect(packedPackageJson.bin?.[alias]).toBe(CLI_BIN_TARGET);

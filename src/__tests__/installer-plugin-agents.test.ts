@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 
@@ -21,7 +28,10 @@ vi.mock('fs', async () => {
       return realAgentsDir;
     }
     if (normalized.startsWith(`${normalizedSourceAgentsDir}/`)) {
-      return normalized.replace(normalizedSourceAgentsDir, normalizedRealAgentsDir);
+      return normalized.replace(
+        normalizedSourceAgentsDir,
+        normalizedRealAgentsDir,
+      );
     }
     if (normalized === sourceClaudeMdPath.replace(/\\/g, '/')) {
       return realClaudeMdPath;
@@ -32,13 +42,19 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((pathLike: Parameters<typeof actual.existsSync>[0]) =>
-      actual.existsSync(withRedirect(pathLike))
+      actual.existsSync(withRedirect(pathLike)),
     ),
-    readFileSync: vi.fn((pathLike: Parameters<typeof actual.readFileSync>[0], options?: Parameters<typeof actual.readFileSync>[1]) =>
-      actual.readFileSync(withRedirect(pathLike), options as never)
+    readFileSync: vi.fn(
+      (
+        pathLike: Parameters<typeof actual.readFileSync>[0],
+        options?: Parameters<typeof actual.readFileSync>[1],
+      ) => actual.readFileSync(withRedirect(pathLike), options as never),
     ),
-    readdirSync: vi.fn((pathLike: Parameters<typeof actual.readdirSync>[0], options?: Parameters<typeof actual.readdirSync>[1]) =>
-      actual.readdirSync(withRedirect(pathLike), options as never)
+    readdirSync: vi.fn(
+      (
+        pathLike: Parameters<typeof actual.readdirSync>[0],
+        options?: Parameters<typeof actual.readdirSync>[1],
+      ) => actual.readdirSync(withRedirect(pathLike), options as never),
     ),
   };
 });
@@ -56,17 +72,41 @@ function writePluginFile(path: string, content: string): void {
 }
 
 function writeCompletePluginPayload(root: string): void {
-  writePluginFile(join(root, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
+  writePluginFile(
+    join(root, 'dist', 'hooks', 'skill-bridge.cjs'),
+    'console.log("skill bridge");\n',
+  );
   writePluginFile(join(root, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+  writePluginFile(
+    join(root, 'bridge', 'claude-md-coordinator.cjs'),
+    'console.log("coordinator");\n',
+  );
   writePluginFile(join(root, 'hooks', 'hooks.json'), '{}\n');
   writePluginFile(join(root, 'skills', 'plan', 'SKILL.md'), '# plan\n');
-  writePluginFile(join(root, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
-  writePluginFile(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'oh-my-claudecode',
-    commands: './commands/',
-    skills: ['./skills/plan/'],
-  }, null, 2));
-  writePluginFile(join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }, null, 2));
+  writePluginFile(
+    join(root, 'commands', 'omc-setup.md'),
+    'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n',
+  );
+  writePluginFile(
+    join(root, '.claude-plugin', 'plugin.json'),
+    JSON.stringify(
+      {
+        name: 'oh-my-claudecode',
+        commands: './commands/',
+        skills: ['./skills/plan/'],
+      },
+      null,
+      2,
+    ),
+  );
+  writePluginFile(
+    join(root, 'package.json'),
+    JSON.stringify(
+      { name: 'oh-my-claude-sisyphus', version: '9.9.9' },
+      null,
+      2,
+    ),
+  );
 }
 
 describe('installer legacy agent sync gating (issue #1502)', () => {
@@ -111,30 +151,49 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
       'cache',
       'omc',
       'oh-my-claudecode',
-      '9.9.9'
+      '9.9.9',
     );
     const pluginAgentsDir = join(pluginInstallPath, 'agents');
     writeCompletePluginPayload(pluginInstallPath);
     mkdirSync(pluginAgentsDir, { recursive: true });
-    writeFileSync(join(pluginAgentsDir, 'executor.md'), '---\nname: executor\ndescription: test\n---\n');
+    writeFileSync(
+      join(pluginAgentsDir, 'executor.md'),
+      '---\nname: executor\ndescription: test\n---\n',
+    );
 
-    const installedPluginsPath = join(claudeConfigDir, 'plugins', 'installed_plugins.json');
+    const installedPluginsPath = join(
+      claudeConfigDir,
+      'plugins',
+      'installed_plugins.json',
+    );
     mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
-    writeFileSync(installedPluginsPath, JSON.stringify({
-      plugins: {
-        'oh-my-claudecode@omc': [
-          { installPath: pluginInstallPath }
-        ]
-      }
-    }, null, 2));
+    writeFileSync(
+      installedPluginsPath,
+      JSON.stringify(
+        {
+          plugins: {
+            'oh-my-claudecode@omc': [{ installPath: pluginInstallPath }],
+          },
+        },
+        null,
+        2,
+      ),
+    );
 
     const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    expect(installer.validatePluginCachePayload(pluginInstallPath)).toEqual({
+      valid: true,
+      errors: [],
+    });
     const result = installer.install({
       skipClaudeCheck: true,
       skipHud: true,
     });
 
-    expect(result.success).toBe(true);
+    expect(
+      result.success,
+      `${result.message}\n${result.errors.join('\n')}`,
+    ).toBe(true);
     expect(result.installedAgents).toEqual([]);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(true);
     expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(false);
@@ -151,9 +210,17 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(result.success).toBe(true);
     expect(result.installedAgents.length).toBeGreaterThan(0);
     expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(true);
-    expect(readdirSync(join(claudeConfigDir, 'agents')).some(file => file.endsWith('.md'))).toBe(true);
-    expect(existsSync(join(claudeConfigDir, 'hooks', 'lib', 'stdin.mjs'))).toBe(true);
-    expect(existsSync(join(claudeConfigDir, 'hooks', 'lib', 'atomic-write.mjs'))).toBe(true);
+    expect(
+      readdirSync(join(claudeConfigDir, 'agents')).some((file) =>
+        file.endsWith('.md'),
+      ),
+    ).toBe(true);
+    expect(existsSync(join(claudeConfigDir, 'hooks', 'lib', 'stdin.mjs'))).toBe(
+      true,
+    );
+    expect(
+      existsSync(join(claudeConfigDir, 'hooks', 'lib', 'atomic-write.mjs')),
+    ).toBe(true);
     expect(installer.hasPluginProvidedAgentFiles()).toBe(false);
     expect(installer.isInstalled()).toBe(true);
   });
