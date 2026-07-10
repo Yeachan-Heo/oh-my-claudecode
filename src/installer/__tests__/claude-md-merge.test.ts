@@ -3,8 +3,14 @@
  * Tests merge-based CLAUDE.md updates with markers and backups
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
-import { mergeClaudeMd } from '../index.js';
+import { mergeClaudeMd, hasLegacyUnmarkedOmcContent, countLegacyOmcFingerprints } from '../index.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const LEGACY_FIXTURE_PATH = join(__dirname, 'fixtures', 'legacy-unmarked-omc-claude-md.md');
 
 const START_MARKER = '<!-- OMC:START -->';
 const END_MARKER = '<!-- OMC:END -->';
@@ -377,6 +383,126 @@ Second user note`;
 
       expect((result.match(/<!-- User customizations/g) || []).length).toBe(1);
       expect(result).toContain(`${USER_CUSTOMIZATIONS}\nFirst user note\n\nSecond user note`);
+    });
+  });
+
+  describe('legacy unmarked OMC content (pre-marker installs)', () => {
+    const CONDUCTOR_FINGERPRINT = 'You are a CONDUCTOR, not a performer';
+    const CORE_PROTOCOL_FINGERPRINT = 'PART 1: CORE PROTOCOL';
+    const AUTOACTIVATE_FINGERPRINT =
+      "The difference? You don't NEED them anymore. Everything auto-activates.";
+
+    it('strips residual legacy OMC guide from a real upgraded CLAUDE.md while keeping user content', () => {
+      // Real-world fixture: a marker-wrapped current block, followed by 300+
+      // lines of legacy pre-marker OMC guide that a prior install left under
+      // "<!-- User customizations -->", then a genuine user "@RTK.md" include.
+      const existingContent = readFileSync(LEGACY_FIXTURE_PATH, 'utf-8');
+
+      const result = mergeClaudeMd(existingContent, omcContent, '4.15.0');
+
+      // Legacy guide is gone.
+      expect(result).not.toContain(CONDUCTOR_FINGERPRINT);
+      expect(result).not.toContain(CORE_PROTOCOL_FINGERPRINT);
+      expect(result).not.toContain('DELEGATION-FIRST PHILOSOPHY');
+      expect(result).not.toContain(AUTOACTIVATE_FINGERPRINT);
+      expect(result).not.toContain('## PART 3: COMPLETE REFERENCE');
+
+      // Genuine user content is preserved.
+      expect(result).toContain('@RTK.md');
+
+      // Exactly one marker pair and the fresh version marker.
+      expect((result.match(/<!-- OMC:START -->/g) || []).length).toBe(1);
+      expect((result.match(/<!-- OMC:END -->/g) || []).length).toBe(1);
+      expect(result).toContain('<!-- OMC:VERSION:4.15.0 -->');
+      expect(result).toContain(omcContent);
+
+      // The result is dramatically smaller than the bloated original.
+      expect(result.length).toBeLessThan(existingContent.length / 2);
+    });
+
+    it('preserves user content that surrounds the stripped legacy block', () => {
+      const existingContent = `${START_MARKER}
+${omcContent}
+${END_MARKER}
+
+${USER_CUSTOMIZATIONS}
+# My real notes before the legacy block
+
+# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+
+You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**
+
+## PART 1: CORE PROTOCOL (CRITICAL)
+
+The difference? You don't NEED them anymore. Everything auto-activates.
+
+---
+
+@RTK.md`;
+
+      const result = mergeClaudeMd(existingContent, omcContent);
+
+      expect(result).toContain('# My real notes before the legacy block');
+      expect(result).toContain('@RTK.md');
+      expect(result).not.toContain(CONDUCTOR_FINGERPRINT);
+      expect(result).not.toContain(CORE_PROTOCOL_FINGERPRINT);
+      expect(result).not.toContain(AUTOACTIVATE_FINGERPRINT);
+    });
+
+    it('does not touch user content without legacy fingerprints (no false positive)', () => {
+      const existingContent = `${START_MARKER}
+${omcContent}
+${END_MARKER}
+
+${USER_CUSTOMIZATIONS}
+# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+I like to orchestrate my own agents and keep my own notes here.
+Nothing in this text matches the legacy guide.`;
+
+      const result = mergeClaudeMd(existingContent, omcContent);
+
+      // The heading alone is not a fingerprint, so user text is untouched.
+      expect(result).toContain('I like to orchestrate my own agents');
+      expect(result).toContain('Nothing in this text matches the legacy guide.');
+    });
+
+    it('does not strip when only a single fingerprint is present', () => {
+      const existingContent = `${START_MARKER}
+${omcContent}
+${END_MARKER}
+
+${USER_CUSTOMIZATIONS}
+Note to self: OMC docs say "You are a CONDUCTOR, not a performer" — worth remembering.`;
+
+      const result = mergeClaudeMd(existingContent, omcContent);
+
+      // Only one fingerprint → below threshold → preserved verbatim.
+      expect(result).toContain(CONDUCTOR_FINGERPRINT);
+    });
+
+    it('handles a fully-legacy CLAUDE.md with no other user content', () => {
+      const existingContent = readFileSync(LEGACY_FIXTURE_PATH, 'utf-8')
+        // Drop the marker block and the trailing @RTK.md include to simulate a
+        // pure pre-marker file that is nothing but the legacy guide.
+        .replace(/^<!-- OMC:START -->[\s\S]*?<!-- User customizations -->\n/, '')
+        .replace(/\n@RTK\.md\s*$/, '\n');
+
+      const result = mergeClaudeMd(existingContent, omcContent);
+
+      expect(result).not.toContain(CONDUCTOR_FINGERPRINT);
+      expect(result).not.toContain(AUTOACTIVATE_FINGERPRINT);
+      expect(result).toContain(omcContent);
+      // Nothing meaningful left to preserve → no user customizations section.
+      expect(result).not.toContain(USER_CUSTOMIZATIONS);
+    });
+
+    it('exposes fingerprint detection helpers', () => {
+      const legacy = readFileSync(LEGACY_FIXTURE_PATH, 'utf-8');
+      expect(hasLegacyUnmarkedOmcContent(legacy)).toBe(true);
+      expect(countLegacyOmcFingerprints(legacy)).toBeGreaterThanOrEqual(2);
+
+      expect(hasLegacyUnmarkedOmcContent('just my own notes')).toBe(false);
+      expect(countLegacyOmcFingerprints('You are a CONDUCTOR, not a performer')).toBe(1);
     });
   });
 });

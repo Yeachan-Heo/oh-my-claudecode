@@ -260,6 +260,105 @@ function trimClaudeUserContent(content: string): string {
     .replace(/(?:\r?\n){3,}/g, '\n\n');
 }
 
+/**
+ * Opening heading of the legacy (pre-marker) OMC instructions. This heading is
+ * identical to the current template's heading, so on its own it is NOT a
+ * reliable legacy fingerprint — it is only used to locate the start of a block
+ * that has already been confirmed legacy via {@link LEGACY_OMC_FINGERPRINTS}.
+ */
+const LEGACY_OMC_HEADING = '# oh-my-claudecode - Intelligent Multi-Agent Orchestration';
+
+/**
+ * Distinctive phrases that appear only in the legacy long-form OMC instructions
+ * (the pre-marker installer wrote these directly into ~/.claude/CLAUDE.md) and
+ * never in the current marker-wrapped template. Used to recognize residual
+ * legacy content that lives outside OMC markers so it can be stripped instead of
+ * being preserved forever as "user customizations".
+ */
+const LEGACY_OMC_FINGERPRINTS = [
+  'You are a CONDUCTOR, not a performer',
+  'PART 1: CORE PROTOCOL',
+  'DELEGATION-FIRST PHILOSOPHY',
+  "The difference? You don't NEED them anymore. Everything auto-activates.",
+] as const;
+
+/**
+ * Require at least this many distinct fingerprints before treating a block as
+ * legacy OMC content. Keeping the threshold above 1 guards against false
+ * positives — a user who merely quotes a single phrase is left untouched.
+ */
+const LEGACY_OMC_FINGERPRINT_THRESHOLD = 2;
+
+/** Count how many distinct legacy OMC fingerprints appear in `content`. */
+export function countLegacyOmcFingerprints(content: string): number {
+  return LEGACY_OMC_FINGERPRINTS.reduce(
+    (count, fingerprint) => (content.includes(fingerprint) ? count + 1 : count),
+    0
+  );
+}
+
+/**
+ * True when `content` contains enough legacy OMC fingerprints to be confidently
+ * identified as pre-marker OMC instructions rather than user-authored text.
+ */
+export function hasLegacyUnmarkedOmcContent(content: string): boolean {
+  return countLegacyOmcFingerprints(content) >= LEGACY_OMC_FINGERPRINT_THRESHOLD;
+}
+
+/**
+ * Remove a residual legacy (pre-marker) OMC instruction block from `content`.
+ *
+ * The pre-marker installer wrote the full OMC guide straight into CLAUDE.md
+ * without any markers. After upgrading, that text has no markers to strip and no
+ * residual markers to trigger recovery, so it was being preserved verbatim as
+ * "user customizations" — duplicating the current marker-wrapped instructions on
+ * every run.
+ *
+ * The strip is deliberately conservative: it only fires when at least
+ * {@link LEGACY_OMC_FINGERPRINT_THRESHOLD} fingerprints are present, and it
+ * removes only the contiguous span from the legacy heading through the final
+ * fingerprint line (plus a trailing horizontal rule that closes the block).
+ * Genuine user content before or after that span — e.g. an `@include` line — is
+ * left in place. The original file is always backed up by the caller before it
+ * is overwritten, so the removed block is never lost.
+ */
+function stripLegacyUnmarkedOmcContent(content: string): string {
+  if (!hasLegacyUnmarkedOmcContent(content)) {
+    return content;
+  }
+
+  const presentFingerprints = LEGACY_OMC_FINGERPRINTS
+    .map(fingerprint => ({ fingerprint, index: content.indexOf(fingerprint) }))
+    .filter(entry => entry.index !== -1);
+
+  let startIdx = Math.min(...presentFingerprints.map(entry => entry.index));
+  let endIdx = Math.max(...presentFingerprints.map(entry => entry.index + entry.fingerprint.length));
+
+  // Extend the start back to the legacy heading when it precedes the first
+  // fingerprint, otherwise snap to the start of the first fingerprint's line.
+  const headingIdx = content.lastIndexOf(LEGACY_OMC_HEADING, startIdx);
+  if (headingIdx !== -1) {
+    startIdx = headingIdx;
+  }
+  const lineStart = content.lastIndexOf('\n', startIdx - 1);
+  startIdx = lineStart === -1 ? 0 : lineStart + 1;
+
+  // Extend the end to the end of the last fingerprint's line.
+  const lineEnd = content.indexOf('\n', endIdx);
+  endIdx = lineEnd === -1 ? content.length : lineEnd;
+
+  // Consume a trailing horizontal rule (with surrounding blank lines) that
+  // closes the legacy block, so it does not dangle above real user content.
+  const trailingRule = /^(?:[ \t]*\r?\n)*(?:-{3,}|\*{3,}|_{3,})[ \t]*(?:\r?\n|$)/.exec(
+    content.slice(endIdx)
+  );
+  if (trailingRule) {
+    endIdx += trailingRule[0].length;
+  }
+
+  return content.slice(0, startIdx) + content.slice(endIdx);
+}
+
 /** Installation result */
 export interface InstallResult {
   success: boolean;
@@ -2043,8 +2142,14 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
   }
 
+  // Drop residual legacy (pre-marker) OMC instructions before preserving the
+  // remainder as user content, so upgrades from pre-marker installs don't keep a
+  // stale duplicate of the OMC guide. The caller backs up the original file, so
+  // the removed block is recoverable.
+  const cleanedExistingContent = stripLegacyUnmarkedOmcContent(strippedExistingContent);
+
   const preservedUserContent = trimClaudeUserContent(
-    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
+    stripGeneratedUserCustomizationHeaders(cleanedExistingContent)
   );
 
   if (!preservedUserContent) {

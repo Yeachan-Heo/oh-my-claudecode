@@ -578,6 +578,41 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     const status = checkClaudeMdStatus();
     expect(status).toBeNull();
   });
+
+  it('flags residual legacy pre-marker OMC content outside markers', () => {
+    const content = [
+      '<!-- OMC:START -->',
+      '# oh-my-claudecode - Intelligent Multi-Agent Orchestration',
+      'Current marker-wrapped instructions.',
+      '<!-- OMC:END -->',
+      '',
+      '<!-- User customizations -->',
+      '# oh-my-claudecode - Intelligent Multi-Agent Orchestration',
+      'You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**',
+      '',
+      '## PART 1: CORE PROTOCOL (CRITICAL)',
+      '',
+      "The difference? You don't NEED them anymore. Everything auto-activates.",
+      ''
+    ].join('\n');
+    writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), content);
+
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMarkers).toBe(true);
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
+
+  it('does not flag legacy content for a clean marker-wrapped file', () => {
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      '<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n\n<!-- User customizations -->\n# My own notes\n'
+    );
+
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(false);
+  });
 });
 
 describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {
