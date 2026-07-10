@@ -68,7 +68,7 @@ If no flag is provided, use **Standard**. Thresholds and round counts are canoni
 
 ## Phase 1: Initialize
 
-The runtime seeds state on `/merge-readiness` (or on autopilot adapter `onEnter`). State shape:
+Call the `merge_readiness_start` tool with the change summary to seed state (the runtime parses the `--quick`/`--standard`/`--deep` profile from it; `--standard` is the default). State shape:
 
 ```json
 {
@@ -100,7 +100,7 @@ Generate, from the actual diff + evidence (not templates):
    - Distributed across the required dimensions
    - Testing understanding of THIS change, not implementation trivia
 
-Submit them with `merge_readiness_set_content`. Do not write the state JSON or invoke internal runtime functions. Invalid content is rejected with recoverable validation errors. This writes the durable artifact under:
+Submit them with `merge_readiness_set_content` (requires an active gate from `merge_readiness_start`; it errors if no gate is active). Do not write the state JSON or invoke internal runtime functions. Invalid content is rejected with recoverable validation errors. This writes the durable artifact under:
 
 `.omc/artifacts/merge-readiness/{timestamp}-{slug}.md`
 
@@ -110,7 +110,7 @@ The Merge Boundary must say: "Passing means the human can explain the change. It
 
 ## Phase 3: Human Quiz Loop (MCQ, one-per-round, deep-interview style)
 
-Present each MCQ one-per-round via AskUserQuestion with marker `[MERGE READINESS:<question-id>]` and option ids/text as choices. The bridge correlates only the marked native result to the active MCQ and the runtime scores it objectively.
+Present each MCQ one-per-round via AskUserQuestion with the option ids/text as choices, then record the human’s selection with the `merge_readiness_record_answer` tool (questionId + optionId). The runtime scores it objectively and either advances to the next question or finalizes the gate (pass / paused / blocked).
 
 Cover these dimensions before passing (quick = why/change/risk only):
 
@@ -173,7 +173,7 @@ If `blocked`:
 <Tool_Usage>
 - Use repository search and local artifacts for evidence intake before asking the human for context.
 - Use structured user questioning when available.
-- Use state read/status/clear only for `.omc/state/merge-readiness-state.json`; never use generic state write to submit quiz content.
+- Use `merge_readiness_start` to initialize the gate, `merge_readiness_set_content` to submit the report + MCQs, and `merge_readiness_record_answer` to record each selection. Use state read/status/clear only for `.omc/state/merge-readiness-state.json`; never use generic state write to submit quiz content.
 - Write reports under `.omc/artifacts/merge-readiness/`.
 </Tool_Usage>
 
