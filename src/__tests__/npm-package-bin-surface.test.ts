@@ -10,7 +10,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { listSourceControlledPackageFiles } from './npm-package-surface-helpers.js';
+import {
+  PLUGIN_JSON_PATH,
+  listSourceControlledPackageFiles,
+  readMcpServersFromPath,
+  readPluginMcpServers,
+  referencesRootMcpConfig,
+  referencesStandardHooksManifest,
+  type McpServerConfig,
+  type PluginJson,
+} from './npm-package-surface-helpers.js';
 
 const PACKAGE_ROOT = process.cwd();
 const PACKAGE_JSON_PATH = join(PACKAGE_ROOT, 'package.json');
@@ -24,6 +33,8 @@ type PackageJson = {
 type PackedPackage = {
   files: Set<string>;
   packageJson: PackageJson;
+  pluginJson: PluginJson;
+  mcpServers: Record<string, McpServerConfig>;
 };
 
 const CLI_BIN_TARGET = 'bin/oh-my-claudecode.js';
@@ -150,13 +161,25 @@ function getPackedPackage(): PackedPackage {
       '-C',
       packDirCache,
       'package/package.json',
+      'package/.claude-plugin/plugin.json',
+      'package/.mcp.json',
     ]);
 
+    const extractedPackageRoot = join(packDirCache, 'package');
     packedPackageCache = {
       files: new Set(files),
       packageJson: JSON.parse(
-        readFileSync(join(packDirCache, 'package', 'package.json'), 'utf-8'),
+        readFileSync(join(extractedPackageRoot, 'package.json'), 'utf-8'),
       ) as PackageJson,
+      pluginJson: JSON.parse(
+        readFileSync(
+          join(extractedPackageRoot, '.claude-plugin', 'plugin.json'),
+          'utf-8',
+        ),
+      ) as PluginJson,
+      mcpServers: readMcpServersFromPath(
+        join(extractedPackageRoot, '.mcp.json'),
+      ),
     };
     return packedPackageCache;
   } catch (error) {
@@ -212,6 +235,28 @@ describe('npm package bin surface regression', () => {
     );
 
     expect(missing).toEqual([]);
+  });
+
+  it('keeps packed plugin and MCP manifests wired to exact standard entrypoints', () => {
+    const sourcePluginJson = JSON.parse(
+      readFileSync(PLUGIN_JSON_PATH, 'utf-8'),
+    ) as PluginJson;
+
+    expect(packedPackageFixture.pluginJson).toEqual(sourcePluginJson);
+    expect(
+      referencesStandardHooksManifest(packedPackageFixture.pluginJson.hooks),
+    ).toBe(false);
+    expect(
+      referencesRootMcpConfig(packedPackageFixture.pluginJson.mcpServers),
+    ).toBe(true);
+
+    expect(packedPackageFixture.mcpServers).toEqual(readPluginMcpServers());
+    expect(Object.values(packedPackageFixture.mcpServers)).toEqual([
+      {
+        command: 'node',
+        args: ['${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs'],
+      },
+    ]);
   });
 
   it('executes the shared CLI bin wrapper', () => {

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, normalize, relative } from 'node:path';
+import { dirname, join, normalize, relative, sep } from 'node:path';
 
 export const PACKAGE_ROOT = process.cwd();
 export const HOOKS_JSON_PATH = join(PACKAGE_ROOT, 'hooks', 'hooks.json');
@@ -33,13 +33,60 @@ export type McpServerConfig = {
   args?: unknown;
 };
 
-type McpJson = {
+export type McpJson = {
   mcpServers?: Record<string, McpServerConfig>;
 };
 
-export function readPluginMcpServers(): Record<string, McpServerConfig> {
-  const mcpJson = JSON.parse(readFileSync(MCP_JSON_PATH, 'utf-8')) as McpJson;
+export type PluginJson = {
+  hooks?: unknown;
+  mcpServers?: unknown;
+};
+
+export function readMcpServersFromPath(
+  filePath: string,
+): Record<string, McpServerConfig> {
+  const mcpJson = JSON.parse(readFileSync(filePath, 'utf-8')) as McpJson;
   return mcpJson.mcpServers ?? {};
+}
+
+export function readPluginMcpServers(): Record<string, McpServerConfig> {
+  return readMcpServersFromPath(MCP_JSON_PATH);
+}
+
+export function referencesStandardHooksManifest(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\\/g, '/');
+    return (
+      normalized === './hooks/hooks.json' || normalized === 'hooks/hooks.json'
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(referencesStandardHooksManifest);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(referencesStandardHooksManifest);
+  }
+
+  return false;
+}
+
+export function referencesRootMcpConfig(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\\/g, '/');
+    return normalized === './.mcp.json' || normalized === '.mcp.json';
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(referencesRootMcpConfig);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(referencesRootMcpConfig);
+  }
+
+  return false;
 }
 
 function listHookScriptEntries(): string[] {
@@ -67,6 +114,13 @@ function resolveRelativeScriptImport(
   specifier: string,
 ): string | null {
   const resolved = normalize(join(dirname(fromFile), specifier));
+  if (
+    resolved !== SCRIPTS_ROOT &&
+    !resolved.startsWith(`${SCRIPTS_ROOT}${sep}`)
+  ) {
+    return null;
+  }
+
   const candidates = [
     resolved,
     `${resolved}.mjs`,
@@ -78,12 +132,15 @@ function resolveRelativeScriptImport(
   ];
 
   for (const candidate of candidates) {
-    if (candidate.startsWith(SCRIPTS_ROOT) && existsSync(candidate)) {
+    if (existsSync(candidate)) {
       return candidate;
     }
   }
 
-  return null;
+  const fromRelPath = relative(PACKAGE_ROOT, fromFile).replace(/\\/g, '/');
+  throw new Error(
+    `Required local hook dependency is missing: ${specifier} imported from ${fromRelPath}`,
+  );
 }
 
 function collectRequiredScriptFiles(
@@ -130,6 +187,7 @@ export function listSourceControlledPackageFiles(): string[] {
   const requiredFiles = new Set<string>([
     '.claude-plugin/plugin.json',
     '.mcp.json',
+    'commands/omc-setup.md',
     'hooks/hooks.json',
   ]);
 

@@ -7,48 +7,10 @@ import {
   PLUGIN_JSON_PATH,
   listSourceControlledPackageFiles,
   readPluginMcpServers,
+  referencesRootMcpConfig,
+  referencesStandardHooksManifest,
+  type PluginJson,
 } from './npm-package-surface-helpers.js';
-
-type PluginJson = {
-  hooks?: unknown;
-  mcpServers?: unknown;
-};
-
-function referencesStandardHooksManifest(value: unknown): boolean {
-  if (typeof value === 'string') {
-    const normalized = value.replace(/\\/g, '/');
-    return (
-      normalized === './hooks/hooks.json' || normalized === 'hooks/hooks.json'
-    );
-  }
-
-  if (Array.isArray(value)) {
-    return value.some(referencesStandardHooksManifest);
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.values(value).some(referencesStandardHooksManifest);
-  }
-
-  return false;
-}
-
-function referencesRootMcpConfig(value: unknown): boolean {
-  if (typeof value === 'string') {
-    const normalized = value.replace(/\\/g, '/');
-    return normalized === './.mcp.json' || normalized === '.mcp.json';
-  }
-
-  if (Array.isArray(value)) {
-    return value.some(referencesRootMcpConfig);
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.values(value).some(referencesRootMcpConfig);
-  }
-
-  return false;
-}
 
 describe('npm package hook surface regression', () => {
   it('builds the coordinator for packaging without mutating ordinary test entrypoints', () => {
@@ -101,6 +63,7 @@ describe('npm package hook surface regression', () => {
   it('keeps the complete hook dependency and template payload source-controlled', () => {
     const requiredFiles = listSourceControlledPackageFiles();
 
+    expect(requiredFiles).toContain('commands/omc-setup.md');
     expect(requiredFiles).not.toHaveLength(0);
     expect(
       requiredFiles.filter((file) => !existsSync(join(PACKAGE_ROOT, file))),
