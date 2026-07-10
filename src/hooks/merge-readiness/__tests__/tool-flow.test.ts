@@ -16,6 +16,8 @@ function textOf(res: any): string {
 
 describe("merge-readiness standalone tool flow", () => {
   let tempDir: string;
+  let originalCwd: string;
+
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "omc-mr-tools-"));
     execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore", windowsHide: true });
@@ -25,10 +27,19 @@ describe("merge-readiness standalone tool flow", () => {
     execFileSync("git", ["add", "."], { cwd: tempDir, stdio: "ignore", windowsHide: true });
     execFileSync("git", ["commit", "-m", "init"], { cwd: tempDir, stdio: "ignore", windowsHide: true });
     writeFileSync(join(tempDir, "README.md"), "after\n");
+    // validateWorkingDirectory trusts process.cwd()'s git root, so chdir into
+    // tempDir so the tools operate on tempDir's git evidence (not the repo CWD,
+    // which is a clean checkout on CI and would yield "blocked").
+    originalCwd = process.cwd();
+    process.chdir(tempDir);
   });
-  afterEach(() => rmSync(tempDir, { recursive: true, force: true }));
 
-  it("start -> set_content -> record_answer reaches pass and persists state", async () => {
+  afterEach(() => {
+    if (originalCwd) process.chdir(originalCwd);
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("start -> set_content -> record_answer reaches pass", async () => {
     const start = findTool("merge_readiness_start");
     const setContent = findTool("merge_readiness_set_content");
     const recordAnswer = findTool("merge_readiness_record_answer");
@@ -56,7 +67,6 @@ describe("merge-readiness standalone tool flow", () => {
       last = textOf(res);
     }
     expect(last).toContain("pass");
-
   });
 
   it("set_content without start errors instead of silently succeeding", async () => {
