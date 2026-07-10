@@ -71,9 +71,16 @@ function formatTimelineEvent(event) {
                 detail += ` (${event.model})`;
             break;
         case 'agent_stop':
-            detail = `[${event.agent}] ${event.agent_type || 'unknown'} ${event.success ? 'completed' : 'FAILED'}`;
-            if (event.duration_ms)
-                detail += ` (${(event.duration_ms / 1000).toFixed(1)}s)`;
+            if (event.synthetic || event.telemetry_status === 'unmatched_stop') {
+                detail = `[${event.agent}] ${event.agent_type || 'untracked-native-fork'} UNTRACKED_STOP`;
+                if (event.reason)
+                    detail += ` - ${event.reason}`;
+            }
+            else {
+                detail = `[${event.agent}] ${event.agent_type || 'unknown'} ${event.success ? 'completed' : 'FAILED'}`;
+                if (event.duration_ms)
+                    detail += ` (${(event.duration_ms / 1000).toFixed(1)}s)`;
+            }
             break;
         case 'tool_start':
             detail = `[${event.agent}] ${event.tool} started`;
@@ -181,6 +188,10 @@ function buildExecutionFlow(events) {
             }
             case 'agent_stop': {
                 const type = event.agent_type || 'unknown';
+                if (event.synthetic || event.telemetry_status === 'unmatched_stop') {
+                    flow.push(`${type} agent stop was untracked (${event.agent})`);
+                    break;
+                }
                 const status = event.success ? 'completed' : 'FAILED';
                 const dur = event.duration_ms ? ` ${(event.duration_ms / 1000).toFixed(1)}s` : '';
                 flow.push(`${type} agent ${status} (${event.agent}${dur})`);
@@ -296,7 +307,7 @@ export const traceSummaryTool = {
                 `### Overview`,
                 `- **Duration:** ${summary.duration_seconds.toFixed(1)}s`,
                 `- **Total Events:** ${summary.total_events}`,
-                `- **Agents:** ${summary.agents_spawned} spawned, ${summary.agents_completed} completed, ${summary.agents_failed} failed`,
+                `- **Agents:** ${summary.agents_spawned} spawned, ${summary.agents_completed} completed, ${summary.agents_failed} failed${summary.agents_untracked_stops ? `, ${summary.agents_untracked_stops} untracked stop(s)` : ''}`,
                 '',
             ];
             // Agent Activity breakdown

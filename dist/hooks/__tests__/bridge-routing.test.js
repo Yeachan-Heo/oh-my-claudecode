@@ -789,6 +789,35 @@ $ ultrawork search the codebase`,
                 rmSync(tempDir, { recursive: true, force: true });
             }
         });
+        it('seeds merge-readiness runtime state for explicit /merge-readiness slash invocation', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-mr-slash-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'mr-slash-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/merge-readiness --quick explain this change',
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                const slotPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json');
+                const slot = JSON.parse(readFileSync(slotPath, 'utf-8'));
+                expect(slot.active_skills?.['merge-readiness']?.initialized_mode).toBe('merge-readiness');
+                expect(slot.active_skills?.['merge-readiness']?.session_id).toBe(sessionId);
+                const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'merge-readiness-state.json');
+                const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+                expect(state.active).toBe(true);
+                expect(state.current_phase).toBe('merge-readiness');
+                // v1: runtime awaits AI-generated doc + MCQs; no pending question until
+                // setMergeReadinessContent is called.
+                expect(state.awaiting_content).toBe(true);
+                expect(state.pending_question).toBeUndefined();
+                expect(state.profile).toBe('quick');
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
         it('seeds workflow slot for explicit /self-improve slash invocation in UserPromptSubmit', async () => {
             const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-si-slash-'));
             try {

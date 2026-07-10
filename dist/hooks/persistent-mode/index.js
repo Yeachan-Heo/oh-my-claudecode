@@ -27,6 +27,7 @@ import { readTeamPipelineState } from '../team-pipeline/state.js';
 import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 import { truncatePromptForEcho } from '../../lib/truncate-prompt.js';
 import { isModeActive } from '../mode-registry/index.js';
+import { checkMergeReadiness } from '../merge-readiness/index.js';
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
@@ -34,7 +35,7 @@ const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
+const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan', 'merge-readiness']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
     'complete',
     'completed',
@@ -1867,6 +1868,20 @@ async function resolvePersistentModeBlock(sessionId, directory, stopContext // N
         const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
         if (teamResult) {
             return teamResult;
+        }
+    }
+    // Priority 1.9: Merge Readiness (post-task explainability gate)
+    if (!tombstonedWorkflowModes.has('merge-readiness') && isModeActive('merge-readiness', workingDir, sessionId)) {
+        const mergeReadinessResult = await checkMergeReadiness(sessionId, workingDir, cancelInProgress);
+        if (mergeReadinessResult?.shouldBlock) {
+            return {
+                shouldBlock: true,
+                message: mergeReadinessResult.message,
+                mode: 'merge-readiness',
+                metadata: {
+                    phase: `result:${mergeReadinessResult.result}`,
+                },
+            };
         }
     }
     // Priority 2: Ultrawork Mode (performance mode with persistence)

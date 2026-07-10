@@ -10,6 +10,17 @@ import {
 } from "../loader.js";
 import { saveAndClear, restore } from "./test-helpers.js";
 
+// ponytail: Windows cannot rmSync a directory that is the process cwd, so
+// chdir out to the OS temp dir before removing a test tempDir.
+function rmTempDir(tempDir: string): void {
+  try {
+    process.chdir(tmpdir());
+  } catch {
+    // ignore; best-effort cwd escape
+  }
+  rmSync(tempDir, { recursive: true, force: true });
+}
+
 const ALL_KEYS = [
   "CLAUDE_CODE_USE_BEDROCK",
   "CLAUDE_CODE_USE_VERTEX",
@@ -220,7 +231,7 @@ schema
         omcGuidance.length + `## Context from ${omcAgentsPath}\n\n`.length - 40,
       );
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -251,7 +262,7 @@ ${"- keep this\n".repeat(900)}
       expect(loaded).toContain(`## Context from ${fileA}`);
       expect(loaded).toContain('startup context budget');
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -346,7 +357,7 @@ describe("plan output configuration", () => {
         filenameTemplate: "plan-{{name}}.md",
       });
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 });
@@ -396,7 +407,7 @@ describe("company context configuration", () => {
         onError: "fail",
       });
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -458,7 +469,7 @@ describe("team.roleRouting (Option E)", () => {
         provider: "gemini",
       });
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -483,7 +494,7 @@ describe("team.roleRouting (Option E)", () => {
       expect(config.team?.ops?.defaultAgentType).toBe("cursor");
       expect(config.team?.roleRouting?.executor).toEqual({ provider: "cursor" });
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -507,7 +518,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/cursor is only supported for executor-style roles/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -529,7 +540,7 @@ describe("team.roleRouting (Option E)", () => {
       const config = loadConfig();
       expect(config.team?.roleRouting?.critic?.provider).toBe("codex");
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -561,7 +572,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/team\.roleRouting\.critic\.provider/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -581,7 +592,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/orchestrator: key "provider" is not allowed/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -599,7 +610,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.agent/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -623,7 +634,7 @@ describe("team.roleRouting (Option E)", () => {
       const r = config.team?.roleRouting as Record<string, unknown>;
       expect(r["reviewer"]).toEqual({ provider: "codex" });
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -641,7 +652,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/team\.ops\.defaultAgentType/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 
@@ -659,7 +670,7 @@ describe("team.roleRouting (Option E)", () => {
       process.chdir(tempDir);
       expect(() => loadConfig()).toThrow(/unknown role "totally-fake-role"/);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 });
@@ -722,7 +733,7 @@ describe("delegation routing deprecation warnings", () => {
         expect.stringContaining("delegationRouting to Codex/Gemini is deprecated"),
       );
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      rmTempDir(tempDir);
     }
   });
 });
@@ -738,7 +749,7 @@ describe("loadConfig() — autopilot team worker config", () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    rmSync(tempDir, { recursive: true, force: true });
+    rmTempDir(tempDir);
   });
 
   it("loads autopilot.execution=team with Cursor team agentTypes", () => {
@@ -774,12 +785,58 @@ describe("loadConfig() — autopilot team worker config", () => {
     expect(() => loadConfig()).toThrow(/autopilot\.team\.agentTypes/);
   });
 
-  it("advertises autopilot.team.agentTypes in generated config schema", () => {
+  it("loads the optional autopilot merge readiness flag", () => {
+    require("node:fs").mkdirSync(join(tempDir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(tempDir, ".claude", "omc.jsonc"),
+      `{
+        "autopilot": {
+          "mergeReadiness": true
+        }
+      }`,
+    );
+
+    const config = loadConfig();
+
+    expect(config.autopilot?.mergeReadiness).toBe(true);
+  });
+
+  it("rejects non-boolean autopilot merge readiness values", () => {
+    require("node:fs").mkdirSync(join(tempDir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(tempDir, ".claude", "omc.jsonc"),
+      `{
+        "autopilot": {
+          "mergeReadiness": "yes"
+        }
+      }`,
+    );
+
+    expect(() => loadConfig()).toThrow(/autopilot\.mergeReadiness/);
+  });
+
+  it("rejects non-boolean deprecated autopilot understanding gate values", () => {
+    require("node:fs").mkdirSync(join(tempDir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(tempDir, ".claude", "omc.jsonc"),
+      `{
+        "autopilot": {
+          "understandingGate": "yes"
+        }
+      }`,
+    );
+
+    expect(() => loadConfig()).toThrow(/autopilot\.understandingGate/);
+  });
+
+  it("advertises autopilot team and merge readiness fields in generated config schema", () => {
     const schema = generateConfigSchema() as {
       properties?: Record<string, { properties?: Record<string, unknown> }>;
     };
 
     expect(schema.properties?.autopilot).toBeDefined();
     expect(schema.properties?.autopilot?.properties?.team).toBeDefined();
+    expect(schema.properties?.autopilot?.properties?.mergeReadiness).toBeDefined();
+    expect(schema.properties?.autopilot?.properties?.understandingGate).toBeDefined();
   });
 });

@@ -10,6 +10,7 @@ const mockedCalls = vi.hoisted(() => ({
     enterSubmitsCommand: true,
     submitClearsAfterCaptures: 0,
     delayedSubmitCapturesRemaining: null,
+    paneStatusAfterEnter: null,
     delayedSubmitReplacement: '',
     cmuxFailOnce: [],
     cmuxFailures: [],
@@ -100,6 +101,9 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
                     mockedCalls.paneCapture = replacement;
                 }
             }
+            if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.paneStatusAfterEnter !== null) {
+                mockedCalls.paneStatus = mockedCalls.paneStatusAfterEnter;
+            }
             return { stdout: '', stderr: '' };
         }),
         tmuxCmdAsync: vi.fn(async (args) => {
@@ -129,6 +133,7 @@ describe('spawnWorkerInPane', () => {
         mockedCalls.submitClearsAfterCaptures = 0;
         mockedCalls.delayedSubmitCapturesRemaining = null;
         mockedCalls.delayedSubmitReplacement = '';
+        mockedCalls.paneStatusAfterEnter = null;
     });
     it('uses argv-style launch with literal tmux send-keys', async () => {
         await spawnWorkerInPane('session:0', '%2', {
@@ -400,6 +405,37 @@ describe('spawnWorkerInPane', () => {
         const submitVerificationCaptures = mockedCalls.tmuxArgs.filter((args) => args[0] === 'capture-pane' && args.includes('-J'));
         expect(submitVerificationCaptures.length).toBeGreaterThan(5);
         vi.useRealTimers();
+    });
+    it('accepts inline TUI worker submission when process leaves the ready shell but command remains in scrollback', async () => {
+        mockedCalls.enterSubmitsCommand = false;
+        mockedCalls.paneStatusAfterEnter = '0 codex\n';
+        await expect(spawnWorkerInPane('session:0', '%2', {
+            teamName: 'safe-team',
+            workerName: 'worker-1',
+            envVars: {
+                OMC_TEAM_NAME: 'safe-team',
+                OMC_TEAM_WORKER: 'safe-team/worker-1',
+            },
+            launchBinary: 'codex',
+            launchArgs: ['--full-auto'],
+            cwd: '/tmp',
+        })).resolves.toBeUndefined();
+    });
+    it('does not accept inline TUI worker submission when the pane is dead', async () => {
+        mockedCalls.enterSubmitsCommand = false;
+        mockedCalls.paneStatusAfterEnter = '1 codex\n';
+        vi.stubEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', '200');
+        await expect(spawnWorkerInPane('session:0', '%2', {
+            teamName: 'safe-team',
+            workerName: 'worker-1',
+            envVars: {
+                OMC_TEAM_NAME: 'safe-team',
+                OMC_TEAM_WORKER: 'safe-team/worker-1',
+            },
+            launchBinary: 'codex',
+            launchArgs: ['--full-auto'],
+            cwd: '/tmp',
+        })).rejects.toThrow(/worker_start_submit_unverified:worker-1:%2:/);
     });
     it('fails loudly when a single Cursor worker start command remains unsubmitted after Enter', async () => {
         mockedCalls.enterSubmitsCommand = false;

@@ -724,6 +724,25 @@ function paneCurrentCommandLooksReady(command) {
   const normalized = (0, import_path9.basename)(command.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "").toLowerCase();
   return SUPPORTED_POSIX_SHELLS.has(normalized) || ["cmd", "powershell", "pwsh", "nu", "elvish"].includes(normalized);
 }
+async function getPaneCurrentCommandStatus(paneId) {
+  try {
+    const result = await tmuxCmdAsync([
+      "display-message",
+      "-p",
+      "-t",
+      paneId,
+      "#{pane_dead} #{pane_current_command}"
+    ], { timeout: 1e3 });
+    const status = result.stdout.trim();
+    const [dead, ...commandParts] = status.split(/\s+/);
+    return { dead: dead === "1", command: commandParts.join(" ") };
+  } catch {
+    return null;
+  }
+}
+function paneCurrentCommandLooksSubmitted(command) {
+  return command.length > 0 && !paneCurrentCommandLooksReady(command);
+}
 async function waitForShellReady(paneId, opts = {}) {
   if (isCmuxSurfaceTarget(paneId)) return true;
   const envTimeout = Number.parseInt(process.env.OMC_TEAM_SHELL_READY_TIMEOUT_MS ?? "", 10);
@@ -732,23 +751,13 @@ async function waitForShellReady(paneId, opts = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "";
   while (Date.now() < deadline) {
-    try {
-      const result = await tmuxCmdAsync([
-        "display-message",
-        "-p",
-        "-t",
-        paneId,
-        "#{pane_dead} #{pane_current_command}"
-      ], { timeout: 1e3 });
-      lastStatus = result.stdout.trim();
-      const [dead, ...commandParts] = lastStatus.split(/\s+/);
-      if (dead === "1") return false;
-      const currentCommand = commandParts.join(" ");
-      if (currentCommand && paneCurrentCommandLooksReady(currentCommand)) {
+    const status = await getPaneCurrentCommandStatus(paneId);
+    if (status) {
+      lastStatus = `${status.dead ? "1" : "0"} ${status.command}`.trim();
+      if (status.dead) return false;
+      if (paneCurrentCommandLooksReady(status.command)) {
         return true;
       }
-    } catch (error) {
-      lastStatus = error instanceof Error ? error.message : String(error);
     }
     await sleep(pollIntervalMs);
   }
@@ -791,6 +800,13 @@ async function verifyWorkerStartCommandSubmitted(paneId, startCmd, opts = {}) {
     const normalizedCaptured = normalizeTmuxCapture(captured);
     const commandStillBuffered = normalizedCaptured.includes(expected) || compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected);
     if (!commandStillBuffered) {
+      return true;
+    }
+    const status = await getPaneCurrentCommandStatus(paneId);
+    if (status?.dead) {
+      return false;
+    }
+    if (status && paneCurrentCommandLooksSubmitted(status.command)) {
       return true;
     }
     const remainingMs = deadline - Date.now();
@@ -2531,7 +2547,7 @@ function buildDefaultConfig() {
       ]
     },
     // External models configuration (Codex, Gemini)
-    // Static defaults only — env var overrides applied in loadEnvConfig()
+    // Static defaults only; env var overrides applied in loadEnvConfig()
     externalModels: {
       defaults: {
         codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
@@ -2550,7 +2566,7 @@ function buildDefaultConfig() {
       defaultProvider: "claude",
       roles: {}
     },
-    // /team role routing (Option E — /team-scoped per-role provider & model)
+    // /team role routing (Option E; /team-scoped per-role provider & model)
     // Empty defaults: zero behavior change until user opts in.
     team: {
       ops: {},
@@ -2893,6 +2909,16 @@ function validateAutopilotConfig(config) {
   if (autopilot.planning !== void 0 && autopilot.planning !== false && (typeof autopilot.planning !== "string" || !AUTOPILOT_PLANNING_MODES.has(autopilot.planning))) {
     throw new Error(
       `[OMC] autopilot.planning: invalid value "${String(autopilot.planning)}". Allowed: ralplan, direct, false`
+    );
+  }
+  if (autopilot.mergeReadiness !== void 0 && typeof autopilot.mergeReadiness !== "boolean") {
+    throw new Error(
+      `[OMC] autopilot.mergeReadiness: must be a boolean, got ${typeof autopilot.mergeReadiness}`
+    );
+  }
+  if (autopilot.understandingGate !== void 0 && typeof autopilot.understandingGate !== "boolean") {
+    throw new Error(
+      `[OMC] autopilot.understandingGate: must be a boolean, got ${typeof autopilot.understandingGate}`
     );
   }
   const team = autopilot.team;

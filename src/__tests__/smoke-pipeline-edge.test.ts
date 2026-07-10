@@ -11,7 +11,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 // ============================================================================
-// SHARED MEMORY MOCK — must be declared before any imports that use it
+// SHARED MEMORY MOCK - must be declared before any imports that use it
 // ============================================================================
 
 const mockGetOmcRoot = vi.fn<(worktreeRoot?: string) => string>();
@@ -25,7 +25,7 @@ vi.mock('../lib/worktree-paths.js', async (importOriginal) => {
 });
 
 // ============================================================================
-// MODE-REGISTRY MOCK — needed by pipeline initPipeline
+// MODE-REGISTRY MOCK - needed by pipeline initPipeline
 // ============================================================================
 
 vi.mock('../hooks/mode-registry/index.js', () => ({
@@ -66,7 +66,7 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
   beforeEach(() => {
     testDir = join(tmpdir(), `edge-pipe-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(testDir, { recursive: true });
-    // Pipeline state uses getOmcRoot(worktreeRoot) — mock returns <dir>/.omc for any arg
+    // Pipeline state uses getOmcRoot(worktreeRoot); mock returns <dir>/.omc for any arg.
     mockGetOmcRoot.mockImplementation((dir?: string) => {
       const base = dir || testDir;
       const omcDir = join(base, '.omc');
@@ -164,7 +164,7 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
 
     // Calling advanceStage again on a completed pipeline should fail gracefully
     const again = advanceStage(testDir, 'edge-sess-complete');
-    // Either failed (no state to read for next stage) or complete — must not throw
+    // Either failed (no state to read for next stage) or complete; must not throw.
     expect(['complete', 'failed']).toContain(again.phase);
   });
 
@@ -191,7 +191,7 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
 
     expect(hud).toMatch(/Pipeline \d+\/\d+ stages/);
     // First stage is active (set by buildPipelineTracking via initPipeline, but here
-    // buildPipelineTracking alone does NOT set active — it marks first as pending)
+    // buildPipelineTracking alone does NOT set active; it marks first as pending.
     // At minimum, pending stages appear as [..] or active as [>>]
     expect(hud).toMatch(/\[\.\.\]|\[>>\]/);
   });
@@ -229,15 +229,16 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
     expect(hud).not.toMatch(/\[\.\.\]/);
   });
 
-  it('STAGE_ORDER contains exactly the four expected stages', () => {
-    expect(STAGE_ORDER).toHaveLength(4);
-    expect([...STAGE_ORDER]).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+  it('STAGE_ORDER contains the expected stages including optional merge readiness', () => {
+    expect(STAGE_ORDER).toHaveLength(5);
+    expect([...STAGE_ORDER]).toEqual(['ralplan', 'execution', 'ralph', 'qa', 'merge-readiness']);
   });
 
   it('DEFAULT_PIPELINE_CONFIG has expected default values', () => {
     expect(DEFAULT_PIPELINE_CONFIG.planning).toBe('ralplan');
     expect(DEFAULT_PIPELINE_CONFIG.execution).toBe('solo');
     expect(DEFAULT_PIPELINE_CONFIG.qa).toBe(true);
+    expect(DEFAULT_PIPELINE_CONFIG.mergeReadiness).toBe(false);
     expect(DEFAULT_PIPELINE_CONFIG.verification).not.toBe(false);
     if (DEFAULT_PIPELINE_CONFIG.verification) {
       expect(DEFAULT_PIPELINE_CONFIG.verification.engine).toBe('ralph');
@@ -349,7 +350,7 @@ describe('EDGE: Shared Memory (issue #1137)', () => {
 
   it('special characters in values: unicode, nested objects, arrays', () => {
     const value = {
-      unicode: '日本語テスト \u2603 \uD83D\uDE00',
+      unicode: '\u65e5\u672c\u8a9e\u30c6\u30b9\u30c8 \u2603 \uD83D\uDE00',
       nested: { a: { b: { c: [1, 2, 3] } } },
       array: ['foo', 'bar', null, true, 42],
     };
@@ -456,13 +457,13 @@ describe('EDGE: HUD truncateLineToMaxWidth (issue #1102)', () => {
   });
 
   it('mixed ANSI + CJK + ASCII truncates at correct visual column', () => {
-    // Each CJK char = 2 columns, ANSI codes not counted
-    const line = '\x1b[32m' + '日本語' + '\x1b[0m' + 'ABC';
-    // visible: 日(2) 本(2) 語(2) A(1) B(1) C(1) = 9 cols total → no truncation at maxWidth=10
+    // Each CJK char = 2 columns, ANSI codes not counted.
+    const line = '\x1b[32m' + '\u65e5\u672c\u8a9e' + '\x1b[0m' + 'ABC';
+    // visible: three CJK chars (6 cols) + ABC (3 cols) = 9 cols total; no truncation at maxWidth=10.
     const notTruncated = truncateLineToMaxWidth(line, 10);
     expect(notTruncated).toBe(line);
 
-    // At maxWidth=5: targetWidth=2 → only '日' fits (2 cols), then ellipsis
+    // At maxWidth=5: targetWidth=2; only the first CJK char fits, then ellipsis.
     const truncated = truncateLineToMaxWidth(line, 5);
     expect(truncated).toContain('...');
   });

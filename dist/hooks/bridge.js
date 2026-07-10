@@ -32,6 +32,7 @@ import { compactOmcStartupGuidance, loadConfig } from "../config/loader.js";
 import { activatePromptPrerequisiteState, buildPromptPrerequisiteDenyReason, buildPromptPrerequisiteReminder, clearPromptPrerequisiteState, getPromptPrerequisiteConfig, isPromptPrerequisiteBlockingTool, parsePromptPrerequisiteSections, readPromptPrerequisiteState, recordPromptPrerequisiteProgress, shouldEnforcePromptPrerequisites, } from "./prompt-prerequisites/index.js";
 import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../config/plan-output.js";
 import { formatAutopilotRuntimeInsight } from "./autopilot/runtime-insight.js";
+import { createInitialMergeReadinessState, cancelMergeReadiness, formatMergeReadinessQuestionMessage, handleMergeReadinessPromptSubmit, recordMergeReadinessAskUserQuestionResult, } from "./merge-readiness/index.js";
 import { writeSkillActiveState, isCanonicalWorkflowSkill, upsertWorkflowSkillSlot, markWorkflowSkillCompleted, pruneExpiredWorkflowSkillTombstones, readSkillActiveStateNormalized, writeSkillActiveStateCopies, } from "./skill-state/index.js";
 import { parseExplicitWorkflowSlashInvocation } from "./keyword-detector/index.js";
 import { ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
@@ -1030,6 +1031,9 @@ async function seedModeStateForExplicitWorkflowSlash(skill, directory, promptTex
         case "autopilot":
             await seedAutopilotStartupState(directory, promptText, sessionId);
             return;
+        case "merge-readiness":
+            createInitialMergeReadinessState(directory, promptText, sessionId);
+            return;
         default:
             // ralph / ultrawork / team / ultraqa / deep-interview / self-improve
             // own their state activation inside their own Skill PostToolUse handlers.
@@ -1065,9 +1069,25 @@ async function processKeywordDetector(input) {
     const sessionId = input.sessionId;
     const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
+    const mergeReadinessAnswer = handleMergeReadinessPromptSubmit(directory, promptText, sessionId);
+    if (mergeReadinessAnswer.handled) {
+        return {
+            continue: true,
+            hookSpecificOutput: {
+                hookEventName: "UserPromptSubmit",
+                additionalContext: mergeReadinessAnswer.message,
+            },
+        };
+    }
+    if (/^\/(?:oh-my-claudecode:|omc:)?cancel\b/i.test(promptText.trim())) {
+        const cancelled = cancelMergeReadiness(directory, sessionId);
+        if (cancelled?.result === "cancelled") {
+            return { continue: true, message: "[MERGE READINESS] Attempt cancelled. The artifact preserves answered-question feedback only." };
+        }
+    }
     // Unified explicit slash invocation handler — covers all 8 canonical
     // workflow skills (autopilot, ralph, team, ultrawork, ultraqa,
-    // deep-interview, ralplan, self-improve). Seeds the workflow slot via the
+    // deep-interview, merge-readiness, ralplan, self-improve). Seeds the workflow slot via the
     // sanctioned dual-copy helper BEFORE the Skill tool fires, and seeds the
     // mode-specific state file when the mode requires pre-Skill state. The
     // ralplan path additionally returns the legacy [RALPLAN INIT] context
@@ -1234,11 +1254,19 @@ async function processKeywordDetector(input) {
             case "autopilot":
             case "ralplan":
             case "deep-interview":
+            case "merge-readiness":
                 if (keywordType === "autopilot") {
                     await seedAutopilotStartupState(directory, cleanedText, sessionId);
                 }
                 else if (keywordType === "ralplan") {
                     seedRalplanStartupState(directory, sessionId);
+                }
+                else if (keywordType === "merge-readiness") {
+                    createInitialMergeReadinessState(directory, cleanedText, sessionId);
+                }
+                if (keywordType === "merge-readiness") {
+                    messages.push("[MODE: MERGE-READINESS] Runtime armed and awaiting a validated explanation report plus MCQs. The stop hook will block until the explainability quiz passes or is explicitly overridden.");
+                    break;
                 }
                 messages.push(`[MODE: ${keywordType.toUpperCase()}] Skill invocation handled by UserPromptSubmit hook.`);
                 break;
@@ -2073,6 +2101,12 @@ function getRawSkillName(toolInput) {
 async function processPostToolUse(input) {
     const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
+    if (input.toolName === "AskUserQuestion") {
+        const updated = recordMergeReadinessAskUserQuestionResult(directory, input.toolInput, input.toolOutput, input.sessionId);
+        if (updated) {
+            messages.push(formatMergeReadinessQuestionMessage(updated));
+        }
+    }
     // Ensure mode state activation also works when execution starts via Skill tool
     // (e.g., ralplan consensus handoff into Skill("oh-my-claudecode:ralph")).
     const toolName = (input.toolName || "").toLowerCase();

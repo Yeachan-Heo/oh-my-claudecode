@@ -126,7 +126,7 @@ export function buildDefaultConfig() {
             ],
         },
         // External models configuration (Codex, Gemini)
-        // Static defaults only — env var overrides applied in loadEnvConfig()
+        // Static defaults only; env var overrides applied in loadEnvConfig()
         externalModels: {
             defaults: {
                 codexModel: BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel,
@@ -145,7 +145,7 @@ export function buildDefaultConfig() {
             defaultProvider: "claude",
             roles: {},
         },
-        // /team role routing (Option E — /team-scoped per-role provider & model)
+        // /team role routing (Option E; /team-scoped per-role provider & model)
         // Empty defaults: zero behavior change until user opts in.
         team: {
             ops: {},
@@ -175,7 +175,7 @@ export function buildDefaultConfig() {
         promptPrerequisites: {
             enabled: true,
             sectionNames: {
-                memory: ["MÉMOIRE", "MEMOIRE", "MEMORY"],
+                memory: ["M\u00c9MOIRE", "MEMOIRE", "MEMORY"],
                 skills: ["SKILLS"],
                 verifyFirst: ["VERIFY-FIRST", "VERIFY FIRST", "VERIFY_FIRST"],
                 context: ["CONTEXT"],
@@ -392,7 +392,7 @@ export function loadEnvConfig() {
             };
         }
     }
-    // /team role routing env override (OMC_TEAM_ROLE_OVERRIDES — single JSON var).
+    // /team role routing env override (OMC_TEAM_ROLE_OVERRIDES; single JSON var).
     // Best-effort: invalid JSON logs and is ignored (no throw on env path).
     const teamRoleOverrides = parseTeamRoleOverridesFromEnv();
     if (teamRoleOverrides) {
@@ -436,7 +436,7 @@ function warnOnDeprecatedDelegationRouting(config) {
 const CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
 const CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
-// /team CLI workers — codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
+// /team CLI workers: codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
 const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
 export function validateTeamConfig(config) {
@@ -524,6 +524,14 @@ export function validateAutopilotConfig(config) {
         (typeof autopilot.planning !== "string" ||
             !AUTOPILOT_PLANNING_MODES.has(autopilot.planning))) {
         throw new Error(`[OMC] autopilot.planning: invalid value "${String(autopilot.planning)}". Allowed: ralplan, direct, false`);
+    }
+    if (autopilot.mergeReadiness !== undefined &&
+        typeof autopilot.mergeReadiness !== "boolean") {
+        throw new Error(`[OMC] autopilot.mergeReadiness: must be a boolean, got ${typeof autopilot.mergeReadiness}`);
+    }
+    if (autopilot.understandingGate !== undefined &&
+        typeof autopilot.understandingGate !== "boolean") {
+        throw new Error(`[OMC] autopilot.understandingGate: must be a boolean, got ${typeof autopilot.understandingGate}`);
     }
     const team = autopilot.team;
     if (!team || typeof team !== "object")
@@ -1057,6 +1065,17 @@ export function generateConfigSchema() {
                         ],
                     },
                     qa: { type: "boolean", default: true },
+                    mergeReadiness: {
+                        type: "boolean",
+                        default: false,
+                        description: "Run the standalone /merge-readiness workflow after QA. This checks human explainability only and does not replace tests, review, or approval.",
+                    },
+                    understandingGate: {
+                        type: "boolean",
+                        default: false,
+                        deprecated: true,
+                        description: "Deprecated alias for autopilot.mergeReadiness.",
+                    },
                     team: {
                         type: "object",
                         properties: {

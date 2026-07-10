@@ -107,18 +107,21 @@ describe('Pipeline Orchestrator', () => {
   // =========================================================================
 
   describe('buildPipelineTracking', () => {
-    it('creates 4 stages matching STAGE_ORDER', () => {
+    it('creates 5 stages matching STAGE_ORDER', () => {
       const tracking = buildPipelineTracking(DEFAULT_PIPELINE_CONFIG);
-      expect(tracking.stages).toHaveLength(4);
+      expect(tracking.stages).toHaveLength(5);
       expect(tracking.stages.map(s => s.id)).toEqual(STAGE_ORDER);
     });
 
-    it('all stages are pending for default config', () => {
+    it('marks default active stages pending and optional merge readiness skipped', () => {
       const tracking = buildPipelineTracking(DEFAULT_PIPELINE_CONFIG);
-      for (const stage of tracking.stages) {
+      for (const stage of tracking.stages.slice(0, 4)) {
         expect(stage.status).toBe('pending');
         expect(stage.iterations).toBe(0);
       }
+      expect(tracking.stages[4].id).toBe('merge-readiness');
+      expect(tracking.stages[4].status).toBe('skipped');
+      expect(tracking.stages[4].iterations).toBe(0);
     });
 
     it('marks skipped stages when config disables them', () => {
@@ -298,7 +301,7 @@ describe('Pipeline Orchestrator', () => {
 
   describe('constants', () => {
     it('STAGE_ORDER has correct sequence', () => {
-      expect(STAGE_ORDER).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+      expect(STAGE_ORDER).toEqual(['ralplan', 'execution', 'ralph', 'qa', 'merge-readiness']);
     });
 
     it('DEPRECATED_MODE_ALIASES has ultrawork and ultrapilot', () => {

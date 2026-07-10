@@ -16,7 +16,12 @@
  * Pipeline stage identifiers in execution order.
  * Each stage is optional and can be skipped via configuration.
  */
-export type PipelineStageId = "ralplan" | "execution" | "ralph" | "qa";
+export type PipelineStageId =
+  | "ralplan"
+  | "execution"
+  | "ralph"
+  | "qa"
+  | "merge-readiness";
 
 /** Terminal pipeline states */
 export type PipelineTerminalState = "complete" | "failed" | "cancelled";
@@ -38,6 +43,7 @@ export const STAGE_ORDER: readonly PipelineStageId[] = [
   "execution",
   "ralph",
   "qa",
+  "merge-readiness",
 ] as const;
 
 // ============================================================================
@@ -95,6 +101,14 @@ export interface PipelineConfig {
   verification: VerificationConfig | false;
   /** Whether to run the QA stage (build/lint/test cycling) */
   qa: boolean;
+  /**
+   * Whether to run the post-task, pre-merge human merge readiness.
+   * This gate checks explainability only; it does not replace tests,
+   * review, risk acceptance, or maintainer approval.
+   */
+  mergeReadiness: boolean;
+  /** Deprecated alias for mergeReadiness. */
+  understandingGate?: boolean;
   /** Team execution options, only used when execution is 'team'. */
   team?: AutopilotTeamConfig;
 }
@@ -108,6 +122,7 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
     maxIterations: 100,
   },
   qa: true,
+  mergeReadiness: false,
 };
 
 // ============================================================================

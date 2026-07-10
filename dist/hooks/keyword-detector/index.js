@@ -13,7 +13,7 @@ import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
 const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
     ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
-    autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|(오토파일럿)|(オートパイロット)/i,
+    autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
     ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i,
     // Team keyword detection disabled — team mode is now explicit-only via /team skill.
     // This prevents infinite spawning when Claude workers receive prompts containing "team".
@@ -27,6 +27,7 @@ const KEYWORD_PATTERNS = {
     analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
     'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
     ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
+    'merge-readiness': /\b(merge[\s-]readiness|understanding[\s-]gate)\b/i,
     codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
     cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -58,7 +59,7 @@ const KEYWORD_SKIP_PREDICATES = {
 const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
     'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
-    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
+    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'merge-readiness', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
 /**
  * Canonical workflow skills detected via explicit slash invocation.
@@ -73,6 +74,7 @@ const CANONICAL_WORKFLOW_SLASH_SKILLS = [
     'ultrawork',
     'ultraqa',
     'deep-interview',
+    'merge-readiness',
     'ralplan',
     'self-improve',
 ];
@@ -89,6 +91,7 @@ const SLASH_SKILL_TO_KEYWORD_TYPE = {
     team: 'team',
     ultrawork: 'ultrawork',
     'deep-interview': 'deep-interview',
+    'merge-readiness': 'merge-readiness',
     ralplan: 'ralplan',
 };
 const WORKFLOW_SLASH_PATTERN = new RegExp('^\\s*/(?:oh-my-claudecode:|omc:)?(' +
@@ -301,6 +304,7 @@ const INFORMATIONAL_INTENT_PATTERNS = [
     /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
     /(?:とは|って何|使い方|説明|(?:について|に関して|違い)[^\n]{0,24}(?:教えて|説明|知りたい)|(?:どう|何が|どこが)違う)/u,
     /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
+    /(?:ทำไม|อะไร|ยังไง|อย่างไร|คืออะไร|หมายถึง|แปลว่า|อธิบาย|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย|เกี่ยวกับ|เหมือน)/u,
 ];
 const INFORMATIONAL_CONTEXT_WINDOW = 80;
 const QUOTED_SPAN_PATTERN = /"[^"\n]{1,400}"|'[^'\n]{1,400}'|“[^”\n]{1,400}”|‘[^’\n]{1,400}’/g;
@@ -308,6 +312,7 @@ const REFERENCE_META_PATTERNS = [
     /\b(?:vs\.?|versus|compared\s+to|comparison|compare|article|blog\s+post|documentation|docs?|reference)\b/i,
     /(?:비교|차이|설명|정리|문서|자료|가이드|이\s*(?:글|비교|문서)는|블로그)/u,
     /\b(?:this\s+(?:article|comparison|guide|documentation|doc)|quoted|quote(?:d)?)\b/i,
+    /(?:เปรียบเทียบ|ต่างกัน|ความต่าง|เอกสาร|บทความ|ไกด์|คู่มือ|เกี่ยวกับ|เหมือน)/u,
 ];
 const REFERENCE_EXPLANATION_PATTERNS = [
     /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
@@ -318,6 +323,7 @@ const REFERENCE_EXPLANATION_PATTERNS = [
 const QUESTION_FOLLOWUP_PATTERNS = [
     /\b(?:how\s+many|how\s+much|why|what\s+happened|what\s+went\s+wrong|token\s+budget|cost|pricing)\b/i,
     /(?:왜|얼마|몇\s*번|몇번|토큰|가격|비용|질문)/u,
+    /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u,
 ];
 const MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ultrawork|ulw|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|ccg|claude-codex-gemini|deerflow)\b/gi;
 function escapeRegExp(value) {
@@ -469,6 +475,17 @@ function isRalphUltraworkMetaOrBanterContext(context, keywordText) {
     ];
     return metaOrBanterPatterns.some((pattern) => pattern.test(context));
 }
+function isAutopilotCreationAlias(keywordText) {
+    const normalized = keywordText.toLowerCase().trim();
+    return /^(?:build|create|make)\s+me\b/.test(normalized) || /^i\s+want\s+an?(?:\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension))?\s*$/.test(normalized);
+}
+function hasActionableCommandAfterSeparator(text, position, keywordLength) {
+    const suffix = text.slice(position + keywordLength).match(/^\s*[:：]\s*([^\n]{0,80})/u)?.[1] ?? '';
+    if (/\?|？|\b(?:what(?:'s|\s+is)|how\s+(?:to|do\s+i)\s+use|explain|describe|tell\s+me\s+about)\b/iu.test(suffix)) {
+        return false;
+    }
+    return /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch)\b|(?:ทำ|ทํา|สร้าง|แก้|เปิด|รัน|เรียก|เริ่ม)/iu.test(suffix);
+}
 function isInformationalKeywordContext(text, position, keywordLength, keywordText) {
     const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW);
     const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW);
@@ -480,6 +497,8 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
     const questionOutsideQuotes = stripQuotedSpans(text);
     const keywordInsideQuotes = isWithinQuotedSpan(text, position);
     const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
+    const hasCommandSeparatorInvocation = hasDirectInvocationPrefix(text, position) && /^\s*[:：]/.test(text.slice(position + keywordLength));
+    const hasActionableCommandSeparatorInvocation = hasCommandSeparatorInvocation && hasActionableCommandAfterSeparator(text, position, keywordLength);
     // A keyword occurrence inside a quoted span is usually reported/example
     // text, not a command directed at the assistant — e.g. an example sentence
     // like `"use autopilot"` inside a paragraph discussing that exact phrasing.
@@ -522,6 +541,12 @@ function isInformationalKeywordContext(text, position, keywordLength, keywordTex
     }
     if (keywordText) {
         const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
+        if (hasActionableCommandSeparatorInvocation) {
+            return false;
+        }
+        if (isAutopilotCreationAlias(keywordText)) {
+            return false;
+        }
         // Explicit command + execution intent should remain actionable even if the
         // surrounding message also contains a help question.
         if (hasActivationIntent && hasExecutionDirective) {

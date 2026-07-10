@@ -14,6 +14,7 @@ import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { validatePayload } from '../lib/payload-limits.js';
 import { canClearStateForSession, findCompletedSessionStateFiles, findSessionOwnedStateFiles, getStateSessionOwner, } from '../lib/mode-state-io.js';
 import { isModeActive, getActiveModes, getAllModeStatuses, clearModeState, getStateFilePath, MODE_CONFIGS, getActiveSessionsForMode } from '../hooks/mode-registry/index.js';
+import { setMergeReadinessContent } from '../hooks/merge-readiness/runtime.js';
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
 // extra state-only mode handled via the registry-fallback path).
@@ -1414,5 +1415,21 @@ export const stateTools = [
     stateClearTool,
     stateListActiveTool,
     stateGetStatusTool,
+    {
+        name: 'merge_readiness_set_content',
+        description: 'Validate and submit the five-section merge-readiness report and objective MCQs. This is the only supported content-submission action.',
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        schema: {
+            why: z.string().max(10000), whatChanged: z.string().max(10000), tradeoffs: z.string().max(10000), risksConsidered: z.string().max(10000), teamUnderstanding: z.string().max(10000),
+            questions: z.array(z.object({ id: z.string().max(100), dimension: z.enum(['why', 'change', 'tradeoff', 'risk', 'team']), stem: z.string().max(2000), options: z.array(z.object({ id: z.string().max(100), text: z.string().max(1000) })).max(8), correctOptionId: z.string().max(100), rationale: z.string().max(2000).optional() })).max(8),
+            workingDirectory: z.string().optional(), session_id: z.string().optional(),
+        },
+        handler: async (args) => {
+            const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+            const state = setMergeReadinessContent(directory, args, args.session_id);
+            const errors = state?.validation_errors ?? [];
+            return { content: [{ type: 'text', text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(' ')}` : `Merge-readiness content accepted. Next question: ${state?.pending_question?.id ?? 'none'}` }], ...(errors.length > 0 ? { isError: true } : {}) };
+        },
+    },
 ];
 //# sourceMappingURL=state-tools.js.map

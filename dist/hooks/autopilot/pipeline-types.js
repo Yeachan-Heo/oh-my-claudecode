@@ -13,6 +13,7 @@ export const STAGE_ORDER = [
     "execution",
     "ralph",
     "qa",
+    "merge-readiness",
 ];
 /** Default pipeline configuration (matches current autopilot behavior) */
 export const DEFAULT_PIPELINE_CONFIG = {
@@ -23,6 +24,7 @@ export const DEFAULT_PIPELINE_CONFIG = {
         maxIterations: 100,
     },
     qa: true,
+    mergeReadiness: false,
 };
 // ============================================================================
 // DEPRECATION ALIASES

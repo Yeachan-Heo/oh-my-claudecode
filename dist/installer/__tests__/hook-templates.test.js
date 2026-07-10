@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -63,7 +63,7 @@ describe('keyword-detector packaged artifacts', () => {
         const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
         const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
         for (const scriptPath of [templatePath, pluginPath]) {
-            const result = runKeywordHook(scriptPath, 'ralph execute and code review this change');
+            const result = runKeywordHook(scriptPath, 'ralph fix and code review this change');
             const context = JSON.stringify(result);
             expect(context).toContain('[MAGIC KEYWORD: RALPH]');
             expect(context).toContain('Preferred invocation: /oh-my-claudecode:ralph');
@@ -75,7 +75,7 @@ describe('keyword-detector packaged artifacts', () => {
     });
     it('keeps multi-skill keyword payloads under a compact budget', () => {
         const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
-        const result = runKeywordHook(pluginPath, 'ralph with ultrawork and ralplan this migration');
+        const result = runKeywordHook(pluginPath, 'ralph this with ultrawork and plan this migration');
         const context = JSON.stringify(result);
         expect(context).toContain('[MAGIC KEYWORDS DETECTED: RALPH, ULTRAWORK]');
         expect(context).toContain('Do not inline full SKILL.md files');
@@ -179,10 +179,43 @@ OMC Ultrawork = "특수부대 작전 반"
         const pluginAutopilotIssue = runKeywordHook(pluginPath, 'fix issue with autopilot in parser module');
         expect(JSON.stringify(templateAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
         expect(JSON.stringify(pluginAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
-        const templateRalphProblem = runKeywordHook(templatePath, 'investigate problem with ralph state');
-        const pluginRalphProblem = runKeywordHook(pluginPath, 'investigate problem with ralph state');
+        const templateRalphProblem = runKeywordHook(templatePath, 'run ralph on parser state issue');
+        const pluginRalphProblem = runKeywordHook(pluginPath, 'run ralph on parser state issue');
         expect(JSON.stringify(templateRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
         expect(JSON.stringify(pluginRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
+    });
+    it('honors keywordDetector.disabled from .claude/omc.jsonc in both packaged artifacts', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+        const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+        // Isolate from any real user config at ~/.config/claude-omc/config.jsonc.
+        const emptyXdg = mkdtempSync(join(tmpdir(), 'keyword-hook-xdg-'));
+        const disabledDir = mkdtempSync(join(tmpdir(), 'keyword-hook-disabled-'));
+        const controlDir = mkdtempSync(join(tmpdir(), 'keyword-hook-control-'));
+        const runInDir = (scriptPath, prompt, dir) => JSON.parse(execFileSync('node', [scriptPath], {
+            cwd: packageRoot,
+            env: { ...process.env, XDG_CONFIG_HOME: emptyXdg },
+            input: JSON.stringify({ prompt, cwd: dir, directory: dir }),
+            encoding: 'utf-8',
+        }));
+        try {
+            mkdirSync(join(disabledDir, '.claude'), { recursive: true });
+            // Canonical JSONC shape from the #3421 review: comment + trailing commas.
+            writeFileSync(join(disabledDir, '.claude', 'omc.jsonc'), '{\n  // disable tdd auto-routing\n  "keywordDetector": { "disabled": ["tdd",], },\n}');
+            for (const scriptPath of [templatePath, pluginPath]) {
+                // Opt-out is honored: the shipped hook does not route the disabled keyword.
+                expect(runInDir(scriptPath, 'tdd implement password validation', disabledDir)).toEqual({
+                    continue: true,
+                    suppressOutput: true,
+                });
+                // Control: without the opt-out the same prompt still routes.
+                expect(JSON.stringify(runInDir(scriptPath, 'tdd implement password validation', controlDir))).toContain('[TDD MODE ACTIVATED]');
+            }
+        }
+        finally {
+            rmSync(emptyXdg, { recursive: true, force: true });
+            rmSync(disabledDir, { recursive: true, force: true });
+            rmSync(controlDir, { recursive: true, force: true });
+        }
     });
 });
 describe('pre-tool-use packaged artifacts', () => {

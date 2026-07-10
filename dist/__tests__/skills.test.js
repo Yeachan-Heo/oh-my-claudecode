@@ -73,10 +73,10 @@ describe('Builtin Skills', () => {
         clearSkillsCache();
     });
     describe('createBuiltinSkills()', () => {
-        it('should return correct number of skills (36 canonical + 3 aliases)', () => {
+        it('should return correct number of skills (37 canonical + 4 aliases)', () => {
             const skills = createBuiltinSkills();
-            // 39 entries: 36 canonical skills + 3 deprecated aliases (cancel-ralph, learner, psm)
-            expect(skills).toHaveLength(39);
+            // 41 entries: 37 canonical skills + 4 aliases (cancel-ralph, learner, psm, understanding-gate)
+            expect(skills).toHaveLength(41);
         });
         it('should return an array of BuiltinSkill objects', () => {
             const skills = createBuiltinSkills();
@@ -136,6 +136,7 @@ describe('Builtin Skills', () => {
                 'skillify',
                 'learner',
                 'local-build-reminder',
+                'merge-readiness',
                 'mcp-setup',
                 'omc-setup',
                 'omc-teams',
@@ -158,6 +159,7 @@ describe('Builtin Skills', () => {
                 'visual-verdict',
                 'wiki',
                 'writer-memory',
+                'understanding-gate',
             ];
             const actualSkillNames = skills.map((s) => s.name);
             expect(actualSkillNames).toEqual(expect.arrayContaining(expectedSkills));
@@ -204,6 +206,36 @@ describe('Builtin Skills', () => {
             const skill = getBuiltinSkill('autopilot');
             expect(skill).toBeDefined();
             expect(skill?.name).toBe('autopilot');
+        });
+        it('documents the optional autopilot merge readiness boundaries', () => {
+            const skill = getBuiltinSkill('autopilot');
+            expect(skill?.template).toContain('Optional Post-Task Merge Readiness');
+            expect(skill?.template).toContain('/merge-readiness');
+            expect(skill?.template).toContain('standalone `/merge-readiness` workflow contract');
+            expect(skill?.template).toContain('Treat `paused` as not merge-ready');
+            expect(skill?.template).toContain('does not replace tests');
+            expect(skill?.template).toContain('does not auto-merge');
+        });
+        it('documents merge-readiness as a standalone post-task slash workflow', () => {
+            const skill = getBuiltinSkill('merge-readiness');
+            const alias = getBuiltinSkill('understanding-gate');
+            expect(skill).toBeDefined();
+            expect(skill?.aliases).toContain('understanding-gate');
+            expect(alias).toBeDefined();
+            expect(alias?.aliasOf).toBe('merge-readiness');
+            expect(skill?.description).toContain('Post-task merge readiness gate');
+            expect(skill?.template).toContain('post-task explainability gate');
+            // v1 MCQ-based flow: AI generates a 5-section doc + MCQs, runtime scores objectively.
+            expect(skill?.template).toContain('Generate Explanation Doc + MCQs');
+            expect(skill?.template).toContain('Human Quiz Loop');
+            expect(skill?.template).toContain('**Why**');
+            expect(skill?.template).toContain('**What Changed**');
+            expect(skill?.template).toContain('**Tradeoffs**');
+            expect(skill?.template).toContain('**Risks Considered**');
+            expect(skill?.template).toContain('**Team Understanding**');
+            expect(skill?.template).toContain('Forbidden question types');
+            expect(skill?.template).toContain('Passing this gate does not approve merge');
+            expect(skill?.template).toContain('No direct implementation or merge performed');
         });
         it('should retrieve the ai-slop-cleaner skill by name', () => {
             const skill = getBuiltinSkill('ai-slop-cleaner');
@@ -727,7 +759,7 @@ describe('Builtin Skills', () => {
     describe('listBuiltinSkillNames()', () => {
         it('should return canonical skill names by default', () => {
             const names = listBuiltinSkillNames();
-            expect(names).toHaveLength(36);
+            expect(names).toHaveLength(37);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('ask');
             expect(names).toContain('autopilot');
@@ -762,7 +794,7 @@ describe('Builtin Skills', () => {
         it('should include aliases when explicitly requested', () => {
             const names = listBuiltinSkillNames({ includeAliases: true });
             // swarm alias removed in #1131; cancel-ralph, psm, and learner aliases still exist
-            expect(names).toHaveLength(39);
+            expect(names).toHaveLength(41);
             expect(names).toContain('ai-slop-cleaner');
             expect(names).toContain('autoresearch');
             expect(names).toContain('self-improve');

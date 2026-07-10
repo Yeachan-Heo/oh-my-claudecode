@@ -57,6 +57,7 @@ export const CANONICAL_WORKFLOW_SKILLS = [
     'ultrawork',
     'ultraqa',
     'deep-interview',
+    'merge-readiness',
     'ralplan',
     'self-improve',
 ];
@@ -87,6 +88,8 @@ const SKILL_PROTECTION = {
     team: 'none',
     'omc-teams': 'none',
     ultraqa: 'none',
+    'merge-readiness': 'none',
+    'understanding-gate': 'none',
     ralplan: 'none',
     'self-improve': 'none',
     cancel: 'none',

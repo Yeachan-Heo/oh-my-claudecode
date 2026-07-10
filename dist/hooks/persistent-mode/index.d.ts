@@ -24,7 +24,7 @@ export interface PersistentModeResult {
     /** Message to inject into context */
     message: string;
     /** Which mode triggered the block */
-    mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+    mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'merge-readiness' | 'none';
     /** Additional metadata */
     metadata?: {
         todoCount?: number;

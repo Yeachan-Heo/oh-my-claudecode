@@ -191,8 +191,14 @@ function feedProjectMemory(root) {
                 if (names)
                     lines.push(`**Languages:** ${names}`);
             }
-            if (ts.frameworks?.length)
-                lines.push(`**Frameworks:** ${ts.frameworks.join(', ')}`);
+            if (ts.frameworks?.length) {
+                const names = ts.frameworks
+                    .map((f) => (typeof f === 'string' ? f : f?.name))
+                    .filter(Boolean)
+                    .join(', ');
+                if (names)
+                    lines.push(`**Frameworks:** ${names}`);
+            }
             if (ts.packageManager)
                 lines.push(`**Package Manager:** ${ts.packageManager}`);
             if (ts.runtime)

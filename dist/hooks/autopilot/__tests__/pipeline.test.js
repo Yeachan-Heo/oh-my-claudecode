@@ -4,11 +4,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolvePipelineConfig, getDeprecationWarning, buildPipelineTracking, getActiveAdapters, readPipelineTracking, initPipeline, getCurrentStageAdapter, advanceStage, failCurrentStage, incrementStageIteration, getCurrentCompletionSignal, getSignalToStageMap, getPipelineStatus, formatPipelineHUD, hasPipelineTracking, } from '../pipeline.js';
 import { DEFAULT_PIPELINE_CONFIG, STAGE_ORDER, DEPRECATED_MODE_ALIASES, } from '../pipeline-types.js';
-import { ralplanAdapter, executionAdapter, ralphAdapter, qaAdapter, RALPLAN_COMPLETION_SIGNAL, EXECUTION_COMPLETION_SIGNAL, RALPH_COMPLETION_SIGNAL, QA_COMPLETION_SIGNAL, ALL_ADAPTERS, getAdapterById, } from '../adapters/index.js';
+import { ralplanAdapter, executionAdapter, ralphAdapter, qaAdapter, mergeReadinessAdapter, RALPLAN_COMPLETION_SIGNAL, EXECUTION_COMPLETION_SIGNAL, RALPH_COMPLETION_SIGNAL, QA_COMPLETION_SIGNAL, MERGE_READINESS_COMPLETION_SIGNAL, ALL_ADAPTERS, getAdapterById, } from '../adapters/index.js';
 import { readAutopilotState } from '../state.js';
 describe('Pipeline Types', () => {
-    it('should have 4 stages in canonical order', () => {
-        expect(STAGE_ORDER).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+    it('should have 5 stages in canonical order', () => {
+        expect(STAGE_ORDER).toEqual(['ralplan', 'execution', 'ralph', 'qa', 'merge-readiness']);
     });
     it('should define default pipeline config', () => {
         expect(DEFAULT_PIPELINE_CONFIG).toEqual({
@@ -16,6 +16,7 @@ describe('Pipeline Types', () => {
             execution: 'solo',
             verification: { engine: 'ralph', maxIterations: 100 },
             qa: true,
+            mergeReadiness: false,
         });
     });
     it('should define deprecation aliases for ultrawork and ultrapilot', () => {
@@ -26,15 +27,16 @@ describe('Pipeline Types', () => {
     });
 });
 describe('Stage Adapters', () => {
-    it('should have 4 adapters in order', () => {
-        expect(ALL_ADAPTERS).toHaveLength(4);
-        expect(ALL_ADAPTERS.map(a => a.id)).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+    it('should have 5 adapters in order', () => {
+        expect(ALL_ADAPTERS).toHaveLength(5);
+        expect(ALL_ADAPTERS.map(a => a.id)).toEqual(['ralplan', 'execution', 'ralph', 'qa', 'merge-readiness']);
     });
     it('should look up adapters by id', () => {
         expect(getAdapterById('ralplan')).toBe(ralplanAdapter);
         expect(getAdapterById('execution')).toBe(executionAdapter);
         expect(getAdapterById('ralph')).toBe(ralphAdapter);
         expect(getAdapterById('qa')).toBe(qaAdapter);
+        expect(getAdapterById('merge-readiness')).toBe(mergeReadinessAdapter);
         expect(getAdapterById('nonexistent')).toBeUndefined();
     });
     describe('ralplanAdapter', () => {
@@ -130,16 +132,53 @@ describe('Stage Adapters', () => {
             expect(qaAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(false);
         });
     });
+    describe('mergeReadinessAdapter', () => {
+        it('should skip by default', () => {
+            expect(mergeReadinessAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(true);
+        });
+        it('should not skip when merge readiness is enabled', () => {
+            expect(mergeReadinessAdapter.shouldSkip({
+                ...DEFAULT_PIPELINE_CONFIG,
+                mergeReadiness: true,
+            })).toBe(false);
+        });
+        it('should require explanation, quiz, and non-approval semantics', () => {
+            const prompt = mergeReadinessAdapter.getPrompt({
+                idea: 'test',
+                directory: '/tmp',
+                config: { ...DEFAULT_PIPELINE_CONFIG, mergeReadiness: true },
+            });
+            expect(prompt).toContain(MERGE_READINESS_COMPLETION_SIGNAL);
+            expect(prompt).toContain('/merge-readiness');
+            expect(prompt).toContain('Why');
+            expect(prompt).toContain('What Changed');
+            expect(prompt).toContain('Tradeoffs');
+            expect(prompt).toContain('Risks Considered');
+            expect(prompt).toContain('Team Understanding');
+            expect(prompt).toContain('MCQ');
+            expect(prompt).toContain('pass');
+            expect(prompt).toContain('paused');
+            expect(prompt).toContain('does NOT replace tests');
+            expect(prompt).toContain('does not approve merge');
+            expect(prompt).toContain('not implementation trivia');
+            expect(prompt).toContain('do NOT emit the completion signal');
+        });
+    });
 });
 describe('resolvePipelineConfig', () => {
     it('should return defaults when no overrides', () => {
         expect(resolvePipelineConfig()).toEqual(DEFAULT_PIPELINE_CONFIG);
     });
     it('should apply user overrides', () => {
-        const config = resolvePipelineConfig({ execution: 'team', qa: false });
+        const config = resolvePipelineConfig({ execution: 'team', qa: false, mergeReadiness: true });
         expect(config.execution).toBe('team');
         expect(config.qa).toBe(false);
+        expect(config.mergeReadiness).toBe(true);
         expect(config.planning).toBe('ralplan'); // unchanged
+    });
+    it('should support deprecated understandingGate as an alias for mergeReadiness', () => {
+        const config = resolvePipelineConfig({ understandingGate: true });
+        expect(config.mergeReadiness).toBe(true);
     });
     it('should apply deprecated mode aliases', () => {
         const config = resolvePipelineConfig(undefined, 'ultrawork');
@@ -169,11 +208,12 @@ describe('getDeprecationWarning', () => {
     });
 });
 describe('buildPipelineTracking', () => {
-    it('should create stages for all 4 stages with default config', () => {
+    it('should create stages for all 5 stages with merge readiness skipped by default', () => {
         const tracking = buildPipelineTracking(DEFAULT_PIPELINE_CONFIG);
-        expect(tracking.stages).toHaveLength(4);
+        expect(tracking.stages).toHaveLength(5);
         expect(tracking.stages.map(s => s.id)).toEqual(STAGE_ORDER);
-        expect(tracking.stages.every(s => s.status === 'pending')).toBe(true);
+        expect(tracking.stages.slice(0, 4).every(s => s.status === 'pending')).toBe(true);
+        expect(tracking.stages[4].status).toBe('skipped');
         expect(tracking.currentStageIndex).toBe(0);
     });
     it('should mark skipped stages', () => {
@@ -182,12 +222,14 @@ describe('buildPipelineTracking', () => {
             execution: 'solo',
             verification: false,
             qa: false,
+            mergeReadiness: false,
         };
         const tracking = buildPipelineTracking(config);
         expect(tracking.stages[0].status).toBe('skipped'); // ralplan
         expect(tracking.stages[1].status).toBe('pending'); // execution
         expect(tracking.stages[2].status).toBe('skipped'); // ralph
         expect(tracking.stages[3].status).toBe('skipped'); // qa
+        expect(tracking.stages[4].status).toBe('skipped'); // merge readiness
         expect(tracking.currentStageIndex).toBe(1); // first non-skipped
     });
     it('should store the config', () => {
@@ -200,12 +242,20 @@ describe('getActiveAdapters', () => {
         const adapters = getActiveAdapters(DEFAULT_PIPELINE_CONFIG);
         expect(adapters).toHaveLength(4);
     });
+    it('should include merge readiness adapter when the gate is enabled', () => {
+        const adapters = getActiveAdapters({
+            ...DEFAULT_PIPELINE_CONFIG,
+            mergeReadiness: true,
+        });
+        expect(adapters.map(a => a.id)).toEqual(['ralplan', 'execution', 'ralph', 'qa', 'merge-readiness']);
+    });
     it('should exclude skipped adapters', () => {
         const config = {
             planning: false,
             execution: 'solo',
             verification: false,
             qa: true,
+            mergeReadiness: false,
         };
         const adapters = getActiveAdapters(config);
         expect(adapters).toHaveLength(2);
@@ -219,6 +269,7 @@ describe('Signal mapping', () => {
         expect(map.get(EXECUTION_COMPLETION_SIGNAL)).toBe('execution');
         expect(map.get(RALPH_COMPLETION_SIGNAL)).toBe('ralph');
         expect(map.get(QA_COMPLETION_SIGNAL)).toBe('qa');
+        expect(map.get(MERGE_READINESS_COMPLETION_SIGNAL)).toBe('merge-readiness');
     });
 });
 describe('Pipeline Orchestrator (with state)', () => {
@@ -238,9 +289,10 @@ describe('Pipeline Orchestrator (with state)', () => {
             expect(hasPipelineTracking(state)).toBe(true);
             const tracking = readPipelineTracking(state);
             expect(tracking).not.toBeNull();
-            expect(tracking.stages).toHaveLength(4);
+            expect(tracking.stages).toHaveLength(5);
             expect(tracking.stages[0].status).toBe('active'); // first stage activated
             expect(tracking.stages[0].startedAt).toBeTruthy();
+            expect(tracking.stages[4].status).toBe('skipped');
         });
         it('should apply pipeline config overrides', () => {
             const state = initPipeline(testDir, 'test', undefined, undefined, {
@@ -300,10 +352,21 @@ describe('Pipeline Orchestrator (with state)', () => {
             });
             // Advance past ralplan
             advanceStage(testDir);
-            // Advance past execution — should skip ralph and go to qa
+            // Advance past execution; should skip ralph and go to qa.
             const { adapter, phase } = advanceStage(testDir);
             expect(adapter).toBe(qaAdapter);
             expect(phase).toBe('qa');
+        });
+        it('should advance from qa to merge readiness when merge readiness is enabled', () => {
+            initPipeline(testDir, 'test', undefined, undefined, {
+                verification: false,
+                mergeReadiness: true,
+            });
+            advanceStage(testDir); // ralplan -> execution
+            advanceStage(testDir); // execution -> qa
+            const { adapter, phase } = advanceStage(testDir); // qa -> merge readiness
+            expect(adapter).toBe(mergeReadinessAdapter);
+            expect(phase).toBe('merge-readiness');
         });
         it('should return complete when all stages done', () => {
             initPipeline(testDir, 'test', undefined, undefined, {
@@ -311,7 +374,7 @@ describe('Pipeline Orchestrator (with state)', () => {
                 verification: false,
                 qa: false,
             });
-            // Only execution is active — advance completes pipeline
+            // Only execution is active; advance completes pipeline.
             const { adapter, phase } = advanceStage(testDir);
             expect(adapter).toBeNull();
             expect(phase).toBe('complete');
@@ -345,7 +408,7 @@ describe('Pipeline Orchestrator (with state)', () => {
             expect(status.currentStage).toBe('ralplan');
             expect(status.completedStages).toEqual([]);
             expect(status.pendingStages).toEqual(['execution', 'ralph', 'qa']);
-            expect(status.skippedStages).toEqual([]);
+            expect(status.skippedStages).toEqual(['merge-readiness']);
             expect(status.isComplete).toBe(false);
             expect(status.progress).toBe('0/4 stages');
         });

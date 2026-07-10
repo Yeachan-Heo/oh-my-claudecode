@@ -362,6 +362,42 @@ export function isOmcHook(command) {
     }
     return false;
 }
+function isStandaloneOmcHookCommand(command) {
+    const lowerCommand = command.toLowerCase();
+    const containsHooksDir = /hooks[/\\]/.test(lowerCommand);
+    const hookFilenameMatch = lowerCommand.match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+    return !!(containsHooksDir && hookFilenameMatch && OMC_HOOK_FILENAMES.has(hookFilenameMatch[1]));
+}
+function getStandaloneOmcHookFilename(command) {
+    if (!isStandaloneOmcHookCommand(command)) {
+        return null;
+    }
+    const hookFilenameMatch = command.toLowerCase().match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+    return hookFilenameMatch?.[1] ?? null;
+}
+function collectActiveStandaloneOmcHookFilenames(hooks) {
+    const active = new Set();
+    for (const groups of Object.values(hooks)) {
+        if (!Array.isArray(groups)) {
+            continue;
+        }
+        for (const group of groups) {
+            if (!Array.isArray(group.hooks)) {
+                continue;
+            }
+            for (const hook of group.hooks) {
+                if (hook.type !== 'command' || typeof hook.command !== 'string') {
+                    continue;
+                }
+                const filename = getStandaloneOmcHookFilename(hook.command);
+                if (filename) {
+                    active.add(filename);
+                }
+            }
+        }
+    }
+    return active;
+}
 /**
  * Check if the current Node.js version meets the minimum requirement
  */
@@ -428,7 +464,7 @@ export function isProjectScopedPlugin() {
     const normalizedGlobalBase = globalPluginBase.replace(/\\/g, '/').replace(/\/$/, '');
     return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
-function pruneLegacyStandaloneHookScripts(log) {
+function pruneLegacyStandaloneHookScripts(log, activeStandaloneOmcHookFilenames = new Set()) {
     if (!existsSync(HOOKS_DIR)) {
         return;
     }
@@ -439,7 +475,9 @@ function pruneLegacyStandaloneHookScripts(log) {
         }
         const targetPath = join(HOOKS_DIR, filename);
         try {
-            if (statSync(targetPath).isFile() && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
+            if (!activeStandaloneOmcHookFilenames.has(filename)
+                && statSync(targetPath).isFile()
+                && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
                 unlinkSync(targetPath);
                 removed++;
             }
@@ -450,7 +488,8 @@ function pruneLegacyStandaloneHookScripts(log) {
         }
     }
     const hooksLibDir = join(HOOKS_DIR, 'lib');
-    if (existsSync(hooksLibDir)) {
+    const preserveSharedHookLibPayload = activeStandaloneOmcHookFilenames.size > 0;
+    if (existsSync(hooksLibDir) && !preserveSharedHookLibPayload) {
         for (const filename of readdirSync(hooksLibDir)) {
             if (!listStandaloneHookLibPayloadFilenames().has(filename)) {
                 continue;
@@ -488,8 +527,8 @@ function configureInstallerSettings(baseSettings, context) {
             const groupList = groups;
             const filtered = groupList.filter(group => {
                 const isLegacy = group.hooks.every(h => h.type === 'command'
-                    && (h.command.includes('/.claude/hooks/') || h.command.includes('\\.claude\\hooks\\'))
-                    && isOmcHook(h.command));
+                    && typeof h.command === 'string'
+                    && isStandaloneOmcHookCommand(h.command));
                 if (isLegacy)
                     legacyRemoved++;
                 return !isLegacy;
@@ -507,7 +546,8 @@ function configureInstallerSettings(baseSettings, context) {
         const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
         const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
         if (pluginHandlesHooks) {
-            pruneLegacyStandaloneHookScripts(context.log);
+            const activeStandaloneOmcHookFilenames = collectActiveStandaloneOmcHookFilenames(existingHooks);
+            pruneLegacyStandaloneHookScripts(context.log, activeStandaloneOmcHookFilenames);
         }
         const shouldConfigureSettingsHooks = (!context.runningAsPlugin || !!context.allowPluginHookRefresh) && !pluginHandlesHooks;
         if (shouldConfigureSettingsHooks) {
@@ -621,18 +661,10 @@ function ensureStandaloneHookScripts(log) {
     if (!existsSync(hooksLibDir)) {
         mkdirSync(hooksLibDir, { recursive: true });
     }
-    for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
-        const sourcePath = join(templatesDir, filename);
-        const targetPath = join(HOOKS_DIR, filename);
-        copyFileSync(sourcePath, targetPath);
-        if (!isWindows()) {
-            chmodSync(targetPath, 0o755);
-        }
-    }
+    // Hook entrypoints import ./lib/*.mjs at module load time. Reconcile the
+    // helper payload before replacing entrypoints so an interrupted update cannot
+    // leave fresh hooks pointing at a stale or partial hooks/lib directory.
     if (existsSync(templatesLibDir)) {
-        if (!existsSync(hooksLibDir)) {
-            mkdirSync(hooksLibDir, { recursive: true });
-        }
         for (const filename of readdirSync(templatesLibDir)) {
             const sourcePath = join(templatesLibDir, filename);
             try {
@@ -666,6 +698,14 @@ function ensureStandaloneHookScripts(log) {
         copyFileSync(configDirHelperSrc, configDirHelperDest);
         chmodSync(findNodeDest, 0o755);
         chmodSync(configDirHelperDest, 0o755);
+    }
+    for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
+        const sourcePath = join(templatesDir, filename);
+        const targetPath = join(HOOKS_DIR, filename);
+        copyFileSync(sourcePath, targetPath);
+        if (!isWindows()) {
+            chmodSync(targetPath, 0o755);
+        }
     }
     log('  Installed standalone hook scripts');
 }
@@ -1161,6 +1201,7 @@ function isCacheInstalledPluginRoot(root) {
 }
 function resolveBestPluginSyncSource(targetRoots) {
     const excludedRoots = new Set(targetRoots.map(normalizePath));
+    const excludedCanonicalRoots = new Set(targetRoots.map(canonicalizeExistingPath));
     const seen = new Set();
     const globalPackageRoot = getGlobalInstalledPackageRoot();
     const candidates = [
@@ -1177,7 +1218,12 @@ function resolveBestPluginSyncSource(targetRoots) {
         if (seen.has(normalizedCandidate) || excludedRoots.has(normalizedCandidate) || !existsSync(candidate)) {
             continue;
         }
+        const canonicalCandidate = canonicalizeExistingPath(candidate);
+        if (seen.has(canonicalCandidate) || excludedCanonicalRoots.has(canonicalCandidate)) {
+            continue;
+        }
         seen.add(normalizedCandidate);
+        seen.add(canonicalCandidate);
         const sourceValidationErrors = validatePluginSyncPayload(candidate);
         if (sourceValidationErrors.length > 0) {
             errors.push(...sourceValidationErrors.map(error => `${candidate}: ${error}`));
@@ -1297,7 +1343,11 @@ export function copyPluginSyncPayload(sourceRoot, targetRoots) {
     }
     let synced = false;
     const errors = [];
+    const canonicalSourceRoot = canonicalizeExistingPath(sourceRoot);
     for (const targetRoot of targetRoots) {
+        if (canonicalizeExistingPath(targetRoot) === canonicalSourceRoot) {
+            continue;
+        }
         let copiedToTarget = false;
         let copiedSkills = false;
         for (const entry of PLUGIN_SYNC_PAYLOAD) {

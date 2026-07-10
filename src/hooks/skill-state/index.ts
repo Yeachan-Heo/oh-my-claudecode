@@ -64,6 +64,7 @@ export const CANONICAL_WORKFLOW_SKILLS = [
   'ultrawork',
   'ultraqa',
   'deep-interview',
+  'merge-readiness',
   'ralplan',
   'self-improve',
 ] as const;
@@ -111,6 +112,8 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
   team: 'none',
   'omc-teams': 'none',
   ultraqa: 'none',
+  'merge-readiness': 'none',
+  'understanding-gate': 'none',
   ralplan: 'none',
   'self-improve': 'none',
   cancel: 'none',

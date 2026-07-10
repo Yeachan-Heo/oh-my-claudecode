@@ -60,6 +60,11 @@ const MODE_CONFIGS = {
         stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.DEEP_INTERVIEW],
         activeProperty: "active",
     },
+    [MODE_NAMES.MERGE_READINESS]: {
+        name: "Merge Readiness",
+        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.MERGE_READINESS],
+        activeProperty: "active",
+    },
     [MODE_NAMES.SELF_IMPROVE]: {
         name: "Self Improve",
         stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.SELF_IMPROVE],

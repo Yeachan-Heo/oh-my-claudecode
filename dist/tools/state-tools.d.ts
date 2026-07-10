@@ -71,6 +71,6 @@ export declare const stateTools: (ToolDefinition<{
     mode: z.ZodOptional<z.ZodEnum<typeof STATE_TOOL_MODES>>;
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
-}>)[];
+}> | ToolDefinition<any>)[];
 export {};
 //# sourceMappingURL=state-tools.d.ts.map

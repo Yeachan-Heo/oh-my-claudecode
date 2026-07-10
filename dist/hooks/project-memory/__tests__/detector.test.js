@@ -152,6 +152,20 @@ pytest = "^7.4.0"
             expect(memory.structure.mainDirectories).toContain('docs');
         });
     });
+    describe('Makefile build detection', () => {
+        it('does not infer build or test commands from unrelated targets', async () => {
+            await fs.writeFile(path.join(tempDir, 'Makefile'), ['install:', '\t./scripts/install.sh', 'clean:', '\trm -rf tmp'].join('\n'));
+            const memory = await detectProjectEnvironment(tempDir);
+            expect(memory.build.buildCommand).toBeNull();
+            expect(memory.build.testCommand).toBeNull();
+        });
+        it('detects explicit build and test targets', async () => {
+            await fs.writeFile(path.join(tempDir, 'Makefile'), ['build:', '\tnpm run build', 'test lint:', '\tnpm test'].join('\n'));
+            const memory = await detectProjectEnvironment(tempDir);
+            expect(memory.build.buildCommand).toBe('make build');
+            expect(memory.build.testCommand).toBe('make test');
+        });
+    });
     describe('Empty project', () => {
         it('should return minimal memory for empty project', async () => {
             const memory = await detectProjectEnvironment(tempDir);

@@ -212,6 +212,10 @@ export interface AutopilotConfig {
     verification?: { engine: 'ralph'; maxIterations: number } | false;
     /** Whether to run QA stage */
     qa?: boolean;
+    /** Optional post-QA/pre-merge merge readiness for human explainability */
+    mergeReadiness?: boolean;
+    /** Deprecated alias for mergeReadiness */
+    understandingGate?: boolean;
   };
 }
 

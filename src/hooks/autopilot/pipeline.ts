@@ -69,6 +69,10 @@ export function resolvePipelineConfig(
     if (userConfig.verification !== undefined)
       config.verification = userConfig.verification;
     if (userConfig.qa !== undefined) config.qa = userConfig.qa;
+    if (userConfig.mergeReadiness !== undefined)
+      config.mergeReadiness = userConfig.mergeReadiness;
+    if (userConfig.understandingGate !== undefined)
+      config.mergeReadiness = userConfig.understandingGate;
     if (userConfig.team !== undefined) {
       config.team = { ...(config.team ?? {}), ...userConfig.team };
     }
@@ -298,7 +302,7 @@ export function advanceStage(
   }
 
   if (nextIndex < 0) {
-    // All stages complete — pipeline is done
+    // All stages complete; pipeline is done.
     tracking.currentStageIndex = stages.length;
     writePipelineTracking(directory, tracking, sessionId);
     return { adapter: null, phase: "complete" };

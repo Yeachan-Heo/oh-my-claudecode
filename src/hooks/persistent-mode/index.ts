@@ -59,6 +59,7 @@ import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 import type { IdleNotificationRepoState } from './idle-repo-state.js';
 import { truncatePromptForEcho } from '../../lib/truncate-prompt.js';
 import { isModeActive } from '../mode-registry/index.js';
+import { checkMergeReadiness } from '../merge-readiness/index.js';
 
 export interface ToolErrorState {
   tool_name: string;
@@ -74,7 +75,7 @@ export interface PersistentModeResult {
   /** Message to inject into context */
   message: string;
   /** Which mode triggered the block */
-  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'none';
+  mode: 'ralph' | 'ultrawork' | 'todo-continuation' | 'autopilot' | 'autoresearch' | 'team' | 'ralplan' | 'merge-readiness' | 'none';
   /** Additional metadata */
   metadata?: {
     todoCount?: number;
@@ -96,7 +97,7 @@ const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
+const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan', 'merge-readiness']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
   'complete',
   'completed',
@@ -2320,6 +2321,21 @@ async function resolvePersistentModeBlock(
     const teamResult = await checkTeamPipeline(sessionId, workingDir, cancelInProgress);
     if (teamResult) {
       return teamResult;
+    }
+  }
+
+  // Priority 1.9: Merge Readiness (post-task explainability gate)
+  if (!tombstonedWorkflowModes.has('merge-readiness') && isModeActive('merge-readiness', workingDir, sessionId)) {
+    const mergeReadinessResult = await checkMergeReadiness(sessionId, workingDir, cancelInProgress);
+    if (mergeReadinessResult?.shouldBlock) {
+      return {
+        shouldBlock: true,
+        message: mergeReadinessResult.message,
+        mode: 'merge-readiness',
+        metadata: {
+          phase: `result:${mergeReadinessResult.result}`,
+        },
+      };
     }
   }
 

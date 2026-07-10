@@ -27,6 +27,7 @@ export type KeywordType =
   | 'ultrathink'  // Priority 11
   | 'deepsearch'  // Priority 12
   | 'deep-interview' // Priority 13.5
+  | 'merge-readiness' // Priority 13.6
   | 'analyze'     // Priority 13
   | 'codex'       // Priority 15
   | 'gemini'      // Priority 16
@@ -60,6 +61,7 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
   'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
   ccg: /\b(ccg|claude-codex-gemini)\b|(씨씨지)|(シーシージー)/i,
+  'merge-readiness': /\b(merge[\s-]readiness|understanding[\s-]gate)\b/i,
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
   cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -94,7 +96,7 @@ const KEYWORD_SKIP_PREDICATES: Partial<Record<KeywordType, (text: string) => boo
 const KEYWORD_PRIORITY: KeywordType[] = [
   'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
   'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
-  'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
+  'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'merge-readiness', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
 
 /**
@@ -110,6 +112,7 @@ const CANONICAL_WORKFLOW_SLASH_SKILLS = [
   'ultrawork',
   'ultraqa',
   'deep-interview',
+  'merge-readiness',
   'ralplan',
   'self-improve',
 ] as const;
@@ -132,6 +135,7 @@ const SLASH_SKILL_TO_KEYWORD_TYPE: Partial<
   team: 'team',
   ultrawork: 'ultrawork',
   'deep-interview': 'deep-interview',
+  'merge-readiness': 'merge-readiness',
   ralplan: 'ralplan',
 };
 

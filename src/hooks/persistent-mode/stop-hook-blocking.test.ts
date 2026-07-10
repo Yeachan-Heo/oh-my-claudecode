@@ -257,6 +257,65 @@ describe("Stop Hook Blocking Contract", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it("blocks stop while merge-readiness has a pending explainability question", async () => {
+      const sessionId = "merge-readiness-stop";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const pendingQuestion = {
+        id: "q-why-1",
+        dimension: "why",
+        stem: "Why was this change worth doing now?",
+        options: [
+          { id: "a", text: "Aligns with the quarterly goal" },
+          { id: "b", text: "No particular reason" },
+        ],
+        correctOptionId: "a",
+        rationale: "The change supports the stated goal.",
+      };
+      writeFileSync(
+        join(sessionDir, "merge-readiness-state.json"),
+        JSON.stringify(
+          {
+            active: true,
+            session_id: sessionId,
+            current_phase: "merge-readiness",
+            phase: "questioning",
+            profile: "quick",
+            threshold: 0.7,
+            max_rounds: 3,
+            required_dimensions: ["why", "change", "risk"],
+            questions: [pendingQuestion],
+            answers: [],
+            awaiting_content: false,
+            evidence: {
+              changedFiles: ["README.md"],
+              status: " M README.md",
+              diffStat: " README.md | 1 +",
+              sourceArtifacts: [],
+              testEvidence: [],
+              reviewEvidence: [],
+              missingEvidence: [],
+            },
+            readiness_score: 0,
+            dimension_scores: {},
+            result: "pending",
+            pending_question: pendingQuestion,
+            started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            change_summary: "docs gate",
+            slug: "docs-gate",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+
+      expect(result.shouldBlock).toBe(true);
+      expect(result.mode).toBe("merge-readiness");
+      expect(result.message).toContain("[MERGE READINESS BLOCKED]");
+    });
 
     it("ignores ultrawork states that are still awaiting skill confirmation", async () => {
       const sessionId = "ultrawork-awaiting-confirmation";

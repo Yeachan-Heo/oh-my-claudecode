@@ -49,6 +49,10 @@ export interface AutopilotConfigBlock {
   verification?: { engine: "ralph"; maxIterations: number } | false;
   /** Whether to run QA build/lint/test cycling. */
   qa?: boolean;
+  /** Whether to run the post-task, pre-merge human merge readiness. */
+  mergeReadiness?: boolean;
+  /** Deprecated alias for mergeReadiness. */
+  understandingGate?: boolean;
   /** Team execution options used when execution is 'team'. */
   team?: {
     /** Preferred CLI worker types for executor-style implementation tasks. */

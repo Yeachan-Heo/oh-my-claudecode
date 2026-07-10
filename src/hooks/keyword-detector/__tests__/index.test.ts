@@ -2779,6 +2779,12 @@ This article argues that fake popularity signals damage trust in open source.`;
       expect(result!.skill).toBe('deep-interview');
     });
 
+    it('parses /merge-readiness at message start', () => {
+      const result = parseExplicitWorkflowSlashInvocation('/merge-readiness --standard explain recent changes');
+      expect(result!.skill).toBe('merge-readiness');
+      expect(result!.args).toBe('--standard explain recent changes');
+    });
+
     it('parses /self-improve at message start', () => {
       const result = parseExplicitWorkflowSlashInvocation('/self-improve');
       expect(result!.skill).toBe('self-improve');
