@@ -1,8 +1,16 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { listSourceControlledPackageFiles } from './npm-package-surface-helpers.js';
 
 const PACKAGE_ROOT = process.cwd();
 const PACKAGE_JSON_PATH = join(PACKAGE_ROOT, 'package.json');
@@ -20,75 +28,146 @@ type PackedPackage = {
 
 const CLI_BIN_TARGET = 'bin/oh-my-claudecode.js';
 const SUPPORTED_CLI_ALIASES = ['oh-my-claudecode', 'omc'] as const;
+const GENERATED_BRIDGE_FILES = new Set([
+  'bridge/claude-md-coordinator.cjs',
+  'bridge/cli.cjs',
+  'bridge/mcp-server.cjs',
+  'bridge/runtime-cli.cjs',
+  'bridge/team-bridge.cjs',
+  'bridge/team-mcp.cjs',
+  'bridge/team.js',
+]);
 
 let packedPackageCache: PackedPackage | null = null;
+let packedPackageError: unknown = null;
+let packedPackageInitialized = false;
+let fixtureRootCache: string | null = null;
 let packDirCache: string | null = null;
+let packWorkspaceCache: string | null = null;
 let tarballPathCache: string | null = null;
 
 function readPackageJson(): PackageJson {
   return JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8')) as PackageJson;
 }
 
+function createIsolatedPackWorkspace(workspacePath: string): void {
+  mkdirSync(workspacePath, { recursive: true });
+
+  const files = execFileSync(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+    { cwd: PACKAGE_ROOT, encoding: 'utf-8' },
+  )
+    .split('\0')
+    .filter(Boolean);
+
+  for (const relativePath of files) {
+    const normalized = relativePath.replace(/\\/g, '/');
+    if (
+      normalized === '.gjc' ||
+      normalized.startsWith('.gjc/') ||
+      normalized === '.omc' ||
+      normalized.startsWith('.omc/') ||
+      GENERATED_BRIDGE_FILES.has(normalized) ||
+      normalized === 'dist' ||
+      normalized.startsWith('dist/') ||
+      normalized.endsWith('.tgz')
+    ) {
+      continue;
+    }
+
+    const destination = join(workspacePath, relativePath);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(join(PACKAGE_ROOT, relativePath), destination, {
+      dereference: false,
+      preserveTimestamps: true,
+    });
+  }
+
+  symlinkSync(
+    join(PACKAGE_ROOT, 'node_modules'),
+    join(workspacePath, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+}
+
 function getPackedPackage(): PackedPackage {
-  if (packedPackageCache) {
+  if (packedPackageInitialized) {
+    if (packedPackageError !== null) {
+      throw packedPackageError;
+    }
+    if (!packedPackageCache) {
+      throw new Error('npm pack fixture initialized without a result');
+    }
     return packedPackageCache;
   }
+  packedPackageInitialized = true;
 
-  const packageJson = readPackageJson();
-  if (!packageJson.name || !packageJson.version) {
-    throw new Error('package.json must define a name and version');
+  try {
+    const packageJson = readPackageJson();
+    if (!packageJson.name || !packageJson.version) {
+      throw new Error('package.json must define a name and version');
+    }
+    fixtureRootCache = mkdtempSync(join(tmpdir(), 'omc-pack-fixture-'));
+    packWorkspaceCache = join(fixtureRootCache, 'workspace');
+    packDirCache = join(fixtureRootCache, 'packed');
+    createIsolatedPackWorkspace(packWorkspaceCache);
+    mkdirSync(packDirCache, { recursive: true });
+
+    const stdout = execFileSync(
+      'npm',
+      ['pack', '--pack-destination', packDirCache, '--silent'],
+      {
+        cwd: packWorkspaceCache,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    );
+    const expectedTarballName = `${packageJson.name.replace(/^@/, '').replace(/\//g, '-')}-${packageJson.version}.tgz`;
+    expect([
+      expectedTarballName,
+      `${expectedTarballName}\n`,
+      `${expectedTarballName}\r\n`,
+    ]).toContain(stdout);
+
+    const tarballName = stdout.replace(/\r?\n$/, '');
+    expect(tarballName).toBe(expectedTarballName);
+    expect(basename(tarballName)).toBe(tarballName);
+    expect(tarballName).not.toMatch(/[\\/]/);
+
+    tarballPathCache = join(packDirCache, tarballName);
+    const files = execFileSync('tar', ['-tzf', tarballPathCache], {
+      encoding: 'utf-8',
+    })
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((file) => file.replace(/^package\//, ''));
+
+    execFileSync('tar', [
+      '-xzf',
+      tarballPathCache,
+      '-C',
+      packDirCache,
+      'package/package.json',
+    ]);
+
+    packedPackageCache = {
+      files: new Set(files),
+      packageJson: JSON.parse(
+        readFileSync(join(packDirCache, 'package', 'package.json'), 'utf-8'),
+      ) as PackageJson,
+    };
+    return packedPackageCache;
+  } catch (error) {
+    packedPackageError = error;
+    throw error;
   }
-  packDirCache = mkdtempSync(join(tmpdir(), 'omc-pack-metadata-'));
-
-  const stdout = execFileSync('npm', ['pack', '--pack-destination', packDirCache, '--silent'], {
-    cwd: PACKAGE_ROOT,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  const expectedTarballName = `${packageJson.name.replace(/^@/, '').replace(/\//g, '-')}-${packageJson.version}.tgz`;
-  expect([
-    expectedTarballName,
-    `${expectedTarballName}\n`,
-    `${expectedTarballName}\r\n`,
-  ]).toContain(stdout);
-
-  const tarballName = stdout.replace(/\r?\n$/, '');
-  expect(tarballName).toBe(expectedTarballName);
-  expect(basename(tarballName)).toBe(tarballName);
-  expect(tarballName).not.toMatch(/[\\/]/);
-
-  tarballPathCache = join(packDirCache, tarballName);
-  const files = execFileSync('tar', ['-tzf', tarballPathCache], {
-    encoding: 'utf-8',
-  })
-    .trim()
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(file => file.replace(/^package\//, ''));
-
-  execFileSync('tar', [
-    '-xzf',
-    tarballPathCache,
-    '-C',
-    packDirCache,
-    'package/package.json',
-  ]);
-
-  packedPackageCache = {
-    files: new Set(files),
-    packageJson: JSON.parse(
-      readFileSync(join(packDirCache, 'package', 'package.json'), 'utf-8'),
-    ) as PackageJson,
-  };
-  return packedPackageCache;
 }
 
 afterAll(() => {
-  if (tarballPathCache) {
-    rmSync(tarballPathCache, { force: true });
-  }
-  if (packDirCache) {
-    rmSync(packDirCache, { recursive: true, force: true });
+  if (fixtureRootCache) {
+    rmSync(fixtureRootCache, { recursive: true, force: true });
   }
 });
 
@@ -117,6 +196,17 @@ describe('npm package bin surface regression', () => {
     expect(packedFiles.has('bridge/team-bridge.cjs')).toBe(true);
     expect(packedFiles.has('bridge/team-mcp.cjs')).toBe(true);
     expect(packedFiles.has('bridge/team.js')).toBe(true);
+    expect(packedFiles.has('bridge/gyoshu_bridge.py')).toBe(true);
+    expect(packedFiles.has('bridge/run-mcp-server.sh')).toBe(true);
+  });
+
+  it('packs the complete source-controlled plugin and hook payload', () => {
+    const packedFiles = getPackedPackage().files;
+    const missing = listSourceControlledPackageFiles().filter(
+      (file) => !packedFiles.has(file),
+    );
+
+    expect(missing).toEqual([]);
   });
 
   it('executes the shared CLI bin wrapper', () => {

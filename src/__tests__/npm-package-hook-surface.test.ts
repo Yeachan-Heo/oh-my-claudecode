@@ -1,42 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, normalize, relative } from 'node:path';
-
-const PACKAGE_ROOT = process.cwd();
-const HOOKS_JSON_PATH = join(PACKAGE_ROOT, 'hooks', 'hooks.json');
-const PLUGIN_JSON_PATH = join(PACKAGE_ROOT, '.claude-plugin', 'plugin.json');
-const MCP_JSON_PATH = join(PACKAGE_ROOT, '.mcp.json');
-const SCRIPTS_ROOT = join(PACKAGE_ROOT, 'scripts');
-
-type HookCommandConfig = {
-  command?: string;
-};
-
-type HooksJson = {
-  hooks?: Record<string, Array<{
-    hooks?: HookCommandConfig[];
-  }>>;
-};
-
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  MCP_JSON_PATH,
+  PACKAGE_ROOT,
+  PLUGIN_JSON_PATH,
+  listSourceControlledPackageFiles,
+  readPluginMcpServers,
+} from './npm-package-surface-helpers.js';
 
 type PluginJson = {
   hooks?: unknown;
   mcpServers?: unknown;
 };
 
-type McpServerConfig = {
-  command?: unknown;
-  args?: unknown;
-};
-
-type McpJson = {
-  mcpServers?: Record<string, McpServerConfig>;
-};
-
 function referencesStandardHooksManifest(value: unknown): boolean {
   if (typeof value === 'string') {
     const normalized = value.replace(/\\/g, '/');
-    return normalized === './hooks/hooks.json' || normalized === 'hooks/hooks.json';
+    return (
+      normalized === './hooks/hooks.json' || normalized === 'hooks/hooks.json'
+    );
   }
 
   if (Array.isArray(value)) {
@@ -67,155 +50,60 @@ function referencesRootMcpConfig(value: unknown): boolean {
   return false;
 }
 
-function listPluginMcpRuntimeFiles(): string[] {
-  const mcpJson = JSON.parse(readFileSync(MCP_JSON_PATH, 'utf-8')) as McpJson;
-  const runtimeFiles = new Set<string>();
-
-  for (const server of Object.values(mcpJson.mcpServers ?? {})) {
-    expect(server.command).toBe('node');
-    expect(Array.isArray(server.args)).toBe(true);
-
-    if (!Array.isArray(server.args)) {
-      continue;
-    }
-
-    for (const arg of server.args) {
-      if (typeof arg !== 'string') {
-        continue;
-      }
-
-      const match = arg.match(/^\$\{CLAUDE_PLUGIN_ROOT\}\/(.+)$/);
-      if (match) {
-        runtimeFiles.add(match[1]);
-      }
-    }
-  }
-
-  return [...runtimeFiles].sort();
-}
-
-const LOCAL_IMPORT_RE = /(?:import\s+(?:[^'"()]+?\s+from\s+)?|import\s*\(|export\s+\*\s+from\s+|export\s+\{[^}]*\}\s+from\s+|require\s*\()\s*['"](\.[^'"]+)['"]/g;
-const PLUGIN_SCRIPT_RE = /"\$CLAUDE_PLUGIN_ROOT"\/(scripts\/[^\s"]+)/g;
-
-function listHookScriptEntries(): string[] {
-  const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8')) as HooksJson;
-  const entries = new Set<string>(['scripts/run.cjs']);
-
-  for (const eventHooks of Object.values(hooksJson.hooks ?? {})) {
-    for (const matcherEntry of eventHooks) {
-      for (const hook of matcherEntry.hooks ?? []) {
-        const command = hook.command ?? '';
-        for (const match of command.matchAll(PLUGIN_SCRIPT_RE)) {
-          entries.add(match[1]);
-        }
-      }
-    }
-  }
-
-  return [...entries].sort();
-}
-
-function resolveRelativeScriptImport(fromFile: string, specifier: string): string | null {
-  const resolved = normalize(join(dirname(fromFile), specifier));
-  const candidates = [
-    resolved,
-    `${resolved}.mjs`,
-    `${resolved}.cjs`,
-    `${resolved}.js`,
-    join(resolved, 'index.mjs'),
-    join(resolved, 'index.cjs'),
-    join(resolved, 'index.js'),
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate.startsWith(SCRIPTS_ROOT) && existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function collectRequiredScriptFiles(entryRelPath: string, collected = new Set<string>()): Set<string> {
-  const absolutePath = join(PACKAGE_ROOT, entryRelPath);
-  if (!existsSync(absolutePath)) {
-    throw new Error(`Required hook file is missing in repo: ${entryRelPath}`);
-  }
-
-  const normalizedRel = relative(PACKAGE_ROOT, absolutePath).replace(/\\/g, '/');
-  if (collected.has(normalizedRel)) {
-    return collected;
-  }
-  collected.add(normalizedRel);
-
-  const content = readFileSync(absolutePath, 'utf-8');
-  for (const match of content.matchAll(LOCAL_IMPORT_RE)) {
-    const resolved = resolveRelativeScriptImport(absolutePath, match[1]);
-    if (!resolved) {
-      continue;
-    }
-    collectRequiredScriptFiles(relative(PACKAGE_ROOT, resolved).replace(/\\/g, '/'), collected);
-  }
-
-  return collected;
-}
-
-
-function listTemplateHookLibFiles(): string[] {
-  const templatesLibDir = join(PACKAGE_ROOT, 'templates', 'hooks', 'lib');
-  return readdirSync(templatesLibDir)
-    .filter(filename => statSync(join(templatesLibDir, filename)).isFile())
-    .map(filename => `templates/hooks/lib/${filename}`)
-    .sort();
-}
-
 describe('npm package hook surface regression', () => {
-  it('builds the coordinator for full builds and packaging without mutating ordinary tests', () => {
-    const packageJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf-8')) as {
+  it('builds the coordinator for packaging without mutating ordinary test entrypoints', () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf-8'),
+    ) as {
       files?: string[];
       scripts?: Record<string, string>;
     };
 
-    expect(packageJson.scripts?.build).toMatch(/npm run compose-docs && npm run build:claude-md-coordinator/);
+    expect(packageJson.scripts?.build).toMatch(
+      /npm run compose-docs && npm run build:claude-md-coordinator/,
+    );
     for (const entrypoint of ['test', 'test:ui', 'test:run', 'test:coverage']) {
-      expect(packageJson.scripts?.[entrypoint], entrypoint).not.toContain('build:claude-md-coordinator');
+      expect(packageJson.scripts?.[entrypoint], entrypoint).not.toContain(
+        'build:claude-md-coordinator',
+      );
     }
     expect(packageJson.scripts?.prepack).toBe('npm run build');
-    expect(packageJson.files).toEqual(expect.arrayContaining(['.claude-plugin', '.mcp.json', 'hooks', 'scripts', 'templates']));
+    expect(packageJson.scripts?.prepublishOnly).toBe('npm run build');
+    expect(packageJson.files).toEqual(
+      expect.arrayContaining([
+        '.claude-plugin',
+        '.mcp.json',
+        'hooks',
+        'scripts',
+        'templates',
+      ]),
+    );
   });
-  it('keeps the source-controlled plugin and MCP manifests wired to their standard entrypoints', () => {
+
+  it('keeps the source-controlled plugin and MCP manifests wired to exact standard entrypoints', () => {
     expect(existsSync(PLUGIN_JSON_PATH)).toBe(true);
     expect(existsSync(MCP_JSON_PATH)).toBe(true);
 
-    const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
+    const pluginJson = JSON.parse(
+      readFileSync(PLUGIN_JSON_PATH, 'utf-8'),
+    ) as PluginJson;
     expect(referencesStandardHooksManifest(pluginJson.hooks)).toBe(false);
     expect(referencesRootMcpConfig(pluginJson.mcpServers)).toBe(true);
-    expect(listPluginMcpRuntimeFiles()).toEqual(['bridge/mcp-server.cjs']);
+
+    expect(Object.values(readPluginMcpServers())).toEqual([
+      {
+        command: 'node',
+        args: ['${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs'],
+      },
+    ]);
   });
 
-  it('keeps hooks.json, hook entry scripts, and their local script dependencies source-controlled', () => {
-    const requiredFiles = new Set<string>(['hooks/hooks.json']);
+  it('keeps the complete hook dependency and template payload source-controlled', () => {
+    const requiredFiles = listSourceControlledPackageFiles();
 
-    for (const entryRelPath of listHookScriptEntries()) {
-      for (const file of collectRequiredScriptFiles(entryRelPath)) {
-        requiredFiles.add(file);
-      }
-    }
-
-    expect([...requiredFiles].sort()).not.toHaveLength(0);
-    const missing = [...requiredFiles]
-      .filter(file => !existsSync(join(PACKAGE_ROOT, file)))
-      .sort();
-    expect(missing).toEqual([]);
-  });
-
-  it('keeps the complete templates/hooks/lib payload source-controlled for standalone hook installs', () => {
-    const hookLibFiles = listTemplateHookLibFiles();
-
-    expect(hookLibFiles).not.toHaveLength(0);
-    const missing = hookLibFiles
-      .filter(file => !existsSync(join(PACKAGE_ROOT, file)))
-      .sort();
-    expect(missing).toEqual([]);
+    expect(requiredFiles).not.toHaveLength(0);
+    expect(
+      requiredFiles.filter((file) => !existsSync(join(PACKAGE_ROOT, file))),
+    ).toEqual([]);
   });
 });
