@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -12,12 +13,38 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildSync } from 'esbuild';
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const SETUP_SCRIPT = join(REPO_ROOT, 'scripts', 'setup-claude-md.sh');
 const CONFIG_DIR_HELPER = join(REPO_ROOT, 'scripts', 'lib', 'config-dir.sh');
+const MERGE_ENTRY_SOURCE = join(REPO_ROOT, 'src', 'cli', 'commands', 'merge-claude-md.ts');
 
 const tempRoots: string[] = [];
+
+// The shell setup path delegates its CLAUDE.md merge to the built
+// dist/cli/commands/merge-claude-md.js. Bundle that entry once (it only depends
+// on node:crypto) so the shell tests exercise the real delegation hermetically,
+// without needing a full `npm run build`.
+//
+// Fixtures with a full plugin layout (createPluginFixture) get the bundle in
+// their own dist/ so the shell resolves it the production way. Minimal fixtures
+// (e.g. the stale-plugin-root resolution tests) point at it via the
+// OMC_CLAUDE_MD_MERGE_ENTRY env override, set here for the whole file.
+let mergeEntryBundle = '';
+let mergeEntryPath = '';
+beforeAll(() => {
+  mergeEntryPath = join(mkdtempSync(join(tmpdir(), 'omc-merge-entry-')), 'merge-claude-md.js');
+  buildSync({
+    entryPoints: [MERGE_ENTRY_SOURCE],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile: mergeEntryPath,
+  });
+  mergeEntryBundle = readFileSync(mergeEntryPath, 'utf-8');
+  process.env.OMC_CLAUDE_MD_MERGE_ENTRY = mergeEntryPath;
+});
 
 function createPluginFixture(claudeMdContent: string) {
   const root = mkdtempSync(join(tmpdir(), 'omc-setup-claude-md-'));
@@ -30,11 +57,14 @@ function createPluginFixture(claudeMdContent: string) {
   mkdirSync(join(pluginRoot, 'scripts', 'lib'), { recursive: true });
   mkdirSync(join(pluginRoot, 'docs'), { recursive: true });
   mkdirSync(join(pluginRoot, 'skills', 'omc-reference'), { recursive: true });
+  mkdirSync(join(pluginRoot, 'dist', 'cli', 'commands'), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   mkdirSync(homeRoot, { recursive: true });
 
   copyFileSync(SETUP_SCRIPT, join(pluginRoot, 'scripts', 'setup-claude-md.sh'));
   copyFileSync(CONFIG_DIR_HELPER, join(pluginRoot, 'scripts', 'lib', 'config-dir.sh'));
+  // Provide the shared merge entry the shell delegates to (same path as a real install).
+  writeFileSync(join(pluginRoot, 'dist', 'cli', 'commands', 'merge-claude-md.js'), mergeEntryBundle);
   writeFileSync(join(pluginRoot, 'docs', 'CLAUDE.md'), claudeMdContent);
   writeFileSync(join(pluginRoot, 'skills', 'omc-reference', 'SKILL.md'), `---
 name: omc-reference
@@ -568,7 +598,9 @@ Use the real docs file.
     const baseClaude = readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8');
     expect(baseClaude).toContain('<!-- OMC:START -->');
     expect(baseClaude).toContain('<!-- OMC:END -->');
-    expect(baseClaude).toContain('<!-- User customizations (migrated from previous CLAUDE.md) -->');
+    // The shell now routes through the shared TS merge, which preserves user
+    // content under the unified "<!-- User customizations -->" header.
+    expect(baseClaude).toContain('<!-- User customizations -->');
     expect(baseClaude).toContain('# User CLAUDE');
     expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
   });
@@ -1117,5 +1149,79 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
     expect(installed).toContain('<!-- OMC:VERSION:4.9.0 -->');
     expect(installed).not.toContain('<!-- OMC:VERSION:4.8.2 -->');
+  });
+});
+
+describe('setup-claude-md.sh legacy pre-marker guide cleanup (shell path)', () => {
+  const CANONICAL = [
+    '<!-- OMC:START -->',
+    '<!-- OMC:VERSION:9.9.9 -->',
+    '',
+    '# Canonical CLAUDE',
+    'Current short guide.',
+    '<!-- OMC:END -->',
+    '',
+  ].join('\n');
+  const LEGACY_GUIDE_583 = readFileSync(
+    join(REPO_ROOT, 'src', 'installer', '__tests__', 'fixtures', 'legacy-guide-583.md'),
+    'utf-8',
+  ).replace(/\n+$/, '');
+  const CONDUCTOR = 'You are a CONDUCTOR, not a performer';
+
+  function runGlobalSetup(fixture: ReturnType<typeof createPluginFixture>, configDir: string) {
+    // Drop the env override so the shell resolves the merge entry the production
+    // way: ${ACTIVE_PLUGIN_ROOT}/dist/cli/commands/merge-claude-md.js.
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: fixture.homeRoot, CLAUDE_CONFIG_DIR: configDir };
+    delete env.OMC_CLAUDE_MD_MERGE_ENTRY;
+    return spawnSync('bash', [fixture.scriptPath, 'global', 'overwrite'], {
+      cwd: fixture.projectRoot,
+      env,
+      encoding: 'utf-8',
+    });
+  }
+
+  it('removes the 583-line legacy guide from a MARKED existing CLAUDE.md and shrinks the file', () => {
+    const fixture = createPluginFixture(CANONICAL);
+    const configDir = join(fixture.homeRoot, 'profile-marked');
+    mkdirSync(configDir, { recursive: true });
+    const targetPath = join(configDir, 'CLAUDE.md');
+    // Current marker block + legacy guide preserved as user customizations + a real user include.
+    const bloated =
+      '<!-- OMC:START -->\n<!-- OMC:VERSION:0.0.1 -->\n# Old OMC\n<!-- OMC:END -->\n\n' +
+      `<!-- User customizations -->\n${LEGACY_GUIDE_583}\n\n@USER.md\n`;
+    writeFileSync(targetPath, bloated);
+    const bytesBefore = readFileSync(targetPath, 'utf-8').length;
+
+    const result = runGlobalSetup(fixture, configDir);
+    expect(result.status).toBe(0);
+
+    const updated = readFileSync(targetPath, 'utf-8');
+    expect(updated.length).toBeLessThan(bytesBefore); // shrinks, never grows
+    expect(updated).not.toContain(CONDUCTOR);
+    expect(updated).toContain('@USER.md'); // real user content preserved
+    expect(updated).toContain('<!-- OMC:VERSION:9.9.9 -->');
+    // A timestamped backup of the original is written before overwrite.
+    const backups = readdirSync(configDir).filter(name => name.startsWith('CLAUDE.md.backup.'));
+    expect(backups.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('removes the 583-line legacy guide from an UNMARKED existing CLAUDE.md and shrinks the file', () => {
+    const fixture = createPluginFixture(CANONICAL);
+    const configDir = join(fixture.homeRoot, 'profile-unmarked');
+    mkdirSync(configDir, { recursive: true });
+    const targetPath = join(configDir, 'CLAUDE.md');
+    // The whole file is the raw pre-marker guide plus a real user include.
+    writeFileSync(targetPath, `${LEGACY_GUIDE_583}\n\n@USER.md\n`);
+    const bytesBefore = readFileSync(targetPath, 'utf-8').length;
+
+    const result = runGlobalSetup(fixture, configDir);
+    expect(result.status).toBe(0);
+
+    const updated = readFileSync(targetPath, 'utf-8');
+    expect(updated.length).toBeLessThan(bytesBefore);
+    expect(updated).not.toContain(CONDUCTOR);
+    expect(updated).toContain('@USER.md');
+    expect(updated).toContain('<!-- OMC:START -->'); // markers added
+    expect(updated).toContain('<!-- OMC:VERSION:9.9.9 -->');
   });
 });

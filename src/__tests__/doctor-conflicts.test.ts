@@ -578,6 +578,77 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     const status = checkClaudeMdStatus();
     expect(status).toBeNull();
   });
+
+  // A block carrying legacy fingerprints (used inside and outside markers).
+  const legacyBody = [
+    '# oh-my-claudecode - Intelligent Multi-Agent Orchestration',
+    'You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**',
+    '',
+    '## PART 1: CORE PROTOCOL (CRITICAL)',
+    '',
+    "The difference? You don't NEED them anymore. Everything auto-activates."
+  ].join('\n');
+
+  it('(d) does not flag fingerprints that live only inside a valid marker block', () => {
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      `<!-- OMC:START -->\n${legacyBody}\n<!-- OMC:END -->\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMarkers).toBe(true);
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(false);
+    expect(status!.hasMalformedMarkers).toBe(false);
+  });
+
+  it('flags legacy content that lives outside the marker block', () => {
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      `<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n\n<!-- User customizations -->\n${legacyBody}\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
+
+  it('(blocker 3) detects legacy content hidden behind malformed nested markers', () => {
+    // Adversarial: START / current / START / legacy guide / END. The nested START
+    // makes the structure malformed, so the legacy guide is NOT treated as safely
+    // inside a block and must be reported (plus a malformed-markers warning).
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      [
+        '<!-- OMC:START -->',
+        '# Current marker-wrapped instructions',
+        '<!-- OMC:START -->',
+        legacyBody,
+        '<!-- OMC:END -->',
+        ''
+      ].join('\n')
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMalformedMarkers).toBe(true);
+    expect(status!.hasMarkers).toBe(false); // not a healthy marker file
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
+
+  it('(blocker 4) aggregates legacy content across companions regardless of order', () => {
+    // Clean companion sorts first; legacy content lives in a later companion.
+    writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# My clean base config\nSee CLAUDE-a.md\n');
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE-a.md'),
+      '<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n'
+    );
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE-z.md'),
+      `<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n\n<!-- User customizations -->\n${legacyBody}\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMarkers).toBe(true);
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
 });
 
 describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {

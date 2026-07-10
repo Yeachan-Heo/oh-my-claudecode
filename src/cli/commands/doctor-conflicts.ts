@@ -6,7 +6,7 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { isOmcHook } from '../../installer/index.js';
+import { isOmcHook, hasLegacyUnmarkedOmcContent, parseOmcMarkerStructure } from '../../installer/index.js';
 import { colors } from '../utils/formatting.js';
 import { getSkillsDir, listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
 import { inspectUnifiedMcpRegistrySync } from '../../installer/mcp-registry.js';
@@ -25,7 +25,7 @@ export interface WorkspaceMarkerStatus {
 
 export interface ConflictReport {
   hookConflicts: { event: string; command: string; isOmc: boolean }[];
-  claudeMdStatus: { hasMarkers: boolean; hasUserContent: boolean; path: string; companionFile?: string } | null;
+  claudeMdStatus: { hasMarkers: boolean; hasUserContent: boolean; hasLegacyUnmarkedOmcContent: boolean; hasMalformedMarkers: boolean; path: string; companionFile?: string } | null;
   legacySkills: { name: string; path: string }[];
   envFlags: { disableOmc: boolean; skipHooks: string[] };
   configIssues: { unknownFields: string[] };
@@ -159,29 +159,49 @@ export function checkWindowsUnsafePluginHooks(): ConflictReport['windowsUnsafePl
   return unsafe;
 }
 
+interface FileMarkerStatus {
+  hasMarkers: boolean;
+  hasUserContent: boolean;
+  hasLegacyUnmarkedOmcContent: boolean;
+  hasMalformedMarkers: boolean;
+}
+
 /**
- * Check a single file for OMC markers.
- * Returns { hasMarkers, hasUserContent } or null on error.
+ * Check a single file for OMC markers using the same structural, line-anchored
+ * parser as the mutation path (never unanchored substring `includes`). Markers
+ * are "present" only when they form well-formed, non-nested, ordered pairs;
+ * malformed structure is surfaced separately and treated as unhealthy.
  */
-function checkFileForOmcMarkers(filePath: string): { hasMarkers: boolean; hasUserContent: boolean } | null {
+function checkFileForOmcMarkers(filePath: string): FileMarkerStatus | null {
   if (!existsSync(filePath)) return null;
   try {
     const content = readFileSync(filePath, 'utf-8');
-    const hasStartMarker = content.includes('<!-- OMC:START -->');
-    const hasEndMarker = content.includes('<!-- OMC:END -->');
-    const hasMarkers = hasStartMarker && hasEndMarker;
+    const structure = parseOmcMarkerStructure(content);
+    const hasMalformedMarkers = !structure.wellFormed;
+    const hasMarkers = structure.wellFormed && structure.blocks.length > 0;
 
-    let hasUserContent = false;
+    let hasUserContent: boolean;
     if (hasMarkers) {
-      const startIdx = content.indexOf('<!-- OMC:START -->');
-      const endIdx = content.indexOf('<!-- OMC:END -->');
-      const beforeMarker = content.substring(0, startIdx).trim();
-      const afterMarker = content.substring(endIdx + '<!-- OMC:END -->'.length).trim();
-      hasUserContent = beforeMarker.length > 0 || afterMarker.length > 0;
+      const lines = content.replace(/\r\n?/g, '\n').split('\n');
+      const insideBlock = new Array<boolean>(lines.length).fill(false);
+      for (const block of structure.blocks) {
+        for (let i = block.start; i <= block.end; i += 1) {
+          insideBlock[i] = true;
+        }
+      }
+      hasUserContent = lines.filter((_line, index) => !insideBlock[index]).join('\n').trim().length > 0;
     } else {
       hasUserContent = content.trim().length > 0;
     }
-    return { hasMarkers, hasUserContent };
+
+    // Legacy detection is scoped to content outside complete marker blocks, so
+    // fingerprints inside a valid current block do not false-positive.
+    return {
+      hasMarkers,
+      hasUserContent,
+      hasLegacyUnmarkedOmcContent: hasLegacyUnmarkedOmcContent(content),
+      hasMalformedMarkers,
+    };
   } catch {
     return null;
   }
@@ -216,50 +236,52 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
   }
 
   try {
-    // Check the main CLAUDE.md first
+    // Check the main CLAUDE.md first.
     const mainResult = checkFileForOmcMarkers(claudeMdPath);
     if (!mainResult) return null;
 
-    if (mainResult.hasMarkers) {
-      return {
-        hasMarkers: true,
-        hasUserContent: mainResult.hasUserContent,
-        path: claudeMdPath
-      };
-    }
-
-    // No markers in main file - check companion files (file-split pattern)
-    const companions = findCompanionClaudeMdFiles(configDir);
-    for (const companionPath of companions) {
-      const companionResult = checkFileForOmcMarkers(companionPath);
-      if (companionResult?.hasMarkers) {
-        return {
-          hasMarkers: true,
-          hasUserContent: mainResult.hasUserContent,
-          path: claudeMdPath,
-          companionFile: companionPath
-        };
-      }
-    }
-
-    // No markers in main or companions - check if CLAUDE.md references a companion
+    // Gather every companion file: those present on disk (file-split pattern) and
+    // any referenced by the main file. Legacy/malformed content can live in any
+    // of them, so we scan all before reporting rather than returning on the
+    // first marked one.
     const content = readFileSync(claudeMdPath, 'utf-8');
+    const companionPaths = new Set<string>(findCompanionClaudeMdFiles(configDir));
     const companionRefPattern = /CLAUDE-[^\s)]+\.md/i;
     const refMatch = content.match(companionRefPattern);
-    if (refMatch) {
-      // CLAUDE.md references a companion file but it doesn't have markers yet
-      return {
-        hasMarkers: false,
-        hasUserContent: mainResult.hasUserContent,
-        path: claudeMdPath,
-        companionFile: join(configDir, refMatch[0])
-      };
+    const referencedCompanion = refMatch ? join(configDir, refMatch[0]) : undefined;
+    if (referencedCompanion) {
+      companionPaths.add(referencedCompanion);
     }
 
+    const companions = [...companionPaths].map(path => ({
+      path,
+      result: checkFileForOmcMarkers(path),
+    }));
+
+    // Aggregate legacy/malformed signals across the main file and all companions.
+    let hasLegacyUnmarkedOmcContentAggregate = mainResult.hasLegacyUnmarkedOmcContent;
+    let hasMalformedMarkersAggregate = mainResult.hasMalformedMarkers;
+    for (const companion of companions) {
+      if (!companion.result) continue;
+      hasLegacyUnmarkedOmcContentAggregate ||= companion.result.hasLegacyUnmarkedOmcContent;
+      hasMalformedMarkersAggregate ||= companion.result.hasMalformedMarkers;
+    }
+
+    // Pick the companion file to surface: prefer the first companion that
+    // actually carries markers, else the referenced one (if any).
+    const markedCompanion = companions.find(companion => companion.result?.hasMarkers);
+    const companionFile = mainResult.hasMarkers
+      ? undefined
+      : markedCompanion?.path ?? referencedCompanion;
+    const hasMarkers = mainResult.hasMarkers || Boolean(markedCompanion);
+
     return {
-      hasMarkers: false,
+      hasMarkers,
       hasUserContent: mainResult.hasUserContent,
-      path: claudeMdPath
+      hasLegacyUnmarkedOmcContent: hasLegacyUnmarkedOmcContentAggregate,
+      hasMalformedMarkers: hasMalformedMarkersAggregate,
+      path: claudeMdPath,
+      ...(companionFile ? { companionFile } : {}),
     };
   } catch (_error) {
     return null;
@@ -558,7 +580,9 @@ export function runConflictCheck(): ConflictReport {
     mcpRegistrySync.claudeMissing.length > 0 ||
     mcpRegistrySync.claudeMismatched.length > 0 ||
     mcpRegistrySync.codexMissing.length > 0 ||
-    mcpRegistrySync.codexMismatched.length > 0;
+    mcpRegistrySync.codexMismatched.length > 0 ||
+    (claudeMdStatus?.hasLegacyUnmarkedOmcContent ?? false) || // Residual pre-marker OMC guide outside markers
+    (claudeMdStatus?.hasMalformedMarkers ?? false); // Malformed/nested OMC markers (fail safe, needs manual repair)
     // Note: Missing OMC markers is informational (normal for fresh install), not a conflict
     // Note: workspaceMarker.precedenceConflict is a WARN, not a hard conflict
 
@@ -628,6 +652,17 @@ export function formatReport(report: ConflictReport, json: boolean): string {
       if (report.claudeMdStatus.hasUserContent) {
         lines.push(`  ${colors.blue('ℹ')} User content present - will be preserved`);
       }
+    }
+    if (report.claudeMdStatus.hasMalformedMarkers) {
+      lines.push(`  ${colors.yellow('⚠')} Malformed OMC markers detected (unmatched or nested START/END)`);
+      lines.push(`    ${colors.gray('Setup will fail safe and preserve the whole file for manual recovery.')}`);
+      lines.push(`    ${colors.gray('Fix the markers by hand, then re-run /oh-my-claudecode:omc-setup.')}`);
+    }
+    if (report.claudeMdStatus.hasLegacyUnmarkedOmcContent) {
+      lines.push(`  ${colors.yellow('⚠')} Legacy pre-marker OMC guide detected outside markers`);
+      lines.push(`    ${colors.gray('This duplicates the current OMC instructions and inflates every session.')}`);
+      lines.push(`    ${colors.gray('Re-run /oh-my-claudecode:omc-setup to strip exact historical copies')}`);
+      lines.push(`    ${colors.gray('(a timestamped CLAUDE.md backup is written first); review any leftover by hand.')}`);
     }
     lines.push(`  ${colors.gray(`Path: ${report.claudeMdStatus.path}`)}`);
     lines.push('');

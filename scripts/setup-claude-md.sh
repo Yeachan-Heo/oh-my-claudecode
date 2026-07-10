@@ -221,6 +221,41 @@ write_wrapped_omc_file() {
   } > "$destination"
 }
 
+# Merge OMC content into a CLAUDE.md file through the shared TypeScript merge
+# (src/installer/claude-md-merge.ts, built to dist/cli/commands/merge-claude-md.js).
+# This is the single source of truth shared with the `install()` code path: it
+# removes complete OMC blocks, strips residual legacy pre-marker guides by exact
+# historical match, preserves real user content, and fails safe on malformed
+# markers. Fails loudly if the built entry or node is unavailable so setup never
+# silently falls back to a non-cleanup merge.
+run_shared_merge() {
+  local destination="$1"
+  mkdir -p "$(dirname "$destination")"
+
+  local merge_entry="${OMC_CLAUDE_MD_MERGE_ENTRY:-${ACTIVE_PLUGIN_ROOT}/dist/cli/commands/merge-claude-md.js}"
+  if [ ! -f "$merge_entry" ]; then
+    echo "ERROR: Shared CLAUDE.md merge entry not found: $merge_entry" >&2
+    echo "Rebuild OMC ('npm run build') or reinstall the plugin, then retry." >&2
+    return 1
+  fi
+
+  set -- "$merge_entry" --target "$destination" --source "$TEMP_OMC"
+  if [ -n "${NEW_OMC_VERSION:-}" ]; then
+    set -- "$@" --version "$NEW_OMC_VERSION"
+  fi
+
+  if [ -n "${OMC_NODE_BIN:-}" ]; then
+    "$OMC_NODE_BIN" "$@"
+  elif command -v node >/dev/null 2>&1; then
+    node "$@"
+  elif [ -f "${SCRIPT_DIR}/find-node.sh" ]; then
+    sh "${SCRIPT_DIR}/find-node.sh" "$@"
+  else
+    echo "ERROR: node binary not found; cannot merge CLAUDE.md." >&2
+    return 1
+  fi
+}
+
 ensure_managed_companion_import() {
   local target_path="$1"
   local companion_name="$2"
@@ -288,46 +323,21 @@ if grep -q '<!-- OMC:START -->' "$TEMP_OMC"; then
   mv "${TEMP_OMC}.clean" "$TEMP_OMC"
 fi
 
+# Version to stamp in the merged file, taken from the canonical source content.
+NEW_OMC_VERSION=$(grep -m1 'OMC:VERSION:' "$TEMP_OMC" 2>/dev/null | sed -E 's/.*OMC:VERSION:([^ ]+).*/\1/' || true)
+
 if [ ! -f "$TARGET_PATH" ]; then
-  # Fresh install: wrap in markers
-  write_wrapped_omc_file "$TARGET_PATH"
+  # Fresh install via the shared merge (single source of truth with install()).
+  run_shared_merge "$TARGET_PATH"
   rm -f "$TEMP_OMC"
   echo "Installed CLAUDE.md (fresh)"
 else
   # Merge: preserve user content outside OMC markers
   if grep -q '<!-- OMC:START -->' "$TARGET_PATH"; then
-    # Has markers: remove ALL complete OMC blocks, preserve only real user text
-    # Use perl -0 for a global multiline regex replace (portable across GNU/BSD environments)
-    perl -0pe 's/^<!-- OMC:START -->\R[\s\S]*?^<!-- OMC:END -->(?:\R)?//msg; s/^<!-- User customizations(?: \([^)]+\))? -->\R?//mg; s/\A(?:[ \t]*\R)+//; s/(?:\R[ \t]*)+\z//;' \
-      "$TARGET_PATH" > "${TARGET_PATH}.preserved"
-
-    if grep -Eq '^<!-- OMC:(START|END) -->$' "${TARGET_PATH}.preserved"; then
-      # Corrupted/unmatched markers remain: preserve the whole original file for manual recovery
-      OLD_CONTENT=$(cat "$TARGET_PATH")
-      {
-        echo '<!-- OMC:START -->'
-        cat "$TEMP_OMC"
-        echo '<!-- OMC:END -->'
-        echo ""
-        echo "<!-- User customizations (recovered from corrupted markers) -->"
-        printf '%s\n' "$OLD_CONTENT"
-      } > "${TARGET_PATH}.tmp"
-    else
-      PRESERVED_CONTENT=$(cat "${TARGET_PATH}.preserved")
-      {
-        echo '<!-- OMC:START -->'
-        cat "$TEMP_OMC"
-        echo '<!-- OMC:END -->'
-        if printf '%s' "$PRESERVED_CONTENT" | grep -q '[^[:space:]]'; then
-          echo ""
-          echo "<!-- User customizations -->"
-          printf '%s\n' "$PRESERVED_CONTENT"
-        fi
-      } > "${TARGET_PATH}.tmp"
-    fi
-
-    mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
-    rm -f "${TARGET_PATH}.preserved"
+    # Existing markers: the shared merge removes complete OMC blocks, strips any
+    # residual legacy pre-marker guide, preserves real user content, and falls
+    # back to safe recovery on malformed markers.
+    run_shared_merge "$TARGET_PATH"
     echo "Updated OMC section (user customizations preserved)"
   elif [ "$MODE" = "global" ] && [ "$INSTALL_STYLE" = "preserve" ]; then
     COMPANION_TARGET_PATH="$CONFIG_DIR/$COMPANION_FILENAME"
@@ -337,27 +347,19 @@ else
       cp "$COMPANION_TARGET_PATH" "${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
       echo "Backed up existing companion CLAUDE.md to ${COMPANION_TARGET_PATH}.backup.${BACKUP_DATE}"
     fi
-    write_wrapped_omc_file "$COMPANION_TARGET_PATH"
+    run_shared_merge "$COMPANION_TARGET_PATH"
     ensure_managed_companion_import "$TARGET_PATH" "$COMPANION_FILENAME"
     VALIDATION_PATH="$COMPANION_TARGET_PATH"
     echo "Installed OMC companion file and preserved existing CLAUDE.md"
   else
-    # No markers: wrap new content in markers, append old content as user section
-    # Strip any preserve-mode import block left by a prior preserve install
+    # No markers: strip any preserve-mode import block left by a prior preserve
+    # install, then let the shared merge wrap new content and migrate the old
+    # content (removing any residual legacy pre-marker guide in the process).
     if grep -Fq "$OMC_IMPORT_START" "$TARGET_PATH"; then
       perl -0pe 's/^<!-- OMC:IMPORT:START -->\R[\s\S]*?^<!-- OMC:IMPORT:END -->(?:\R)?//msg' "$TARGET_PATH" > "${TARGET_PATH}.importless"
       mv "${TARGET_PATH}.importless" "$TARGET_PATH"
     fi
-    OLD_CONTENT=$(cat "$TARGET_PATH")
-    {
-      echo '<!-- OMC:START -->'
-      cat "$TEMP_OMC"
-      echo '<!-- OMC:END -->'
-      echo ""
-      echo "<!-- User customizations (migrated from previous CLAUDE.md) -->"
-      printf '%s\n' "$OLD_CONTENT"
-    } > "${TARGET_PATH}.tmp"
-    mv "${TARGET_PATH}.tmp" "$TARGET_PATH"
+    run_shared_merge "$TARGET_PATH"
     echo "Migrated existing CLAUDE.md (added OMC markers, preserved old content)"
   fi
   rm -f "$TEMP_OMC"
