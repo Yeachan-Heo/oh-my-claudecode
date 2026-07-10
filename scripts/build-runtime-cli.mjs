@@ -29,8 +29,8 @@ const buildConfig = {
 if (watchMode) {
   const ctx = await esbuild.context(buildConfig);
   await ctx.watch();
-  console.log(`Watching ${outfile}...`);
+  console.error(`Watching ${outfile}...`);
 } else {
   await esbuild.build(buildConfig);
-  console.log(`Built ${outfile}`);
+  console.error(`Built ${outfile}`);
 }

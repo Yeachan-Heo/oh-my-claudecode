@@ -9,16 +9,8 @@ const PACKAGE_JSON_PATH = join(PACKAGE_ROOT, 'package.json');
 
 type PackageJson = {
   bin?: Record<string, string>;
+  name?: string;
   version?: string;
-};
-
-type NpmPackEntry = {
-  path: string;
-};
-
-type NpmPackResult = {
-  filename?: string;
-  files?: NpmPackEntry[];
 };
 
 type PackedPackage = {
@@ -31,6 +23,7 @@ const SUPPORTED_CLI_ALIASES = ['oh-my-claudecode', 'omc'] as const;
 
 let packedPackageCache: PackedPackage | null = null;
 let packDirCache: string | null = null;
+let tarballPathCache: string | null = null;
 
 function readPackageJson(): PackageJson {
   return JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8')) as PackageJson;
@@ -41,34 +34,48 @@ function getPackedPackage(): PackedPackage {
     return packedPackageCache;
   }
 
-  packDirCache = mkdtempSync(join(tmpdir(), 'omc-pack-metadata-'));
-  const stdout = execFileSync(
-    'npm',
-    ['pack', '--pack-destination', packDirCache, '--json'],
-    {
-      cwd: PACKAGE_ROOT,
-      encoding: 'utf-8',
-    },
-  );
-  const jsonStart = stdout.search(/^\[\r?$/m);
-  if (jsonStart < 0) throw new Error('npm pack did not emit a JSON payload');
-  const results = JSON.parse(stdout.slice(jsonStart)) as NpmPackResult[];
-  const tarballName = results[0]?.filename;
-
-  if (!tarballName) {
-    throw new Error('npm pack did not report a tarball filename');
+  const packageJson = readPackageJson();
+  if (!packageJson.name || !packageJson.version) {
+    throw new Error('package.json must define a name and version');
   }
+  packDirCache = mkdtempSync(join(tmpdir(), 'omc-pack-metadata-'));
+
+  const stdout = execFileSync('npm', ['pack', '--pack-destination', packDirCache, '--silent'], {
+    cwd: PACKAGE_ROOT,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const expectedTarballName = `${packageJson.name.replace(/^@/, '').replace(/\//g, '-')}-${packageJson.version}.tgz`;
+  expect([
+    expectedTarballName,
+    `${expectedTarballName}\n`,
+    `${expectedTarballName}\r\n`,
+  ]).toContain(stdout);
+
+  const tarballName = stdout.replace(/\r?\n$/, '');
+  expect(tarballName).toBe(expectedTarballName);
+  expect(basename(tarballName)).toBe(tarballName);
+  expect(tarballName).not.toMatch(/[\\/]/);
+
+  tarballPathCache = join(packDirCache, tarballName);
+  const files = execFileSync('tar', ['-tzf', tarballPathCache], {
+    encoding: 'utf-8',
+  })
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map(file => file.replace(/^package\//, ''));
 
   execFileSync('tar', [
     '-xzf',
-    join(packDirCache, basename(tarballName)),
+    tarballPathCache,
     '-C',
     packDirCache,
     'package/package.json',
   ]);
 
   packedPackageCache = {
-    files: new Set((results[0]?.files ?? []).map((file) => file.path)),
+    files: new Set(files),
     packageJson: JSON.parse(
       readFileSync(join(packDirCache, 'package', 'package.json'), 'utf-8'),
     ) as PackageJson,
@@ -77,6 +84,9 @@ function getPackedPackage(): PackedPackage {
 }
 
 afterAll(() => {
+  if (tarballPathCache) {
+    rmSync(tarballPathCache, { force: true });
+  }
   if (packDirCache) {
     rmSync(packDirCache, { recursive: true, force: true });
   }
@@ -95,11 +105,18 @@ describe('npm package bin surface regression', () => {
     }
   });
 
-  it('packs the shared CLI bin target and bundled bridge implementation', () => {
+  it('packs the CLI bin target and generated runtime entrypoints', () => {
     const packedFiles = getPackedPackage().files;
 
     expect(packedFiles.has(CLI_BIN_TARGET)).toBe(true);
+    expect(packedFiles.has('dist/hooks/skill-bridge.cjs')).toBe(true);
     expect(packedFiles.has('bridge/cli.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/claude-md-coordinator.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/mcp-server.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/runtime-cli.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/team-bridge.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/team-mcp.cjs')).toBe(true);
+    expect(packedFiles.has('bridge/team.js')).toBe(true);
   });
 
   it('executes the shared CLI bin wrapper', () => {

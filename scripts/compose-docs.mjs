@@ -38,7 +38,7 @@ if (existsSync(partialsDir)) {
     const content = readFileSync(join(partialsDir, partial), 'utf-8');
     writeFileSync(join(sharedDir, partial), content);
   }
-  console.log(`Synced ${readdirSync(partialsDir).filter(f => f.endsWith('.md')).length} partials to shared/`);
+  console.error(`Synced ${readdirSync(partialsDir).filter(f => f.endsWith('.md')).length} partials to shared/`);
 }
 
-console.log('Documentation composition complete.');
+console.error('Documentation composition complete.');

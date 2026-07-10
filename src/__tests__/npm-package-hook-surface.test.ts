@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, normalize, relative } from 'node:path';
 
@@ -19,17 +18,19 @@ type HooksJson = {
   }>>;
 };
 
-type NpmPackDryRunEntry = {
-  path: string;
-};
-
-type NpmPackDryRunResult = {
-  files?: NpmPackDryRunEntry[];
-};
 
 type PluginJson = {
   hooks?: unknown;
   mcpServers?: unknown;
+};
+
+type McpServerConfig = {
+  command?: unknown;
+  args?: unknown;
+};
+
+type McpJson = {
+  mcpServers?: Record<string, McpServerConfig>;
 };
 
 function referencesStandardHooksManifest(value: unknown): boolean {
@@ -66,19 +67,7 @@ function referencesRootMcpConfig(value: unknown): boolean {
   return false;
 }
 
-type McpServerConfig = {
-  command?: unknown;
-  args?: unknown;
-};
-
-type McpJson = {
-  mcpServers?: Record<string, McpServerConfig>;
-};
-
 function listPluginMcpRuntimeFiles(): string[] {
-  const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
-  expect(referencesRootMcpConfig(pluginJson.mcpServers)).toBe(true);
-
   const mcpJson = JSON.parse(readFileSync(MCP_JSON_PATH, 'utf-8')) as McpJson;
   const runtimeFiles = new Set<string>();
 
@@ -107,7 +96,6 @@ function listPluginMcpRuntimeFiles(): string[] {
 
 const LOCAL_IMPORT_RE = /(?:import\s+(?:[^'"()]+?\s+from\s+)?|import\s*\(|export\s+\*\s+from\s+|export\s+\{[^}]*\}\s+from\s+|require\s*\()\s*['"](\.[^'"]+)['"]/g;
 const PLUGIN_SCRIPT_RE = /"\$CLAUDE_PLUGIN_ROOT"\/(scripts\/[^\s"]+)/g;
-let packedFilesCache: Set<string> | null = null;
 
 function listHookScriptEntries(): string[] {
   const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8')) as HooksJson;
@@ -172,22 +160,6 @@ function collectRequiredScriptFiles(entryRelPath: string, collected = new Set<st
   return collected;
 }
 
-function getPackedFiles(): Set<string> {
-  if (packedFilesCache) {
-    return packedFilesCache;
-  }
-
-  const stdout = execFileSync('npm', ['pack', '--dry-run', '--json', '--silent'], {
-    cwd: PACKAGE_ROOT,
-    encoding: 'utf-8',
-  });
-
-  const jsonStart = stdout.search(/^\[\r?$/m);
-  if (jsonStart < 0) throw new Error('npm pack did not emit a JSON payload');
-  const results = JSON.parse(stdout.slice(jsonStart)) as NpmPackDryRunResult[];
-  packedFilesCache = new Set((results[0]?.files ?? []).map(file => file.path));
-  return packedFilesCache;
-}
 
 function listTemplateHookLibFiles(): string[] {
   const templatesLibDir = join(PACKAGE_ROOT, 'templates', 'hooks', 'lib');
@@ -200,6 +172,7 @@ function listTemplateHookLibFiles(): string[] {
 describe('npm package hook surface regression', () => {
   it('builds the coordinator for full builds and packaging without mutating ordinary tests', () => {
     const packageJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf-8')) as {
+      files?: string[];
       scripts?: Record<string, string>;
     };
 
@@ -208,36 +181,19 @@ describe('npm package hook surface regression', () => {
       expect(packageJson.scripts?.[entrypoint], entrypoint).not.toContain('build:claude-md-coordinator');
     }
     expect(packageJson.scripts?.prepack).toBe('npm run build');
+    expect(packageJson.files).toEqual(expect.arrayContaining(['.claude-plugin', '.mcp.json', 'hooks', 'scripts', 'templates']));
   });
-  it('does not explicitly reference the auto-loaded standard hooks manifest from plugin.json', () => {
+  it('keeps the source-controlled plugin and MCP manifests wired to their standard entrypoints', () => {
+    expect(existsSync(PLUGIN_JSON_PATH)).toBe(true);
+    expect(existsSync(MCP_JSON_PATH)).toBe(true);
+
     const pluginJson = JSON.parse(readFileSync(PLUGIN_JSON_PATH, 'utf-8')) as PluginJson;
     expect(referencesStandardHooksManifest(pluginJson.hooks)).toBe(false);
-
-    const packedFiles = getPackedFiles();
-    expect(packedFiles.has('.claude-plugin/plugin.json')).toBe(true);
+    expect(referencesRootMcpConfig(pluginJson.mcpServers)).toBe(true);
+    expect(listPluginMcpRuntimeFiles()).toEqual(['bridge/mcp-server.cjs']);
   });
 
-  it('packs the runtime-critical plugin cache payload surface', () => {
-    const packedFiles = getPackedFiles();
-    expect(packedFiles.has('commands/omc-setup.md')).toBe(true);
-    expect(packedFiles.has('dist/hooks/skill-bridge.cjs')).toBe(true);
-    expect(packedFiles.has('bridge/cli.cjs')).toBe(true);
-    expect(packedFiles.has('bridge/claude-md-coordinator.cjs')).toBe(true);
-    expect(packedFiles.has('.claude-plugin/plugin.json')).toBe(true);
-  });
-
-  it('packs the public plugin MCP config and referenced runtime files', () => {
-    const packedFiles = getPackedFiles();
-    const runtimeFiles = listPluginMcpRuntimeFiles();
-
-    expect(packedFiles.has('.mcp.json')).toBe(true);
-    expect(runtimeFiles).toEqual(['bridge/mcp-server.cjs']);
-
-    const missing = runtimeFiles.filter(file => !packedFiles.has(file));
-    expect(missing).toEqual([]);
-  });
-
-  it('packs hooks.json, hook entry scripts, and their local script dependencies', () => {
+  it('keeps hooks.json, hook entry scripts, and their local script dependencies source-controlled', () => {
     const requiredFiles = new Set<string>(['hooks/hooks.json']);
 
     for (const entryRelPath of listHookScriptEntries()) {
@@ -246,19 +202,20 @@ describe('npm package hook surface regression', () => {
       }
     }
 
-    const packedFiles = getPackedFiles();
     expect([...requiredFiles].sort()).not.toHaveLength(0);
-
-    const missing = [...requiredFiles].filter(file => !packedFiles.has(file)).sort();
+    const missing = [...requiredFiles]
+      .filter(file => !existsSync(join(PACKAGE_ROOT, file)))
+      .sort();
     expect(missing).toEqual([]);
   });
 
-  it('packs the complete templates/hooks/lib payload for standalone hook installs', () => {
-    const packedFiles = getPackedFiles();
+  it('keeps the complete templates/hooks/lib payload source-controlled for standalone hook installs', () => {
     const hookLibFiles = listTemplateHookLibFiles();
 
     expect(hookLibFiles).not.toHaveLength(0);
-    const missing = hookLibFiles.filter(file => !packedFiles.has(file));
+    const missing = hookLibFiles
+      .filter(file => !existsSync(join(PACKAGE_ROOT, file)))
+      .sort();
     expect(missing).toEqual([]);
   });
 });
