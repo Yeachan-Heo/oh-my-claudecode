@@ -31,6 +31,7 @@
     "./skills/hud/",
     "./skills/learner/",
     "./skills/local-build-reminder/",
+    "./skills/merge-readiness/",
     "./skills/mcp-setup/",
     "./skills/omc-doctor/",
     "./skills/omc-reference/",

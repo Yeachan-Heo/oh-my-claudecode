@@ -40,12 +40,13 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
+import { createInitialMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
 // extra state-only mode handled via the registry-fallback path).
 const EXECUTION_MODES: [string, ...string[]] = [
-  'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
+  'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'merge-readiness', 'self-improve'
 ];
 
 // Extended type for state tools - includes state-bearing modes outside mode-registry
@@ -1644,4 +1645,62 @@ export const stateTools = [
   stateClearTool,
   stateListActiveTool,
   stateGetStatusTool,
+  {
+    name: 'merge_readiness_start',
+    description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick/--standard/--deep; standard is default).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    schema: {
+      summary: z.string().max(2000),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { summary: string; workingDirectory?: string; session_id?: string }) => {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const state = createInitialMergeReadinessState(directory, args.summary, args.session_id);
+      const blocked = state.result === 'blocked';
+      return { content: [{ type: 'text' as const, text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(' ') ?? 'missing evidence'}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...(blocked ? { isError: true } : {}) };
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_set_content',
+    description: 'Validate and submit the five-section merge-readiness report and objective MCQs. Requires an active gate (call merge_readiness_start first).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    schema: {
+      why: z.string().max(10000), whatChanged: z.string().max(10000), tradeoffs: z.string().max(10000), risksConsidered: z.string().max(10000), teamUnderstanding: z.string().max(10000),
+      questions: z.array(z.object({ id: z.string().max(100), dimension: z.enum(['why', 'change', 'tradeoff', 'risk', 'team']), stem: z.string().max(2000), options: z.array(z.object({ id: z.string().max(100), text: z.string().max(1000) })).max(8), correctOptionId: z.string().max(100), rationale: z.string().max(2000).optional() })).max(8),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { why: string; whatChanged: string; tradeoffs: string; risksConsidered: string; teamUnderstanding: string; questions: Array<any>; workingDirectory?: string; session_id?: string }) => {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const state = setMergeReadinessContent(directory, args, args.session_id);
+      if (!state) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness content rejected: no active gate. Call merge_readiness_start first.' }], isError: true };
+      }
+      const errors = state.validation_errors ?? [];
+      return { content: [{ type: 'text' as const, text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(' ')}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? 'none'}` }], ...(errors.length > 0 ? { isError: true } : {}) };
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_record_answer',
+    description: 'Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    schema: {
+      questionId: z.string().max(100),
+      optionId: z.string().max(100),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { questionId: string; optionId: string; workingDirectory?: string; session_id?: string }) => {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, args.session_id);
+      if (!state) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ.' }], isError: true };
+      }
+      const result = state.result;
+      const score = state.readiness_score;
+      const terminal = result === 'pass' || result === 'paused' || result === 'blocked' || result === 'overridden';
+      const text = terminal
+        ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === 'pass' ? 'The change may proceed to human merge approval.' : result === 'paused' ? 'Explanation gap remains; reread the report and rerun /merge-readiness.' : result === 'blocked' ? 'Missing evidence; produce it before rerunning.' : 'Gate overridden; artifact preserves the record.'}`
+        : `Answer recorded. Next question: ${state.pending_question?.id ?? 'none'}. Answered: ${state.answers.length}/${state.questions.length}.`;
+      return { content: [{ type: 'text' as const, text }] };
+    },
+  } as ToolDefinition<any>,
 ];
