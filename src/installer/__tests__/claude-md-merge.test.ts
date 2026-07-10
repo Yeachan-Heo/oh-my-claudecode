@@ -3,13 +3,22 @@
  * Tests merge-based CLAUDE.md updates with markers and backups
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
-import { mergeClaudeMd } from '../index.js';
+import { mergeClaudeMd, hasLegacyUnmarkedOmcContent, hasLegacyTemplateMatch } from '../index.js';
 
 const START_MARKER = '<!-- OMC:START -->';
 const END_MARKER = '<!-- OMC:END -->';
 const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
 const USER_CUSTOMIZATIONS_RECOVERED = '<!-- User customizations (recovered from corrupted markers) -->';
+
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const readLegacyGuide = (name: string): string =>
+  readFileSync(join(FIXTURES_DIR, name), 'utf-8').replace(/\n+$/, '');
+const LEGACY_HEADING = '# oh-my-claudecode - Intelligent Multi-Agent Orchestration';
+const CONDUCTOR = 'You are a CONDUCTOR, not a performer';
 
 describe('mergeClaudeMd', () => {
   const omcContent = '# OMC Configuration\n\nThis is the OMC content.';
@@ -377,6 +386,117 @@ Second user note`;
 
       expect((result.match(/<!-- User customizations/g) || []).length).toBe(1);
       expect(result).toContain(`${USER_CUSTOMIZATIONS}\nFirst user note\n\nSecond user note`);
+    });
+  });
+
+  describe('legacy unmarked OMC guide removal (exact historical templates)', () => {
+    const guide292 = readLegacyGuide('legacy-guide-292.md');
+    const guide583 = readLegacyGuide('legacy-guide-583.md');
+
+    // Simulate an upgraded CLAUDE.md: current marker block on top, then one or
+    // more legacy guides plus real user content preserved under customizations.
+    const buildUpgraded = (body: string): string =>
+      `${START_MARKER}\n${omcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${body}`;
+
+    it('(a) fully removes the 583-line historical guide, keeping user content', () => {
+      const existing = buildUpgraded(`${guide583}\n\n@RTK.md`);
+      const result = mergeClaudeMd(existing, omcContent, '4.15.0');
+
+      expect(result).not.toContain(CONDUCTOR);
+      expect(result).not.toContain(LEGACY_HEADING);
+      expect(result).not.toContain('## PART 3: COMPLETE REFERENCE');
+      // The guide's final line must be gone (end-boundary proof, not fingerprint).
+      expect(result).not.toContain(guide583.split('\n').at(-1)!);
+      expect(result).toContain('@RTK.md');
+      expect(result).toContain(omcContent);
+      expect(result).toContain('<!-- OMC:VERSION:4.15.0 -->');
+      expect(result.length).toBeLessThan(existing.length / 2);
+    });
+
+    it('(b) preserves user notes that merely quote two fingerprints (no false-positive span)', () => {
+      const body = [
+        'My orchestration playbook:',
+        `- I love the line "${CONDUCTOR}".`,
+        'KEEP-MIDDLE-USER-NOTE',
+        '- and remember "PART 1: CORE PROTOCOL" from the old guide.'
+      ].join('\n');
+      const result = mergeClaudeMd(buildUpgraded(body), omcContent);
+
+      expect(result).toContain('KEEP-MIDDLE-USER-NOTE');
+      expect(result).toContain(CONDUCTOR);
+      expect(result).toContain('PART 1: CORE PROTOCOL');
+    });
+
+    it('(b) preserves user notes with reversed fingerprint order and the shared heading above', () => {
+      const body = [
+        LEGACY_HEADING,
+        '- quoting "PART 1: CORE PROTOCOL" first,',
+        'KEEP-MIDDLE-USER-NOTE',
+        `- then "${CONDUCTOR}".`
+      ].join('\n');
+      const result = mergeClaudeMd(buildUpgraded(body), omcContent);
+
+      expect(result).toContain('KEEP-MIDDLE-USER-NOTE');
+      expect(result).toContain(LEGACY_HEADING);
+      expect(result).toContain(CONDUCTOR);
+      expect(result).toContain('PART 1: CORE PROTOCOL');
+    });
+
+    it('(c) removes two complete legacy blocks without spanning the user note between them', () => {
+      const body = `${guide292}\n\nMIDDLE-USER-NOTE\n\n${guide583}\n\n@RTK.md`;
+      const result = mergeClaudeMd(buildUpgraded(body), omcContent);
+
+      expect(result).not.toContain(CONDUCTOR); // both blocks gone
+      expect(result).not.toContain(LEGACY_HEADING);
+      expect(result).toContain('MIDDLE-USER-NOTE'); // content between blocks preserved
+      expect(result).toContain('@RTK.md');
+    });
+
+    it('(f) removes the 292-line historical guide (v1 scenario) and its CRLF variant', () => {
+      const existing = buildUpgraded(`${guide292}\n\n@RTK.md`);
+
+      const lf = mergeClaudeMd(existing, omcContent);
+      expect(lf).not.toContain(CONDUCTOR);
+      expect(lf).toContain('@RTK.md');
+
+      const crlf = mergeClaudeMd(existing.replace(/\n/g, '\r\n'), omcContent);
+      expect(crlf).not.toContain(CONDUCTOR);
+      expect(crlf).toContain('@RTK.md');
+    });
+
+    it('(g) shrinks a bloated file and is idempotent (never grows)', () => {
+      const existing = buildUpgraded(`${guide583}\n\n@RTK.md`);
+      const first = mergeClaudeMd(existing, omcContent, '4.15.0');
+      expect(first.length).toBeLessThan(existing.length);
+
+      // Re-running the merge on its own output must not regrow the file.
+      const second = mergeClaudeMd(first, omcContent, '4.15.0');
+      expect(second.length).toBeLessThanOrEqual(first.length);
+      expect(second).toContain('@RTK.md');
+      expect(second).not.toContain(CONDUCTOR);
+    });
+
+    it('fails closed on a near-miss variant (fingerprints present but no exact template match)', () => {
+      // A guide with an extra line inserted no longer matches any historical
+      // template and must be preserved verbatim rather than partially deleted.
+      const mutated = guide292.replace(CONDUCTOR, `${CONDUCTOR}\nMY-EXTRA-USER-LINE`);
+      const result = mergeClaudeMd(buildUpgraded(`${mutated}\n\n@RTK.md`), omcContent);
+
+      expect(result).toContain(CONDUCTOR); // preserved, not stripped
+      expect(result).toContain('@RTK.md');
+      // But the doctor heuristic still flags it for manual review.
+      expect(hasLegacyUnmarkedOmcContent(mutated)).toBe(true);
+      expect(hasLegacyTemplateMatch(mutated)).toBe(false);
+    });
+
+    it('exposes detection helpers scoped to content outside markers', () => {
+      expect(hasLegacyTemplateMatch(guide583)).toBe(true);
+      expect(hasLegacyUnmarkedOmcContent(guide292)).toBe(true);
+      expect(hasLegacyUnmarkedOmcContent('just my own notes')).toBe(false);
+
+      // Fingerprints living only inside a valid marker block are not flagged.
+      const insideMarkersOnly = `${START_MARKER}\n${guide292}\n${END_MARKER}\n`;
+      expect(hasLegacyUnmarkedOmcContent(insideMarkersOnly)).toBe(false);
     });
   });
 });

@@ -578,6 +578,52 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     const status = checkClaudeMdStatus();
     expect(status).toBeNull();
   });
+
+  // A block carrying legacy fingerprints. Used both inside and outside markers.
+  const legacyBody = [
+    '# oh-my-claudecode - Intelligent Multi-Agent Orchestration',
+    'You are enhanced with multi-agent capabilities. **You are a CONDUCTOR, not a performer.**',
+    '',
+    '## PART 1: CORE PROTOCOL (CRITICAL)',
+    '',
+    "The difference? You don't NEED them anymore. Everything auto-activates."
+  ].join('\n');
+
+  it('(d) does not flag fingerprints that live only inside a valid marker block', () => {
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      `<!-- OMC:START -->\n${legacyBody}\n<!-- OMC:END -->\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMarkers).toBe(true);
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(false);
+  });
+
+  it('flags legacy content that lives outside the marker block', () => {
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE.md'),
+      `<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n\n<!-- User customizations -->\n${legacyBody}\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
+
+  it('(e) reports legacy content living in the companion file, not only the main file', () => {
+    // Main file has no markers and no legacy content; companion holds the markers
+    // and the residual legacy guide outside them.
+    writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# My clean config\nSee CLAUDE-omc.md\n');
+    writeFileSync(
+      join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md'),
+      `<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n\n<!-- User customizations -->\n${legacyBody}\n`
+    );
+    const status = checkClaudeMdStatus();
+    expect(status).not.toBeNull();
+    expect(status!.hasMarkers).toBe(true);
+    expect(status!.companionFile).toContain('CLAUDE-omc.md');
+    expect(status!.hasLegacyUnmarkedOmcContent).toBe(true);
+  });
 });
 
 describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {

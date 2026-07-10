@@ -80,6 +80,35 @@ describe('install() CLAUDE.md target resolution', () => {
     expect(backups).toHaveLength(1);
   });
 
+  it('shrinks a CLAUDE.md bloated with a legacy pre-marker guide (does not grow)', async () => {
+    const configClaudePath = join(testClaudeDir, 'CLAUDE.md');
+    const legacyGuide = readFileSync(
+      new URL('./fixtures/legacy-guide-583.md', import.meta.url),
+      'utf-8',
+    ).replace(/\n+$/, '');
+
+    // Simulate a pre-marker upgrade artifact: current marker block on top, the
+    // 583-line legacy guide preserved as "user customizations", plus a real
+    // user include that must survive.
+    const bloated =
+      '<!-- OMC:START -->\n<!-- OMC:VERSION:0.0.1 -->\n# Old OMC\n<!-- OMC:END -->\n\n' +
+      `<!-- User customizations -->\n${legacyGuide}\n\n@RTK.md\n`;
+    writeFileSync(configClaudePath, bloated);
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true, skipHud: true });
+
+    const updated = readFileSync(configClaudePath, 'utf-8');
+
+    expect(result.success).toBe(true);
+    expect(updated.length).toBeLessThan(bloated.length); // shrinks, never grows
+    expect(updated).not.toContain('You are a CONDUCTOR, not a performer');
+    expect(updated).toContain('@RTK.md'); // real user content preserved
+
+    const backups = readdirSync(testClaudeDir).filter(name => name.startsWith('CLAUDE.md.backup.'));
+    expect(backups).toHaveLength(1); // original safely backed up before overwrite
+  });
+
   it('preserves project-scoped behavior by skipping global CLAUDE.md writes', async () => {
     process.env.CLAUDE_PLUGIN_ROOT = join(tempRoot, 'project', '.claude', 'plugins', 'oh-my-claudecode');
     writeFileSync(join(testHomeDir, 'CLAUDE.md'), '# Home CLAUDE\nkeep me\n');

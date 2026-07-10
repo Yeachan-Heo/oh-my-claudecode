@@ -260,6 +260,214 @@ function trimClaudeUserContent(content: string): string {
     .replace(/(?:\r?\n){3,}/g, '\n\n');
 }
 
+const OMC_START_MARKER = '<!-- OMC:START -->';
+const OMC_END_MARKER = '<!-- OMC:END -->';
+
+/** Match one complete, well-formed OMC marker block (START through END). */
+function buildOmcBlockPattern(): RegExp {
+  return new RegExp(
+    `^${escapeRegex(OMC_START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(OMC_END_MARKER)}(?:\\r?\\n)?`,
+    'gm'
+  );
+}
+
+/** Remove every complete OMC marker block, leaving only content outside markers. */
+function stripCompleteOmcBlocks(content: string): string {
+  return content.replace(buildOmcBlockPattern(), '');
+}
+
+/**
+ * Distinctive phrases that appear only in the legacy long-form ("CONDUCTOR")
+ * OMC guide and never in the current marker-wrapped template. Used as a coarse
+ * heuristic by the doctor diagnostic (which warns for manual review) — the
+ * installer's strip path relies on exact template matching, not these.
+ */
+const LEGACY_OMC_FINGERPRINTS = [
+  'You are a CONDUCTOR, not a performer',
+  'PART 1: CORE PROTOCOL',
+  'DELEGATION-FIRST PHILOSOPHY',
+  "The difference? You don't NEED them anymore. Everything auto-activates.",
+] as const;
+
+const LEGACY_OMC_FINGERPRINT_THRESHOLD = 2;
+
+/** Count how many distinct legacy OMC fingerprints appear in `content`. */
+export function countLegacyOmcFingerprints(content: string): number {
+  return LEGACY_OMC_FINGERPRINTS.reduce(
+    (count, fingerprint) => (content.includes(fingerprint) ? count + 1 : count),
+    0
+  );
+}
+
+/**
+ * Opening headings used across the pre-marker eras of the shipped template.
+ * A legacy guide always begins with one of these, so they gate the (otherwise
+ * comparatively expensive) exact-match scan and mark candidate block starts.
+ */
+const LEGACY_TEMPLATE_HEADINGS = [
+  '# oh-my-claudecode - Intelligent Multi-Agent Orchestration',
+  '# OMC Multi-Agent System',
+  '# Sisyphus Multi-Agent System',
+] as const;
+
+interface LegacyTemplateSignature {
+  /** Number of normalized (see {@link normalizeLegacyLine}) lines in the template. */
+  lineCount: number;
+  /** SHA-256 of the normalized template lines joined by "\n". */
+  sha256: string;
+}
+
+/**
+ * Fingerprints of every pre-marker `docs/CLAUDE.md` revision in upstream git
+ * history (all markerless blobs; the marker mechanism was introduced later).
+ * The pre-marker installer wrote one of these guides verbatim into the user's
+ * CLAUDE.md, so an exact match against a preserved region is a structural proof
+ * that the region is a stale generated guide rather than user-authored text.
+ *
+ * Provenance / regeneration: for each commit from
+ * `git log --all --format=%H -- docs/CLAUDE.md`, take `<commit>:docs/CLAUDE.md`,
+ * keep the blobs that do NOT contain `<!-- OMC:START -->`, normalize each with
+ * {@link normalizeLegacyLine} (CRLF/CR -> LF, strip trailing whitespace per line,
+ * drop leading/trailing blank lines), then record `{ lineCount, sha256 }` of the
+ * normalized text. Comments below cite the source blob and its opening heading.
+ */
+const LEGACY_TEMPLATE_SIGNATURES: readonly LegacyTemplateSignature[] = [
+  { lineCount: 168, sha256: 'e63ed430c326b64f6673ff1aa2c523ded6432864a05ad96597e930d060fbecb7' }, // docs/CLAUDE.md@df2cf2ed833e — "# Sisyphus Multi-Agent System"
+  { lineCount: 220, sha256: '8953ef9807e8062480f5ea4a3f5831439ce15067f31a95dc95d0d2270b052c27' }, // docs/CLAUDE.md@30932adbdce0 — "# Sisyphus Multi-Agent System"
+  { lineCount: 222, sha256: '97629f1df4008d3d9add680342c6291df1d8305618ac5591173814dceeeb1722' }, // docs/CLAUDE.md@e96516c9b67b — "# Sisyphus Multi-Agent System"
+  { lineCount: 281, sha256: '00e5c79ec3357a05ed1fbcb6dccf93e573f938bd6720e5e866afe0a33aa981f6' }, // docs/CLAUDE.md@1e5adf8fc013 — "# OMC Multi-Agent System"
+  { lineCount: 281, sha256: 'd5bc088810c29163d524936c7c82473d248c4e208647a778a1df593bddb59744' }, // docs/CLAUDE.md@3a564f00865a — "# OMC Multi-Agent System"
+  { lineCount: 292, sha256: '570d03a21582707615690f3987139f401a74ce04307f94238550c2491b99f4e3' }, // docs/CLAUDE.md@173a9c8d542d — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 292, sha256: '549e113b71738e73798096ac4be763a609b92c23fdc936680f20099aed28fa1a' }, // docs/CLAUDE.md@97b83b327b74 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 296, sha256: 'e0d60a7612c32838058ac874d6e1aaf0922842571ab3c01ba9d0db84e18dbe9d' }, // docs/CLAUDE.md@62706f8b0e5e — "# Sisyphus Multi-Agent System"
+  { lineCount: 304, sha256: 'f79797777234b0b2321ac1346a096a216064d6e34a0659de9b13aea12f998783' }, // docs/CLAUDE.md@26a56e555af3 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 304, sha256: '5e06d427b9681b1af6e48c53e61b93a5abfc2eb873a9fbd50a1fa583bd24f88d' }, // docs/CLAUDE.md@466569ea4877 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 386, sha256: '730ef988aa6f0c6e7e40224f38531ddf96245f9c4d24b93052bb6d86dc168679' }, // docs/CLAUDE.md@60f219084886 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 388, sha256: '70763267fcd0ea35ed5c8eef64cead25ffcdf8c6008c50efd51f9aeaf4525887' }, // docs/CLAUDE.md@294d68014791 — "# Sisyphus Multi-Agent System"
+  { lineCount: 395, sha256: '9d317963b8f84231205a1ed4f6744b2fe2b0aeb7833fcddcbe5362b763fdebf7' }, // docs/CLAUDE.md@95112588b50b — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 411, sha256: '80df71c2efa0e1171b1004ff5cbc1ad098f34b23e9c658a2574f544e8aa66452' }, // docs/CLAUDE.md@6f005ea35251 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 417, sha256: 'abc8fbcc16cd44cd3bc6916124414b1789eb3eeec1720a0029125bd471e46efc' }, // docs/CLAUDE.md@9f90998867fb — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 424, sha256: 'e3b2c65e66d8169e3dd942bff432e5f419cb41e197ecc4d68812e0a964cb0719' }, // docs/CLAUDE.md@7e600225d358 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 429, sha256: 'e1f45622c042d007abba9421b9f2c75df1f5eadc0d17a7366e44192b94b22d64' }, // docs/CLAUDE.md@c01f0039651c — "# Sisyphus Multi-Agent System"
+  { lineCount: 431, sha256: '38be02ee6ee1a4e368f9a5134614bf2ca58faca722ebf451bc4cdfe4f94aeb93' }, // docs/CLAUDE.md@091f7a4d3313 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 457, sha256: '0d9234c7026540097d23a4f159f2ee49ba472060b9aee7cf1decb0c3c86fa6e1' }, // docs/CLAUDE.md@36eb3effcfac — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 457, sha256: '479bcbfc4d04e3e353846e2ca9cc85866b67097b690adedc568636d4143585ff' }, // docs/CLAUDE.md@4903c785e15e — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 534, sha256: '6469fc2e3b41ec9d9c1000ac8c143b59f9776967fe1d832c1be4d1d4c6e8d926' }, // docs/CLAUDE.md@dc02bf379845 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 576, sha256: 'df301c7263291356005300f4a3175aa806693525d6f2245434bb173141196d54' }, // docs/CLAUDE.md@7d38a2de5a03 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 576, sha256: '03ab36b0d233a19195d892ad43e2033ac12b28a44e629196d05345d70069f28b' }, // docs/CLAUDE.md@9b19d53d59f3 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 583, sha256: 'b0b06eac1cf3ba557f91acc4b93ed2b4ea0ec133a49f84a4d07361f2b9d08c21' }, // docs/CLAUDE.md@afbf9cb29227 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 659, sha256: 'ef1eed15aa9e80372516615a402a28762cc1f611bb0fb3c7d59e74994cb65e3e' }, // docs/CLAUDE.md@f2346c49597d — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 680, sha256: 'c2b6f253f146bbdf80e469751312fea9aecd6900c0d570369d3c285dfdd7f34b' }, // docs/CLAUDE.md@020424a846f5 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 680, sha256: '4ec039bd333c3ad6aecd16c7206731e97e6963e54a138a97379710261d9bdfa8' }, // docs/CLAUDE.md@c75cd527a6fd — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 718, sha256: 'ad7c487773fd21de53dfdeaf40667f7ce37a3979efcaae347b8e30ea2b6525aa' }, // docs/CLAUDE.md@b66ec4a761bc — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+  { lineCount: 720, sha256: 'b1bdafcd18b420d6c75c497e5b339ac1114787abb32bee70a418949c0b0580b5' }, // docs/CLAUDE.md@b1e5de1548f3 — "# oh-my-claudecode - Intelligent Multi-Agent Orchestration"
+];
+
+const LEGACY_TEMPLATE_HASHES: ReadonlySet<string> = new Set(
+  LEGACY_TEMPLATE_SIGNATURES.map(signature => signature.sha256)
+);
+
+/** Distinct template lengths, longest first (prefer the largest proven block). */
+const LEGACY_TEMPLATE_LENGTHS: readonly number[] = [
+  ...new Set(LEGACY_TEMPLATE_SIGNATURES.map(signature => signature.lineCount)),
+].sort((a, b) => b - a);
+
+/** Normalize a single line for template comparison: strip trailing whitespace. */
+function normalizeLegacyLine(line: string): string {
+  return line.replace(/[ \t]+$/, '');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/**
+ * True when `content` contains a region that exactly matches a known pre-marker
+ * template — i.e. there is a legacy guide to strip.
+ */
+export function hasLegacyTemplateMatch(content: string): boolean {
+  return stripLegacyUnmarkedOmcContent(content) !== content;
+}
+
+/**
+ * Detect residual legacy pre-marker OMC guidance living OUTSIDE complete OMC
+ * marker blocks. Used by the doctor diagnostic to warn for manual review. It is
+ * intentionally broader than the installer's strip: it also flags near-miss
+ * fingerprinted variants that exact matching leaves in place (fail closed).
+ */
+export function hasLegacyUnmarkedOmcContent(content: string): boolean {
+  const outsideMarkers = stripCompleteOmcBlocks(content);
+  return (
+    countLegacyOmcFingerprints(outsideMarkers) >= LEGACY_OMC_FINGERPRINT_THRESHOLD ||
+    hasLegacyTemplateMatch(outsideMarkers)
+  );
+}
+
+/**
+ * Remove residual legacy (pre-marker) OMC guides from `content`.
+ *
+ * The pre-marker installer wrote the full `docs/CLAUDE.md` guide straight into
+ * the user's CLAUDE.md with no markers. After upgrading, that text has no
+ * markers to strip and no residual markers to trigger recovery, so it was being
+ * preserved verbatim as "user customizations" — duplicating the current
+ * marker-wrapped instructions on every run.
+ *
+ * Removal is proof-based and fails closed: a region is removed only when a
+ * contiguous run of lines, starting at a known template heading, hashes exactly
+ * to a recorded historical template (see {@link LEGACY_TEMPLATE_SIGNATURES}).
+ * Each proven block is removed independently; content between or around blocks
+ * is never spanned. Anything that does not match exactly is left untouched (the
+ * caller backs up the file before overwrite, and the doctor flags leftovers).
+ */
+function stripLegacyUnmarkedOmcContent(content: string): string {
+  // Cheap guard: every legacy guide opens with one of these headings.
+  if (!LEGACY_TEMPLATE_HEADINGS.some(heading => content.includes(heading))) {
+    return content;
+  }
+
+  const physicalLines = content.replace(/\r\n?/g, '\n').split('\n');
+  const normalizedLines = physicalLines.map(normalizeLegacyLine);
+  const total = normalizedLines.length;
+  const headingSet: ReadonlySet<string> = new Set(LEGACY_TEMPLATE_HEADINGS);
+
+  const removed = new Array<boolean>(total).fill(false);
+  let matchedAny = false;
+
+  for (let start = 0; start < total; ) {
+    if (!headingSet.has(normalizedLines[start])) {
+      start += 1;
+      continue;
+    }
+
+    let matchedLength = 0;
+    for (const length of LEGACY_TEMPLATE_LENGTHS) {
+      if (start + length > total) {
+        continue;
+      }
+      const window = normalizedLines.slice(start, start + length).join('\n');
+      if (LEGACY_TEMPLATE_HASHES.has(sha256Hex(window))) {
+        matchedLength = length;
+        break;
+      }
+    }
+
+    if (matchedLength > 0) {
+      for (let k = start; k < start + matchedLength; k += 1) {
+        removed[k] = true;
+      }
+      matchedAny = true;
+      start += matchedLength;
+    } else {
+      start += 1;
+    }
+  }
+
+  if (!matchedAny) {
+    return content;
+  }
+  return physicalLines.filter((_line, index) => !removed[index]).join('\n');
+}
+
 /** Installation result */
 export interface InstallResult {
   success: boolean;
@@ -1996,13 +2204,9 @@ export function syncPersistedSetupVersion(options?: {
  * @returns Merged content with markers
  */
 export function mergeClaudeMd(existingContent: string | null, omcContent: string, version?: string): string {
-  const START_MARKER = '<!-- OMC:START -->';
-  const END_MARKER = '<!-- OMC:END -->';
+  const START_MARKER = OMC_START_MARKER;
+  const END_MARKER = OMC_END_MARKER;
   const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-  const OMC_BLOCK_PATTERN = new RegExp(
-    `^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`,
-    'gm'
-  );
   const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
   const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
 
@@ -2027,7 +2231,7 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
   }
 
-  const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
+  const strippedExistingContent = stripCompleteOmcBlocks(existingContent);
   const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
   const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
 
@@ -2043,8 +2247,14 @@ export function mergeClaudeMd(existingContent: string | null, omcContent: string
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
   }
 
+  // Remove residual legacy (pre-marker) OMC guides before preserving the
+  // remainder as user content, so upgrades from pre-marker installs don't carry
+  // a stale duplicate of the guide forever. Only exact historical-template
+  // matches are removed; the caller backs up the original file first.
+  const cleanedExistingContent = stripLegacyUnmarkedOmcContent(strippedExistingContent);
+
   const preservedUserContent = trimClaudeUserContent(
-    stripGeneratedUserCustomizationHeaders(strippedExistingContent)
+    stripGeneratedUserCustomizationHeaders(cleanedExistingContent)
   );
 
   if (!preservedUserContent) {

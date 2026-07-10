@@ -6,7 +6,7 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { isOmcHook } from '../../installer/index.js';
+import { isOmcHook, hasLegacyUnmarkedOmcContent } from '../../installer/index.js';
 import { colors } from '../utils/formatting.js';
 import { getSkillsDir, listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
 import { inspectUnifiedMcpRegistrySync } from '../../installer/mcp-registry.js';
@@ -25,7 +25,7 @@ export interface WorkspaceMarkerStatus {
 
 export interface ConflictReport {
   hookConflicts: { event: string; command: string; isOmc: boolean }[];
-  claudeMdStatus: { hasMarkers: boolean; hasUserContent: boolean; path: string; companionFile?: string } | null;
+  claudeMdStatus: { hasMarkers: boolean; hasUserContent: boolean; hasLegacyUnmarkedOmcContent: boolean; path: string; companionFile?: string } | null;
   legacySkills: { name: string; path: string }[];
   envFlags: { disableOmc: boolean; skipHooks: string[] };
   configIssues: { unknownFields: string[] };
@@ -161,9 +161,11 @@ export function checkWindowsUnsafePluginHooks(): ConflictReport['windowsUnsafePl
 
 /**
  * Check a single file for OMC markers.
- * Returns { hasMarkers, hasUserContent } or null on error.
+ * Returns { hasMarkers, hasUserContent, hasLegacyUnmarkedOmcContent } or null on error.
  */
-function checkFileForOmcMarkers(filePath: string): { hasMarkers: boolean; hasUserContent: boolean } | null {
+function checkFileForOmcMarkers(
+  filePath: string
+): { hasMarkers: boolean; hasUserContent: boolean; hasLegacyUnmarkedOmcContent: boolean } | null {
   if (!existsSync(filePath)) return null;
   try {
     const content = readFileSync(filePath, 'utf-8');
@@ -181,7 +183,9 @@ function checkFileForOmcMarkers(filePath: string): { hasMarkers: boolean; hasUse
     } else {
       hasUserContent = content.trim().length > 0;
     }
-    return { hasMarkers, hasUserContent };
+    // Only content OUTSIDE complete OMC marker blocks counts as legacy; fingerprints
+    // inside a valid current block are expected and must not be flagged.
+    return { hasMarkers, hasUserContent, hasLegacyUnmarkedOmcContent: hasLegacyUnmarkedOmcContent(content) };
   } catch {
     return null;
   }
@@ -224,6 +228,7 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
       return {
         hasMarkers: true,
         hasUserContent: mainResult.hasUserContent,
+        hasLegacyUnmarkedOmcContent: mainResult.hasLegacyUnmarkedOmcContent,
         path: claudeMdPath
       };
     }
@@ -236,6 +241,9 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
         return {
           hasMarkers: true,
           hasUserContent: mainResult.hasUserContent,
+          // Legacy content may live in either the main file or the companion.
+          hasLegacyUnmarkedOmcContent:
+            mainResult.hasLegacyUnmarkedOmcContent || companionResult.hasLegacyUnmarkedOmcContent,
           path: claudeMdPath,
           companionFile: companionPath
         };
@@ -251,6 +259,7 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
       return {
         hasMarkers: false,
         hasUserContent: mainResult.hasUserContent,
+        hasLegacyUnmarkedOmcContent: mainResult.hasLegacyUnmarkedOmcContent,
         path: claudeMdPath,
         companionFile: join(configDir, refMatch[0])
       };
@@ -259,6 +268,7 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
     return {
       hasMarkers: false,
       hasUserContent: mainResult.hasUserContent,
+      hasLegacyUnmarkedOmcContent: mainResult.hasLegacyUnmarkedOmcContent,
       path: claudeMdPath
     };
   } catch (_error) {
@@ -558,7 +568,8 @@ export function runConflictCheck(): ConflictReport {
     mcpRegistrySync.claudeMissing.length > 0 ||
     mcpRegistrySync.claudeMismatched.length > 0 ||
     mcpRegistrySync.codexMissing.length > 0 ||
-    mcpRegistrySync.codexMismatched.length > 0;
+    mcpRegistrySync.codexMismatched.length > 0 ||
+    (claudeMdStatus?.hasLegacyUnmarkedOmcContent ?? false); // Residual pre-marker OMC guide outside markers
     // Note: Missing OMC markers is informational (normal for fresh install), not a conflict
     // Note: workspaceMarker.precedenceConflict is a WARN, not a hard conflict
 
@@ -628,6 +639,12 @@ export function formatReport(report: ConflictReport, json: boolean): string {
       if (report.claudeMdStatus.hasUserContent) {
         lines.push(`  ${colors.blue('ℹ')} User content present - will be preserved`);
       }
+    }
+    if (report.claudeMdStatus.hasLegacyUnmarkedOmcContent) {
+      lines.push(`  ${colors.yellow('⚠')} Legacy pre-marker OMC guide detected outside markers`);
+      lines.push(`    ${colors.gray('This duplicates the current OMC instructions and inflates every session.')}`);
+      lines.push(`    ${colors.gray('Re-run /oh-my-claudecode:omc-setup to strip exact historical copies')}`);
+      lines.push(`    ${colors.gray('(a timestamped CLAUDE.md backup is written first); review any leftover by hand.')}`);
     }
     lines.push(`  ${colors.gray(`Path: ${report.claudeMdStatus.path}`)}`);
     lines.push('');
