@@ -148,6 +148,8 @@ Use AskUserQuestion with multiple questions:
 3. **gemini** - Use Gemini CLI workers by default when installed (enterprise/API-key tier)
 4. **antigravity** - Use Antigravity CLI (`agy`) workers by default when installed; Google's successor to the Gemini CLI (install per the [official instructions](https://antigravity.google))
 
+> **Note:** As of 2026-06-18, Google discontinued the Gemini CLI's free/personal tier (free, AI Pro, and Ultra accounts). For free usage, choose **antigravity** (`agy`) instead. Gemini remains fully supported via a paid Gemini API key or Gemini Code Assist Standard/Enterprise. ([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/))
+
 Store the team configuration in `~/.claude/.omc-config.json`:
 
 ```bash

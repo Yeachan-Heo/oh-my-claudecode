@@ -52,6 +52,7 @@ cursor-agent --version
   any installer before running it). Verify: `agy --version`
   > **Platform note:** `omc ask antigravity` is supported on macOS/Linux. On Windows it is guarded with a clear error, because `agy --print` takes the prompt as an argv value (it cannot read stdin) and has known upstream Windows `-p` limitations; use `omc ask gemini` on Windows.
 - **Gemini CLI** remains supported for enterprise/API-key use cases.
+  > **Note:** As of 2026-06-18, Google discontinued the Gemini CLI's free/personal tier (free, AI Pro, and Ultra accounts). For free usage, use Antigravity (`agy`) instead. Gemini remains fully supported via a paid Gemini API key or Gemini Code Assist Standard/Enterprise. ([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/))
 
 ## Artifacts
 
