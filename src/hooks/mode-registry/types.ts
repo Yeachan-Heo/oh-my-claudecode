@@ -12,6 +12,7 @@ export type ExecutionMode =
   | 'ultrawork'
   | 'ultraqa'
   | 'deep-interview'
+  | 'merge-readiness'
   | 'self-improve';
 
 export interface ModeConfig {
