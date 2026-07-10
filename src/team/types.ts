@@ -210,6 +210,163 @@ export interface TeamTask {
   completed_at?: string;
   delegation?: TeamTaskDelegationPlan;
   delegation_compliance?: TeamTaskDelegationComplianceEvidence;
+  recovery_reservation?: TeamTaskRecoveryReservation;
+  recovery_adoption?: TaskRecoveryAdoption;
+}
+
+/** Immutable safe-boundary continuation checkpoint, scoped to one live claim. */
+export interface TaskRecoveryCheckpoint {
+  schema_version: 1;
+  team_name: string;
+  task_id: string;
+  worker_name: string;
+  sequence: number;
+  task_version: number;
+  claim_token: string;
+  resume_payload_hash: string;
+  resume_payload: unknown;
+  updated_at: string;
+}
+
+/** Reservation installed when a dead worker's claimed task is safely requeued. */
+export interface TeamTaskRecoveryReservation {
+  recovery_id: string;
+  request_id: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adoption_token_hash: string;
+  reserved_at: string;
+}
+
+/** Durable evidence that a reservation was consumed by its replacement claim. */
+export interface TaskRecoveryAdoption {
+  recovery_id: string;
+  request_id: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adopted_at: string;
+}
+
+export interface TaskRecoveryRequeueSidecar {
+  schema_version: 1;
+  recovery_id: string;
+  request_id: string;
+  task_id: string;
+  old_task_version: number;
+  old_owner: string;
+  old_claim_token: string;
+  old_claim_leased_until: string;
+  continuation_sequence: number;
+  checkpoint_path: string;
+  checkpoint_hash: string;
+  replacement_worker: string;
+  replacement_generation: number;
+  adoption_token_hash: string;
+  created_at: string;
+}
+
+export type TaskRecoveryCheckpointValidation =
+  | { ok: true; checkpoint: TaskRecoveryCheckpoint; path: string }
+  | { ok: false; error: 'missing' | 'malformed' | 'stale' | 'ambiguous' };
+
+export interface TaskRecoveryAdoptionProof {
+  recoveryId: string;
+  requestId: string;
+  replacementGeneration: number;
+  adoptionToken: string;
+}
+
+export type TaskRecoveryRequeueResult =
+  | { ok: true; task: TeamTaskV2; reservation: TeamTaskRecoveryReservation; replayed: boolean }
+  | { ok: false; error: 'task_not_found' | 'task_requeue_failed' | 'checkpoint_missing' | 'checkpoint_malformed' | 'checkpoint_stale' | 'checkpoint_ambiguous' | 'claim_conflict' };
+
+export type TaskRecoveryAdoptionResult =
+  | { ok: true; task: TeamTaskV2; claimToken: string; checkpoint: TaskRecoveryCheckpoint; replayed: boolean }
+  | { ok: false; error: 'task_not_found' | 'claim_conflict' | 'checkpoint_missing' | 'checkpoint_malformed' | 'checkpoint_stale' | 'checkpoint_ambiguous' };
+
+export type RecoverDeadWorkerV2Warning =
+  | 'projection_repair_required'
+  | 'identity_repair_required'
+  | 'services_pending'
+  | 'event_repair_required'
+  | 'result_repair_required';
+
+export type RecoverDeadWorkerV2Error =
+  | 'invalid_input' | 'team_not_found' | 'worker_not_found' | 'runtime_v2_required'
+  | 'invalid_persisted_state' | 'runtime_owner_unavailable' | 'runtime_owner_fence_lost'
+  | 'recovery_request_timeout' | 'recovery_attempt_conflict' | 'team_mutation_busy'
+  | 'team_mutation_resume_required' | 'team_shutting_down' | 'team_session_dead'
+  | 'worker_liveness_unknown' | 'recovery_checkpoint_missing' | 'recovery_checkpoint_malformed'
+  | 'recovery_checkpoint_ambiguous' | 'recovery_checkpoint_stale' | 'task_requeue_failed'
+  | 'launch_metadata_incomplete' | 'launch_descriptor_unresolvable' | 'spawn_failed'
+  | 'startup_ack_timeout' | 'worker_activation_failed' | 'auto_merge_unavailable'
+  | 'stale_state_revision' | 'config_commit_failed';
+
+export interface RecoverDeadWorkerV2OutcomeBase {
+  requestId: string;
+  recoveryId: string;
+  teamName: string;
+  workerName: string;
+  committed: boolean;
+  updatedAt: string;
+}
+
+export interface RecoverDeadWorkerV2Success extends RecoverDeadWorkerV2OutcomeBase {
+  outcome: 'recovered' | 'already_running';
+  committed: true;
+  oldPaneId: string | null;
+  newPaneId: string;
+  requeuedTaskIds: string[];
+  continuationSequenceByTask: Record<string, number>;
+  stateRevision: number;
+  activation: 'active' | 'services_pending';
+  manifestSync: 'synced' | 'repair_required';
+  servicesSync: 'synced' | 'repair_required';
+  warnings: RecoverDeadWorkerV2Warning[];
+}
+
+export interface RecoverDeadWorkerV2Failure extends RecoverDeadWorkerV2OutcomeBase {
+  outcome: 'failed' | 'commit_unknown';
+  committed: false;
+  error: RecoverDeadWorkerV2Error;
+  message?: string;
+}
+
+export type RecoverDeadWorkerV2Result = RecoverDeadWorkerV2Success | RecoverDeadWorkerV2Failure;
+
+export interface TeamRuntimeOwnerEpoch {
+  epoch: number;
+  nonce: string;
+  pid: number;
+  process_started_at: string;
+  created_at: string;
+}
+
+export interface TeamRecoveryAttempt {
+  request_id: string;
+  recovery_id: string;
+  worker_name: string;
+  owner_epoch: number;
+  owner_nonce: string;
+  phase: 'reserved' | 'requeued' | 'ready' | 'active' | 'services_pending' | 'adopted' | 'failed';
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamServiceDescriptor {
+  service_generation: number;
+  auto_merge_enabled: boolean;
+  leader_branch?: string;
+  workspace_root: string;
+  cadence_policy?: string;
+  worker_launch_descriptors: Record<string, unknown>;
 }
 
 /** Team leader identity */
@@ -295,6 +452,11 @@ export interface WorkerInfo {
    * Consumed by the worker-completion handler in runtime-v2.
    */
   output_file?: string;
+  recovery_id?: string;
+  replacement_generation?: number;
+  pane_attempt_id?: string;
+  operational_state?: 'starting' | 'active' | 'dead' | 'stopped';
+  launch_descriptor?: Record<string, unknown>;
 }
 
 /** Team configuration (V1 compat) */
@@ -328,6 +490,12 @@ export interface TeamConfig {
    * `scaleUp`, worker restart, and spawn paths. Immutable for the team's lifetime.
    */
   resolved_routing?: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>;
+  state_revision?: number;
+  runtime_owner_epoch?: TeamRuntimeOwnerEpoch;
+  active_recovery?: TeamRecoveryAttempt;
+  last_recovery?: TeamRecoveryAttempt;
+  service_descriptor?: TeamServiceDescriptor;
+  lifecycle_state?: 'active' | 'shutting_down' | 'stopped';
 }
 
 /** Dispatch request kinds */

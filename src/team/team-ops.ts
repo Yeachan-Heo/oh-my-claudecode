@@ -9,7 +9,7 @@
  * Modeled after oh-my-codex/src/team/team-ops.ts.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -43,14 +43,32 @@ import type {
   TeamSummaryPerformance,
   ShutdownAck,
   TeamMonitorSnapshotState,
+  TaskRecoveryAdoptionProof,
+  TaskRecoveryAdoptionResult,
+  TaskRecoveryCheckpoint,
+  TaskRecoveryRequeueResult,
+  TaskRecoveryRequeueSidecar,
+  TaskRecoveryCheckpointValidation,
+  TeamTaskRecoveryReservation,
+  RecoverDeadWorkerV2Error,
+  RecoverDeadWorkerV2Result,
+  RecoverDeadWorkerV2Warning,
 } from './types.js';
 
 import {
+  adoptRecoveryReservations as adoptRecoveryReservationsImpl,
   claimTask as claimTaskImpl,
+  requeueRecoveredTask as requeueRecoveredTaskImpl,
   transitionTaskStatus as transitionTaskStatusImpl,
   releaseTaskClaim as releaseTaskClaimImpl,
   listTasks as listTasksImpl,
 } from './state/tasks.js';
+import {
+  publishTaskRecoveryCheckpoint as publishTaskRecoveryCheckpointImpl,
+  readTaskRecoveryCheckpoint,
+  selectTaskRecoveryCheckpoint,
+  type PublishTaskRecoveryCheckpointInput,
+} from './task-recovery-checkpoint.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 
 // Re-export types for consumers
@@ -74,7 +92,18 @@ export type {
   TeamSummary,
   ShutdownAck,
   TeamMonitorSnapshotState,
+  TaskRecoveryAdoptionProof,
+  TaskRecoveryAdoptionResult,
+  TaskRecoveryCheckpoint,
+  TaskRecoveryRequeueResult,
+  TaskRecoveryRequeueSidecar,
+  TaskRecoveryCheckpointValidation,
+  TeamTaskRecoveryReservation,
+  RecoverDeadWorkerV2Error,
+  RecoverDeadWorkerV2Result,
+  RecoverDeadWorkerV2Warning,
 };
+export type { PublishTaskRecoveryCheckpointInput } from './task-recovery-checkpoint.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -496,6 +525,38 @@ export async function teamReleaseTaskClaim(
     taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
   });
+}
+
+function recoveryTransitionDeps(teamName: string, cwd: string) {
+  return {
+    teamName, cwd, readTask: teamReadTask,
+    readTeamConfig: teamReadConfig as (tn: string, c: string) => Promise<{ workers: Array<{ name: string }> } | null>,
+    withTaskClaimLock, normalizeTask, isTerminalTaskStatus: isTerminalTeamTaskStatus,
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c), writeAtomic,
+    readRecoverySidecar: async (tn: string, tid: string, c: string): Promise<TaskRecoveryRequeueSidecar | null | 'malformed'> => {
+      const path = absPath(c, TeamPaths.taskRecoverySidecar(tn, tid));
+      if (!existsSync(path)) return null;
+      try { return JSON.parse(await readFile(path, 'utf8')) as TaskRecoveryRequeueSidecar; } catch { return 'malformed'; }
+    },
+    writeRecoverySidecar: (tn: string, tid: string, sidecar: TaskRecoveryRequeueSidecar, c: string) => writeAtomic(absPath(c, TeamPaths.taskRecoverySidecar(tn, tid)), JSON.stringify(sidecar, null, 2)),
+    selectRecoveryCheckpoint: selectTaskRecoveryCheckpoint, readRecoveryCheckpoint: readTaskRecoveryCheckpoint,
+    verifyAdoptionToken: (token: string, hash: string) => createHash('sha256').update(token).digest('hex') === hash,
+  };
+}
+
+export async function teamPublishTaskRecoveryCheckpoint(input: PublishTaskRecoveryCheckpointInput, cwd: string) {
+  return publishTaskRecoveryCheckpointImpl(input, cwd, { readTask: async (tn, tid, c) => {
+    const task = await teamReadTask(tn, tid, c); return task ? normalizeTask(task) : null;
+  }, withTaskLock: withTaskClaimLock });
+}
+
+export async function teamRequeueRecoveredTask(teamName: string, cwd: string, input: { recoveryId: string; requestId: string; taskId: string; replacementWorker: string; replacementGeneration: number; adoptionTokenHash: string }): Promise<TaskRecoveryRequeueResult> {
+  return requeueRecoveredTaskImpl(input, recoveryTransitionDeps(teamName, cwd));
+}
+
+/** Runtime-owner-only continuation adoption; call before provider launch. */
+export async function teamAdoptRecoveryReservations(teamName: string, cwd: string, taskIds: string[], workerName: string, proof: TaskRecoveryAdoptionProof): Promise<TaskRecoveryAdoptionResult[]> {
+  return adoptRecoveryReservationsImpl(taskIds, workerName, proof, recoveryTransitionDeps(teamName, cwd));
 }
 
 // ---------------------------------------------------------------------------

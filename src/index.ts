@@ -70,6 +70,27 @@ export * from './shared/index.js';
 // Hooks module exports
 export * from './hooks/index.js';
 
+
+// Team recovery and worker checkpoint public clients.
+export {
+  recoverDeadWorkerV2,
+  readRecoverDeadWorkerV2Outcome,
+  teamPublishTaskRecoveryCheckpoint,
+} from './team/index.js';
+export type {
+  RecoverDeadWorkerV2Options,
+  RecoverDeadWorkerV2Error,
+  RecoverDeadWorkerV2Result,
+  RecoverDeadWorkerV2Success,
+  RecoverDeadWorkerV2Failure,
+  PublishTaskRecoveryCheckpointInput,
+  PublishTaskRecoveryCheckpointResult,
+} from './team/index.js';
+export type {
+  RecoveryDurableOutcome,
+  RecoveryOutcomePending,
+  RecoveryOutcomeFinal,
+} from './team/index.js';
 // Features module exports (boulder-state, context-injector)
 export {
   // Boulder State

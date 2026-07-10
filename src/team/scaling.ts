@@ -143,7 +143,7 @@ export interface ScaleError {
  * Acquires the file-based scaling lock, reads the current config,
  * validates capacity, creates new tmux panes, and bootstraps workers.
  */
-export async function scaleUp(
+export async function scaleUpOwned(
   teamName: string,
   count: number,
   agentType: string,
@@ -166,6 +166,7 @@ export async function scaleUp(
     if (!config) {
       return { ok: false, error: `Team ${sanitized} not found` };
     }
+    if (config.active_recovery) return { ok: false, error: 'team_mutation_busy' };
 
     const maxWorkers = config.max_workers ?? 20;
     const currentCount = config.workers.length;
@@ -535,7 +536,7 @@ export interface ScaleDownOptions {
  * Sets targeted workers to 'draining' status, waits for them to finish
  * current work (or force kills), then removes tmux panes and updates config.
  */
-export async function scaleDown(
+export async function scaleDownOwned(
   teamName: string,
   cwd: string,
   options: ScaleDownOptions = {},
@@ -553,6 +554,7 @@ export async function scaleDown(
     if (!config) {
       return { ok: false, error: `Team ${sanitized} not found` };
     }
+    if (config.active_recovery) return { ok: false, error: 'team_mutation_busy' };
 
     // Determine which workers to remove
     let targetWorkers: WorkerInfo[];
@@ -691,6 +693,28 @@ export async function scaleDown(
       newWorkerCount: config.worker_count,
     };
   });
+}
+
+/** Public scale facade; the owned algorithm applies the recovery exclusion under its existing lock. */
+export async function scaleUp(
+  teamName: string,
+  count: number,
+  agentType: string,
+  tasks: Array<{ subject: string; description: string; owner?: string; blocked_by?: string[]; role?: string }>,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ScaleUpResult | ScaleError> {
+  return scaleUpOwned(teamName, count, agentType, tasks, cwd, env);
+}
+
+/** Public scale-down facade; force and drain behavior are delegated unchanged. */
+export async function scaleDown(
+  teamName: string,
+  cwd: string,
+  options: ScaleDownOptions = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ScaleDownResult | ScaleError> {
+  return scaleDownOwned(teamName, cwd, options, env);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

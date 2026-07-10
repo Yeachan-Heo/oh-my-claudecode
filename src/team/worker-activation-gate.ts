@@ -1,0 +1,79 @@
+import { spawn } from 'node:child_process';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
+export interface RecoveryActivationGate {
+  recoveryId: string;
+  workerName: string;
+  replacementGeneration: number;
+  paneAttemptId: string;
+  readyPath: string;
+  activatePath: string;
+  runPath: string;
+  providerArgv: string[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+export type RecoveryActivationGateResult =
+  | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
+  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' };
+
+interface GateRecord {
+  recovery_id: string;
+  worker_name: string;
+  replacement_generation: number;
+  pane_attempt_id: string;
+  written_at: string;
+}
+
+async function writeAtomic(path: string, value: GateRecord): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
+  await writeFile(temporary, JSON.stringify(value), 'utf8');
+  await rename(temporary, path);
+}
+
+async function waitForRecord(path: string, expected: GateRecord, timeoutMs: number, pollIntervalMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const value = JSON.parse(await readFile(path, 'utf8')) as Partial<GateRecord>;
+      if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name
+        && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id) return true;
+    } catch { /* absent or incomplete publication; keep waiting */ }
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+  return false;
+}
+
+/**
+ * Provider-independent activation barrier. The provider process is not created
+ * until the runtime owner has first published activate and then run for this
+ * exact pane attempt. Credentials are deliberately not written by this runner.
+ */
+export async function runWorkerActivationGate(gate: RecoveryActivationGate): Promise<RecoveryActivationGateResult> {
+  if (gate.providerArgv.length === 0 || !gate.providerArgv[0]) return { outcome: 'invalid_provider_argv' };
+  const expected: GateRecord = {
+    recovery_id: gate.recoveryId,
+    worker_name: gate.workerName,
+    replacement_generation: gate.replacementGeneration,
+    pane_attempt_id: gate.paneAttemptId,
+    written_at: new Date().toISOString(),
+  };
+  const timeoutMs = gate.timeoutMs ?? 30_000;
+  const pollIntervalMs = gate.pollIntervalMs ?? 100;
+  await writeAtomic(gate.readyPath, expected);
+  if (!await waitForRecord(gate.activatePath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'activation_timeout' };
+  // This marker proves the pane is gated and can be safely adopted by the owner.
+  await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
+  if (!await waitForRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
+  const child = spawn(gate.providerArgv[0], gate.providerArgv.slice(1), {
+    cwd: gate.cwd,
+    env: { ...process.env, ...gate.env },
+    stdio: 'inherit',
+  });
+  return new Promise(resolve => child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal })));
+}

@@ -244,6 +244,29 @@ export type {
   WatchdogCompletionEvent,
 } from './runtime.js';
 export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
+export {
+  setRuntimeOwnerRecoveryClient,
+  recoverDeadWorkerV2,
+  readRecoverDeadWorkerV2Outcome,
+} from './runtime-v2.js';
+export type {
+  RecoverDeadWorkerV2Options,
+  RuntimeOwnerRecoveryClient,
+} from './runtime-v2.js';
+export type {
+  RecoverDeadWorkerV2Error,
+  RecoverDeadWorkerV2Result,
+  RecoverDeadWorkerV2Success,
+  RecoverDeadWorkerV2Failure,
+} from './types.js';
+export type {
+  RecoveryDurableOutcome,
+  RecoveryOutcomePending,
+  RecoveryOutcomeFinal,
+} from './recovery-request-store.js';
+
+export { teamPublishTaskRecoveryCheckpoint } from './team-ops.js';
+export type { PublishTaskRecoveryCheckpointInput, PublishTaskRecoveryCheckpointResult } from './task-recovery-checkpoint.js';
 
 export { injectToLeaderPane } from './tmux-session.js';
 

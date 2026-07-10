@@ -101,6 +101,23 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
   });
 }
 
+/** Recovery readers keep revisioned config authoritative without changing legacy reads. */
+export async function readRevisionedTeamConfig(teamName: string, cwd: string): Promise<{ config: TeamConfig; stateRevision: number } | null> {
+  const config = await readTeamConfig(teamName, cwd);
+  const stateRevision = config?.state_revision;
+  return config && typeof stateRevision === 'number' && Number.isSafeInteger(stateRevision)
+    ? { config, stateRevision }
+    : null;
+}
+
+/** Reject a stale recovery writer before projecting config/manifest. */
+export async function saveTeamConfigAtRevision(config: TeamConfig, expectedRevision: number, cwd: string): Promise<boolean> {
+  const current = await readRevisionedTeamConfig(config.name, cwd);
+  if (!current || current.stateRevision !== expectedRevision) return false;
+  await saveTeamConfig(config, cwd);
+  return true;
+}
+
 export async function readTeamManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null> {
   const manifest = await readJsonSafe<TeamManifestV2>(absPath(cwd, TeamPaths.manifest(teamName)));
   return manifest ? normalizeTeamManifest(manifest) : null;

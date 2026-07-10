@@ -14,9 +14,43 @@ import type { TeamConfig, TeamRuntime } from './runtime.js';
 import { appendTeamEvent } from './events.js';
 import { deriveTeamLeaderGuidance } from './leader-nudge-guidance.js';
 import { waitForSentinelReadiness } from './sentinel-gate.js';
-import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2 } from './runtime-v2.js';
+import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2, executeRecoverDeadWorkerV2Owner } from './runtime-v2.js';
 import type { TeamSnapshotV2 } from './runtime-v2.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { setRuntimeOwnerDispatch, type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
+import type { RecoverDeadWorkerV2Result } from './types.js';
+import { absPath, TeamPaths } from './state-paths.js';
+import { readRecoveryOutcome } from './recovery-request-store.js';
+
+/** Private owner dispatch entry point used by durable recovery admission. */
+export async function handleRecoverDeadWorkerV2Owner(input: RecoverDeadWorkerOwnerInput): Promise<RecoverDeadWorkerV2Result> {
+  return executeRecoverDeadWorkerV2Owner(input);
+}
+
+async function processPendingRecoveryIntents(teamName: string, cwd: string): Promise<void> {
+  const root = absPath(cwd, TeamPaths.recoveryIntents(teamName));
+  let names: string[];
+  try { names = readdirSync(root).filter(name => name.endsWith('.json')).sort(); } catch { return; }
+  for (const name of names) {
+    const path = join(root, name);
+    try {
+      const intent = JSON.parse(readFileSync(path, 'utf8')) as {
+        request_id?: string;
+        recovery_id?: string;
+        team_name?: string;
+        worker_name?: string;
+      };
+      if (!intent.request_id || !intent.worker_name || intent.team_name !== teamName) continue;
+      const outcome = readRecoveryOutcome(cwd, intent.request_id);
+      if (!outcome || outcome.kind !== 'final') {
+        await handleRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: intent.worker_name, requestId: intent.request_id });
+      }
+      await unlink(path).catch(() => undefined);
+    } catch (error) {
+      process.stderr.write(`[runtime-cli/v2] recovery intent ${name} failed: ${error}\n`);
+    }
+  }
+}
 
 interface CliInput {
   teamName: string;
@@ -457,6 +491,7 @@ async function main(): Promise<void> {
         activeWorkers: new Map(),
         cwd,
       };
+      setRuntimeOwnerDispatch(handleRecoverDeadWorkerV2Owner);
     } else {
       runtime = await startTeam(config);
     }
@@ -479,10 +514,13 @@ async function main(): Promise<void> {
   if (useV2) {
     process.stderr.write('[runtime-cli] Using runtime v2 (event-driven, no watchdog)\n');
     let lastLeaderNudgeReason = '';
+    let allDeadSince: number | null = null;
 
     while (pollActive) {
       await new Promise(r => setTimeout(r, pollIntervalMs));
       if (!pollActive) break;
+
+      await processPendingRecoveryIntents(teamName, cwd);
 
       let snap: TeamSnapshotV2 | null;
       try {
@@ -595,19 +633,26 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Dead worker heuristic
+      // An all-dead team can be resumed by a replacement owner. Keep the durable
+      // state intact for the full recovery grace interval before terminal cleanup.
       const allDead = runtime.workerPaneIds.length > 0 && snap.deadWorkers.length === runtime.workerPaneIds.length;
       const hasOutstanding = (snap.tasks.pending + snap.tasks.in_progress) > 0;
       if (allDead && hasOutstanding) {
-        process.stderr.write('[runtime-cli/v2] All workers dead with outstanding work — failing\n');
-        await doShutdown('failed');
-        return;
+        allDeadSince ??= Date.now();
+        if (Date.now() - allDeadSince >= 300_000) {
+          process.stderr.write('[runtime-cli/v2] All-worker recovery grace expired\n');
+          await doShutdown('failed');
+          return;
+        }
+      } else {
+        allDeadSince = null;
       }
     }
     return;
   }
 
   // ── V1 poll loop (legacy watchdog-based) ────────────────────────────────
+  let allDeadSince: number | null = null;
   while (pollActive) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
 
@@ -686,17 +731,20 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Check failure heuristics
+    // Preserve durable team state for a 300s owner-recovery grace rather than
+    // treating the first all-dead observation as terminal.
     const allWorkersDead = runtime.workerPaneIds.length > 0 && snap.deadWorkers.length === runtime.workerPaneIds.length;
     const hasOutstandingWork = (snap.taskCounts.pending + snap.taskCounts.inProgress) > 0;
-
-    const deadWorkerFailure = allWorkersDead && hasOutstandingWork;
-    const fixingWithNoWorkers = snap.phase === 'fixing' && allWorkersDead;
-
-    if (deadWorkerFailure || fixingWithNoWorkers) {
-      process.stderr.write(`[runtime-cli] Failure detected: deadWorkerFailure=${deadWorkerFailure} fixingWithNoWorkers=${fixingWithNoWorkers}\n`);
-      exitWithoutShutdown('failed');
-      return;
+    const allDeadWithWork = allWorkersDead && (hasOutstandingWork || snap.phase === 'fixing');
+    if (allDeadWithWork) {
+      allDeadSince ??= Date.now();
+      if (Date.now() - allDeadSince >= 300_000) {
+        process.stderr.write('[runtime-cli] All-worker recovery grace expired\n');
+        exitWithoutShutdown('failed');
+        return;
+      }
+    } else {
+      allDeadSince = null;
     }
   }
 

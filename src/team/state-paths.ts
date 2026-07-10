@@ -118,6 +118,44 @@ export const TeamPaths = {
 
   shutdownRequest: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/shutdown-request.json`,
+  checkpoints: (teamName: string, taskId: string, claimTokenHash: string) =>
+    `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}`,
+  checkpoint: (teamName: string, taskId: string, claimTokenHash: string, sequence: number) =>
+    `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/${sequence}.json`,
+  checkpointLatest: (teamName: string, taskId: string, claimTokenHash: string) =>
+    `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/latest.json`,
+  taskRecoverySidecar: (teamName: string, taskId: string) =>
+    `.omc/state/team/${teamName}/recovery/task-sidecars/${normalizeTaskFileStem(taskId)}.json`,
+  taskRecoveryReservation: (teamName: string, taskId: string) =>
+    `.omc/state/team/${teamName}/recovery/reservations/${normalizeTaskFileStem(taskId)}.json`,
+  ownerEpochs: (teamName: string) =>
+    `.omc/state/team/${teamName}/recovery/owner-epochs`,
+  ownerEpoch: (teamName: string, epoch: number) =>
+    `.omc/state/team/${teamName}/recovery/owner-epochs/${epoch}.json`,
+  recoveryIntents: (teamName: string) =>
+    `.omc/state/team/${teamName}/recovery/intents`,
+  recoveryIntent: (teamName: string, recoveryId: string) =>
+    `.omc/state/team/${teamName}/recovery/intents/${recoveryId}.json`,
+  recoveryAttempts: (teamName: string) =>
+    `.omc/state/team/${teamName}/recovery/attempts`,
+  recoveryAttempt: (teamName: string, recoveryId: string) =>
+    `.omc/state/team/${teamName}/recovery/attempts/${recoveryId}.json`,
+  recoveryActivation: (teamName: string, recoveryId: string, paneAttemptId: string) =>
+    `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}`,
+  recoveryReady: (teamName: string, recoveryId: string, paneAttemptId: string) =>
+    `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/ready.json`,
+  recoveryActivate: (teamName: string, recoveryId: string, paneAttemptId: string) =>
+    `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/activate.json`,
+  recoveryRun: (teamName: string, recoveryId: string, paneAttemptId: string) =>
+    `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/run.json`,
+  recoveryRequestsRoot: () => '.omc/state/team-recovery/by-request',
+  recoveryRequestPending: (requestId: string) =>
+    `.omc/state/team-recovery/by-request/${requestId}.pending.json`,
+  recoveryRequestResult: (requestId: string) =>
+    `.omc/state/team-recovery/by-request/${requestId}.result.json`,
+  recoveryResultByTeam: (workspaceHash: string, teamName: string, recoveryId: string) =>
+    `.omc/state/team-recovery/by-team/${workspaceHash}/${teamName}/${recoveryId}.json`,
+  recoveryAuditIndex: () => '.omc/state/team-recovery/audit.jsonl',
 } as const;
 
 /**

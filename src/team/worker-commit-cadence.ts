@@ -28,6 +28,28 @@ export interface WorkerCadenceContext {
   enabled: boolean;
 }
 
+/** Service ownership fence supplied by the persistent runtime owner. */
+export interface CadenceOwnership {
+  serviceGeneration: number;
+  attemptId: string;
+}
+
+const cadenceOwners = new Map<string, CadenceOwnership>();
+
+function ownsCadence(ctx: WorkerCadenceContext & Partial<CadenceOwnership>): boolean {
+  const current = cadenceOwners.get(ctx.worktreePath);
+  return !current || ctx.serviceGeneration === undefined
+    || (current.serviceGeneration === ctx.serviceGeneration && current.attemptId === ctx.attemptId);
+}
+
+function registerCadenceOwner(ctx: WorkerCadenceContext & Partial<CadenceOwnership>): boolean {
+  if (ctx.serviceGeneration === undefined || ctx.attemptId === undefined) return true;
+  const current = cadenceOwners.get(ctx.worktreePath);
+  if (current && current.serviceGeneration > ctx.serviceGeneration) return false;
+  cadenceOwners.set(ctx.worktreePath, { serviceGeneration: ctx.serviceGeneration, attemptId: ctx.attemptId });
+  return true;
+}
+
 export type CadenceMethod = 'hook' | 'fallback-poll' | 'none';
 
 // ---------------------------------------------------------------------------
@@ -305,8 +327,9 @@ export function startFallbackPoller(
  * callers that need the poller should call startFallbackPoller directly.
  */
 export async function installCommitCadence(
-  ctx: WorkerCadenceContext,
+  ctx: WorkerCadenceContext & Partial<CadenceOwnership>,
 ): Promise<{ method: CadenceMethod }> {
+  if (!registerCadenceOwner(ctx)) return { method: 'none' };
   if (!ctx.enabled) {
     return { method: 'none' };
   }
@@ -324,8 +347,15 @@ export async function installCommitCadence(
  * Removes the auto-commit PostToolUse hook from .claude/settings.json.
  * For fallback-poll workers the caller is responsible for stopping the poller handle.
  */
-export async function uninstallCommitCadence(ctx: WorkerCadenceContext): Promise<void> {
-  if (ctx.agentType !== 'claude') return;
+export async function uninstallCommitCadence(ctx: WorkerCadenceContext & Partial<CadenceOwnership>): Promise<void> {
+  if (!ownsCadence(ctx)) return;
+  const owner = cadenceOwners.get(ctx.worktreePath);
+  const ownsRegisteredGeneration = owner && ctx.serviceGeneration !== undefined
+    && owner.serviceGeneration === ctx.serviceGeneration && owner.attemptId === ctx.attemptId;
+  if (ctx.agentType !== 'claude') {
+    if (ownsRegisteredGeneration) cadenceOwners.delete(ctx.worktreePath);
+    return;
+  }
 
   const settingsPath = join(ctx.worktreePath, '.claude', 'settings.json');
   try {
@@ -345,6 +375,7 @@ export async function uninstallCommitCadence(ctx: WorkerCadenceContext): Promise
   } catch {
     // File absent — nothing to uninstall.
   }
+  if (ownsRegisteredGeneration) cadenceOwners.delete(ctx.worktreePath);
 }
 
 /**

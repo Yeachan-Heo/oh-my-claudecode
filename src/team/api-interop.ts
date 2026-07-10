@@ -41,6 +41,7 @@ import {
   teamWriteMonitorSnapshot,
   teamReadTaskApproval,
   teamWriteTaskApproval,
+  teamPublishTaskRecoveryCheckpoint,
   type TeamMonitorSnapshotState,
 } from './team-ops.js';
 import { queueBroadcastMailboxMessage, queueDirectMailboxMessage, type DispatchOutcome } from './mcp-comm.js';
@@ -48,13 +49,29 @@ import { injectToLeaderPane, sendToWorker } from './tmux-session.js';
 import { listDispatchRequests, markDispatchRequestDelivered, markDispatchRequestNotified } from './dispatch-queue.js';
 import { generateMailboxTriggerMessage } from './worker-bootstrap.js';
 import { shutdownTeam } from './runtime.js';
-import { shutdownTeamV2 } from './runtime-v2.js';
+import { shutdownTeamV2, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome } from './runtime-v2.js';
 import { inspectTeamWorktreeCleanupSafety } from './git-worktree.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
-import type { TeamTaskDelegationPlan } from './types.js';
+import type { RecoverDeadWorkerV2Result, TeamTaskDelegationPlan } from './types.js';
 
 const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change', 'delegation']);
 const TEAM_UPDATE_TASK_REQUEST_FIELDS = new Set(['team_name', 'task_id', 'workingDirectory', ...TEAM_UPDATE_TASK_MUTABLE_FIELDS]);
+const RECOVER_WORKER_REQUEST_FIELDS = new Set(['team_name', 'worker', 'request_id', 'timeout_ms']);
+const WRITE_TASK_CHECKPOINT_REQUEST_FIELDS = new Set([
+  'team_name', 'task_id', 'worker', 'claim_token', 'task_version', 'sequence', 'resume_payload',
+]);
+const READ_RECOVERY_RESULT_REQUEST_FIELDS = new Set(['request_id']);
+const RECOVERY_ERROR_CODES = new Set([
+  'invalid_input', 'team_not_found', 'worker_not_found', 'worker_not_dead', 'runtime_v2_required',
+  'invalid_persisted_state', 'runtime_owner_unavailable', 'runtime_owner_fence_lost',
+  'recovery_request_timeout', 'recovery_attempt_conflict', 'team_mutation_busy',
+  'team_mutation_resume_required', 'team_shutting_down', 'team_session_dead',
+  'worker_liveness_unknown', 'recovery_checkpoint_missing', 'recovery_checkpoint_malformed',
+  'recovery_checkpoint_ambiguous', 'recovery_checkpoint_stale', 'task_requeue_failed',
+  'launch_metadata_incomplete', 'launch_descriptor_unresolvable', 'spawn_failed',
+  'startup_ack_timeout', 'worker_activation_failed', 'auto_merge_unavailable',
+  'stale_state_revision', 'config_commit_failed',
+]);
 
 export const LEGACY_TEAM_MCP_TOOLS = [
   'team_send_message',
@@ -117,6 +134,9 @@ export const TEAM_API_OPERATIONS = [
   'read-task-approval',
   'write-task-approval',
   'orphan-cleanup',
+  'recover-worker',
+  'write-task-checkpoint',
+  'read-recovery-result',
 ] as const;
 
 export type TeamApiOperation = typeof TEAM_API_OPERATIONS[number];
@@ -567,6 +587,15 @@ function validateCommonFields(args: Record<string, unknown>): void {
   }
 }
 
+function unsupportedFields(args: Record<string, unknown>, allowed: Set<string>): string[] {
+  return Object.keys(args).filter((field) => !allowed.has(field));
+}
+
+function requiredString(args: Record<string, unknown>, field: string): string | null {
+  const value = args[field];
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
 export async function executeTeamApiOperation(
   operation: TeamApiOperation,
   args: Record<string, unknown>,
@@ -578,6 +607,81 @@ export async function executeTeamApiOperation(
     const cwd = teamNameForCwd ? resolveTeamWorkingDirectory(teamNameForCwd, fallbackCwd) : fallbackCwd;
 
     switch (operation) {
+      case 'recover-worker': {
+        const unsupported = unsupportedFields(args, RECOVER_WORKER_REQUEST_FIELDS);
+        if (unsupported.length > 0) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: `recover-worker received unsupported fields: ${unsupported.join(', ')}` } };
+        }
+        const teamName = requiredString(args, 'team_name');
+        const workerName = requiredString(args, 'worker');
+        const requestId = args.request_id;
+        const timeoutMs = args.timeout_ms;
+        if (!teamName || !workerName || (requestId !== undefined && (typeof requestId !== 'string' || requestId.trim() === ''))
+          || (timeoutMs !== undefined && (!isFiniteInteger(timeoutMs) || timeoutMs <= 0))) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name and worker are required; request_id must be a non-empty string and timeout_ms must be a positive integer when provided' } };
+        }
+        let result: RecoverDeadWorkerV2Result;
+        try {
+          result = await recoverDeadWorkerV2(teamName, cwd, {
+            workerName,
+            requestId: typeof requestId === 'string' ? requestId.trim() : undefined,
+            timeoutMs: timeoutMs as number | undefined,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (RECOVERY_ERROR_CODES.has(message)) {
+            return { ok: false, operation, error: { code: message, message } };
+          }
+          throw error;
+        }
+        return { ok: true, operation, data: { result } };
+      }
+      case 'write-task-checkpoint': {
+        const unsupported = unsupportedFields(args, WRITE_TASK_CHECKPOINT_REQUEST_FIELDS);
+        if (unsupported.length > 0) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: `write-task-checkpoint received unsupported fields: ${unsupported.join(', ')}` } };
+        }
+        const teamName = requiredString(args, 'team_name');
+        const taskId = requiredString(args, 'task_id');
+        const workerName = requiredString(args, 'worker');
+        const claimToken = requiredString(args, 'claim_token');
+        const taskVersion = args.task_version;
+        const sequence = args.sequence;
+        if (!teamName || !taskId || !workerName || !claimToken || !Object.hasOwn(args, 'resume_payload')
+          || !isFiniteInteger(taskVersion) || taskVersion <= 0 || !isFiniteInteger(sequence) || sequence <= 0) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, worker, claim_token, positive task_version, positive sequence, and resume_payload are required' } };
+        }
+        const workerContext = parseTeamWorkerContextFromEnv();
+        if (!workerContext) {
+          return { ok: false, operation, error: { code: 'worker_auth_required', message: 'write-task-checkpoint requires OMC_TEAM_WORKER or OMX_TEAM_WORKER authentication' } };
+        }
+        if (workerContext.teamName !== teamName || workerContext.workerName !== workerName) {
+          return { ok: false, operation, error: { code: 'worker_auth_mismatch', message: 'authenticated worker does not match team_name and worker' } };
+        }
+        const result = await teamPublishTaskRecoveryCheckpoint({
+          teamName,
+          taskId,
+          workerName,
+          claimToken,
+          taskVersion,
+          sequence,
+          resumePayload: args.resume_payload,
+        }, cwd);
+        return result.ok
+          ? { ok: true, operation, data: result }
+          : { ok: false, operation, error: { code: result.error, message: result.error } };
+      }
+      case 'read-recovery-result': {
+        const unsupported = unsupportedFields(args, READ_RECOVERY_RESULT_REQUEST_FIELDS);
+        const requestId = requiredString(args, 'request_id');
+        if (unsupported.length > 0 || !requestId) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: unsupported.length > 0 ? `read-recovery-result received unsupported fields: ${unsupported.join(', ')}` : 'request_id is required' } };
+        }
+        const outcome = readRecoverDeadWorkerV2Outcome(fallbackCwd, requestId);
+        return outcome
+          ? { ok: true, operation, data: { outcome } }
+          : { ok: false, operation, error: { code: 'recovery_result_not_found', message: 'recovery_result_not_found' } };
+      }
       case 'send-message': {
         const teamName = String(args.team_name || '').trim();
         const fromWorker = String(args.from_worker || '').trim();
