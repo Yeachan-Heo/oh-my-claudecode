@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
   checkMergeReadiness,
   cancelMergeReadiness,
   createInitialMergeReadinessState,
+  formatMergeReadinessReport,
   formatMergeReadinessQuestionMessage,
   readMergeReadinessState,
   recordMergeReadinessMCQAnswer,
@@ -59,8 +60,12 @@ function makeQuestion(
 describe("merge-readiness runtime", () => {
   let tempDir: string;
   const sessionId = "merge-readiness-session";
+  const originalPrincipal = process.env.OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL;
+  const originalMaintainers = process.env.OMC_MERGE_READINESS_MAINTAINERS;
 
   beforeEach(() => {
+    process.env.OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL = "github:trusted-maintainer";
+    process.env.OMC_MERGE_READINESS_MAINTAINERS = "github:trusted-maintainer";
     tempDir = mkdtempSync(join(tmpdir(), "omc-merge-readiness-"));
     execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore", windowsHide: true });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: tempDir, stdio: "ignore", windowsHide: true });
@@ -72,6 +77,10 @@ describe("merge-readiness runtime", () => {
   });
 
   afterEach(() => {
+    if (originalPrincipal === undefined) delete process.env.OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL;
+    else process.env.OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL = originalPrincipal;
+    if (originalMaintainers === undefined) delete process.env.OMC_MERGE_READINESS_MAINTAINERS;
+    else process.env.OMC_MERGE_READINESS_MAINTAINERS = originalMaintainers;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -398,13 +407,21 @@ describe("merge-readiness runtime", () => {
     // Public state_read surface must hide prior answer keys while the current quiz is live.
     const redacted = redactMergeReadinessState(state) as {
       questions: Array<Record<string, unknown>>;
-      prior_attempts: Array<{ questions: Array<Record<string, unknown>> }>;
+      prior_attempts: Array<{
+        questions: Array<Record<string, unknown>>;
+        answers: Array<Record<string, unknown>>;
+      }>;
     };
     expect(redacted.questions.every((q) => q.correctOptionId === undefined)).toBe(true);
     expect(redacted.prior_attempts[0].questions.every((q) => q.correctOptionId === undefined)).toBe(true);
+    expect(redacted.prior_attempts[0].answers.every((answer) => answer.selectedOptionId === undefined && answer.isCorrect === undefined)).toBe(true);
+    const report = formatMergeReadinessReport(state);
+    expect(report).not.toContain("_(correct");
+    expect(report).not.toContain("Correct: yes");
+    expect(report).not.toContain("Correct: no");
   });
 
-  it("binds the resolved base ref into the no-diff recovery guidance", () => {
+  it("binds the resolved base ref into the no-diff recovery tool call", () => {
     const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --standard change", sessionId);
     // Force a no-diff blocked state with a known base_ref to test guidance rendering.
     state.result = "blocked";
@@ -415,7 +432,7 @@ describe("merge-readiness runtime", () => {
       base_ref: "origin/dev",
     };
     const msg = formatMergeReadinessQuestionMessage(state);
-    expect(msg).toContain("--from-diff origin/dev");
+    expect(msg).toContain('merge_readiness_start with summary "--from-diff" and baseRef "origin/dev"');
     expect(msg).not.toMatch(/<base-ref>/);
   });
 
@@ -469,6 +486,38 @@ describe("merge-readiness runtime", () => {
       expect(state?.validation_errors?.some((e) => e.includes("persisted"))).toBe(true);
       // The fail-closed error must appear exactly once - no unbounded recursion.
       expect(state?.validation_errors?.filter((e) => e.includes("persisted"))).toHaveLength(1);
+    } finally {
+      persistFail.failWrites = false;
+    }
+  });
+
+  it.runIf(process.platform !== "win32")("fails closed on a real disposable POSIX directory write fault", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    const before = readMergeReadinessState(tempDir, sessionId)!;
+    const stateDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+
+    chmodSync(stateDir, 0o500);
+    try {
+      const result = setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      expect(result?.result).toBe("blocked");
+      expect(result?.active).toBe(true);
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
+
+    const after = readMergeReadinessState(tempDir, sessionId)!;
+    expect(after).toEqual(before);
+  });
+
+  it("refuses to start when the initial durable state write fails", () => {
+    persistFail.failWrites = true;
+    try {
+      expect(() => createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId))
+        .toThrow("could not create durable state");
+      expect(readMergeReadinessState(tempDir, sessionId)).toBeNull();
     } finally {
       persistFail.failWrites = false;
     }
@@ -814,18 +863,140 @@ describe("merge-readiness runtime", () => {
     }
   });
 
-  it("override records the operator identity (owner boundary)", () => {
+  it("override records the authenticated maintainer principal, not caller-supplied session_id", () => {
     createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
     setMergeReadinessContent(tempDir, {
       why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
       questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
     }, sessionId);
     const state = overrideMergeReadiness(tempDir, "Maintainer override.", sessionId);
-    expect(state?.override_owner).toBe(sessionId);
-    expect(readMergeReadinessState(tempDir, sessionId)?.override_owner).toBe(sessionId);
+    expect(state?.override_owner).toBe("github:trusted-maintainer");
+    expect(state?.override_owner).not.toBe(sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.override_owner).toBe("github:trusted-maintainer");
   });
 
-  describe("failed-write durable-non-advance (transition map)", () => {
+  it("rejects an override when the server has no allowlisted authenticated maintainer principal", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    delete process.env.OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL;
+    const state = overrideMergeReadiness(tempDir, "Attempt untrusted override.", sessionId);
+    expect(state?.result).toBe("pending");
+    expect(state?.active).toBe(true);
+    expect(state?.validation_errors?.some((error) => error.includes("authenticated maintainer principal"))).toBe(true);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("pending");
+  });
+
+  describe("15-case failed-write durable-non-advance transition matrix", () => {
+    const seedPending = (sid: string) => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sid);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sid);
+    };
+
+    it.each([
+      {
+        name: "invalid content validation update",
+        setup: (sid: string) => seedPending(sid),
+        action: (sid: string) => setMergeReadinessContent(tempDir, {
+          why: "", whatChanged: "", tradeoffs: "", risksConsidered: "", teamUnderstanding: "", questions: [],
+        }, sid),
+      },
+      {
+        name: "paused content rejection update",
+        setup: (sid: string) => {
+          seedPending(sid);
+          for (const id of ["q1", "q2", "q3"]) recordMergeReadinessMCQAnswer(tempDir, id, "b", sid);
+        },
+        action: (sid: string) => setMergeReadinessContent(tempDir, {
+          why: "w2", whatChanged: "wc2", tradeoffs: "t2", risksConsidered: "r2", teamUnderstanding: "tu2", questions: [],
+        }, sid),
+      },
+      {
+        name: "final correct answer transition",
+        setup: (sid: string) => {
+          seedPending(sid);
+          recordMergeReadinessMCQAnswer(tempDir, "q1", "a", sid);
+          recordMergeReadinessMCQAnswer(tempDir, "q2", "a", sid);
+        },
+        action: (sid: string) => recordMergeReadinessMCQAnswer(tempDir, "q3", "a", sid),
+      },
+      {
+        name: "final incorrect answer transition",
+        setup: (sid: string) => {
+          seedPending(sid);
+          recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sid);
+          recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sid);
+        },
+        action: (sid: string) => recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sid),
+      },
+      {
+        name: "maintainer override transition",
+        setup: (sid: string) => seedPending(sid),
+        action: (sid: string) => overrideMergeReadiness(tempDir, "Maintainer override.", sid),
+      },
+      {
+        name: "cancelled attempt re-start retention",
+        setup: (sid: string) => {
+          seedPending(sid);
+          cancelMergeReadiness(tempDir, sid);
+        },
+        action: (sid: string) => {
+          try {
+            createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sid);
+          } catch {
+            // Initial-state writes reject rather than returning a phantom state.
+          }
+        },
+      },
+      {
+        name: "blocked-gate cancellation",
+        setup: (sid: string) => {
+          const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sid);
+          state.result = "blocked";
+          state.awaiting_content = false;
+          writeFileSync(join(tempDir, ".omc", "state", "sessions", sid, "merge-readiness-state.json"), JSON.stringify(state));
+        },
+        action: (sid: string) => cancelMergeReadiness(tempDir, sid),
+      },
+      {
+        name: "cancellation while still awaiting content",
+        setup: (sid: string) => { createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sid); },
+        action: (sid: string) => cancelMergeReadiness(tempDir, sid),
+      },
+      {
+        name: "blocked-gate override rejection",
+        setup: (sid: string) => {
+          const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sid);
+          state.result = "blocked";
+          state.awaiting_content = false;
+          writeFileSync(join(tempDir, ".omc", "state", "sessions", sid, "merge-readiness-state.json"), JSON.stringify(state));
+        },
+        action: (sid: string) => overrideMergeReadiness(tempDir, "Attempt blocked override.", sid),
+      },
+      {
+        name: "first-answer AskUserQuestion transition",
+        setup: (sid: string) => seedPending(sid),
+        action: (sid: string) => recordMergeReadinessAskUserQuestionResult(
+          tempDir,
+          { question: "[MERGE READINESS:q1] choose" },
+          "[a]",
+          sid,
+        ),
+      },
+    ])("does not advance durable state on failed write: $name", ({ setup, action }) => {
+      const sid = `failed-write-${Math.random().toString(16).slice(2)}`;
+      setup(sid);
+      const before = readMergeReadinessState(tempDir, sid)!;
+      persistFail.failWrites = true;
+      try {
+        action(sid);
+      } finally {
+        persistFail.failWrites = false;
+      }
+      expect(readMergeReadinessState(tempDir, sid)).toEqual(before);
+    });
+
     it("set-content does not advance on-disk state on failed write", () => {
       createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
       setMergeReadinessContent(tempDir, {
@@ -906,8 +1077,9 @@ describe("merge-readiness runtime", () => {
 
       persistFail.failWrites = true;
       try {
-        const res = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId);
-        expect(res.result).toBe("blocked");
+        expect(() =>
+          createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId),
+        ).toThrow("could not create durable state");
       } finally {
         persistFail.failWrites = false;
       }
@@ -962,18 +1134,18 @@ describe("merge-readiness runtime", () => {
     }
   });
 
-  it("override is rejected without a session id (owner boundary)", () => {
-    // Legacy/no-session mode: seed and override with no session id.
+  it("uses the authenticated maintainer principal for legacy/no-session override", () => {
+    // Legacy/no-session mode cannot supply a caller identity; authority remains
+    // the server-injected principal rather than a synthetic session string.
     createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", undefined);
     setMergeReadinessContent(tempDir, {
       why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
       questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
     }, undefined);
     const state = overrideMergeReadiness(tempDir, "Maintainer override.", undefined);
-    expect(state?.result).not.toBe("overridden");
-    expect(state?.active).toBe(true);
-    expect(state?.validation_errors?.some((e) => e.includes("session id"))).toBe(true);
-    expect(readMergeReadinessState(tempDir, undefined)?.result).not.toBe("overridden");
+    expect(state?.result).toBe("overridden");
+    expect(state?.override_owner).toBe("github:trusted-maintainer");
+    expect(readMergeReadinessState(tempDir, undefined)?.override_owner).toBe("github:trusted-maintainer");
   });
 
   it("rejects a traversal session id before scanning the session state dir", () => {

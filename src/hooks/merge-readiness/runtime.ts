@@ -27,6 +27,24 @@ import type {
 
 const MODE = "merge-readiness";
 
+// The MCP caller controls session_id, so it is only a state-scope selector and
+// must never be used as override authority. The server launcher injects the
+// authenticated principal and the allowlist; neither value is accepted from a
+// tool call or slash-command argument.
+const MAINTAINER_PRINCIPAL_ENV = "OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL";
+const MAINTAINER_ALLOWLIST_ENV = "OMC_MERGE_READINESS_MAINTAINERS";
+
+function resolveAuthenticatedMaintainerPrincipal(): string | null {
+  const principal = process.env[MAINTAINER_PRINCIPAL_ENV]?.trim();
+  const allowedPrincipals = (process.env[MAINTAINER_ALLOWLIST_ENV] ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!principal || !allowedPrincipals.includes(principal)) return null;
+  return principal;
+}
+
 export function parseMergeReadinessProfile(promptText: string): MergeReadinessProfile {
   if (/\B--deep\b/i.test(promptText)) return "deep";
   if (/\B--quick\b/i.test(promptText)) return "quick";
@@ -508,10 +526,9 @@ export function createInitialMergeReadinessState(
   }
   const persisted = writeMergeReadinessState(directory, state, sessionId);
   if (!persisted) {
-    state.result = "blocked";
-    state.awaiting_content = false;
-    state.phase = "complete";
-    state.validation_errors = ["Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start."];
+    throw new Error(
+      "Merge-readiness could not create durable state. The workflow was not started; restore state storage and retry.",
+    );
   }
   return state;
 }
@@ -680,10 +697,11 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readMergeReadinessState(workingDir, sessionId);
   if (!state?.active || !reason.trim()) return state ?? null;
-  if (!sessionId) {
+  const principal = resolveAuthenticatedMaintainerPrincipal();
+  if (!principal) {
     state.validation_errors = [
       ...(state.validation_errors ?? []),
-      "Override rejected: a session id is required to record the operator (owner boundary). Re-run with a valid session id.",
+      "Override rejected: no authenticated maintainer principal is available for this MCP server. Configure OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL and OMC_MERGE_READINESS_MAINTAINERS in the trusted server launcher.",
     ];
     return persistOrFailClosed(workingDir, state, sessionId);
   }
@@ -695,7 +713,7 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   state.phase = "complete";
   state.result = "overridden";
   state.override_reason = reason.trim();
-  state.override_owner = sessionId;
+  state.override_owner = principal;
   state.completed_at = state.updated_at = new Date().toISOString();
   delete state.pending_question;
   return persistOrFailClosed(workingDir, state, sessionId);
@@ -728,8 +746,8 @@ export function formatMergeReadinessQuestionMessage(state: MergeReadinessState):
     const noDiff = state.evidence.changedFiles.length === 0 && !state.evidence.diffStat;
     const baseRef = state.evidence.base_ref;
     const diffHint = baseRef
-      ? `re-run with --from-diff ${baseRef}`
-      : "re-run with --from-diff <base-ref> (or pass baseRef to merge_readiness_start)";
+      ? `call merge_readiness_start with summary "--from-diff" and baseRef "${baseRef}"`
+      : "call merge_readiness_start with summary \"--from-diff\" and an explicit baseRef";
     const evidenceGuidance = noDiff
       ? `No diff detected. If changes are committed, ${diffHint}; if relying on .omc artifacts, use --from-artifacts. If there are truly no changes, a merge-readiness gate is not needed.`
       : "Produce the test/review evidence under .omc, then re-run /merge-readiness (merge_readiness_start).";

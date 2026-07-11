@@ -103,6 +103,10 @@ Use `merge_readiness_report` to render the five sections, evidence, quiz progres
 
 The Merge Boundary must say: "Passing means the human can explain the change. It does not approve merge, replace tests, replace review, or accept risk."
 
+### Maintainer Override Authority
+
+`/merge-readiness --override <reason>` is accepted only when the MCP server launcher injects an authenticated principal in `OMC_MERGE_READINESS_AUTHENTICATED_PRINCIPAL` and includes that exact principal in the comma-separated `OMC_MERGE_READINESS_MAINTAINERS` allowlist. The caller-provided `session_id` selects the state record only; it is never override authority and is not recorded as `override_owner`.
+
 ## Phase 3: Human Quiz Loop (MCQ, one-per-round, deep-interview style)
 
 Present each MCQ one-per-round via AskUserQuestion with the option ids/text as choices, then record the human’s selection with the `merge_readiness_record_answer` tool (questionId + optionId). The runtime scores it objectively and either advances to the next question or finalizes the gate (pass / paused / blocked).

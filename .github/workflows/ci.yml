@@ -254,6 +254,15 @@ jobs:
           TARBALL=$(ls -t oh-my-claude-sisyphus-*.tgz | head -1)
           echo "📦 Tarball: $TARBALL"
 
+          echo "🔎 Verifying the packaged MCP bridge registers every merge-readiness tool..."
+          for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
+            if ! tar -xOf "$TARBALL" package/bridge/mcp-server.cjs | grep -q "\"$tool\""; then
+              echo "::error::npm package bridge/mcp-server.cjs is missing tool: $tool"
+              exit 1
+            fi
+            echo "packaged bridge registers $tool"
+          done
+
           # ENOTEMPTY hardening (mirrors .github/workflows/upgrade-test.yml):
           # the global node_modules dir is reused across runs on GitHub-hosted
           # runners and inside the GitHub-hosted tool cache. A previously

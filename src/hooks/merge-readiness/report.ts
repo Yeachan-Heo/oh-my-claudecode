@@ -45,7 +45,11 @@ function renderList(values: string[], empty: string): string {
  * construction, so revealing correctOptionId/isCorrect is safe (not a
  * redaction leak) and gives the operator a complete audit of past tries.
  */
-function renderPriorAttempt(attempt: MergeReadinessAttempt, index: number): string {
+function renderPriorAttempt(
+  attempt: MergeReadinessAttempt,
+  index: number,
+  revealAssessment: boolean,
+): string {
   const header = [
     `### Attempt ${index + 1}: ${attempt.result}`,
     `- Profile: ${attempt.profile} | threshold ${Math.round(attempt.threshold * 100)}% | max rounds ${attempt.max_rounds}`,
@@ -70,13 +74,15 @@ function renderPriorAttempt(attempt: MergeReadinessAttempt, index: number): stri
       const answer = attempt.answers.find((a) => a.questionId === question.id);
       const options = question.options.map((option) => {
         const marks: string[] = [];
-        if (option.id === question.correctOptionId) marks.push("correct");
-        if (answer?.selectedOptionId === option.id) marks.push("selected");
+        if (revealAssessment && option.id === question.correctOptionId) marks.push("correct");
+        if (revealAssessment && answer?.selectedOptionId === option.id) marks.push("selected");
         return `- [${option.id}] ${option.text}${marks.length > 0 ? ` _(${marks.join(", ")})_` : ""}`;
       });
-      const correctness = answer
+      const correctness = answer && revealAssessment
         ? `Correct: ${answer.isCorrect ? "yes" : "no"}`
-        : "_Not answered._";
+        : answer
+          ? "_Prior answer recorded; assessment hidden until the current attempt completes._"
+          : "_Not answered._";
       return [
         `#### Q${qIndex + 1}. [${question.dimension}] ${question.stem}`,
         "",
@@ -170,7 +176,7 @@ export function formatMergeReadinessReport(state: MergeReadinessState): string {
     "",
     "",
     state.prior_attempts && state.prior_attempts.length > 0
-      ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => renderPriorAttempt(a, i))].join("\n")
+      ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => renderPriorAttempt(a, i, revealAssessment))].join("\n")
       : "",
     "",
     "## Merge Boundary", "", MERGE_BOUNDARY_STATEMENT,
@@ -221,10 +227,11 @@ export function redactMergeReadinessState(state: MergeReadinessState): Record<st
           ...attempt,
           questions: attempt.questions.map((q) => redactQuestion(q)),
           answers: attempt.answers.map((a) => {
-            const pa: Record<string, unknown> = { ...a };
-            delete pa.isCorrect;
-            return pa;
+            // A previous selection can reveal the key for an equivalent retry.
+            return { questionId: a.questionId, answeredAt: a.answeredAt };
           }),
+          readiness_score: undefined,
+          dimension_scores: {},
         })),
   };
 
