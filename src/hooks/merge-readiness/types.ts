@@ -92,6 +92,8 @@ export interface MergeReadinessState {
   override_reason?: string;
   /** Operator identity that recorded the override (session id of the override call). */
   override_owner?: string;
+  /** Operator identity that cancelled the gate (session id, or "legacy" for the no-session bulk path). */
+  cancel_owner?: string;
   change_summary: string;
   slug: string;
   /** Evidence source mode: --from-diff requires a diff; --from-artifacts accepts .omc artifacts. */
@@ -112,6 +114,7 @@ export interface MergeReadinessAttempt {
   result: MergeReadinessResult;
   override_reason?: string;
   override_owner?: string;
+  cancel_owner?: string;
   readiness_score: number;
   dimension_scores: Partial<Record<MergeReadinessDimension, number>>;
   questions: MergeReadinessMCQQuestion[];

@@ -53,6 +53,7 @@ function renderPriorAttempt(attempt: MergeReadinessAttempt, index: number): stri
     `- Change summary: ${attempt.change_summary || "_No change summary._"}`,
     attempt.override_reason ? `- Override reason: ${attempt.override_reason}` : "",
     attempt.override_owner ? `- Override owner: ${attempt.override_owner}` : "",
+    attempt.cancel_owner ? `- Cancel owner: ${attempt.cancel_owner}` : "",
     attempt.started_at ? `- Started: ${attempt.started_at}` : "",
     attempt.completed_at ? `- Completed: ${attempt.completed_at}` : "",
   ].filter((line) => line.length > 0).join("\n");
@@ -150,6 +151,7 @@ export function formatMergeReadinessReport(state: MergeReadinessState): string {
     `Result: ${state.result}`,
     state.override_reason ? `Override reason: ${state.override_reason}` : "",
     state.override_owner ? `Override owner: ${state.override_owner}` : "",
+    state.cancel_owner ? `Cancel owner: ${state.cancel_owner}` : "",
     "",
     revealAssessment
       ? `Correctness rate: ${Math.round(state.readiness_score * 100)}% / threshold ${Math.round(state.threshold * 100)}%`

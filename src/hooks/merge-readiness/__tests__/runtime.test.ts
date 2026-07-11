@@ -333,11 +333,11 @@ describe("merge-readiness runtime", () => {
     expect(state2.prior_attempts?.length).toBe(2);
   });
 
-  it("fails closed when state cannot be persisted (invalid session id)", () => {
-    // tempDir has a diff, so without the persistence failure this would be pending.
-    const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", "bad/session");
-    expect(state.result).toBe("blocked");
-    expect(state.validation_errors?.some((e) => e.includes("persisted"))).toBe(true);
+  it("rejects an invalid session id early before evidence collection (path separator)", () => {
+    // An invalid session id (path separator) is rejected at the entry of
+    // createInitialMergeReadinessState by validateSessionId, before any path
+    // join or evidence collection - rather than fail-closing to blocked.
+    expect(() => createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", "bad/session")).toThrow();
   });
 
   it("mutators never surface a phantom pass/override when the write cannot land", () => {
@@ -888,5 +888,33 @@ describe("merge-readiness runtime", () => {
     expect(state?.active).toBe(true);
     expect(state?.validation_errors?.some((e) => e.includes("session id"))).toBe(true);
     expect(readMergeReadinessState(tempDir, undefined)?.result).not.toBe("overridden");
+  });
+
+  it("rejects a traversal session id before scanning the session state dir", () => {
+    // A session id with traversal sequences must be rejected before
+    // listArtifactFiles joins it into .omc/state/sessions/<sessionId>/.
+    expect(() => createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", "../../foo")).toThrow();
+    expect(() => createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", "../bar")).toThrow();
+  });
+
+  it("cancel records the operator identity (cancel_owner parity with override)", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    const state = cancelMergeReadiness(tempDir, sessionId);
+    expect(state?.cancel_owner).toBe(sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.cancel_owner).toBe(sessionId);
+  });
+
+  it("cancel records a synthetic owner for the no-session bulk path", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", undefined);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, undefined);
+    const state = cancelMergeReadiness(tempDir, undefined);
+    expect(state?.cancel_owner).toBe("legacy");
   });
 });

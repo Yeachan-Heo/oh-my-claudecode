@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, relative } from "path";
 import { readModeState, writeModeState } from "../../lib/mode-state-io.js";
 import { MODE_NAMES, MODE_STATE_FILE_MAP } from "../../lib/mode-names.js";
-import { getOmcRoot, resolveToWorktreeRoot } from "../../lib/worktree-paths.js";
+import { getOmcRoot, resolveToWorktreeRoot, validateSessionId } from "../../lib/worktree-paths.js";
 import {
   computeCorrectnessRate,
   hasRequiredDimensionCoverage,
@@ -402,6 +402,10 @@ export function createInitialMergeReadinessState(
   sessionId?: string,
   baseRef?: string,
 ): MergeReadinessState {
+  // Validate sessionId before any path join: listArtifactFiles joins it into
+  // .omc/state/sessions/<sessionId>/ for evidence collection, and an unvalidated
+  // traversal id (../../) would scan arbitrary directories outside that scope.
+  if (sessionId) validateSessionId(sessionId);
   const now = new Date().toISOString();
   const profile = parseMergeReadinessProfile(promptText);
   const changeSummary = extractChangeSummary(promptText);
@@ -466,6 +470,7 @@ export function createInitialMergeReadinessState(
       result: prior.result,
       override_reason: prior.override_reason,
       override_owner: prior.override_owner,
+      cancel_owner: prior.cancel_owner,
       readiness_score: prior.readiness_score,
       dimension_scores: { ...prior.dimension_scores },
       questions: prior.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
@@ -683,6 +688,10 @@ export function cancelMergeReadiness(directory: string, sessionId?: string): Mer
   state.active = false;
   state.phase = "complete";
   state.result = "cancelled";
+  // Record who cancelled for audit parity with override_owner. The state_clear
+  // bulk/legacy path cancels with no session id; record a synthetic owner there
+  // rather than rejecting (cancel is an abandonment, not a discretionary bypass).
+  state.cancel_owner = sessionId ?? "legacy";
   state.completed_at = state.updated_at = new Date().toISOString();
   delete state.pending_question;
   return persistOrFailClosed(workingDir, state, sessionId);
