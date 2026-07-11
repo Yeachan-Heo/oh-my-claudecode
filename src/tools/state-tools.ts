@@ -1724,8 +1724,8 @@ export const stateTools = [
       const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = setMergeReadinessContent(directory, args, sessionId);
-      if (!state) {
-        return { content: [{ type: 'text' as const, text: 'Merge-readiness content rejected: no active gate. Call merge_readiness_start first.' }], isError: true };
+      if (!state || !state.active) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness content rejected: no active gate (the gate is missing or already terminal - pass/cancelled/overridden). Call merge_readiness_start first.' }], isError: true };
       }
       const errors = state.validation_errors ?? [];
       return { content: [{ type: 'text' as const, text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(' ')}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? 'none'}` }], ...(errors.length > 0 ? { isError: true } : {}) };

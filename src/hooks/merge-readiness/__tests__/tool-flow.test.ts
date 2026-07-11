@@ -190,6 +190,44 @@ describe("merge-readiness standalone tool flow", () => {
     expect(readMergeReadinessState(tempDir, session)?.result).toBe("paused");
   });
 
+  it("refuses to submit content on a terminal (pass) gate instead of false-accepting", async () => {
+    const start = findTool("merge_readiness_start");
+    const setContent = findTool("merge_readiness_set_content");
+    const recordAnswer = findTool("merge_readiness_record_answer");
+    const session = "terminal-session";
+
+    await start.handler({ summary: "/merge-readiness --quick change", workingDirectory: tempDir, session_id: session });
+    const questions = [
+      { id: "q1", dimension: "why", stem: "why?", options: [{ id: "a", text: "correct" }, { id: "b", text: "wrong" }], correctOptionId: "a" },
+      { id: "q2", dimension: "change", stem: "change?", options: [{ id: "a", text: "correct" }, { id: "b", text: "wrong" }], correctOptionId: "a" },
+      { id: "q3", dimension: "risk", stem: "risk?", options: [{ id: "a", text: "correct" }, { id: "b", text: "wrong" }], correctOptionId: "a" },
+    ];
+    await setContent.handler({
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions, workingDirectory: tempDir, session_id: session,
+    });
+    for (const q of questions) {
+      await recordAnswer.handler({ questionId: q.id, optionId: "a", workingDirectory: tempDir, session_id: session });
+    }
+    expect(readMergeReadinessState(tempDir, session)?.result).toBe("pass");
+    expect(readMergeReadinessState(tempDir, session)?.active).toBe(false);
+
+    // Gate is terminal (pass, active=false). setMergeReadinessContent returns the
+    // inactive state (non-null), so the handler MUST check state.active - not
+    // just null - or it false-accepts and arms a dead-end quiz on a resumed/
+    // passed session.
+    const resubmit = await setContent.handler({
+      why: "w2", whatChanged: "wc2", tradeoffs: "t2", risksConsidered: "r2", teamUnderstanding: "tu2",
+      questions, workingDirectory: tempDir, session_id: session,
+    });
+    expect(resubmit.isError).toBe(true);
+    expect(textOf(resubmit)).toContain("no active gate");
+    expect(textOf(resubmit)).not.toContain("accepted");
+    // The terminal pass state is untouched (no new quiz armed).
+    expect(readMergeReadinessState(tempDir, session)?.result).toBe("pass");
+    expect(readMergeReadinessState(tempDir, session)?.active).toBe(false);
+  });
+
   it("state_clear without session_id only cancels the caller's session", async () => {
     const start = findTool("merge_readiness_start");
     const clear = findTool("state_clear");

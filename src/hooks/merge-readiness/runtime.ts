@@ -114,19 +114,27 @@ function listArtifactFiles(directory: string): string[] {
     found.push(relativePath);
   };
 
+  // Cap evidence per artifact root (not globally): a repo with many unrelated
+  // files under plans/ must not exhaust the cap before logs/specs/interviews
+  // are inspected, or valid test/review evidence in those later roots is missed
+  // and the gate blocks incorrectly on artifact-only / --from-artifacts runs.
+  const MAX_PER_ROOT = 40;
   for (const candidate of dirCandidates) {
     const stack = [candidate];
-    while (stack.length > 0 && found.length < 40) {
+    let perRoot = 0;
+    while (stack.length > 0 && perRoot < MAX_PER_ROOT) {
       const current = stack.pop();
       if (!current) continue;
       try {
         const entries = readdirSync(current, { withFileTypes: true });
         for (const entry of entries) {
+          if (perRoot >= MAX_PER_ROOT) break;
           const full = join(current, entry.name);
           if (entry.isDirectory()) {
             stack.push(full);
           } else if (entry.isFile() && /\.(md|json|txt|log)$/i.test(entry.name)) {
             pushRelative(full);
+            perRoot++;
           }
         }
       } catch {

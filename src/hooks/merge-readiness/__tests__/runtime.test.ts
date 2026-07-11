@@ -650,6 +650,33 @@ describe("merge-readiness runtime", () => {
     }
   });
 
+  it("scans later artifact roots after an earlier root fills its per-directory cap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-mr-perroot-cap-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      writeFileSync(join(dir, "README.md"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      // Clean tree (no diff). plans/ has 45 unrelated files - more than the
+      // 40-per-root cap. specs/ has one valid test-evidence file. Previously the
+      // global 40-file cap was exhausted by plans/ and specs/ was never scanned,
+      // so --from-artifacts blocked despite valid evidence in a later root.
+      mkdirSync(join(dir, ".omc", "plans"), { recursive: true });
+      for (let i = 0; i < 45; i++) {
+        writeFileSync(join(dir, ".omc", "plans", `plan-${i}.md`), `plan notes ${i}\n`);
+      }
+      mkdirSync(join(dir, ".omc", "specs"), { recursive: true });
+      writeFileSync(join(dir, ".omc", "specs", "design.md"), "spec for the change\n");
+      const state = createInitialMergeReadinessState(dir, "/merge-readiness --from-artifacts change", sessionId);
+      expect(state.evidence.sourceArtifacts).toContain("specs/design.md");
+      expect(state.result).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("counts an active ralph mode-state file as evidence", () => {
     const dir = mkdtempSync(join(tmpdir(), "omc-mr-ralph-state-"));
     try {
