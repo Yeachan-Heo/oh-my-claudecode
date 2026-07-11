@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { canonicalizeTeamConfigWorkers } from '../worker-canonicalization.js';
 
 const mocks = vi.hoisted(() => ({
   getWorkerLiveness: vi.fn(async () => 'alive'),
@@ -215,11 +216,11 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     expect(snapshot?.nonReportingWorkers).toEqual([]);
   });
 
-  it('deduplicates duplicate worker rows from persisted config during monitoring', async () => {
+  it('monitors a valid config canonicalized from duplicate legacy worker rows', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-dedup-'));
     await writeConfigAndTask('pending');
     const root = join(cwd, '.omc', 'state', 'team', 'demo-team');
-    await writeFile(join(root, 'config.json'), JSON.stringify({
+    const config = canonicalizeTeamConfigWorkers({
       name: 'demo-team',
       task: 'demo',
       agent_type: 'claude',
@@ -239,7 +240,11 @@ describe('monitorTeamV2 pane-based stall inference', () => {
       next_task_id: 2,
       team_state_root: join(cwd, '.omc', 'state', 'team', 'demo-team'),
       workspace_mode: 'single',
-    }, null, 2), 'utf-8');
+    } as any);
+    expect(config.workers).toEqual([expect.objectContaining({
+      name: 'worker-1', index: 1, pane_id: '%2', assigned_tasks: ['1'],
+    })]);
+    await writeFile(join(root, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
 
     const { monitorTeamV2 } = await import('../runtime-v2.js');
     const snapshot = await monitorTeamV2('demo-team', cwd);

@@ -19,7 +19,7 @@ export interface RecoveryActivationGate {
 
 export type RecoveryActivationGateResult =
   | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' };
+  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' };
 
 interface GateRecord {
   recovery_id: string;
@@ -36,7 +36,7 @@ async function writeAtomic(path: string, value: GateRecord): Promise<void> {
   await rename(temporary, path);
 }
 
-async function waitForRecord(path: string, expected: GateRecord, timeoutMs: number, pollIntervalMs: number): Promise<boolean> {
+export async function waitForRecoveryGateRecord(path: string, expected: Omit<GateRecord, 'written_at'>, timeoutMs: number, pollIntervalMs = 100): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -66,14 +66,24 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
   const timeoutMs = gate.timeoutMs ?? 30_000;
   const pollIntervalMs = gate.pollIntervalMs ?? 100;
   await writeAtomic(gate.readyPath, expected);
-  if (!await waitForRecord(gate.activatePath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'activation_timeout' };
+  if (!await waitForRecoveryGateRecord(gate.activatePath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'activation_timeout' };
   // This marker proves the pane is gated and can be safely adopted by the owner.
   await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
-  if (!await waitForRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
+  if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
   const child = spawn(gate.providerArgv[0], gate.providerArgv.slice(1), {
     cwd: gate.cwd,
     env: { ...process.env, ...gate.env },
     stdio: 'inherit',
   });
-  return new Promise(resolve => child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal })));
+  const completion = new Promise<RecoveryActivationGateResult>(resolve => {
+    child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
+    child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
+  });
+  const spawned = await new Promise<boolean>(resolve => {
+    child.once('spawn', () => resolve(true));
+    child.once('error', () => resolve(false));
+  });
+  if (!spawned) return { outcome: 'provider_spawn_failed' };
+  await writeAtomic(`${gate.runPath}.launched`, { ...expected, written_at: new Date().toISOString() });
+  return completion;
 }

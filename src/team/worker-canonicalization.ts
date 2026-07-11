@@ -53,6 +53,10 @@ function chooseWinningWorker(existing: WorkerInfo, incoming: WorkerInfo): { winn
   return { winner: existing, loser: incoming };
 }
 
+/**
+ * Legacy aggregation only. Persisted config rows must be validated before this
+ * function is called; it intentionally retains historical trim-and-merge behavior.
+ */
 export function canonicalizeWorkers(workers: WorkerInfo[]): WorkerCanonicalizationResult {
   const byName = new Map<string, WorkerInfo>();
   const duplicateNames = new Set<string>();

@@ -109,6 +109,8 @@ export const TeamPaths = {
 
   scalingLock: (teamName: string) =>
     `.omc/state/team/${teamName}/.scaling-lock`,
+  configMutationLock: (teamName: string) =>
+    `.omc/state/team/${teamName}/.config-mutation.lock`,
 
   workerIdentity: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/identity.json`,
@@ -124,14 +126,26 @@ export const TeamPaths = {
     `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/${sequence}.json`,
   checkpointLatest: (teamName: string, taskId: string, claimTokenHash: string) =>
     `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/latest.json`,
-  taskRecoverySidecar: (teamName: string, taskId: string) =>
-    `.omc/state/team/${teamName}/recovery/task-sidecars/${normalizeTaskFileStem(taskId)}.json`,
+  taskRecoverySidecar: (teamName: string, recoveryId: string, taskId: string) => {
+    if (recoveryId.length === 0 || recoveryId.length > 128 || recoveryId === '.' || recoveryId === '..'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(recoveryId)) {
+      throw new Error('invalid_recovery_request_id');
+    }
+    const taskStem = normalizeTaskFileStem(taskId);
+    if (!/^task-\d+$/.test(taskStem)) throw new Error('invalid_task_id');
+    return `.omc/state/team/${teamName}/recovery/task-sidecars/${recoveryId}/${taskStem}.json`;
+  },
   taskRecoveryReservation: (teamName: string, taskId: string) =>
     `.omc/state/team/${teamName}/recovery/reservations/${normalizeTaskFileStem(taskId)}.json`,
   ownerEpochs: (teamName: string) =>
     `.omc/state/team/${teamName}/recovery/owner-epochs`,
   ownerEpoch: (teamName: string, epoch: number) =>
     `.omc/state/team/${teamName}/recovery/owner-epochs/${epoch}.json`,
+  recoveryOwnerBootstrapCandidate: (teamName: string, expectedEpoch: number, nonce: string) => {
+    if (nonce.length === 0 || nonce.length > 128 || nonce === '.' || nonce === '..'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(nonce)) throw new Error('invalid_recovery_owner_bootstrap_nonce');
+    return `.omc/state/team/${teamName}/recovery/owner-bootstrap/${expectedEpoch}/${nonce}.json`;
+  },
   recoveryIntents: (teamName: string) =>
     `.omc/state/team/${teamName}/recovery/intents`,
   recoveryIntent: (teamName: string, recoveryId: string) =>
@@ -149,12 +163,22 @@ export const TeamPaths = {
   recoveryRun: (teamName: string, recoveryId: string, paneAttemptId: string) =>
     `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/run.json`,
   recoveryRequestsRoot: () => '.omc/state/team-recovery/by-request',
+  recoveryAdmissionLock: (payloadHash: string) =>
+    `.omc/state/team-recovery/admission-locks/${payloadHash}.lock`,
+  recoveryLifecycleLock: (workspaceHash: string, teamName: string) =>
+    `.omc/state/team-recovery/lifecycle-locks/${workspaceHash}/${teamName}.lock`,
   recoveryRequestPending: (requestId: string) =>
     `.omc/state/team-recovery/by-request/${requestId}.pending.json`,
   recoveryRequestResult: (requestId: string) =>
     `.omc/state/team-recovery/by-request/${requestId}.result.json`,
   recoveryResultByTeam: (workspaceHash: string, teamName: string, recoveryId: string) =>
     `.omc/state/team-recovery/by-team/${workspaceHash}/${teamName}/${recoveryId}.json`,
+  recoveryFinalIndexLock: (workspaceHash: string, teamName: string, recoveryId: string) =>
+    `.omc/state/team-recovery/index-locks/${workspaceHash}/${teamName}/${recoveryId}.lock`,
+  scalingRollbackFailure: (teamName: string, recordedAt: number) =>
+    `.omc/state/team/${teamName}/scaling-rollback/${recordedAt}.json`,
+  recoveryPaneRollbackFailure: (teamName: string, recoveryId: string, paneAttemptId: string, recordedAt: number) =>
+    `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}/${paneAttemptId}-${recordedAt}.json`,
   recoveryAuditIndex: () => '.omc/state/team-recovery/audit.jsonl',
 } as const;
 

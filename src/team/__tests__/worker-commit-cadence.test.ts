@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { readFile as readFileAsync, writeFile as writeFileAsync } from 'node:fs/promises';
 import { tmpdir } from 'os';
 import {
   installPostToolUseHook,
+  installCommitCadence,
+  uninstallCommitCadence,
   pauseHookViaSentinel,
   resumeHookViaSentinel,
   isHookPaused,
@@ -425,5 +428,72 @@ describe('worker name validation (shell injection guard)', () => {
     await expect(
       installPostToolUseHook(worktreePath, 'alice-1_writer'),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('uninstallCommitCadence durability', () => {
+  let worktreePath: string;
+
+  const context = (): {
+    teamName: string;
+    workerName: string;
+    worktreePath: string;
+    agentType: 'claude';
+    enabled: true;
+    serviceGeneration: number;
+    attemptId: string;
+  } => ({
+    teamName: 'cadence-durability', workerName: 'writer', worktreePath, agentType: 'claude', enabled: true,
+    serviceGeneration: 7, attemptId: '7:owner',
+  });
+
+  beforeEach(() => {
+    worktreePath = mkWorktree();
+  });
+
+  afterEach(() => {
+    rmSync(worktreePath, { recursive: true, force: true });
+  });
+
+  it('retains generation ownership after malformed settings and removes it only after a durable retry', async () => {
+    const current = context();
+    await installCommitCadence(current);
+    const settingsPath = join(worktreePath, '.claude', 'settings.json');
+    writeFileSync(settingsPath, '{ malformed settings', 'utf-8');
+
+    await expect(uninstallCommitCadence(current)).rejects.toThrow();
+    await expect(installCommitCadence({ ...current, serviceGeneration: 6, attemptId: '6:owner' }))
+      .resolves.toEqual({ method: 'none' });
+
+    writeFileSync(settingsPath, JSON.stringify({ hooks: { PostToolUse: [] } }), 'utf-8');
+    await expect(uninstallCommitCadence(current)).resolves.toBeUndefined();
+  });
+
+  it('propagates non-ENOENT read errors and permits a later durable uninstall retry', async () => {
+    const current = context();
+    await installCommitCadence(current);
+    const settingsPath = join(worktreePath, '.claude', 'settings.json');
+    rmSync(settingsPath);
+    mkdirSync(settingsPath);
+
+    await expect(uninstallCommitCadence(current)).rejects.toThrow();
+
+    rmSync(settingsPath, { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({ hooks: { PostToolUse: [] } }), 'utf-8');
+    await expect(uninstallCommitCadence(current)).resolves.toBeUndefined();
+  });
+
+  it('propagates write failures and permits a later durable uninstall retry', async () => {
+    const current = context();
+    await installCommitCadence(current);
+    await expect(uninstallCommitCadence(current, {
+      readFile: readFileAsync,
+      writeFile: vi.fn(async () => { throw new Error('settings write denied'); }) as typeof writeFileAsync,
+    })).rejects.toThrow('settings write denied');
+    await expect(uninstallCommitCadence(current)).resolves.toBeUndefined();
+
+    const settings = readSettings(worktreePath);
+    const postToolUse = (settings.hooks as Record<string, unknown>)['PostToolUse'] as Array<Record<string, unknown>>;
+    expect(postToolUse).toEqual([]);
   });
 });

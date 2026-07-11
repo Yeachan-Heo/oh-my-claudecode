@@ -347,7 +347,10 @@ export async function installCommitCadence(
  * Removes the auto-commit PostToolUse hook from .claude/settings.json.
  * For fallback-poll workers the caller is responsible for stopping the poller handle.
  */
-export async function uninstallCommitCadence(ctx: WorkerCadenceContext & Partial<CadenceOwnership>): Promise<void> {
+export async function uninstallCommitCadence(
+  ctx: WorkerCadenceContext & Partial<CadenceOwnership>,
+  io: { readFile: typeof readFile; writeFile: typeof writeFile } = { readFile, writeFile },
+): Promise<void> {
   if (!ownsCadence(ctx)) return;
   const owner = cadenceOwners.get(ctx.worktreePath);
   const ownsRegisteredGeneration = owner && ctx.serviceGeneration !== undefined
@@ -358,23 +361,28 @@ export async function uninstallCommitCadence(ctx: WorkerCadenceContext & Partial
   }
 
   const settingsPath = join(ctx.worktreePath, '.claude', 'settings.json');
+  let raw: string;
   try {
-    const raw = await readFile(settingsPath, 'utf-8');
-    const parsed = JSON.parse(raw) as ClaudeSettings;
-    const filtered = (parsed.hooks?.PostToolUse ?? []).filter(
-      (h) => h.matcher !== HOOK_MATCHER,
-    );
-    const updated: ClaudeSettings = {
-      ...parsed,
-      hooks: {
-        ...parsed.hooks,
-        PostToolUse: filtered,
-      },
-    };
-    await writeFile(settingsPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
-  } catch {
-    // File absent — nothing to uninstall.
+    raw = await io.readFile(settingsPath, 'utf-8');
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT') {
+      if (ownsRegisteredGeneration) cadenceOwners.delete(ctx.worktreePath);
+      return;
+    }
+    throw error;
   }
+  const parsed = JSON.parse(raw) as ClaudeSettings;
+  const filtered = (parsed.hooks?.PostToolUse ?? []).filter(
+    (h) => h.matcher !== HOOK_MATCHER,
+  );
+  const updated: ClaudeSettings = {
+    ...parsed,
+    hooks: {
+      ...parsed.hooks,
+      PostToolUse: filtered,
+    },
+  };
+  await io.writeFile(settingsPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
   if (ownsRegisteredGeneration) cadenceOwners.delete(ctx.worktreePath);
 }
 

@@ -81,13 +81,14 @@ export interface RecoveryContinuationInstruction {
   workerName: string;
   taskId: string;
   claimToken: string;
+  taskVersion: number;
   sequence: number;
   resumePayload: unknown;
 }
 
 /** Render owner-adopted continuation data only after the activation gate opens. */
 export function renderRecoveryContinuationInstruction(instruction: RecoveryContinuationInstruction): string {
-  const checkpoint = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${instruction.teamName}\\",\\"task_id\\":\\"${instruction.taskId}\\",\\"worker\\":\\"${instruction.workerName}\\",\\"claim_token\\":\\"${instruction.claimToken}\\",\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
+  const checkpoint = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${instruction.teamName}\\",\\"task_id\\":\\"${instruction.taskId}\\",\\"worker\\":\\"${instruction.workerName}\\",\\"claim_token\\":\\"${instruction.claimToken}\\",\\"task_version\\":${instruction.taskVersion},\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
   return [
     '## Recovery Continuation',
     `You own adopted task ${instruction.taskId} at checkpoint sequence ${instruction.sequence}.`,
@@ -177,7 +178,7 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
   const releaseClaimCommand = formatOmcCliInvocation(`team api release-task-claim --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"claim_token\\":\\"<claim_token>\\",\\"worker\\":\\"${workerName}\\"}" --json`);
   const mailboxListCommand = formatOmcCliInvocation(`team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\"}" --json`);
   const mailboxDeliveredCommand = formatOmcCliInvocation(`team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\",\\"message_id\\":\\"<id>\\"}" --json`);
-  const checkpointTaskCommand = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName}\\",\\"claim_token\\":\\"<claim_token>\\",\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
+  const checkpointTaskCommand = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName}\\",\\"claim_token\\":\\"<claim_token>\\",\\"task_version\\":<current_task_version>,\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
   const teamApiCommand = formatOmcCliInvocation('team api');
   const teamCommand = formatOmcCliInvocation('team');
 

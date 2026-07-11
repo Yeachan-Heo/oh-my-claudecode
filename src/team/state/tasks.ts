@@ -322,8 +322,8 @@ export async function listTasks(
 }
 
 export interface RecoveryTaskTransitionDeps extends ClaimTaskDeps {
-  readRecoverySidecar: (teamName: string, taskId: string, cwd: string) => Promise<TaskRecoveryRequeueSidecar | null | 'malformed'>;
-  writeRecoverySidecar: (teamName: string, taskId: string, sidecar: TaskRecoveryRequeueSidecar, cwd: string) => Promise<void>;
+  readRecoverySidecar: (teamName: string, recoveryId: string, taskId: string, cwd: string) => Promise<TaskRecoveryRequeueSidecar | null | 'malformed'>;
+  writeRecoverySidecar: (teamName: string, recoveryId: string, taskId: string, sidecar: TaskRecoveryRequeueSidecar, cwd: string) => Promise<void>;
   selectRecoveryCheckpoint: (teamName: string, task: TeamTaskV2, cwd: string) => Promise<{ ok: true; checkpoint: TaskRecoveryCheckpoint; path: string } | { ok: false; error: 'missing' | 'malformed' | 'stale' | 'ambiguous' }>;
   readRecoveryCheckpoint: (path: string) => Promise<{ ok: true; checkpoint: TaskRecoveryCheckpoint; path: string } | { ok: false; error: 'missing' | 'malformed' | 'stale' | 'ambiguous' }>;
   verifyAdoptionToken: (token: string, hash: string) => boolean;
@@ -342,7 +342,7 @@ export async function requeueRecoveredTask(input: RequeueRecoveredTaskInput, dep
     const current = await deps.readTask(deps.teamName, input.taskId, deps.cwd);
     if (!current) return { ok: false as const, error: 'task_not_found' as const };
     const task = deps.normalizeTask(current);
-    const sidecar = await deps.readRecoverySidecar(deps.teamName, input.taskId, deps.cwd);
+    const sidecar = await deps.readRecoverySidecar(deps.teamName, input.recoveryId, input.taskId, deps.cwd);
     if (sidecar === 'malformed') return { ok: false as const, error: 'task_requeue_failed' as const };
     if (sidecar) {
       const reservation = reservationFromSidecar(sidecar);
@@ -361,7 +361,7 @@ export async function requeueRecoveredTask(input: RequeueRecoveredTaskInput, dep
     if (!selected.ok) return { ok: false as const, error: checkpointError(selected.error) };
     const createdAt = new Date().toISOString();
     const next: TaskRecoveryRequeueSidecar = { schema_version: 1, recovery_id: input.recoveryId, request_id: input.requestId, task_id: task.id, old_task_version: task.version, old_owner: task.owner, old_claim_token: task.claim.token, old_claim_leased_until: task.claim.leased_until, continuation_sequence: selected.checkpoint.sequence, checkpoint_path: selected.path, checkpoint_hash: selected.checkpoint.resume_payload_hash, replacement_worker: input.replacementWorker, replacement_generation: input.replacementGeneration, adoption_token_hash: input.adoptionTokenHash, created_at: createdAt };
-    await deps.writeRecoverySidecar(deps.teamName, input.taskId, next, deps.cwd);
+    await deps.writeRecoverySidecar(deps.teamName, input.recoveryId, input.taskId, next, deps.cwd);
     const reservation = reservationFromSidecar(next);
     const updated: TeamTaskV2 = { ...task, status: 'pending', owner: undefined, claim: undefined, version: task.version + 1, recovery_reservation: reservation };
     await deps.writeAtomic(deps.taskFilePath(deps.teamName, input.taskId, deps.cwd), JSON.stringify(updated, null, 2));

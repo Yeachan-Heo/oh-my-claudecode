@@ -25,12 +25,13 @@ async function initTeamState(teamName: string, wd: string): Promise<void> {
   await mkdir(join(base, 'mailbox'), { recursive: true });
   await mkdir(join(base, 'events'), { recursive: true });
   await writeFile(join(base, 'config.json'), JSON.stringify({
-    team_name: teamName,
+    name: teamName,
     task: 'test',
     agent_type: 'executor',
     worker_count: 1,
     workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] }],
     created_at: new Date().toISOString(),
+    tmux_session: 'test-session:0',
   }));
 }
 
@@ -220,6 +221,7 @@ describe('teamCommand api operations', () => {
       worker_count: 1,
       workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [] }],
       created_at: new Date().toISOString(),
+      tmux_session: 'stale-session:0',
       next_task_id: 1,
     }, null, 2));
 

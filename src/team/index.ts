@@ -248,6 +248,7 @@ export {
   setRuntimeOwnerRecoveryClient,
   recoverDeadWorkerV2,
   readRecoverDeadWorkerV2Outcome,
+  readRecoverDeadWorkerV2Result,
 } from './runtime-v2.js';
 export type {
   RecoverDeadWorkerV2Options,

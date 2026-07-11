@@ -34,6 +34,16 @@ describe('canonicalizeWorkers', () => {
     });
   });
 
+  it('retains trim-and-merge behavior for non-authoritative legacy aggregation', () => {
+    const result = canonicalizeWorkers([
+      { name: ' worker-1 ', index: 1, role: 'executor', assigned_tasks: [] },
+      { name: 'worker-1', index: 2, role: 'executor', assigned_tasks: ['1'] },
+    ]);
+
+    expect(result.duplicateNames).toEqual(['worker-1']);
+    expect(result.workers).toEqual([expect.objectContaining({ name: 'worker-1', assigned_tasks: ['1'] })]);
+  });
+
   it('syncs worker_count with deduplicated workers array', () => {
     const config = {
       name: 'test-team',

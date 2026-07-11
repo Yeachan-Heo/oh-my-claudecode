@@ -75,6 +75,7 @@ export * from './hooks/index.js';
 export {
   recoverDeadWorkerV2,
   readRecoverDeadWorkerV2Outcome,
+  readRecoverDeadWorkerV2Result,
   teamPublishTaskRecoveryCheckpoint,
 } from './team/index.js';
 export type {

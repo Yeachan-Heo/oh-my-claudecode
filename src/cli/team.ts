@@ -740,7 +740,7 @@ export async function executeTeamApiOperation(
     };
   }
 
-  const normalizedInput = {
+  const normalizedInput: Record<string, unknown> = {
     ...input,
     ...(typeof input.teamName === 'string' && input.teamName.trim() !== '' && typeof input.team_name !== 'string'
       ? { team_name: input.teamName }
@@ -776,6 +776,10 @@ export async function executeTeamApiOperation(
       ? { timeout_ms: input.timeoutMs }
       : {}),
   };
+  for (const alias of ['teamName', 'taskId', 'workerName', 'fromWorker', 'toWorker', 'messageId',
+    'claimToken', 'taskVersion', 'resumePayload', 'requestId', 'timeoutMs']) {
+    delete normalizedInput[alias];
+  }
 
   const result = await executeCanonicalTeamApiOperation(canonicalOperation, normalizedInput, cwd);
   return result;

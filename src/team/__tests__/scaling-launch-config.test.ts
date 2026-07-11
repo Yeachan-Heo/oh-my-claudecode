@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import type { CliAgentType } from '../model-contract.js';
+import type { TeamConfig } from '../types.js';
 
 const tmuxUtilsMocks = vi.hoisted(() => ({
   tmuxExec: vi.fn(),
@@ -12,6 +13,7 @@ const tmuxUtilsMocks = vi.hoisted(() => ({
 const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn(),
   getWorkerEnv: vi.fn(),
+  validateWorkerLaunchDescriptor: vi.fn((value: unknown) => value),
 }));
 
 const teamOpsMocks = vi.hoisted(() => ({
@@ -25,6 +27,10 @@ const teamOpsMocks = vi.hoisted(() => ({
 const monitorMocks = vi.hoisted(() => ({
   withScalingLock: vi.fn(),
   saveTeamConfig: vi.fn(),
+  migrateTeamConfigRevision: vi.fn(),
+  readRevisionedTeamConfig: vi.fn(),
+  saveTeamConfigAtRevision: vi.fn(),
+  currentConfig: null as TeamConfig | null,
 }));
 
 const tmuxSessionMocks = vi.hoisted(() => ({
@@ -53,6 +59,7 @@ vi.mock('../../cli/tmux-utils.js', () => ({
 vi.mock('../model-contract.js', () => ({
   buildWorkerArgv: modelContractMocks.buildWorkerArgv,
   getWorkerEnv: modelContractMocks.getWorkerEnv,
+  validateWorkerLaunchDescriptor: modelContractMocks.validateWorkerLaunchDescriptor,
   assertHeadlessSupported: () => {},
   isHeadlessSupportedOnPlatform: () => true,
 }));
@@ -68,6 +75,9 @@ vi.mock('../team-ops.js', () => ({
 vi.mock('../monitor.js', () => ({
   withScalingLock: monitorMocks.withScalingLock,
   saveTeamConfig: monitorMocks.saveTeamConfig,
+  migrateTeamConfigRevision: monitorMocks.migrateTeamConfigRevision,
+  readRevisionedTeamConfig: monitorMocks.readRevisionedTeamConfig,
+  saveTeamConfigAtRevision: monitorMocks.saveTeamConfigAtRevision,
 }));
 
 vi.mock('../tmux-session.js', () => ({
@@ -92,18 +102,10 @@ import { scaleDown, scaleUp } from '../scaling.js';
 
 describe('scaleUp launch config', () => {
   let cwd: string;
+  let config: TeamConfig;
 
-  beforeEach(async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-launch-config-'));
-
-    vi.clearAllMocks();
-
-    monitorMocks.withScalingLock.mockImplementation(async (
-      _teamName: string,
-      _leaderCwd: string,
-      fn: () => Promise<unknown>,
-    ) => fn());
-    teamOpsMocks.teamReadConfig.mockResolvedValue({
+  function makeConfig(overrides: Partial<TeamConfig> = {}): TeamConfig {
+    const base: TeamConfig = {
       name: 'demo-team',
       task: 'demo',
       agent_type: 'claude',
@@ -119,7 +121,36 @@ describe('scaleUp launch config', () => {
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
+      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+    };
+    return { ...base, ...overrides };
+  }
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-launch-config-'));
+
+    vi.clearAllMocks();
+    monitorMocks.currentConfig = null;
+
+    monitorMocks.withScalingLock.mockImplementation(async (
+      _teamName: string,
+      _leaderCwd: string,
+      fn: () => Promise<unknown>,
+    ) => fn());
+    monitorMocks.migrateTeamConfigRevision.mockImplementation(async () => {
+      const config = await teamOpsMocks.teamReadConfig() as TeamConfig | null;
+      monitorMocks.currentConfig = config;
+      return config ? { config, stateRevision: config.state_revision ?? 0 } : null;
     });
+    monitorMocks.readRevisionedTeamConfig.mockImplementation(async () => monitorMocks.currentConfig
+      ? { config: monitorMocks.currentConfig, stateRevision: monitorMocks.currentConfig.state_revision ?? 0 } : null);
+    monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (next: TeamConfig, expectedRevision: number) => {
+      if (!monitorMocks.currentConfig || (monitorMocks.currentConfig.state_revision ?? 0) !== expectedRevision) return false;
+      monitorMocks.currentConfig = next;
+      return true;
+    });
+    config = makeConfig();
+    teamOpsMocks.teamReadConfig.mockImplementation(async () => config);
     modelContractMocks.getWorkerEnv.mockImplementation((teamName: string, workerName: string, agentType: string) => ({
       OMC_TEAM_WORKER: `${teamName}/${workerName}`,
       OMC_TEAM_NAME: teamName,
@@ -192,26 +223,51 @@ describe('scaleUp launch config', () => {
         OMC_TEAM_LEADER_CWD: resolve(cwd),
       }),
     }));
+    const reservation = monitorMocks.saveTeamConfigAtRevision.mock.calls
+      .map(([candidate]) => candidate as TeamConfig)
+      .find(candidate => candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting'));
+    expect(reservation).toBeDefined();
+    expect(reservation!.active_scale_up).toEqual(expect.objectContaining({ phase: 'effects' }));
+    expect(reservation!.workers[0]).toMatchObject({ worker_cli: agentType, operational_state: 'starting',
+      launch_descriptor: { schema_version: 1, provider: agentType, model: null,
+        binary: workerArgv[0], args: workerArgv.slice(1) } });
+    const splitIndex = tmuxUtilsMocks.tmuxSpawn.mock.calls.findIndex(([args]) => args[0] === 'split-window');
+    expect(splitIndex).toBeGreaterThanOrEqual(0);
+    expect(monitorMocks.saveTeamConfigAtRevision.mock.invocationCallOrder.find((_, index) => {
+      const candidate = monitorMocks.saveTeamConfigAtRevision.mock.calls[index]?.[0] as TeamConfig;
+      return candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting');
+    })!).toBeLessThan(tmuxUtilsMocks.tmuxSpawn.mock.invocationCallOrder[splitIndex]!);
+  });
+
+  it('rejects scale-up before external effects when recovery is already reserved', async () => {
+    config = makeConfig({ state_revision: 4, next_worker_index: 2,
+      active_recovery: { request_id: 'request-1', recovery_id: 'recovery-1', worker_name: 'worker-1', owner_epoch: 1,
+        owner_nonce: 'owner-1', phase: 'reserved', state_revision: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } });
+    const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+    expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+    expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+  });
+
+  it('rejects scale-down while an unverifiable scale-up reservation is active', async () => {
+    config = makeConfig({ state_revision: 4, worker_count: 2, next_worker_index: 3,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_up: { operation_id: 'scale-up-1', phase: 'effects', pid: 999_999,
+        process_started_at: 'malformed', state_revision: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    });
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'] },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+    expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+    expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
   });
 
   it('rolls back a pending worktree when scale-up fails before worker config is saved', async () => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/codex']);
-    teamOpsMocks.teamReadConfig.mockResolvedValueOnce({
-      name: 'demo-team',
-      task: 'demo',
+    config = makeConfig({
       agent_type: 'codex',
-      worker_launch_mode: 'interactive',
-      worker_count: 0,
-      max_workers: 20,
-      workers: [],
-      created_at: new Date().toISOString(),
-      tmux_session: 'demo-session:0',
-      next_task_id: 2,
-      next_worker_index: 1,
-      leader_pane_id: '%0',
-      hud_pane_id: null,
-      resize_hook_name: null,
-      resize_hook_target: null,
       team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
       worktree_mode: 'named',
     });
@@ -246,22 +302,8 @@ describe('scaleUp launch config', () => {
 
   it('rolls back a pending worktree when root overlay installation fails', async () => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/codex']);
-    teamOpsMocks.teamReadConfig.mockResolvedValueOnce({
-      name: 'demo-team',
-      task: 'demo',
+    config = makeConfig({
       agent_type: 'codex',
-      worker_launch_mode: 'interactive',
-      worker_count: 0,
-      max_workers: 20,
-      workers: [],
-      created_at: new Date().toISOString(),
-      tmux_session: 'demo-session:0',
-      next_task_id: 2,
-      next_worker_index: 1,
-      leader_pane_id: '%0',
-      hud_pane_id: null,
-      resize_hook_name: null,
-      resize_hook_target: null,
       team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
       worktree_mode: 'named',
     });
@@ -317,7 +359,7 @@ describe('scaleUp launch config', () => {
       resize_hook_target: null,
       team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
     };
-    teamOpsMocks.teamReadConfig.mockResolvedValueOnce(config);
+    teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
     tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
 
@@ -357,7 +399,7 @@ describe('scaleUp launch config', () => {
       resize_hook_target: null,
       team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
     };
-    teamOpsMocks.teamReadConfig.mockResolvedValueOnce(config);
+    teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
     tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
     gitWorktreeMocks.prepareWorkerWorktreeForRemoval.mockImplementationOnce(() => {
@@ -398,7 +440,7 @@ describe('scaleUp launch config', () => {
       resize_hook_target: null,
       team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
     };
-    teamOpsMocks.teamReadConfig.mockResolvedValueOnce(config);
+    teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
     tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('alive');
 

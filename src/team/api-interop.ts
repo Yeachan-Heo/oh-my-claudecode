@@ -50,6 +50,7 @@ import { listDispatchRequests, markDispatchRequestDelivered, markDispatchRequest
 import { generateMailboxTriggerMessage } from './worker-bootstrap.js';
 import { shutdownTeam } from './runtime.js';
 import { shutdownTeamV2, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome } from './runtime-v2.js';
+import { isSafeRecoveryRequestId } from './recovery-request-store.js';
 import { inspectTeamWorktreeCleanupSafety } from './git-worktree.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import type { RecoverDeadWorkerV2Result, TeamTaskDelegationPlan } from './types.js';
@@ -290,7 +291,13 @@ function assertNoNativeWorktreeCleanupEvidence(teamName: string, cwd: string): v
 }
 
 async function executeTeamCleanupViaRuntime(teamName: string, cwd: string): Promise<void> {
-  const config = await teamReadConfig(teamName, cwd) as unknown;
+  let config: unknown;
+  try {
+    config = await teamReadConfig(teamName, cwd) as unknown;
+  } catch (error) {
+    assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
+    throw error;
+  }
 
   if (!config) {
     assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
@@ -616,15 +623,16 @@ export async function executeTeamApiOperation(
         const workerName = requiredString(args, 'worker');
         const requestId = args.request_id;
         const timeoutMs = args.timeout_ms;
-        if (!teamName || !workerName || (requestId !== undefined && (typeof requestId !== 'string' || requestId.trim() === ''))
-          || (timeoutMs !== undefined && (!isFiniteInteger(timeoutMs) || timeoutMs <= 0))) {
-          return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name and worker are required; request_id must be a non-empty string and timeout_ms must be a positive integer when provided' } };
+        const normalizedRequestId = typeof requestId === 'string' ? requestId.trim() : undefined;
+        if (!teamName || !workerName || (requestId !== undefined && (normalizedRequestId === undefined || !isSafeRecoveryRequestId(normalizedRequestId)))
+          || (timeoutMs !== undefined && (!isFiniteInteger(timeoutMs) || timeoutMs < 180_000 || timeoutMs > 300_000))) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name and worker are required; request_id must be a path-safe 1-128 character opaque identifier and timeout_ms must be an integer from 180000 through 300000 when provided' } };
         }
         let result: RecoverDeadWorkerV2Result;
         try {
           result = await recoverDeadWorkerV2(teamName, cwd, {
             workerName,
-            requestId: typeof requestId === 'string' ? requestId.trim() : undefined,
+            requestId: normalizedRequestId,
             timeoutMs: timeoutMs as number | undefined,
           });
         } catch (error) {

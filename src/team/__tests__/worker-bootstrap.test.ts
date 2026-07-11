@@ -4,6 +4,7 @@ import {
   generatePromptModeStartupPrompt,
   generateTriggerMessage,
   generateWorkerOverlay,
+  renderRecoveryContinuationInstruction,
   getWorkerEnv,
 } from '../worker-bootstrap.js';
 
@@ -171,6 +172,14 @@ describe('worker-bootstrap', () => {
       expect(overlay).toContain('Subagent skip reason:');
       expect(overlay).toContain('missing_delegation_compliance_evidence');
       expect(overlay).not.toContain('Read your task file at');
+    });
+
+    it('renders required task versions in ordinary and adopted checkpoint commands', () => {
+      expect(generateWorkerOverlay(baseParams)).toContain('\\"task_version\\":<current_task_version>');
+      const recovery = renderRecoveryContinuationInstruction({ teamName: 'test-team', workerName: 'worker-1',
+        taskId: '1', taskVersion: 7, claimToken: 'claim-token', sequence: 4, resumePayload: { cursor: 3 } });
+      expect(recovery).toContain('\\"task_version\\":7');
+      expect(recovery).not.toContain('<current_task_version>');
     });
 
     it('renders plugin-safe CLI lifecycle examples when omc is unavailable in plugin installs', () => {

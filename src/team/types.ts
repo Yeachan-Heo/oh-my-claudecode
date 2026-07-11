@@ -336,6 +336,7 @@ export interface RecoverDeadWorkerV2Failure extends RecoverDeadWorkerV2OutcomeBa
   committed: false;
   error: RecoverDeadWorkerV2Error;
   message?: string;
+  reservationsWritten?: boolean;
 }
 
 export type RecoverDeadWorkerV2Result = RecoverDeadWorkerV2Success | RecoverDeadWorkerV2Failure;
@@ -348,6 +349,18 @@ export interface TeamRuntimeOwnerEpoch {
   created_at: string;
 }
 
+/** Durable lifecycle fence for a scale-up operation. */
+export interface TeamScaleUpAttempt {
+  operation_id: string;
+  phase: 'reserved' | 'effects' | 'failed';
+  pid: number;
+  process_started_at: string;
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
 export interface TeamRecoveryAttempt {
   request_id: string;
   recovery_id: string;
@@ -355,18 +368,31 @@ export interface TeamRecoveryAttempt {
   owner_epoch: number;
   owner_nonce: string;
   phase: 'reserved' | 'requeued' | 'ready' | 'active' | 'services_pending' | 'adopted' | 'failed';
+  /** Pane identity of the worker before a recovery replaces its config row. */
+  original_pane_id?: string;
   state_revision: number;
   created_at: string;
   updated_at: string;
 }
 
+export interface WorkerLaunchDescriptor {
+  schema_version: 1;
+  provider: 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
+  model: string | null;
+  binary: string;
+  args: string[];
+}
+
+export type TeamCadencePolicy = 'disabled' | 'worker-auto-commit-v1';
+
 export interface TeamServiceDescriptor {
+  schema_version: 1;
   service_generation: number;
+  service_attempt_id: string;
   auto_merge_enabled: boolean;
-  leader_branch?: string;
   workspace_root: string;
-  cadence_policy?: string;
-  worker_launch_descriptors: Record<string, unknown>;
+  leader_branch?: string;
+  cadence_policy: TeamCadencePolicy;
 }
 
 /** Team leader identity */
@@ -407,6 +433,7 @@ export interface PermissionsSnapshot {
 /** V2 team manifest matching OMX schema */
 export interface TeamManifestV2 {
   schema_version: 2;
+  state_revision?: number;
   name: string;
   task: string;
   leader: TeamLeader;
@@ -428,6 +455,7 @@ export interface TeamManifestV2 {
   resize_hook_name: string | null;
   resize_hook_target: string | null;
   next_worker_index?: number;
+  service_descriptor?: TeamServiceDescriptor;
 }
 
 /** Worker info within a team config */
@@ -456,7 +484,27 @@ export interface WorkerInfo {
   replacement_generation?: number;
   pane_attempt_id?: string;
   operational_state?: 'starting' | 'active' | 'dead' | 'stopped';
-  launch_descriptor?: Record<string, unknown>;
+  launch_descriptor?: WorkerLaunchDescriptor;
+}
+
+export interface TeamScaleDownAttempt {
+  operation_id: string;
+  phase: 'draining' | 'effects' | 'failed';
+  pid: number;
+  process_started_at: string;
+  workers: Array<{ name: string; pane_id?: string; worktree_path?: string; worktree_created?: boolean }>;
+  state_revision: number;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
+export interface TeamShutdownAttempt {
+  nonce: string;
+  pid: number;
+  process_started_at: string;
+  state_revision: number;
+  created_at: string;
 }
 
 /** Team configuration (V1 compat) */
@@ -493,9 +541,13 @@ export interface TeamConfig {
   state_revision?: number;
   runtime_owner_epoch?: TeamRuntimeOwnerEpoch;
   active_recovery?: TeamRecoveryAttempt;
+  active_scale_down?: TeamScaleDownAttempt;
+  active_scale_up?: TeamScaleUpAttempt;
   last_recovery?: TeamRecoveryAttempt;
+  all_dead_recovery?: { detected_at: string; deadline_at: string; state_revision: number };
   service_descriptor?: TeamServiceDescriptor;
   lifecycle_state?: 'active' | 'shutting_down' | 'stopped';
+  shutdown_attempt?: TeamShutdownAttempt;
 }
 
 /** Dispatch request kinds */

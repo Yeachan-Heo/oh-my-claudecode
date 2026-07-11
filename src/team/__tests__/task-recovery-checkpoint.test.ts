@@ -4,10 +4,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { executeTeamApiOperation } from '../api-interop.js';
 import {
-  hashTaskRecoveryCheckpointPayload,
   MAX_TASK_RECOVERY_CHECKPOINT_BYTES,
   publishTaskRecoveryCheckpoint,
+  readTaskRecoveryCheckpoint,
   selectTaskRecoveryCheckpoint,
   taskRecoveryClaimTokenHash,
 } from '../task-recovery-checkpoint.js';
@@ -53,8 +54,56 @@ describe('task recovery checkpoints', () => {
     expect((await publishTaskRecoveryCheckpoint(input(1, 'x'.repeat(MAX_TASK_RECOVERY_CHECKPOINT_BYTES + 1)), cwd, access(task())))).toEqual({ ok: false, error: 'invalid_checkpoint' });
     const first = await publishTaskRecoveryCheckpoint(input(1, { a: 1 }), cwd, access(task()));
     expect(first).toMatchObject({ ok: true, replayed: false });
-    expect(await publishTaskRecoveryCheckpoint(input(1, { a: 1 }), cwd, access(task()))).toMatchObject({ ok: true, replayed: true });
+    const retryWithoutTimestamp = { ...input(1, { a: 1 }), updatedAt: undefined };
+    await new Promise(resolve => setTimeout(resolve, 2));
+    const replayed = await publishTaskRecoveryCheckpoint(retryWithoutTimestamp, cwd, access(task()));
+    expect(replayed).toMatchObject({ ok: true, replayed: true });
+    if (first.ok && replayed.ok) expect(replayed.checkpoint.updated_at).toBe(first.checkpoint.updated_at);
     expect(await publishTaskRecoveryCheckpoint(input(1, { a: 2 }), cwd, access(task()))).toEqual({ ok: false, error: 'publication_conflict' });
+  });
+
+  it('replays the public checkpoint operation after time advances', async () => {
+    const taskPath = absPath(cwd, TeamPaths.taskFile(teamName, taskId));
+    mkdirSync(join(taskPath, '..'), { recursive: true });
+    writeFileSync(taskPath, JSON.stringify(task()));
+    const previousWorker = process.env.OMC_TEAM_WORKER;
+    process.env.OMC_TEAM_WORKER = `${teamName}/${workerName}`;
+    const args = {
+      team_name: teamName,
+      task_id: taskId,
+      worker: workerName,
+      claim_token: claimToken,
+      task_version: 3,
+      sequence: 1,
+      resume_payload: { cursor: 4 },
+    };
+    try {
+      const first = await executeTeamApiOperation('write-task-checkpoint', args, cwd);
+      expect(first).toMatchObject({ ok: true, data: { replayed: false } });
+      await new Promise(resolve => setTimeout(resolve, 2));
+      const second = await executeTeamApiOperation('write-task-checkpoint', args, cwd);
+      expect(second).toMatchObject({ ok: true, data: { replayed: true } });
+      if (first.ok && second.ok) {
+        const firstData = first.data as { checkpoint: { updated_at: string } };
+        const secondData = second.data as { checkpoint: { updated_at: string } };
+        expect(secondData.checkpoint.updated_at).toBe(firstData.checkpoint.updated_at);
+      }
+    } finally {
+      if (previousWorker === undefined) delete process.env.OMC_TEAM_WORKER;
+      else process.env.OMC_TEAM_WORKER = previousWorker;
+    }
+  });
+
+  it('rejects a sole checkpoint whose embedded sequence disagrees with its immutable filename', async () => {
+    const first = await publishTaskRecoveryCheckpoint(input(1, { cursor: 1 }), cwd, access(task()));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const original = JSON.parse(readFileSync(first.path, 'utf8'));
+    writeFileSync(first.path, JSON.stringify({ ...original, sequence: 2 }));
+    await expect(readTaskRecoveryCheckpoint(first.path)).resolves.toEqual({ ok: false, error: 'malformed' });
+    await expect(selectTaskRecoveryCheckpoint(teamName, task(), cwd)).resolves.toEqual({ ok: false, error: 'malformed' });
+    await expect(publishTaskRecoveryCheckpoint(input(1, { cursor: 1 }), cwd, access(task())))
+      .resolves.toEqual({ ok: false, error: 'publication_conflict' });
   });
 
   it('selects only a unique current highest checkpoint and ignores a stale latest projection after a projection-write crash', async () => {
@@ -65,7 +114,7 @@ describe('task recovery checkpoints', () => {
     await expect(selectTaskRecoveryCheckpoint(teamName, task(), cwd)).resolves.toMatchObject({ ok: true, checkpoint: { sequence: 2 } });
   });
 
-  it('distinguishes missing, malformed, stale, and ambiguous checkpoint sets', async () => {
+  it('distinguishes missing, malformed, and stale checkpoint sets', async () => {
     await expect(selectTaskRecoveryCheckpoint(teamName, task(), cwd)).resolves.toEqual({ ok: false, error: 'missing' });
     const root = absPath(cwd, TeamPaths.checkpoints(teamName, taskId, taskRecoveryClaimTokenHash(claimToken)));
     mkdirSync(root, { recursive: true });
@@ -74,10 +123,5 @@ describe('task recovery checkpoints', () => {
     rmSync(root, { recursive: true });
     await publishTaskRecoveryCheckpoint(input(1), cwd, access(task()));
     await expect(selectTaskRecoveryCheckpoint(teamName, { ...task(), version: 4 }, cwd)).resolves.toEqual({ ok: false, error: 'stale' });
-    const source = absPath(cwd, TeamPaths.checkpoint(teamName, taskId, taskRecoveryClaimTokenHash(claimToken), 1));
-    const original = JSON.parse(readFileSync(source, 'utf8'));
-    const resumePayload = { cursor: 99 };
-    writeFileSync(join(root, '2.json'), JSON.stringify({ ...original, sequence: 1, resume_payload: resumePayload, resume_payload_hash: hashTaskRecoveryCheckpointPayload(resumePayload) }));
-    await expect(selectTaskRecoveryCheckpoint(teamName, task(), cwd)).resolves.toEqual({ ok: false, error: 'ambiguous' });
   });
 });

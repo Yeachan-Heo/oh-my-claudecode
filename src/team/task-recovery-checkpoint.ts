@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { link, mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 
 import { TeamPaths, absPath } from './state-paths.js';
 import type { TaskRecoveryCheckpoint, TaskRecoveryCheckpointValidation, TeamTaskV2 } from './types.js';
@@ -72,11 +72,37 @@ function latestPath(cwd: string, teamName: string, taskId: string, claimToken: s
   return absPath(cwd, TeamPaths.checkpointLatest(teamName, taskId, taskRecoveryClaimTokenHash(claimToken)));
 }
 
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const directory = await open(dirname(path), 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
 async function writeAtomic(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, content, 'utf8');
+  const handle = await open(temp, 'wx', 0o600);
+  try { await handle.writeFile(content, 'utf8'); await handle.sync(); } finally { await handle.close(); }
   await rename(temp, path);
+  await syncDirectory(path);
+}
+
+async function publishImmutableCheckpoint(path: string, content: string): Promise<'created' | 'replayed' | 'conflict'> {
+  await mkdir(dirname(path), { recursive: true });
+  const temp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  const handle = await open(temp, 'wx', 0o600);
+  try { await handle.writeFile(content, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+  try {
+    await link(temp, path);
+    if (await readFile(path, 'utf8') !== content) return 'conflict';
+    await syncDirectory(path);
+    return 'created';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    return await readFile(path, 'utf8').catch(() => '') === content ? 'replayed' : 'conflict';
+  } finally {
+    await unlink(temp).catch(() => undefined);
+  }
 }
 
 function parseCheckpoint(value: unknown): TaskRecoveryCheckpoint | null {
@@ -96,9 +122,28 @@ function parseCheckpoint(value: unknown): TaskRecoveryCheckpoint | null {
   return checkpoint as TaskRecoveryCheckpoint;
 }
 
+function sameCheckpointPublication(
+  existing: TaskRecoveryCheckpoint,
+  candidate: TaskRecoveryCheckpoint,
+): boolean {
+  const { updated_at: _existingUpdatedAt, ...existingSemantic } = existing;
+  const { updated_at: _candidateUpdatedAt, ...candidateSemantic } = candidate;
+  return canonicalJson(existingSemantic) === canonicalJson(candidateSemantic);
+}
+
+function checkpointSequenceFromPath(path: string): number | null {
+  const match = /^(\d+)\.json$/.exec(basename(path));
+  if (!match) return null;
+  const sequence = Number(match[1]);
+  return Number.isSafeInteger(sequence) && sequence > 0 ? sequence : null;
+}
+
 async function readCheckpoint(path: string): Promise<TaskRecoveryCheckpoint | null> {
+  const filenameSequence = checkpointSequenceFromPath(path);
+  if (filenameSequence === null) return null;
   try {
-    return parseCheckpoint(JSON.parse(await readFile(path, 'utf8')) as unknown);
+    const checkpoint = parseCheckpoint(JSON.parse(await readFile(path, 'utf8')) as unknown);
+    return checkpoint?.sequence === filenameSequence ? checkpoint : null;
   } catch {
     return null;
   }
@@ -151,15 +196,18 @@ export async function publishTaskRecoveryCheckpoint(
     const path = checkpointPath(cwd, input.teamName, input.taskId, input.claimToken, input.sequence);
     const existing = await readCheckpoint(path);
     if (existing) {
-      if (existing.team_name !== checkpoint.team_name || existing.task_id !== checkpoint.task_id || existing.worker_name !== checkpoint.worker_name
-        || existing.task_version !== checkpoint.task_version || existing.claim_token !== checkpoint.claim_token
-        || existing.resume_payload_hash !== checkpoint.resume_payload_hash) {
+      if (!sameCheckpointPublication(existing, checkpoint)) {
         return { ok: false as const, error: 'publication_conflict' as const };
       }
       return { ok: true as const, checkpoint: existing, path, replayed: true };
     }
-    if (existsSync(path)) return { ok: false as const, error: 'publication_conflict' as const };
-    await writeAtomic(path, JSON.stringify(checkpoint));
+    const publication = await publishImmutableCheckpoint(path, JSON.stringify(checkpoint));
+    if (publication !== 'created') {
+      const replayed = await readCheckpoint(path);
+      return replayed && sameCheckpointPublication(replayed, checkpoint)
+        ? { ok: true as const, checkpoint: replayed, path, replayed: true }
+        : { ok: false as const, error: 'publication_conflict' as const };
+    }
     const latest = latestPath(cwd, input.teamName, input.taskId, input.claimToken);
     const existingLatest = await readCheckpointLatest(latest);
     if (!existingLatest || input.sequence >= existingLatest.sequence) {

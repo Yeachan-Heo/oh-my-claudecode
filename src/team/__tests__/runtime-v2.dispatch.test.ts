@@ -37,12 +37,18 @@ const cadenceMocks = vi.hoisted(() => ({
 }));
 
 const modelContractMocks = vi.hoisted(() => ({
-  buildWorkerArgv: vi.fn(() => ['/usr/bin/claude']),
+  buildWorkerArgv: vi.fn((_agentType: string, _config: unknown) => ['/usr/bin/claude']),
   resolveValidatedBinaryPath: vi.fn(() => '/usr/bin/claude'),
   getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'dispatch-team/worker-1' })),
   isPromptModeAgent: vi.fn(() => false),
   getPromptModeArgs: vi.fn((_agentType: string, instruction: string) => [instruction]),
   resolveClaudeWorkerModel: vi.fn(() => undefined),
+  buildValidatedWorkerLaunchDescriptor: vi.fn((agentType: string, config: { model?: string; resolvedBinaryPath?: string }, appendedArgs: string[] = []) => {
+    const [binary, ...args] = modelContractMocks.buildWorkerArgv(agentType, config);
+    return { schema_version: 1, provider: agentType, model: config.model ?? null,
+      binary: binary ?? config.resolvedBinaryPath ?? `/usr/bin/${agentType}`, args: [...args, ...appendedArgs] };
+  }),
+  validateWorkerLaunchDescriptor: vi.fn((value: unknown) => value),
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -69,6 +75,8 @@ vi.mock('../model-contract.js', () => ({
   isPromptModeAgent: modelContractMocks.isPromptModeAgent,
   getPromptModeArgs: modelContractMocks.getPromptModeArgs,
   resolveClaudeWorkerModel: modelContractMocks.resolveClaudeWorkerModel,
+  buildValidatedWorkerLaunchDescriptor: modelContractMocks.buildValidatedWorkerLaunchDescriptor,
+  validateWorkerLaunchDescriptor: modelContractMocks.validateWorkerLaunchDescriptor,
   assertHeadlessSupported: () => {},
   isHeadlessSupportedOnPlatform: () => true,
 }));
@@ -127,6 +135,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     modelContractMocks.isPromptModeAgent.mockReset();
     modelContractMocks.getPromptModeArgs.mockReset();
     modelContractMocks.resolveClaudeWorkerModel.mockReset();
+    modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockClear();
+    modelContractMocks.validateWorkerLaunchDescriptor.mockClear();
     mergeMocks.startMergeOrchestrator.mockReset();
     mergeMocks.recoverFromRestart.mockReset();
     mergeMocks.registerWorker.mockReset();
@@ -242,6 +252,11 @@ describe('runtime v2 startup inbox dispatch', () => {
       }),
     );
     expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session');
+    const config = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf-8'));
+    const manifest = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json'), 'utf-8'));
+    expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
+    expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
+    expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
   });
 
   it('persists startup task delegation plans and gives executable result evidence instructions', async () => {
@@ -445,6 +460,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     const manifestPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json');
     const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8'));
+    expect(persisted.state_revision).toBe(1);
+    expect(manifest.state_revision).toBe(1);
     expect(persisted.workspace_mode).toBe('worktree');
     expect(persisted.worktree_mode).toBe('named');
     expect(manifest.workspace_mode).toBe('worktree');

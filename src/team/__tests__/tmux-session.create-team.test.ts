@@ -6,6 +6,8 @@ const mockedCalls = vi.hoisted(() => ({
   execFileArgs: [] as string[][],
   splitCount: 0,
   newSplitStdouts: [] as string[],
+  tmuxSplitStdouts: [] as string[],
+  tmuxSplitError: null as { stdout: string; stderr: string; message: string } | null,
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -40,7 +42,14 @@ vi.mock('child_process', async (importOriginal) => {
 
     if (tmuxArgs[0] === 'split-window') {
       mockedCalls.splitCount += 1;
-      return { stdout: `%50${mockedCalls.splitCount}\n`, stderr: '' };
+      if (mockedCalls.tmuxSplitError) {
+        const failure = Object.assign(new Error(mockedCalls.tmuxSplitError.message), {
+          stdout: mockedCalls.tmuxSplitError.stdout,
+          stderr: mockedCalls.tmuxSplitError.stderr,
+        });
+        throw failure;
+      }
+      return { stdout: mockedCalls.tmuxSplitStdouts.shift() ?? `%50${mockedCalls.splitCount}\n`, stderr: '' };
     }
 
     if (tmuxArgs[0] === 'new-split') {
@@ -102,7 +111,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-import { createTeamSession, detectTeamMultiplexerContext, splitTeamWorkerPane } from '../tmux-session.js';
+import { createTeamSession, detectTeamMultiplexerContext, splitTeamWorkerPane, splitTeamWorkerPaneWithEvidence } from '../tmux-session.js';
 
 describe('detectTeamMultiplexerContext', () => {
   afterEach(() => {
@@ -296,6 +305,8 @@ describe('splitTeamWorkerPane multiplexer routing (#3267)', () => {
     mockedCalls.execFileArgs = [];
     mockedCalls.splitCount = 0;
     mockedCalls.newSplitStdouts = [];
+    mockedCalls.tmuxSplitStdouts = [];
+    mockedCalls.tmuxSplitError = null;
   });
 
   afterEach(() => {
@@ -334,5 +345,57 @@ describe('splitTeamWorkerPane multiplexer routing (#3267)', () => {
       expect.arrayContaining(['split-window', '-v', '-t', '%732']),
     );
     expect(mockedCalls.execFileArgs.some((args) => args[0] === 'new-split')).toBe(false);
+  });
+
+  it('retains successful tmux split output when the pane id is malformed', async () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
+    vi.stubEnv('TMUX_PANE', '%732');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+    mockedCalls.tmuxSplitStdouts.push('not-a-pane\n');
+
+    await expect(splitTeamWorkerPaneWithEvidence('%732', 'right', '/tmp')).resolves.toEqual({
+      commandSucceeded: true,
+      provider: 'tmux',
+      splitTarget: '%732',
+      direction: 'right',
+      rawOutput: 'not-a-pane\n',
+      stderr: '',
+      paneId: null,
+    });
+  });
+
+  it('retains stdout and stderr when tmux split execution rejects', async () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
+    vi.stubEnv('TMUX_PANE', '%732');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+    mockedCalls.tmuxSplitError = { stdout: '%orphan\n', stderr: 'transport interrupted', message: 'split failed' };
+
+    await expect(splitTeamWorkerPaneWithEvidence('%732', 'down', '/tmp')).resolves.toEqual({
+      commandSucceeded: false,
+      provider: 'tmux',
+      splitTarget: '%732',
+      direction: 'down',
+      rawOutput: '%orphan\n',
+      stderr: 'transport interrupted',
+      paneId: null,
+    });
+  });
+
+  it('retains successful cmux stdout when no surface identity can be parsed', async () => {
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('TMUX_PANE', '');
+    vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+    vi.stubEnv('CMUX_WORKSPACE_ID', 'workspace-1');
+    mockedCalls.newSplitStdouts.push('\n');
+
+    await expect(splitTeamWorkerPaneWithEvidence('cmux-leader', 'right', '/tmp')).resolves.toEqual({
+      commandSucceeded: true,
+      provider: 'cmux',
+      splitTarget: 'cmux-leader',
+      direction: 'right',
+      rawOutput: '\n',
+      stderr: '',
+      paneId: null,
+    });
   });
 });

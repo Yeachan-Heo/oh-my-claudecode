@@ -17,6 +17,8 @@ import { dirname, join } from 'node:path';
 import { TeamPaths, absPath } from './state-paths.js';
 import { normalizeTeamManifest } from './governance.js';
 import { normalizeTeamGovernance } from './governance.js';
+import { migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import {
   isTerminalTeamTaskStatus,
   canTransitionTeamTaskStatus,
@@ -162,41 +164,18 @@ function isTeamTask(value: unknown): value is TeamTask {
   return typeof v.id === 'string' && typeof v.subject === 'string' && typeof v.status === 'string';
 }
 
-// Simple file-based lock (best-effort, non-blocking)
-async function withLock<T>(lockDir: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
-  const STALE_MS = 30_000;
-  await mkdir(dirname(lockDir), { recursive: true });
+// Process-identity lock: live holders are never stolen by elapsed time alone.
+async function withLock<T>(lockPath: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
   try {
-    await mkdir(lockDir, { recursive: false });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      // Check staleness
-      try {
-        const { stat } = await import('node:fs/promises');
-        const s = await stat(lockDir);
-        if (Date.now() - s.mtimeMs > STALE_MS) {
-          await rm(lockDir, { recursive: true, force: true });
-          try { await mkdir(lockDir, { recursive: false }); } catch { return { ok: false }; }
-        } else {
-          return { ok: false };
-        }
-      } catch {
-        return { ok: false };
-      }
-    } else {
-      throw err;
-    }
-  }
-
-  try {
-    const result = await fn();
-    return { ok: true, value: result };
-  } finally {
-    await rm(lockDir, { recursive: true, force: true }).catch(() => {});
+    const value = await withProcessIdentityFileLock(lockPath, fn, 1);
+    return { ok: true, value };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'process_identity_lock_timeout') return { ok: false };
+    throw error;
   }
 }
 
-async function withTaskClaimLock<T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+export async function withTaskClaimLock<T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
   const lockDir = join(teamDir(teamName, cwd), 'tasks', `.lock-${taskId}`);
   return withLock(lockDir, fn);
 }
@@ -249,6 +228,9 @@ function configFromManifest(manifest: TeamManifestV2): TeamConfig {
 
 function mergeTeamConfigSources(config: TeamConfig | null, manifest: TeamManifestV2 | null): TeamConfig | null {
   if (!config && !manifest) return null;
+  if (config && typeof config.state_revision === 'number' && Number.isSafeInteger(config.state_revision)) {
+    return canonicalizeTeamConfigWorkers(config);
+  }
   if (!manifest) return config ? canonicalizeTeamConfigWorkers(config) : null;
   if (!config) return canonicalizeTeamConfigWorkers(configFromManifest(manifest));
 
@@ -263,16 +245,24 @@ function mergeTeamConfigSources(config: TeamConfig | null, manifest: TeamManifes
 }
 
 export async function teamReadConfig(teamName: string, cwd: string): Promise<TeamConfig | null> {
+  const configPath = absPath(cwd, TeamPaths.config(teamName));
+  const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
   const [manifest, config] = await Promise.all([
     teamReadManifest(teamName, cwd),
-    readJsonSafe<TeamConfig>(absPath(cwd, TeamPaths.config(teamName))),
+    readJsonSafe<TeamConfig>(configPath),
   ]);
+  if (!config && existsSync(configPath)) throw new Error('invalid_persisted_state');
+  if (config && typeof config.state_revision === 'number' && Number.isSafeInteger(config.state_revision)) {
+    return canonicalizeTeamConfigWorkers(config);
+  }
+  if (!manifest && existsSync(manifestPath)) throw new Error('invalid_persisted_state');
   return mergeTeamConfigSources(config, manifest);
 }
 
 export async function teamReadManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null> {
   const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
   const manifest = await readJsonSafe<TeamManifestV2>(manifestPath);
+  if (!manifest && existsSync(manifestPath)) throw new Error('invalid_persisted_state');
   return manifest ? normalizeTeamManifest(manifest) : null;
 }
 
@@ -350,11 +340,13 @@ export async function teamCreateTask(
 
   while (Date.now() < deadline) {
     const result = await withLock(lockDir, async () => {
-      const cfg = await teamReadConfig(teamName, cwd);
-      if (!cfg) throw new Error(`Team ${teamName} not found`);
+      const revisioned = await migrateTeamConfigRevision(teamName, cwd);
+      if (!revisioned) throw new Error(`Team ${teamName} not found`);
+      if (revisioned.config.lifecycle_state === 'shutting_down' || revisioned.config.lifecycle_state === 'stopped') {
+        throw new Error('team_mutation_busy');
+      }
 
-      const nextId = String(cfg.next_task_id ?? 1);
-
+      const nextId = String(revisioned.config.next_task_id ?? 1);
       const created: TeamTaskV2 = {
         ...task,
         id: nextId,
@@ -363,15 +355,36 @@ export async function teamCreateTask(
         version: 1,
         created_at: new Date().toISOString(),
       };
+      const serializedTask = JSON.stringify(created, null, 2);
+      const createdTaskPath = join(absPath(cwd, TeamPaths.tasks(teamName)), `task-${nextId}.json`);
+      const taskLock = await withTaskClaimLock(teamName, nextId, cwd, async () => {
+        await mkdir(dirname(createdTaskPath), { recursive: true });
+        await writeAtomic(createdTaskPath, serializedTask);
 
-      const taskPath = absPath(cwd, TeamPaths.tasks(teamName));
-      await mkdir(taskPath, { recursive: true });
-      await writeAtomic(join(taskPath, `task-${nextId}.json`), JSON.stringify(created, null, 2));
-
-      // Advance counter
-      cfg.next_task_id = Number(nextId) + 1;
-      await writeAtomic(absPath(cwd, TeamPaths.config(teamName)), JSON.stringify(cfg, null, 2));
-      return created;
+        const nextConfig: TeamConfig = {
+          ...revisioned.config,
+          next_task_id: Number(nextId) + 1,
+          state_revision: revisioned.stateRevision + 1,
+        };
+        try {
+          if (!await saveTeamConfigAtRevision(nextConfig, revisioned.stateRevision, cwd)) {
+            throw new Error('stale_state_revision');
+          }
+        } catch (error) {
+          // A manifest projection can fail after config.json commits. Preserve a task
+          // that the authoritative counter/revision already admits.
+          const persisted = await readRevisionedTeamConfig(teamName, cwd).catch(() => null);
+          const configCommitted = persisted?.stateRevision === nextConfig.state_revision
+            && persisted?.config.next_task_id === nextConfig.next_task_id;
+          if (!configCommitted && await readFile(createdTaskPath, 'utf8').catch(() => null) === serializedTask) {
+            await rm(createdTaskPath, { force: true });
+          }
+          throw error;
+        }
+        return created;
+      });
+      if (!taskLock.ok) throw new Error(`Failed to acquire task claim lock for task ${nextId}`);
+      return taskLock.value;
     });
     if (result.ok) return result.value;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -440,8 +453,8 @@ export async function teamClaimTask(
   expectedVersion: number | null,
   cwd: string,
 ): Promise<ClaimTaskResult> {
-  const manifest = await teamReadManifest(teamName, cwd);
-  const governance = normalizeTeamGovernance(manifest?.governance, manifest?.policy);
+  const config = await teamReadConfig(teamName, cwd);
+  const governance = normalizeTeamGovernance(config?.governance, config?.policy);
   if (governance.plan_approval_required) {
     const task = await teamReadTask(teamName, taskId, cwd);
     if (task?.requires_code_change) {
@@ -533,12 +546,12 @@ function recoveryTransitionDeps(teamName: string, cwd: string) {
     readTeamConfig: teamReadConfig as (tn: string, c: string) => Promise<{ workers: Array<{ name: string }> } | null>,
     withTaskClaimLock, normalizeTask, isTerminalTaskStatus: isTerminalTeamTaskStatus,
     taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c), writeAtomic,
-    readRecoverySidecar: async (tn: string, tid: string, c: string): Promise<TaskRecoveryRequeueSidecar | null | 'malformed'> => {
-      const path = absPath(c, TeamPaths.taskRecoverySidecar(tn, tid));
+    readRecoverySidecar: async (tn: string, recoveryId: string, tid: string, c: string): Promise<TaskRecoveryRequeueSidecar | null | 'malformed'> => {
+      const path = absPath(c, TeamPaths.taskRecoverySidecar(tn, recoveryId, tid));
       if (!existsSync(path)) return null;
       try { return JSON.parse(await readFile(path, 'utf8')) as TaskRecoveryRequeueSidecar; } catch { return 'malformed'; }
     },
-    writeRecoverySidecar: (tn: string, tid: string, sidecar: TaskRecoveryRequeueSidecar, c: string) => writeAtomic(absPath(c, TeamPaths.taskRecoverySidecar(tn, tid)), JSON.stringify(sidecar, null, 2)),
+    writeRecoverySidecar: (tn: string, recoveryId: string, tid: string, sidecar: TaskRecoveryRequeueSidecar, c: string) => writeAtomic(absPath(c, TeamPaths.taskRecoverySidecar(tn, recoveryId, tid)), JSON.stringify(sidecar, null, 2)),
     selectRecoveryCheckpoint: selectTaskRecoveryCheckpoint, readRecoveryCheckpoint: readTaskRecoveryCheckpoint,
     verifyAdoptionToken: (token: string, hash: string) => createHash('sha256').update(token).digest('hex') === hash,
   };

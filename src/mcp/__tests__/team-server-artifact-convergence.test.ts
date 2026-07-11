@@ -262,7 +262,7 @@ describe('team-server artifact convergence + scoped cleanup', () => {
       max_workers: 20,
       workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] }],
       created_at: new Date().toISOString(),
-      tmux_session: '',
+      tmux_session: 'team-one-session:0',
       leader_pane_id: null,
       hud_pane_id: null,
       resize_hook_name: null,
