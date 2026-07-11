@@ -333,4 +333,36 @@ describe("merge-readiness standalone tool flow", () => {
     // On-disk answer was not advanced.
     expect(readMergeReadinessState(tempDir, session)?.answers).toEqual([]);
   });
+
+  it("merge_readiness_cancel surfaces a failed write as an error, not no active gate", async () => {
+    const start = findTool("merge_readiness_start");
+    const setContent = findTool("merge_readiness_set_content");
+    const cancel = findTool("merge_readiness_cancel");
+    const session = "cancel-tool-failwrite-session";
+
+    await start.handler({ summary: "/merge-readiness --quick change", workingDirectory: tempDir, session_id: session });
+    await setContent.handler({
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [
+        { id: "q1", dimension: "why", stem: "why?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q2", dimension: "change", stem: "change?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q3", dimension: "risk", stem: "risk?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+      ],
+      workingDirectory: tempDir, session_id: session,
+    });
+
+    persistFail.failWrites = true;
+    let res: any;
+    try {
+      res = await cancel.handler({ workingDirectory: tempDir, session_id: session });
+    } finally {
+      persistFail.failWrites = false;
+    }
+    // The direct cancel tool must report the failed write as an error, not "no active gate".
+    expect(res?.isError).toBe(true);
+    expect(textOf(res)).toContain("FAILED");
+    expect(textOf(res)).not.toContain("no active gate");
+    // On-disk gate still armed.
+    expect(readMergeReadinessState(tempDir, session)?.active).toBe(true);
+  });
 });

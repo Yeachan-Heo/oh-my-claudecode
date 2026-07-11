@@ -1805,6 +1805,10 @@ export const stateTools = [
       const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
       const state = cancelMergeReadiness(directory, sessionId);
+      const persistFailed = state?.result === 'blocked' && (state.validation_errors ?? []).some((e) => e.includes('persisted'));
+      if (persistFailed) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness cancellation FAILED: state could not be persisted (read-only state dir / full disk). The gate is still armed on disk. ${(state?.validation_errors ?? []).join(' ')}` }], isError: true };
+      }
       if (!state || state.result !== 'cancelled') {
         return { content: [{ type: 'text' as const, text: 'Merge-readiness cancellation rejected: no active gate.' }], isError: true };
       }
