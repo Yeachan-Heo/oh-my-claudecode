@@ -716,6 +716,57 @@ function getExpectedUltragoalObjective(state, directory) {
   return '';
 }
 
+// Recover the active Claude `/goal` from the session transcript.
+//
+// Claude Code does not expose live `/goal` state to hooks (the PreToolUse payload
+// carries none of the fields below), but every hook receives `transcript_path`, and
+// `/goal` is recorded there as `Goal set: <objective>` / `Goal cleared` command output.
+// Scanning it lets the guard see a goal the user actually set, instead of denying
+// forever because the runtime never injects one (see issue #3341).
+function extractGoalFromTranscript(transcriptPath) {
+  if (typeof transcriptPath !== 'string' || !transcriptPath) return null;
+  let content;
+  try {
+    content = readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  if (!content) return null;
+
+  let objective = '';
+  let cleared = false;
+  for (const line of content.split('\n')) {
+    if (!line) continue;
+    // Cheap prefilter before parsing each JSONL entry.
+    if (line.indexOf('Goal set:') === -1 && line.indexOf('Goal cleared') === -1) continue;
+    let text = '';
+    try {
+      const entry = JSON.parse(line);
+      const messageContent = entry?.message?.content;
+      if (typeof messageContent === 'string') {
+        text = messageContent;
+      } else if (Array.isArray(messageContent)) {
+        text = messageContent.map(part => (typeof part === 'string' ? part : (part?.text ?? ''))).join('\n');
+      }
+    } catch {
+      text = line;
+    }
+    const setIndex = text.lastIndexOf('Goal set:');
+    if (setIndex !== -1) {
+      objective = text.slice(setIndex + 'Goal set:'.length).replace(/<\/local-command-stdout>[\s\S]*$/, '').trim();
+      cleared = false;
+      continue;
+    }
+    if (text.indexOf('Goal cleared') !== -1) {
+      cleared = true;
+      objective = '';
+    }
+  }
+
+  if (cleared || !objective) return null;
+  return { objective, status: 'active' };
+}
+
 function extractClaudeGoalSnapshot(data) {
   const candidates = [
     data.goal,
@@ -738,7 +789,9 @@ function extractClaudeGoalSnapshot(data) {
       }
     }
   }
-  return null;
+  // Runtime injected no goal field (the standard Claude Code case): fall back to the
+  // transcript, the only place a hook can observe an active `/goal`.
+  return extractGoalFromTranscript(data.transcript_path ?? data.transcriptPath);
 }
 
 
@@ -769,7 +822,7 @@ function isUltragoalBootstrapTool(toolName, toolInput) {
   if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return true;
   if (toolName !== 'Bash') return false;
   const command = typeof toolInput.command === 'string' ? toolInput.command : '';
-  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode)\s+ultragoal\s+(?:create(?:-goals)?|create-goals|complete(?:-goals)?|complete-goals|next|start-next|status)\b/.test(command);
+  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode)\s+ultragoal\s+(?:create(?:-goals)?|create-goals|complete(?:-goals)?|complete-goals|next|start-next|status|checkpoint|record-review-blockers)\b/.test(command);
 }
 
 function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
@@ -793,6 +846,13 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
 
+  // #3341: Claude Code cannot expose live `/goal` state to a PreToolUse hook, so the
+  // guard only enforces that *a* Claude `/goal` is engaged and active for this run —
+  // recovered from the payload or the transcript. Exact-objective reconciliation against
+  // the durable plan happens at `omc ultragoal checkpoint`, the only place with a
+  // trustworthy, model-supplied snapshot. Denying when no goal is observable at all is
+  // preserved below.
+  if (actualObjective && activeStatus) return null;
   if (!expectedObjective && actualObjective && activeStatus) return null;
   if (objectiveMatches && activeStatus) return null;
 

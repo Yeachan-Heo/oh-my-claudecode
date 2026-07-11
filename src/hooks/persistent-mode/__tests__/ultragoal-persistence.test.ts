@@ -138,6 +138,82 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
     expect(result.hookSpecificOutput?.permissionDecisionReason).toContain('ALLOW_ULTRAGOAL_WITHOUT_GOAL=1');
   });
 
+  it('allows PreToolUse when an active Claude /goal is recovered from the transcript', () => {
+    const cwd = makeTempProject('omc-ultragoal-transcript-');
+    writeUltragoalState(cwd);
+    // Claude Code never puts /goal in the hook payload; it is only recorded in the
+    // transcript as `Goal set: <objective>`. The guard must recover it there instead
+    // of denying every tool for the whole run (regression for #3341).
+    const transcriptPath = join(cwd, 'transcript.jsonl');
+    writeFileSync(
+      transcriptPath,
+      `${[
+        JSON.stringify({ type: 'user', message: { role: 'user', content: '<command-name>/goal</command-name>' } }),
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: '<local-command-stdout>Goal set: Complete issue #3098 ultragoal persistence.</local-command-stdout>' },
+        }),
+      ].join('\n')}\n`,
+    );
+
+    const result = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      transcript_path: transcriptPath,
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+    });
+
+    expect(result.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+  });
+
+  it('re-denies when the transcript shows the /goal was cleared', () => {
+    const cwd = makeTempProject('omc-ultragoal-transcript-cleared-');
+    writeUltragoalState(cwd);
+    const transcriptPath = join(cwd, 'transcript.jsonl');
+    writeFileSync(
+      transcriptPath,
+      `${[
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: '<local-command-stdout>Goal set: Complete issue #3098 ultragoal persistence.</local-command-stdout>' },
+        }),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: '<local-command-stdout>Goal cleared</local-command-stdout>' } }),
+      ].join('\n')}\n`,
+    );
+
+    const result = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      transcript_path: transcriptPath,
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+    });
+
+    expect(result.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+
+  it('allows ultragoal checkpoint and record-review-blockers as bootstrap/exit surfaces', () => {
+    const cwd = makeTempProject('omc-ultragoal-checkpoint-');
+    writeUltragoalState(cwd);
+
+    const checkpoint = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Bash',
+      tool_input: { command: 'omc ultragoal checkpoint --goal-id G001 --status complete' },
+    });
+    const blockers = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Bash',
+      tool_input: { command: 'omc ultragoal record-review-blockers --goal-id G001' },
+    });
+
+    expect(checkpoint.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    expect(blockers.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+  });
+
   it('ignores stale ultragoal state in PreToolUse and Stop enforcement', () => {
     const cwd = makeTempProject('omc-ultragoal-stale-');
     writeUltragoalState(cwd, {
