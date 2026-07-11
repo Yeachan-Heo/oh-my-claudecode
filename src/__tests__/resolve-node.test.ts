@@ -112,7 +112,7 @@ describe('resolveNodeBinary', () => {
     });
 
     expect(resolveNodeBinary()).toBe('/opt/homebrew/bin/node');
-    expect(mockedExecSync).toHaveBeenCalledWith('which node', { encoding: 'utf-8', stdio: 'pipe' });
+    expect(mockedExecSync).toHaveBeenCalledWith('which node', { encoding: 'utf-8', stdio: 'pipe', windowsHide: true });
   });
 
   it('prefers PATH node over a CI-only hostedtoolcache process.execPath', () => {
