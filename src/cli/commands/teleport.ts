@@ -329,8 +329,8 @@ function sanitize(str: string, maxLen: number = 30): string {
  */
 function getCurrentRepo(): { owner: string; repo: string; root: string; provider: ProviderName } | null {
   try {
-    const root = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', timeout: 5000 }).trim();
-    const remoteUrl = execSync('git remote get-url origin', { encoding: 'utf-8', timeout: 5000 }).trim();
+    const root = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', timeout: 5000, windowsHide: true }).trim();
+    const remoteUrl = execSync('git remote get-url origin', { encoding: 'utf-8', timeout: 5000, windowsHide: true }).trim();
     const parsed = parseRemoteUrl(remoteUrl);
     if (parsed) {
       return { owner: parsed.owner, repo: parsed.repo, root, provider: parsed.provider };
@@ -652,6 +652,7 @@ export async function teleportListCommand(options: { json?: boolean }): Promise<
       branch = execSync('git branch --show-current', {
         cwd: worktreePath,
         encoding: 'utf-8',
+        windowsHide: true,
       }).trim();
     } catch {
       // Ignore
@@ -720,6 +721,7 @@ export async function teleportRemoveCommand(
       const status = execSync('git status --porcelain', {
         cwd: worktreePath,
         encoding: 'utf-8',
+        windowsHide: true,
       });
 
       if (status.trim()) {
@@ -737,6 +739,7 @@ export async function teleportRemoveCommand(
     const gitDir = execSync('git rev-parse --git-dir', {
       cwd: worktreePath,
       encoding: 'utf-8',
+      windowsHide: true,
     }).trim();
 
     // A removable worktree reports a git-dir inside the main repo's .git/worktrees directory.
