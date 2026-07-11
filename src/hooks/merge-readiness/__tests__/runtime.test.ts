@@ -727,4 +727,128 @@ describe("merge-readiness runtime", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("override records the operator identity (owner boundary)", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    const state = overrideMergeReadiness(tempDir, "Maintainer override.", sessionId);
+    expect(state?.override_owner).toBe(sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.override_owner).toBe(sessionId);
+  });
+
+  describe("failed-write durable-non-advance (transition map)", () => {
+    it("set-content does not advance on-disk state on failed write", () => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      const before = readMergeReadinessState(tempDir, sessionId)!;
+      persistFail.failWrites = true;
+      try {
+        const res = setMergeReadinessContent(tempDir, {
+          why: "w2", whatChanged: "wc2", tradeoffs: "t2", risksConsidered: "r2", teamUnderstanding: "tu2",
+          questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+        }, sessionId);
+        expect(res?.result).toBe("blocked");
+      } finally {
+        persistFail.failWrites = false;
+      }
+      const after = readMergeReadinessState(tempDir, sessionId)!;
+      expect(after.why).toBe(before.why);
+      expect(after.questions).toEqual(before.questions);
+      expect(after.phase).toBe(before.phase);
+      expect(after.updated_at).toBe(before.updated_at);
+    });
+
+    it("answer does not advance on-disk state on failed write", () => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      const before = readMergeReadinessState(tempDir, sessionId)!;
+      persistFail.failWrites = true;
+      try {
+        const res = recordMergeReadinessMCQAnswer(tempDir, "q1", "a", sessionId);
+        expect(res?.result).toBe("blocked");
+      } finally {
+        persistFail.failWrites = false;
+      }
+      const after = readMergeReadinessState(tempDir, sessionId)!;
+      expect(after.answers).toEqual(before.answers);
+      expect(after.readiness_score).toBe(before.readiness_score);
+      expect(after.updated_at).toBe(before.updated_at);
+    });
+
+    it("cancel does not advance on-disk state on failed write", () => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      const before = readMergeReadinessState(tempDir, sessionId)!;
+      persistFail.failWrites = true;
+      try {
+        const res = cancelMergeReadiness(tempDir, sessionId);
+        expect(res?.result).toBe("blocked");
+        expect(res?.active).toBe(true);
+      } finally {
+        persistFail.failWrites = false;
+      }
+      const after = readMergeReadinessState(tempDir, sessionId)!;
+      expect(after.active).toBe(true);
+      expect(after.result).toBe(before.result);
+      expect(after.updated_at).toBe(before.updated_at);
+    });
+
+    it("history append (re-start) does not advance on-disk state on failed write", () => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sessionId);
+      recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sessionId);
+      recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sessionId);
+      expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("paused");
+      const before = readMergeReadinessState(tempDir, sessionId)!;
+      expect(before.prior_attempts?.length ?? 0).toBe(0);
+
+      persistFail.failWrites = true;
+      try {
+        const res = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId);
+        expect(res.result).toBe("blocked");
+      } finally {
+        persistFail.failWrites = false;
+      }
+      const after = readMergeReadinessState(tempDir, sessionId)!;
+      expect(after.result).toBe("paused");
+      expect(after.prior_attempts?.length ?? 0).toBe(0);
+      expect(after.change_summary).toBe(before.change_summary);
+    });
+
+    it("gate check (checkMergeReadiness) does not advance on-disk state on failed write", async () => {
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+      setMergeReadinessContent(tempDir, {
+        why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+        questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+      }, sessionId);
+      const before = readMergeReadinessState(tempDir, sessionId)!;
+      persistFail.failWrites = true;
+      try {
+        const res = await checkMergeReadiness(sessionId, tempDir, false);
+        expect(res?.shouldBlock).toBe(true);
+      } finally {
+        persistFail.failWrites = false;
+      }
+      const after = readMergeReadinessState(tempDir, sessionId)!;
+      expect(after.updated_at).toBe(before.updated_at);
+      expect(after.pending_question?.id).toBe(before.pending_question?.id);
+      expect(after.answers).toEqual(before.answers);
+    });
+  });
 });

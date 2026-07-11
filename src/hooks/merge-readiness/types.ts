@@ -90,6 +90,8 @@ export interface MergeReadinessState {
   updated_at: string;
   completed_at?: string;
   override_reason?: string;
+  /** Operator identity that recorded the override (session id of the override call). */
+  override_owner?: string;
   change_summary: string;
   slug: string;
   /** Evidence source mode: --from-diff requires a diff; --from-artifacts accepts .omc artifacts. */
@@ -109,6 +111,7 @@ export interface MergeReadinessAttempt {
   completed_at?: string;
   result: MergeReadinessResult;
   override_reason?: string;
+  override_owner?: string;
   readiness_score: number;
   dimension_scores: Partial<Record<MergeReadinessDimension, number>>;
   questions: MergeReadinessMCQQuestion[];

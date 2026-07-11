@@ -458,6 +458,7 @@ export function createInitialMergeReadinessState(
       completed_at: prior.completed_at,
       result: prior.result,
       override_reason: prior.override_reason,
+      override_owner: prior.override_owner,
       readiness_score: prior.readiness_score,
       dimension_scores: { ...prior.dimension_scores },
       questions: prior.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
@@ -655,6 +656,7 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   state.phase = "complete";
   state.result = "overridden";
   state.override_reason = reason.trim();
+  state.override_owner = sessionId;
   state.completed_at = state.updated_at = new Date().toISOString();
   delete state.pending_question;
   return persistOrFailClosed(workingDir, state, sessionId);
@@ -680,10 +682,14 @@ export function formatMergeReadinessQuestionMessage(state: MergeReadinessState):
     : `Score: ${scorePct}% / threshold ${thresholdPct}%`;
 
   if (state.result === "blocked") {
+    const noDiff = state.evidence.changedFiles.length === 0 && !state.evidence.diffStat;
+    const evidenceGuidance = noDiff
+      ? "No diff detected. If changes are committed, re-run with --from-diff <base-ref>; if relying on .omc artifacts, use --from-artifacts. If there are truly no changes, a merge-readiness gate is not needed."
+      : "Produce the test/review evidence under .omc, then re-run /merge-readiness (merge_readiness_start).";
     return [
       "[MERGE READINESS BLOCKED]",
       "Do not merge yet. Minimal evidence for the change is missing.",
-      "Produce the diff/test/review evidence under .omc, then re-run /merge-readiness (merge_readiness_start).",
+      evidenceGuidance,
       ...(state.validation_errors ?? []),
     ].join("\n");
   }

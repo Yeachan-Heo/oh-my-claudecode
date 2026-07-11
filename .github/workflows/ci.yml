@@ -95,6 +95,9 @@ jobs:
           src/cli/__tests__/session-search.test.ts
           src/lib/__tests__/worktree-paths.test.ts
           src/hooks/project-memory/__tests__/hot-path-tracker.test.ts
+          src/hooks/merge-readiness/__tests__/win-cross-platform.test.ts
+          src/hooks/merge-readiness/__tests__/runtime.test.ts
+          src/hooks/merge-readiness/__tests__/tool-flow.test.ts
 
   build:
     name: Build

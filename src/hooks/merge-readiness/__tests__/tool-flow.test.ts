@@ -2,9 +2,29 @@ import { execFileSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stateTools } from "../../../tools/state-tools.js";
 import { readMergeReadinessState, writeMergeReadinessState } from "../runtime.js";
+
+// Forces writeModeState to return false (read-only FS / full-disk analog) so the
+// state_clear failed-write path is exercised. Other tests unaffected while
+// failWrites stays false.
+const persistFail = vi.hoisted(() => ({ failWrites: false }));
+vi.mock("../../../lib/mode-state-io.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../lib/mode-state-io.js")>();
+  return {
+    ...actual,
+    writeModeState: (
+      mode: string,
+      state: Record<string, unknown>,
+      directory?: string,
+      sessionId?: string,
+    ) => {
+      if (persistFail.failWrites) return false;
+      return actual.writeModeState(mode, state, directory, sessionId);
+    },
+  };
+});
 
 function findTool(name: string): any {
   const tool = stateTools.find((t) => t.name === name);
@@ -247,5 +267,34 @@ describe("merge-readiness standalone tool flow", () => {
     // sess-A cancelled, sess-B untouched (no cross-session clear).
     expect(readMergeReadinessState(tempDir, "sess-A")?.result).toBe("cancelled");
     expect(readMergeReadinessState(tempDir, "sess-B")?.active).toBe(true);
+  });
+
+  it("state_clear does not advance on-disk state on failed write (durable non-advance)", async () => {
+    const start = findTool("merge_readiness_start");
+    const setContent = findTool("merge_readiness_set_content");
+    const clear = findTool("state_clear");
+    const session = "clear-failwrite-session";
+
+    await start.handler({ summary: "/merge-readiness --quick change", workingDirectory: tempDir, session_id: session });
+    await setContent.handler({
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [
+        { id: "q1", dimension: "why", stem: "why?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q2", dimension: "change", stem: "change?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q3", dimension: "risk", stem: "risk?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+      ],
+      workingDirectory: tempDir, session_id: session,
+    });
+    expect(readMergeReadinessState(tempDir, session)?.active).toBe(true);
+
+    persistFail.failWrites = true;
+    try {
+      await clear.handler({ mode: "merge-readiness", workingDirectory: tempDir, session_id: session });
+    } finally {
+      persistFail.failWrites = false;
+    }
+    // On-disk state did not advance to cancelled; the gate stays armed.
+    expect(readMergeReadinessState(tempDir, session)?.active).toBe(true);
+    expect(readMergeReadinessState(tempDir, session)?.result).not.toBe("cancelled");
   });
 });
