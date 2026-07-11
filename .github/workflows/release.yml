@@ -30,8 +30,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run tests
+      - name: Run functional tests
         run: npm test -- --run
+
+      - name: Run subagent-lock performance test
+        run: npm run test:perf:subagent-lock
 
       # Some tests execute scripts/plugin-setup.mjs against the real
       # hooks/hooks.json and rewrite bare `node` to the absolute node binary

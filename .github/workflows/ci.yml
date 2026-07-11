@@ -55,8 +55,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run functional tests
         run: npm test -- --run
+
+      - name: Run subagent-lock performance test
+        run: npm run test:perf:subagent-lock
 
   test-windows:
     name: Test (Windows path suite)
