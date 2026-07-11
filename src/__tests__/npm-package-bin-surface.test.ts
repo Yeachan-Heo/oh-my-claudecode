@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -35,6 +36,7 @@ type PackedPackage = {
   packageJson: PackageJson;
   pluginJson: PluginJson;
   mcpServers: Record<string, McpServerConfig>;
+  startedWithoutGeneratedBundles: boolean;
 };
 
 const CLI_BIN_TARGET = 'bin/oh-my-claudecode.js';
@@ -123,6 +125,9 @@ function getPackedPackage(): PackedPackage {
     packWorkspaceCache = join(fixtureRootCache, 'workspace');
     packDirCache = join(fixtureRootCache, 'packed');
     createIsolatedPackWorkspace(packWorkspaceCache);
+    const startedWithoutGeneratedBundles = [...GENERATED_BRIDGE_FILES].every(
+      (file) => !existsSync(join(packWorkspaceCache!, file)),
+    );
     mkdirSync(packDirCache, { recursive: true });
 
     const stdout = execFileSync(
@@ -163,6 +168,10 @@ function getPackedPackage(): PackedPackage {
       'package/package.json',
       'package/.claude-plugin/plugin.json',
       'package/.mcp.json',
+      'package/agents',
+      'package/bridge/cli.cjs',
+      'package/bridge/runtime-cli.cjs',
+      'package/bridge/team.js',
     ]);
 
     const extractedPackageRoot = join(packDirCache, 'package');
@@ -180,6 +189,7 @@ function getPackedPackage(): PackedPackage {
       mcpServers: readMcpServersFromPath(
         join(extractedPackageRoot, '.mcp.json'),
       ),
+      startedWithoutGeneratedBundles,
     };
     return packedPackageCache;
   } catch (error) {
@@ -226,6 +236,29 @@ describe('npm package bin surface regression', () => {
     expect(packedFiles.has('bridge/team.js')).toBe(true);
     expect(packedFiles.has('bridge/gyoshu_bridge.py')).toBe(true);
     expect(packedFiles.has('bridge/run-mcp-server.sh')).toBe(true);
+  });
+
+  it('rebuilds recovery CLI surfaces from source without committed bundles', () => {
+    expect(packedPackageFixture.startedWithoutGeneratedBundles).toBe(true);
+
+    const packedCli = join(packDirCache!, 'package', 'bridge', 'cli.cjs');
+    const apiHelp = execFileSync(
+      process.execPath,
+      [packedCli, 'team', 'api', '--help'],
+      { cwd: tmpdir(), encoding: 'utf-8' },
+    );
+
+    expect(apiHelp).toContain('recover-worker');
+    expect(apiHelp).toContain('write-task-checkpoint');
+    expect(apiHelp).toContain('read-recovery-result');
+
+    const resultHelp = execFileSync(
+      process.execPath,
+      [packedCli, 'team', 'api', 'read-recovery-result', '--help'],
+      { cwd: tmpdir(), encoding: 'utf-8' },
+    );
+    expect(resultHelp).toContain('team_name');
+    expect(resultHelp).toContain('request_id');
   });
 
   it('packs the complete source-controlled plugin and hook payload', () => {
