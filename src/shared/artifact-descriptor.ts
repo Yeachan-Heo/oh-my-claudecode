@@ -1,5 +1,5 @@
-import { createHash } from 'crypto';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { createHash, randomBytes } from 'crypto';
+import { closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 
 export const DEFAULT_INLINE_ARTIFACT_THRESHOLD_BYTES = 2048;
@@ -92,8 +92,23 @@ export function createArtifactDescriptorFromPath(
 
 export function writeTextArtifact(options: WriteTextArtifactOptions): ArtifactDescriptor {
   mkdirSync(dirname(options.path), { recursive: true });
-  writeFileSync(options.path, options.content, { encoding: 'utf-8', mode: 0o600 });
-
+  // Atomic replacement with an exclusive, unpredictable temp name: random suffix + O_EXCL prevents
+  // same-process concurrent writes and stale/precreated temp collisions from clobbering each other.
+  const tmp = `${options.path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
+  const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+  try {
+    writeFileSync(fd, options.content, { encoding: "utf-8" });
+  } catch (e) {
+    try { closeSync(fd); unlinkSync(tmp); } catch { /* best-effort */ }
+    throw e;
+  }
+  closeSync(fd);
+  try {
+    renameSync(tmp, options.path);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* best-effort */ }
+    throw e;
+  }
   return createArtifactDescriptorFromPath(options.path, options);
 }
 

@@ -40,6 +40,8 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
+import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
+import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
 
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
@@ -48,8 +50,16 @@ const EXECUTION_MODES: [string, ...string[]] = [
   'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
 ];
 
-// Extended type for state tools - includes state-bearing modes outside mode-registry
+// merge-readiness is read/clear-eligible (state_read/status/clear + /cancel work) but NOT write-eligible.
 const STATE_TOOL_MODES: [string, ...string[]] = [
+  ...EXECUTION_MODES,
+  'ralplan',
+  'omc-teams',
+  'skill-active',
+  'merge-readiness'
+];
+// Modes that may be generically written via state_write. Excludes merge-readiness (runtime-owned).
+const STATE_WRITE_MODES: [string, ...string[]] = [
   ...EXECUTION_MODES,
   'ralplan',
   'omc-teams',
@@ -581,6 +591,12 @@ function findSingleOwningSessionForMode(
   return owningSessions.length === 1 ? owningSessions[0] : undefined;
 }
 
+function publicStateForMode(mode: StateToolMode, state: unknown): unknown {
+  return mode === 'merge-readiness'
+    ? redactMergeReadinessState(state as Parameters<typeof redactMergeReadinessState>[0])
+    : state;
+}
+
 // ============================================================================
 // state_read - Read state for a mode
 // ============================================================================
@@ -647,7 +663,7 @@ export const stateReadTool: ToolDefinition<{
         return {
           content: [{
             type: 'text' as const,
-            text: `## State for ${mode} (session: ${sessionId})\n\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\``
+            text: `## State for ${mode} (session: ${sessionId})\n\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\``
           }]
         };
       }
@@ -684,7 +700,7 @@ export const stateReadTool: ToolDefinition<{
         try {
           const content = readFileSync(statePath, 'utf-8');
           const state = JSON.parse(content);
-          output += `### Legacy Path (shared)\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\`\n\n`;
+          output += `### Legacy Path (shared)\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\`\n\n`;
         } catch {
           output += `### Legacy Path (shared)\nPath: ${statePath}\n*Error reading state file*\n\n`;
         }
@@ -701,7 +717,7 @@ export const stateReadTool: ToolDefinition<{
           try {
             const content = readFileSync(sessionStatePath, 'utf-8');
             const state = JSON.parse(content);
-            output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n\n\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\`\n\n`;
+            output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\`\n\n`;
           } catch {
             output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n*Error reading state file*\n\n`;
           }
@@ -731,7 +747,7 @@ export const stateReadTool: ToolDefinition<{
 // ============================================================================
 
 export const stateWriteTool: ToolDefinition<{
-  mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
+  mode: z.ZodEnum<typeof STATE_WRITE_MODES>;
   active: z.ZodOptional<z.ZodBoolean>;
   iteration: z.ZodOptional<z.ZodNumber>;
   max_iterations: z.ZodOptional<z.ZodNumber>;
@@ -749,7 +765,7 @@ export const stateWriteTool: ToolDefinition<{
   description: 'Write/update state for a specific mode. Creates the state file and directories if they do not exist. Common fields (active, iteration, phase, etc.) can be set directly as parameters. Additional custom fields can be passed via the optional `state` parameter. Note: swarm uses SQLite and cannot be written via this tool.',
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   schema: {
-    mode: z.enum(STATE_TOOL_MODES).describe('The mode to write state for'),
+    mode: z.enum(STATE_WRITE_MODES).describe('The mode to write state for'),
     active: z.boolean().optional().describe('Whether the mode is currently active'),
     iteration: z.number().optional().describe('Current iteration number'),
     max_iterations: z.number().optional().describe('Maximum iterations allowed'),
@@ -877,7 +893,7 @@ export const stateClearTool: ToolDefinition<{
   session_id: z.ZodOptional<z.ZodString>;
 }> = {
   name: 'state_clear',
-  description: 'Clear/delete state for a specific mode. Removes the state file and any associated marker files.',
+  description: 'Clear/delete state for a specific mode. Removes the state file and any associated marker files. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   schema: {
     mode: z.enum(STATE_TOOL_MODES).describe('The mode to clear state for'),
@@ -890,6 +906,33 @@ export const stateClearTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
+
+      // Merge-readiness is an audit gate, so clearing it must leave a durable
+      // terminal result and report rather than deleting the evidence trail.
+      if (mode === 'merge-readiness') {
+        const cancelledSessions: string[] = [];
+        const cancelActiveSession = (targetSessionId?: string): boolean => {
+          const current = readMergeReadinessState(root, targetSessionId);
+          return current?.active === true && cancelMergeReadiness(root, targetSessionId)?.result === 'cancelled';
+        };
+        if (sessionId) {
+          validateSessionId(sessionId);
+          if (cancelActiveSession(sessionId)) cancelledSessions.push(sessionId);
+        } else {
+          if (cancelActiveSession()) cancelledSessions.push('legacy');
+          for (const sid of listSessionIds(root)) {
+            if (cancelActiveSession(sid)) cancelledSessions.push(sid);
+          }
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: cancelledSessions.length > 0
+              ? `Cancelled merge-readiness gate(s) with durable state audit records: ${cancelledSessions.join(', ')}`
+              : 'No active merge-readiness gate found; existing state audit records were preserved.',
+          }],
+        };
+      }
       const cleanedTeamNames = new Set<string>();
 
       const collectTeamNamesForCleanup = (statePath: string): void => {
@@ -1505,7 +1548,7 @@ export const stateGetStatusTool: ToolDefinition<{
             try {
               const content = readFileSync(statePath, 'utf-8');
               const state = JSON.parse(content);
-              statePreview = JSON.stringify(state, null, 2).slice(0, 500);
+              statePreview = JSON.stringify(publicStateForMode(mode, state), null, 2).slice(0, 500);
               if (statePreview.length >= 500) statePreview += '\n...(truncated)';
             } catch {
               statePreview = 'Error reading state file';
@@ -1644,4 +1687,116 @@ export const stateTools = [
   stateClearTool,
   stateListActiveTool,
   stateGetStatusTool,
+  {
+    name: 'merge_readiness_start',
+    description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick/--standard/--deep; standard is default).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    schema: {
+      summary: z.string().max(2000),
+      baseRef: z.string().max(200).regex(/^[A-Za-z0-9._\/@{}~^:-]+$/, "baseRef must be a valid git ref").refine((s) => !s.startsWith("-"), "baseRef must not start with '-'").optional().describe("Base ref to diff committed changes against (e.g. origin/dev, HEAD, HEAD~1, HEAD^). Defaults to the branch upstream / origin/HEAD."),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { summary: string; workingDirectory?: string; session_id?: string; baseRef?: string }) => {
+      try {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
+      const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
+      const blocked = state.result === 'blocked';
+      return { content: [{ type: 'text' as const, text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(' ') ?? 'missing evidence'}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...(blocked ? { isError: true } : {}) };
+      } catch (error) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_set_content',
+    description: 'Validate and submit the five-section merge-readiness report and objective MCQs. Requires an active gate (call merge_readiness_start first).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    schema: {
+      why: z.string().max(10000), whatChanged: z.string().max(10000), tradeoffs: z.string().max(10000), risksConsidered: z.string().max(10000), teamUnderstanding: z.string().max(10000),
+      questions: z.array(z.object({ id: z.string().max(100), dimension: z.enum(['why', 'change', 'tradeoff', 'risk', 'team']), stem: z.string().max(2000), options: z.array(z.object({ id: z.string().max(100), text: z.string().max(1000) })).max(8), correctOptionId: z.string().max(100), rationale: z.string().max(2000).optional() })).max(8),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { why: string; whatChanged: string; tradeoffs: string; risksConsidered: string; teamUnderstanding: string; questions: Array<any>; workingDirectory?: string; session_id?: string }) => {
+      try {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
+      const state = setMergeReadinessContent(directory, args, sessionId);
+      if (!state) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness content rejected: no active gate. Call merge_readiness_start first.' }], isError: true };
+      }
+      const errors = state.validation_errors ?? [];
+      return { content: [{ type: 'text' as const, text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(' ')}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? 'none'}` }], ...(errors.length > 0 ? { isError: true } : {}) };
+      } catch (error) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_record_answer',
+    description: 'Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    schema: {
+      questionId: z.string().max(100),
+      optionId: z.string().max(100),
+      workingDirectory: z.string().optional(), session_id: z.string().optional(),
+    },
+    handler: async (args: { questionId: string; optionId: string; workingDirectory?: string; session_id?: string }) => {
+      try {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
+      const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
+      if (!state) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ.' }], isError: true };
+      }
+      const result = state.result;
+      const score = state.readiness_score;
+      const terminal = result === 'pass' || result === 'paused' || result === 'blocked' || result === 'overridden';
+      const text = terminal
+        ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === 'pass' ? 'The change may proceed to human merge approval.' : result === 'paused' ? 'Explanation gap remains; reread the report and rerun /merge-readiness.' : result === 'blocked' ? 'Missing evidence; produce it before rerunning.' : 'Gate overridden; terminal session state preserves the record.'}`
+        : `Answer recorded. Next question: ${state.pending_question?.id ?? 'none'}. Answered: ${state.answers.length}/${state.questions.length}.`;
+      return { content: [{ type: 'text' as const, text }] };
+      } catch (error) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_report',
+    description: 'Render the authoritative merge-readiness session state as a Markdown report without writing a file.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
+    handler: async (args: { workingDirectory?: string; session_id?: string }) => {
+      try {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
+      const state = readMergeReadinessState(directory, sessionId);
+      if (!state) {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness report unavailable: no session state found.' }], isError: true };
+      }
+      return { content: [{ type: 'text' as const, text: formatMergeReadinessReport(state) }] };
+      } catch (error) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  } as ToolDefinition<any>,
+  {
+    name: 'merge_readiness_cancel',
+    description: 'Cancel an active merge-readiness gate while preserving its terminal state audit record.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
+    handler: async (args: { workingDirectory?: string; session_id?: string }) => {
+      try {
+      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
+      const state = cancelMergeReadiness(directory, sessionId);
+      if (!state || state.result !== 'cancelled') {
+        return { content: [{ type: 'text' as const, text: 'Merge-readiness cancellation rejected: no active gate.' }], isError: true };
+      }
+      return { content: [{ type: 'text' as const, text: 'Merge-readiness cancelled. Terminal session state preserved as the audit record.' }] };
+      } catch (error) {
+        return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  } as ToolDefinition<any>,
 ];
