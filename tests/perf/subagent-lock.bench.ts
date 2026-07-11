@@ -9,9 +9,9 @@
  * / ~30-32ms p99 on a healthy path, so the CI ceilings sit above that band.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performance } from "perf_hooks";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -19,9 +19,13 @@ import {
   executeFlush,
   type SubagentTrackingState,
 } from "../../src/hooks/subagent-tracker/index.js";
-import { clearWorktreeCache } from "../../src/lib/worktree-paths.js";
+import {
+  clearWorktreeCache,
+  resolveSessionStatePaths,
+} from "../../src/lib/worktree-paths.js";
 
 const N = 100;
+const TRACKING_STATE_NAME = "subagent-tracking";
 const WARMUP_RUNS = 1;
 const MEASURED_RUNS = 5;
 const LOCAL_P99_LIMIT_MS = 8;
@@ -95,6 +99,31 @@ describe("subagent-lock benchmark", () => {
     return dir;
   }
 
+  function assertPersistedRun(
+    dir: string,
+    sessionId: string,
+    expectedAgents: number,
+  ): void {
+    const statePath = resolveSessionStatePaths(
+      TRACKING_STATE_NAME,
+      sessionId,
+      dir,
+    ).effectiveWrite;
+    const persisted = JSON.parse(
+      readFileSync(statePath, "utf8"),
+    ) as SubagentTrackingState;
+    const actualAgentIds = persisted.agents
+      .map((agent) => agent.agent_id)
+      .sort();
+    const expectedAgentIds = Array.from(
+      { length: expectedAgents },
+      (_value, index) => `agent-${index}`,
+    ).sort();
+
+    expect(persisted.total_spawned).toBe(expectedAgents);
+    expect(actualAgentIds).toEqual(expectedAgentIds);
+  }
+
   /**
    * Run N sequential executeFlush calls and return sorted per-update timings.
    */
@@ -121,6 +150,9 @@ describe("subagent-lock benchmark", () => {
       samples.push(elapsed);
     }
 
+    // Persistence validation is intentionally outside every timed interval.
+    assertPersistedRun(dir, sessionId, N);
+
     return samples.slice().sort((a, b) => a - b);
   }
 
@@ -136,6 +168,36 @@ describe("subagent-lock benchmark", () => {
 
     return summaries;
   }
+
+  it("rejects a successful flush when the expected state was not persisted", () => {
+    const dir = makeTempDir();
+    const sessionId = `bench-write-failure-${Date.now()}`;
+    const statePath = resolveSessionStatePaths(
+      TRACKING_STATE_NAME,
+      sessionId,
+      dir,
+    ).effectiveWrite;
+    mkdirSync(statePath, { recursive: true });
+
+    const state = makeEmptyState();
+    state.agents.push({
+      agent_id: "agent-0",
+      agent_type: "oh-my-claudecode:executor",
+      started_at: new Date().toISOString(),
+      parent_mode: "ultrawork",
+      status: "running",
+      task_description: "write-failure",
+    });
+    state.total_spawned = 1;
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(executeFlush(dir, state, sessionId)).toBe(true);
+      expect(() => assertPersistedRun(dir, sessionId, 1)).toThrow();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 
   // Linux hard assertion with CI-noise-tolerant aggregation.
   it.runIf(process.platform === "linux")(
