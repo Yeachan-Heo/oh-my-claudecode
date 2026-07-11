@@ -1476,10 +1476,40 @@ async function readOrCreateRecoveryAttempt(
   }
 }
 
+const BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS = 25;
+const BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS = 1_000;
+
+interface BootstrapRecoveryEvidenceWaitOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  now?: () => number;
+  sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+}
+
+function waitForBootstrapRecoveryEvidence(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal?.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function hasBootstrapRecoveryEvidence(
   teamName: string,
   cwd: string,
   input: RecoverDeadWorkerOwnerInput,
+  waitOptions: BootstrapRecoveryEvidenceWaitOptions = {},
 ): Promise<boolean> {
   const bootstrap = input.bootstrap;
   if (!bootstrap) return true;
@@ -1490,15 +1520,27 @@ async function hasBootstrapRecoveryEvidence(
     const intent = parseRecoveryIntent(await readFile(absPath(cwd, TeamPaths.recoveryIntent(teamName, bootstrap.recoveryId)), 'utf8'));
     if (intent.request_id !== input.requestId || intent.recovery_id !== bootstrap.recoveryId
       || intent.team_name !== teamName || intent.worker_name !== input.workerName) return false;
-    for (;;) {
+    const now = waitOptions.now ?? Date.now;
+    const timeoutMs = waitOptions.timeoutMs === undefined
+      ? BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS
+      : Number.isFinite(waitOptions.timeoutMs)
+        ? Math.min(Math.max(waitOptions.timeoutMs, 0), BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS)
+        : 0;
+    const deadline = now() + timeoutMs;
+    const sleep = waitOptions.sleep ?? waitForBootstrapRecoveryEvidence;
+    for (let attempt = 0; attempt <= Math.ceil(timeoutMs / BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS)
+      && !waitOptions.signal?.aborted; attempt++) {
       const candidate = await readRecoveryOwnerBootstrapCandidate(teamName, cwd, bootstrap.expectedEpoch, bootstrap.nonce);
       if (candidate && candidateMatchesBootstrap(candidate, input)) return true;
       const owner = readLatestOwnerEpoch(cwd, teamName);
       if (owner && (owner.epoch > bootstrap.expectedEpoch
         || (owner.epoch === bootstrap.expectedEpoch && (owner.pid !== bootstrap.pid
           || owner.process_started_at !== bootstrap.processStartedAt || owner.nonce !== bootstrap.nonce)))) return false;
-      await new Promise(resolve => setTimeout(resolve, 25));
+      const remainingMs = deadline - now();
+      if (remainingMs <= 0) return false;
+      await sleep(Math.min(BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS, remainingMs), waitOptions.signal);
     }
+    return false;
   } catch {
     return false;
   }
@@ -1723,6 +1765,7 @@ async function ensureRecoveryOwner(
   teamName: string,
   cwd: string,
   input: RecoverDeadWorkerOwnerInput,
+  waitOptions?: BootstrapRecoveryEvidenceWaitOptions,
 ): Promise<{ fence: OwnerFence; config: TeamConfig; stateRevision: number }> {
   let current = await readRevisionedTeamConfig(teamName, cwd);
   if (!current) current = await migrateTeamConfigRevision(teamName, cwd);
@@ -1737,7 +1780,7 @@ async function ensureRecoveryOwner(
   if (bootstrap) {
     if (bootstrap.expectedEpoch !== bootstrap.predecessorEpoch + 1 || bootstrap.pid !== process.pid
       || bootstrap.processStartedAt !== processStartedAt || bootstrap.nonce.length === 0
-      || !await hasBootstrapRecoveryEvidence(teamName, cwd, input)) {
+      || !await hasBootstrapRecoveryEvidence(teamName, cwd, input, waitOptions)) {
       throw new Error('runtime_owner_bootstrap_fence_lost');
     }
     const predecessor = owner;
@@ -1855,10 +1898,13 @@ async function ensureRecoveryOwner(
 }
 
 /** Establish the exact successor/config binding before a detached owner may execute or maintain. */
-export async function prepareRecoveryOwnerBootstrap(input: RecoverDeadWorkerOwnerInput): Promise<void> {
+export async function prepareRecoveryOwnerBootstrap(
+  input: RecoverDeadWorkerOwnerInput,
+  waitOptions?: BootstrapRecoveryEvidenceWaitOptions,
+): Promise<void> {
   const bootstrap = input.bootstrap;
   if (!bootstrap) throw new Error('runtime_owner_bootstrap_fence_lost');
-  let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input);
+  let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions);
   if (owner.fence.epoch !== bootstrap.expectedEpoch
     || owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch
     || owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce) {

@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 import { executeTeamApiOperation } from '../api-interop.js';
+import { reserveRecoveryRequest, writeRecoveryPhase } from '../recovery-request-store.js';
 
 describe('team api working-directory resolution', () => {
   let cwd: string;
@@ -36,12 +37,37 @@ describe('team api working-directory resolution', () => {
     return base;
   }
 
+  function seedRecoveryPhase(workspace: string, recoveryId: string, stateRevision: number): void {
+    reserveRecoveryRequest(workspace, 'request-a', {
+      operation: 'recover-worker',
+      workspaceHash: 'a'.repeat(64),
+      teamName,
+      workerName: 'worker-1',
+    }, recoveryId);
+    writeRecoveryPhase(workspace, {
+      schema_version: 1,
+      kind: 'phase',
+      request_id: 'request-a',
+      recovery_id: recoveryId,
+      team_name: teamName,
+      worker_name: 'worker-1',
+      phase: 'active',
+      continuation: 'adopted',
+      adoption: 'adopted',
+      services: 'synced',
+      manifest: 'synced',
+      state_revision: stateRevision,
+      updated_at: '2026-07-11T00:00:00.000Z',
+    });
+  }
+
   beforeEach(async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-team-api-resolution-'));
   });
 
   afterEach(async () => {
     delete process.env.OMC_TEAM_STATE_ROOT;
+    delete process.env.OMC_TEAM_WORKER;
     await rm(cwd, { recursive: true, force: true });
   });
 
@@ -81,6 +107,31 @@ describe('team api working-directory resolution', () => {
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(typeof (claimResult.data as { claimToken?: string }).claimToken).toBe('string');
+  });
+
+  it('reads recovery results from canonical leader state rather than a colliding foreign worker cwd', async () => {
+    const leaderStateRoot = await seedTeamState();
+    const foreignCwd = join(cwd, 'worktrees', 'worker-1', 'nested');
+    const foreignTeamRoot = join(foreignCwd, '.omc', 'state', 'team', teamName);
+    await mkdir(foreignTeamRoot, { recursive: true });
+    await writeFile(join(foreignTeamRoot, 'config.json'), JSON.stringify({
+      name: teamName,
+      team_state_root: foreignTeamRoot,
+    }));
+
+    seedRecoveryPhase(cwd, 'leader-recovery', 7);
+    seedRecoveryPhase(foreignCwd, 'foreign-recovery', 99);
+    process.env.OMC_TEAM_STATE_ROOT = leaderStateRoot;
+    process.env.OMC_TEAM_WORKER = `${teamName}/worker-1`;
+
+    await expect(executeTeamApiOperation('read-recovery-result', {
+      team_name: teamName,
+      request_id: 'request-a',
+    }, foreignCwd)).resolves.toMatchObject({
+      ok: true,
+      operation: 'read-recovery-result',
+      data: { outcome: { kind: 'phase', recovery_id: 'leader-recovery', state_revision: 7 } },
+    });
   });
 
   it('claims tasks using config workers even when manifest workers are stale', async () => {

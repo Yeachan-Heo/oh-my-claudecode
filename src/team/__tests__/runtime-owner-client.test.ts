@@ -81,6 +81,23 @@ function seedV2Team(cwd: string, teamName = 'recovery-team'): void {
   writeFileSync(manifestPath, JSON.stringify({ schema_version: 2 }));
 }
 
+function seedBootstrapRecoveryRequest(
+  cwd: string,
+  teamName: string,
+  requestId: string,
+  recoveryId: string,
+): void {
+  const payload = { operation: 'recover-worker' as const,
+    workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' };
+  reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
+  const intentPath = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
+  mkdirSync(join(intentPath, '..'), { recursive: true });
+  writeFileSync(intentPath, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
+    recovery_id: recoveryId, operation: payload.operation, workspace_hash: payload.workspaceHash,
+    payload_hash: canonicalRecoveryPayloadHash(payload), team_name: teamName, worker_name: 'worker-1',
+    created_at: new Date().toISOString() }));
+}
+
 describe('runtime owner durable request admission', () => {
   it('joins concurrent copies of the same request and never dispatches owner effects twice', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-replay-'));
@@ -554,6 +571,73 @@ describe('recovery owner bootstrap candidates', () => {
       const finalized = JSON.parse(readFileSync(configPath, 'utf8')) as { active_recovery?: unknown; last_recovery?: { request_id: string } };
       expect(finalized.active_recovery).toBeUndefined();
       expect(finalized.last_recovery?.request_id).toBe(requestId);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('times out missing bootstrap evidence without publishing owner, config, effects, or a final result', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-bootstrap-timeout-'));
+    try {
+      const teamName = 'recovery-team';
+      const requestId = 'missing-candidate-request';
+      const recoveryId = 'missing-candidate-recovery';
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+      seedBootstrapRecoveryRequest(cwd, teamName, requestId, recoveryId);
+      const processStartedAt = currentProcessStartIdentity();
+      expect(processStartedAt).toBeTruthy();
+      let now = 0;
+      let sleepCalls = 0;
+      const input: RecoverDeadWorkerOwnerInput = { teamName, cwd, workerName: 'worker-1', requestId, bootstrap: {
+        expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
+        predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: processStartedAt!, nonce: 'missing-child', recoveryId,
+      } };
+
+      await expect(prepareRecoveryOwnerBootstrap(input, {
+        timeoutMs: Number.MAX_SAFE_INTEGER,
+        now: () => now,
+        sleep: async delayMs => { sleepCalls++; now += delayMs; },
+      })).rejects.toThrow('runtime_owner_bootstrap_fence_lost');
+      expect(sleepCalls).toBe(40);
+
+      const config = JSON.parse(readFileSync(configPath, 'utf8')) as { runtime_owner_epoch?: unknown; active_recovery?: unknown };
+      expect(config.runtime_owner_epoch).toBeUndefined();
+      expect(config.active_recovery).toBeUndefined();
+      expect(readRecoveryOutcome(cwd, requestId)).toBeNull();
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('cancels bootstrap evidence waiting without publishing owner, config, effects, or a final result', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-bootstrap-abort-'));
+    try {
+      const teamName = 'recovery-team';
+      const requestId = 'aborted-candidate-request';
+      const recoveryId = 'aborted-candidate-recovery';
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+      seedBootstrapRecoveryRequest(cwd, teamName, requestId, recoveryId);
+      const processStartedAt = currentProcessStartIdentity();
+      expect(processStartedAt).toBeTruthy();
+      const controller = new AbortController();
+      const input: RecoverDeadWorkerOwnerInput = { teamName, cwd, workerName: 'worker-1', requestId, bootstrap: {
+        expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
+        predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: processStartedAt!, nonce: 'aborted-child', recoveryId,
+      } };
+
+      await expect(prepareRecoveryOwnerBootstrap(input, {
+        signal: controller.signal,
+        sleep: async () => { controller.abort(); },
+      })).rejects.toThrow('runtime_owner_bootstrap_fence_lost');
+
+      const config = JSON.parse(readFileSync(configPath, 'utf8')) as { runtime_owner_epoch?: unknown; active_recovery?: unknown };
+      expect(config.runtime_owner_epoch).toBeUndefined();
+      expect(config.active_recovery).toBeUndefined();
+      expect(readRecoveryOutcome(cwd, requestId)).toBeNull();
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

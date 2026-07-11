@@ -61,7 +61,7 @@ const RECOVER_WORKER_REQUEST_FIELDS = new Set(['team_name', 'worker', 'request_i
 const WRITE_TASK_CHECKPOINT_REQUEST_FIELDS = new Set([
   'team_name', 'task_id', 'worker', 'claim_token', 'task_version', 'sequence', 'resume_payload',
 ]);
-const READ_RECOVERY_RESULT_REQUEST_FIELDS = new Set(['request_id']);
+const READ_RECOVERY_RESULT_REQUEST_FIELDS = new Set(['team_name', 'request_id']);
 const RECOVERY_ERROR_CODES = new Set([
   'invalid_input', 'team_not_found', 'worker_not_found', 'worker_not_dead', 'runtime_v2_required',
   'invalid_persisted_state', 'runtime_owner_unavailable', 'runtime_owner_fence_lost',
@@ -681,11 +681,21 @@ export async function executeTeamApiOperation(
       }
       case 'read-recovery-result': {
         const unsupported = unsupportedFields(args, READ_RECOVERY_RESULT_REQUEST_FIELDS);
+        const teamName = requiredString(args, 'team_name');
         const requestId = requiredString(args, 'request_id');
-        if (unsupported.length > 0 || !requestId) {
-          return { ok: false, operation, error: { code: 'invalid_input', message: unsupported.length > 0 ? `read-recovery-result received unsupported fields: ${unsupported.join(', ')}` : 'request_id is required' } };
+        if (unsupported.length > 0 || !teamName || !requestId) {
+          return {
+            ok: false,
+            operation,
+            error: {
+              code: 'invalid_input',
+              message: unsupported.length > 0
+                ? `read-recovery-result received unsupported fields: ${unsupported.join(', ')}`
+                : 'team_name and request_id are required',
+            },
+          };
         }
-        const outcome = readRecoverDeadWorkerV2Outcome(fallbackCwd, requestId);
+        const outcome = readRecoverDeadWorkerV2Outcome(cwd, requestId);
         return outcome
           ? { ok: true, operation, data: { outcome } }
           : { ok: false, operation, error: { code: 'recovery_result_not_found', message: 'recovery_result_not_found' } };

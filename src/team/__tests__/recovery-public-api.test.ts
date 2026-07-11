@@ -178,11 +178,29 @@ describe('public dead-worker recovery facade', () => {
         expires_at: '2099-01-01T00:00:00.000Z',
       });
 
-      await expect(executeTeamApiOperation('read-recovery-result', { request_id: 'request-a' }, cwd))
+      await expect(executeTeamApiOperation('read-recovery-result', { team_name: 'recovery-team', request_id: 'request-a' }, cwd))
         .resolves.toMatchObject({ ok: true, operation: 'read-recovery-result', data: { outcome: { kind: 'final', result: recovered } } });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  it('requires team_name and rejects unsupported read-recovery-result fields', async () => {
+    await expect(executeTeamApiOperation('read-recovery-result', { request_id: 'request-a' }, '/workspace'))
+      .resolves.toEqual({
+        ok: false,
+        operation: 'read-recovery-result',
+        error: { code: 'invalid_input', message: 'team_name and request_id are required' },
+      });
+    await expect(executeTeamApiOperation('read-recovery-result', {
+      team_name: 'recovery-team',
+      request_id: 'request-a',
+      worker: 'worker-1',
+    }, '/workspace')).resolves.toEqual({
+      ok: false,
+      operation: 'read-recovery-result',
+      error: { code: 'invalid_input', message: 'read-recovery-result received unsupported fields: worker' },
+    });
   });
 
   it('exports an async request-first terminal-result reader that preserves canonical durable pane identities', async () => {
