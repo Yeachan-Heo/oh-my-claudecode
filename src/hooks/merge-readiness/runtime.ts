@@ -97,7 +97,7 @@ function modeStateRecordsRun(filePath: string): boolean {
   return false;
 }
 
-function listArtifactFiles(directory: string): string[] {
+function listArtifactFiles(directory: string, sessionId?: string): string[] {
   const root = getOmcRoot(directory);
   const dirCandidates = ["plans", "artifacts", "logs", "specs", "interviews"]
     .map((segment) => join(root, segment))
@@ -144,28 +144,35 @@ function listArtifactFiles(directory: string): string[] {
   }
 
   // Scan .omc/state/ for canonical mode-state files that record a real run
-  // (the "relevant mode state artifacts" advertised in SKILL.md). Only the
-  // legacy/global state dir; session-scoped state belongs to other sessions.
+  // (the "relevant mode state artifacts" advertised in SKILL.md). Scan the
+  // legacy/global state dir AND the current session's session-scoped state dir,
+  // so a --from-artifacts run after a session-scoped workflow (ralph/team/etc.)
+  // counts the current session's mode state as evidence.
   const stateDir = join(root, "state");
-  if (existsSync(stateDir)) {
+  const scanStateDir = (dir: string): void => {
+    if (!existsSync(dir)) return;
     try {
-      for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
         if (isNonEvidenceStateFile(entry.name)) continue;
         if (!EVIDENCE_MODE_STATE_FILES.has(entry.name)) continue;
-        const full = join(stateDir, entry.name);
+        const full = join(dir, entry.name);
         if (!modeStateRecordsRun(full)) continue;
         pushRelative(full);
       }
     } catch {
       // Unreadable state dir: skip.
     }
+  };
+  scanStateDir(stateDir);
+  if (sessionId) {
+    scanStateDir(join(stateDir, "sessions", sessionId));
   }
 
   return found.sort();
 }
 
-export function collectMergeReadinessEvidence(directory: string, baseRef?: string): MergeReadinessEvidence {
+export function collectMergeReadinessEvidence(directory: string, baseRef?: string, sessionId?: string): MergeReadinessEvidence {
   const worktree = resolveToWorktreeRoot(directory);
   const gitErrors: string[] = [];
   const git = (args: string[]): string => {
@@ -184,7 +191,7 @@ export function collectMergeReadinessEvidence(directory: string, baseRef?: strin
   const trackedChangedFiles = Array.from(new Set([...changedFiles, ...stagedFiles, ...committedFiles])).sort();
   const status = git(["status", "--short"]);
   const diffStat = git(["diff", "--stat", "HEAD"]) || (committedBase ? git(["diff", "--stat", committedBase + "...HEAD"]) : "") || git(["diff", "--cached", "--stat"]);
-  const sourceArtifacts = listArtifactFiles(worktree);
+  const sourceArtifacts = listArtifactFiles(worktree, sessionId);
   const evidenceText = sourceArtifacts.join("\n").toLowerCase();
   const testEvidence = sourceArtifacts.filter((file) => /test|spec|qa|verify|validation/i.test(file));
   const reviewEvidence = sourceArtifacts.filter((file) => /review|risk|security|readiness|verdict/i.test(file));
@@ -401,7 +408,7 @@ export function createInitialMergeReadinessState(
   const unsupportedFromPr = /\B--from-pr\b/i.test(promptText);
   const sourceModeResult = parseMergeReadinessSourceMode(promptText);
   const sourceMode = sourceModeResult.mode;
-  const evidence = collectMergeReadinessEvidence(directory, baseRef);
+  const evidence = collectMergeReadinessEvidence(directory, baseRef, sessionId);
   const missingEvidence = unsupportedFromPr || Boolean(sourceModeResult.error) || !hasMinimalEvidenceForMode(evidence, sourceMode);
   const state: MergeReadinessState = {
     active: true,
@@ -648,6 +655,13 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readMergeReadinessState(workingDir, sessionId);
   if (!state?.active || !reason.trim()) return state ?? null;
+  if (!sessionId) {
+    state.validation_errors = [
+      ...(state.validation_errors ?? []),
+      "Override rejected: a session id is required to record the operator (owner boundary). Re-run with a valid session id.",
+    ];
+    return persistOrFailClosed(workingDir, state, sessionId);
+  }
   if (state.result === "blocked") {
     state.validation_errors ??= ["Blocked: resolve the validation errors before overriding."];
     return persistOrFailClosed(workingDir, state, sessionId);

@@ -851,4 +851,42 @@ describe("merge-readiness runtime", () => {
       expect(after.answers).toEqual(before.answers);
     });
   });
+
+  it("counts the current session's session-scoped mode-state file as evidence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-mr-session-state-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      writeFileSync(join(dir, "README.md"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      // Clean tree. An active ralph run stored under the CURRENT session's
+      // session-scoped state dir must count as evidence (not just legacy/global).
+      mkdirSync(join(dir, ".omc", "state", "sessions", sessionId), { recursive: true });
+      writeFileSync(
+        join(dir, ".omc", "state", "sessions", sessionId, "ralph-state.json"),
+        JSON.stringify({ active: true, iteration: 3, started_at: "2026-01-01T00:00:00.000Z", phase: "execute" }),
+      );
+      const state = createInitialMergeReadinessState(dir, "/merge-readiness --from-artifacts change", sessionId);
+      expect(state.evidence.sourceArtifacts).toContain(`state/sessions/${sessionId}/ralph-state.json`);
+      expect(state.result).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("override is rejected without a session id (owner boundary)", () => {
+    // Legacy/no-session mode: seed and override with no session id.
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", undefined);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, undefined);
+    const state = overrideMergeReadiness(tempDir, "Maintainer override.", undefined);
+    expect(state?.result).not.toBe("overridden");
+    expect(state?.active).toBe(true);
+    expect(state?.validation_errors?.some((e) => e.includes("session id"))).toBe(true);
+    expect(readMergeReadinessState(tempDir, undefined)?.result).not.toBe("overridden");
+  });
 });
