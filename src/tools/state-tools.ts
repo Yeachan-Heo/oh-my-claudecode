@@ -911,28 +911,39 @@ export const stateClearTool: ToolDefinition<{
       // terminal result and report rather than deleting the evidence trail.
       if (mode === 'merge-readiness') {
         const cancelledSessions: string[] = [];
-        const cancelActiveSession = (targetSessionId?: string): boolean => {
+        const blockedSessions: string[] = [];
+        const cancelActiveSession = (targetSessionId?: string): 'cancelled' | 'blocked' | 'inactive' => {
           const current = readMergeReadinessState(root, targetSessionId);
-          return current?.active === true && cancelMergeReadiness(root, targetSessionId)?.result === 'cancelled';
+          if (!current?.active) return 'inactive';
+          // cancelMergeReadiness fail-closes to an active blocked state when the
+          // write cannot land; distinguish that from a real cancelled result so
+          // the operator learns the cancel did not persist.
+          return cancelMergeReadiness(root, targetSessionId)?.result === 'cancelled' ? 'cancelled' : 'blocked';
+        };
+        const recordResult = (sid: string, status: 'cancelled' | 'blocked' | 'inactive'): void => {
+          if (status === 'cancelled') cancelledSessions.push(sid);
+          else if (status === 'blocked') blockedSessions.push(sid);
         };
         if (sessionId) {
           validateSessionId(sessionId);
-          if (cancelActiveSession(sessionId)) cancelledSessions.push(sessionId);
+          recordResult(sessionId, cancelActiveSession(sessionId));
         } else {
           // Omitting session_id must not cross session boundaries: only cancel
           // the caller's own session (resolved from env) and legacy state,
           // never other sessions' active gates.
           const callerSid = (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
-          if (callerSid && cancelActiveSession(callerSid)) cancelledSessions.push(callerSid);
-          if (cancelActiveSession()) cancelledSessions.push('legacy');
+          if (callerSid) recordResult(callerSid, cancelActiveSession(callerSid));
+          recordResult('legacy', cancelActiveSession());
         }
+        const blocked = blockedSessions.length > 0;
+        const text = blocked
+          ? `Merge-readiness cancellation FAILED for: ${blockedSessions.join(', ')}. The state could not be persisted (read-only state dir / full disk); the gate(s) remain active on disk. Resolve and re-run.`
+          : cancelledSessions.length > 0
+            ? `Cancelled merge-readiness gate(s) with durable state audit records: ${cancelledSessions.join(', ')}`
+            : 'No active merge-readiness gate found; existing state audit records were preserved.';
         return {
-          content: [{
-            type: 'text' as const,
-            text: cancelledSessions.length > 0
-              ? `Cancelled merge-readiness gate(s) with durable state audit records: ${cancelledSessions.join(', ')}`
-              : 'No active merge-readiness gate found; existing state audit records were preserved.',
-          }],
+          content: [{ type: 'text' as const, text }],
+          ...(blocked ? { isError: true } : {}),
         };
       }
       const cleanedTeamNames = new Set<string>();
@@ -1753,11 +1764,13 @@ export const stateTools = [
       }
       const result = state.result;
       const score = state.readiness_score;
-      const terminal = result === 'pass' || result === 'paused' || result === 'blocked' || result === 'overridden';
-      const text = terminal
-        ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === 'pass' ? 'The change may proceed to human merge approval.' : result === 'paused' ? 'Explanation gap remains; reread the report and rerun /merge-readiness.' : result === 'blocked' ? 'Missing evidence; produce it before rerunning.' : 'Gate overridden; terminal session state preserves the record.'}`
-        : `Answer recorded. Next question: ${state.pending_question?.id ?? 'none'}. Answered: ${state.answers.length}/${state.questions.length}.`;
-      return { content: [{ type: 'text' as const, text }] };
+      const persistFailed = result === 'blocked' && (state.validation_errors ?? []).some((e) => e.includes('persisted'));
+      const text = persistFailed
+        ? `Merge-readiness answer NOT recorded: state could not be persisted (read-only state dir / full disk / invalid path). The gate is still armed on disk. ${(state.validation_errors ?? []).join(' ')}`
+        : result === 'pass' || result === 'paused' || result === 'blocked' || result === 'overridden'
+          ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === 'pass' ? 'The change may proceed to human merge approval.' : result === 'paused' ? 'Explanation gap remains; reread the report and rerun /merge-readiness.' : result === 'blocked' ? 'Missing evidence; produce it before rerunning.' : 'Gate overridden; terminal session state preserves the record.'}`
+          : `Answer recorded. Next question: ${state.pending_question?.id ?? 'none'}. Answered: ${state.answers.length}/${state.questions.length}.`;
+      return { content: [{ type: 'text' as const, text }], ...(persistFailed ? { isError: true } : {}) };
       } catch (error) {
         return { content: [{ type: 'text' as const, text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
       }

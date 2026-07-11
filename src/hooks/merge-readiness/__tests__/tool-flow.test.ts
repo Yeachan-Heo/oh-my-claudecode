@@ -288,13 +288,49 @@ describe("merge-readiness standalone tool flow", () => {
     expect(readMergeReadinessState(tempDir, session)?.active).toBe(true);
 
     persistFail.failWrites = true;
+    let res: any;
     try {
-      await clear.handler({ mode: "merge-readiness", workingDirectory: tempDir, session_id: session });
+      res = await clear.handler({ mode: "merge-readiness", workingDirectory: tempDir, session_id: session });
     } finally {
       persistFail.failWrites = false;
     }
+    // The handler must report the failed cancellation as an error, not "no active gate".
+    expect(res?.isError).toBe(true);
+    expect(textOf(res)).toContain("FAILED");
     // On-disk state did not advance to cancelled; the gate stays armed.
     expect(readMergeReadinessState(tempDir, session)?.active).toBe(true);
     expect(readMergeReadinessState(tempDir, session)?.result).not.toBe("cancelled");
+  });
+
+  it("record_answer surfaces a failed write as an error, not a normal terminal", async () => {
+    const start = findTool("merge_readiness_start");
+    const setContent = findTool("merge_readiness_set_content");
+    const recordAnswer = findTool("merge_readiness_record_answer");
+    const session = "record-failwrite-session";
+
+    await start.handler({ summary: "/merge-readiness --quick change", workingDirectory: tempDir, session_id: session });
+    await setContent.handler({
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [
+        { id: "q1", dimension: "why", stem: "why?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q2", dimension: "change", stem: "change?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+        { id: "q3", dimension: "risk", stem: "risk?", options: [{ id: "a", text: "c" }, { id: "b", text: "w" }], correctOptionId: "a" },
+      ],
+      workingDirectory: tempDir, session_id: session,
+    });
+
+    persistFail.failWrites = true;
+    let res: any;
+    try {
+      res = await recordAnswer.handler({ questionId: "q1", optionId: "a", workingDirectory: tempDir, session_id: session });
+    } finally {
+      persistFail.failWrites = false;
+    }
+    // The handler must report the failed answer write as an error, not "Answer recorded".
+    expect(res?.isError).toBe(true);
+    expect(textOf(res)).toContain("NOT recorded");
+    expect(textOf(res)).not.toContain("Answer recorded");
+    // On-disk answer was not advanced.
+    expect(readMergeReadinessState(tempDir, session)?.answers).toEqual([]);
   });
 });
