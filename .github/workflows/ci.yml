@@ -120,6 +120,17 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify bridge registers all merge-readiness tools (source/packaged parity)
+        run: |
+          set -e
+          for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
+            if ! grep -q "\"$tool\"" bridge/mcp-server.cjs; then
+              echo "::error::Packaged bridge/mcp-server.cjs is missing tool: $tool. Source/packaged parity broken (run npm run build)."
+              exit 1
+            fi
+            echo "bridge registers $tool"
+          done
+
       - name: Check dist size
         run: |
           DIST_SIZE=$(du -sm dist | cut -f1)

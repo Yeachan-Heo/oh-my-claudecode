@@ -7,10 +7,12 @@ import {
   checkMergeReadiness,
   cancelMergeReadiness,
   createInitialMergeReadinessState,
+  formatMergeReadinessQuestionMessage,
   readMergeReadinessState,
   recordMergeReadinessMCQAnswer,
   recordMergeReadinessAskUserQuestionResult,
   overrideMergeReadiness,
+  redactMergeReadinessState,
   setMergeReadinessContent,
 } from "../index.js";
 import type { MergeReadinessMCQQuestion } from "../mcq.js";
@@ -358,6 +360,63 @@ describe("merge-readiness runtime", () => {
     expect(after.why).toBe(before.why);
     expect(after.change_summary).toBe(before.change_summary);
     expect(after.prior_attempts?.length ?? 0).toBe(0);
+  });
+
+  it("retains the five narrative sections in a prior-attempt audit record", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "why-text", whatChanged: "wc-text", tradeoffs: "t-text", risksConsidered: "r-text", teamUnderstanding: "tu-text",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("paused");
+    const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId);
+    const prior = state.prior_attempts?.[0];
+    expect(prior?.why).toBe("why-text");
+    expect(prior?.whatChanged).toBe("wc-text");
+    expect(prior?.tradeoffs).toBe("t-text");
+    expect(prior?.risksConsidered).toBe("r-text");
+    expect(prior?.teamUnderstanding).toBe("tu-text");
+  });
+
+  it("redacts prior-attempt answer keys on state_read while the current attempt is pending", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why", "a"), makeQuestion("q2", "change", "a"), makeQuestion("q3", "risk", "a")],
+    }, sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("paused");
+    // Re-start: the paused attempt is retained; the current attempt is pending.
+    const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId);
+    expect(state.result).toBe("pending");
+    expect(state.prior_attempts?.[0].questions.every((q) => typeof q.correctOptionId === "string")).toBe(true);
+    // Public state_read surface must hide prior answer keys while the current quiz is live.
+    const redacted = redactMergeReadinessState(state) as {
+      questions: Array<Record<string, unknown>>;
+      prior_attempts: Array<{ questions: Array<Record<string, unknown>> }>;
+    };
+    expect(redacted.questions.every((q) => q.correctOptionId === undefined)).toBe(true);
+    expect(redacted.prior_attempts[0].questions.every((q) => q.correctOptionId === undefined)).toBe(true);
+  });
+
+  it("binds the resolved base ref into the no-diff recovery guidance", () => {
+    const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --standard change", sessionId);
+    // Force a no-diff blocked state with a known base_ref to test guidance rendering.
+    state.result = "blocked";
+    state.evidence = {
+      changedFiles: [], untrackedFiles: [], status: "", diffStat: "",
+      sourceArtifacts: [], testEvidence: [], reviewEvidence: [],
+      missingEvidence: ["No diff stat was detected for the current worktree."],
+      base_ref: "origin/dev",
+    };
+    const msg = formatMergeReadinessQuestionMessage(state);
+    expect(msg).toContain("--from-diff origin/dev");
+    expect(msg).not.toMatch(/<base-ref>/);
   });
 
   it("rejects an invalid session id early before evidence collection (path separator)", () => {

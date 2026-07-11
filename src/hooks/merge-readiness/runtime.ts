@@ -209,7 +209,7 @@ export function collectMergeReadinessEvidence(directory: string, baseRef?: strin
     missingEvidence.push("No review or risk artifact was detected under .omc.");
   }
   for (const gerr of gitErrors) missingEvidence.push(gerr);
-  return { changedFiles: trackedChangedFiles, untrackedFiles, status, diffStat, sourceArtifacts, testEvidence, reviewEvidence, missingEvidence };
+  return { changedFiles: trackedChangedFiles, untrackedFiles, status, diffStat, sourceArtifacts, testEvidence, reviewEvidence, missingEvidence, base_ref: resolvedBase };
 }
 
 function extractChangeSummary(promptText: string): string {
@@ -480,6 +480,11 @@ export function createInitialMergeReadinessState(
       required_dimensions: [...prior.required_dimensions],
       change_summary: prior.change_summary,
       slug: prior.slug,
+      why: prior.why,
+      whatChanged: prior.whatChanged,
+      tradeoffs: prior.tradeoffs,
+      risksConsidered: prior.risksConsidered,
+      teamUnderstanding: prior.teamUnderstanding,
       started_at: prior.started_at,
       completed_at: prior.completed_at,
       result: prior.result,
@@ -721,8 +726,12 @@ export function formatMergeReadinessQuestionMessage(state: MergeReadinessState):
 
   if (state.result === "blocked") {
     const noDiff = state.evidence.changedFiles.length === 0 && !state.evidence.diffStat;
+    const baseRef = state.evidence.base_ref;
+    const diffHint = baseRef
+      ? `re-run with --from-diff ${baseRef}`
+      : "re-run with --from-diff <base-ref> (or pass baseRef to merge_readiness_start)";
     const evidenceGuidance = noDiff
-      ? "No diff detected. If changes are committed, re-run with --from-diff <base-ref>; if relying on .omc artifacts, use --from-artifacts. If there are truly no changes, a merge-readiness gate is not needed."
+      ? `No diff detected. If changes are committed, ${diffHint}; if relying on .omc artifacts, use --from-artifacts. If there are truly no changes, a merge-readiness gate is not needed.`
       : "Produce the test/review evidence under .omc, then re-run /merge-readiness (merge_readiness_start).";
     return [
       "[MERGE READINESS BLOCKED]",

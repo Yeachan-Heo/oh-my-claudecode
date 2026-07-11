@@ -99,7 +99,16 @@ function renderPriorAttempt(attempt: MergeReadinessAttempt, index: number): stri
       : "- Missing evidence: none",
   ].filter((line) => line.length > 0).join("\n");
 
-  return [header, "", "#### Dimension Coverage", "", dimensions, "", "#### Questions & Answers", "", qa, "", evidenceBlock].join("\n");
+  const narrative = [
+    "#### Narrative",
+    `- Why: ${attempt.why || "_Not recorded._"}`,
+    `- What changed: ${attempt.whatChanged || "_Not recorded._"}`,
+    `- Tradeoffs: ${attempt.tradeoffs || "_Not recorded._"}`,
+    `- Risks considered: ${attempt.risksConsidered || "_Not recorded._"}`,
+    `- Team understanding: ${attempt.teamUnderstanding || "_Not recorded._"}`,
+  ].join("\n");
+
+  return [header, "", narrative, "", "#### Dimension Coverage", "", dimensions, "", "#### Questions & Answers", "", qa, "", evidenceBlock].join("\n");
 }
 
 /** Render the authoritative session state as a report without filesystem side effects. */
@@ -202,6 +211,21 @@ export function redactMergeReadinessState(state: MergeReadinessState): Record<st
       delete publicRound.score;
       return publicRound;
     }),
+    // Prior attempts are terminal, but while the CURRENT attempt is still
+    // pending/blocked the operator must not read past answer keys from the
+    // audit trail. Redact correctOptionId/rationale/isCorrect on retained
+    // attempts until the current attempt reaches a terminal state.
+    prior_attempts: (revealAll || revealAnswered)
+      ? state.prior_attempts
+      : (state.prior_attempts ?? []).map((attempt) => ({
+          ...attempt,
+          questions: attempt.questions.map((q) => redactQuestion(q)),
+          answers: attempt.answers.map((a) => {
+            const pa: Record<string, unknown> = { ...a };
+            delete pa.isCorrect;
+            return pa;
+          }),
+        })),
   };
 
   if (!revealAll && !revealAnswered) {

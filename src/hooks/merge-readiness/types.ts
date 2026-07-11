@@ -38,6 +38,8 @@ export interface MergeReadinessEvidence {
   testEvidence: string[];
   reviewEvidence: string[];
   missingEvidence: string[];
+  /** The base ref the diff was computed against (explicit baseRef arg or auto-detected upstream). */
+  base_ref?: string;
 }
 
 /**
@@ -109,6 +111,13 @@ export interface MergeReadinessAttempt {
   required_dimensions: MergeReadinessDimension[];
   change_summary: string;
   slug: string;
+  // AI-generated explanation narrative (5 sections), captured so a retained
+  // attempt is a complete audit record, not just scores + Q/A.
+  why: string;
+  whatChanged: string;
+  tradeoffs: string;
+  risksConsidered: string;
+  teamUnderstanding: string;
   started_at?: string;
   completed_at?: string;
   result: MergeReadinessResult;
