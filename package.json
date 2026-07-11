@@ -58,7 +58,6 @@
     "test:ui": "vitest --ui --exclude \"tests/perf/**\"",
     "test:run": "vitest run --exclude \"tests/perf/**\"",
     "test:coverage": "vitest run --coverage --exclude \"tests/perf/**\"",
-    "test:perf:subagent-lock": "vitest run tests/perf/subagent-lock.bench.ts --fileParallelism=false --maxWorkers=1",
     "prepack": "npm run build",
     "lint": "eslint src",
     "format": "prettier --write src/**/*.ts",

@@ -7,6 +7,7 @@ const PERF_GLOB = "tests/perf/**";
 const QUOTED_PERF_GLOB = `"${PERF_GLOB}"`;
 const PERF_TARGET = "tests/perf/subagent-lock.bench.ts";
 const PERF_SCRIPT = "test:perf:subagent-lock";
+const PERF_COMMAND = `npm exec vitest -- run ${PERF_TARGET} --fileParallelism=false --maxWorkers=1`;
 const FUNCTIONAL_SCRIPTS = {
   test: ["vitest"],
   "test:run": ["vitest", "run"],
@@ -68,17 +69,15 @@ function assertWorkflowCommands(
   const functional = steps.filter((step) =>
     step.run?.includes("npm test -- --run"),
   );
-  const perf = steps.filter((step) =>
-    step.run?.includes(`npm run ${PERF_SCRIPT}`),
-  );
+  const perf = steps.filter((step) => step.run?.includes(PERF_TARGET));
 
   expect(
     functional,
     `${jobName} must have one functional package step`,
   ).toHaveLength(1);
-  expect(perf, `${jobName} must have one perf package step`).toHaveLength(1);
+  expect(perf, `${jobName} must have one serialized perf step`).toHaveLength(1);
   expect(functional[0].run).toBe("npm test -- --run");
-  expect(perf[0].run).toBe(`npm run ${PERF_SCRIPT}`);
+  expect(perf[0].run).toBe(PERF_COMMAND);
   expect(functional[0]).not.toBe(perf[0]);
   expect(steps.indexOf(functional[0])).toBeLessThan(steps.indexOf(perf[0]));
 
@@ -94,13 +93,13 @@ function assertWorkflowCommands(
     `${jobName} must not recombine the test commands`,
   ).not.toMatch(/npm test\s+--\s+--run\s*[;&|]/);
   expect(
-    commands.join("\n"),
-    `${jobName} must not invoke the benchmark directly`,
-  ).not.toContain(PERF_TARGET);
+    workflow.split(PERF_COMMAND).length - 1,
+    `${jobName} workflow must have exactly one serialized perf command`,
+  ).toBe(1);
   expect(
-    commands.join("\n"),
-    `${jobName} must not set raw serialization flags`,
-  ).not.toMatch(/--(?:fileParallelism|maxWorkers)/);
+    workflow,
+    `${jobName} workflow must not invoke the removed perf package script`,
+  ).not.toContain(`npm run ${PERF_SCRIPT}`);
 
   if (release) {
     const sideEffect = steps.findIndex(
@@ -146,7 +145,7 @@ describe("subagent-lock test contract", () => {
     }
 
     for (const [name, command] of Object.entries(pkg.scripts)) {
-      if (name !== PERF_SCRIPT && /(?:^|\s)vitest(?:\s|$)/.test(command)) {
+      if (/(?:^|\s)vitest(?:\s|$)/.test(command)) {
         expect(
           Object.keys(FUNCTIONAL_SCRIPTS),
           `unclassified Vitest script: ${name}`,
@@ -155,23 +154,15 @@ describe("subagent-lock test contract", () => {
     }
   });
 
-  it("keeps the subagent-lock benchmark isolated and serialized", () => {
+  it("does not publish a subagent-lock benchmark script", () => {
     const pkg = JSON.parse(readRepoFile("package.json")) as {
       scripts: Record<string, string>;
     };
-    const command = pkg.scripts[PERF_SCRIPT];
-    expect(tokens(command)).toEqual([
-      "vitest",
-      "run",
-      PERF_TARGET,
-      "--fileParallelism=false",
-      "--maxWorkers=1",
-    ]);
-    expect(command).not.toMatch(/(?:--ci|threshold)/i);
-    expect(command).not.toContain("--exclude");
+
+    expect(pkg.scripts).not.toHaveProperty(PERF_SCRIPT);
   });
 
-  it("keeps CI and release as ordered, blocking package-level functional and perf gates", () => {
+  it("keeps CI and release as ordered, blocking functional and serialized perf gates", () => {
     const ci = readRepoFile(".github/workflows/ci.yml");
     const release = readRepoFile(".github/workflows/release.yml");
 

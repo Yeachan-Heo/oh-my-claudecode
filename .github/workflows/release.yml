@@ -34,7 +34,7 @@ jobs:
         run: npm test -- --run
 
       - name: Run subagent-lock performance test
-        run: npm run test:perf:subagent-lock
+        run: npm exec vitest -- run tests/perf/subagent-lock.bench.ts --fileParallelism=false --maxWorkers=1
 
       # Some tests execute scripts/plugin-setup.mjs against the real
       # hooks/hooks.json and rewrite bare `node` to the absolute node binary

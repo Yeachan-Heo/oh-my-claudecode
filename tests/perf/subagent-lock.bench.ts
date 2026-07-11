@@ -9,7 +9,7 @@
  * / ~30-32ms p99 on a healthy path, so the CI ceilings sit above that band.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { performance } from "perf_hooks";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -19,6 +19,7 @@ import {
   executeFlush,
   type SubagentTrackingState,
 } from "../../src/hooks/subagent-tracker/index.js";
+import { clearWorktreeCache } from "../../src/lib/worktree-paths.js";
 
 const N = 100;
 const WARMUP_RUNS = 1;
@@ -73,6 +74,9 @@ function median(values: number[]): number {
 
 describe("subagent-lock benchmark", () => {
   const dirs: string[] = [];
+  beforeEach(() => {
+    clearWorktreeCache();
+  });
 
   afterEach(() => {
     flushPendingWrites();
@@ -80,6 +84,7 @@ describe("subagent-lock benchmark", () => {
       try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
     }
     dirs.length = 0;
+    clearWorktreeCache();
   });
 
   function makeTempDir(): string {
@@ -110,8 +115,9 @@ describe("subagent-lock benchmark", () => {
 
       const t0 = performance.now();
       // executeFlush does the full RMW critical section under lock
-      executeFlush(dir, state, sessionId);
+      const succeeded = executeFlush(dir, state, sessionId);
       const elapsed = performance.now() - t0;
+      expect(succeeded, `locked RMW update ${i} must succeed`).toBe(true);
       samples.push(elapsed);
     }
 
