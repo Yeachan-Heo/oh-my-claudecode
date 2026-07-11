@@ -99,11 +99,28 @@ export interface MergeReadinessState {
 }
 
 export interface MergeReadinessAttempt {
+  profile: MergeReadinessProfile;
+  threshold: number;
+  max_rounds: number;
+  required_dimensions: MergeReadinessDimension[];
+  change_summary: string;
+  slug: string;
   started_at?: string;
   completed_at?: string;
   result: MergeReadinessResult;
+  override_reason?: string;
   readiness_score: number;
-  change_summary?: string;
+  dimension_scores: Partial<Record<MergeReadinessDimension, number>>;
+  questions: MergeReadinessMCQQuestion[];
+  answers: MergeReadinessMCQAnswer[];
+  evidence_summary: {
+    changedFiles: string[];
+    source_mode?: "diff" | "artifacts";
+    missingEvidence: string[];
+    sourceArtifactCount: number;
+    testEvidenceCount: number;
+    reviewEvidenceCount: number;
+  };
 }
 
 export interface MergeReadinessPromptResult {

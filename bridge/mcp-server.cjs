@@ -21089,6 +21089,7 @@ var OmcPaths = {
 var MAX_WORKTREE_CACHE_SIZE = 8;
 var worktreeCacheMap = /* @__PURE__ */ new Map();
 var toplevelCacheMap = /* @__PURE__ */ new Map();
+var superprojectCacheMap = /* @__PURE__ */ new Map();
 var workspaceCacheMap = /* @__PURE__ */ new Map();
 function findWorkspaceRoot(startDir) {
   if (process.env.OMC_DISABLE_MULTIREPO === "1") return null;
@@ -21144,9 +21145,24 @@ function readWorkspaceMarkerConfig(workspaceRoot) {
     return {};
   }
 }
+function isDefinitiveNonGitError(error2) {
+  if (!error2 || typeof error2 !== "object") return false;
+  const { status, stderr } = error2;
+  if (status !== 128) return false;
+  const output = typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
+  return /not a git repository/i.test(output);
+}
 function resolveSuperprojectRoot(cwd) {
+  const cacheKey = (0, import_path11.resolve)(cwd);
+  if (superprojectCacheMap.has(cacheKey)) {
+    const cached2 = superprojectCacheMap.get(cacheKey) ?? null;
+    superprojectCacheMap.delete(cacheKey);
+    superprojectCacheMap.set(cacheKey, cached2);
+    return cached2;
+  }
   let anchor = null;
-  let probeCwd = cwd;
+  let probeCwd = cacheKey;
+  let completed = false;
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
@@ -21157,12 +21173,23 @@ function resolveSuperprojectRoot(cwd) {
         windowsHide: true,
         timeout: 5e3
       }).trim();
-    } catch {
+    } catch (error2) {
+      completed = depth === 0 && isDefinitiveNonGitError(error2);
       break;
     }
-    if (!superRoot) break;
+    if (!superRoot) {
+      completed = true;
+      break;
+    }
     anchor = superRoot;
     probeCwd = superRoot;
+  }
+  if (completed) {
+    if (superprojectCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = superprojectCacheMap.keys().next().value;
+      if (oldest !== void 0) superprojectCacheMap.delete(oldest);
+    }
+    superprojectCacheMap.set(cacheKey, anchor);
   }
   return anchor;
 }
@@ -23465,11 +23492,47 @@ function runGit(directory, args) {
     return { stdout: "", error: error2 };
   }
 }
+var EVIDENCE_MODE_STATE_FILES = /* @__PURE__ */ new Set([
+  MODE_STATE_FILE_MAP[MODE_NAMES.RALPH],
+  MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT],
+  MODE_STATE_FILE_MAP[MODE_NAMES.TEAM],
+  MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK],
+  MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA],
+  MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN],
+  MODE_STATE_FILE_MAP[MODE_NAMES.AUTORESEARCH]
+]);
+var NON_EVIDENCE_STATE_SUFFIXES = ["-stop-breaker.json", "-last-steer-at", "-continue-steer.lock"];
+function isNonEvidenceStateFile(name) {
+  return NON_EVIDENCE_STATE_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+function modeStateRecordsRun(filePath) {
+  try {
+    const raw = (0, import_fs14.readFileSync)(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      if (parsed.active === true) return true;
+      if (typeof parsed.iteration === "number" && parsed.iteration > 0) return true;
+      if (typeof parsed.started_at === "string" && parsed.started_at.length > 0) return true;
+      if (typeof parsed.phase === "string" && parsed.phase.length > 0 && parsed.phase !== "init") return true;
+    }
+  } catch {
+  }
+  return false;
+}
 function listArtifactFiles(directory) {
   const root = getOmcRoot(directory);
-  const candidates = ["plans", "artifacts", "logs", "specs", "interviews"].map((segment) => (0, import_path15.join)(root, segment)).filter((path13) => (0, import_fs14.existsSync)(path13));
+  const dirCandidates = ["plans", "artifacts", "logs", "specs", "interviews"].map((segment) => (0, import_path15.join)(root, segment)).filter((path13) => (0, import_fs14.existsSync)(path13));
   const found = [];
-  for (const candidate of candidates) {
+  const seen = /* @__PURE__ */ new Set();
+  const pushRelative = (full) => {
+    const relativePath = (0, import_path15.relative)(root, full).replace(/\\/g, "/");
+    if (relativePath.startsWith("artifacts/merge-readiness/")) return;
+    if (relativePath.includes("merge-readiness-state")) return;
+    if (seen.has(relativePath)) return;
+    seen.add(relativePath);
+    found.push(relativePath);
+  };
+  for (const candidate of dirCandidates) {
     const stack = [candidate];
     while (stack.length > 0 && found.length < 40) {
       const current = stack.pop();
@@ -23481,15 +23544,26 @@ function listArtifactFiles(directory) {
           if (entry.isDirectory()) {
             stack.push(full);
           } else if (entry.isFile() && /\.(md|json|txt|log)$/i.test(entry.name)) {
-            const relativePath = (0, import_path15.relative)(root, full).replace(/\\/g, "/");
-            if (!relativePath.startsWith("artifacts/merge-readiness/") && !relativePath.includes("merge-readiness-state")) {
-              found.push(relativePath);
-            }
+            pushRelative(full);
           }
         }
       } catch {
         continue;
       }
+    }
+  }
+  const stateDir = (0, import_path15.join)(root, "state");
+  if ((0, import_fs14.existsSync)(stateDir)) {
+    try {
+      for (const entry of (0, import_fs14.readdirSync)(stateDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+        if (isNonEvidenceStateFile(entry.name)) continue;
+        if (!EVIDENCE_MODE_STATE_FILES.has(entry.name)) continue;
+        const full = (0, import_path15.join)(stateDir, entry.name);
+        if (!modeStateRecordsRun(full)) continue;
+        pushRelative(full);
+      }
+    } catch {
     }
   }
   return found.sort();
@@ -23545,11 +23619,17 @@ function parseMergeReadinessSourceMode(promptText) {
   if (fromArtifacts) return { mode: "artifacts" };
   return {};
 }
+function hasModeStateArtifact(evidence) {
+  return evidence.sourceArtifacts.some((path13) => {
+    const name = path13.slice(path13.lastIndexOf("/") + 1);
+    return EVIDENCE_MODE_STATE_FILES.has(name);
+  });
+}
 function hasMinimalEvidenceForMode(evidence, mode) {
   const hasDiff = evidence.changedFiles.length > 0 || Boolean(evidence.diffStat);
+  const hasRelevantArtifact = evidence.testEvidence.length > 0 || evidence.reviewEvidence.length > 0 || hasModeStateArtifact(evidence);
   if (mode === "diff") return hasDiff;
-  if (mode === "artifacts") return evidence.sourceArtifacts.length > 0;
-  const hasRelevantArtifact = evidence.testEvidence.length > 0 || evidence.reviewEvidence.length > 0;
+  if (mode === "artifacts") return hasRelevantArtifact;
   return hasDiff || hasRelevantArtifact;
 }
 function pickNextQuestion(state) {
@@ -23624,6 +23704,20 @@ function readMergeReadinessState(directory, sessionId) {
 function writeMergeReadinessState(directory, state, sessionId) {
   return writeModeState(MODE, state, directory, sessionId);
 }
+function persistOrFailClosed(workingDir, state, sessionId) {
+  const persisted = writeMergeReadinessState(workingDir, state, sessionId);
+  if (persisted) return state;
+  state.active = true;
+  state.phase = "complete";
+  state.result = "blocked";
+  state.awaiting_content = false;
+  delete state.pending_question;
+  state.validation_errors = [
+    ...state.validation_errors ?? [],
+    "Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start."
+  ];
+  return persistOrFailClosed(workingDir, state, sessionId);
+}
 function createInitialMergeReadinessState(directory, promptText, sessionId, baseRef) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const profile = parseMergeReadinessProfile(promptText);
@@ -23671,16 +23765,31 @@ function createInitialMergeReadinessState(directory, promptText, sessionId, base
     prior = null;
   }
   if (prior && prior.result !== "pending" && prior.completed_at) {
-    state.prior_attempts = [
-      ...prior.prior_attempts ?? [],
-      {
-        started_at: prior.started_at,
-        completed_at: prior.completed_at,
-        result: prior.result,
-        readiness_score: prior.readiness_score,
-        change_summary: prior.change_summary
+    const priorAttempt = {
+      profile: prior.profile,
+      threshold: prior.threshold,
+      max_rounds: prior.max_rounds,
+      required_dimensions: [...prior.required_dimensions],
+      change_summary: prior.change_summary,
+      slug: prior.slug,
+      started_at: prior.started_at,
+      completed_at: prior.completed_at,
+      result: prior.result,
+      override_reason: prior.override_reason,
+      readiness_score: prior.readiness_score,
+      dimension_scores: { ...prior.dimension_scores },
+      questions: prior.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
+      answers: prior.answers.map((a) => ({ ...a })),
+      evidence_summary: {
+        changedFiles: [...prior.evidence.changedFiles],
+        source_mode: prior.source_mode,
+        missingEvidence: [...prior.evidence.missingEvidence],
+        sourceArtifactCount: prior.evidence.sourceArtifacts.length,
+        testEvidenceCount: prior.evidence.testEvidence.length,
+        reviewEvidenceCount: prior.evidence.reviewEvidence.length
       }
-    ];
+    };
+    state.prior_attempts = [...prior.prior_attempts ?? [], priorAttempt];
   }
   const persisted = writeMergeReadinessState(directory, state, sessionId);
   if (!persisted) {
@@ -23703,8 +23812,7 @@ function setMergeReadinessContent(directory, content, sessionId) {
       state.phase = "content";
     }
     state.updated_at = now;
-    writeMergeReadinessState(workingDir, state, sessionId);
-    return state;
+    return persistOrFailClosed(workingDir, state, sessionId);
   }
   const errors = validateMergeReadinessContent(content, state);
   if (errors.length > 0) {
@@ -23719,8 +23827,7 @@ function setMergeReadinessContent(directory, content, sessionId) {
     delete state.completed_at;
     delete state.override_reason;
     state.updated_at = now;
-    writeMergeReadinessState(workingDir, state, sessionId);
-    return state;
+    return persistOrFailClosed(workingDir, state, sessionId);
   }
   state.why = content.why.trim();
   state.whatChanged = content.whatChanged.trim();
@@ -23739,8 +23846,7 @@ function setMergeReadinessContent(directory, content, sessionId) {
   state.phase = "questioning";
   state.updated_at = now;
   state.pending_question = pickNextQuestion(state);
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 function recordMergeReadinessMCQAnswer(directory, questionId, selectedOptionId, sessionId) {
   const workingDir = resolveToWorktreeRoot(directory);
@@ -23769,8 +23875,7 @@ function recordMergeReadinessMCQAnswer(directory, questionId, selectedOptionId, 
   } else {
     delete state.pending_question;
   }
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 function validateMergeReadinessContent(content, state) {
   const errors = [];
@@ -23802,8 +23907,7 @@ function cancelMergeReadiness(directory, sessionId) {
   state.result = "cancelled";
   state.completed_at = state.updated_at = (/* @__PURE__ */ new Date()).toISOString();
   delete state.pending_question;
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 // src/hooks/merge-readiness/report.ts
@@ -23833,6 +23937,47 @@ function renderQuestions(questions, answers, result) {
 }
 function renderList(values, empty) {
   return values.length > 0 ? values.map((value) => `- ${value}`).join("\n") : empty;
+}
+function renderPriorAttempt(attempt, index) {
+  const header = [
+    `### Attempt ${index + 1}: ${attempt.result}`,
+    `- Profile: ${attempt.profile} | threshold ${Math.round(attempt.threshold * 100)}% | max rounds ${attempt.max_rounds}`,
+    `- Readiness score: ${Math.round(attempt.readiness_score * 100)}%`,
+    `- Change summary: ${attempt.change_summary || "_No change summary._"}`,
+    attempt.override_reason ? `- Override reason: ${attempt.override_reason}` : "",
+    attempt.started_at ? `- Started: ${attempt.started_at}` : "",
+    attempt.completed_at ? `- Completed: ${attempt.completed_at}` : ""
+  ].filter((line) => line.length > 0).join("\n");
+  const dimensions = attempt.required_dimensions.length > 0 ? attempt.required_dimensions.map((dimension) => `- ${dimension}: ${Math.round((attempt.dimension_scores[dimension] ?? 0) * 100)}%`).join("\n") : "_No required dimensions recorded._";
+  const qa = attempt.questions.length === 0 ? "_No quiz questions recorded._" : attempt.questions.map((question, qIndex) => {
+    const answer = attempt.answers.find((a) => a.questionId === question.id);
+    const options = question.options.map((option) => {
+      const marks = [];
+      if (option.id === question.correctOptionId) marks.push("correct");
+      if (answer?.selectedOptionId === option.id) marks.push("selected");
+      return `- [${option.id}] ${option.text}${marks.length > 0 ? ` _(${marks.join(", ")})_` : ""}`;
+    });
+    const correctness = answer ? `Correct: ${answer.isCorrect ? "yes" : "no"}` : "_Not answered._";
+    return [
+      `#### Q${qIndex + 1}. [${question.dimension}] ${question.stem}`,
+      "",
+      ...options,
+      "",
+      correctness
+    ].join("\n");
+  }).join("\n\n");
+  const evidence = attempt.evidence_summary;
+  const evidenceBlock = [
+    "#### Evidence Summary",
+    `- Changed files: ${evidence.changedFiles.length}`,
+    evidence.source_mode ? `- Source mode: ${evidence.source_mode}` : "",
+    `- Source artifacts: ${evidence.sourceArtifactCount}`,
+    `- Test artifacts: ${evidence.testEvidenceCount}`,
+    `- Review artifacts: ${evidence.reviewEvidenceCount}`,
+    evidence.missingEvidence.length > 0 ? `- Missing evidence:
+${evidence.missingEvidence.map((m) => `  - ${m}`).join("\n")}` : "- Missing evidence: none"
+  ].filter((line) => line.length > 0).join("\n");
+  return [header, "", "#### Dimension Coverage", "", dimensions, "", "#### Questions & Answers", "", qa, "", evidenceBlock].join("\n");
 }
 function formatMergeReadinessReport(state) {
   const revealAssessment = ["pass", "paused", "overridden", "cancelled"].includes(state.result);
@@ -23909,7 +24054,7 @@ function formatMergeReadinessReport(state) {
     dimensions || "_No scored dimensions yet._",
     "",
     "",
-    state.prior_attempts && state.prior_attempts.length > 0 ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => "- Attempt " + (i + 1) + ": " + a.result + " (score " + Math.round((a.readiness_score ?? 0) * 100) + "%)" + (a.change_summary ? " - " + a.change_summary : ""))].join("\n") : "",
+    state.prior_attempts && state.prior_attempts.length > 0 ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => renderPriorAttempt(a, i))].join("\n") : "",
     "",
     "## Merge Boundary",
     "",
@@ -25243,7 +25388,7 @@ var stateTools = [
   stateGetStatusTool,
   {
     name: "merge_readiness_start",
-    description: "Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick/--standard/--deep; standard is default).",
+    description: "Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick or --deep; standard is the default when neither flag is present).",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     schema: {
       summary: external_exports.string().max(2e3),

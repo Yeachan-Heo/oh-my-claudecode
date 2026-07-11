@@ -1,4 +1,4 @@
-import type { MergeReadinessMCQAnswer, MergeReadinessMCQQuestion, MergeReadinessState } from "./types.js";
+import type { MergeReadinessAttempt, MergeReadinessMCQAnswer, MergeReadinessMCQQuestion, MergeReadinessState } from "./types.js";
 
 const MERGE_BOUNDARY_STATEMENT =
   "Passing means the human can explain the change. It does not approve merge, replace tests, replace review, or accept risk.";
@@ -38,6 +38,66 @@ function renderQuestions(
 
 function renderList(values: string[], empty: string): string {
   return values.length > 0 ? values.map((value) => `- ${value}`).join("\n") : empty;
+}
+
+/**
+ * Render a prior (terminal) attempt. Prior attempts are terminal by
+ * construction, so revealing correctOptionId/isCorrect is safe (not a
+ * redaction leak) and gives the operator a complete audit of past tries.
+ */
+function renderPriorAttempt(attempt: MergeReadinessAttempt, index: number): string {
+  const header = [
+    `### Attempt ${index + 1}: ${attempt.result}`,
+    `- Profile: ${attempt.profile} | threshold ${Math.round(attempt.threshold * 100)}% | max rounds ${attempt.max_rounds}`,
+    `- Readiness score: ${Math.round(attempt.readiness_score * 100)}%`,
+    `- Change summary: ${attempt.change_summary || "_No change summary._"}`,
+    attempt.override_reason ? `- Override reason: ${attempt.override_reason}` : "",
+    attempt.started_at ? `- Started: ${attempt.started_at}` : "",
+    attempt.completed_at ? `- Completed: ${attempt.completed_at}` : "",
+  ].filter((line) => line.length > 0).join("\n");
+
+  const dimensions = attempt.required_dimensions.length > 0
+    ? attempt.required_dimensions
+      .map((dimension) => `- ${dimension}: ${Math.round((attempt.dimension_scores[dimension] ?? 0) * 100)}%`)
+      .join("\n")
+    : "_No required dimensions recorded._";
+
+  const qa = attempt.questions.length === 0
+    ? "_No quiz questions recorded._"
+    : attempt.questions.map((question, qIndex) => {
+      const answer = attempt.answers.find((a) => a.questionId === question.id);
+      const options = question.options.map((option) => {
+        const marks: string[] = [];
+        if (option.id === question.correctOptionId) marks.push("correct");
+        if (answer?.selectedOptionId === option.id) marks.push("selected");
+        return `- [${option.id}] ${option.text}${marks.length > 0 ? ` _(${marks.join(", ")})_` : ""}`;
+      });
+      const correctness = answer
+        ? `Correct: ${answer.isCorrect ? "yes" : "no"}`
+        : "_Not answered._";
+      return [
+        `#### Q${qIndex + 1}. [${question.dimension}] ${question.stem}`,
+        "",
+        ...options,
+        "",
+        correctness,
+      ].join("\n");
+    }).join("\n\n");
+
+  const evidence = attempt.evidence_summary;
+  const evidenceBlock = [
+    "#### Evidence Summary",
+    `- Changed files: ${evidence.changedFiles.length}`,
+    evidence.source_mode ? `- Source mode: ${evidence.source_mode}` : "",
+    `- Source artifacts: ${evidence.sourceArtifactCount}`,
+    `- Test artifacts: ${evidence.testEvidenceCount}`,
+    `- Review artifacts: ${evidence.reviewEvidenceCount}`,
+    evidence.missingEvidence.length > 0
+      ? `- Missing evidence:\n${evidence.missingEvidence.map((m) => `  - ${m}`).join("\n")}`
+      : "- Missing evidence: none",
+  ].filter((line) => line.length > 0).join("\n");
+
+  return [header, "", "#### Dimension Coverage", "", dimensions, "", "#### Questions & Answers", "", qa, "", evidenceBlock].join("\n");
 }
 
 /** Render the authoritative session state as a report without filesystem side effects. */
@@ -97,7 +157,7 @@ export function formatMergeReadinessReport(state: MergeReadinessState): string {
     "",
     "",
     state.prior_attempts && state.prior_attempts.length > 0
-      ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => "- Attempt " + (i + 1) + ": " + a.result + " (score " + Math.round((a.readiness_score ?? 0) * 100) + "%)" + (a.change_summary ? " - " + a.change_summary : ""))].join("\n")
+      ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => renderPriorAttempt(a, i))].join("\n")
       : "",
     "",
     "## Merge Boundary", "", MERGE_BOUNDARY_STATEMENT,

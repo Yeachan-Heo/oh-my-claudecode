@@ -1691,7 +1691,7 @@ export const stateTools = [
   stateGetStatusTool,
   {
     name: 'merge_readiness_start',
-    description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick/--standard/--deep; standard is default).',
+    description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick or --deep; standard is the default when neither flag is present).',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     schema: {
       summary: z.string().max(2000),

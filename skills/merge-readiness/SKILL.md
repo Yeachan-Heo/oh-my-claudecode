@@ -56,19 +56,17 @@ If no flag is provided, use **Standard**. Thresholds and round counts are canoni
 ## Phase 0: Evidence Intake
 
 1. Parse `{{ARGUMENTS}}`, depth profile, source mode (`--from-diff|--from-artifacts`), and derive a task slug. `--from-pr` is unsupported; this workflow uses local evidence only.
-2. Collect available evidence:
+2. Collect available evidence (the runtime detects artifacts by FILENAME heuristics; file CONTENTS are never parsed):
    - Local Git diff and commit range
    - Changed files
-   - Test output
-   - QA output
-   - Review notes
-   - Security review notes when applicable
-   - `.omc/plans/`, `.omc/specs/`, `.omc/interviews/`, and relevant mode state artifacts
+   - Test/QA/verification artifacts (filenames matching `test|spec|qa|verify|validation`)
+   - Review/risk/security/readiness/verdict artifacts (filenames matching `review|risk|security|readiness|verdict`)
+   - `.omc/plans/`, `.omc/specs/`, `.omc/interviews/`, `.omc/artifacts/`, `.omc/logs/`, and relevant mode state artifacts (canonical `{mode}-state.json` files under `.omc/state/` that record a real run)
 3. Record missing evidence explicitly. Missing evidence is not hidden by a good explanation.
 
 ## Phase 1: Initialize
 
-Call the `merge_readiness_start` tool with the change summary to seed state (the runtime parses the `--quick`/`--standard`/`--deep` profile from it; `--standard` is the default). State shape:
+Call the `merge_readiness_start` tool with the change summary to seed state (the runtime parses the `--quick`/`--deep` profile (`--standard` is the default when neither flag is present; it is not a parsed token)). State shape:
 
 ```json
 {

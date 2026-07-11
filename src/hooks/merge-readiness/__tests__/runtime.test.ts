@@ -257,11 +257,89 @@ describe("merge-readiness runtime", () => {
     expect(state.prior_attempts?.[0].result).toBe("paused");
   });
 
+  it("preserves a full prior-attempt audit record with questions, answers, and scores", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [
+        makeQuestion("q1", "why", "a"),
+        makeQuestion("q2", "change", "a"),
+        makeQuestion("q3", "risk", "a"),
+      ],
+    }, sessionId);
+    // Answer all wrong -> 0/3 = 0 < quick threshold 0.70 -> paused.
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("paused");
+
+    // First re-start: the prior paused attempt is captured in full.
+    const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId);
+    expect(state.prior_attempts?.length).toBe(1);
+    const prior = state.prior_attempts?.[0];
+    expect(prior).toBeDefined();
+    expect(prior?.result).toBe("paused");
+    expect(prior?.readiness_score).toBe(0);
+    // Full questions retained with correctOptionId (terminal, safe to reveal).
+    expect(prior?.questions).toHaveLength(3);
+    expect(prior?.questions.every((q) => typeof q.correctOptionId === "string")).toBe(true);
+    // Full answers retained with isCorrect=false (all wrong).
+    expect(prior?.answers).toHaveLength(3);
+    expect(prior?.answers.every((a) => a.isCorrect === false)).toBe(true);
+    // Dimension scores captured.
+    expect(prior?.dimension_scores).toBeDefined();
+    expect(Object.keys(prior?.dimension_scores ?? {}).length).toBeGreaterThan(0);
+    // Evidence summary captured.
+    expect(prior?.evidence_summary.sourceArtifactCount).toBeDefined();
+    expect(prior?.evidence_summary.testEvidenceCount).toBeDefined();
+
+    // Take the first re-start's gate to a terminal result so a second re-start
+    // can append (a pending gate is not captured as a prior attempt).
+    setMergeReadinessContent(tempDir, {
+      why: "w2", whatChanged: "wc2", tradeoffs: "t2", risksConsidered: "r2", teamUnderstanding: "tu2",
+      questions: [
+        makeQuestion("q1", "why", "a"),
+        makeQuestion("q2", "change", "a"),
+        makeQuestion("q3", "risk", "a"),
+      ],
+    }, sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q2", "b", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q3", "b", sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("paused");
+
+    // Second re-start appends a second prior attempt (does not overwrite).
+    const state2 = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry2", sessionId);
+    expect(state2.prior_attempts?.length).toBe(2);
+  });
+
   it("fails closed when state cannot be persisted (invalid session id)", () => {
     // tempDir has a diff, so without the persistence failure this would be pending.
     const state = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", "bad/session");
     expect(state.result).toBe("blocked");
     expect(state.validation_errors?.some((e) => e.includes("persisted"))).toBe(true);
+  });
+
+  it("mutators never surface a phantom pass/override when the write cannot land", () => {
+    // Seed a valid, active, passing gate under a good session.
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "a", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q2", "a", sessionId);
+    recordMergeReadinessMCQAnswer(tempDir, "q3", "a", sessionId);
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("pass");
+
+    // With an invalid session id, the mutator's read path throws (validateSessionId
+    // rejects path separators). The contract: the mutator must NOT return a
+    // phantom active=false/overridden/pass result when the write cannot land.
+    // It throws rather than silently producing a phantom release.
+    expect(() => overrideMergeReadiness(tempDir, "Maintainer override.", "bad/session")).toThrow();
+    expect(() => cancelMergeReadiness(tempDir, "bad/session")).toThrow();
+    // The valid gate is untouched: still a real pass under the good session.
+    expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("pass");
   });
 
   it("blocked gate message directs to evidence, not content submission", async () => {
@@ -504,5 +582,76 @@ describe("merge-readiness runtime", () => {
     }, sessionId);
     recordMergeReadinessAskUserQuestionResult(tempDir, { question: "[MERGE READINESS:q1] choose" }, "selected [a] or [b]", sessionId);
     expect(readMergeReadinessState(tempDir, sessionId)?.answers).toEqual([]);
+  });
+
+  it("does not start the gate on an unrelated artifact in --from-artifacts mode", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-mr-artifacts-unrelated-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      writeFileSync(join(dir, "README.md"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      // Clean tree (no diff) + an unrelated plans file under --from-artifacts:
+      // must block, since the artifact is neither a test nor a review artifact.
+      mkdirSync(join(dir, ".omc", "plans"), { recursive: true });
+      writeFileSync(join(dir, ".omc", "plans", "unrelated.md"), "notes\n");
+      const state = createInitialMergeReadinessState(dir, "/merge-readiness --from-artifacts change", sessionId);
+      expect(state.result).toBe("blocked");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts an active ralph mode-state file as evidence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-mr-ralph-state-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      writeFileSync(join(dir, "README.md"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      // Clean tree, but an active ralph mode-state file records a real run.
+      mkdirSync(join(dir, ".omc", "state"), { recursive: true });
+      writeFileSync(
+        join(dir, ".omc", "state", "ralph-state.json"),
+        JSON.stringify({ active: true, iteration: 3, started_at: "2026-01-01T00:00:00.000Z", phase: "execute" }),
+      );
+      const state = createInitialMergeReadinessState(dir, "/merge-readiness --standard change", sessionId);
+      expect(state.evidence.sourceArtifacts).toContain("state/ralph-state.json");
+      expect(state.result).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count a stale/empty mode-state stub as evidence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-mr-stale-state-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      writeFileSync(join(dir, "README.md"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore", windowsHide: true });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore", windowsHide: true });
+      // Clean tree + a stale ralph-state stub (active:false, phase:init) and a
+      // bookkeeping ralph-stop-breaker.json: neither records a real run.
+      mkdirSync(join(dir, ".omc", "state"), { recursive: true });
+      writeFileSync(
+        join(dir, ".omc", "state", "ralph-state.json"),
+        JSON.stringify({ active: false, phase: "init" }),
+      );
+      writeFileSync(
+        join(dir, ".omc", "state", "ralph-stop-breaker.json"),
+        JSON.stringify({ active: true, iteration: 5 }),
+      );
+      const state = createInitialMergeReadinessState(dir, "/merge-readiness --standard change", sessionId);
+      expect(state.evidence.sourceArtifacts).toEqual([]);
+      expect(state.result).toBe("blocked");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

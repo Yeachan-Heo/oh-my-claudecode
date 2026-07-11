@@ -1,7 +1,8 @@
 import { execFileSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, relative } from "path";
 import { readModeState, writeModeState } from "../../lib/mode-state-io.js";
+import { MODE_NAMES, MODE_STATE_FILE_MAP } from "../../lib/mode-names.js";
 import { getOmcRoot, resolveToWorktreeRoot } from "../../lib/worktree-paths.js";
 import {
   computeCorrectnessRate,
@@ -15,6 +16,7 @@ import {
   type MergeReadinessMCQQuestion,
 } from "./mcq.js";
 import type {
+  MergeReadinessAttempt,
   MergeReadinessDimension,
   MergeReadinessEvidence,
   MergeReadinessProfile,
@@ -63,13 +65,56 @@ function runGit(directory: string, args: string[]): { stdout: string; error?: st
   }
 }
 
+const EVIDENCE_MODE_STATE_FILES = new Set<string>([
+  MODE_STATE_FILE_MAP[MODE_NAMES.RALPH],
+  MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT],
+  MODE_STATE_FILE_MAP[MODE_NAMES.TEAM],
+  MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK],
+  MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA],
+  MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN],
+  MODE_STATE_FILE_MAP[MODE_NAMES.AUTORESEARCH],
+]);
+
+const NON_EVIDENCE_STATE_SUFFIXES = ["-stop-breaker.json", "-last-steer-at", "-continue-steer.lock"];
+
+function isNonEvidenceStateFile(name: string): boolean {
+  return NON_EVIDENCE_STATE_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+function modeStateRecordsRun(filePath: string): boolean {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object") {
+      if (parsed.active === true) return true;
+      if (typeof parsed.iteration === "number" && parsed.iteration > 0) return true;
+      if (typeof parsed.started_at === "string" && parsed.started_at.length > 0) return true;
+      if (typeof parsed.phase === "string" && parsed.phase.length > 0 && parsed.phase !== "init") return true;
+    }
+  } catch {
+    // Unreadable/unparseable state is not evidence.
+  }
+  return false;
+}
+
 function listArtifactFiles(directory: string): string[] {
   const root = getOmcRoot(directory);
-  const candidates = ["plans", "artifacts", "logs", "specs", "interviews"]
+  const dirCandidates = ["plans", "artifacts", "logs", "specs", "interviews"]
     .map((segment) => join(root, segment))
     .filter((path) => existsSync(path));
   const found: string[] = [];
-  for (const candidate of candidates) {
+  const seen = new Set<string>();
+
+  const pushRelative = (full: string): void => {
+    const relativePath = relative(root, full).replace(/\\/g, "/");
+    if (relativePath.startsWith("artifacts/merge-readiness/")) return;
+    if (relativePath.includes("merge-readiness-state")) return;
+    if (seen.has(relativePath)) return;
+    seen.add(relativePath);
+    found.push(relativePath);
+  };
+
+  for (const candidate of dirCandidates) {
     const stack = [candidate];
     while (stack.length > 0 && found.length < 40) {
       const current = stack.pop();
@@ -81,10 +126,7 @@ function listArtifactFiles(directory: string): string[] {
           if (entry.isDirectory()) {
             stack.push(full);
           } else if (entry.isFile() && /\.(md|json|txt|log)$/i.test(entry.name)) {
-            const relativePath = relative(root, full).replace(/\\/g, "/");
-            if (!relativePath.startsWith("artifacts/merge-readiness/") && !relativePath.includes("merge-readiness-state")) {
-              found.push(relativePath);
-            }
+            pushRelative(full);
           }
         }
       } catch {
@@ -92,6 +134,26 @@ function listArtifactFiles(directory: string): string[] {
       }
     }
   }
+
+  // Scan .omc/state/ for canonical mode-state files that record a real run
+  // (the "relevant mode state artifacts" advertised in SKILL.md). Only the
+  // legacy/global state dir; session-scoped state belongs to other sessions.
+  const stateDir = join(root, "state");
+  if (existsSync(stateDir)) {
+    try {
+      for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+        if (isNonEvidenceStateFile(entry.name)) continue;
+        if (!EVIDENCE_MODE_STATE_FILES.has(entry.name)) continue;
+        const full = join(stateDir, entry.name);
+        if (!modeStateRecordsRun(full)) continue;
+        pushRelative(full);
+      }
+    } catch {
+      // Unreadable state dir: skip.
+    }
+  }
+
   return found.sort();
 }
 
@@ -156,16 +218,20 @@ function parseMergeReadinessSourceMode(promptText: string): { mode?: "diff" | "a
   return {};
 }
 
+function hasModeStateArtifact(evidence: MergeReadinessEvidence): boolean {
+  return evidence.sourceArtifacts.some((path) => {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    return EVIDENCE_MODE_STATE_FILES.has(name);
+  });
+}
+
 function hasMinimalEvidenceForMode(evidence: MergeReadinessEvidence, mode: "diff" | "artifacts" | undefined): boolean {
-  // Status and untracked files are not a diff: --from-diff requires Git to
-  // report a tracked working-tree, staged, or committed change.
   const hasDiff = evidence.changedFiles.length > 0 || Boolean(evidence.diffStat);
+  const hasRelevantArtifact = evidence.testEvidence.length > 0
+    || evidence.reviewEvidence.length > 0
+    || hasModeStateArtifact(evidence);
   if (mode === "diff") return hasDiff;
-  if (mode === "artifacts") return evidence.sourceArtifacts.length > 0;
-  // Default: an unrelated artifact (e.g. plans/notes.md) must not alone start
-  // the gate. Require a real diff or a test/review artifact, so the gate does
-  // not go pending on evidence that missingEvidence itself flags as absent.
-  const hasRelevantArtifact = evidence.testEvidence.length > 0 || evidence.reviewEvidence.length > 0;
+  if (mode === "artifacts") return hasRelevantArtifact;
   return hasDiff || hasRelevantArtifact;
 }
 
@@ -257,8 +323,10 @@ function finalizeIfReady(state: MergeReadinessState, now: string): void {
   }
 
   // All required answered but below threshold or missing coverage: paused.
-  // Keep active=true so the Stop-hook keeps blocking until the operator
-  // re-runs /merge-readiness and passes.
+  // Keep active=true so the gate stays armed until the operator re-runs
+  // /merge-readiness and passes. v1 is advisory: checkMergeReadiness is not
+  // wired to the Stop hook, so this does not block the session; the gate
+  // remains active until pass/override/cancel.
   state.phase = "complete";
   state.result = "paused";
   state.completed_at = now;
@@ -275,6 +343,28 @@ export function writeMergeReadinessState(
   sessionId?: string,
 ): boolean {
   return writeModeState(MODE, state as unknown as Record<string, unknown>, directory, sessionId);
+}
+
+/**
+ * Persist state and fail closed if the write cannot land (invalid session id
+ * or state path). Prevents phantom pass/override/cancel results from surfacing
+ * when the authoritative state file cannot be written. Mutators that would
+ * otherwise report a terminal release (active=false) instead force-block so the
+ * operator must resolve the session id and re-run.
+ */
+function persistOrFailClosed(workingDir: string, state: MergeReadinessState, sessionId: string | undefined): MergeReadinessState {
+  const persisted = writeMergeReadinessState(workingDir, state, sessionId);
+  if (persisted) return state;
+  state.active = true;
+  state.phase = "complete";
+  state.result = "blocked";
+  state.awaiting_content = false;
+  delete state.pending_question;
+  state.validation_errors = [
+    ...(state.validation_errors ?? []),
+    "Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start.",
+  ];
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 /**
@@ -341,16 +431,31 @@ export function createInitialMergeReadinessState(
     prior = null;
   }
   if (prior && prior.result !== "pending" && prior.completed_at) {
-    state.prior_attempts = [
-      ...(prior.prior_attempts ?? []),
-      {
-        started_at: prior.started_at,
-        completed_at: prior.completed_at,
-        result: prior.result,
-        readiness_score: prior.readiness_score,
-        change_summary: prior.change_summary,
+    const priorAttempt: MergeReadinessAttempt = {
+      profile: prior.profile,
+      threshold: prior.threshold,
+      max_rounds: prior.max_rounds,
+      required_dimensions: [...prior.required_dimensions],
+      change_summary: prior.change_summary,
+      slug: prior.slug,
+      started_at: prior.started_at,
+      completed_at: prior.completed_at,
+      result: prior.result,
+      override_reason: prior.override_reason,
+      readiness_score: prior.readiness_score,
+      dimension_scores: { ...prior.dimension_scores },
+      questions: prior.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
+      answers: prior.answers.map((a) => ({ ...a })),
+      evidence_summary: {
+        changedFiles: [...prior.evidence.changedFiles],
+        source_mode: prior.source_mode,
+        missingEvidence: [...prior.evidence.missingEvidence],
+        sourceArtifactCount: prior.evidence.sourceArtifacts.length,
+        testEvidenceCount: prior.evidence.testEvidence.length,
+        reviewEvidenceCount: prior.evidence.reviewEvidence.length,
       },
-    ];
+    };
+    state.prior_attempts = [...(prior.prior_attempts ?? []), priorAttempt];
   }
   const persisted = writeMergeReadinessState(directory, state, sessionId);
   if (!persisted) {
@@ -397,8 +502,7 @@ export function setMergeReadinessContent(
       state.phase = "content";
     }
     state.updated_at = now;
-    writeMergeReadinessState(workingDir, state, sessionId);
-    return state;
+    return persistOrFailClosed(workingDir, state, sessionId);
   }
   const errors = validateMergeReadinessContent(content, state);
   if (errors.length > 0) {
@@ -413,8 +517,7 @@ export function setMergeReadinessContent(
     delete state.completed_at;
     delete state.override_reason;
     state.updated_at = now;
-    writeMergeReadinessState(workingDir, state, sessionId);
-    return state;
+    return persistOrFailClosed(workingDir, state, sessionId);
   }
   state.why = content.why.trim();
   state.whatChanged = content.whatChanged.trim();
@@ -435,8 +538,7 @@ export function setMergeReadinessContent(
   state.phase = "questioning";
   state.updated_at = now;
   state.pending_question = pickNextQuestion(state);
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 /**
@@ -476,8 +578,7 @@ export function recordMergeReadinessMCQAnswer(
   } else {
     delete state.pending_question;
   }
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 /** Correlate only a marked native AskUserQuestion result to the current MCQ. */
@@ -532,8 +633,7 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   if (!state?.active || !reason.trim()) return state ?? null;
   if (state.result === "blocked") {
     state.validation_errors ??= ["Blocked: resolve the validation errors before overriding."];
-    writeMergeReadinessState(workingDir, state, sessionId);
-    return state;
+    return persistOrFailClosed(workingDir, state, sessionId);
   }
   state.active = false;
   state.phase = "complete";
@@ -541,8 +641,7 @@ export function overrideMergeReadiness(directory: string, reason: string, sessio
   state.override_reason = reason.trim();
   state.completed_at = state.updated_at = new Date().toISOString();
   delete state.pending_question;
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 export function cancelMergeReadiness(directory: string, sessionId?: string): MergeReadinessState | null {
@@ -554,8 +653,7 @@ export function cancelMergeReadiness(directory: string, sessionId?: string): Mer
   state.result = "cancelled";
   state.completed_at = state.updated_at = new Date().toISOString();
   delete state.pending_question;
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 export function formatMergeReadinessQuestionMessage(state: MergeReadinessState): string {
@@ -660,8 +758,7 @@ export function recordMergeReadinessAnswer(
       : round,
   );
   state.updated_at = now;
-  writeMergeReadinessState(workingDir, state, sessionId);
-  return state;
+  return persistOrFailClosed(workingDir, state, sessionId);
 }
 
 export function isLikelyMergeReadinessAnswer(promptText: string): boolean {
@@ -717,11 +814,23 @@ export async function checkMergeReadiness(
       finalizeIfReady(state, now);
     }
   }
-  writeMergeReadinessState(workingDir, state, sessionId);
+  const persisted = writeMergeReadinessState(workingDir, state, sessionId);
 
   // finalizeIfReady (called above) may have deactivated the gate on pass/paused/
   // blocked. When active=false the session is released; otherwise block.
-  if (!state.active) return null;
+  if (!state.active) {
+    // Fail-closed: if the write could not land (invalid session id/state path),
+    // do NOT release the gate on a phantom pass/paused/blocked result. Force a
+    // block so the operator resolves the session id and re-runs.
+    if (!persisted) {
+      return {
+        shouldBlock: true,
+        message: "Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start.",
+        result: "blocked",
+      };
+    }
+    return null;
+  }
   return {
     shouldBlock: true,
     message: formatMergeReadinessQuestionMessage(state),
