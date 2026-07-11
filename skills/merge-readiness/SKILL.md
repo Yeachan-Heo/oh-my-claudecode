@@ -173,7 +173,7 @@ If `blocked`:
 <Tool_Usage>
 - Use repository search and local artifacts for evidence intake before asking the human for context.
 - Use structured user questioning when available.
-- Use `merge_readiness_start` to initialize the gate, `merge_readiness_set_content` to submit the report + MCQs, and `merge_readiness_record_answer` to record each selection. Use state read/status/clear only for `.omc/state/merge-readiness-state.json`; never use generic state write to submit quiz content.
+- Use `merge_readiness_start` to initialize the gate, `merge_readiness_set_content` to submit the report + MCQs, and `merge_readiness_record_answer` to record each selection. Use state read/status/clear only for `.omc/state/merge-readiness-state.json`; never use generic state write to submit quiz content. When clearing merge-readiness state with state_clear, always pass the current session_id - omitting it clears legacy plus every session and can erase concurrent quizzes.
 - Write reports under `.omc/artifacts/merge-readiness/`.
 </Tool_Usage>
 

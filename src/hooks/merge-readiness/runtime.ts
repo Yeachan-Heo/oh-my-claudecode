@@ -305,6 +305,8 @@ export function createInitialMergeReadinessState(
   const profile = parseMergeReadinessProfile(promptText);
   const changeSummary = extractChangeSummary(promptText);
   const unsupportedFromPr = /\B--from-pr\b/i.test(promptText);
+  const evidence = collectMergeReadinessEvidence(directory, baseRef);
+  const missingEvidence = unsupportedFromPr || !hasMinimalEvidence(evidence);
   const state: MergeReadinessState = {
     active: true,
     session_id: sessionId,
@@ -318,10 +320,10 @@ export function createInitialMergeReadinessState(
     questions: [],
     answers: [],
     awaiting_content: !unsupportedFromPr,
-    evidence: collectMergeReadinessEvidence(directory, baseRef),
+    evidence,
     readiness_score: 0,
     dimension_scores: {},
-    result: unsupportedFromPr ? "blocked" : "pending",
+    result: missingEvidence ? "blocked" : "pending",
     why: "",
     whatChanged: "",
     tradeoffs: "",
@@ -332,8 +334,10 @@ export function createInitialMergeReadinessState(
     change_summary: changeSummary,
     slug: slugifyMergeReadiness(changeSummary || "merge-readiness"),
   };
-  if (unsupportedFromPr) {
-    state.validation_errors = ["--from-pr is unsupported: merge-readiness uses local git and .omc evidence only."];
+  if (missingEvidence) {
+    state.validation_errors = unsupportedFromPr
+      ? ["--from-pr is unsupported: merge-readiness uses local git and .omc evidence only."]
+      : ["No minimal change evidence (diff/status/artifacts) detected; produce the change before running /merge-readiness."];
   }
   writeArtifactForState(directory, state);
   writeMergeReadinessState(directory, state, sessionId);

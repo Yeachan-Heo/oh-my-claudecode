@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 
 export const DEFAULT_INLINE_ARTIFACT_THRESHOLD_BYTES = 2048;
@@ -92,7 +92,17 @@ export function createArtifactDescriptorFromPath(
 
 export function writeTextArtifact(options: WriteTextArtifactOptions): ArtifactDescriptor {
   mkdirSync(dirname(options.path), { recursive: true });
-  writeFileSync(options.path, options.content, { encoding: 'utf-8', mode: 0o600 });
+  // Atomic replacement: write to a temp file then rename. rename() replaces the target dir entry
+  // atomically and does NOT follow a symlink at the target, so a tampered symlink at the
+  // predictable artifact path cannot redirect the write to another file.
+  const tmp = options.path + '.tmp-' + process.pid;
+  writeFileSync(tmp, options.content, { encoding: 'utf-8', mode: 0o600 });
+  try {
+    renameSync(tmp, options.path);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    throw e;
+  }
 
   return createArtifactDescriptorFromPath(options.path, options);
 }

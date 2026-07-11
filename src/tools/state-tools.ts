@@ -1656,7 +1656,7 @@ export const stateTools = [
   {
     name: 'merge_readiness_start',
     description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick/--standard/--deep; standard is default).',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     schema: {
       summary: z.string().max(2000),
       baseRef: z.string().optional().describe("Base ref to diff committed changes against (e.g. origin/dev). Defaults to the branch upstream / origin/HEAD."),
@@ -1664,7 +1664,7 @@ export const stateTools = [
     },
     handler: async (args: { summary: string; workingDirectory?: string; session_id?: string; baseRef?: string }) => {
       const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
-      const sessionId = args.session_id ?? process.env.CLAUDE_SESSION_ID ?? resolveSessionId({ context: "cli" });
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
       const blocked = state.result === 'blocked';
       return { content: [{ type: 'text' as const, text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(' ') ?? 'missing evidence'}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...(blocked ? { isError: true } : {}) };
@@ -1681,7 +1681,7 @@ export const stateTools = [
     },
     handler: async (args: { why: string; whatChanged: string; tradeoffs: string; risksConsidered: string; teamUnderstanding: string; questions: Array<any>; workingDirectory?: string; session_id?: string }) => {
       const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
-      const sessionId = args.session_id ?? process.env.CLAUDE_SESSION_ID ?? resolveSessionId({ context: "cli" });
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = setMergeReadinessContent(directory, args, sessionId);
       if (!state) {
         return { content: [{ type: 'text' as const, text: 'Merge-readiness content rejected: no active gate. Call merge_readiness_start first.' }], isError: true };
@@ -1693,7 +1693,7 @@ export const stateTools = [
   {
     name: 'merge_readiness_record_answer',
     description: 'Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     schema: {
       questionId: z.string().max(100),
       optionId: z.string().max(100),
@@ -1701,7 +1701,7 @@ export const stateTools = [
     },
     handler: async (args: { questionId: string; optionId: string; workingDirectory?: string; session_id?: string }) => {
       const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
-      const sessionId = args.session_id ?? process.env.CLAUDE_SESSION_ID ?? resolveSessionId({ context: "cli" });
+      const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
       if (!state) {
         return { content: [{ type: 'text' as const, text: 'Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ.' }], isError: true };
