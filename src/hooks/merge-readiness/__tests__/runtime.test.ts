@@ -314,7 +314,7 @@ describe("merge-readiness runtime", () => {
     expect(prior?.evidence_summary.testEvidenceCount).toBeDefined();
 
     // Take the first re-start's gate to a terminal result so a second re-start
-    // can append (a pending gate is not captured as a prior attempt).
+    // can append (a pending gate refuses re-start rather than being overwritten).
     setMergeReadinessContent(tempDir, {
       why: "w2", whatChanged: "wc2", tradeoffs: "t2", risksConsidered: "r2", teamUnderstanding: "tu2",
       questions: [
@@ -331,6 +331,33 @@ describe("merge-readiness runtime", () => {
     // Second re-start appends a second prior attempt (does not overwrite).
     const state2 = createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry2", sessionId);
     expect(state2.prior_attempts?.length).toBe(2);
+  });
+
+  it("refuses to re-start while an active pending attempt exists (audit preservation)", () => {
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    // Record one answer; the quiz is still pending (not all required answered).
+    recordMergeReadinessMCQAnswer(tempDir, "q1", "a", sessionId);
+    const before = readMergeReadinessState(tempDir, sessionId)!;
+    expect(before.result).toBe("pending");
+    expect(before.answers).toHaveLength(1);
+
+    // Re-start must be refused: the active pending attempt would otherwise be
+    // overwritten and its single recorded answer lost without an audit trail.
+    expect(() =>
+      createInitialMergeReadinessState(tempDir, "/merge-readiness --quick retry", sessionId),
+    ).toThrow(/active merge-readiness attempt is still in progress/);
+
+    // On-disk state is untouched: same content, same single answer, still pending.
+    const after = readMergeReadinessState(tempDir, sessionId)!;
+    expect(after.result).toBe("pending");
+    expect(after.answers).toHaveLength(1);
+    expect(after.why).toBe(before.why);
+    expect(after.change_summary).toBe(before.change_summary);
+    expect(after.prior_attempts?.length ?? 0).toBe(0);
   });
 
   it("rejects an invalid session id early before evidence collection (path separator)", () => {

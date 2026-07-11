@@ -457,6 +457,21 @@ export function createInitialMergeReadinessState(
     // as no prior attempt. The write below will fail-closed on the same id.
     prior = null;
   }
+  // Refuse to overwrite an active (pending) attempt. A pending prior has not
+  // reached a terminal state (pass/override/cancel) or paused, so silently
+  // re-starting would discard its recorded content/answers without leaving a
+  // prior-attempt audit record. Force the operator to cancel (which records a
+  // cancel_owner audit entry) or let the attempt finalize first. Paused and
+  // terminal priors fall through to the retention branch below and may resume.
+  if (prior && prior.result === "pending") {
+    const phase = prior.phase ?? "content";
+    const answerCount = (prior.answers ?? []).length;
+    throw new Error(
+      `An active merge-readiness attempt is still in progress (phase: ${phase}, ${answerCount} answer(s) recorded). ` +
+        `Re-running merge_readiness_start would overwrite it and lose its audit trail. ` +
+        `Cancel it first via merge_readiness_cancel, or let it pass/pause; the prior attempt is retained in the audit history once terminal.`,
+    );
+  }
   if (prior && prior.result !== "pending" && prior.completed_at) {
     const priorAttempt: MergeReadinessAttempt = {
       profile: prior.profile,
