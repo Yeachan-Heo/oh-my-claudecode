@@ -54,14 +54,26 @@ export async function refreshRuntimeWorkerPaneIds(
   };
 }
 
+export type AllDeadRecoveryEvidence = 'all_dead' | 'alive' | 'unknown' | 'clear';
+
+export function classifyAllDeadRecoveryEvidence(
+  refresh: RuntimeWorkerPaneRefresh,
+  workers: TeamSnapshotV2['workers'],
+  hasOutstanding: boolean,
+): AllDeadRecoveryEvidence {
+  if (!hasOutstanding) return 'clear';
+  if (!refresh.allWorkerPaneIdsKnown || refresh.authoritativePaneIds.length === 0
+    || workers.length !== refresh.authoritativePaneIds.length) return 'unknown';
+  if (workers.some(worker => worker.liveness === 'alive')) return 'alive';
+  if (workers.some(worker => worker.liveness === 'unknown')) return 'unknown';
+  return hasOutstanding && workers.every(worker => worker.liveness === 'dead') ? 'all_dead' : 'unknown';
+}
+
 export function areAllAuthoritativeWorkersDead(
   refresh: RuntimeWorkerPaneRefresh,
   workers: TeamSnapshotV2['workers'],
 ): boolean {
-  return refresh.allWorkerPaneIdsKnown
-    && refresh.authoritativePaneIds.length > 0
-    && workers.length === refresh.authoritativePaneIds.length
-    && workers.every(worker => worker.liveness === 'dead');
+  return classifyAllDeadRecoveryEvidence(refresh, workers, true) === 'all_dead';
 }
 
 function validateCanonicalRecoveryIntent(teamName: string, cwd: string, pathRecoveryId: string, path: string) {
@@ -129,25 +141,28 @@ export async function processPendingRecoveryIntents(
 export async function updateAllDeadRecoveryGrace(
   teamName: string,
   cwd: string,
-  allDeadWithOutstanding: boolean,
+  evidence: AllDeadRecoveryEvidence,
   nowMs = Date.now(),
 ): Promise<{ deadlineAt: number | null; expired: boolean }> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const current = await readRevisionedTeamConfig(teamName, cwd);
     if (!current) return { deadlineAt: null, expired: false };
     const existingDeadline = Date.parse(current.config.all_dead_recovery?.deadline_at ?? '');
-    if (allDeadWithOutstanding && Number.isFinite(existingDeadline)) {
+    if (evidence === 'unknown') {
+      return { deadlineAt: Number.isFinite(existingDeadline) ? existingDeadline : null, expired: false };
+    }
+    if (evidence === 'all_dead' && Number.isFinite(existingDeadline)) {
       return { deadlineAt: existingDeadline, expired: nowMs >= existingDeadline };
     }
-    if (!allDeadWithOutstanding && !current.config.all_dead_recovery) return { deadlineAt: null, expired: false };
+    if ((evidence === 'alive' || evidence === 'clear') && !current.config.all_dead_recovery) return { deadlineAt: null, expired: false };
     const nextRevision = current.stateRevision + 1;
     const deadlineAt = nowMs + 300_000;
     const nextConfig = { ...current.config, state_revision: nextRevision,
-      all_dead_recovery: allDeadWithOutstanding
+      all_dead_recovery: evidence === 'all_dead'
         ? { detected_at: new Date(nowMs).toISOString(), deadline_at: new Date(deadlineAt).toISOString(), state_revision: nextRevision }
         : undefined };
     if (await saveTeamConfigAtRevision(nextConfig, current.stateRevision, cwd)) {
-      return { deadlineAt: allDeadWithOutstanding ? deadlineAt : null, expired: false };
+      return { deadlineAt: evidence === 'all_dead' ? deadlineAt : null, expired: false };
     }
   }
   throw new Error('stale_state_revision');
@@ -300,6 +315,7 @@ export interface PersistentRecoveryOwnerLoopOptions {
   monitor?: (teamName: string, cwd: string) => Promise<TeamSnapshotV2 | null>;
   verifyFence?: (input: RecoverDeadWorkerOwnerInput, fence: OwnerFence, expectedEpoch?: number) => boolean;
   shouldContinue?: (iteration: number) => boolean;
+  shutdown?: (teamName: string, cwd: string, options: { force: boolean }) => Promise<void>;
 }
 
 function ownsPersistentRecoveryFence(input: RecoverDeadWorkerOwnerInput, fence: OwnerFence, expectedEpoch?: number): boolean {
@@ -324,6 +340,7 @@ export async function runPersistentRecoveryOwnerLoop(
   const reconcileServices = options.reconcileServices ?? reconcileCommittedTeamServices;
   const monitor = options.monitor ?? monitorTeamV2;
   const sleep = options.sleep ?? (async ms => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const shutdown = options.shutdown ?? shutdownTeamV2;
   let iteration = 0;
   let bootstrapBindingRequired = Boolean(input.bootstrap);
   let bootstrapPending = true;
@@ -334,7 +351,7 @@ export async function runPersistentRecoveryOwnerLoop(
       await sleep(options.pollIntervalMs ?? 250);
       continue;
     }
-    if (!current || current.config.lifecycle_state === 'stopped' || current.config.lifecycle_state === 'shutting_down') return;
+    if (!current || current.config.lifecycle_state === 'stopped') return;
     const configured = current.config.runtime_owner_epoch;
     if (!configured || (options.expectedEpoch !== undefined && configured.epoch !== options.expectedEpoch)
       || (input.bootstrap && (configured.pid !== input.bootstrap.pid || configured.process_started_at !== input.bootstrap.processStartedAt
@@ -349,6 +366,17 @@ export async function runPersistentRecoveryOwnerLoop(
     const fenceOwned = options.verifyFence?.(input, fence, options.expectedEpoch)
       ?? ownsPersistentRecoveryFence(input, fence, options.expectedEpoch);
     if (!fenceOwned) return;
+    if (current.config.lifecycle_state === 'shutting_down') {
+      try {
+        await shutdown(input.teamName, input.cwd, { force: true });
+      } catch (error) {
+        process.stderr.write(`[runtime-cli/v2] recovery owner terminal cleanup failed: ${error}\n`);
+      }
+      iteration += 1;
+      if (!(options.shouldContinue?.(iteration) ?? true)) return;
+      await sleep(options.pollIntervalMs ?? 250);
+      continue;
+    }
     if (bootstrapPending) {
       bootstrapPending = false;
       try {
@@ -378,7 +406,7 @@ export async function runPersistentRecoveryOwnerLoop(
       await sleep(options.pollIntervalMs ?? 250);
       continue;
     }
-    if (!afterIntents || afterIntents.config.lifecycle_state === 'stopped' || afterIntents.config.lifecycle_state === 'shutting_down') return;
+    if (!afterIntents || afterIntents.config.lifecycle_state === 'stopped') return;
     const afterOwner = afterIntents.config.runtime_owner_epoch;
     const afterActive = afterIntents.config.active_recovery;
     if (bootstrapBindingRequired && input.bootstrap && afterOwner?.epoch === fence.epoch
@@ -394,6 +422,17 @@ export async function runPersistentRecoveryOwnerLoop(
         || afterActive?.owner_epoch !== afterOwner?.epoch || afterActive?.owner_nonce !== afterOwner?.nonce))
       || !(options.verifyFence?.(input, fence, options.expectedEpoch)
         ?? ownsPersistentRecoveryFence(input, fence, options.expectedEpoch))) return;
+    if (afterIntents.config.lifecycle_state === 'shutting_down') {
+      try {
+        await shutdown(input.teamName, input.cwd, { force: true });
+      } catch (error) {
+        process.stderr.write(`[runtime-cli/v2] recovery owner terminal cleanup failed: ${error}\n`);
+      }
+      iteration += 1;
+      if (!(options.shouldContinue?.(iteration) ?? true)) return;
+      await sleep(options.pollIntervalMs ?? 250);
+      continue;
+    }
 
     const panes = afterIntents.config.workers.map(worker => worker.pane_id).filter((pane): pane is string => Boolean(pane));
     const refresh = { authoritativePaneIds: panes, allWorkerPaneIdsKnown: panes.length === afterIntents.config.workers.length };
@@ -402,11 +441,13 @@ export async function runPersistentRecoveryOwnerLoop(
       process.stderr.write(`[runtime-cli/v2] recovery owner monitor maintenance failed: ${error}\n`);
     }
     if (snapshot) {
-      const allDead = areAllAuthoritativeWorkersDead(refresh, snapshot.workers);
       const outstanding = snapshot.tasks.pending + snapshot.tasks.in_progress > 0;
+      const evidence = classifyAllDeadRecoveryEvidence(refresh, snapshot.workers, outstanding);
       try {
-        const grace = await updateAllDeadRecoveryGrace(input.teamName, input.cwd, allDead && outstanding);
-        if (grace.expired && grace.deadlineAt !== null) await fenceAllDeadRecoveryExpiry(input.teamName, input.cwd, grace.deadlineAt);
+        const grace = await updateAllDeadRecoveryGrace(input.teamName, input.cwd, evidence);
+        if (evidence === 'all_dead' && grace.expired && grace.deadlineAt !== null) {
+          await fenceAllDeadRecoveryExpiry(input.teamName, input.cwd, grace.deadlineAt);
+        }
       } catch (error) {
         process.stderr.write(`[runtime-cli/v2] recovery owner all-dead maintenance failed: ${error}\n`);
       }
@@ -1011,18 +1052,14 @@ async function main(): Promise<void> {
 
       // An all-dead team can be resumed by a replacement owner. Keep the durable
       // state intact for the full recovery grace interval before terminal cleanup.
-      const allDead = areAllAuthoritativeWorkersDead(paneRefresh, snap.workers);
       const hasOutstanding = (snap.tasks.pending + snap.tasks.in_progress) > 0;
-      if (allDead && hasOutstanding) {
-        const grace = await updateAllDeadRecoveryGrace(teamName, cwd, true);
-        if (grace.expired && grace.deadlineAt !== null
-          && await fenceAllDeadRecoveryExpiry(teamName, cwd, grace.deadlineAt)) {
-          process.stderr.write('[runtime-cli/v2] All-worker recovery grace expired\n');
-          await doShutdown('failed');
-          return;
-        }
-      } else {
-        await updateAllDeadRecoveryGrace(teamName, cwd, false);
+      const evidence = classifyAllDeadRecoveryEvidence(paneRefresh, snap.workers, hasOutstanding);
+      const grace = await updateAllDeadRecoveryGrace(teamName, cwd, evidence);
+      if (evidence === 'all_dead' && grace.expired && grace.deadlineAt !== null
+        && await fenceAllDeadRecoveryExpiry(teamName, cwd, grace.deadlineAt)) {
+        process.stderr.write('[runtime-cli/v2] All-worker recovery grace expired\n');
+        await doShutdown('failed');
+        return;
       }
     }
     return;

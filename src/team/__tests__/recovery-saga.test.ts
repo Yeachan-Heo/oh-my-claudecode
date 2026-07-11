@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from '../recovery-saga.js';
-import { readRecoveryOutcome } from '../recovery-request-store.js';
+import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
 import type { TeamTask } from '../types.js';
 
 let cwd: string;
@@ -26,7 +26,11 @@ const task = {
   version: 3,
 } as TeamTask;
 
-beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'omc-recovery-saga-')); });
+beforeEach(() => {
+  cwd = mkdtempSync(join(tmpdir(), 'omc-recovery-saga-'));
+  reserveRecoveryRequest(cwd, input.requestId, { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
+    teamName: input.teamName, workerName: input.workerName }, input.recoveryId);
+});
 afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
 
 function dependencies(order: string[], overrides: Partial<RecoverySagaDependencies> = {}): RecoverySagaDependencies {

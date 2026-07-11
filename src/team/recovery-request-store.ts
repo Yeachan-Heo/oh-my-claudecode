@@ -275,7 +275,30 @@ function resolveCanonicalRecoveryRequestId(cwd: string, requestId: string): stri
 }
 
 
+function hasMatchingRecoveryPhaseTuple(phase: RecoveryOutcomePending, reservation: RecoveryRequestReservation): boolean {
+  return phase.request_id === reservation.request_id
+    && phase.recovery_id === reservation.recovery_id
+    && phase.team_name === reservation.team_name
+    && phase.worker_name === reservation.worker_name;
+}
+
+function isValidRecoveryPhase(phase: RecoveryOutcomePending | null, reservation: RecoveryRequestReservation): phase is RecoveryOutcomePending {
+  return phase?.schema_version === 1 && phase.kind === 'phase'
+    && hasMatchingRecoveryPhaseTuple(phase, reservation)
+    && ['reserved', 'elected', 'requeued', 'ready', 'active', 'services_pending', 'adopted'].includes(phase.phase)
+    && ['none', 'selected', 'reserved', 'adopted'].includes(phase.continuation)
+    && ['not_started', 'pending', 'adopted'].includes(phase.adoption)
+    && ['not_started', 'pending', 'synced', 'repair_required'].includes(phase.services)
+    && ['not_started', 'synced', 'repair_required'].includes(phase.manifest)
+    && typeof phase.updated_at === 'string' && Number.isFinite(Date.parse(phase.updated_at))
+    && (phase.state_revision === undefined || (Number.isSafeInteger(phase.state_revision) && phase.state_revision >= 0));
+}
+
 export function writeRecoveryPhase(cwd: string, phase: RecoveryOutcomePending): RecoveryOutcomePending {
+  const reservation = readRecoveryRequestReservation(cwd, phase.request_id);
+  if (!reservation || reservation.kind !== 'reservation' || !hasMatchingRecoveryPhaseTuple(phase, reservation)) {
+    throw new Error('invalid_persisted_state');
+  }
   const sequence = `${Date.now().toString().padStart(16, '0')}-${process.hrtime.bigint().toString().padStart(20, '0')}-${randomUUID()}.json`;
   return publishImmutable(join(phaseDirectory(cwd, phase.request_id), sequence), { ...phase, schema_version: 1, kind: 'phase' as const, updated_at: phase.updated_at || new Date().toISOString() });
 }
@@ -297,13 +320,14 @@ export function writeRecoveryFinal(cwd: string, outcome: RecoveryOutcomeFinal): 
 }
 
 function latestPhase(cwd: string, requestId: string): RecoveryOutcomePending | null {
+  const reservation = readRecoveryRequestReservation(cwd, requestId);
+  if (!reservation || reservation.kind !== 'reservation') return null;
   const directory = phaseDirectory(cwd, requestId);
   try {
-    const candidates = readdirSync(directory).sort().reverse() as string[];
-    for (const file of candidates) {
-      const phase = parseCanonical<RecoveryOutcomePending>(join(directory, file));
-      if (phase?.schema_version === 1 && phase.kind === 'phase') return phase;
-    }
+    const candidates = readdirSync(directory).filter(file => file.endsWith('.json')).sort().reverse() as string[];
+    if (candidates.length === 0) return null;
+    const phase = parseCanonical<RecoveryOutcomePending>(join(directory, candidates[0]!));
+    return isValidRecoveryPhase(phase, reservation) ? phase : null;
   } catch { /* no phases */ }
   return null;
 }

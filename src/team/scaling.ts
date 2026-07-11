@@ -199,6 +199,14 @@ export async function scaleUpOwned(
     const lifecycleLock = absPath(leaderCwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
     const processStartedAt = currentProcessStartIdentity();
     if (!processStartedAt) return { ok: false, error: 'process_start_identity_unavailable' };
+    const withScaleUpFenceRevision = (next: TeamConfig, stateRevision: number): TeamConfig => {
+      const reservation = scaleUpAttempt(next);
+      return {
+        ...next,
+        state_revision: stateRevision,
+        ...(reservation ? { active_scale_up: { ...reservation, state_revision: stateRevision } } : {}),
+      };
+    };
     const saveScaleUpConfig = async (next: TeamConfig, expectedRevision: number): Promise<boolean> => {
       try {
         return await saveTeamConfigAtRevision(next, expectedRevision, leaderCwd);
@@ -358,9 +366,9 @@ export async function scaleUpOwned(
             }
           }
           if (safeToRetire.size > 0) {
-            const retired = { ...persisted.config,
+            const retired = withScaleUpFenceRevision({ ...persisted.config,
               workers: persisted.config.workers.filter(worker => !safeToRetire.has(worker.name)),
-              state_revision: persisted.stateRevision + 1 };
+            }, persisted.stateRevision + 1);
             retired.worker_count = retired.workers.length;
             if (!await saveScaleUpConfig(retired, persisted.stateRevision)) {
               cleanupFailures.push('scale_up_reservation_retire_failed');
@@ -401,7 +409,7 @@ export async function scaleUpOwned(
       const workerName = `worker-${workerIndex}`;
       if (config.workers.some((worker) => worker.name === workerName)) {
         // Persist the advanced index only if the authoritative revision still exists.
-        const advancedConfig = { ...config, next_worker_index: nextIndex, state_revision: configRevision + 1 };
+        const advancedConfig = withScaleUpFenceRevision({ ...config, next_worker_index: nextIndex }, configRevision + 1);
         if (!await saveScaleUpConfig(advancedConfig, configRevision)) {
           return { ok: false, error: 'team_mutation_busy' };
         }
@@ -565,8 +573,8 @@ export async function scaleUpOwned(
         ...(worktree ? { worktree_repo_root: leaderCwd, worktree_path: worktree.path, worktree_branch: worktree.branch,
           worktree_detached: worktree.detached, worktree_created: worktree.created } : {}),
       };
-      const reservationConfig = { ...config, workers: [...config.workers, reservedWorker],
-        worker_count: config.workers.length + 1, next_worker_index: nextIndex, state_revision: configRevision + 1 };
+      const reservationConfig = withScaleUpFenceRevision({ ...config, workers: [...config.workers, reservedWorker],
+        worker_count: config.workers.length + 1, next_worker_index: nextIndex }, configRevision + 1);
       if (!await saveScaleUpConfig(reservationConfig, configRevision)) {
         return await rollbackScaleUp('Scale-up reservation lost its revision: stale_state_revision');
       }
@@ -696,7 +704,7 @@ export async function scaleUpOwned(
       }
     }
 
-    const committedConfig: TeamConfig = { ...config, state_revision: configRevision + 1 };
+    const committedConfig = withScaleUpFenceRevision(config, configRevision + 1);
     try {
       if (!await saveScaleUpConfig(committedConfig, configRevision)) {
         return await rollbackScaleUp('Scale-up config commit lost its revision: stale_state_revision');

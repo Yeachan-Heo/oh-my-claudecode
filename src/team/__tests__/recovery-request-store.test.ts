@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +31,13 @@ const writeRawFinal = (requestId: string, value: unknown) => {
   const path = absPath(cwd, TeamPaths.recoveryRequestResult(requestId));
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, JSON.stringify(value));
+};
+const corruptNewestPhase = (from: string, to: string) => {
+  writeRecoveryPhase(cwd, pending('reserved'));
+  writeRecoveryPhase(cwd, pending('active'));
+  const directory = join(absPath(cwd, TeamPaths.recoveryRequestPending('request-a')), '..', 'phases', 'request-a');
+  const path = join(directory, readdirSync(directory).sort().reverse()[0]!);
+  writeFileSync(path, readFileSync(path, 'utf8').replace(from, to));
 };
 
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'omc-recovery-request-')); });
@@ -103,12 +110,42 @@ describe('global recovery request store', () => {
   });
 
   it('uses final outcome over phases and otherwise returns the newest durable phase', () => {
+    reserveForFinal('request-a', 'recovery-a', 'team-a');
     writeRecoveryPhase(cwd, pending('reserved'));
     writeRecoveryPhase(cwd, pending('active'));
     expect(readRecoveryOutcome(cwd, 'request-a')).toMatchObject({ kind: 'phase', phase: 'active' });
-    reserveForFinal('request-a', 'recovery-a', 'team-a');
     writeRecoveryFinal(cwd, { schema_version: 1, kind: 'final', request_id: 'request-a', recovery_id: 'recovery-a', team_name: 'team-a', worker_name: 'worker-a', outcome: 'succeeded', result: successResult('request-a', 'recovery-a'), continuation: 'none', adoption: 'not_started', services: 'synced', manifest: 'synced', completed_at: new Date().toISOString(), expires_at: '2099-01-01T00:00:00.000Z' });
     expect(readRecoveryOutcome(cwd, 'request-a')).toMatchObject({ kind: 'final', outcome: 'succeeded' });
+  });
+
+  it('rejects phase publication unless its tuple exactly matches the canonical reservation', () => {
+    reserveForFinal('request-a', 'recovery-a', 'team-a');
+    const conflicts = [
+      { name: 'recovery', phase: { ...pending('active'), recovery_id: 'recovery-b' } },
+      { name: 'team', phase: { ...pending('active'), team_name: 'team-b' } },
+      { name: 'worker', phase: { ...pending('active'), worker_name: 'worker-b' } },
+      { name: 'request path', phase: { ...pending('active'), request_id: 'request-b' } },
+    ];
+    for (const { name, phase } of conflicts) {
+      expect(() => writeRecoveryPhase(cwd, phase), name).toThrow('invalid_persisted_state');
+    }
+    expect(readRecoveryOutcome(cwd, 'request-a')).toBeNull();
+  });
+
+  it('fails closed when the newest immutable phase conflicts with its canonical reservation', () => {
+    const conflicts: Array<[string, string, string]> = [
+      ['recovery', '"recovery_id":"recovery-a"', '"recovery_id":"recovery-b"'],
+      ['team', '"team_name":"team-a"', '"team_name":"team-b"'],
+      ['worker', '"worker_name":"worker-a"', '"worker_name":"worker-b"'],
+      ['request path', '"request_id":"request-a"', '"request_id":"request-b"'],
+    ];
+    for (const [name, from, to] of conflicts) {
+      reserveForFinal('request-a', 'recovery-a', 'team-a');
+      corruptNewestPhase(from, to);
+      expect(readRecoveryOutcome(cwd, 'request-a'), name).toBeNull();
+      rmSync(absPath(cwd, TeamPaths.recoveryRequestPending('request-a')));
+      rmSync(join(absPath(cwd, TeamPaths.recoveryRequestPending('request-a')), '..', 'phases'), { recursive: true, force: true });
+    }
   });
 
   it('repairs a missing workspace-scoped final index with exact immutable bytes', () => {

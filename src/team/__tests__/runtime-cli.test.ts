@@ -18,6 +18,7 @@ import {
   processPendingRecoveryIntents,
   refreshRuntimeWorkerPaneIds,
   areAllAuthoritativeWorkersDead,
+  classifyAllDeadRecoveryEvidence,
   readTaskOutputFallback,
   writeResultArtifact,
   runPersistentRecoveryOwnerLoop,
@@ -758,13 +759,44 @@ describe('runtime-cli recovery intent cleanup', () => {
       writeFileSync(configPath, JSON.stringify({ name: 'intent-team', worker_count: 1,
         workers: [{ name: 'worker-1', index: 1 }], agent_type: 'claude', created_at: new Date().toISOString(),
         tmux_session: 'intent-team:0', state_revision: 4 }));
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, true, 1_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, true, 200_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 200_000))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, true, 301_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 301_000))
         .resolves.toEqual({ deadlineAt: 301_000, expired: true });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, false, 302_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 302_000))
+        .resolves.toEqual({ deadlineAt: null, expired: false });
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery).toBeUndefined();
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+  it('preserves all-dead grace for unknown evidence but clears it for all-alive or mixed alive/unknown evidence', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-all-dead-evidence-'));
+    try {
+      const configPath = absPath(cwd, TeamPaths.config('intent-team'));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({ name: 'intent-team', worker_count: 1,
+        workers: [{ name: 'worker-1', index: 1, pane_id: '%worker-1' }], agent_type: 'claude',
+        created_at: new Date().toISOString(), tmux_session: 'intent-team:0', state_revision: 4 }));
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000))
+        .resolves.toEqual({ deadlineAt: 301_000, expired: false });
+      expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: ['%worker-1'], allWorkerPaneIdsKnown: true },
+        [{ liveness: 'unknown' }] as never, true)).toBe('unknown');
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 350_000))
+        .resolves.toEqual({ deadlineAt: 301_000, expired: false });
+      expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: [], allWorkerPaneIdsKnown: false },
+        [{ liveness: 'dead' }] as never, true)).toBe('unknown');
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 400_000))
+        .resolves.toEqual({ deadlineAt: 301_000, expired: false });
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery.deadline_at)
+        .toBe(new Date(301_000).toISOString());
+      expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: ['%worker-1', '%worker-2'], allWorkerPaneIdsKnown: true },
+        [{ liveness: 'alive' }, { liveness: 'unknown' }] as never, true)).toBe('alive');
+      expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: ['%worker-1'], allWorkerPaneIdsKnown: true },
+        [{ liveness: 'alive' }] as never, true)).toBe('alive');
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 400_000))
         .resolves.toEqual({ deadlineAt: null, expired: false });
       expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery).toBeUndefined();
     } finally {
@@ -1140,6 +1172,43 @@ describe('detached persistent recovery owner', () => {
       expect(execute).not.toHaveBeenCalled();
       expect(services).not.toHaveBeenCalled();
       expect(intents).not.toHaveBeenCalled();
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+  it('completes terminal cleanup after all-dead expiry fences the detached owner into shutting_down', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-persistent-owner-shutdown-'));
+    try {
+      const teamName = 'persistent-team';
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      const owner = { epoch: 2, nonce: 'successor', pid: process.pid, state_revision: 2,
+        process_started_at: 'linux:1', created_at: new Date().toISOString() };
+      writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 2,
+        worker_count: 1, workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1' }],
+        runtime_owner_epoch: owner, all_dead_recovery: { detected_at: new Date(1).toISOString(),
+          deadline_at: new Date(2).toISOString(), state_revision: 2 } })));
+      const shutdown = vi.fn(async () => {
+        const fenced = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+        expect(fenced.lifecycle_state).toBe('shutting_down');
+        writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 4,
+          lifecycle_state: 'stopped', runtime_owner_epoch: { ...owner, state_revision: 2 } })));
+      });
+      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'request-1' }, {
+        expectedEpoch: 2,
+        execute: vi.fn(),
+        processIntents: vi.fn(),
+        reconcileServices: vi.fn(async () => 'synced' as const),
+        monitor: vi.fn(async () => ({ workers: [{ liveness: 'dead' }],
+          tasks: { pending: 1, in_progress: 0 } } as never)),
+        shutdown,
+        verifyFence: (_input, fence) => fence.epoch === 2 && fence.nonce === 'successor',
+        shouldContinue: iteration => iteration < 3,
+        sleep: async () => undefined,
+      });
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(shutdown).toHaveBeenCalledWith(teamName, cwd, { force: true });
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('stopped');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

@@ -226,6 +226,33 @@ describe('scaleUp duplicate worker guard', () => {
     ]);
   });
 
+  it('keeps the active scale-up fence revision aligned through normal worker reservation and commit', async () => {
+    config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+    const snapshots: TeamConfig[] = [];
+    monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (nextConfig: TeamConfig, expectedRevision: number) => {
+      if ((config.state_revision ?? 0) !== expectedRevision) return false;
+      if (nextConfig.active_scale_up?.state_revision !== undefined
+        && nextConfig.active_scale_up.state_revision !== nextConfig.state_revision) {
+        throw new Error('invalid_persisted_state');
+      }
+      snapshots.push(structuredClone(nextConfig));
+      config = nextConfig;
+      return true;
+    });
+
+    const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 2, nextWorkerIndex: 3 });
+    expect(snapshots.some(snapshot => snapshot.workers.some(worker => worker.name === 'worker-2'
+      && worker.operational_state === 'starting'))).toBe(true);
+    expect(snapshots.some(snapshot => snapshot.workers.some(worker => worker.name === 'worker-2'
+      && worker.operational_state === 'active'))).toBe(true);
+    expect(snapshots.filter(snapshot => snapshot.active_scale_up).every(snapshot =>
+      snapshot.active_scale_up?.state_revision === snapshot.state_revision)).toBe(true);
+    expect(snapshots.at(-1)?.active_scale_up).toBeUndefined();
+  });
+
   it.each(['shutting_down', 'stopped'] as const)('rejects scale-up while team lifecycle is %s', async lifecycleState => {
     config = makeConfig({ state_revision: 4, lifecycle_state: lifecycleState, next_worker_index: 2 });
 
