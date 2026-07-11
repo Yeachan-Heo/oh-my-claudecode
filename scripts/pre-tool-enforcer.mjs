@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
@@ -716,7 +716,107 @@ function getExpectedUltragoalObjective(state, directory) {
   return '';
 }
 
-function extractClaudeGoalSnapshot(data) {
+// Upper bound on the transcript we are willing to read on every tool call.
+const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
+// The authoritative `/goal` signal is the slash-command *invocation* record, not the
+// `<local-command-stdout>` display echo (which Claude Code also emits for ordinary
+// user-typed/pasted prompts, so display text is spoofable). A real record looks like
+// `<command-name>/goal</command-name> ... <command-args>OBJECTIVE</command-args>`.
+const GOAL_COMMAND_MARKER = /<command-name>\s*\/goal\s*<\/command-name>/;
+const GOAL_COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+// Any line that plausibly carries `/goal` state — intentionally broad (matches even
+// truncated markers) so a malformed goal-bearing record fails closed instead of
+// silently keeping a stale goal active.
+const GOAL_BEARING_HINT = /\/goal|Goal set|Goal cleared|local-command-stdout/;
+
+// Read a bounded regular file without following symlinks and without a stat->open race:
+// reject symlinks via lstat, then stat the open fd (fstat) and read through that same fd.
+function readBoundedTranscript(path) {
+  let linkStat;
+  try {
+    linkStat = lstatSync(path);
+  } catch {
+    return null;
+  }
+  if (linkStat.isSymbolicLink() || !linkStat.isFile()) return null;
+
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_TRANSCRIPT_BYTES) return null;
+    const buffer = Buffer.allocUnsafe(stat.size);
+    let read = 0;
+    while (read < stat.size) {
+      const n = readSync(fd, buffer, read, stat.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    return buffer.toString('utf-8', 0, read);
+  } catch {
+    return null;
+  } finally {
+    try { closeSync(fd); } catch { /* ignore */ }
+  }
+}
+
+// Recover the active Claude `/goal` from the session transcript.
+//
+// Claude Code does not expose live `/goal` state to hooks (the PreToolUse payload
+// carries none of the goal fields read below), but every hook receives
+// `transcript_path`, where a `/goal` invocation is recorded as a command record.
+// Reading it lets the guard observe a goal the user actually set instead of denying
+// forever (issue #3341) — without trusting arbitrary transcript text.
+//
+// Authorization boundary (PR review on #3465/#3466):
+// - resolve worktree-encoded paths via the shared resolver, then require the file to be
+//   the active session's own transcript (`<sessionId>.jsonl`);
+// - read a bounded, non-symlink regular file through a stable fd;
+// - trust only command-originated `/goal` records (`<command-name>/goal</command-name>`),
+//   never `<local-command-stdout>` display text;
+// - apply set/clear strictly in order (last-event-wins) and fail closed if any
+//   goal-bearing record is malformed.
+function extractGoalFromTranscript(rawTranscriptPath, sessionId, cwd) {
+  if (typeof rawTranscriptPath !== 'string' || !rawTranscriptPath) return null;
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+
+  const resolved = resolveTranscriptPath(rawTranscriptPath, cwd);
+  if (typeof resolved !== 'string' || !resolved) return null;
+  // Bind to the active session; Claude Code names the transcript `<sessionId>.jsonl`.
+  if (basename(resolved).replace(/\.jsonl$/i, '') !== sessionId) return null;
+
+  const content = readBoundedTranscript(resolved);
+  if (content === null) return null;
+
+  let objective = '';
+  for (const line of content.split('\n')) {
+    if (!line || !GOAL_BEARING_HINT.test(line)) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return null; // fail closed: a malformed goal-bearing record invalidates recovery
+    }
+    if (entry?.type !== 'user') continue;
+    const message = entry.message;
+    if (!message || message.role !== 'user' || typeof message.content !== 'string') continue;
+    // Trust only command-originated `/goal` records, not display stdout text.
+    if (!GOAL_COMMAND_MARKER.test(message.content)) continue;
+    const argsMatch = message.content.match(GOAL_COMMAND_ARGS);
+    const args = argsMatch ? argsMatch[1].trim() : '';
+    // `/goal clear` (or empty args) clears; any other args are the objective.
+    objective = args === '' || args.toLowerCase() === 'clear' ? '' : args;
+  }
+
+  if (!objective) return null;
+  return { objective, status: 'active' };
+}
+
+function extractClaudeGoalSnapshot(data, sessionId, cwd) {
   const candidates = [
     data.goal,
     data.claude_goal,
@@ -738,9 +838,20 @@ function extractClaudeGoalSnapshot(data) {
       }
     }
   }
-  return null;
+  // Runtime injected no goal field (the standard Claude Code case): fall back to the
+  // transcript, the only place a hook can observe an active `/goal`.
+  return extractGoalFromTranscript(data.transcript_path ?? data.transcriptPath, sessionId, cwd);
 }
 
+
+// A bootstrap/exit bypass must apply to one indivisible command only. Reject shell
+// chaining/expansion so a recognized token cannot smuggle other commands past the guard
+// (e.g. `omc ultragoal checkpoint ... && npm test`). See PR review on #3465.
+function isSingleShellCommand(command) {
+  return typeof command === 'string'
+    && command.trim().length > 0
+    && !/[\n\r;&|`]|\$\(|<\(|>\(/.test(command);
+}
 
 function isCancelSkillBootstrapTool(toolName, toolInput) {
   const skillName = extractSkillName(toolInput);
@@ -762,14 +873,16 @@ function isCancelSkillBootstrapTool(toolName, toolInput) {
 
   if (toolName !== 'Bash') return false;
   const command = typeof toolInput.command === 'string' ? toolInput.command : '';
-  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode|gjc)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(command);
+  if (!isSingleShellCommand(command)) return false;
+  return /^(?:omc|oh-my-claudecode|gjc)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(command.trim());
 }
 
 function isUltragoalBootstrapTool(toolName, toolInput) {
   if (toolName === 'Skill' && extractSkillName(toolInput) === 'ultragoal') return true;
   if (toolName !== 'Bash') return false;
   const command = typeof toolInput.command === 'string' ? toolInput.command : '';
-  return /(?:^|[;&|\s])(?:omc|oh-my-claudecode)\s+ultragoal\s+(?:create(?:-goals)?|create-goals|complete(?:-goals)?|complete-goals|next|start-next|status)\b/.test(command);
+  if (!isSingleShellCommand(command)) return false;
+  return /^(?:omc|oh-my-claudecode)\s+ultragoal\s+(?:create(?:-goals)?|complete(?:-goals)?|next|start-next|status|checkpoint|record-review-blockers)\b/.test(command.trim());
 }
 
 function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, data) {
@@ -786,13 +899,19 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   if (isUltragoalTerminalState(state, directory)) return null;
 
   const expected = getExpectedUltragoalObjective(state, directory);
-  const actual = extractClaudeGoalSnapshot(data);
+  const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
   const actualObjective = normalizeText(actual?.objective);
   const expectedObjective = normalizeText(expected);
   const status = normalizePhase(actual?.status);
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
 
+  // #3341: Claude Code does not expose live `/goal` state to a PreToolUse hook, so
+  // `actual` may be recovered from the session transcript (see extractGoalFromTranscript)
+  // in addition to the payload. Objective/status matching semantics are otherwise
+  // unchanged: an explicit or recovered goal must match the expected ultragoal objective
+  // (or the expected objective must be unseeded). Denying when no active goal is
+  // observable at all is preserved below, so the guard stays meaningful.
   if (!expectedObjective && actualObjective && activeStatus) return null;
   if (objectiveMatches && activeStatus) return null;
 
