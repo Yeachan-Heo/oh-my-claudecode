@@ -181,6 +181,7 @@ export function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     }).trim();
 
     if (!output) return [];
@@ -189,6 +190,7 @@ export function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     }).trim();
 
     const statusMap = new Map<string, 'modified' | 'added' | 'deleted'>();

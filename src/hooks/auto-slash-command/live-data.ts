@@ -351,10 +351,11 @@ function globToRegex(glob: string): RegExp {
 
 function checkIfModified(pattern: string): boolean {
   try {
-    const output = execSync("git diff --name-only 2>/dev/null || true", {
+    const output = execSync("git diff --name-only", {
       timeout: 5000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     const regex = globToRegex(pattern);
     return output.split("\n").some((f) => regex.test(f.trim()));
@@ -365,10 +366,11 @@ function checkIfModified(pattern: string): boolean {
 
 function checkIfBranch(pattern: string): boolean {
   try {
-    const branch = execSync("git branch --show-current 2>/dev/null || true", {
+    const branch = execSync("git branch --show-current", {
       timeout: 5000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     }).trim();
     return globToRegex(pattern).test(branch);
   } catch {

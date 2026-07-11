@@ -9,6 +9,7 @@ const RECURRING_HOOK_SCRIPTS = [
   'scripts/post-tool-verifier.mjs',
   'scripts/context-guard-stop.mjs',
   'scripts/code-simplifier.mjs',
+  'templates/hooks/code-simplifier.mjs',
 ] as const;
 
 const CHILD_PROCESS_CALL = /\b(execSync|execFileSync|spawn|spawnSync)\s*\(\s*(?:'[^']*'|"[^"]*"|`[^`]*`)\s*,\s*\{([\s\S]*?)\}\s*\)/g;
@@ -49,6 +50,7 @@ describe('Windows hook child-process hardening', () => {
       'scripts/post-tool-verifier.mjs:execSync',
       'scripts/context-guard-stop.mjs:execSync',
       'scripts/code-simplifier.mjs:execSync',
+      'templates/hooks/code-simplifier.mjs:execSync',
     ]);
     expect(violations).toEqual([]);
   });

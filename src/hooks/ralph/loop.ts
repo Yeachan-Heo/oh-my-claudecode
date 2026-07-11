@@ -303,6 +303,7 @@ export function createRalphLoopHook(directory: string): RalphLoopHook {
         cwd: directory,
         encoding: "utf-8",
         timeout: 5000,
+        windowsHide: true,
       }).trim();
     } catch {
       // Fallback outside git repos.

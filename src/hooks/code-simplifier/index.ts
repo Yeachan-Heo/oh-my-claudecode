@@ -84,6 +84,7 @@ export function getModifiedFiles(
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
+      windowsHide: true,
     });
 
     return output
