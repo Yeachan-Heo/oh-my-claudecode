@@ -364,7 +364,15 @@ function persistOrFailClosed(workingDir: string, state: MergeReadinessState, ses
     ...(state.validation_errors ?? []),
     "Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start.",
   ];
-  return persistOrFailClosed(workingDir, state, sessionId);
+  // Return the fail-closed state directly. Do NOT recurse: re-invoking
+  // writeMergeReadinessState with the same session id/path will fail
+  // identically (read-only FS, full disk, EACCES), so the recursion would
+  // never terminate - it would also append a duplicate error per frame -
+  // and would overflow the stack instead of returning the intended blocked
+  // state. The on-disk state is unchanged here (the write above did not
+  // land), so the gate stays armed until the operator resolves the session
+  // id and re-runs merge_readiness_start.
+  return state;
 }
 
 /**

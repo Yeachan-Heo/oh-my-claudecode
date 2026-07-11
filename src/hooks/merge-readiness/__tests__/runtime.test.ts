@@ -2,7 +2,7 @@ import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkMergeReadiness,
   cancelMergeReadiness,
@@ -14,6 +14,26 @@ import {
   setMergeReadinessContent,
 } from "../index.js";
 import type { MergeReadinessMCQQuestion } from "../mcq.js";
+
+// Forces writeModeState to return false (read-only FS / full-disk analog) so
+// persistOrFailClosed's fail-closed path is exercised without throwing. Other
+// tests are unaffected while failWrites stays false.
+const persistFail = vi.hoisted(() => ({ failWrites: false }));
+vi.mock("../../../lib/mode-state-io.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../lib/mode-state-io.js")>();
+  return {
+    ...actual,
+    writeModeState: (
+      mode: string,
+      state: Record<string, unknown>,
+      directory?: string,
+      sessionId?: string,
+    ) => {
+      if (persistFail.failWrites) return false;
+      return actual.writeModeState(mode, state, directory, sessionId);
+    },
+  };
+});
 
 function makeQuestion(
   id: string,
@@ -340,6 +360,32 @@ describe("merge-readiness runtime", () => {
     expect(() => cancelMergeReadiness(tempDir, "bad/session")).toThrow();
     // The valid gate is untouched: still a real pass under the good session.
     expect(readMergeReadinessState(tempDir, sessionId)?.result).toBe("pass");
+  });
+
+  it("fails closed without recursing when a mutator's write cannot land (read-only FS / full disk)", () => {
+    // Seed an active, non-blocked gate under a valid session: real writes succeed
+    // and reads still resolve the on-disk state, so the mutator reaches
+    // persistOrFailClosed rather than failing earlier on the read path.
+    createInitialMergeReadinessState(tempDir, "/merge-readiness --quick change", sessionId);
+    setMergeReadinessContent(tempDir, {
+      why: "w", whatChanged: "wc", tradeoffs: "t", risksConsidered: "r", teamUnderstanding: "tu",
+      questions: [makeQuestion("q1", "why"), makeQuestion("q2", "change"), makeQuestion("q3", "risk")],
+    }, sessionId);
+    // The next write fails the way writeModeState fails on a read-only FS / full
+    // disk: it returns false (does not throw). Previously persistOrFailClosed
+    // recursed with identical args here and overflowed the stack (RangeError),
+    // also appending a duplicate error per frame.
+    persistFail.failWrites = true;
+    try {
+      const state = overrideMergeReadiness(tempDir, "Maintainer override.", sessionId);
+      expect(state?.result).toBe("blocked");
+      expect(state?.active).toBe(true);
+      expect(state?.validation_errors?.some((e) => e.includes("persisted"))).toBe(true);
+      // The fail-closed error must appear exactly once - no unbounded recursion.
+      expect(state?.validation_errors?.filter((e) => e.includes("persisted"))).toHaveLength(1);
+    } finally {
+      persistFail.failWrites = false;
+    }
   });
 
   it("blocked gate message directs to evidence, not content submission", async () => {
