@@ -152,6 +152,7 @@ function resolveSuperprojectRoot(cwd) {
                 cwd: probeCwd,
                 encoding: 'utf-8',
                 stdio: ['pipe', 'pipe', 'pipe'],
+                windowsHide: true,
                 timeout: 5000,
             }).trim();
         }
@@ -210,6 +211,7 @@ export function getGitTopLevel(cwd) {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
             timeout: 5000,
         }).trim();
         if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
@@ -431,6 +433,7 @@ export function getProjectIdentifier(worktreeRoot) {
             cwd: root,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
         }).trim();
         source = remoteUrl || root;
     }
@@ -449,6 +452,7 @@ export function getProjectIdentifier(worktreeRoot) {
             cwd: root,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
             timeout: 5000,
         }).trim();
         // Only resolve when --git-common-dir points to a .git directory.
@@ -986,6 +990,7 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
         }).trim();
         const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
         // For linked worktrees, git-common-dir is <repo>/.git/worktrees/<name>
@@ -1004,6 +1009,7 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
         }).trim();
         if (mainRepoRoot !== worktreeTop) {
             // basename handles `\` (Windows transcript_path) and `/` (POSIX).
@@ -1097,6 +1103,7 @@ function getGitCommonDir(cwd) {
             cwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
             timeout: 5000,
         }).trim();
         return realpathSync(commonDir);

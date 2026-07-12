@@ -156,6 +156,7 @@ function resolveSuperprojectRoot(cwd: string): string | null {
         cwd: probeCwd,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
         timeout: 5000,
       }).trim();
     } catch {
@@ -215,6 +216,7 @@ export function getGitTopLevel(cwd?: string): string | null {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
       timeout: 5000,
     }).trim();
 
@@ -448,6 +450,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
     source = remoteUrl || root;
   } catch {
@@ -466,6 +469,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
       timeout: 5000,
     }).trim();
     // Only resolve when --git-common-dir points to a .git directory.
@@ -1107,6 +1111,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
@@ -1124,6 +1129,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     if (mainRepoRoot !== worktreeTop) {
@@ -1226,6 +1232,7 @@ function getGitCommonDir(cwd: string): string | null {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
       timeout: 5000,
     }).trim();
     return realpathSync(commonDir);
