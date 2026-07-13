@@ -111,6 +111,18 @@ describe('workflow-drift-guard Stop hook', () => {
   });
 
   it.each([
+    ['PREC-EMPTY', ''],
+    ['PREC-SPACE', '   '],
+  ])('%s does not fall through from a present canonical key', (_id, last_assistant_message) => {
+    expectPass(runGuard({
+      hook_event_name: 'Stop',
+      last_assistant_message,
+      message: 'PostgreSQL or SQLite?',
+      cwd: ROOT,
+    }));
+  });
+
+  it.each([
     ['BQ-01', 'Would you prefer PostgreSQL or SQLite?'],
     ['BQ-02', 'Do you prefer PostgreSQL or SQLite?'],
     ['BQ-03', 'Should I migrate now or keep the compatibility layer?'],

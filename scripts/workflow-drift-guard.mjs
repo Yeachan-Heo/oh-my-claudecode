@@ -61,7 +61,11 @@ function safeJsonParse(text) {
 }
 
 function lastAssistantMessage(input) {
-  for (const key of ['last_assistant_message', 'lastAssistantMessage', 'message', 'output', 'response', 'text']) {
+  if (input && Object.prototype.hasOwnProperty.call(input, 'last_assistant_message')) {
+    const canonical = input.last_assistant_message;
+    return typeof canonical === 'string' ? canonical.trim() : '';
+  }
+  for (const key of ['lastAssistantMessage', 'message', 'output', 'response', 'text']) {
     const value = input?.[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
