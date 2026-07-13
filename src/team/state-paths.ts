@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'path';
 
 /**
@@ -79,6 +80,8 @@ export const TeamPaths = {
 
   dispatchLockDir: (teamName: string) =>
     `.omc/state/team/${teamName}/dispatch/.lock`,
+  mailboxNotificationLock: (teamName: string, requestId: string) =>
+    `.omc/state/team/${teamName}/dispatch/.mailbox-notification-${createHash('sha256').update(requestId).digest('hex')}.lock`,
 
   workerStatus: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/status.json`,

@@ -17,6 +17,7 @@ import { validateTeamName } from './team-name.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
 import { configureTmuxClipboardForSession, configureTmuxClipboardForSessionAsync } from '../cli/tmux-clipboard.js';
+import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbox-notification-guard.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
@@ -215,6 +216,186 @@ async function cmuxCaptureSurface(surfaceId: string): Promise<string> {
 
 async function cmuxCloseSurface(surfaceId: string): Promise<void> {
   await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
+}
+
+const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+
+function isExactOpaqueCmuxIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim() && !/[\x00-\x1f\x7f\s]/.test(value);
+}
+
+function parseCmuxResourceIds(output: string, collectionName: 'panes' | 'surfaces'): string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output) as unknown;
+  } catch {
+    return null;
+  }
+
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>)[collectionName])
+      ? (parsed as Record<string, unknown>)[collectionName] as unknown[]
+      : null;
+  if (!entries) return null;
+
+  const ids: string[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const id = (entry as Record<string, unknown>).id;
+    if (!isExactOpaqueCmuxIdentifier(id)) return null;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+type MailboxOwnershipCommand = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+export interface MailboxTargetOwnershipDependencies {
+  tmuxExec: MailboxOwnershipCommand;
+  cmuxExec: MailboxOwnershipCommand;
+}
+
+const defaultMailboxTargetOwnershipDependencies: MailboxTargetOwnershipDependencies = {
+  tmuxExec: (args) => tmuxExecAsync(args),
+  cmuxExec: cmuxExecAsync,
+};
+
+/**
+ * Proves that a configured direct-mailbox target still belongs to its exact
+ * provider target. This performs read-only provider queries and never touches
+ * a candidate pane/surface.
+ */
+export async function verifyTeamTargetOwnership(
+  target: MailboxNotificationTarget,
+  dependencies: MailboxTargetOwnershipDependencies = defaultMailboxTargetOwnershipDependencies,
+): Promise<MailboxTargetOwnership> {
+  const expectedProvider = target.providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+  if (target.provider !== expectedProvider) return { kind: 'provider_mismatch' };
+
+  if (target.provider === 'tmux') {
+    if (
+      typeof target.providerTarget !== 'string'
+      || target.providerTarget.length === 0
+      || target.providerTarget !== target.providerTarget.trim()
+      || !TMUX_MAILBOX_TARGET.test(target.providerTarget)
+      || !TMUX_MAILBOX_PANE_ID.test(target.paneId)
+    ) {
+      return { kind: 'unavailable' };
+    }
+
+    try {
+      const result = await dependencies.tmuxExec([
+        'list-panes', '-t', target.providerTarget, '-F', '#{pane_id}',
+      ]);
+      const paneIds: string[] = [];
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const paneId = line.trim();
+        if (!paneId) continue;
+        if (!TMUX_MAILBOX_PANE_ID.test(paneId)) return { kind: 'unavailable' };
+        if (!paneIds.includes(paneId)) paneIds.push(paneId);
+      }
+      if (paneIds.length === 0) return { kind: 'unavailable' };
+      return paneIds.includes(target.paneId)
+        ? { kind: 'owned', provider: 'tmux', providerTarget: target.providerTarget, paneId: target.paneId }
+        : { kind: 'foreign' };
+    } catch {
+      return { kind: 'unavailable' };
+    }
+  }
+
+  const workspace = target.providerTarget.slice('cmux:'.length);
+  if (
+    !isExactOpaqueCmuxIdentifier(workspace)
+    || !isExactOpaqueCmuxIdentifier(target.paneId)
+    || TMUX_MAILBOX_PANE_ID.test(target.paneId)
+  ) {
+    return { kind: 'unavailable' };
+  }
+
+  try {
+    const panes = parseCmuxResourceIds(
+      (await dependencies.cmuxExec(['--json', 'list-panes', '--workspace', workspace])).stdout,
+      'panes',
+    );
+    if (!panes || panes.length === 0) return { kind: 'unavailable' };
+
+    for (const pane of panes) {
+      const surfaces = parseCmuxResourceIds(
+        (await dependencies.cmuxExec([
+          '--json', 'list-pane-surfaces', '--workspace', workspace, '--pane', pane,
+        ])).stdout,
+        'surfaces',
+      );
+      if (!surfaces) return { kind: 'unavailable' };
+      if (surfaces.includes(target.paneId)) {
+        return {
+          kind: 'owned',
+          provider: 'cmux',
+          providerTarget: target.providerTarget,
+          paneId: target.paneId,
+        };
+      }
+    }
+    return { kind: 'foreign' };
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+export type DirectMailboxEffectResult =
+  | { kind: 'not_attempted'; reason: string }
+  | { kind: 'confirmed'; transport: 'tmux_send_keys'; reason: 'worker_pane_notified' | 'leader_pane_notified' }
+  | { kind: 'attempted_unconfirmed'; transport: 'tmux_send_keys'; reason: 'notification_delivery_uncertain'; cause: 'returned_false' | 'threw' };
+
+export interface DirectMailboxEffectDependencies {
+  sendWorker: typeof sendToWorker;
+  sendLeader: typeof injectToLeaderPane;
+}
+
+const defaultDirectMailboxEffectDependencies: DirectMailboxEffectDependencies = {
+  sendWorker: sendToWorker,
+  sendLeader: injectToLeaderPane,
+};
+
+/**
+ * Direct-mailbox-only adapter. Once the public boolean transport has been
+ * called, a false result or exception is conservatively treated as uncertain.
+ */
+export async function invokeDirectMailboxEffect(
+  target: MailboxNotificationTarget,
+  message: string,
+  dependencies: DirectMailboxEffectDependencies = defaultDirectMailboxEffectDependencies,
+): Promise<DirectMailboxEffectResult> {
+  if (!target.paneId || !message) return { kind: 'not_attempted', reason: 'mailbox_target_missing' };
+  if (target.provider === 'cmux' && !isCmuxContext()) {
+    return { kind: 'not_attempted', reason: 'mailbox_membership_unresolvable' };
+  }
+  try {
+    const notified = target.recipientRole === 'leader'
+      ? await dependencies.sendLeader(target.providerTarget, target.paneId, message)
+      : await dependencies.sendWorker(target.providerTarget, target.paneId, message);
+    return notified
+      ? {
+          kind: 'confirmed',
+          transport: 'tmux_send_keys',
+          reason: target.recipientRole === 'leader' ? 'leader_pane_notified' : 'worker_pane_notified',
+        }
+      : {
+          kind: 'attempted_unconfirmed',
+          transport: 'tmux_send_keys',
+          reason: 'notification_delivery_uncertain',
+          cause: 'returned_false',
+        };
+  } catch {
+    return {
+      kind: 'attempted_unconfirmed',
+      transport: 'tmux_send_keys',
+      reason: 'notification_delivery_uncertain',
+      cause: 'threw',
+    };
+  }
 }
 
 export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
@@ -1498,7 +1679,11 @@ export async function injectToLeaderPane(
     }
     const captured = await capturePaneAsync(leaderPaneId);
     if (paneHasActiveTask(captured)) {
-      await tmuxExecAsync(['send-keys', '-t', leaderPaneId, 'C-c']);
+      if (isCmuxSurfaceTarget(leaderPaneId)) {
+        await cmuxSendSurfaceKey(leaderPaneId, 'C-c');
+      } else {
+        await tmuxExecAsync(['send-keys', '-t', leaderPaneId, 'C-c']);
+      }
       await new Promise<void>(r => setTimeout(r, 250));
     }
   } catch { /* best-effort */ }

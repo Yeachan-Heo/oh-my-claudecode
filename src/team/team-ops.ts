@@ -107,6 +107,21 @@ export type {
 };
 export type { PublishTaskRecoveryCheckpointInput } from './task-recovery-checkpoint.js';
 
+/**
+ * Result of an exact lookup in the canonical mailbox JSON file. This is a
+ * guard-only reader and intentionally never falls back to legacy JSONL.
+ */
+export type StrictCanonicalMailboxMessageReadResult =
+  | { kind: 'valid'; message: TeamMailboxMessage }
+  | { kind: 'store_missing' }
+  | { kind: 'malformed_store'; cause: 'json' | 'non_object' | 'messages_non_array' }
+  | { kind: 'wrong_owner' }
+  | { kind: 'malformed_message'; messageIndex: number; field: string }
+  | { kind: 'message_missing' }
+  | { kind: 'duplicate_message_id'; messageId: string; messageIndexes: number[] }
+  | { kind: 'recipient_mismatch'; messageIndex: number }
+  | { kind: 'replay_suppressed'; message: TeamMailboxMessage; marker: 'notified_at' | 'delivered_at' };
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -639,6 +654,105 @@ async function readMailbox(teamName: string, workerName: string, cwd: string): P
     return { worker: workerName, messages: mailbox.messages };
   }
   return readLegacyMailboxJsonl(teamName, workerName, cwd);
+}
+
+function isStrictCanonicalMailboxRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isStrictCanonicalMailboxText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && value === value.trim();
+}
+
+function isStrictCanonicalMailboxTimestamp(value: unknown): value is string {
+  return isStrictCanonicalMailboxText(value) && Number.isFinite(Date.parse(value));
+}
+
+function materializeStrictCanonicalMailboxMessage(raw: Record<string, unknown>): TeamMailboxMessage {
+  const message: TeamMailboxMessage = {
+    message_id: raw.message_id as string,
+    from_worker: raw.from_worker as string,
+    to_worker: raw.to_worker as string,
+    body: raw.body as string,
+    created_at: raw.created_at as string,
+  };
+  if ('notified_at' in raw) message.notified_at = raw.notified_at as string;
+  if ('delivered_at' in raw) message.delivered_at = raw.delivered_at as string;
+  return message;
+}
+
+function validateStrictCanonicalMailboxMessage(
+  raw: unknown,
+  messageIndex: number,
+): TeamMailboxMessage | Extract<StrictCanonicalMailboxMessageReadResult, { kind: 'malformed_message' }> {
+  if (!isStrictCanonicalMailboxRecord(raw)) return { kind: 'malformed_message', messageIndex, field: '$' };
+  if (!isStrictCanonicalMailboxText(raw.message_id)) return { kind: 'malformed_message', messageIndex, field: 'message_id' };
+  if (!isStrictCanonicalMailboxText(raw.from_worker)) return { kind: 'malformed_message', messageIndex, field: 'from_worker' };
+  if (!isStrictCanonicalMailboxText(raw.to_worker)) return { kind: 'malformed_message', messageIndex, field: 'to_worker' };
+  if (!isStrictCanonicalMailboxText(raw.body)) return { kind: 'malformed_message', messageIndex, field: 'body' };
+  if (!isStrictCanonicalMailboxTimestamp(raw.created_at)) return { kind: 'malformed_message', messageIndex, field: 'created_at' };
+  if ('notified_at' in raw && !isStrictCanonicalMailboxTimestamp(raw.notified_at)) {
+    return { kind: 'malformed_message', messageIndex, field: 'notified_at' };
+  }
+  if ('delivered_at' in raw && !isStrictCanonicalMailboxTimestamp(raw.delivered_at)) {
+    return { kind: 'malformed_message', messageIndex, field: 'delivered_at' };
+  }
+  return materializeStrictCanonicalMailboxMessage(raw);
+}
+
+/**
+ * Reads one exact message from the canonical JSON mailbox without using the
+ * compatibility JSONL fallback. It validates every canonical record first so
+ * a corrupt or ambiguous mailbox cannot authorize a pane notification.
+ */
+export async function teamReadCanonicalMailboxMessageStrict(
+  teamName: string,
+  workerName: string,
+  messageId: string,
+  cwd: string,
+): Promise<StrictCanonicalMailboxMessageReadResult> {
+  const path = absPath(cwd, TeamPaths.mailbox(teamName, workerName));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT'
+      ? { kind: 'store_missing' }
+      : { kind: 'malformed_store', cause: 'json' };
+  }
+  if (!isStrictCanonicalMailboxRecord(parsed)) return { kind: 'malformed_store', cause: 'non_object' };
+  if (parsed.worker !== workerName) return { kind: 'wrong_owner' };
+  if (!Array.isArray(parsed.messages)) return { kind: 'malformed_store', cause: 'messages_non_array' };
+
+  const messages: TeamMailboxMessage[] = [];
+  for (let messageIndex = 0; messageIndex < parsed.messages.length; messageIndex += 1) {
+    const validated = validateStrictCanonicalMailboxMessage(parsed.messages[messageIndex], messageIndex);
+    if (!('message_id' in validated)) return validated;
+    messages.push(validated);
+  }
+
+  const indexesByMessageId = new Map<string, number[]>();
+  for (const [messageIndex, message] of messages.entries()) {
+    const indexes = indexesByMessageId.get(message.message_id) ?? [];
+    indexes.push(messageIndex);
+    indexesByMessageId.set(message.message_id, indexes);
+  }
+  const requestedIndexes = indexesByMessageId.get(messageId) ?? [];
+  if (requestedIndexes.length > 1) {
+    return { kind: 'duplicate_message_id', messageId, messageIndexes: requestedIndexes };
+  }
+  const duplicate = [...indexesByMessageId.entries()].find(([, indexes]) => indexes.length > 1);
+  if (duplicate) return { kind: 'duplicate_message_id', messageId: duplicate[0], messageIndexes: duplicate[1] };
+  if (requestedIndexes.length === 0) return { kind: 'message_missing' };
+
+  const messageIndex = requestedIndexes[0]!;
+  const message = messages[messageIndex]!;
+  if (message.to_worker !== workerName) return { kind: 'recipient_mismatch', messageIndex };
+  if (message.notified_at) return { kind: 'replay_suppressed', message: { ...message }, marker: 'notified_at' };
+  if (message.delivered_at) return { kind: 'replay_suppressed', message: { ...message }, marker: 'delivered_at' };
+  return { kind: 'valid', message: { ...message } };
 }
 
 async function writeMailbox(teamName: string, workerName: string, mailbox: TeamMailbox, cwd: string): Promise<void> {
