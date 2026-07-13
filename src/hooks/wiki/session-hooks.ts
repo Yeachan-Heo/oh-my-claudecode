@@ -8,6 +8,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { createHash } from 'crypto';
+
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
@@ -16,6 +18,7 @@ import {
   readIndex,
   readPage,
   readAllPages,
+  readLog,
   listPages,
   withWikiLock,
   writePageUnsafe,
@@ -25,6 +28,56 @@ import {
 } from './storage.js';
 import { WIKI_SCHEMA_VERSION, DEFAULT_WIKI_CONFIG } from './types.js';
 import type { WikiConfig } from './types.js';
+
+export interface WikiSessionEndCaptureIntent {
+  kind: 'wiki-session-end-capture';
+  root: string;
+  sessionId: string;
+  filename: string;
+  capturedAt: string;
+  /** Durable intent identity; safe to persist because it is a one-way digest. */
+  captureKey?: string;
+
+}
+
+export interface WikiSessionEndCommitOptions {
+  /** Absolute deadline in epoch milliseconds for a worker-owned commit. */
+  deadlineAt?: number;
+  /** Maximum time to wait for the existing wiki lock. */
+  lockTimeoutMs?: number;
+}
+
+function captureKeyFor(intent: Pick<WikiSessionEndCaptureIntent, 'sessionId' | 'filename' | 'capturedAt' | 'captureKey'>): string {
+  if (typeof intent.captureKey === 'string' && /^[a-f0-9]{64}$/.test(intent.captureKey)) {
+    return intent.captureKey;
+  }
+  return createHash('sha256')
+    .update(`${intent.sessionId}\u0000${intent.filename}\u0000${intent.capturedAt}`)
+    .digest('hex');
+}
+
+
+function pageHasCaptureKey(page: ReturnType<typeof readPage>, captureKey: string): boolean {
+  return page?.content.includes(`<!-- omc-wiki-capture:${captureKey} -->`) ?? false;
+}
+
+function logHasCaptureKey(root: string, captureKey: string): boolean {
+  return readLog(root)?.includes(`omc-wiki-capture:${captureKey}`) ?? false;
+}
+
+
+function isBeforeDeadline(deadlineAt: number | undefined): boolean {
+  return deadlineAt === undefined || Date.now() <= deadlineAt;
+}
+
+function captureFilename(sessionId: string, capturedAt: string): string {
+  const dateSlug = capturedAt.split('T')[0] ?? 'unknown-date';
+  let hash = 0;
+  for (let index = 0; index < sessionId.length; index += 1) {
+    hash = ((hash << 5) - hash + sessionId.charCodeAt(index)) | 0;
+  }
+  return `session-log-${dateSlug}-${(hash >>> 0).toString(16).padStart(8, '0')}.md`;
+}
 
 /**
  * Load wiki config from .omc-config.json.
@@ -48,6 +101,93 @@ function loadWikiConfig(root: string): WikiConfig {
     // Ignore config errors, use defaults
   }
   return DEFAULT_WIKI_CONFIG;
+}
+
+/**
+ * Build a JSON-safe SessionEnd capture intent without taking the wiki lock or
+ * mutating the filesystem. The manifest worker durably owns and commits it.
+ */
+export function buildWikiSessionEndCaptureIntent(
+  data: { cwd?: string; session_id?: string },
+): WikiSessionEndCaptureIntent | null {
+  try {
+    const root = data.cwd || process.cwd();
+    if (!loadWikiConfig(root).autoCapture || !existsSync(getWikiDir(root))) return null;
+
+    const sessionId = data.session_id || `session-${Date.now()}`;
+    const capturedAt = new Date().toISOString();
+    const filename = captureFilename(sessionId, capturedAt);
+    const captureKey = captureKeyFor({ sessionId, filename, capturedAt });
+    return {
+      kind: 'wiki-session-end-capture',
+      root,
+      sessionId,
+      filename,
+      capturedAt,
+      captureKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Commit a capture intent under the existing wiki lock. Replaying the same
+ * intent never duplicates its page or its log entry.
+ */
+export function commitWikiSessionEndCaptureIntent(
+  intent: WikiSessionEndCaptureIntent,
+  options: WikiSessionEndCommitOptions = {},
+): boolean {
+  if (!isBeforeDeadline(options.deadlineAt)) return false;
+
+  try {
+    const captureKey = captureKeyFor(intent);
+    let committed = false;
+    withWikiLock(intent.root, () => {
+      if (!isBeforeDeadline(options.deadlineAt)) return;
+
+      const existingPage = readPage(intent.root, intent.filename);
+      if (!pageHasCaptureKey(existingPage, captureKey)) {
+        const dateSlug = intent.capturedAt.split('T')[0] ?? 'unknown-date';
+        writePageUnsafe(intent.root, {
+          filename: intent.filename,
+          frontmatter: {
+            title: `Session Log ${dateSlug}`,
+            tags: ['session-log', 'auto-captured'],
+            created: intent.capturedAt,
+            updated: intent.capturedAt,
+            sources: [intent.sessionId],
+            links: [],
+            category: 'session-log',
+            confidence: 'medium',
+            schemaVersion: WIKI_SCHEMA_VERSION,
+          },
+          content: `\n# Session Log ${dateSlug}\n\nAuto-captured session metadata.\nSession ID: ${intent.sessionId}\n<!-- omc-wiki-capture:${captureKey} -->\n\nReview and promote significant findings to curated wiki pages via \`wiki_ingest\`.\n`,
+        });
+      }
+
+      if (!isBeforeDeadline(options.deadlineAt)) return;
+      if (!logHasCaptureKey(intent.root, captureKey)) {
+        appendLogUnsafe(intent.root, {
+          timestamp: intent.capturedAt,
+          operation: 'ingest',
+          pagesAffected: [intent.filename],
+          summary: `Auto-captured session log for ${intent.sessionId} (omc-wiki-capture:${captureKey})`,
+        });
+      }
+
+      if (!isBeforeDeadline(options.deadlineAt)) return;
+      committed = pageHasCaptureKey(readPage(intent.root, intent.filename), captureKey)
+        && logHasCaptureKey(intent.root, captureKey);
+    }, {
+      deadlineAt: options.deadlineAt,
+      timeoutMs: options.lockTimeoutMs,
+    });
+    return committed;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -98,68 +238,11 @@ export function onSessionStart(data: { cwd?: string }): { additionalContext?: st
 }
 
 /**
- * SessionEnd hook: bounded append-only capture of session metadata.
- *
- * Captures raw session data as a session-log page.
- * Does NOT do LLM-judged curation — that happens via skill on next session.
- * Hard timeout: 3s via Promise.race pattern (sync version uses try/catch + time check).
+ * SessionEnd foreground compatibility hook. It deliberately constructs no
+ * writes and never acquires the wiki lock; the session wrapper enqueues the
+ * intent for the manifest worker to commit.
  */
-export function onSessionEnd(data: { cwd?: string; session_id?: string }): { continue: boolean } {
-  const startTime = Date.now();
-  const TIMEOUT_MS = 3_000;
-
-  try {
-    const root = data.cwd || process.cwd();
-    const config = loadWikiConfig(root);
-
-    if (!config.autoCapture) {
-      return { continue: true };
-    }
-
-    const wikiDir = getWikiDir(root);
-    if (!existsSync(wikiDir)) {
-      // Don't create wiki dir just for session logging
-      return { continue: true };
-    }
-
-    const sessionId = data.session_id || `session-${Date.now()}`;
-    const now = new Date().toISOString();
-    const dateSlug = now.split('T')[0]; // YYYY-MM-DD
-    const filename = `session-log-${dateSlug}-${sessionId.slice(-8)}.md`;
-
-    withWikiLock(root, () => {
-      // Time check inside lock
-      if (Date.now() - startTime > TIMEOUT_MS) return;
-
-      writePageUnsafe(root, {
-        filename,
-        frontmatter: {
-          title: `Session Log ${dateSlug}`,
-          tags: ['session-log', 'auto-captured'],
-          created: now,
-          updated: now,
-          sources: [sessionId],
-          links: [],
-          category: 'session-log',
-          confidence: 'medium',
-          schemaVersion: WIKI_SCHEMA_VERSION,
-        },
-        content: `\n# Session Log ${dateSlug}\n\nAuto-captured session metadata.\nSession ID: ${sessionId}\n\nReview and promote significant findings to curated wiki pages via \`wiki_ingest\`.\n`,
-      });
-
-      appendLogUnsafe(root, {
-        timestamp: now,
-        operation: 'ingest',
-        pagesAffected: [filename],
-        summary: `Auto-captured session log for ${sessionId}`,
-      });
-
-      // Do NOT rebuild index here — keep SessionEnd fast
-    });
-  } catch {
-    // Silently fail — session end should never block
-  }
-
+export function onSessionEnd(_data: { cwd?: string; session_id?: string }): { continue: boolean } {
   return { continue: true };
 }
 

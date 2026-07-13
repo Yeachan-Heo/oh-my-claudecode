@@ -288,6 +288,25 @@ function dispatchSessionStartNotificationInBackground(pluginRoot, payload) {
   }
 }
 
+function reconcileSessionEndJobsInBackground(pluginRoot, directory) {
+  const workerModuleUrl = pathToFileURL(join(pluginRoot, 'dist', 'hooks', 'session-end', 'worker.js')).href;
+  const childSource = `import(${JSON.stringify(workerModuleUrl)})\n`
+    + `  .then(({ reconcileSessionEndJobs }) => reconcileSessionEndJobs?.(${JSON.stringify(directory)}))\n`
+    + `  .catch(() => {});`;
+
+  try {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childSource], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    child.unref();
+  } catch {
+    // Reconciliation is best-effort and must not delay SessionStart.
+  }
+}
+
 function hasProjectMemoryContent(memory) {
   return Boolean(
     memory &&
@@ -821,6 +840,7 @@ async function main() {
 
     writeSessionStartedMarker(omcRoot, directory, sessionId);
     reconcileAbandonedSessionStarts(omcRoot, sessionId);
+    reconcileSessionEndJobsInBackground(getRuntimeBaseDir(), directory);
 
     // Check for version drift between components
     const driftInfo = detectVersionDrift();

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-import { readStdin } from './lib/stdin.mjs';
+import { readSessionEndFrame } from './lib/stdin.mjs';
+
+const fallback = { continue: true, suppressOutput: true };
 
 async function main() {
-  const input = await readStdin(1000);
-  const fallback = { continue: true, suppressOutput: true };
+  const frame = await readSessionEndFrame();
 
-  if (input.trim().length === 0) {
+  if (frame.status !== 'ok') {
     console.log(JSON.stringify(fallback));
     return;
   }
 
   try {
-    const data = JSON.parse(input);
-    const { onSessionEnd } = await import('../dist/hooks/wiki/session-hooks.js');
-    const result = onSessionEnd(data);
+    const { processWikiSessionEnd } = await import('../dist/hooks/session-end/index.js');
+    const result = await processWikiSessionEnd(frame.value);
     console.log(JSON.stringify(result));
   } catch (error) {
     console.error('[wiki-session-end] Error:', error.message);

@@ -237,6 +237,92 @@ export function atomicWriteJsonSync(filePath: string, data: unknown): void {
   atomicWriteFileSync(filePath, jsonContent);
 }
 
+/**
+ * Bounded set of independently atomic writes. This is not a multi-file
+ * transaction: a crash between renames can expose a prefix of the batch.
+ * Every visible file, however, is fully written and durable before return.
+ */
+export interface AtomicBatchWrite {
+  path: string;
+  content: string;
+  mode?: number;
+}
+
+const ATOMIC_BATCH_MAX_WRITES = 64;
+const ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
+
+export function atomicWriteBatchSync(writes: AtomicBatchWrite[]): void {
+  if (writes.length > ATOMIC_BATCH_MAX_WRITES) {
+    throw new Error(`Atomic batch exceeds ${ATOMIC_BATCH_MAX_WRITES} writes`);
+  }
+
+  const targets = new Set<string>();
+  let totalBytes = 0;
+  const pending = writes.map((write) => {
+    if (!write.path || typeof write.content !== "string") {
+      throw new TypeError("Atomic batch writes require a path and string content");
+    }
+    if (write.mode !== undefined && (!Number.isInteger(write.mode) || write.mode < 0 || write.mode > 0o777)) {
+      throw new RangeError("Atomic batch write mode must be a valid file mode");
+    }
+    if (targets.has(write.path)) {
+      throw new Error(`Atomic batch contains duplicate target: ${write.path}`);
+    }
+    targets.add(write.path);
+    totalBytes += Buffer.byteLength(write.content, "utf-8");
+    if (totalBytes > ATOMIC_BATCH_MAX_CONTENT_BYTES) {
+      throw new Error(`Atomic batch exceeds ${ATOMIC_BATCH_MAX_CONTENT_BYTES} bytes`);
+    }
+
+    const dir = path.dirname(write.path);
+    ensureDirSync(dir);
+    return {
+      ...write,
+      dir,
+      tempPath: path.join(dir, `.${path.basename(write.path)}.tmp.${crypto.randomUUID()}`),
+    };
+  });
+
+  const renamedDirectories = new Set<string>();
+  try {
+    for (const write of pending) {
+      const fd = fsSync.openSync(write.tempPath, "wx", write.mode ?? 0o600);
+      try {
+        fsSync.writeSync(fd, write.content, 0, "utf-8");
+        fsSync.fsyncSync(fd);
+      } finally {
+        fsSync.closeSync(fd);
+      }
+    }
+
+    for (const write of pending) {
+      fsSync.renameSync(write.tempPath, write.path);
+      renamedDirectories.add(write.dir);
+    }
+
+    for (const dir of renamedDirectories) {
+      try {
+        const dirFd = fsSync.openSync(dir, "r");
+        try {
+          fsSync.fsyncSync(dirFd);
+        } finally {
+          fsSync.closeSync(dirFd);
+        }
+      } catch {
+        // Some platforms do not support directory fsync.
+      }
+    }
+  } finally {
+    for (const write of pending) {
+      try {
+        fsSync.unlinkSync(write.tempPath);
+      } catch {
+        // The temp file was renamed or could not be created.
+      }
+    }
+  }
+}
+
 export async function safeReadJson<T>(filePath: string): Promise<T | null> {
   try {
     // Check if file exists

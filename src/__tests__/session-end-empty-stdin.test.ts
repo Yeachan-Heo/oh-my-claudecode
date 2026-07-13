@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+const runCjs = join(process.cwd(), 'scripts', 'run.cjs');
 
 const sessionEndScripts = [
   ['session-end', join(process.cwd(), 'scripts', 'session-end.mjs')],
@@ -12,8 +13,8 @@ describe('SessionEnd hook stdin handling', () => {
   it.each(sessionEndScripts.flatMap(([name, script]) => [
     [name, 'empty stdin', script, ''],
     [name, 'whitespace stdin', script, '  \n\t  '],
-  ] as const))('%s treats %s as a clean no-op', (_name, _label, script, input) => {
-    const result = spawnSync(process.execPath, [script], {
+  ] as const))('%s treats promptly closed %s as a clean no-op through run.cjs', (_name, _label, script, input) => {
+    const result = spawnSync(process.execPath, [runCjs, script], {
       input,
       encoding: 'utf-8',
     });

@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSy
 import { join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import { tmuxExec } from '../cli/tmux-utils.js';
 import { request as httpsRequest } from 'https';
 import { resolveDaemonModulePath } from '../utils/daemon-module-path.js';
@@ -31,14 +32,21 @@ import {
 } from '../features/rate-limit-wait/tmux-detector.js';
 import {
   lookupByMessageId,
+  lockRegistryIfEmpty,
   removeMessagesByPane,
   pruneStale,
   type SessionMapping,
 } from './session-registry.js';
+
 import type { ReplyConfig } from './types.js';
 import { parseMentionAllowedMentions } from './config.js';
 import { redactTokens } from './redact.js';
-import { isProcessAlive } from '../platform/index.js';
+import {
+  getProcessStartIdentity,
+  isProcessAlive,
+  isProcessIdentityLive,
+  terminateOwnedProcessTree,
+} from '../platform/index.js';
 import {
   validateSlackMessage,
   SlackConnectionStateTracker,
@@ -93,6 +101,10 @@ export interface ReplyListenerState {
   messagesInjected: number;
   errors: number;
   lastError?: string;
+  /** Unique per-launch generation used to reject stale PID/state pairs. */
+  generation?: string;
+  /** Platform-provided start identity that prevents PID-reuse signalling. */
+  processStartIdentity?: string;
 }
 
 /** Daemon configuration (written to state file) */
@@ -248,26 +260,39 @@ export async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | n
   }
 }
 
-/**
- * Read PID file
- */
-function readPidFile(): number | null {
+interface ReplyListenerPidRecord {
+  pid: number;
+  generation?: string;
+  processStartIdentity?: string;
+}
+
+/** Read the PID record, accepting the legacy numeric format for cleanup only. */
+function readPidRecord(): ReplyListenerPidRecord | null {
   try {
-    if (!existsSync(PID_FILE_PATH)) {
+    if (!existsSync(PID_FILE_PATH)) return null;
+    const content = readFileSync(PID_FILE_PATH, 'utf-8').trim();
+    const parsed = JSON.parse(content) as Partial<ReplyListenerPidRecord>;
+    return typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0
+      ? { pid: parsed.pid, generation: parsed.generation, processStartIdentity: parsed.processStartIdentity }
+      : null;
+  } catch {
+    try {
+      const pid = Number.parseInt(readFileSync(PID_FILE_PATH, 'utf-8').trim(), 10);
+      return Number.isInteger(pid) && pid > 0 ? { pid } : null;
+    } catch {
       return null;
     }
-    const content = readFileSync(PID_FILE_PATH, 'utf-8');
-    return parseInt(content.trim(), 10);
-  } catch {
-    return null;
   }
 }
 
-/**
- * Write PID file with secure permissions
- */
-function writePidFile(pid: number): void {
-  writeSecureFile(PID_FILE_PATH, String(pid));
+/** Read PID only for existing liveness/status callers. */
+function readPidFile(): number | null {
+  return readPidRecord()?.pid ?? null;
+}
+
+/** Write a generation-bound PID record with secure permissions. */
+function writePidFile(record: ReplyListenerPidRecord): void {
+  writeSecureFile(PID_FILE_PATH, JSON.stringify(record));
 }
 
 /**
@@ -1005,7 +1030,8 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
 
     const pid = child.pid;
     if (pid) {
-      writePidFile(pid);
+      const generation = randomUUID();
+      writePidFile({ pid, generation });
 
       const state: ReplyListenerState = {
         isRunning: true,
@@ -1016,8 +1042,19 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
         discordLastMessageId: null,
         messagesInjected: 0,
         errors: 0,
+        generation,
       };
       writeDaemonState(state);
+
+      void getProcessStartIdentity(pid).then((processStartIdentity) => {
+        if (!processStartIdentity) return;
+        const current = readDaemonState();
+        const currentPid = readPidRecord();
+        if (current?.pid !== pid || current.generation !== generation || currentPid?.generation !== generation) return;
+        current.processStartIdentity = processStartIdentity;
+        writeDaemonState(current);
+        writePidFile({ pid, generation, processStartIdentity });
+      }).catch(() => {});
 
       log(`Reply listener daemon started with PID ${pid}`);
 
@@ -1041,51 +1078,71 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
   }
 }
 
-/**
- * Stop the reply listener daemon
- */
-export function stopReplyListener(): DaemonResponse {
-  const pid = readPidFile();
+/** Stop only the exact live listener generation; never signal a reused PID. */
+export async function stopReplyListener(): Promise<DaemonResponse> {
+  const record = readPidRecord();
+  if (!record) return { success: true, message: 'Reply listener daemon is not running' };
 
-  if (pid === null) {
-    return {
-      success: true,
-      message: 'Reply listener daemon is not running',
-    };
+  if (!isProcessAlive(record.pid)) {
+    removePidFile();
+    return { success: true, message: 'Reply listener daemon was not running (cleaned up stale PID file)' };
   }
 
-  if (!isProcessAlive(pid)) {
-    removePidFile();
-    return {
-      success: true,
-      message: 'Reply listener daemon was not running (cleaned up stale PID file)',
-    };
+  const state = readDaemonState();
+  if (
+    !record.generation ||
+    !record.processStartIdentity ||
+    state?.pid !== record.pid ||
+    state.generation !== record.generation ||
+    state.processStartIdentity !== record.processStartIdentity
+  ) {
+    return { success: false, message: 'Refusing to stop listener without an exact live identity' };
+  }
+
+  // Revalidate under the registry lock. It is held through termination so a
+  // concurrent registration cannot be accepted for a listener we are stopping.
+  const emptyRegistryLock = lockRegistryIfEmpty();
+  if (emptyRegistryLock === 'active') {
+    return { success: true, message: 'Reply listener retained for active sessions', state };
+  }
+  if (emptyRegistryLock === null) {
+    return { success: false, message: 'Could not durably verify an empty reply registry' };
   }
 
   try {
-    process.kill(pid, 'SIGTERM');
-    removePidFile();
-
-    const state = readDaemonState();
-    if (state) {
-      state.isRunning = false;
-      state.pid = null;
-      writeDaemonState(state);
+    const deadlineAt = Date.now() + 500;
+    const liveness = await isProcessIdentityLive(record.pid, record.processStartIdentity, deadlineAt);
+    if (liveness !== 'live') {
+      return {
+        success: liveness === 'dead',
+        message: liveness === 'dead'
+          ? 'Reply listener was not running'
+          : 'Refusing to stop listener after identity revalidation failed',
+      };
     }
 
-    log(`Reply listener daemon stopped (PID ${pid})`);
-
-    return {
-      success: true,
-      message: `Reply listener daemon stopped (PID ${pid})`,
-      state: state ?? undefined,
-    };
+    const termination = await terminateOwnedProcessTree({
+      pid: record.pid,
+      expectedStartIdentity: record.processStartIdentity,
+      deadlineAt: new Date(deadlineAt).toISOString(),
+    });
+    if (termination !== 'terminated' && termination !== 'already-dead') {
+      return { success: false, message: 'Refusing to stop listener after termination identity revalidation failed' };
+    }
+    removePidFile();
+    state.isRunning = false;
+    state.pid = null;
+    writeDaemonState(state);
+    log(`Reply listener daemon stopped (PID ${record.pid})`);
+    return { success: true, message: `Reply listener daemon stopped (PID ${record.pid})`, state };
   } catch (error) {
     return {
       success: false,
       message: 'Failed to stop daemon',
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    emptyRegistryLock();
   }
 }
 
