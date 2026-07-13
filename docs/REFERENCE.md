@@ -900,6 +900,8 @@ OMC registers 21 hook scripts across 11 Claude Code lifecycle events. For detail
 | **Stop**               | `context-guard-stop.mjs`, `workflow-drift-guard.mjs`, `persistent-mode.cjs`, `code-simplifier.mjs`                | 5s, 3s, 10s, 5s  |
 | **SessionEnd**         | `session-end.mjs`                                                                                                 | 30s              |
 
+The `workflow-drift-guard` blocks only supported source-associated local selection forks with a known minimum of two live alternatives—including exact binary questions and cardinality templates; explicit open input and every unsupported or ambiguous form fail open.
+
 > **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (activated via keyword-detector), not hooks. The `persistent-mode.cjs` hook enforces their continuation by blocking the Stop event.
 
 ### Code Simplifier Hook
