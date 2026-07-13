@@ -72,6 +72,16 @@ describe('HUD Windows Compatibility', () => {
       expect(content).not.toContain('shell: true');
     });
 
+    it('shared HUD wrapper template hides the console window for npm root discovery', () => {
+      // Claude Code spawns the statusline with no console of its own, so the
+      // cmd.exe introduced by `shell: isWin` cannot attach to an existing console.
+      // Without windowsHide it allocates a fresh one and the default terminal
+      // flashes a window on every statusline render.
+      const templatePath = join(packageRoot, 'scripts', 'lib', 'hud-wrapper-template.txt');
+      const content = readFileSync(templatePath, 'utf-8');
+      expect(content).toContain('windowsHide: true');
+    });
+
     it('pathToFileURL should correctly convert Unix paths', () => {
       const unixPath = '/home/user/test.js';
       expect(pathToFileURL(unixPath).href).toBe(
@@ -150,6 +160,26 @@ describe('HUD Windows Compatibility', () => {
       const indexPath = join(packageRoot, 'src', 'hud', 'index.ts');
       const content = readFileSync(indexPath, 'utf-8');
       expect(content).toContain('config.elements.safeMode !== false');
+    });
+  });
+
+  describe('Bridge banner console window', () => {
+    // The bundled bridges resolve the global npm root at startup. execSync always
+    // goes through a shell (cmd.exe on Windows), and the bridges are spawned by
+    // Claude Code without a console, so the shell child pops a terminal window
+    // unless windowsHide is set. The banner is copied verbatim into the bundle,
+    // so the generator and the committed artifact must both carry the flag.
+    const EXPECTED =
+      "execSync('npm root -g', { encoding: 'utf8', timeout: 5000, windowsHide: true })";
+
+    it.each([
+      ['scripts', 'build-mcp-server.mjs'],
+      ['scripts', 'build-bridge-entry.mjs'],
+      ['bridge', 'mcp-server.cjs'],
+      ['bridge', 'team-bridge.cjs'],
+    ])('%s/%s passes windowsHide to the npm root execSync', (dir, file) => {
+      const content = readFileSync(join(packageRoot, dir, file), 'utf-8');
+      expect(content).toContain(EXPECTED);
     });
   });
 

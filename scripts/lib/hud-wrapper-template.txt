@@ -55,6 +55,10 @@ function getGlobalNodeModuleRoots() {
       // Node 20.12+ rejects direct .cmd/.bat spawns without a shell on Windows.
       // Keep non-Windows behavior unchanged by only enabling shell there.
       shell: isWin,
+      // The shell above is cmd.exe. Claude Code spawns the statusline with no
+      // console of its own, so without windowsHide the cmd.exe child allocates a
+      // fresh console and the default terminal flashes a window on every render.
+      windowsHide: true,
     })).trim();
     if (npmRoot) roots.unshift(npmRoot);
   } catch { /* continue */ }
