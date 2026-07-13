@@ -106,11 +106,12 @@ export interface MailboxNotificationAttemptDependencies {
   withRequestLock: <T>(lockPath: string, fn: () => Promise<T>) => Promise<T>;
 }
 
-type MailboxTombstoneCause = 'delivery' | 'commit';
-
-interface MailboxTombstone {
-  cause: MailboxTombstoneCause;
-}
+type MailboxTombstone =
+  | { cause: 'delivery' }
+  | {
+    cause: 'commit';
+    confirmationReason: 'worker_pane_notified' | 'leader_pane_notified';
+  };
 
 interface MailboxMarkerState {
   safe: boolean;
@@ -309,19 +310,19 @@ async function reconcileTombstone(
   tombstone: MailboxTombstone,
 ): Promise<DispatchOutcome> {
   let state = await readMailboxMarkerState(params, deps);
-  if ((state.mailboxMarked || state.dispatchMarked) && tombstone.cause === 'commit') {
+  if (tombstone.cause === 'commit') {
     state = await writeAndVerifyMailboxMarkers(params, deps);
+    if (state.mailboxMarked && state.dispatchMarked) {
+      mailboxNotificationTombstones.delete(key);
+    }
+    return markerOutcome(state, tombstone.confirmationReason);
   }
 
   if (state.mailboxMarked || state.dispatchMarked) {
     mailboxNotificationTombstones.delete(key);
     return markerOutcome(state, 'worker_pane_notified');
   }
-  return managedOutcome(
-    false,
-    'tmux_send_keys',
-    tombstone.cause === 'delivery' ? 'notification_delivery_uncertain' : 'notification_commit_uncertain',
-  );
+  return managedOutcome(false, 'tmux_send_keys', 'notification_delivery_uncertain');
 }
 
 /**
@@ -384,10 +385,10 @@ export async function runMailboxNotificationAttempt(
         return managedOutcome(false, effect.transport, 'notification_delivery_uncertain');
       }
 
-      mailboxNotificationTombstones.set(key, { cause: 'commit' });
+      mailboxNotificationTombstones.set(key, { cause: 'commit', confirmationReason: effect.reason });
       const markers = await writeAndVerifyMailboxMarkers(params, deps);
       const outcome = markerOutcome(markers, effect.reason);
-      if (markers.mailboxMarked || markers.dispatchMarked) mailboxNotificationTombstones.delete(key);
+      if (markers.mailboxMarked && markers.dispatchMarked) mailboxNotificationTombstones.delete(key);
       return outcome;
     });
   } catch {
@@ -638,20 +639,32 @@ export interface QueueBroadcastParams {
 }
 
 export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams): Promise<DispatchOutcome[]> {
-  const outcomes: DispatchOutcome[] = [];
   const recipientNames = new Set<string>();
+  const recipients = params.recipients.map((recipient, index) => {
+    const duplicate = recipientNames.has(recipient.workerName);
+    recipientNames.add(recipient.workerName);
+    return { ...recipient, duplicate, index };
+  });
+  const outcomes: DispatchOutcome[] = [];
+  const persistedRecipients: Array<{
+    workerName: string;
+    workerIndex: number;
+    paneId?: string;
+    triggerMessage: string;
+    message: { message_id: string; to_worker: string };
+    index: number;
+  }> = [];
 
-  for (const recipient of params.recipients) {
-    if (recipientNames.has(recipient.workerName)) {
-      outcomes.push({
+  for (const recipient of recipients) {
+    if (recipient.duplicate) {
+      outcomes[recipient.index] = {
         ok: false,
         transport: 'none',
         reason: 'broadcast_recipient_diverged',
         to_worker: recipient.workerName,
-      });
+      };
       continue;
     }
-    recipientNames.add(recipient.workerName);
 
     const triggerMessage = params.triggerFor(recipient.workerName);
     const message = await params.deps.sendDirectMessage(
@@ -661,6 +674,10 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
       params.body,
       params.cwd,
     );
+    persistedRecipients.push({ ...recipient, triggerMessage, message });
+  }
+
+  for (const recipient of persistedRecipients) {
     const queued = await enqueueDispatchRequest(
       params.teamName,
       {
@@ -668,8 +685,8 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
         to_worker: recipient.workerName,
         worker_index: recipient.workerIndex,
         pane_id: recipient.paneId,
-        trigger_message: triggerMessage,
-        message_id: message.message_id,
+        trigger_message: recipient.triggerMessage,
+        message_id: recipient.message.message_id,
         transport_preference: params.transportPreference,
         fallback_allowed: params.fallbackAllowed,
       },
@@ -677,25 +694,25 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
     );
 
     if (queued.deduped) {
-      outcomes.push({
+      outcomes[recipient.index] = {
         ok: false,
         transport: 'none',
         reason: 'duplicate_pending_dispatch_request',
         request_id: queued.request.request_id,
-        message_id: message.message_id,
+        message_id: recipient.message.message_id,
         to_worker: recipient.workerName,
-      });
+      };
       continue;
     }
 
-    if (message.to_worker !== recipient.workerName) {
+    if (recipient.message.to_worker !== recipient.workerName) {
       const reasonOutcome = await persistPendingReason(
         {
           teamName: params.teamName,
           recipient: recipient.workerName,
           requestId: queued.request.request_id,
-          messageId: message.message_id,
-          triggerMessage,
+          messageId: recipient.message.message_id,
+          triggerMessage: recipient.triggerMessage,
           cwd: params.cwd,
         },
         mergeMailboxNotificationDependencies({
@@ -705,19 +722,19 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
         true,
       );
       const { notification_managed: _managed, ...outcome } = reasonOutcome;
-      outcomes.push({
+      outcomes[recipient.index] = {
         ...outcome,
         request_id: queued.request.request_id,
-        message_id: message.message_id,
+        message_id: recipient.message.message_id,
         to_worker: recipient.workerName,
-      });
+      };
       continue;
     }
 
     const notifyOutcome = await Promise.resolve(params.notify(
       { workerName: recipient.workerName, workerIndex: recipient.workerIndex, paneId: recipient.paneId },
-      triggerMessage,
-      { request: queued.request, message_id: message.message_id },
+      recipient.triggerMessage,
+      { request: queued.request, message_id: recipient.message.message_id },
     )).catch((error) => ({
       ok: false,
       transport: fallbackTransportForPreference(params.transportPreference),
@@ -726,18 +743,18 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
     const { notification_managed: notificationManaged, ...outcome } = {
       ...notifyOutcome,
       request_id: queued.request.request_id,
-      message_id: message.message_id,
+      message_id: recipient.message.message_id,
       to_worker: recipient.workerName,
     };
-    outcomes.push(outcome);
+    outcomes[recipient.index] = outcome;
     if (notificationManaged) continue;
 
     if (isConfirmedNotification(outcome)) {
-      await params.deps.markMessageNotified(params.teamName, recipient.workerName, message.message_id, params.cwd);
+      await params.deps.markMessageNotified(params.teamName, recipient.workerName, recipient.message.message_id, params.cwd);
       await markDispatchRequestNotified(
         params.teamName,
         queued.request.request_id,
-        { message_id: message.message_id, last_reason: outcome.reason },
+        { message_id: recipient.message.message_id, last_reason: outcome.reason },
         params.cwd,
       );
     } else {
@@ -745,7 +762,7 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
         teamName: params.teamName,
         request: queued.request,
         reason: outcome.reason,
-        messageId: message.message_id,
+        messageId: recipient.message.message_id,
         cwd: params.cwd,
       });
     }

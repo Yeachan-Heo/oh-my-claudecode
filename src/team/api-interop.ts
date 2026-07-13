@@ -785,7 +785,8 @@ export async function executeTeamApiOperation(
 
         const messages: Awaited<ReturnType<typeof broadcastMessage>> = [];
         const config = await teamReadConfig(teamName, cwd);
-        const recipients = (config?.workers ?? [])
+        if (!config) throw new Error(`Team ${teamName} not found`);
+        const recipients = config.workers
           .filter((worker) => worker.name !== fromWorker)
           .map((worker) => ({
             workerName: worker.name,

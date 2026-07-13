@@ -291,7 +291,7 @@ describe('direct mailbox notification orchestration', () => {
     const partialReplay = await runMailboxNotificationAttempt(partial.input, partial.dependencies);
 
     expect(partialOutcome.reason).toBe('notification_commit_mailbox_failed');
-    expect(partialReplay.reason).toBe('mailbox_replay_suppressed');
+    expect(partialReplay.reason).toBe('notification_commit_mailbox_failed');
     expect(partial.effect).toHaveBeenCalledTimes(1);
 
     const dual = harness();
@@ -303,6 +303,61 @@ describe('direct mailbox notification orchestration', () => {
     expect(dualOutcome.reason).toBe('notification_commit_uncertain');
     expect(dualReplay.reason).toBe('notification_commit_uncertain');
     expect(dual.effect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a worker commit missing its mailbox marker without reinvoking transport', async () => {
+    const state = harness();
+    state.dependencies.markMailbox = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockImplementation(async () => {
+        state.markMailbox(true);
+        return true;
+      });
+
+    const partial = await runMailboxNotificationAttempt(state.input, state.dependencies);
+    const reconciled = await runMailboxNotificationAttempt(state.input, state.dependencies);
+
+    expect(partial.reason).toBe('notification_commit_mailbox_failed');
+    expect(reconciled.reason).toBe('worker_pane_notified');
+    expect(state.effect).toHaveBeenCalledTimes(1);
+    expect(state.dependencies.markMailbox).toHaveBeenCalledTimes(2);
+    expect(state.dependencies.markDispatch).toHaveBeenCalledTimes(1);
+    expect(state.mailboxMarked).toBe(true);
+    expect(state.request.status).toBe('notified');
+  });
+
+  it('reconciles a leader commit missing its dispatch marker without reinvoking transport', async () => {
+    const state = harness(params({ recipient: 'leader-fixed' }));
+    const effect = vi.fn(async () => ({
+      kind: 'confirmed' as const,
+      transport: 'tmux_send_keys' as const,
+      reason: 'leader_pane_notified' as const,
+    }));
+    state.dependencies.invokeEffect = effect;
+    const markDispatch = state.dependencies.markDispatch;
+    let firstDispatch = true;
+    state.dependencies.markDispatch = vi.fn(async (
+      resolvedTeamName: string,
+      requestId: string,
+      resolvedCwd: string,
+    ) => {
+      if (firstDispatch) {
+        firstDispatch = false;
+        return null;
+      }
+      return markDispatch(resolvedTeamName, requestId, resolvedCwd);
+    });
+
+    const partial = await runMailboxNotificationAttempt(state.input, state.dependencies);
+    const reconciled = await runMailboxNotificationAttempt(state.input, state.dependencies);
+
+    expect(partial.reason).toBe('notification_commit_dispatch_failed');
+    expect(reconciled.reason).toBe('leader_pane_notified');
+    expect(effect).toHaveBeenCalledTimes(1);
+    expect(state.dependencies.markMailbox).toHaveBeenCalledTimes(1);
+    expect(state.dependencies.markDispatch).toHaveBeenCalledTimes(2);
+    expect(state.mailboxMarked).toBe(true);
+    expect(state.request.status).toBe('notified');
   });
 
   it('reconciles a tombstone through markers only and never invokes transport again', async () => {
@@ -385,6 +440,7 @@ describe('direct mailbox notification orchestration', () => {
     await mkdir(join(cwd, '.omc', 'state', 'team', 'dispatch-team'), { recursive: true });
 
     let nextMessage = 0;
+    const effects: string[] = [];
     const outcomes = await queueBroadcastMailboxMessage({
       teamName: 'dispatch-team',
       fromWorker: 'leader-fixed',
@@ -395,12 +451,18 @@ describe('direct mailbox notification orchestration', () => {
       body: 'broadcast body',
       cwd,
       triggerFor: (workerName) => `Read mailbox for ${workerName}.`,
-      notify: vi.fn(async () => ({ ok: true, transport: 'hook' as const, reason: 'queued_for_hook_dispatch' })),
+      notify: vi.fn(async () => {
+        effects.push('notify');
+        return { ok: true, transport: 'hook' as const, reason: 'queued_for_hook_dispatch' };
+      }),
       deps: {
-        sendDirectMessage: vi.fn(async (_teamName, _fromWorker, toWorker) => ({
-          message_id: `broadcast-${++nextMessage}`,
-          to_worker: nextMessage === 2 ? 'worker-foreign' : toWorker,
-        })),
+        sendDirectMessage: vi.fn(async (_teamName, _fromWorker, toWorker) => {
+          effects.push(`persist:${toWorker}`);
+          return {
+            message_id: `broadcast-${++nextMessage}`,
+            to_worker: nextMessage === 2 ? 'worker-foreign' : toWorker,
+          };
+        }),
         broadcastMessage: vi.fn(async () => []),
         markMessageNotified: vi.fn(async () => true),
       },
@@ -409,5 +471,36 @@ describe('direct mailbox notification orchestration', () => {
     expect(outcomes).toHaveLength(2);
     expect(outcomes[0]).toMatchObject({ to_worker: 'worker-1', reason: 'queued_for_hook_dispatch' });
     expect(outcomes[1]).toMatchObject({ to_worker: 'worker-2', reason: 'broadcast_recipient_diverged' });
+    expect(effects).toEqual(['persist:worker-1', 'persist:worker-2', 'notify']);
+  });
+
+  it('does not notify a broadcast when persisting the second recipient fails', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omc-mcp-broadcast-'));
+    temporaryDirectories.push(cwd);
+    await mkdir(join(cwd, '.omc', 'state', 'team', 'dispatch-team'), { recursive: true });
+    const notify = vi.fn(async () => ({ ok: true, transport: 'hook' as const, reason: 'queued_for_hook_dispatch' }));
+
+    await expect(queueBroadcastMailboxMessage({
+      teamName: 'dispatch-team',
+      fromWorker: 'leader-fixed',
+      recipients: [
+        { workerName: 'worker-1', workerIndex: 1, paneId: '%9' },
+        { workerName: 'worker-2', workerIndex: 2, paneId: '%10' },
+      ],
+      body: 'broadcast body',
+      cwd,
+      triggerFor: (workerName) => `Read mailbox for ${workerName}.`,
+      notify,
+      deps: {
+        sendDirectMessage: vi.fn(async (_teamName, _fromWorker, toWorker) => {
+          if (toWorker === 'worker-2') throw new Error('persist recipient 2 failed');
+          return { message_id: 'broadcast-1', to_worker: toWorker };
+        }),
+        broadcastMessage: vi.fn(async () => []),
+        markMessageNotified: vi.fn(async () => true),
+      },
+    })).rejects.toThrow('persist recipient 2 failed');
+
+    expect(notify).not.toHaveBeenCalled();
   });
 });

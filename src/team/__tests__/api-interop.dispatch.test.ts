@@ -57,6 +57,19 @@ describe('team api dispatch-aware messaging', () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
+  it('returns the top-level operation failure for an unknown broadcast team', async () => {
+    const result = await executeTeamApiOperation('broadcast', {
+      team_name: 'unknown-team',
+      from_worker: 'leader-fixed',
+      body: 'Unreachable broadcast',
+    }, cwd);
+
+    expect(result).toEqual({
+      ok: false,
+      operation: 'broadcast',
+      error: { code: 'operation_failed', message: 'Team unknown-team not found' },
+    });
+  });
   it('persists leader-fixed messages and leaves a durable pending dispatch request when the leader pane is absent', async () => {
     const result = await executeTeamApiOperation('send-message', {
       team_name: teamName,
