@@ -3,7 +3,6 @@
  * Incrementally learns from PostToolUse events
  */
 import { loadProjectMemory, saveProjectMemory, withProjectMemoryLock } from './storage.js';
-import { BUILD_COMMAND_PATTERNS, TEST_COMMAND_PATTERNS } from './constants.js';
 import { trackAccess } from './hot-path-tracker.js';
 import { detectDirectivesFromMessage, addDirective } from './directive-detector.js';
 /**
@@ -68,32 +67,14 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
                     updated = true;
                 }
             }
-            // Learn from Bash commands
+            // Learn environment hints from Bash output without trusting commands as durable build/test facts
             if (toolName !== 'Bash') {
                 if (updated) {
                     await saveProjectMemory(projectRoot, memory);
                 }
                 return;
             }
-            const command = toolInput?.command || '';
-            if (!command) {
-                return;
-            }
             try {
-                // Detect and store build commands
-                if (isBuildCommand(command)) {
-                    if (!memory.build.buildCommand || memory.build.buildCommand !== command) {
-                        memory.build.buildCommand = command;
-                        updated = true;
-                    }
-                }
-                // Detect and store test commands
-                if (isTestCommand(command)) {
-                    if (!memory.build.testCommand || memory.build.testCommand !== command) {
-                        memory.build.testCommand = command;
-                        updated = true;
-                    }
-                }
                 // Extract environment hints from output
                 const hints = extractEnvironmentHints(toolOutput);
                 if (hints.length > 0) {
@@ -122,18 +103,6 @@ export async function learnFromToolOutput(toolName, toolInput, toolOutput, proje
             }
         });
     });
-}
-/**
- * Check if command is a build command
- */
-function isBuildCommand(command) {
-    return BUILD_COMMAND_PATTERNS.some(pattern => pattern.test(command));
-}
-/**
- * Check if command is a test command
- */
-function isTestCommand(command) {
-    return TEST_COMMAND_PATTERNS.some(pattern => pattern.test(command));
 }
 /**
  * Extract environment hints from tool output

@@ -19,6 +19,7 @@ const sharedExternal = [
 const cliConfig = {
   entryPoints: ['src/cli/index.ts'],
   bundle: true,
+  preserveSymlinks: true,
   platform: 'node',
   target: 'node18',
   format: 'cjs',
@@ -37,6 +38,7 @@ const teamOutfile = 'bridge/team.js';
 const teamConfig = {
   entryPoints: ['src/cli/team.ts'],
   bundle: true,
+  preserveSymlinks: true,
   platform: 'node',
   target: 'node18',
   format: 'esm',

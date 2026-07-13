@@ -12,6 +12,7 @@ const sourceSha256 = createHash('sha256').update(source).digest('hex');
 await esbuild.build({
   entryPoints: ['src/cli/claude-md-coordinator.ts'],
   bundle: true,
+  preserveSymlinks: true,
   platform: 'node',
   target: 'node20',
   format: 'cjs',

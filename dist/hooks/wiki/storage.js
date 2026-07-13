@@ -53,9 +53,6 @@ export function ensureWikiDir(root) {
     }
     return wikiDir;
 }
-// ============================================================================
-// Mutation Boundary
-// ============================================================================
 /**
  * Execute a function under the wiki-wide file lock.
  * All write operations MUST go through this boundary.
@@ -63,10 +60,14 @@ export function ensureWikiDir(root) {
  * Uses synchronous file lock (withFileLockSync) because wiki operations
  * are called from sync hook contexts (notepad pattern).
  */
-export function withWikiLock(root, fn) {
+export function withWikiLock(root, fn, options) {
     const wikiDir = ensureWikiDir(root);
     const lockPath = lockPathFor(join(wikiDir, '.wiki-lock'));
-    return withFileLockSync(lockPath, fn, { timeoutMs: 5_000, retryDelayMs: 50 });
+    const remainingMs = options?.deadlineAt === undefined
+        ? undefined
+        : Math.max(0, options.deadlineAt - Date.now());
+    const timeoutMs = Math.min(options?.timeoutMs ?? 5_000, remainingMs ?? Infinity);
+    return withFileLockSync(lockPath, fn, { timeoutMs, retryDelayMs: 50 });
 }
 // ============================================================================
 // Frontmatter Parsing

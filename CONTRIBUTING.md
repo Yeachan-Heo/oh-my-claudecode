@@ -246,9 +246,9 @@ npm run build
 
 Runs the complete pipeline: `tsc` → esbuild bundles → docs composition → all bridge artifacts.
 
-### Do NOT commit `dist/` or `bridge/`
+### Do NOT commit `dist/` or `bridge/` in contributor PRs
 
-`npm run build` regenerates `dist/` and `bridge/`. **These are build artifacts — do not commit them in your PR.** They are gitignored, but the `bridge/*.cjs` bundles are tracked in the repo, so a rebuild will show them as modified in your working tree. The maintainer regenerates them at merge/release; committing them in a contributor PR inflates the diff, causes merge conflicts, and obscures the real change.
+`npm run build` regenerates `dist/` and `bridge/`. **These are build artifacts — do not commit them in your PR.** They are gitignored, but tracked `bridge/*.cjs` bundles can appear modified after a rebuild. Committing them inflates the diff, causes merge conflicts, and obscures the source change.
 
 Before committing, restore them:
 
@@ -256,7 +256,7 @@ Before committing, restore them:
 git restore dist/ bridge/
 ```
 
-CI enforces this: the **No Committed Build Artifacts** check fails any PR whose diff touches `dist/` or `bridge/`. (Your source change still ships — `bridge/` is rebuilt from it when the maintainer merges.)
+CI's **No Committed Build Artifacts** check fails every contributor PR whose diff touches `dist/` or `bridge/`. A maintainer-owned release PR is considered only when its live base and head still match the checked event, it originates in this repository from the active owner, the exact head is cryptographically signed by that owner, and every generated change matches the verified runtime closure. This is not available to contributors.
 
 ---
 

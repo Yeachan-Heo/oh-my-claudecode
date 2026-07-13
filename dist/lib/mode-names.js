@@ -15,6 +15,7 @@ export const MODE_NAMES = {
     ULTRAQA: 'ultraqa',
     RALPLAN: 'ralplan',
     DEEP_INTERVIEW: 'deep-interview',
+    MERGE_READINESS: 'merge-readiness',
     SELF_IMPROVE: 'self-improve',
 };
 /**
@@ -39,6 +40,7 @@ export const ALL_MODE_NAMES = [
     MODE_NAMES.ULTRAQA,
     MODE_NAMES.RALPLAN,
     MODE_NAMES.DEEP_INTERVIEW,
+    MODE_NAMES.MERGE_READINESS,
     MODE_NAMES.SELF_IMPROVE,
 ];
 /**
@@ -54,6 +56,7 @@ export const MODE_STATE_FILE_MAP = {
     [MODE_NAMES.ULTRAQA]: 'ultraqa-state.json',
     [MODE_NAMES.RALPLAN]: 'ralplan-state.json',
     [MODE_NAMES.DEEP_INTERVIEW]: 'deep-interview-state.json',
+    [MODE_NAMES.MERGE_READINESS]: 'merge-readiness-state.json',
     [MODE_NAMES.SELF_IMPROVE]: 'self-improve-state.json',
 };
 /**
@@ -82,6 +85,7 @@ export const SESSION_METRICS_MODE_FILES = [
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAWORK], mode: MODE_NAMES.ULTRAWORK },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.DEEP_INTERVIEW], mode: MODE_NAMES.DEEP_INTERVIEW },
+    { file: MODE_STATE_FILE_MAP[MODE_NAMES.MERGE_READINESS], mode: MODE_NAMES.MERGE_READINESS },
     { file: MODE_STATE_FILE_MAP[MODE_NAMES.SELF_IMPROVE], mode: MODE_NAMES.SELF_IMPROVE },
 ];
 //# sourceMappingURL=mode-names.js.map

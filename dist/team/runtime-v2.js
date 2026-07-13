@@ -18,19 +18,20 @@
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
+import { link, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { allocateTasksToWorkers } from './allocation-policy.js';
-import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnapshot, writeMonitorSnapshot, writeShutdownRequest, readShutdownAck, writeWorkerInbox, listTasksFromFiles, saveTeamConfig, cleanupTeamState, } from './monitor.js';
+import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnapshot, writeMonitorSnapshot, writeShutdownRequest, readShutdownAck, writeWorkerInbox, listTasksFromFiles, saveTeamConfig, readRevisionedTeamConfig, saveTeamConfigAtRevision, migrateTeamConfigRevision, withTeamConfigMutationLock, cleanupTeamState, readTeamManifest, } from './monitor.js';
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
-import { buildWorkerArgv, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform, } from './model-contract.js';
-import { createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, splitTeamWorkerPane, } from './tmux-session.js';
-import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, } from './worker-bootstrap.js';
+import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
+import { buildValidatedWorkerLaunchDescriptor, validateWorkerLaunchDescriptor, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform, } from './model-contract.js';
+import { createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession, waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, splitTeamWorkerPane, splitTeamWorkerPaneWithEvidence, } from './tmux-session.js';
+import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
@@ -46,6 +47,60 @@ import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } f
 import { execFileSync } from 'node:child_process';
 import { isRuntimeV2Enabled } from './runtime-flags.js';
 import { installCommitCadence, startFallbackPoller, uninstallCommitCadence, } from './worker-commit-cadence.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { isMatchingRecoveryFinal, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation, readRecoveryResult, writeRecoveryFinal } from './recovery-request-store.js';
+import { parseRecoveryIntent } from './runtime-owner-client.js';
+import { runRecoverySaga } from './recovery-saga.js';
+import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
+import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-ops.js';
+import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity } from './team-owner-epoch.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
+import { waitForRecoveryGateRecord } from './worker-activation-gate.js';
+let runtimeOwnerRecoveryClient;
+/** Runtime integration point; production may bind its owner client after startup. */
+export function setRuntimeOwnerRecoveryClient(client) {
+    runtimeOwnerRecoveryClient = client;
+}
+function hasRequiredRecoveryPaneIdentities(result) {
+    if (result.outcome !== 'recovered' && result.outcome !== 'already_running')
+        return true;
+    return Boolean(result.newPaneId.trim())
+        && (result.outcome !== 'recovered' || Boolean(result.oldPaneId?.trim()));
+}
+/** Queue recovery with the runtime owner; this process never runs the owner saga. */
+export async function recoverDeadWorkerV2(teamName, cwd, { workerName, requestId = randomUUID(), timeoutMs = 180_000 }) {
+    try {
+        validateTeamName(teamName);
+    }
+    catch {
+        return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
+            updatedAt: new Date().toISOString(), message: 'teamName is invalid.' };
+    }
+    if (!cwd || !WORKER_NAME_SAFE_PATTERN.test(workerName) || !isSafeRecoveryRequestId(requestId) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 180_000 || timeoutMs > 300_000) {
+        return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
+            updatedAt: new Date().toISOString(), message: 'cwd, workerName, and requestId are required; timeoutMs must be an integer from 180000 through 300000.' };
+    }
+    const client = runtimeOwnerRecoveryClient ?? {
+        requestRuntimeOwnerRecovery: (input) => import('./runtime-owner-client.js').then(module => module.requestRuntimeOwnerRecovery(input)),
+    };
+    const result = await client.requestRuntimeOwnerRecovery({ requestId, cwd, teamName, workerName, timeoutMs });
+    if (hasRequiredRecoveryPaneIdentities(result))
+        return result;
+    return {
+        outcome: 'failed', committed: false, error: 'invalid_persisted_state',
+        requestId: result.requestId, recoveryId: result.recoveryId, teamName: result.teamName, workerName: result.workerName,
+        updatedAt: new Date().toISOString(), message: 'Recovery success result omitted a required actual pane identity.',
+    };
+}
+/** Reads only the canonical durable terminal result for a request. */
+export async function readRecoverDeadWorkerV2Result(requestId, cwd = process.cwd()) {
+    const result = readRecoveryResult(cwd, requestId);
+    return !result || hasRequiredRecoveryPaneIdentities(result) ? result : null;
+}
+/** Compatibility/internal reader that may return an in-progress durable outcome. */
+export function readRecoverDeadWorkerV2Outcome(cwd, requestId) {
+    return readRecoveryOutcome(cwd, requestId);
+}
 // ---------------------------------------------------------------------------
 // In-process orchestrator registry (per-team handle for the lifetime of the
 // runtime-cli process). Lives at module scope so shutdownTeamV2 can find it.
@@ -69,38 +124,199 @@ function isCursorExecutorContextTask(task) {
     return CURSOR_EXECUTOR_CONTEXT_INTENTS.has(inferLaneIntent(text));
 }
 const cadenceByTeam = new Map();
-function registerTeamOrchestrator(teamName, handle) {
-    orchestratorByTeam.set(teamName, handle);
+function registerTeamOrchestrator(teamName, handle, service) {
+    orchestratorByTeam.set(teamName, { handle, ...service, registeredWorkers: new Set() });
 }
 function getTeamOrchestrator(teamName) {
-    return orchestratorByTeam.get(teamName);
+    return orchestratorByTeam.get(teamName)?.handle;
 }
 function unregisterTeamOrchestrator(teamName) {
     orchestratorByTeam.delete(teamName);
 }
 function registerTeamCadence(teamName, context, poller) {
-    const entry = cadenceByTeam.get(teamName) ?? { pollers: [], contexts: [] };
-    entry.contexts.push(context);
-    if (poller)
-        entry.pollers.push(poller);
+    const entry = cadenceByTeam.get(teamName) ?? { entries: [] };
+    entry.entries.push({ workerName: context.workerName, context, poller });
     cadenceByTeam.set(teamName, entry);
 }
-async function stopTeamCadence(teamName) {
+async function stopTeamCadence(teamName, strict = false) {
     const entry = cadenceByTeam.get(teamName);
     if (!entry)
         return;
     cadenceByTeam.delete(teamName);
-    for (const poller of entry.pollers) {
-        try {
-            poller.stop();
+    const failedEntries = [];
+    for (const cadence of entry.entries) {
+        let poller = cadence.poller;
+        let context = cadence.context;
+        if (poller) {
+            try {
+                poller.stop();
+                poller = undefined;
+            }
+            catch { /* retain for retry */ }
         }
-        catch { /* best-effort cleanup */ }
+        if (context) {
+            try {
+                await uninstallCommitCadence(context);
+                context = undefined;
+            }
+            catch { /* retain for retry */ }
+        }
+        if (poller || context)
+            failedEntries.push({ workerName: cadence.workerName, poller, context });
     }
-    for (const context of entry.contexts) {
-        try {
-            await uninstallCommitCadence(context);
+    if (failedEntries.length > 0) {
+        cadenceByTeam.set(teamName, { entries: failedEntries });
+        if (strict)
+            throw new Error('service_teardown_incomplete');
+    }
+}
+function cadenceContextMatches(candidate, expected) {
+    const known = candidate.context;
+    if (!known)
+        return false;
+    return candidate.workerName === expected.workerName
+        && known.teamName === expected.teamName && known.worktreePath === expected.worktreePath
+        && known.agentType === expected.agentType && known.serviceGeneration === expected.serviceGeneration
+        && known.attemptId === expected.attemptId;
+}
+async function removeStaleTeamCadence(teamName, expectedContexts) {
+    const entry = cadenceByTeam.get(teamName);
+    if (!entry)
+        return true;
+    const retained = [];
+    const matched = new Set();
+    let converged = true;
+    for (const cadence of entry.entries) {
+        const expected = expectedContexts.find(context => context.workerName === cadence.workerName);
+        const isExpected = expected && !matched.has(expected.workerName) && cadenceContextMatches(cadence, expected);
+        if (isExpected) {
+            matched.add(expected.workerName);
+            retained.push(cadence);
+            continue;
         }
-        catch { /* best-effort cleanup */ }
+        let poller = cadence.poller;
+        let context = cadence.context;
+        if (poller) {
+            try {
+                poller.stop();
+                poller = undefined;
+            }
+            catch {
+                converged = false;
+            }
+        }
+        if (context) {
+            try {
+                await uninstallCommitCadence(context);
+                context = undefined;
+            }
+            catch {
+                converged = false;
+            }
+        }
+        if (poller || context)
+            retained.push({ workerName: cadence.workerName, poller, context });
+    }
+    if (retained.length > 0)
+        cadenceByTeam.set(teamName, { entries: retained });
+    else
+        cadenceByTeam.delete(teamName);
+    return converged;
+}
+export async function reconcileCommittedTeamServices(config, cwd) {
+    const scaleUp = config.active_scale_up;
+    if (scaleUp)
+        return 'repair_required';
+    const descriptor = config.service_descriptor;
+    if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation)
+        || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root)
+        return 'repair_required';
+    if (!descriptor.auto_merge_enabled) {
+        if (descriptor.cadence_policy !== 'disabled')
+            return 'repair_required';
+        const localService = orchestratorByTeam.get(config.name);
+        try {
+            if (localService)
+                await localService.handle.drainAndStop();
+            await stopTeamCadence(config.name, true);
+            unregisterTeamOrchestrator(config.name);
+            return 'synced';
+        }
+        catch {
+            return 'repair_required';
+        }
+    }
+    if (descriptor.cadence_policy !== 'worker-auto-commit-v1' || !descriptor.leader_branch || config.worktree_mode !== 'named')
+        return 'repair_required';
+    try {
+        for (const worker of config.workers) {
+            const launch = validateWorkerLaunchDescriptor(worker.launch_descriptor);
+            if (worker.worker_cli !== launch.provider || !worker.worktree_path)
+                return 'repair_required';
+        }
+        const localService = orchestratorByTeam.get(config.name);
+        if (localService && (localService.serviceGeneration !== descriptor.service_generation
+            || localService.serviceAttemptId !== descriptor.service_attempt_id)) {
+            await localService.handle.drainAndStop();
+            await stopTeamCadence(config.name, true);
+            unregisterTeamOrchestrator(config.name);
+        }
+        let orchestrator = getTeamOrchestrator(config.name);
+        if (!orchestrator) {
+            orchestrator = await startMergeOrchestrator({ teamName: config.name, repoRoot: descriptor.workspace_root,
+                leaderBranch: descriptor.leader_branch, cwd, serviceGeneration: descriptor.service_generation,
+                serviceAttemptId: descriptor.service_attempt_id });
+            registerTeamOrchestrator(config.name, orchestrator, { serviceGeneration: descriptor.service_generation,
+                serviceAttemptId: descriptor.service_attempt_id });
+        }
+        const local = orchestratorByTeam.get(config.name);
+        if (!local)
+            return 'repair_required';
+        const expectedContexts = config.workers.map(worker => {
+            const launch = validateWorkerLaunchDescriptor(worker.launch_descriptor);
+            return {
+                teamName: config.name, workerName: worker.name, worktreePath: worker.worktree_path,
+                agentType: launch.provider, enabled: true, serviceGeneration: descriptor.service_generation,
+                attemptId: descriptor.service_attempt_id,
+            };
+        });
+        const expectedWorkers = new Set(config.workers.map(worker => worker.name));
+        let staleOrchestratorRemovalFailed = false;
+        for (const workerName of [...local.registeredWorkers]) {
+            if (expectedWorkers.has(workerName))
+                continue;
+            try {
+                await orchestrator.unregisterWorker(workerName);
+                local.registeredWorkers.delete(workerName);
+            }
+            catch {
+                staleOrchestratorRemovalFailed = true;
+            }
+        }
+        const cadenceRemovalsConverged = await removeStaleTeamCadence(config.name, expectedContexts);
+        for (const worker of config.workers) {
+            if (!local.registeredWorkers.has(worker.name)) {
+                await orchestrator.registerWorker(worker.name);
+                local.registeredWorkers.add(worker.name);
+            }
+        }
+        const cadence = cadenceByTeam.get(config.name);
+        for (const context of expectedContexts) {
+            const installed = cadence?.entries.some(candidate => cadenceContextMatches(candidate, context));
+            if (installed)
+                continue;
+            const installedCadence = await installCommitCadence(context);
+            registerTeamCadence(config.name, context, installedCadence.method === 'fallback-poll' ? startFallbackPoller(context.worktreePath, context.workerName) : undefined);
+        }
+        const finalCadence = cadenceByTeam.get(config.name);
+        const exactCadence = (finalCadence?.entries.length ?? 0) === expectedContexts.length
+            && expectedContexts.every(context => finalCadence?.entries.some(candidate => cadenceContextMatches(candidate, context)));
+        return cadenceRemovalsConverged && !staleOrchestratorRemovalFailed
+            && exactCadence && local.registeredWorkers.size === expectedWorkers.size
+            && [...expectedWorkers].every(workerName => local.registeredWorkers.has(workerName)) ? 'synced' : 'repair_required';
+    }
+    catch {
+        return 'repair_required';
     }
 }
 /**
@@ -224,7 +440,7 @@ function resolvePreflightBinaryPath(agentType) {
 // ---------------------------------------------------------------------------
 async function getWorkerPaneLiveness(paneId) {
     if (!paneId)
-        return 'dead';
+        return 'unknown';
     return getWorkerLiveness(paneId);
 }
 async function captureWorkerPane(paneId) {
@@ -380,7 +596,6 @@ async function spawnV2Worker(opts) {
     const instruction = buildV2TaskInstruction(opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract);
     const instructionStateRoot = opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : undefined;
     const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
-    const promptModeStartupPrompt = generatePromptModeStartupPrompt(opts.teamName, opts.workerName, instructionStateRoot, cliOutputContract);
     if (usePromptMode) {
         await composeInitialInbox(opts.teamName, opts.workerName, instruction, opts.cwd, cliOutputContract);
     }
@@ -392,53 +607,7 @@ async function spawnV2Worker(opts) {
         ...(opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {}),
         ...(opts.workerCwd ? { OMC_TEAM_WORKER_CWD: opts.workerCwd } : {}),
     };
-    const resolvedBinaryPath = opts.resolvedBinaryPaths[opts.agentType]
-        ?? resolveValidatedBinaryPath(opts.agentType);
-    // Resolve model from environment variables.
-    // For Claude agents on Bedrock/Vertex, resolve the provider-specific model
-    // so workers don't fall back to invalid Anthropic API model names. (#1695)
-    // Snapshot-provided model (from resolved_routing) takes precedence so
-    // per-role routing (codex/gemini/grok/cursor/claude-tier) is honored at spawn time.
-    const modelForAgent = opts.model ?? (() => {
-        if (opts.agentType === 'codex') {
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL
-                || process.env.OMC_CODEX_DEFAULT_MODEL
-                || undefined;
-        }
-        if (opts.agentType === 'gemini') {
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL
-                || process.env.OMC_GEMINI_DEFAULT_MODEL
-                || undefined;
-        }
-        if (opts.agentType === 'antigravity') {
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL
-                || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL
-                || undefined;
-        }
-        if (opts.agentType === 'grok') {
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL
-                || process.env.OMC_GROK_DEFAULT_MODEL
-                || undefined;
-        }
-        if (opts.agentType === 'cursor') {
-            return undefined;
-        }
-        // Claude agents: resolve Bedrock/Vertex model when on those providers
-        return resolveClaudeWorkerModel();
-    })();
-    const [launchBinary, ...launchArgs] = buildWorkerArgv(opts.agentType, {
-        teamName: opts.teamName,
-        workerName: opts.workerName,
-        cwd: opts.workerCwd ?? opts.cwd,
-        resolvedBinaryPath,
-        model: modelForAgent,
-    });
-    // For prompt-mode agents (gemini, antigravity), keep the full instruction in
-    // inbox.md and pass only a short file-pointer prompt via CLI args. This
-    // avoids echoing reviewer/seed prompt text into tmux scrollback.
-    if (usePromptMode) {
-        launchArgs.push(...getPromptModeArgs(opts.agentType, promptModeStartupPrompt));
-    }
+    const launchDescriptor = opts.launchDescriptor;
     if (opts.autoMerge && opts.worktreePath) {
         const cadenceContext = {
             teamName: opts.teamName,
@@ -457,8 +626,8 @@ async function spawnV2Worker(opts) {
         teamName: opts.teamName,
         workerName: opts.workerName,
         envVars,
-        launchBinary,
-        launchArgs,
+        launchBinary: launchDescriptor.binary,
+        launchArgs: [...launchDescriptor.args],
         cwd: opts.workerCwd ?? opts.cwd,
     };
     await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
@@ -551,6 +720,1116 @@ async function spawnV2Worker(opts) {
         startupAssigned: true,
         ...(outputFile ? { outputFile } : {}),
     };
+}
+function validateRecoveryAttemptSecret(value, input, recoveryId, replacementGeneration) {
+    const secret = value;
+    if (secret?.schema_version !== 1 || secret.request_id !== input.requestId || secret.recovery_id !== recoveryId
+        || secret.worker_name !== input.workerName || secret.replacement_generation !== replacementGeneration
+        || typeof secret.adoption_token !== 'string' || secret.adoption_token.length === 0
+        || typeof secret.created_at !== 'string' || !Number.isFinite(Date.parse(secret.created_at))) {
+        throw new Error('invalid_persisted_state');
+    }
+    return secret;
+}
+const pendingRecoveryPanes = new Map();
+async function recordRecoveryPaneRollbackFailure(input, recoveryId, pending, reason, liveness) {
+    const recordedAt = Date.now();
+    const path = absPath(input.cwd, TeamPaths.recoveryPaneRollbackFailure(input.teamName, recoveryId, pending.paneAttemptId, recordedAt));
+    const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
+    await mkdir(join(path, '..'), { recursive: true });
+    const handle = await open(candidate, 'wx', 0o600);
+    try {
+        await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
+            request_id: input.requestId, recovery_id: recoveryId, pane_id: pending.paneId,
+            pane_attempt_id: pending.paneAttemptId, reason, liveness, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+        await handle.sync();
+    }
+    finally {
+        await handle.close();
+    }
+    try {
+        await link(candidate, path);
+    }
+    finally {
+        await unlink(candidate).catch(() => undefined);
+    }
+    return path;
+}
+async function recordUnaddressableRecoveryPaneFailure(input, recoveryId, paneAttemptId, reason, split) {
+    const recordedAt = Date.now();
+    const path = absPath(input.cwd, TeamPaths.recoveryPaneRollbackFailure(input.teamName, recoveryId, paneAttemptId, recordedAt));
+    const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
+    await mkdir(join(path, '..'), { recursive: true });
+    const handle = await open(candidate, 'wx', 0o600);
+    try {
+        await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
+            request_id: input.requestId, recovery_id: recoveryId, pane_id: null, pane_attempt_id: paneAttemptId,
+            reason, liveness: 'unknown', unaddressable: true, split, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+        await handle.sync();
+    }
+    finally {
+        await handle.close();
+    }
+    try {
+        await link(candidate, path);
+    }
+    finally {
+        await unlink(candidate).catch(() => undefined);
+    }
+    return path;
+}
+async function cleanupRecoveryPaneAttempt(input, recoveryId, pending, reason) {
+    const { killTeamPane } = await import('./tmux-session.js');
+    let liveness = 'unknown';
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await killTeamPane(pending.paneId).catch(() => undefined);
+        liveness = await getWorkerLiveness(pending.paneId).catch(() => 'unknown');
+        if (liveness === 'dead') {
+            pendingRecoveryPanes.delete(recoveryId);
+            return true;
+        }
+    }
+    await recordRecoveryPaneRollbackFailure(input, recoveryId, pending, reason, liveness);
+    return false;
+}
+function buildRecoveryPaneContext(input, sagaInput, config, worker, descriptor, paneId, paneAttemptId) {
+    const agentType = descriptor.provider;
+    const workerCwd = worker.working_dir ?? input.cwd;
+    const promptMode = isPromptModeAgent(agentType);
+    const providerEnv = {
+        ...getModelWorkerEnv(input.teamName, sagaInput.workerName, agentType),
+        OMC_TEAM_STATE_ROOT: teamStateRoot(input.cwd, input.teamName),
+        OMC_TEAM_LEADER_CWD: input.cwd,
+        ...(worker.worktree_path ? { OMC_TEAM_WORKTREE_PATH: worker.worktree_path } : {}),
+    };
+    const gate = {
+        recoveryId: sagaInput.recoveryId, workerName: sagaInput.workerName,
+        replacementGeneration: sagaInput.replacementGeneration, paneAttemptId,
+        readyPath: absPath(input.cwd, TeamPaths.recoveryReady(input.teamName, sagaInput.recoveryId, paneAttemptId)),
+        activatePath: absPath(input.cwd, TeamPaths.recoveryActivate(input.teamName, sagaInput.recoveryId, paneAttemptId)),
+        runPath: absPath(input.cwd, TeamPaths.recoveryRun(input.teamName, sagaInput.recoveryId, paneAttemptId)),
+        providerArgv: [descriptor.binary, ...descriptor.args], cwd: workerCwd, env: providerEnv, timeoutMs: 300_000,
+    };
+    return { paneId, paneAttemptId, sessionName: config.tmux_session, config, worker, agentType, gate, promptMode };
+}
+function recoveryError(input, recoveryId, error, message) {
+    return {
+        outcome: 'failed',
+        committed: false,
+        error,
+        message,
+        requestId: input.requestId,
+        recoveryId,
+        teamName: input.teamName,
+        workerName: input.workerName,
+        updatedAt: new Date().toISOString(),
+    };
+}
+function persistRecoveryFinal(input, recoveryId, result) {
+    if (result.requestId !== input.requestId || result.recoveryId !== recoveryId
+        || result.teamName !== input.teamName || result.workerName !== input.workerName) {
+        throw new Error('invalid_persisted_state');
+    }
+    const existingFinalState = readRecoveryFinalState(input.cwd, input.requestId);
+    if (existingFinalState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const existing = readRecoveryOutcome(input.cwd, input.requestId);
+    if (isMatchingRecoveryFinal(existing, { requestId: input.requestId, recoveryId,
+        teamName: input.teamName, workerName: input.workerName }))
+        return existing.result;
+    const succeeded = result.outcome === 'recovered' || result.outcome === 'already_running';
+    const failureResult = succeeded ? undefined : result;
+    writeRecoveryFinal(input.cwd, {
+        schema_version: 1,
+        kind: 'final',
+        request_id: input.requestId,
+        recovery_id: recoveryId,
+        team_name: input.teamName,
+        worker_name: input.workerName,
+        outcome: succeeded ? 'succeeded' : result.outcome === 'commit_unknown' ? 'commit_unknown' : 'failed',
+        result,
+        error: failureResult ? { code: failureResult.error, message: failureResult.message, commit_uncertain: failureResult.outcome === 'commit_unknown' } : undefined,
+        continuation: succeeded && result.requeuedTaskIds.length > 0 ? 'adopted' : 'none',
+        adoption: succeeded && result.requeuedTaskIds.length > 0 ? 'adopted' : 'not_started',
+        services: succeeded ? result.servicesSync : 'terminal_degraded',
+        manifest: succeeded ? result.manifestSync : 'repair_required',
+        completed_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+    });
+    return result;
+}
+export async function finalizeRecoveryOwnerResult(input, recoveryId, result, deps = {
+    readRevisionedConfig: readRevisionedTeamConfig,
+    saveConfigAtRevision: saveTeamConfigAtRevision,
+    publishFinal: persistRecoveryFinal,
+    withConfigLock: withTeamConfigMutationLock,
+}) {
+    if (!hasRequiredRecoveryPaneIdentities(result)) {
+        return recoveryError(input, recoveryId, 'invalid_persisted_state', 'Recovery success result omitted a required actual pane identity.');
+    }
+    const durableContinuation = deps.readDurableContinuation
+        ? deps.readDurableContinuation(input.cwd, input.requestId, recoveryId)
+        : (() => {
+            const outcome = readRecoveryOutcome(input.cwd, input.requestId);
+            return outcome?.kind === 'phase' && outcome.recovery_id === recoveryId ? outcome.continuation : 'none';
+        })();
+    const transientFailure = result.outcome === 'commit_unknown'
+        || (result.outcome === 'recovered' && result.activation === 'services_pending')
+        || (result.outcome === 'failed' && durableContinuation === 'reserved')
+        || (result.outcome === 'failed' && result.reservationsWritten === true)
+        || (result.outcome === 'failed' && [
+            'spawn_failed',
+            'startup_ack_timeout',
+            'config_commit_failed',
+            'worker_activation_failed',
+            'auto_merge_unavailable',
+            'stale_state_revision',
+            'worker_liveness_unknown',
+            'runtime_owner_unavailable',
+            'runtime_owner_fence_lost',
+        ].includes(result.error));
+    if (transientFailure) {
+        const pending = await deps.readRevisionedConfig(input.teamName, input.cwd);
+        if (pending?.config.active_recovery?.recovery_id === recoveryId) {
+            const phase = result.outcome === 'recovered' && result.activation === 'services_pending'
+                ? 'services_pending'
+                : pending.config.active_recovery.phase;
+            const nextRevision = pending.stateRevision + 1;
+            await deps.saveConfigAtRevision({
+                ...pending.config,
+                state_revision: nextRevision,
+                active_recovery: {
+                    ...pending.config.active_recovery,
+                    phase,
+                    state_revision: nextRevision,
+                    updated_at: new Date().toISOString(),
+                },
+            }, pending.stateRevision, input.cwd);
+        }
+        return result;
+    }
+    const terminal = await deps.readRevisionedConfig(input.teamName, input.cwd);
+    const active = terminal?.config.active_recovery;
+    if (terminal && active?.recovery_id === recoveryId
+        && active.request_id === input.requestId && active.worker_name === input.workerName
+        && active.owner_epoch === terminal.config.runtime_owner_epoch?.epoch
+        && active.owner_nonce === terminal.config.runtime_owner_epoch?.nonce) {
+        const phase = result.outcome === 'recovered' || result.outcome === 'already_running'
+            ? 'adopted'
+            : 'failed';
+        const finalRevision = terminal.stateRevision + 1;
+        const finalConfig = {
+            ...terminal.config,
+            active_recovery: undefined,
+            last_recovery: {
+                ...active,
+                phase,
+                state_revision: finalRevision,
+                updated_at: new Date().toISOString(),
+            },
+            state_revision: finalRevision,
+        };
+        let published = null;
+        let saved = false;
+        try {
+            saved = await deps.saveConfigAtRevision(finalConfig, terminal.stateRevision, input.cwd, async () => {
+                const verified = await deps.readRevisionedConfig(input.teamName, input.cwd);
+                const verifiedLast = verified?.config.last_recovery;
+                if (verified && !verified.config.active_recovery && verifiedLast?.recovery_id === recoveryId
+                    && verifiedLast.request_id === input.requestId && verifiedLast.worker_name === input.workerName
+                    && verifiedLast.phase === phase && verifiedLast.state_revision === finalRevision
+                    && verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch
+                    && verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce
+                    && verified.stateRevision === finalRevision) {
+                    published = deps.publishFinal(input, recoveryId, result);
+                }
+            });
+        }
+        catch {
+            saved = false;
+        }
+        if (!saved || !published) {
+            return { ...recoveryError(input, recoveryId, 'stale_state_revision', 'Recovery reached a terminal state, but config cleanup could not be verified.'), outcome: 'commit_unknown' };
+        }
+        return published;
+    }
+    const withLock = deps.withConfigLock ?? (async (_teamName, _cwd, fn) => fn());
+    return withLock(input.teamName, input.cwd, async () => {
+        const verified = await deps.readRevisionedConfig(input.teamName, input.cwd);
+        const expectedPhase = result.outcome === 'recovered' || result.outcome === 'already_running' ? 'adopted' : 'failed';
+        const verifiedLast = verified?.config.last_recovery;
+        if (verified && !verified.config.active_recovery && verifiedLast?.recovery_id === recoveryId
+            && verifiedLast.request_id === input.requestId && verifiedLast.worker_name === input.workerName
+            && verifiedLast.phase === expectedPhase && verifiedLast.state_revision === verified.stateRevision
+            && verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch
+            && verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce) {
+            return deps.publishFinal(input, recoveryId, result);
+        }
+        return { ...recoveryError(input, recoveryId, 'stale_state_revision', 'Recovery terminal state is no longer the active or last revision-checked attempt.'), outcome: 'commit_unknown' };
+    });
+}
+async function finalizeBoundRecoveryOwnerTerminal(input, recoveryId, result) {
+    try {
+        const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
+        const active = current?.config.active_recovery;
+        if (active?.request_id === input.requestId && active.recovery_id === recoveryId
+            && active.worker_name === input.workerName) {
+            return finalizeRecoveryOwnerResult(input, recoveryId, result);
+        }
+    }
+    catch { /* owner-bound state is uncertain; retain intent and attempt */ }
+    return { ...recoveryError(input, recoveryId, 'stale_state_revision', 'Recovery terminal cleanup could not prove the exact active attempt.'), outcome: 'commit_unknown' };
+}
+export function selectRecoveryReplayTasks(tasks, workerName, recoveryId, committedPaneLiveness) {
+    return tasks.filter(task => task.recovery_reservation?.recovery_id === recoveryId
+        || task.recovery_adoption?.recovery_id === recoveryId
+        || ((committedPaneLiveness === null || committedPaneLiveness === 'dead')
+            && task.status === 'in_progress' && task.owner === workerName));
+}
+export async function resolveCommittedRecoveryManifestSync(readManifest, expected) {
+    try {
+        const manifest = await readManifest();
+        const projected = manifest?.workers.find(candidate => candidate.name === expected.workerName);
+        return projected?.pane_id === expected.paneId && projected.pane_attempt_id === expected.paneAttemptId
+            && projected.recovery_id === expected.recoveryId
+            && projected.replacement_generation === expected.replacementGeneration
+            ? 'synced' : 'repair_required';
+    }
+    catch {
+        return 'repair_required';
+    }
+}
+export function resolveCommittedRecoveryPaneAttempt(activeRecovery, recoveryId, replacementGeneration, worker) {
+    return activeRecovery?.recovery_id === recoveryId && worker.recovery_id === recoveryId
+        && worker.replacement_generation === replacementGeneration && worker.pane_id && worker.pane_attempt_id
+        ? { paneId: worker.pane_id, paneAttemptId: worker.pane_attempt_id }
+        : null;
+}
+async function readOrCreateRecoveryAttempt(input, recoveryId, replacementGeneration) {
+    const path = absPath(input.cwd, TeamPaths.recoveryAttempt(input.teamName, recoveryId));
+    try {
+        return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    }
+    catch (error) {
+        if (error.code !== 'ENOENT')
+            throw error;
+    }
+    const secret = {
+        schema_version: 1,
+        request_id: input.requestId,
+        recovery_id: recoveryId,
+        worker_name: input.workerName,
+        replacement_generation: replacementGeneration,
+        adoption_token: randomUUID(),
+        created_at: new Date().toISOString(),
+    };
+    await mkdir(join(path, '..'), { recursive: true });
+    const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
+    const candidateHandle = await open(candidate, 'wx', 0o600);
+    try {
+        await candidateHandle.writeFile(JSON.stringify(secret, null, 2), 'utf8');
+        await candidateHandle.sync();
+    }
+    finally {
+        await candidateHandle.close();
+    }
+    try {
+        await link(candidate, path);
+        return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    }
+    catch (error) {
+        if (error.code !== 'EEXIST')
+            throw error;
+        return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    }
+    finally {
+        await unlink(candidate).catch(() => undefined);
+    }
+}
+const BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS = 25;
+const BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS = 1_000;
+function waitForBootstrapRecoveryEvidence(delayMs, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(signal.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+            return;
+        }
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, delayMs);
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+            reject(signal?.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+}
+async function hasBootstrapRecoveryEvidence(teamName, cwd, input, waitOptions = {}) {
+    const bootstrap = input.bootstrap;
+    if (!bootstrap)
+        return true;
+    const reservation = readRecoveryRequestReservation(cwd, input.requestId);
+    if (!reservation || reservation.kind !== 'reservation' || reservation.recovery_id !== bootstrap.recoveryId
+        || reservation.team_name !== teamName || reservation.worker_name !== input.workerName)
+        return false;
+    try {
+        const intent = parseRecoveryIntent(await readFile(absPath(cwd, TeamPaths.recoveryIntent(teamName, bootstrap.recoveryId)), 'utf8'));
+        if (intent.request_id !== input.requestId || intent.recovery_id !== bootstrap.recoveryId
+            || intent.team_name !== teamName || intent.worker_name !== input.workerName)
+            return false;
+        const now = waitOptions.now ?? Date.now;
+        const timeoutMs = waitOptions.timeoutMs === undefined
+            ? BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS
+            : Number.isFinite(waitOptions.timeoutMs)
+                ? Math.min(Math.max(waitOptions.timeoutMs, 0), BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS)
+                : 0;
+        const deadline = now() + timeoutMs;
+        const sleep = waitOptions.sleep ?? waitForBootstrapRecoveryEvidence;
+        for (let attempt = 0; attempt <= Math.ceil(timeoutMs / BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS)
+            && !waitOptions.signal?.aborted; attempt++) {
+            const candidate = await readRecoveryOwnerBootstrapCandidate(teamName, cwd, bootstrap.expectedEpoch, bootstrap.nonce);
+            if (candidate && candidateMatchesBootstrap(candidate, input))
+                return true;
+            const owner = readLatestOwnerEpoch(cwd, teamName);
+            if (owner && (owner.epoch > bootstrap.expectedEpoch
+                || (owner.epoch === bootstrap.expectedEpoch && (owner.pid !== bootstrap.pid
+                    || owner.process_started_at !== bootstrap.processStartedAt || owner.nonce !== bootstrap.nonce))))
+                return false;
+            const remainingMs = deadline - now();
+            if (remainingMs <= 0)
+                return false;
+            await sleep(Math.min(BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS, remainingMs), waitOptions.signal);
+        }
+        return false;
+    }
+    catch {
+        return false;
+    }
+}
+function recoveryOwnerBootstrapCandidatePath(teamName, expectedEpoch, nonce) {
+    return TeamPaths.recoveryOwnerBootstrapCandidate(teamName, expectedEpoch, nonce);
+}
+function isCanonicalBootstrapCandidate(value, expectedEpoch) {
+    const candidate = value;
+    if (!candidate || candidate.schema_version !== 1 || candidate.expected_epoch !== expectedEpoch
+        || typeof candidate.request_id !== 'string' || candidate.request_id.length === 0
+        || typeof candidate.recovery_id !== 'string' || candidate.recovery_id.length === 0
+        || typeof candidate.team_name !== 'string' || candidate.team_name.length === 0
+        || typeof candidate.worker_name !== 'string' || candidate.worker_name.length === 0
+        || typeof candidate.nonce !== 'string' || candidate.nonce.length === 0
+        || typeof candidate.pid !== 'number' || !Number.isSafeInteger(candidate.pid) || candidate.pid < 1
+        || typeof candidate.process_started_at !== 'string' || candidate.process_started_at.length === 0
+        || typeof candidate.predecessor_epoch !== 'number' || !Number.isSafeInteger(candidate.predecessor_epoch) || candidate.predecessor_epoch < 0
+        || candidate.expected_epoch !== candidate.predecessor_epoch + 1
+        || (candidate.predecessor_epoch === 0 && (candidate.predecessor_nonce !== null
+            || candidate.predecessor_pid !== null || candidate.predecessor_process_started_at !== null))
+        || (candidate.predecessor_epoch > 0 && (typeof candidate.predecessor_nonce !== 'string'
+            || candidate.predecessor_nonce.length === 0 || typeof candidate.predecessor_pid !== 'number'
+            || !Number.isSafeInteger(candidate.predecessor_pid)
+            || candidate.predecessor_pid < 1 || typeof candidate.predecessor_process_started_at !== 'string'
+            || candidate.predecessor_process_started_at.length === 0))
+        || typeof candidate.created_at !== 'string' || !Number.isFinite(Date.parse(candidate.created_at))
+        || typeof candidate.payload_hash !== 'string')
+        return false;
+    const { payload_hash, ...unsigned } = candidate;
+    return createHash('sha256').update(JSON.stringify(unsigned)).digest('hex') === payload_hash;
+}
+async function readRecoveryOwnerBootstrapCandidate(teamName, cwd, expectedEpoch, nonce) {
+    try {
+        const value = JSON.parse(await readFile(absPath(cwd, recoveryOwnerBootstrapCandidatePath(teamName, expectedEpoch, nonce)), 'utf8'));
+        return isCanonicalBootstrapCandidate(value, expectedEpoch) && value.nonce === nonce ? value : null;
+    }
+    catch {
+        return null;
+    }
+}
+function candidateMatchesBootstrap(candidate, input) {
+    const bootstrap = input.bootstrap;
+    return !!bootstrap && candidate.request_id === input.requestId && candidate.recovery_id === bootstrap.recoveryId
+        && candidate.team_name === input.teamName && candidate.worker_name === input.workerName
+        && candidate.expected_epoch === bootstrap.expectedEpoch && candidate.nonce === bootstrap.nonce
+        && candidate.pid === bootstrap.pid && candidate.process_started_at === bootstrap.processStartedAt
+        && candidate.predecessor_epoch === bootstrap.predecessorEpoch
+        && candidate.predecessor_nonce === bootstrap.predecessorNonce
+        && candidate.predecessor_pid === bootstrap.predecessorPid
+        && candidate.predecessor_process_started_at === bootstrap.predecessorProcessStartedAt;
+}
+async function isExactDeadOrphanBootstrapCandidate(teamName, cwd, input, config, orphan) {
+    const bootstrap = input.bootstrap;
+    if (!bootstrap || !orphan || !isProcessIdentityDead(orphan) || orphan.epoch !== bootstrap.predecessorEpoch
+        || orphan.nonce !== bootstrap.predecessorNonce || orphan.pid !== bootstrap.predecessorPid
+        || orphan.process_started_at !== bootstrap.predecessorProcessStartedAt)
+        return false;
+    let expectedEpoch = bootstrap.expectedEpoch;
+    let candidateNonce = bootstrap.nonce;
+    let predecessor = orphan;
+    for (;;) {
+        const candidate = await readRecoveryOwnerBootstrapCandidate(teamName, cwd, expectedEpoch, candidateNonce);
+        if (!candidate)
+            return false;
+        if (expectedEpoch === bootstrap.expectedEpoch) {
+            if (!candidateMatchesBootstrap(candidate, input))
+                return false;
+        }
+        else if (candidate.request_id !== input.requestId || candidate.recovery_id !== bootstrap.recoveryId
+            || candidate.team_name !== teamName || candidate.worker_name !== input.workerName
+            || candidate.nonce !== predecessor.nonce || candidate.pid !== predecessor.pid
+            || candidate.process_started_at !== predecessor.process_started_at) {
+            return false;
+        }
+        if (candidate.predecessor_epoch === 0) {
+            return !config.runtime_owner_epoch && !config.active_recovery;
+        }
+        const candidatePredecessor = candidate.predecessor_epoch === 0 ? null : {
+            pid: candidate.predecessor_pid,
+            process_started_at: candidate.predecessor_process_started_at,
+        };
+        if (candidatePredecessor && !isProcessIdentityDead(candidatePredecessor))
+            return false;
+        if (config.runtime_owner_epoch?.epoch === candidate.predecessor_epoch
+            && config.runtime_owner_epoch.nonce === candidate.predecessor_nonce
+            && config.runtime_owner_epoch.pid === candidate.predecessor_pid
+            && config.runtime_owner_epoch.process_started_at === candidate.predecessor_process_started_at) {
+            const active = config.active_recovery;
+            return !!active && active.request_id === input.requestId && active.recovery_id === bootstrap.recoveryId
+                && active.worker_name === input.workerName && active.owner_epoch === candidate.predecessor_epoch
+                && active.owner_nonce === candidate.predecessor_nonce;
+        }
+        if (expectedEpoch <= 1 || candidate.predecessor_epoch !== expectedEpoch - 1)
+            return false;
+        predecessor = {
+            epoch: candidate.predecessor_epoch,
+            nonce: candidate.predecessor_nonce,
+            pid: candidate.predecessor_pid,
+            process_started_at: candidate.predecessor_process_started_at,
+        };
+        expectedEpoch = candidate.predecessor_epoch;
+        candidateNonce = predecessor.nonce;
+    }
+}
+function isExactRecoverySidecar(value, task, input, active, replacementGeneration, adoptionToken) {
+    const sidecar = value;
+    const persisted = task.recovery_reservation ?? task.recovery_adoption;
+    if (!sidecar || !persisted || sidecar.schema_version !== 1 || sidecar.recovery_id !== active.recovery_id
+        || sidecar.request_id !== input.requestId || sidecar.task_id !== task.id || sidecar.old_owner !== input.workerName
+        || typeof sidecar.old_task_version !== 'number' || !Number.isSafeInteger(sidecar.old_task_version) || sidecar.old_task_version < 1
+        || typeof sidecar.old_claim_token !== 'string' || sidecar.old_claim_token.length === 0
+        || typeof sidecar.old_claim_leased_until !== 'string' || !Number.isFinite(Date.parse(sidecar.old_claim_leased_until))
+        || typeof sidecar.continuation_sequence !== 'number' || !Number.isSafeInteger(sidecar.continuation_sequence) || sidecar.continuation_sequence < 1
+        || typeof sidecar.checkpoint_path !== 'string' || sidecar.checkpoint_path.length === 0
+        || typeof sidecar.checkpoint_hash !== 'string' || !/^[a-f0-9]{64}$/.test(sidecar.checkpoint_hash)
+        || sidecar.replacement_worker !== input.workerName || sidecar.replacement_generation !== replacementGeneration
+        || sidecar.adoption_token_hash !== createHash('sha256').update(adoptionToken).digest('hex')
+        || typeof sidecar.created_at !== 'string' || !Number.isFinite(Date.parse(sidecar.created_at)))
+        return false;
+    const sameReservation = persisted.recovery_id === sidecar.recovery_id && persisted.request_id === sidecar.request_id
+        && persisted.continuation_sequence === sidecar.continuation_sequence && persisted.checkpoint_path === sidecar.checkpoint_path
+        && persisted.checkpoint_hash === sidecar.checkpoint_hash && persisted.replacement_worker === sidecar.replacement_worker
+        && persisted.replacement_generation === sidecar.replacement_generation;
+    if (!sameReservation)
+        return false;
+    if ('adoption_token_hash' in persisted && persisted.adoption_token_hash !== sidecar.adoption_token_hash)
+        return false;
+    if (task.recovery_reservation) {
+        return task.status === 'pending' && task.version === sidecar.old_task_version + 1 && !task.owner && !task.claim;
+    }
+    return task.status === 'in_progress' && task.version === sidecar.old_task_version + 2 && task.owner === input.workerName
+        && !!task.claim && task.claim.owner === input.workerName;
+}
+async function hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, config) {
+    const bootstrap = input.bootstrap;
+    const active = config.active_recovery;
+    if (!bootstrap || !active)
+        return true;
+    if (active.request_id !== input.requestId || active.recovery_id !== bootstrap.recoveryId
+        || active.worker_name !== input.workerName)
+        return false;
+    const worker = config.workers.find(candidate => candidate.name === input.workerName);
+    const replacementGeneration = worker?.recovery_id === active.recovery_id && Number.isSafeInteger(worker.replacement_generation)
+        ? worker.replacement_generation
+        : (worker?.replacement_generation ?? 0) + 1;
+    let attempt;
+    try {
+        attempt = validateRecoveryAttemptSecret(JSON.parse(await readFile(absPath(cwd, TeamPaths.recoveryAttempt(teamName, active.recovery_id)), 'utf8')), input, active.recovery_id, replacementGeneration);
+    }
+    catch {
+        return false;
+    }
+    let tasks;
+    try {
+        tasks = await listTasksFromFiles(teamName, cwd);
+    }
+    catch {
+        return false;
+    }
+    const continuations = tasks.filter(task => task.recovery_reservation?.recovery_id === active.recovery_id
+        || task.recovery_adoption?.recovery_id === active.recovery_id);
+    const untouchedClaims = tasks.filter(task => task.status === 'in_progress' && task.owner === input.workerName
+        && !continuations.some(continuation => continuation.id === task.id));
+    if (continuations.length === 0 && untouchedClaims.length === 0)
+        return true;
+    for (const task of continuations) {
+        let sidecar;
+        try {
+            sidecar = JSON.parse(await readFile(absPath(cwd, TeamPaths.taskRecoverySidecar(teamName, active.recovery_id, task.id)), 'utf8'));
+        }
+        catch {
+            return false;
+        }
+        if (!isExactRecoverySidecar(sidecar, task, input, active, replacementGeneration, attempt.adoption_token))
+            return false;
+        const verified = sidecar;
+        const checkpoint = await readTaskRecoveryCheckpoint(verified.checkpoint_path);
+        if (!checkpoint.ok || checkpoint.checkpoint.team_name !== teamName || checkpoint.checkpoint.task_id !== task.id
+            || checkpoint.checkpoint.worker_name !== verified.old_owner || checkpoint.checkpoint.task_version !== verified.old_task_version
+            || checkpoint.checkpoint.claim_token !== verified.old_claim_token || checkpoint.checkpoint.sequence !== verified.continuation_sequence
+            || checkpoint.checkpoint.resume_payload_hash !== verified.checkpoint_hash)
+            return false;
+    }
+    for (const task of untouchedClaims) {
+        const checkpoint = await selectTaskRecoveryCheckpoint(teamName, { ...task, version: task.version ?? 1 }, cwd);
+        if (!checkpoint.ok)
+            return false;
+    }
+    return true;
+}
+async function ensureRecoveryOwner(teamName, cwd, input, waitOptions) {
+    let current = await readRevisionedTeamConfig(teamName, cwd);
+    if (!current)
+        current = await migrateTeamConfigRevision(teamName, cwd);
+    if (!current)
+        throw new Error('invalid_persisted_state');
+    const processStartedAt = currentProcessStartIdentity();
+    if (!processStartedAt)
+        throw new Error('process_start_identity_unavailable');
+    const bootstrap = input.bootstrap;
+    let owner = readLatestOwnerEpoch(cwd, teamName);
+    let bootstrapPredecessor = null;
+    let exactDeadOrphan = false;
+    if (bootstrap) {
+        if (bootstrap.expectedEpoch !== bootstrap.predecessorEpoch + 1 || bootstrap.pid !== process.pid
+            || bootstrap.processStartedAt !== processStartedAt || bootstrap.nonce.length === 0
+            || !await hasBootstrapRecoveryEvidence(teamName, cwd, input, waitOptions)) {
+            throw new Error('runtime_owner_bootstrap_fence_lost');
+        }
+        const predecessor = owner;
+        bootstrapPredecessor = predecessor;
+        const alreadyPublished = predecessor?.epoch === bootstrap.expectedEpoch && predecessor.pid === bootstrap.pid
+            && predecessor.process_started_at === bootstrap.processStartedAt && predecessor.nonce === bootstrap.nonce;
+        exactDeadOrphan = !alreadyPublished && await isExactDeadOrphanBootstrapCandidate(teamName, cwd, input, current.config, predecessor);
+        if (alreadyPublished) {
+            const configAlreadyBound = current.config.runtime_owner_epoch?.epoch === bootstrap.expectedEpoch
+                && current.config.runtime_owner_epoch?.nonce === bootstrap.nonce;
+            const retryFromNoOwner = bootstrap.predecessorEpoch === 0 && !current.config.runtime_owner_epoch
+                && (!current.config.active_recovery || await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config));
+            const retryFromPredecessor = bootstrap.predecessorEpoch > 0
+                && current.config.runtime_owner_epoch?.epoch === bootstrap.predecessorEpoch
+                && current.config.runtime_owner_epoch?.nonce === bootstrap.predecessorNonce
+                && current.config.active_recovery?.owner_epoch === bootstrap.predecessorEpoch
+                && current.config.active_recovery?.owner_nonce === bootstrap.predecessorNonce
+                && await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config);
+            if (!configAlreadyBound && !retryFromNoOwner && !retryFromPredecessor) {
+                throw new Error('runtime_owner_bootstrap_rebind_rejected');
+            }
+            owner = predecessor;
+        }
+        else {
+            const bootstrapFromNoOwner = bootstrap.predecessorEpoch === 0;
+            if (bootstrapFromNoOwner) {
+                if (predecessor || current.config.runtime_owner_epoch
+                    || (current.config.active_recovery && !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config))) {
+                    throw new Error('runtime_owner_bootstrap_fence_lost');
+                }
+            }
+            else if (!exactDeadOrphan && (!predecessor || predecessor.epoch !== bootstrap.predecessorEpoch
+                || predecessor.nonce !== bootstrap.predecessorNonce || predecessor.pid !== bootstrap.predecessorPid
+                || predecessor.process_started_at !== bootstrap.predecessorProcessStartedAt || !isProcessIdentityDead(predecessor)
+                || current.config.runtime_owner_epoch?.epoch !== predecessor.epoch
+                || current.config.runtime_owner_epoch?.nonce !== predecessor.nonce
+                || current.config.active_recovery?.owner_epoch !== predecessor.epoch
+                || current.config.active_recovery?.owner_nonce !== predecessor.nonce
+                || !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config))) {
+                throw new Error('runtime_owner_bootstrap_fence_lost');
+            }
+            owner = publishOwnerEpoch(cwd, teamName, bootstrap.expectedEpoch, {
+                pid: bootstrap.pid,
+                processStartedAt: bootstrap.processStartedAt,
+                nonce: bootstrap.nonce,
+            });
+            if (owner.epoch !== bootstrap.expectedEpoch || owner.pid !== bootstrap.pid
+                || owner.process_started_at !== bootstrap.processStartedAt || owner.nonce !== bootstrap.nonce) {
+                throw new Error('runtime_owner_bootstrap_fence_lost');
+            }
+        }
+    }
+    else if (!owner) {
+        owner = publishOwnerEpoch(cwd, teamName, 1);
+    }
+    else if (owner.pid !== process.pid || owner.process_started_at !== processStartedAt) {
+        throw new Error('runtime_owner_fence_lost');
+    }
+    const fence = { epoch: owner.epoch, nonce: owner.nonce };
+    requireOwnerFence(cwd, teamName, fence);
+    requireOwnerProcessIdentity(owner, process.pid, processStartedAt);
+    for (let bindAttempt = 0; bindAttempt < 3 && (current.config.runtime_owner_epoch?.epoch !== owner.epoch
+        || current.config.runtime_owner_epoch?.nonce !== owner.nonce); bindAttempt++) {
+        if (current.config.runtime_owner_epoch && (current.config.runtime_owner_epoch.epoch !== owner.epoch
+            || current.config.runtime_owner_epoch.nonce !== owner.nonce)
+            && !(bootstrap && exactDeadOrphan && await isExactDeadOrphanBootstrapCandidate(teamName, cwd, input, current.config, bootstrapPredecessor))) {
+            throw new Error('runtime_owner_bootstrap_rebind_rejected');
+        }
+        if (bootstrap && current.config.active_recovery
+            && !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config)) {
+            throw new Error('runtime_owner_bootstrap_fence_lost');
+        }
+        const nextRevision = current.stateRevision + 1;
+        const bootstrapWorker = bootstrap
+            ? current.config.workers.find(candidate => candidate.name === input.workerName)
+            : undefined;
+        const next = {
+            ...current.config,
+            state_revision: nextRevision,
+            runtime_owner_epoch: owner,
+            ...(current.config.service_descriptor ? {
+                service_descriptor: {
+                    ...current.config.service_descriptor,
+                    service_generation: current.config.service_descriptor.service_generation + 1,
+                    service_attempt_id: `${owner.epoch}:${owner.nonce}`,
+                },
+            } : {}),
+            lifecycle_state: current.config.lifecycle_state ?? 'active',
+            active_recovery: current.config.active_recovery
+                ? { ...current.config.active_recovery, owner_epoch: owner.epoch, owner_nonce: owner.nonce,
+                    state_revision: nextRevision, updated_at: new Date().toISOString() }
+                : bootstrap ? {
+                    request_id: input.requestId,
+                    recovery_id: bootstrap.recoveryId,
+                    worker_name: input.workerName,
+                    owner_epoch: owner.epoch,
+                    owner_nonce: owner.nonce,
+                    phase: 'reserved',
+                    state_revision: nextRevision,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    ...(bootstrapWorker?.pane_id?.trim() ? { original_pane_id: bootstrapWorker.pane_id } : {}),
+                } : undefined,
+        };
+        if (await saveTeamConfigAtRevision(next, current.stateRevision, cwd)) {
+            current = { config: next, stateRevision: nextRevision };
+            break;
+        }
+        const retry = await readRevisionedTeamConfig(teamName, cwd);
+        if (!retry)
+            throw new Error('invalid_persisted_state');
+        current = retry;
+    }
+    if (!current)
+        throw new Error('invalid_persisted_state');
+    if (current.config.runtime_owner_epoch?.epoch !== owner.epoch
+        || current.config.runtime_owner_epoch?.nonce !== owner.nonce)
+        throw new Error('stale_state_revision');
+    return { fence, config: current.config, stateRevision: current.stateRevision };
+}
+/** Establish the exact successor/config binding before a detached owner may execute or maintain. */
+export async function prepareRecoveryOwnerBootstrap(input, waitOptions) {
+    const bootstrap = input.bootstrap;
+    if (!bootstrap)
+        throw new Error('runtime_owner_bootstrap_fence_lost');
+    let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions);
+    if (owner.fence.epoch !== bootstrap.expectedEpoch
+        || owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch
+        || owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce) {
+        throw new Error('runtime_owner_bootstrap_rebind_rejected');
+    }
+    const active = owner.config.active_recovery;
+    if (!active || active.request_id !== input.requestId || active.recovery_id !== bootstrap.recoveryId
+        || active.worker_name !== input.workerName || active.owner_epoch !== owner.fence.epoch
+        || active.owner_nonce !== owner.fence.nonce) {
+        throw new Error('runtime_owner_bootstrap_rebind_rejected');
+    }
+}
+/** Private runtime-owner executor. It never calls the public recovery facade. */
+export async function executeRecoverDeadWorkerV2Owner(input) {
+    const reservation = readRecoveryRequestReservation(input.cwd, input.requestId);
+    const recoveryId = reservation?.recovery_id ?? randomUUID();
+    let ownerBound = false;
+    try {
+        const beforeOwner = await readRevisionedTeamConfig(input.teamName, input.cwd);
+        if (beforeOwner?.config.active_scale_down || beforeOwner?.config.active_scale_up) {
+            return recoveryError(input, recoveryId, 'team_mutation_busy');
+        }
+        let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input);
+        ownerBound = true;
+        const existingAttempt = owner.config.active_recovery;
+        if (existingAttempt && (existingAttempt.request_id !== input.requestId
+            || existingAttempt.recovery_id !== recoveryId || existingAttempt.worker_name !== input.workerName)) {
+            return recoveryError(input, recoveryId, 'team_mutation_busy');
+        }
+        if (!existingAttempt) {
+            const nextRevision = owner.stateRevision + 1;
+            const electedConfig = {
+                ...owner.config,
+                state_revision: nextRevision,
+                active_recovery: {
+                    request_id: input.requestId,
+                    recovery_id: recoveryId,
+                    worker_name: input.workerName,
+                    owner_epoch: owner.fence.epoch,
+                    owner_nonce: owner.fence.nonce,
+                    phase: 'reserved',
+                    state_revision: nextRevision,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                },
+            };
+            if (!await saveTeamConfigAtRevision(electedConfig, owner.stateRevision, input.cwd)) {
+                return recoveryError(input, recoveryId, 'stale_state_revision');
+            }
+            owner = { ...owner, config: electedConfig, stateRevision: nextRevision };
+        }
+        if (owner.config.lifecycle_state === 'shutting_down' || owner.config.lifecycle_state === 'stopped') {
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_shutting_down'));
+        }
+        if (owner.config.active_scale_down || owner.config.active_scale_up)
+            return recoveryError(input, recoveryId, 'team_mutation_busy');
+        const worker = owner.config.workers.find(candidate => candidate.name === input.workerName);
+        if (!worker)
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'worker_not_found'));
+        if (!worker.launch_descriptor)
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_metadata_incomplete'));
+        let launchDescriptor;
+        try {
+            launchDescriptor = validateWorkerLaunchDescriptor(worker.launch_descriptor);
+            if (worker.worker_cli !== launchDescriptor.provider)
+                throw new Error('provider mismatch');
+        }
+        catch {
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_descriptor_unresolvable'));
+        }
+        if (!owner.config.tmux_session)
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+        try {
+            await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
+        }
+        catch {
+            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+        }
+        const replacementGeneration = existingAttempt && worker.recovery_id === recoveryId
+            && typeof worker.replacement_generation === 'number'
+            ? worker.replacement_generation
+            : (worker.replacement_generation ?? 0) + 1;
+        const attempt = await readOrCreateRecoveryAttempt(input, recoveryId, replacementGeneration);
+        const originalPaneId = existingAttempt?.original_pane_id ?? worker.pane_id;
+        const ensureFence = async () => {
+            requireOwnerFence(input.cwd, input.teamName, owner.fence);
+            const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
+            if (!current || current.config.active_scale_down
+                || current.config.active_scale_up
+                || current.config.active_recovery?.recovery_id !== recoveryId
+                || current.config.active_recovery.owner_epoch !== owner.fence.epoch
+                || current.config.active_recovery.owner_nonce !== owner.fence.nonce) {
+                throw new Error('runtime_owner_fence_lost');
+            }
+            return current.config;
+        };
+        let committedReplacementLiveness = null;
+        const deps = {
+            cwd: input.cwd,
+            getLiveness: async () => {
+                const config = await ensureFence();
+                const currentWorker = config.workers.find(candidate => candidate.name === input.workerName);
+                const committedReplacement = existingAttempt?.recovery_id === recoveryId
+                    && currentWorker?.recovery_id === recoveryId
+                    && currentWorker.replacement_generation === attempt.replacement_generation
+                    && Boolean(currentWorker.pane_id && currentWorker.pane_attempt_id);
+                if (!committedReplacement) {
+                    if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId)
+                        return 'unknown';
+                    return getWorkerPaneLiveness(originalPaneId);
+                }
+                committedReplacementLiveness = await getWorkerPaneLiveness(currentWorker?.pane_id);
+                return committedReplacementLiveness === 'unknown' ? 'unknown' : 'dead';
+            },
+            listOwnedInProgressTasks: async () => selectRecoveryReplayTasks(await listTasksFromFiles(input.teamName, input.cwd), input.workerName, recoveryId, committedReplacementLiveness),
+            validateCheckpoint: async (teamName, task) => {
+                const persisted = task.recovery_reservation ?? task.recovery_adoption;
+                if (persisted?.recovery_id === recoveryId) {
+                    const selected = await readTaskRecoveryCheckpoint(persisted.checkpoint_path);
+                    if (selected.ok && selected.checkpoint.sequence === persisted.continuation_sequence
+                        && selected.checkpoint.resume_payload_hash === persisted.checkpoint_hash) {
+                        return { ok: true, sequence: selected.checkpoint.sequence };
+                    }
+                    return { ok: false, error: selected.ok ? 'recovery_checkpoint_stale'
+                            : `recovery_checkpoint_${selected.error}` };
+                }
+                const selected = await selectTaskRecoveryCheckpoint(teamName, { ...task, version: task.version ?? 1 }, input.cwd);
+                if (selected.ok)
+                    return { ok: true, sequence: selected.checkpoint.sequence };
+                const errorByState = {
+                    missing: 'recovery_checkpoint_missing',
+                    malformed: 'recovery_checkpoint_malformed',
+                    stale: 'recovery_checkpoint_stale',
+                    ambiguous: 'recovery_checkpoint_ambiguous',
+                };
+                return { ok: false, error: errorByState[selected.error] };
+            },
+            requeue: async (sagaInput, taskId, adoptionTokenHash) => {
+                await ensureFence();
+                const currentTask = (await listTasksFromFiles(input.teamName, input.cwd)).find(task => task.id === taskId);
+                if (currentTask?.recovery_adoption?.recovery_id === sagaInput.recoveryId) {
+                    return { ok: true, sequence: currentTask.recovery_adoption.continuation_sequence };
+                }
+                const result = await teamRequeueRecoveredTask(input.teamName, input.cwd, {
+                    recoveryId: sagaInput.recoveryId,
+                    requestId: sagaInput.requestId,
+                    taskId,
+                    replacementWorker: sagaInput.workerName,
+                    replacementGeneration: sagaInput.replacementGeneration,
+                    adoptionTokenHash,
+                });
+                return result.ok
+                    ? { ok: true, sequence: result.reservation.continuation_sequence }
+                    : { ok: false, error: result.error.startsWith('checkpoint_')
+                            ? `recovery_${result.error}`
+                            : 'task_requeue_failed' };
+            },
+            spawnGatedPane: async (sagaInput) => {
+                const config = await ensureFence();
+                const currentWorker = config.workers.find(candidate => candidate.name === sagaInput.workerName);
+                if (!currentWorker)
+                    return { ok: false, error: 'worker_not_found' };
+                const committedPane = resolveCommittedRecoveryPaneAttempt(existingAttempt, sagaInput.recoveryId, sagaInput.replacementGeneration, currentWorker);
+                if (committedPane) {
+                    const committedPaneLiveness = await getWorkerPaneLiveness(committedPane.paneId);
+                    if (committedPaneLiveness === 'unknown')
+                        return { ok: false, error: 'runtime_owner_unavailable' };
+                    if (committedPaneLiveness === 'alive') {
+                        let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+                        if (!pending) {
+                            try {
+                                pending = buildRecoveryPaneContext(input, sagaInput, config, currentWorker, launchDescriptor, committedPane.paneId, committedPane.paneAttemptId);
+                                pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
+                            }
+                            catch {
+                                return { ok: false, error: 'launch_descriptor_unresolvable' };
+                            }
+                        }
+                        const expected = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
+                            replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: committedPane.paneAttemptId };
+                        const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, expected, 1_000);
+                        const manifest = await readTeamManifest(input.teamName, input.cwd);
+                        const projected = manifest?.workers.find(candidate => candidate.name === sagaInput.workerName);
+                        const projectedSameAttempt = projected?.pane_id === committedPane.paneId
+                            && projected.pane_attempt_id === committedPane.paneAttemptId
+                            && projected.recovery_id === sagaInput.recoveryId
+                            && projected.replacement_generation === sagaInput.replacementGeneration;
+                        if (!ready || !projectedSameAttempt)
+                            return { ok: false, error: 'worker_activation_failed' };
+                        return { ok: true, paneId: pending.paneId, paneAttemptId: pending.paneAttemptId, committed: true,
+                            stateRevision: config.state_revision ?? 0, manifestSync: 'synced' };
+                    }
+                }
+                const paneAttemptId = randomUUID();
+                let prepared;
+                try {
+                    prepared = buildRecoveryPaneContext(input, sagaInput, config, currentWorker, launchDescriptor, '', paneAttemptId);
+                    if (!process.argv[1])
+                        throw new Error('runtime_cli_path_missing');
+                }
+                catch {
+                    return { ok: false, error: 'launch_descriptor_unresolvable' };
+                }
+                const livePaneIds = [];
+                for (const candidate of config.workers) {
+                    if (!candidate.pane_id || candidate.name === sagaInput.workerName)
+                        continue;
+                    if (await getWorkerPaneLiveness(candidate.pane_id) === 'alive')
+                        livePaneIds.push(candidate.pane_id);
+                }
+                const splitTarget = livePaneIds.at(-1) ?? config.leader_pane_id ?? '';
+                if (!splitTarget)
+                    return { ok: false, error: 'spawn_failed' };
+                const splitDirection = livePaneIds.length > 0 ? 'down' : 'right';
+                const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, prepared.gate.cwd);
+                if (!split.paneId) {
+                    await recordUnaddressableRecoveryPaneFailure(input, sagaInput.recoveryId, paneAttemptId, split.commandSucceeded ? 'unaddressable_spawned_pane' : 'split_command_uncertain', split);
+                    return { ok: false, error: 'spawn_failed' };
+                }
+                const pending = { ...prepared, paneId: split.paneId };
+                pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
+                try {
+                    await spawnWorkerInPane(config.tmux_session, pending.paneId, {
+                        teamName: input.teamName,
+                        workerName: sagaInput.workerName,
+                        envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(pending.gate) },
+                        launchBinary: process.execPath,
+                        launchArgs: [process.argv[1], '--recovery-gate'],
+                        cwd: pending.gate.cwd,
+                    });
+                    const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
+                        recovery_id: sagaInput.recoveryId,
+                        worker_name: sagaInput.workerName,
+                        replacement_generation: sagaInput.replacementGeneration,
+                        pane_attempt_id: paneAttemptId,
+                    }, 30_000);
+                    if (!ready)
+                        throw new Error('startup_ack_timeout');
+                    return { ok: true, paneId: pending.paneId, paneAttemptId, committed: false };
+                }
+                catch (error) {
+                    await cleanupRecoveryPaneAttempt(input, sagaInput.recoveryId, pending, error instanceof Error ? error.message : 'spawn_failed');
+                    return { ok: false, error: error instanceof Error && error.message === 'startup_ack_timeout'
+                            ? 'startup_ack_timeout' : 'spawn_failed' };
+                }
+            },
+            persistActive: async (sagaInput, paneId) => {
+                await ensureFence();
+                const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
+                if (!current)
+                    throw new Error('invalid_persisted_state');
+                const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+                if (!pending)
+                    throw new Error('worker_activation_failed');
+                const nextWorkers = current.config.workers.map(candidate => candidate.name === sagaInput.workerName
+                    ? { ...candidate, pane_id: paneId, pane_attempt_id: pending.paneAttemptId, recovery_id: sagaInput.recoveryId,
+                        replacement_generation: sagaInput.replacementGeneration, operational_state: 'active' }
+                    : candidate);
+                const nextRevision = current.stateRevision + 1;
+                const next = {
+                    ...current.config,
+                    workers: nextWorkers,
+                    state_revision: nextRevision,
+                    active_recovery: current.config.active_recovery
+                        ? { ...current.config.active_recovery, phase: 'active', state_revision: nextRevision, updated_at: new Date().toISOString() }
+                        : current.config.active_recovery,
+                };
+                if (!await saveTeamConfigAtRevision(next, current.stateRevision, input.cwd))
+                    throw new Error('stale_state_revision');
+                const manifestSync = await resolveCommittedRecoveryManifestSync(() => readTeamManifest(input.teamName, input.cwd), { workerName: sagaInput.workerName, paneId, paneAttemptId: pending.paneAttemptId,
+                    recoveryId: sagaInput.recoveryId, replacementGeneration: sagaInput.replacementGeneration });
+                return { stateRevision: nextRevision, manifestSync };
+            },
+            activatePane: async (sagaInput, paneAttemptId) => {
+                await ensureFence();
+                const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+                if (!pending || pending.paneAttemptId !== paneAttemptId)
+                    return { ok: false, error: 'worker_activation_failed' };
+                const record = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
+                    replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId, written_at: new Date().toISOString() };
+                await mkdir(join(pending.gate.activatePath, '..'), { recursive: true });
+                await writeFile(pending.gate.activatePath, JSON.stringify(record), 'utf8');
+                const adoptedReady = await waitForRecoveryGateRecord(`${pending.gate.readyPath}.adoption-ready`, record, 30_000);
+                return adoptedReady ? { ok: true } : { ok: false, error: 'worker_activation_failed' };
+            },
+            adoptAll: async (sagaInput, proof, taskIds) => {
+                await ensureFence();
+                const results = await teamAdoptRecoveryReservations(input.teamName, input.cwd, taskIds, sagaInput.workerName, proof);
+                const failed = results.find(result => !result.ok);
+                if (failed && !failed.ok) {
+                    return { ok: false, error: failed.error.startsWith('checkpoint_')
+                            ? `recovery_${failed.error}`
+                            : 'worker_activation_failed' };
+                }
+                const continuations = results
+                    .filter((result) => result.ok)
+                    .map(result => ({ taskId: result.task.id, taskVersion: result.task.version ?? 1,
+                    sequence: result.checkpoint.sequence, payload: result.checkpoint.resume_payload, claimToken: result.claimToken }));
+                return { ok: true, continuations };
+            },
+            repairServices: async () => {
+                await ensureFence();
+                const config = await readTeamConfig(input.teamName, input.cwd);
+                return config ? reconcileCommittedTeamServices(config, input.cwd) : 'repair_required';
+            },
+            writeRun: async (sagaInput, paneAttemptId, continuations) => {
+                await ensureFence();
+                const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+                if (!pending || pending.paneAttemptId !== paneAttemptId)
+                    throw new Error('worker_activation_failed');
+                const instruction = continuations.length > 0
+                    ? continuations.map(continuation => renderRecoveryContinuationInstruction({
+                        teamName: input.teamName,
+                        workerName: sagaInput.workerName,
+                        taskId: continuation.taskId,
+                        taskVersion: continuation.taskVersion,
+                        claimToken: continuation.claimToken,
+                        sequence: continuation.sequence,
+                        resumePayload: continuation.payload,
+                    })).join('\n\n')
+                    : 'Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.';
+                await composeInitialInbox(input.teamName, sagaInput.workerName, instruction, input.cwd);
+                const record = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
+                    replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId, written_at: new Date().toISOString() };
+                const launchedPath = `${pending.gate.runPath}.launched`;
+                if (!existsSync(launchedPath)) {
+                    await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
+                    const launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
+                    if (!launched)
+                        throw new Error('startup_ack_timeout');
+                }
+                if (!pending.promptMode) {
+                    if (!await waitForPaneReady(pending.paneId))
+                        throw new Error('startup_ack_timeout');
+                    const outcome = await queueInboxInstruction({
+                        teamName: input.teamName,
+                        workerName: sagaInput.workerName,
+                        workerIndex: pending.worker.index,
+                        paneId: pending.paneId,
+                        inbox: instruction,
+                        triggerMessage: generateTriggerMessage(input.teamName, sagaInput.workerName, pending.worker.worktree_path ? '$OMC_TEAM_STATE_ROOT' : undefined),
+                        cwd: input.cwd,
+                        transportPreference: 'transport_direct',
+                        fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
+                        inboxCorrelationKey: `recovery:${sagaInput.recoveryId}`,
+                        notify: async (_target, triggerMessage) => notifyStartupInbox(pending.sessionName, pending.paneId, triggerMessage),
+                        deps: { writeWorkerInbox },
+                    });
+                    if (!outcome.ok)
+                        throw new Error(outcome.reason ?? 'worker_notify_failed');
+                }
+                pendingRecoveryPanes.delete(sagaInput.recoveryId);
+            },
+            killAttemptPane: async (paneAttemptId) => {
+                const pending = pendingRecoveryPanes.get(recoveryId);
+                if (!pending || pending.paneAttemptId !== paneAttemptId)
+                    return;
+                const cleaned = await cleanupRecoveryPaneAttempt(input, recoveryId, pending, 'recovery_saga_rollback');
+                if (!cleaned)
+                    throw new Error('worker_cleanup_incomplete');
+            },
+        };
+        const sagaInput = {
+            requestId: input.requestId,
+            recoveryId,
+            teamName: input.teamName,
+            workerName: input.workerName,
+            replacementGeneration: attempt.replacement_generation,
+            adoptionToken: attempt.adoption_token,
+            originalPaneId,
+        };
+        const result = await runRecoverySaga(sagaInput, deps);
+        return finalizeRecoveryOwnerResult(input, recoveryId, result);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const code = message === 'team_not_found'
+            ? 'team_not_found'
+            : message === 'invalid_persisted_state'
+                ? 'invalid_persisted_state'
+                : message === 'stale_state_revision'
+                    ? 'stale_state_revision'
+                    : message === 'runtime_owner_fence_lost'
+                        ? 'runtime_owner_fence_lost'
+                        : 'runtime_owner_unavailable';
+        const result = recoveryError(input, recoveryId, code, message);
+        return ownerBound && (code === 'team_not_found' || code === 'invalid_persisted_state')
+            ? await finalizeBoundRecoveryOwnerTerminal(input, recoveryId, result)
+            : code === 'team_not_found' || code === 'invalid_persisted_state'
+                ? persistRecoveryFinal(input, recoveryId, result)
+                : result;
+    }
 }
 async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
     const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
@@ -770,6 +2049,45 @@ export async function startTeamV2(config) {
             startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
         }
     }
+    const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
+    const preparedLaunches = new Map();
+    const resolveDefaultModel = (agentType) => {
+        if (agentType === 'codex')
+            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL || process.env.OMC_CODEX_DEFAULT_MODEL || undefined;
+        if (agentType === 'gemini')
+            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || undefined;
+        if (agentType === 'antigravity')
+            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || undefined;
+        if (agentType === 'grok')
+            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || undefined;
+        if (agentType === 'cursor')
+            return undefined;
+        return resolveClaudeWorkerModel();
+    };
+    for (let i = 0; i < workerNames.length; i++) {
+        const workerName = workerNames[i];
+        const taskIndex = startupByWorker.get(workerName);
+        const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
+        const assignment = taskIndex === undefined
+            ? { agentType: fallbackAgent, model: resolveDefaultModel(fallbackAgent), role: undefined }
+            : resolveTaskAssignment(config.tasks[taskIndex], resolvedRouting, pluginCfg.team?.roleRouting, resolvedBinaryPaths, fallbackAgent);
+        const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
+        const worktree = workerWorktrees.get(workerName);
+        const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
+            ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName) : undefined;
+        const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
+        const promptArgs = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
+            ? getPromptModeArgs(assignment.agentType, generatePromptModeStartupPrompt(sanitized, workerName, worktree ? '$OMC_TEAM_STATE_ROOT' : undefined, outputContract)) : [];
+        const binary = resolvedBinaryPaths[assignment.agentType];
+        if (!binary)
+            throw new Error(`No validated binary available for ${assignment.agentType}`);
+        const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
+            teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
+            model: effectiveModel,
+        }, promptArgs);
+        preparedLaunches.set(workerName, { agentType: assignment.agentType,
+            ...(assignment.role ? { role: assignment.role } : {}), descriptor });
+    }
     // Set up worker state dirs and overlays (with v2 CLI API instructions)
     try {
         for (let i = 0; i < workerNames.length; i++) {
@@ -819,6 +2137,8 @@ export async function startTeamV2(config) {
             index: i + 1,
             role: config.workerRoles?.[i]
                 ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude'),
+            worker_cli: preparedLaunches.get(wName).descriptor.provider,
+            launch_descriptor: preparedLaunches.get(wName).descriptor,
             assigned_tasks: [],
             working_dir: worktree?.path ?? leaderCwd,
             team_state_root: teamStateRoot(leaderCwd, sanitized),
@@ -834,6 +2154,7 @@ export async function startTeamV2(config) {
     // Write initial v2 config
     const teamConfig = {
         name: sanitized,
+        state_revision: 0,
         task: config.tasks.map(t => t.subject).join('; '),
         agent_type: agentTypes[0] || 'claude',
         worker_launch_mode: 'interactive',
@@ -855,9 +2176,14 @@ export async function startTeamV2(config) {
         resolved_routing: resolvedRouting,
         workspace_mode: workspaceMode,
         worktree_mode: worktreeMode,
+        service_descriptor: config.autoMerge
+            ? { schema_version: 1, service_generation: 1, service_attempt_id: randomUUID(), auto_merge_enabled: true,
+                workspace_root: leaderCwd, leader_branch: autoMergeLeaderBranch, cadence_policy: 'worker-auto-commit-v1' }
+            : { schema_version: 1, service_generation: 1, service_attempt_id: randomUUID(), auto_merge_enabled: false,
+                workspace_root: leaderCwd, cadence_policy: 'disabled' },
     };
     try {
-        await saveTeamConfig(teamConfig, leaderCwd);
+        await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
     }
     catch (error) {
         await rollbackStartedNativeWorktreeStartup({
@@ -878,6 +2204,7 @@ export async function startTeamV2(config) {
     };
     const teamManifest = {
         schema_version: 2,
+        state_revision: 0,
         name: sanitized,
         task: teamConfig.task,
         leader: {
@@ -902,6 +2229,7 @@ export async function startTeamV2(config) {
         resize_hook_name: null,
         resize_hook_target: null,
         next_worker_index: teamConfig.next_worker_index,
+        service_descriptor: teamConfig.service_descriptor,
     };
     try {
         await writeFile(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), 'utf-8');
@@ -937,11 +2265,9 @@ export async function startTeamV2(config) {
             const task = config.tasks[decision.taskIndex];
             if (!task || workerIndex < 0)
                 continue;
-            // Route the task through the team's immutable snapshot (Option E).
-            // Falls back to the round-robin agentType when the inferred role is
-            // outside the canonical vocabulary (preserves pre-patch behavior).
-            const fallbackAgent = (agentTypes[workerIndex % agentTypes.length] ?? agentTypes[0] ?? 'claude');
-            const assignment = resolveTaskAssignment(task, resolvedRouting, pluginCfg.team?.roleRouting, resolvedBinaryPaths, fallbackAgent);
+            const prepared = preparedLaunches.get(wName);
+            if (!prepared)
+                continue;
             const workerLaunch = await spawnV2Worker({
                 sessionName,
                 leaderPaneId,
@@ -949,16 +2275,15 @@ export async function startTeamV2(config) {
                 teamName: sanitized,
                 workerName: wName,
                 workerIndex,
-                agentType: assignment.agentType,
+                agentType: prepared.agentType,
+                launchDescriptor: prepared.descriptor,
                 task,
                 taskId,
                 cwd: leaderCwd,
                 workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
                 worktreePath: workersInfo[workerIndex]?.worktree_path,
                 autoMerge: Boolean(config.autoMerge),
-                resolvedBinaryPaths,
-                ...(assignment.model ? { model: assignment.model } : {}),
-                ...(assignment.role ? { role: assignment.role } : {}),
+                ...(prepared.role ? { role: prepared.role } : {}),
             });
             if (workerLaunch.paneId) {
                 workerPaneIds.push(workerLaunch.paneId);
@@ -966,7 +2291,7 @@ export async function startTeamV2(config) {
                 if (workerInfo) {
                     workerInfo.pane_id = workerLaunch.paneId;
                     workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
-                    workerInfo.worker_cli = assignment.agentType;
+                    workerInfo.worker_cli = prepared.agentType;
                     if (workerLaunch.outputFile) {
                         workerInfo.output_file = workerLaunch.outputFile;
                     }
@@ -997,7 +2322,7 @@ export async function startTeamV2(config) {
     // Persist config with pane IDs
     teamConfig.workers = workersInfo;
     try {
-        await saveTeamConfig(teamConfig, leaderCwd);
+        await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
     }
     catch (error) {
         await rollbackStartedNativeWorktreeStartup({
@@ -1044,8 +2369,11 @@ export async function startTeamV2(config) {
                 repoRoot: leaderCwd,
                 leaderBranch: autoMergeLeaderBranch,
                 cwd: leaderCwd,
+                serviceGeneration: teamConfig.service_descriptor.service_generation,
+                serviceAttemptId: teamConfig.service_descriptor.service_attempt_id,
             });
-            registerTeamOrchestrator(sanitized, orchestrator);
+            registerTeamOrchestrator(sanitized, orchestrator, { serviceGeneration: teamConfig.service_descriptor.service_generation,
+                serviceAttemptId: teamConfig.service_descriptor.service_attempt_id });
             // Register every spawned worker (named worktree mode is enforced above
             // when autoMerge is on, so worker branches exist). A single failed
             // registration makes the auto-merge contract unsafe, so fail loudly.
@@ -1131,60 +2459,20 @@ export class CircuitBreakerV2 {
 // Failure sidecars — requeue tasks from dead workers
 // ---------------------------------------------------------------------------
 /**
- * Requeue tasks from dead workers by writing failure sidecars and resetting
- * task status back to pending so they can be claimed by other workers.
+ * Compatibility wrapper that routes legacy dead-worker requeue requests through
+ * the strict runtime-owner recovery transaction.
  */
 export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
-    const logEventFailure = createSwallowedErrorLogger('team.runtime-v2.requeueDeadWorkerTasks appendTeamEvent failed');
     const sanitized = sanitizeTeamName(teamName);
-    const tasks = await listTasksFromFiles(sanitized, cwd);
-    const requeued = [];
-    const deadSet = new Set(deadWorkerNames);
-    for (const task of tasks) {
-        if (task.status !== 'in_progress')
-            continue;
-        if (!task.owner || !deadSet.has(task.owner))
-            continue;
-        // Write failure sidecar
-        const sidecarPath = absPath(cwd, `${TeamPaths.tasks(sanitized)}/${task.id}.failure.json`);
-        const sidecar = {
-            taskId: task.id,
-            lastError: `worker_dead:${task.owner}`,
-            retryCount: 0,
-            lastFailedAt: new Date().toISOString(),
-        };
-        const { writeFile } = await import('fs/promises');
-        await mkdir(absPath(cwd, TeamPaths.tasks(sanitized)), { recursive: true });
-        await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2), 'utf-8');
-        // Reset task to pending (locked to prevent race with concurrent claimTask)
-        const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
-        try {
-            const { readFileSync, writeFileSync } = await import('fs');
-            const { withFileLockSync } = await import('../lib/file-lock.js');
-            withFileLockSync(taskPath + '.lock', () => {
-                const raw = readFileSync(taskPath, 'utf-8');
-                const taskData = JSON.parse(raw);
-                // Only requeue if still in_progress — another worker may have already claimed it
-                if (taskData.status === 'in_progress') {
-                    taskData.status = 'pending';
-                    taskData.owner = undefined;
-                    taskData.claim = undefined;
-                    writeFileSync(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
-                    requeued.push(task.id);
-                }
-            });
+    const requeued = new Set();
+    for (const workerName of deadWorkerNames) {
+        const outcome = await recoverDeadWorkerV2(sanitized, cwd, { workerName });
+        if (outcome.outcome === 'recovered') {
+            for (const taskId of outcome.requeuedTaskIds)
+                requeued.add(taskId);
         }
-        catch {
-            // Task file may have been removed or lock failed; skip
-        }
-        await appendTeamEvent(sanitized, {
-            type: 'team_leader_nudge',
-            worker: 'leader-fixed',
-            task_id: task.id,
-            reason: `requeue_dead_worker:${task.owner}`,
-        }, cwd).catch(logEventFailure);
     }
-    return requeued;
+    return [...requeued];
 }
 /**
  * Post-exit handler for CLI workers that emitted a structured verdict
@@ -1546,7 +2834,109 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     const ralph = options.ralph === true;
     const timeoutMs = options.timeoutMs ?? 15_000;
     const sanitized = sanitizeTeamName(teamName);
-    const config = await readTeamConfig(sanitized, cwd);
+    const workspaceHash = createHash('sha256').update(cwd).digest('hex');
+    const lifecycleLock = absPath(cwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
+    const assertShutdownGate = async (currentConfig) => {
+        if (force)
+            return;
+        const allTasks = await listTasksFromFiles(sanitized, cwd);
+        const governance = getConfigGovernance(currentConfig);
+        const gate = {
+            total: allTasks.length,
+            pending: allTasks.filter((t) => t.status === 'pending').length,
+            blocked: allTasks.filter((t) => t.status === 'blocked').length,
+            in_progress: allTasks.filter((t) => t.status === 'in_progress').length,
+            completed: allTasks.filter((t) => t.status === 'completed').length,
+            failed: allTasks.filter((t) => t.status === 'failed').length,
+            allowed: false,
+        };
+        gate.allowed = gate.pending === 0 && gate.blocked === 0 && gate.in_progress === 0 && gate.failed === 0;
+        await appendTeamEvent(sanitized, {
+            type: 'shutdown_gate',
+            worker: 'leader-fixed',
+            reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
+        }, cwd).catch(logEventFailure);
+        if (gate.allowed)
+            return;
+        const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
+        if (!governance.cleanup_requires_all_workers_inactive) {
+            await appendTeamEvent(sanitized, {
+                type: 'team_leader_nudge',
+                worker: 'leader-fixed',
+                reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
+            }, cwd).catch(logEventFailure);
+            return;
+        }
+        if (ralph && !hasActiveWork) {
+            await appendTeamEvent(sanitized, {
+                type: 'team_leader_nudge',
+                worker: 'leader-fixed',
+                reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
+            }, cwd).catch(logEventFailure);
+            return;
+        }
+        throw new Error(`shutdown_gate_blocked:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`);
+    };
+    let ownedShutdownNonce = null;
+    let config = await withProcessIdentityFileLock(lifecycleLock, async () => {
+        const current = await migrateTeamConfigRevision(sanitized, cwd);
+        if (!current)
+            return null;
+        if (current.config.active_recovery)
+            throw new Error(`shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`);
+        if (current.config.active_scale_down)
+            throw new Error(`shutdown_blocked:active_scale_down:${current.config.active_scale_down.operation_id}`);
+        if (current.config.active_scale_up) {
+            throw new Error(`shutdown_blocked:active_scale_up:${current.config.active_scale_up.operation_id}`);
+        }
+        if (current.config.lifecycle_state === 'stopped' || current.config.lifecycle_state === 'shutting_down')
+            return current.config;
+        await assertShutdownGate(current.config);
+        const processStartedAt = currentProcessStartIdentity();
+        if (!processStartedAt)
+            throw new Error('process_start_identity_unavailable');
+        ownedShutdownNonce = randomUUID();
+        const nextRevision = current.stateRevision + 1;
+        const next = { ...current.config, lifecycle_state: 'shutting_down', state_revision: nextRevision,
+            shutdown_attempt: { nonce: ownedShutdownNonce, pid: process.pid, process_started_at: processStartedAt,
+                state_revision: nextRevision, created_at: new Date().toISOString() } };
+        if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd))
+            throw new Error('stale_state_revision');
+        return next;
+    });
+    const revalidateShutdownFence = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const current = await readRevisionedTeamConfig(sanitized, cwd);
+        if (!current || !['shutting_down', 'stopped'].includes(current.config.lifecycle_state ?? '') || current.config.active_recovery
+            || current.config.active_scale_up) {
+            throw new Error(current?.config.active_recovery
+                ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
+        }
+        return current.config;
+    });
+    const commitStoppedFence = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const current = await readRevisionedTeamConfig(sanitized, cwd);
+        if (!current || !['shutting_down', 'stopped'].includes(current.config.lifecycle_state ?? '') || current.config.active_recovery
+            || current.config.active_scale_up) {
+            throw new Error(current?.config.active_recovery
+                ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
+        }
+        if (current.config.lifecycle_state === 'stopped')
+            return;
+        const stopped = { ...current.config, lifecycle_state: 'stopped', shutdown_attempt: undefined,
+            state_revision: current.stateRevision + 1 };
+        if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd))
+            throw new Error('stale_state_revision');
+    });
+    const rollbackRejectedShutdownFence = async (expected) => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const current = await readRevisionedTeamConfig(sanitized, cwd);
+        if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
+            || current.config.active_scale_up
+            || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce)
+            return false;
+        const active = { ...current.config, lifecycle_state: 'active', shutdown_attempt: undefined,
+            state_revision: current.stateRevision + 1 };
+        return saveTeamConfigAtRevision(active, current.stateRevision, cwd);
+    });
     const finalizeAutoMerge = async () => {
         const orchestrator = getTeamOrchestrator(sanitized);
         if (orchestrator) {
@@ -1591,47 +2981,6 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         }
         await cleanupTeamState(sanitized, cwd);
         return;
-    }
-    // 1. Shutdown gate check
-    if (!force) {
-        const allTasks = await listTasksFromFiles(sanitized, cwd);
-        const governance = getConfigGovernance(config);
-        const gate = {
-            total: allTasks.length,
-            pending: allTasks.filter((t) => t.status === 'pending').length,
-            blocked: allTasks.filter((t) => t.status === 'blocked').length,
-            in_progress: allTasks.filter((t) => t.status === 'in_progress').length,
-            completed: allTasks.filter((t) => t.status === 'completed').length,
-            failed: allTasks.filter((t) => t.status === 'failed').length,
-            allowed: false,
-        };
-        gate.allowed = gate.pending === 0 && gate.blocked === 0 && gate.in_progress === 0 && gate.failed === 0;
-        await appendTeamEvent(sanitized, {
-            type: 'shutdown_gate',
-            worker: 'leader-fixed',
-            reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
-        }, cwd).catch(logEventFailure);
-        if (!gate.allowed) {
-            const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
-            if (!governance.cleanup_requires_all_workers_inactive) {
-                await appendTeamEvent(sanitized, {
-                    type: 'team_leader_nudge',
-                    worker: 'leader-fixed',
-                    reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-                }, cwd).catch(logEventFailure);
-            }
-            else if (ralph && !hasActiveWork) {
-                // Ralph policy: bypass on failure-only scenarios
-                await appendTeamEvent(sanitized, {
-                    type: 'team_leader_nudge',
-                    worker: 'leader-fixed',
-                    reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-                }, cwd).catch(logEventFailure);
-            }
-            else {
-                throw new Error(`shutdown_gate_blocked:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`);
-            }
-        }
     }
     if (force) {
         await appendTeamEvent(sanitized, {
@@ -1681,6 +3030,9 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         }
         if (rejected.length > 0 && !force) {
             const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(',');
+            if (!await rollbackRejectedShutdownFence(config)) {
+                throw new Error(`shutdown_rejected_fence_lost:${detail}`);
+            }
             throw new Error(`shutdown_rejected:${detail}`);
         }
         // Check if all workers have acked or exited
@@ -1689,6 +3041,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             break;
         await new Promise((r) => setTimeout(r, 2_000));
     }
+    config = await revalidateShutdownFence();
     // 4. Force kill remaining tmux panes
     const recordedWorkerPaneIds = config.workers
         .map((w) => w.pane_id)
@@ -1758,6 +3111,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     // cleanupTeamWorktrees touches per-worker worktrees. Also used by preserve-state
     // exits above so auto-merge shutdown is not skipped when pane liveness is unknown.
     await finalizeAutoMerge();
+    await commitStoppedFence();
     // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
     // team state directory too; it contains the metadata and root AGENTS.md backups
     // needed for a later safe cleanup attempt.

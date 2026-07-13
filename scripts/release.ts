@@ -296,6 +296,20 @@ function isMainModule(): boolean {
   return process.argv[1] ? resolve(process.argv[1]) === __filename : false;
 }
 
+function releaseNextSteps(version: string): string {
+  return `
+  git switch -c release/v${version}
+  npm run build
+  npm run plugin:shipping:verify
+  npm run plugin:shipping:stage
+  git add -- package.json package-lock.json .claude-plugin/plugin.json .claude-plugin/marketplace.json docs/CLAUDE.md CHANGELOG.md README.md docs/REFERENCE.md .github/CLAUDE.md docs/ARCHITECTURE.md .github/release-body.md
+  git commit -S -m "chore(release): bump version to v${version}"
+  git push origin HEAD:release/v${version}
+  # Open a release PR from release/v${version} to dev. The signed commit is required; do not push or merge a protected branch directly.
+  # The maintainer shipping transaction stages only the verified generated closure.
+`;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -324,12 +338,7 @@ ${clr('What it does:', c.cyan)}
   4. Runs sync-metadata to update doc badges
 
 ${clr('After running:', c.cyan)}
-  git add -A && git commit -m "chore(release): bump version to vX.Y.Z"
-  git push origin dev
-  # Wait for CI green, then:
-  git checkout main && git merge dev && git push origin main
-  git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
-  # release.yml handles npm publish + GitHub release
+${releaseNextSteps('X.Y.Z')}
 `);
     return;
   }
@@ -420,12 +429,7 @@ ${clr('After running:', c.cyan)}
   console.log(clr('\n✅ Done!', c.green));
   if (!dryRun) {
     console.log(clr('\nNext steps:', c.bold));
-    console.log(`  1. ${clr(`git add -A && git commit -m "chore(release): bump version to v${newVersion}"`, c.cyan)}`);
-    console.log(`  2. ${clr('git push origin dev', c.cyan)}`);
-    console.log('  3. Wait for CI green');
-    console.log(`  4. ${clr('git checkout main && git merge dev && git push origin main', c.cyan)}`);
-    console.log(`  5. ${clr(`git tag -a v${newVersion} -m "v${newVersion}" && git push origin v${newVersion}`, c.cyan)}`);
-    console.log('  6. release.yml handles npm publish + GitHub release automatically');
+    console.log(releaseNextSteps(newVersion));
   }
 }
 

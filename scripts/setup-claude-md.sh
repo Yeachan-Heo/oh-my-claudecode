@@ -17,6 +17,8 @@ resolve_active_plugin_root() {
   is_valid_plugin_root() {
     local candidate="$1"
     [ -d "$candidate" ] \
+      && [ -f "${candidate}/scripts/setup-claude-md.sh" ] \
+      && [ -f "${candidate}/scripts/lib/config-dir.sh" ] \
       && [ -f "${candidate}/docs/CLAUDE.md" ] \
       && [ -f "${candidate}/bridge/claude-md-coordinator.cjs" ] \
       && [ -s "${candidate}/skills/omc-reference/SKILL.md" ]
@@ -145,6 +147,9 @@ fi
 if ! ACTIVE_PLUGIN_ROOT="$(resolve_active_plugin_root)"; then
   echo "ERROR: Active plugin root lacks the required coordinator artifact and canonical source; refusing setup." >&2
   exit 1
+fi
+if [ "$ACTIVE_PLUGIN_ROOT" != "$SCRIPT_PLUGIN_ROOT" ]; then
+  exec bash "${ACTIVE_PLUGIN_ROOT}/scripts/setup-claude-md.sh" "$MODE" "$INSTALL_STYLE"
 fi
 COORDINATOR="${ACTIVE_PLUGIN_ROOT}/bridge/claude-md-coordinator.cjs"
 CANONICAL_CLAUDE_MD="${ACTIVE_PLUGIN_ROOT}/docs/CLAUDE.md"

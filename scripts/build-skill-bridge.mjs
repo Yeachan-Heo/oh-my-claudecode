@@ -19,6 +19,7 @@ const watchMode = process.argv.includes('--watch');
 const buildConfig = {
   entryPoints: ['src/hooks/learner/bridge.ts'],
   bundle: true,
+  preserveSymlinks: true,
   platform: 'node',
   target: 'node18',
   format: 'cjs',

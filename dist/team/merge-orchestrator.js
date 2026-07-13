@@ -67,6 +67,7 @@ import { appendToInbox } from './worker-bootstrap.js';
 import { appendToLeaderInbox, ensureLeaderInbox } from './leader-inbox.js';
 import { formatMergeConflictForLeader, formatRebaseConflictForWorker, } from './conflict-mailbox.js';
 import { pauseHookViaSentinel, resumeHookViaSentinel, } from './worker-commit-cadence.js';
+const liveServiceOwners = new Map();
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_DRAIN_TIMEOUT_MS = 10000;
 // ---------------------------------------------------------------------------
@@ -246,6 +247,16 @@ export async function startMergeOrchestrator(config) {
             persisted = { lastShas: {} };
         }
     }
+    const service = config.serviceGeneration === undefined || config.serviceAttemptId === undefined
+        ? undefined : { generation: config.serviceGeneration, attemptId: config.serviceAttemptId };
+    const live = liveServiceOwners.get(config.teamName);
+    if (service && live && (live.generation > service.generation || (live.generation === service.generation && live.attemptId !== service.attemptId))) {
+        throw new Error('auto_merge_service_owned_by_live_generation');
+    }
+    if (service)
+        liveServiceOwners.set(config.teamName, service);
+    const ownsService = () => !service || liveServiceOwners.get(config.teamName)?.generation === service.generation
+        && liveServiceOwners.get(config.teamName)?.attemptId === service.attemptId;
     const workers = new Map();
     const pausedWorkers = new Set(); // workers mid-rebase (cadence paused)
     const mutex = createMutex();
@@ -253,6 +264,7 @@ export async function startMergeOrchestrator(config) {
     function persistState() {
         const payload = {
             lastShas: Object.fromEntries(Array.from(workers.values()).map((w) => [w.workerName, w.lastObservedSha])),
+            ...(service ? { service } : {}),
         };
         atomicWriteJson(persistedPath, payload);
     }
@@ -448,7 +460,7 @@ export async function startMergeOrchestrator(config) {
         });
     }
     async function runPollOnce() {
-        if (stopped)
+        if (stopped || !ownsService())
             return;
         for (const entry of workers.values()) {
             // Apply per-worker exponential backoff: skip ticks based on consecutiveFailures.
@@ -560,6 +572,8 @@ export async function startMergeOrchestrator(config) {
     // ----- Public handle -----
     return {
         async registerWorker(workerName) {
+            if (!ownsService())
+                return;
             if (workers.has(workerName))
                 return;
             const workerBranch = getBranchName(config.teamName, workerName);
@@ -594,6 +608,8 @@ export async function startMergeOrchestrator(config) {
             }
         },
         async unregisterWorker(workerName) {
+            if (!ownsService())
+                return;
             workers.delete(workerName);
             pausedWorkers.delete(workerName);
             try {
@@ -607,6 +623,8 @@ export async function startMergeOrchestrator(config) {
             await runPollOnce();
         },
         async drainAndStop() {
+            if (!ownsService())
+                return { unmerged: [] };
             stopped = true;
             clearInterval(interval);
             const start = Date.now();
@@ -668,6 +686,8 @@ export async function startMergeOrchestrator(config) {
                     // best-effort
                 }
             }
+            if (service && ownsService())
+                liveServiceOwners.delete(config.teamName);
             return { unmerged };
         },
         getState() {

@@ -46,7 +46,7 @@ export function resolveNodeBinary() {
     // symlink (for example /opt/homebrew/bin/node instead of a Cellar version).
     try {
         const cmd = process.platform === 'win32' ? 'where node' : 'which node';
-        const result = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' })
+        const result = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe', windowsHide: true })
             .trim()
             .split('\n')[0]
             .trim();

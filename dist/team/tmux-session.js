@@ -133,7 +133,12 @@ async function cmuxSplitSurface(targetSurfaceId, direction, _cwd) {
     if (process.env.CMUX_WORKSPACE_ID)
         args.push('--workspace', process.env.CMUX_WORKSPACE_ID);
     const result = await cmuxExecAsync(args);
-    return parseCmuxSurfaceId(result.stdout);
+    let paneId = null;
+    try {
+        paneId = parseCmuxSurfaceId(result.stdout);
+    }
+    catch { /* successful split with unparseable identity */ }
+    return { ...result, paneId };
 }
 async function cmuxSendSurface(surfaceId, text) {
     // cmux 0.64.x targets a specific surface with the dedicated
@@ -177,6 +182,154 @@ async function cmuxCaptureSurface(surfaceId) {
 }
 async function cmuxCloseSurface(surfaceId) {
     await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
+}
+const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+function isExactOpaqueCmuxIdentifier(value) {
+    return typeof value === 'string' && value.length > 0 && value === value.trim() && !/[\x00-\x1f\x7f\s]/.test(value);
+}
+function parseCmuxResourceIds(output, collectionName) {
+    let parsed;
+    try {
+        parsed = JSON.parse(output);
+    }
+    catch {
+        return null;
+    }
+    const entries = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray(parsed[collectionName])
+            ? parsed[collectionName]
+            : null;
+    if (!entries)
+        return null;
+    const ids = [];
+    for (const entry of entries) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+            return null;
+        const id = entry.id;
+        if (!isExactOpaqueCmuxIdentifier(id))
+            return null;
+        if (!ids.includes(id))
+            ids.push(id);
+    }
+    return ids;
+}
+const defaultMailboxTargetOwnershipDependencies = {
+    tmuxExec: (args) => tmuxExecAsync(args),
+    cmuxExec: cmuxExecAsync,
+};
+/**
+ * Proves that a configured direct-mailbox target still belongs to its exact
+ * provider target. This performs read-only provider queries and never touches
+ * a candidate pane/surface.
+ */
+export async function verifyTeamTargetOwnership(target, dependencies = defaultMailboxTargetOwnershipDependencies) {
+    const expectedProvider = target.providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+    if (target.provider !== expectedProvider)
+        return { kind: 'provider_mismatch' };
+    if (target.provider === 'tmux') {
+        if (typeof target.providerTarget !== 'string'
+            || target.providerTarget.length === 0
+            || target.providerTarget !== target.providerTarget.trim()
+            || !TMUX_MAILBOX_TARGET.test(target.providerTarget)
+            || !TMUX_MAILBOX_PANE_ID.test(target.paneId)) {
+            return { kind: 'unavailable' };
+        }
+        try {
+            const result = await dependencies.tmuxExec([
+                'list-panes', '-t', target.providerTarget, '-F', '#{pane_id}',
+            ]);
+            const paneIds = [];
+            for (const line of result.stdout.split(/\r?\n/)) {
+                const paneId = line.trim();
+                if (!paneId)
+                    continue;
+                if (!TMUX_MAILBOX_PANE_ID.test(paneId))
+                    return { kind: 'unavailable' };
+                if (!paneIds.includes(paneId))
+                    paneIds.push(paneId);
+            }
+            if (paneIds.length === 0)
+                return { kind: 'unavailable' };
+            return paneIds.includes(target.paneId)
+                ? { kind: 'owned', provider: 'tmux', providerTarget: target.providerTarget, paneId: target.paneId }
+                : { kind: 'foreign' };
+        }
+        catch {
+            return { kind: 'unavailable' };
+        }
+    }
+    const workspace = target.providerTarget.slice('cmux:'.length);
+    if (!isExactOpaqueCmuxIdentifier(workspace)
+        || !isExactOpaqueCmuxIdentifier(target.paneId)
+        || TMUX_MAILBOX_PANE_ID.test(target.paneId)) {
+        return { kind: 'unavailable' };
+    }
+    try {
+        const panes = parseCmuxResourceIds((await dependencies.cmuxExec(['--json', 'list-panes', '--workspace', workspace])).stdout, 'panes');
+        if (!panes || panes.length === 0)
+            return { kind: 'unavailable' };
+        for (const pane of panes) {
+            const surfaces = parseCmuxResourceIds((await dependencies.cmuxExec([
+                '--json', 'list-pane-surfaces', '--workspace', workspace, '--pane', pane,
+            ])).stdout, 'surfaces');
+            if (!surfaces)
+                return { kind: 'unavailable' };
+            if (surfaces.includes(target.paneId)) {
+                return {
+                    kind: 'owned',
+                    provider: 'cmux',
+                    providerTarget: target.providerTarget,
+                    paneId: target.paneId,
+                };
+            }
+        }
+        return { kind: 'foreign' };
+    }
+    catch {
+        return { kind: 'unavailable' };
+    }
+}
+const defaultDirectMailboxEffectDependencies = {
+    sendWorker: sendToWorker,
+    sendLeader: injectToLeaderPane,
+};
+/**
+ * Direct-mailbox-only adapter. Once the public boolean transport has been
+ * called, a false result or exception is conservatively treated as uncertain.
+ */
+export async function invokeDirectMailboxEffect(target, message, dependencies = defaultDirectMailboxEffectDependencies) {
+    if (!target.paneId || !message)
+        return { kind: 'not_attempted', reason: 'mailbox_target_missing' };
+    if (target.provider === 'cmux' && !isCmuxContext()) {
+        return { kind: 'not_attempted', reason: 'mailbox_membership_unresolvable' };
+    }
+    try {
+        const notified = target.recipientRole === 'leader'
+            ? await dependencies.sendLeader(target.providerTarget, target.paneId, message)
+            : await dependencies.sendWorker(target.providerTarget, target.paneId, message);
+        return notified
+            ? {
+                kind: 'confirmed',
+                transport: 'tmux_send_keys',
+                reason: target.recipientRole === 'leader' ? 'leader_pane_notified' : 'worker_pane_notified',
+            }
+            : {
+                kind: 'attempted_unconfirmed',
+                transport: 'tmux_send_keys',
+                reason: 'notification_delivery_uncertain',
+                cause: 'returned_false',
+            };
+    }
+    catch {
+        return {
+            kind: 'attempted_unconfirmed',
+            transport: 'tmux_send_keys',
+            reason: 'notification_delivery_uncertain',
+            cause: 'threw',
+        };
+    }
 }
 /** Shells known to support the `-lc 'exec "$@"'` invocation pattern. */
 const SUPPORTED_POSIX_SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'ksh']);
@@ -302,6 +455,23 @@ function paneCurrentCommandLooksReady(command) {
     return SUPPORTED_POSIX_SHELLS.has(normalized)
         || ['cmd', 'powershell', 'pwsh', 'nu', 'elvish'].includes(normalized);
 }
+async function getPaneCurrentCommandStatus(paneId) {
+    try {
+        const result = await tmuxCmdAsync([
+            'display-message', '-p', '-t', paneId,
+            '#{pane_dead} #{pane_current_command}',
+        ], { timeout: 1000 });
+        const status = result.stdout.trim();
+        const [dead, ...commandParts] = status.split(/\s+/);
+        return { dead: dead === '1', command: commandParts.join(' ') };
+    }
+    catch {
+        return null;
+    }
+}
+function paneCurrentCommandLooksSubmitted(command) {
+    return command.length > 0 && !paneCurrentCommandLooksReady(command);
+}
 async function waitForShellReady(paneId, opts = {}) {
     if (isCmuxSurfaceTarget(paneId))
         return true;
@@ -315,22 +485,14 @@ async function waitForShellReady(paneId, opts = {}) {
     const deadline = Date.now() + timeoutMs;
     let lastStatus = '';
     while (Date.now() < deadline) {
-        try {
-            const result = await tmuxCmdAsync([
-                'display-message', '-p', '-t', paneId,
-                '#{pane_dead} #{pane_current_command}',
-            ], { timeout: 1000 });
-            lastStatus = result.stdout.trim();
-            const [dead, ...commandParts] = lastStatus.split(/\s+/);
-            if (dead === '1')
+        const status = await getPaneCurrentCommandStatus(paneId);
+        if (status) {
+            lastStatus = `${status.dead ? '1' : '0'} ${status.command}`.trim();
+            if (status.dead)
                 return false;
-            const currentCommand = commandParts.join(' ');
-            if (currentCommand && paneCurrentCommandLooksReady(currentCommand)) {
+            if (paneCurrentCommandLooksReady(status.command)) {
                 return true;
             }
-        }
-        catch (error) {
-            lastStatus = error instanceof Error ? error.message : String(error);
         }
         await sleep(pollIntervalMs);
     }
@@ -380,6 +542,13 @@ async function verifyWorkerStartCommandSubmitted(paneId, startCmd, opts = {}) {
         const commandStillBuffered = normalizedCaptured.includes(expected)
             || (compactExpected.length > 0 && normalizeTmuxCaptureForDelivery(captured).includes(compactExpected));
         if (!commandStillBuffered) {
+            return true;
+        }
+        const status = await getPaneCurrentCommandStatus(paneId);
+        if (status?.dead) {
+            return false;
+        }
+        if (status && paneCurrentCommandLooksSubmitted(status.command)) {
             return true;
         }
         const remainingMs = deadline - Date.now();
@@ -631,44 +800,37 @@ export function spawnBridgeInSession(tmuxSession, bridgeScriptPath, configFilePa
         .join(' ');
     tmuxExec(['send-keys', '-t', tmuxSession, cmd, 'Enter'], { stripTmux: true, stdio: 'pipe', timeout: 5000 });
 }
-/**
- * Create a tmux team topology for a team leader/worker layout.
- *
- * When running inside a classic tmux session, creates splits in the CURRENT
- * window so panes appear immediately in the user's view. When options.newWindow
- * is true, creates a detached dedicated tmux window first and then splits worker
- * panes there.
- *
- * When running inside cmux (CMUX_SURFACE_ID without TMUX), creates native
- * cmux splits from the current surface. When running in a plain terminal, falls
- * back to a detached tmux session. Returns sessionName in "session:window" form
- * for tmux and "cmux:<workspace>" form for cmux.
- *
- * Layout: leader pane on the left, worker panes stacked vertically on the right.
- * IMPORTANT: Uses pane IDs (%N format) not pane indices for stable targeting.
- */
-/**
- * Split a new worker pane off `splitTarget`, honoring the active multiplexer.
- *
- * Under cmux a worker MUST be a native cmux surface (UUID), not a tmux pane id
- * (`%N`). Otherwise spawnWorkerInPane()/waitForShellReady() classify the worker
- * as a tmux pane, poll tmux for shell readiness, and time out after 5s with
- * `worker_start_shell_not_ready` — abandoning the worker's git worktree.
- * createTeamSession() already branches this way for panes created up front; the
- * on-demand worker spawns in both team runtimes must do the same. (#3267)
- */
-export async function splitTeamWorkerPane(splitTarget, direction, cwd) {
-    if (isCmuxContext()) {
-        return cmuxSplitSurface(splitTarget, direction, cwd);
+export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd) {
+    const provider = isCmuxContext() ? 'cmux' : 'tmux';
+    try {
+        if (provider === 'cmux') {
+            const splitResult = await cmuxSplitSurface(splitTarget, direction, cwd);
+            return { commandSucceeded: true, provider, splitTarget, direction, rawOutput: splitResult.stdout,
+                stderr: splitResult.stderr, paneId: splitResult.paneId };
+        }
+        const splitType = direction === 'right' ? '-h' : '-v';
+        const splitResult = await tmuxExecAsync([
+            'split-window', splitType, '-t', splitTarget,
+            '-d', '-P', '-F', '#{pane_id}',
+            '-c', cwd,
+            ...workerPaneShellCommand(),
+        ]);
+        const rawOutput = splitResult.stdout;
+        const candidate = rawOutput.split('\n')[0]?.trim() ?? '';
+        return { commandSucceeded: true, provider, splitTarget, direction, rawOutput, stderr: splitResult.stderr,
+            paneId: /^%\d+$/.test(candidate) ? candidate : null };
     }
-    const splitType = direction === 'right' ? '-h' : '-v';
-    const splitResult = await tmuxExecAsync([
-        'split-window', splitType, '-t', splitTarget,
-        '-d', '-P', '-F', '#{pane_id}',
-        '-c', cwd,
-        ...workerPaneShellCommand(),
-    ]);
-    return splitResult.stdout.split('\n')[0]?.trim() || null;
+    catch (error) {
+        const failure = error;
+        return { commandSucceeded: false, provider, splitTarget, direction,
+            rawOutput: typeof failure.stdout === 'string' ? failure.stdout : '',
+            stderr: typeof failure.stderr === 'string' ? failure.stderr
+                : typeof failure.message === 'string' ? failure.message : String(error),
+            paneId: null };
+    }
+}
+export async function splitTeamWorkerPane(splitTarget, direction, cwd) {
+    return (await splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd)).paneId;
 }
 export async function createTeamSession(teamName, workerCount, cwd, options = {}) {
     const multiplexerContext = detectTeamMultiplexerContext();
@@ -786,7 +948,10 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
         const splitTarget = i === 0 ? leaderPaneId : workerPaneIds[i - 1];
         if (inCmux) {
             const direction = i === 0 ? 'right' : 'down';
-            workerPaneIds.push(await cmuxSplitSurface(splitTarget, direction, cwd));
+            const split = await cmuxSplitSurface(splitTarget, direction, cwd);
+            if (!split.paneId)
+                throw new Error(`Failed to resolve cmux surface id: ${JSON.stringify(split.stdout.trim())}`);
+            workerPaneIds.push(split.paneId);
             continue;
         }
         const splitType = i === 0 ? '-h' : '-v';
@@ -1216,7 +1381,12 @@ export async function injectToLeaderPane(sessionName, leaderPaneId, message) {
         }
         const captured = await capturePaneAsync(leaderPaneId);
         if (paneHasActiveTask(captured)) {
-            await tmuxExecAsync(['send-keys', '-t', leaderPaneId, 'C-c']);
+            if (isCmuxSurfaceTarget(leaderPaneId)) {
+                await cmuxSendSurfaceKey(leaderPaneId, 'C-c');
+            }
+            else {
+                await tmuxExecAsync(['send-keys', '-t', leaderPaneId, 'C-c']);
+            }
             await new Promise(r => setTimeout(r, 250));
         }
     }

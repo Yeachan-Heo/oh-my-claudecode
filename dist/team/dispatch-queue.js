@@ -36,6 +36,22 @@ function isDispatchKind(value) {
 function isDispatchStatus(value) {
     return value === 'pending' || value === 'notified' || value === 'delivered' || value === 'failed';
 }
+function isDispatchTransportPreference(value) {
+    return value === 'hook_preferred_with_fallback' || value === 'transport_direct' || value === 'prompt_stdin';
+}
+function isPlainRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        && Object.getPrototypeOf(value) === Object.prototype;
+}
+function isStrictText(value) {
+    return typeof value === 'string' && value.trim() !== '' && value === value.trim();
+}
+function isStrictTimestamp(value) {
+    return isStrictText(value) && Number.isFinite(Date.parse(value));
+}
+function isStrictNonNegativeInteger(value) {
+    return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
 // ── Lock ───────────────────────────────────────────────────────────────────
 export function resolveDispatchLockTimeoutMs(env = process.env) {
     const raw = env[OMC_DISPATCH_LOCK_TIMEOUT_ENV];
@@ -163,6 +179,198 @@ export function normalizeDispatchRequest(teamName, raw, nowIso = new Date().toIS
         failed_at: typeof raw.failed_at === 'string' && raw.failed_at !== '' ? raw.failed_at : undefined,
         last_reason: typeof raw.last_reason === 'string' && raw.last_reason !== '' ? raw.last_reason : undefined,
     };
+}
+function strictMalformedRow(rowIndex, field) {
+    return { kind: 'malformed_row', rowIndex, field };
+}
+function materializeStrictDispatchRequest(raw) {
+    const request = {
+        request_id: raw.request_id,
+        kind: raw.kind,
+        team_name: raw.team_name,
+        to_worker: raw.to_worker,
+        trigger_message: raw.trigger_message,
+        transport_preference: raw.transport_preference,
+        fallback_allowed: raw.fallback_allowed,
+        status: raw.status,
+        attempt_count: raw.attempt_count,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
+    };
+    if ('worker_index' in raw)
+        request.worker_index = raw.worker_index;
+    if ('pane_id' in raw)
+        request.pane_id = raw.pane_id;
+    if ('message_id' in raw)
+        request.message_id = raw.message_id;
+    if ('inbox_correlation_key' in raw)
+        request.inbox_correlation_key = raw.inbox_correlation_key;
+    if ('notified_at' in raw)
+        request.notified_at = raw.notified_at;
+    if ('delivered_at' in raw)
+        request.delivered_at = raw.delivered_at;
+    if ('failed_at' in raw)
+        request.failed_at = raw.failed_at;
+    if ('last_reason' in raw)
+        request.last_reason = raw.last_reason;
+    return request;
+}
+function validateStrictDispatchRow(teamName, raw, rowIndex) {
+    if (!isPlainRecord(raw))
+        return strictMalformedRow(rowIndex, '$');
+    if (!isStrictText(raw.request_id))
+        return strictMalformedRow(rowIndex, 'request_id');
+    if (typeof raw.team_name !== 'string' || raw.team_name === '')
+        return strictMalformedRow(rowIndex, 'team_name');
+    if (raw.team_name !== teamName)
+        return { kind: 'team_mismatch', rowIndex };
+    if (!isDispatchKind(raw.kind))
+        return { kind: 'invalid_kind', rowIndex };
+    if (!isStrictText(raw.to_worker))
+        return strictMalformedRow(rowIndex, 'to_worker');
+    if (!isStrictText(raw.trigger_message))
+        return strictMalformedRow(rowIndex, 'trigger_message');
+    if (!isDispatchTransportPreference(raw.transport_preference))
+        return strictMalformedRow(rowIndex, 'transport_preference');
+    if (typeof raw.fallback_allowed !== 'boolean')
+        return strictMalformedRow(rowIndex, 'fallback_allowed');
+    if (!isDispatchStatus(raw.status))
+        return { kind: 'invalid_status', rowIndex };
+    if (!isStrictNonNegativeInteger(raw.attempt_count))
+        return strictMalformedRow(rowIndex, 'attempt_count');
+    if (!isStrictTimestamp(raw.created_at))
+        return strictMalformedRow(rowIndex, 'created_at');
+    if (!isStrictTimestamp(raw.updated_at))
+        return strictMalformedRow(rowIndex, 'updated_at');
+    if (raw.kind === 'mailbox' && !isStrictText(raw.message_id))
+        return strictMalformedRow(rowIndex, 'message_id');
+    if ('message_id' in raw && !isStrictText(raw.message_id))
+        return strictMalformedRow(rowIndex, 'message_id');
+    if ('worker_index' in raw && !isStrictNonNegativeInteger(raw.worker_index))
+        return strictMalformedRow(rowIndex, 'worker_index');
+    if ('pane_id' in raw && !isStrictText(raw.pane_id))
+        return strictMalformedRow(rowIndex, 'pane_id');
+    if ('inbox_correlation_key' in raw && !isStrictText(raw.inbox_correlation_key)) {
+        return strictMalformedRow(rowIndex, 'inbox_correlation_key');
+    }
+    if ('notified_at' in raw && !isStrictTimestamp(raw.notified_at))
+        return strictMalformedRow(rowIndex, 'notified_at');
+    if ('delivered_at' in raw && !isStrictTimestamp(raw.delivered_at))
+        return strictMalformedRow(rowIndex, 'delivered_at');
+    if ('failed_at' in raw && !isStrictTimestamp(raw.failed_at))
+        return strictMalformedRow(rowIndex, 'failed_at');
+    if ('last_reason' in raw && typeof raw.last_reason !== 'string')
+        return strictMalformedRow(rowIndex, 'last_reason');
+    return materializeStrictDispatchRequest(raw);
+}
+async function readStrictDispatchStore(teamName, cwd) {
+    const path = absPath(cwd, TeamPaths.dispatchRequests(teamName));
+    let parsed;
+    try {
+        parsed = JSON.parse(await readFile(path, 'utf8'));
+    }
+    catch (error) {
+        const code = error.code;
+        return code === 'ENOENT'
+            ? { kind: 'store_missing' }
+            : { kind: 'malformed_store', cause: 'json' };
+    }
+    if (!Array.isArray(parsed))
+        return { kind: 'malformed_store', cause: 'non_array' };
+    const rawRows = [];
+    const requests = [];
+    for (let rowIndex = 0; rowIndex < parsed.length; rowIndex += 1) {
+        const raw = parsed[rowIndex];
+        const validated = validateStrictDispatchRow(teamName, raw, rowIndex);
+        if (!('request_id' in validated))
+            return validated;
+        rawRows.push(raw);
+        requests.push(validated);
+    }
+    return { kind: 'valid_store', rawRows, requests };
+}
+function lookupStrictDispatchRequest(store, requestId) {
+    const indexesByRequestId = new Map();
+    for (const [rowIndex, request] of store.requests.entries()) {
+        const indexes = indexesByRequestId.get(request.request_id) ?? [];
+        indexes.push(rowIndex);
+        indexesByRequestId.set(request.request_id, indexes);
+    }
+    const requestedIndexes = indexesByRequestId.get(requestId) ?? [];
+    if (requestedIndexes.length > 1) {
+        return { kind: 'duplicate_request_id', requestId, rowIndexes: requestedIndexes };
+    }
+    const duplicateIndexes = [...indexesByRequestId.values()].filter((indexes) => indexes.length > 1).flat();
+    if (duplicateIndexes.length > 0)
+        return { kind: 'ambiguous_request', rowIndexes: duplicateIndexes };
+    if (requestedIndexes.length === 0)
+        return { kind: 'request_missing' };
+    const rowIndex = requestedIndexes[0];
+    const request = store.requests[rowIndex];
+    if (request.kind !== 'mailbox')
+        return { kind: 'invalid_kind', rowIndex };
+    return { kind: 'valid', request, rowIndex };
+}
+async function readStrictDispatchRequestWithIndex(teamName, requestId, cwd) {
+    const store = await readStrictDispatchStore(teamName, cwd);
+    if (store.kind !== 'valid_store')
+        return { read: store };
+    return { read: lookupStrictDispatchRequest(store, requestId), store };
+}
+/**
+ * Reads raw dispatch evidence for the direct mailbox authorization boundary.
+ * Unlike readDispatchRequest, it neither defaults nor rewrites persisted data.
+ */
+export async function readDispatchRequestStrict(teamName, requestId, cwd) {
+    const { read } = await readStrictDispatchRequestWithIndex(teamName, requestId, cwd);
+    if (read.kind === 'valid')
+        return { kind: 'valid', request: { ...read.request } };
+    return read;
+}
+/**
+ * Patches only a uniquely validated pending mailbox request. Invalid or
+ * ambiguous persisted stores are left byte-for-byte untouched.
+ */
+export async function patchPendingDispatchReason(teamName, requestId, reason, cwd) {
+    if (!existsSync(absPath(cwd, TeamPaths.root(teamName))))
+        return { kind: 'missing' };
+    try {
+        return await withDispatchLock(teamName, cwd, async () => {
+            const { read, store } = await readStrictDispatchRequestWithIndex(teamName, requestId, cwd);
+            if (read.kind === 'store_missing' || read.kind === 'request_missing')
+                return { kind: 'missing' };
+            if (read.kind !== 'valid')
+                return { kind: 'unsafe', read };
+            if (!store)
+                return { kind: 'write_failed' };
+            if (read.request.status !== 'pending')
+                return { kind: 'not_pending', request: { ...read.request } };
+            const nowIso = new Date().toISOString();
+            const nextRows = store.rawRows.map((row) => ({ ...row }));
+            nextRows[read.rowIndex] = {
+                ...nextRows[read.rowIndex],
+                last_reason: reason,
+                updated_at: nowIso,
+            };
+            try {
+                atomicWriteJson(absPath(cwd, TeamPaths.dispatchRequests(teamName)), nextRows);
+            }
+            catch {
+                return { kind: 'write_failed' };
+            }
+            return {
+                kind: 'patched',
+                request: {
+                    ...read.request,
+                    last_reason: reason,
+                    updated_at: nowIso,
+                },
+            };
+        });
+    }
+    catch {
+        return { kind: 'write_failed' };
+    }
 }
 // ── Dedup ──────────────────────────────────────────────────────────────────
 function equivalentPendingDispatch(existing, input) {

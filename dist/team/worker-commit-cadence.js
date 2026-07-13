@@ -14,6 +14,21 @@ import { existsSync, watch as fsWatch } from 'fs';
 import { readFile, writeFile, mkdir, unlink } from 'fs/promises';
 import { join, dirname } from 'path';
 import { exec } from 'child_process';
+const cadenceOwners = new Map();
+function ownsCadence(ctx) {
+    const current = cadenceOwners.get(ctx.worktreePath);
+    return !current || ctx.serviceGeneration === undefined
+        || (current.serviceGeneration === ctx.serviceGeneration && current.attemptId === ctx.attemptId);
+}
+function registerCadenceOwner(ctx) {
+    if (ctx.serviceGeneration === undefined || ctx.attemptId === undefined)
+        return true;
+    const current = cadenceOwners.get(ctx.worktreePath);
+    if (current && current.serviceGeneration > ctx.serviceGeneration)
+        return false;
+    cadenceOwners.set(ctx.worktreePath, { serviceGeneration: ctx.serviceGeneration, attemptId: ctx.attemptId });
+    return true;
+}
 // ---------------------------------------------------------------------------
 // Internal constants
 // ---------------------------------------------------------------------------
@@ -219,6 +234,8 @@ export function startFallbackPoller(worktreePath, workerName, opts) {
  * callers that need the poller should call startFallbackPoller directly.
  */
 export async function installCommitCadence(ctx) {
+    if (!registerCadenceOwner(ctx))
+        return { method: 'none' };
     if (!ctx.enabled) {
         return { method: 'none' };
     }
@@ -233,26 +250,42 @@ export async function installCommitCadence(ctx) {
  * Removes the auto-commit PostToolUse hook from .claude/settings.json.
  * For fallback-poll workers the caller is responsible for stopping the poller handle.
  */
-export async function uninstallCommitCadence(ctx) {
-    if (ctx.agentType !== 'claude')
+export async function uninstallCommitCadence(ctx, io = { readFile, writeFile }) {
+    if (!ownsCadence(ctx))
         return;
+    const owner = cadenceOwners.get(ctx.worktreePath);
+    const ownsRegisteredGeneration = owner && ctx.serviceGeneration !== undefined
+        && owner.serviceGeneration === ctx.serviceGeneration && owner.attemptId === ctx.attemptId;
+    if (ctx.agentType !== 'claude') {
+        if (ownsRegisteredGeneration)
+            cadenceOwners.delete(ctx.worktreePath);
+        return;
+    }
     const settingsPath = join(ctx.worktreePath, '.claude', 'settings.json');
+    let raw;
     try {
-        const raw = await readFile(settingsPath, 'utf-8');
-        const parsed = JSON.parse(raw);
-        const filtered = (parsed.hooks?.PostToolUse ?? []).filter((h) => h.matcher !== HOOK_MATCHER);
-        const updated = {
-            ...parsed,
-            hooks: {
-                ...parsed.hooks,
-                PostToolUse: filtered,
-            },
-        };
-        await writeFile(settingsPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+        raw = await io.readFile(settingsPath, 'utf-8');
     }
-    catch {
-        // File absent — nothing to uninstall.
+    catch (error) {
+        if (typeof error === 'object' && error !== null && error.code === 'ENOENT') {
+            if (ownsRegisteredGeneration)
+                cadenceOwners.delete(ctx.worktreePath);
+            return;
+        }
+        throw error;
     }
+    const parsed = JSON.parse(raw);
+    const filtered = (parsed.hooks?.PostToolUse ?? []).filter((h) => h.matcher !== HOOK_MATCHER);
+    const updated = {
+        ...parsed,
+        hooks: {
+            ...parsed.hooks,
+            PostToolUse: filtered,
+        },
+    };
+    await io.writeFile(settingsPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+    if (ownsRegisteredGeneration)
+        cadenceOwners.delete(ctx.worktreePath);
 }
 /**
  * Pauses commit cadence by touching the sentinel file.

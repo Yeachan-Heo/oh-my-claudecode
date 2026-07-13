@@ -34,6 +34,17 @@ export function generateMailboxTriggerMessage(teamName, workerName, count = 1, t
     }
     return `${normalizedCount} new msg(s). Read ${mailboxPath}, act now, report concrete progress.`;
 }
+/** Render owner-adopted continuation data only after the activation gate opens. */
+export function renderRecoveryContinuationInstruction(instruction) {
+    const checkpoint = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${instruction.teamName}\\",\\"task_id\\":\\"${instruction.taskId}\\",\\"worker\\":\\"${instruction.workerName}\\",\\"claim_token\\":\\"${instruction.claimToken}\\",\\"task_version\\":${instruction.taskVersion},\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
+    return [
+        '## Recovery Continuation',
+        `You own adopted task ${instruction.taskId} at checkpoint sequence ${instruction.sequence}.`,
+        'Resume only from this owner-provided safe boundary; do not claim the task again or alter its lifecycle ownership.',
+        `Checkpoint payload: \`${JSON.stringify(instruction.resumePayload)}\``,
+        `Before a risky boundary and before yielding, publish the next authenticated checkpoint: \`${checkpoint}\`.`,
+    ].join('\n');
+}
 function agentTypeGuidance(agentType) {
     const teamApiCommand = formatOmcCliInvocation('team api');
     const claimTaskCommand = formatOmcCliInvocation('team api claim-task');
@@ -111,6 +122,7 @@ export function generateWorkerOverlay(params) {
     const releaseClaimCommand = formatOmcCliInvocation(`team api release-task-claim --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"claim_token\\":\\"<claim_token>\\",\\"worker\\":\\"${workerName}\\"}" --json`);
     const mailboxListCommand = formatOmcCliInvocation(`team api mailbox-list --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\"}" --json`);
     const mailboxDeliveredCommand = formatOmcCliInvocation(`team api mailbox-mark-delivered --input "{\\"team_name\\":\\"${teamName}\\",\\"worker\\":\\"${workerName}\\",\\"message_id\\":\\"<id>\\"}" --json`);
+    const checkpointTaskCommand = formatOmcCliInvocation(`team api write-task-checkpoint --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName}\\",\\"claim_token\\":\\"<claim_token>\\",\\"task_version\\":<current_task_version>,\\"sequence\\":<next_sequence>,\\"resume_payload\\":<safe_boundary_json>}" --json`);
     const teamApiCommand = formatOmcCliInvocation('team api');
     const teamCommand = formatOmcCliInvocation('team');
     const taskList = sanitizedTasks.length > 0
@@ -139,6 +151,11 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
    - On success: \`${completeTaskCommand}\`
    - On failure: \`${failTaskCommand}\`
 5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.
+
+## Recovery-safe Boundaries
+- While a task is claimed, publish an authenticated checkpoint before a risky operation, before handoff, and before stopping: \`${checkpointTaskCommand}\`.
+- The resume payload must describe a completed safe boundary and the exact next action; never include credentials or future recovery IDs.
+- Checkpoint publication is worker guidance only. Recovery activation is enforced by the runtime wrapper, not by prompt compliance.
 
 ## Identity
 - **Team**: ${teamName}

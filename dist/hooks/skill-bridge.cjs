@@ -71,6 +71,7 @@ var OmcPaths = {
 var MAX_WORKTREE_CACHE_SIZE = 8;
 var worktreeCacheMap = /* @__PURE__ */ new Map();
 var toplevelCacheMap = /* @__PURE__ */ new Map();
+var superprojectCacheMap = /* @__PURE__ */ new Map();
 var workspaceCacheMap = /* @__PURE__ */ new Map();
 function findWorkspaceRoot(startDir) {
   if (process.env.OMC_DISABLE_MULTIREPO === "1") return null;
@@ -126,9 +127,24 @@ function readWorkspaceMarkerConfig(workspaceRoot) {
     return {};
   }
 }
+function isDefinitiveNonGitError(error) {
+  if (!error || typeof error !== "object") return false;
+  const { status, stderr } = error;
+  if (status !== 128) return false;
+  const output = typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
+  return /not a git repository/i.test(output);
+}
 function resolveSuperprojectRoot(cwd) {
+  const cacheKey = (0, import_path2.resolve)(cwd);
+  if (superprojectCacheMap.has(cacheKey)) {
+    const cached = superprojectCacheMap.get(cacheKey) ?? null;
+    superprojectCacheMap.delete(cacheKey);
+    superprojectCacheMap.set(cacheKey, cached);
+    return cached;
+  }
   let anchor = null;
-  let probeCwd = cwd;
+  let probeCwd = cacheKey;
+  let completed = false;
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
@@ -136,14 +152,26 @@ function resolveSuperprojectRoot(cwd) {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
         timeout: 5e3
       }).trim();
-    } catch {
+    } catch (error) {
+      completed = depth === 0 && isDefinitiveNonGitError(error);
       break;
     }
-    if (!superRoot) break;
+    if (!superRoot) {
+      completed = true;
+      break;
+    }
     anchor = superRoot;
     probeCwd = superRoot;
+  }
+  if (completed) {
+    if (superprojectCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = superprojectCacheMap.keys().next().value;
+      if (oldest !== void 0) superprojectCacheMap.delete(oldest);
+    }
+    superprojectCacheMap.set(cacheKey, anchor);
   }
   return anchor;
 }
@@ -164,6 +192,7 @@ function getGitTopLevel(cwd) {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       timeout: 5e3
     }).trim();
     if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
@@ -217,7 +246,8 @@ function getProjectIdentifier(worktreeRoot) {
     const remoteUrl = (0, import_child_process.execSync)("git remote get-url origin", {
       cwd: root,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     }).trim();
     source = remoteUrl || root;
   } catch {
@@ -229,6 +259,7 @@ function getProjectIdentifier(worktreeRoot) {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       timeout: 5e3
     }).trim();
     const isGitDir = (0, import_path2.basename)(commonDir) === ".git";

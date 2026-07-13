@@ -160,6 +160,7 @@ var OmcPaths = {
 var MAX_WORKTREE_CACHE_SIZE = 8;
 var worktreeCacheMap = /* @__PURE__ */ new Map();
 var toplevelCacheMap = /* @__PURE__ */ new Map();
+var superprojectCacheMap = /* @__PURE__ */ new Map();
 var workspaceCacheMap = /* @__PURE__ */ new Map();
 function findWorkspaceRoot(startDir) {
   if (process.env.OMC_DISABLE_MULTIREPO === "1") return null;
@@ -215,9 +216,24 @@ function readWorkspaceMarkerConfig(workspaceRoot) {
     return {};
   }
 }
+function isDefinitiveNonGitError(error) {
+  if (!error || typeof error !== "object") return false;
+  const { status, stderr } = error;
+  if (status !== 128) return false;
+  const output = typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
+  return /not a git repository/i.test(output);
+}
 function resolveSuperprojectRoot(cwd) {
+  const cacheKey = (0, import_path3.resolve)(cwd);
+  if (superprojectCacheMap.has(cacheKey)) {
+    const cached = superprojectCacheMap.get(cacheKey) ?? null;
+    superprojectCacheMap.delete(cacheKey);
+    superprojectCacheMap.set(cacheKey, cached);
+    return cached;
+  }
   let anchor = null;
-  let probeCwd = cwd;
+  let probeCwd = cacheKey;
+  let completed = false;
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
@@ -225,14 +241,26 @@ function resolveSuperprojectRoot(cwd) {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
         timeout: 5e3
       }).trim();
-    } catch {
+    } catch (error) {
+      completed = depth === 0 && isDefinitiveNonGitError(error);
       break;
     }
-    if (!superRoot) break;
+    if (!superRoot) {
+      completed = true;
+      break;
+    }
     anchor = superRoot;
     probeCwd = superRoot;
+  }
+  if (completed) {
+    if (superprojectCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = superprojectCacheMap.keys().next().value;
+      if (oldest !== void 0) superprojectCacheMap.delete(oldest);
+    }
+    superprojectCacheMap.set(cacheKey, anchor);
   }
   return anchor;
 }
@@ -253,6 +281,7 @@ function getGitTopLevel(cwd) {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       timeout: 5e3
     }).trim();
     if (toplevelCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
@@ -306,7 +335,8 @@ function getProjectIdentifier(worktreeRoot) {
     const remoteUrl = (0, import_child_process.execSync)("git remote get-url origin", {
       cwd: root,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     }).trim();
     source = remoteUrl || root;
   } catch {
@@ -318,6 +348,7 @@ function getProjectIdentifier(worktreeRoot) {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       timeout: 5e3
     }).trim();
     const isGitDir = (0, import_path3.basename)(commonDir) === ".git";
@@ -476,6 +507,7 @@ function isProcessAlive(pid) {
 var PLATFORM = process.platform;
 
 // src/team/state-paths.ts
+var import_node_crypto = require("node:crypto");
 var import_path6 = require("path");
 function normalizeTaskFileStem(taskId) {
   const trimmed = String(taskId).trim().replace(/\.json$/i, "");
@@ -501,6 +533,7 @@ var TeamPaths = {
   mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
   dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
   dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
+  mailboxNotificationLock: (teamName, requestId) => `.omc/state/team/${teamName}/dispatch/.mailbox-notification-${(0, import_node_crypto.createHash)("sha256").update(requestId).digest("hex")}.lock`,
   workerStatus: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/status.json`,
   workerIdleNotify: (teamName) => `.omc/state/team/${teamName}/worker-idle-notify.json`,
   workerPrevNotifyState: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/prev-notify-state.json`,
@@ -511,9 +544,46 @@ var TeamPaths = {
   summarySnapshot: (teamName) => `.omc/state/team/${teamName}/summary-snapshot.json`,
   phaseState: (teamName) => `.omc/state/team/${teamName}/phase-state.json`,
   scalingLock: (teamName) => `.omc/state/team/${teamName}/.scaling-lock`,
+  configMutationLock: (teamName) => `.omc/state/team/${teamName}/.config-mutation.lock`,
   workerIdentity: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/identity.json`,
   workerAgentsMd: (teamName) => `.omc/state/team/${teamName}/worker-agents.md`,
-  shutdownRequest: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-request.json`
+  shutdownRequest: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-request.json`,
+  checkpoints: (teamName, taskId, claimTokenHash) => `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}`,
+  checkpoint: (teamName, taskId, claimTokenHash, sequence) => `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/${sequence}.json`,
+  checkpointLatest: (teamName, taskId, claimTokenHash) => `.omc/state/team/${teamName}/checkpoints/${normalizeTaskFileStem(taskId)}/${claimTokenHash}/latest.json`,
+  taskRecoverySidecar: (teamName, recoveryId, taskId) => {
+    if (recoveryId.length === 0 || recoveryId.length > 128 || recoveryId === "." || recoveryId === ".." || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(recoveryId)) {
+      throw new Error("invalid_recovery_request_id");
+    }
+    const taskStem = normalizeTaskFileStem(taskId);
+    if (!/^task-\d+$/.test(taskStem)) throw new Error("invalid_task_id");
+    return `.omc/state/team/${teamName}/recovery/task-sidecars/${recoveryId}/${taskStem}.json`;
+  },
+  taskRecoveryReservation: (teamName, taskId) => `.omc/state/team/${teamName}/recovery/reservations/${normalizeTaskFileStem(taskId)}.json`,
+  ownerEpochs: (teamName) => `.omc/state/team/${teamName}/recovery/owner-epochs`,
+  ownerEpoch: (teamName, epoch) => `.omc/state/team/${teamName}/recovery/owner-epochs/${epoch}.json`,
+  recoveryOwnerBootstrapCandidate: (teamName, expectedEpoch, nonce) => {
+    if (nonce.length === 0 || nonce.length > 128 || nonce === "." || nonce === ".." || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(nonce)) throw new Error("invalid_recovery_owner_bootstrap_nonce");
+    return `.omc/state/team/${teamName}/recovery/owner-bootstrap/${expectedEpoch}/${nonce}.json`;
+  },
+  recoveryIntents: (teamName) => `.omc/state/team/${teamName}/recovery/intents`,
+  recoveryIntent: (teamName, recoveryId) => `.omc/state/team/${teamName}/recovery/intents/${recoveryId}.json`,
+  recoveryAttempts: (teamName) => `.omc/state/team/${teamName}/recovery/attempts`,
+  recoveryAttempt: (teamName, recoveryId) => `.omc/state/team/${teamName}/recovery/attempts/${recoveryId}.json`,
+  recoveryActivation: (teamName, recoveryId, paneAttemptId) => `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}`,
+  recoveryReady: (teamName, recoveryId, paneAttemptId) => `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/ready.json`,
+  recoveryActivate: (teamName, recoveryId, paneAttemptId) => `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/activate.json`,
+  recoveryRun: (teamName, recoveryId, paneAttemptId) => `.omc/state/team/${teamName}/recovery/activation/${recoveryId}/${paneAttemptId}/run.json`,
+  recoveryRequestsRoot: () => ".omc/state/team-recovery/by-request",
+  recoveryAdmissionLock: (payloadHash) => `.omc/state/team-recovery/admission-locks/${payloadHash}.lock`,
+  recoveryLifecycleLock: (workspaceHash, teamName) => `.omc/state/team-recovery/lifecycle-locks/${workspaceHash}/${teamName}.lock`,
+  recoveryRequestPending: (requestId) => `.omc/state/team-recovery/by-request/${requestId}.pending.json`,
+  recoveryRequestResult: (requestId) => `.omc/state/team-recovery/by-request/${requestId}.result.json`,
+  recoveryResultByTeam: (workspaceHash, teamName, recoveryId) => `.omc/state/team-recovery/by-team/${workspaceHash}/${teamName}/${recoveryId}.json`,
+  recoveryFinalIndexLock: (workspaceHash, teamName, recoveryId) => `.omc/state/team-recovery/index-locks/${workspaceHash}/${teamName}/${recoveryId}.lock`,
+  scalingRollbackFailure: (teamName, recordedAt) => `.omc/state/team/${teamName}/scaling-rollback/${recordedAt}.json`,
+  recoveryPaneRollbackFailure: (teamName, recoveryId, paneAttemptId, recordedAt) => `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}/${paneAttemptId}-${recordedAt}.json`,
+  recoveryAuditIndex: () => ".omc/state/team-recovery/audit.jsonl"
 };
 function getTaskStoragePath(cwd, teamName, taskId) {
   if (taskId !== void 0) {
@@ -943,6 +1013,7 @@ function ensureDirSync(dir) {
     throw err;
   }
 }
+var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
 
 // src/lib/file-lock.ts
 var DEFAULT_STALE_LOCK_MS2 = 3e4;

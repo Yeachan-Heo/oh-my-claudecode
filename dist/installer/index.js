@@ -24,6 +24,8 @@ import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compat.js';
+import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
+import { executeClaudeMdTransaction } from './claude-md-transaction.js';
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -129,36 +131,6 @@ function getNewestInstalledVersionHint() {
     }
     return candidates.reduce((highest, candidate) => compareVersions(candidate, highest) > 0 ? candidate : highest);
 }
-/**
- * Find a marker that appears at the start of a line (line-anchored).
- * This prevents matching markers inside code blocks.
- * @param content - The content to search in
- * @param marker - The marker string to find
- * @param fromEnd - If true, finds the LAST occurrence instead of first
- * @returns The index of the marker, or -1 if not found
- */
-function findLineAnchoredMarker(content, marker, fromEnd = false) {
-    // Escape special regex characters in marker
-    const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`^${escapedMarker}$`, 'gm');
-    if (fromEnd) {
-        // Find the last occurrence
-        let lastIndex = -1;
-        let match;
-        while ((match = regex.exec(content)) !== null) {
-            lastIndex = match.index;
-        }
-        return lastIndex;
-    }
-    else {
-        // Find the first occurrence
-        const match = regex.exec(content);
-        return match ? match.index : -1;
-    }
-}
-function escapeRegex(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 function normalizePath(value) {
     return value.replace(/\\/g, '/').replace(/\/+$/, '');
 }
@@ -198,20 +170,19 @@ function buildStatusLineCommand(nodeBin, hudScriptPath, findNodePath, cacheWrapp
     }
     return `node ${quoteShellArg(normalizedHudScriptPath)}`;
 }
-function createLineAnchoredMarkerRegex(marker, flags = 'gm') {
-    return new RegExp(`^${escapeRegex(marker)}$`, flags);
-}
-function stripGeneratedUserCustomizationHeaders(content) {
-    return content.replace(/^<!-- User customizations(?: \([^)]+\))? -->\r?\n?/gm, '');
-}
-function trimClaudeUserContent(content) {
-    if (content.trim().length === 0) {
-        return '';
+function generatedUserCustomizationHeaderRanges(markers) {
+    const ranges = [];
+    const generatedHeaders = new Set(['<!-- User customizations -->', '<!-- User customizations (recovered from corrupted markers) -->']);
+    for (let index = 1; index < markers.lines.length; index += 1) {
+        const header = markers.lines[index];
+        const separator = markers.lines[index - 1];
+        if (!generatedHeaders.has(header.text) || separator.text !== '')
+            continue;
+        if (markers.managedRanges.some(range => range.end === separator.start)) {
+            ranges.push({ start: separator.start, end: header.eolEnd });
+        }
     }
-    return content
-        .replace(/^(?:[ \t]*\r?\n)+/, '')
-        .replace(/(?:\r?\n[ \t]*)+$/, '')
-        .replace(/(?:\r?\n){3,}/g, '\n\n');
+    return ranges;
 }
 /**
  * Read hudEnabled from .omc-config.json without importing auto-update
@@ -362,6 +333,42 @@ export function isOmcHook(command) {
     }
     return false;
 }
+function isStandaloneOmcHookCommand(command) {
+    const lowerCommand = command.toLowerCase();
+    const containsHooksDir = /hooks[/\\]/.test(lowerCommand);
+    const hookFilenameMatch = lowerCommand.match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+    return !!(containsHooksDir && hookFilenameMatch && OMC_HOOK_FILENAMES.has(hookFilenameMatch[1]));
+}
+function getStandaloneOmcHookFilename(command) {
+    if (!isStandaloneOmcHookCommand(command)) {
+        return null;
+    }
+    const hookFilenameMatch = command.toLowerCase().match(/([a-z0-9-]+\.mjs)(?:$|["'\s])/);
+    return hookFilenameMatch?.[1] ?? null;
+}
+function collectActiveStandaloneOmcHookFilenames(hooks) {
+    const active = new Set();
+    for (const groups of Object.values(hooks)) {
+        if (!Array.isArray(groups)) {
+            continue;
+        }
+        for (const group of groups) {
+            if (!Array.isArray(group.hooks)) {
+                continue;
+            }
+            for (const hook of group.hooks) {
+                if (hook.type !== 'command' || typeof hook.command !== 'string') {
+                    continue;
+                }
+                const filename = getStandaloneOmcHookFilename(hook.command);
+                if (filename) {
+                    active.add(filename);
+                }
+            }
+        }
+    }
+    return active;
+}
 /**
  * Check if the current Node.js version meets the minimum requirement
  */
@@ -428,7 +435,7 @@ export function isProjectScopedPlugin() {
     const normalizedGlobalBase = globalPluginBase.replace(/\\/g, '/').replace(/\/$/, '');
     return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
-function pruneLegacyStandaloneHookScripts(log) {
+function pruneLegacyStandaloneHookScripts(log, activeStandaloneOmcHookFilenames = new Set()) {
     if (!existsSync(HOOKS_DIR)) {
         return;
     }
@@ -439,7 +446,9 @@ function pruneLegacyStandaloneHookScripts(log) {
         }
         const targetPath = join(HOOKS_DIR, filename);
         try {
-            if (statSync(targetPath).isFile() && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
+            if (!activeStandaloneOmcHookFilenames.has(filename)
+                && statSync(targetPath).isFile()
+                && isShippedStandaloneHookPayload(targetPath, filename, 'hooks')) {
                 unlinkSync(targetPath);
                 removed++;
             }
@@ -450,7 +459,8 @@ function pruneLegacyStandaloneHookScripts(log) {
         }
     }
     const hooksLibDir = join(HOOKS_DIR, 'lib');
-    if (existsSync(hooksLibDir)) {
+    const preserveSharedHookLibPayload = activeStandaloneOmcHookFilenames.size > 0;
+    if (existsSync(hooksLibDir) && !preserveSharedHookLibPayload) {
         for (const filename of readdirSync(hooksLibDir)) {
             if (!listStandaloneHookLibPayloadFilenames().has(filename)) {
                 continue;
@@ -488,8 +498,8 @@ function configureInstallerSettings(baseSettings, context) {
             const groupList = groups;
             const filtered = groupList.filter(group => {
                 const isLegacy = group.hooks.every(h => h.type === 'command'
-                    && (h.command.includes('/.claude/hooks/') || h.command.includes('\\.claude\\hooks\\'))
-                    && isOmcHook(h.command));
+                    && typeof h.command === 'string'
+                    && isStandaloneOmcHookCommand(h.command));
                 if (isLegacy)
                     legacyRemoved++;
                 return !isLegacy;
@@ -507,7 +517,8 @@ function configureInstallerSettings(baseSettings, context) {
         const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
         const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
         if (pluginHandlesHooks) {
-            pruneLegacyStandaloneHookScripts(context.log);
+            const activeStandaloneOmcHookFilenames = collectActiveStandaloneOmcHookFilenames(existingHooks);
+            pruneLegacyStandaloneHookScripts(context.log, activeStandaloneOmcHookFilenames);
         }
         const shouldConfigureSettingsHooks = (!context.runningAsPlugin || !!context.allowPluginHookRefresh) && !pluginHandlesHooks;
         if (shouldConfigureSettingsHooks) {
@@ -621,18 +632,10 @@ function ensureStandaloneHookScripts(log) {
     if (!existsSync(hooksLibDir)) {
         mkdirSync(hooksLibDir, { recursive: true });
     }
-    for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
-        const sourcePath = join(templatesDir, filename);
-        const targetPath = join(HOOKS_DIR, filename);
-        copyFileSync(sourcePath, targetPath);
-        if (!isWindows()) {
-            chmodSync(targetPath, 0o755);
-        }
-    }
+    // Hook entrypoints import ./lib/*.mjs at module load time. Reconcile the
+    // helper payload before replacing entrypoints so an interrupted update cannot
+    // leave fresh hooks pointing at a stale or partial hooks/lib directory.
     if (existsSync(templatesLibDir)) {
-        if (!existsSync(hooksLibDir)) {
-            mkdirSync(hooksLibDir, { recursive: true });
-        }
         for (const filename of readdirSync(templatesLibDir)) {
             const sourcePath = join(templatesLibDir, filename);
             try {
@@ -666,6 +669,14 @@ function ensureStandaloneHookScripts(log) {
         copyFileSync(configDirHelperSrc, configDirHelperDest);
         chmodSync(findNodeDest, 0o755);
         chmodSync(configDirHelperDest, 0o755);
+    }
+    for (const filename of STANDALONE_HOOK_TEMPLATE_FILES) {
+        const sourcePath = join(templatesDir, filename);
+        const targetPath = join(HOOKS_DIR, filename);
+        copyFileSync(sourcePath, targetPath);
+        if (!isWindows()) {
+            chmodSync(targetPath, 0o755);
+        }
     }
     log('  Installed standalone hook scripts');
 }
@@ -986,6 +997,7 @@ const REQUIRED_PLUGIN_PAYLOAD_FILES = [
     '.claude-plugin/plugin.json',
     'package.json',
     'dist/hooks/skill-bridge.cjs',
+    'bridge/claude-md-coordinator.cjs',
     'bridge/cli.cjs',
     'hooks/hooks.json',
 ];
@@ -1161,6 +1173,7 @@ function isCacheInstalledPluginRoot(root) {
 }
 function resolveBestPluginSyncSource(targetRoots) {
     const excludedRoots = new Set(targetRoots.map(normalizePath));
+    const excludedCanonicalRoots = new Set(targetRoots.map(canonicalizeExistingPath));
     const seen = new Set();
     const globalPackageRoot = getGlobalInstalledPackageRoot();
     const candidates = [
@@ -1177,7 +1190,12 @@ function resolveBestPluginSyncSource(targetRoots) {
         if (seen.has(normalizedCandidate) || excludedRoots.has(normalizedCandidate) || !existsSync(candidate)) {
             continue;
         }
+        const canonicalCandidate = canonicalizeExistingPath(candidate);
+        if (seen.has(canonicalCandidate) || excludedCanonicalRoots.has(canonicalCandidate)) {
+            continue;
+        }
         seen.add(normalizedCandidate);
+        seen.add(canonicalCandidate);
         const sourceValidationErrors = validatePluginSyncPayload(candidate);
         if (sourceValidationErrors.length > 0) {
             errors.push(...sourceValidationErrors.map(error => `${candidate}: ${error}`));
@@ -1297,7 +1315,11 @@ export function copyPluginSyncPayload(sourceRoot, targetRoots) {
     }
     let synced = false;
     const errors = [];
+    const canonicalSourceRoot = canonicalizeExistingPath(sourceRoot);
     for (const targetRoot of targetRoots) {
+        if (canonicalizeExistingPath(targetRoot) === canonicalSourceRoot) {
+            continue;
+        }
         let copiedToTarget = false;
         let copiedSkills = false;
         for (const entry of PLUGIN_SYNC_PAYLOAD) {
@@ -1339,6 +1361,9 @@ export function syncInstalledPluginPayload() {
     const sourceResolution = resolveBestPluginSyncSource(targetRoots);
     const sourceRoot = sourceResolution.sourceRoot;
     if (!sourceRoot) {
+        if (targetRoots.every(root => validatePluginSyncPayload(root).length === 0)) {
+            return { synced: false, errors: [], sourceRoot: null, targetRoots };
+        }
         return {
             synced: false,
             errors: [
@@ -1546,14 +1571,6 @@ function syncUserSkillCompatShims(log) {
     }
     return synced;
 }
-function loadClaudeMdContent() {
-    const claudeMdPath = join(getPackageDir(), 'docs', 'CLAUDE.md');
-    if (!existsSync(claudeMdPath)) {
-        console.error(`FATAL: CLAUDE.md not found: ${claudeMdPath}`);
-        process.exit(1);
-    }
-    return readFileSync(claudeMdPath, 'utf-8');
-}
 /**
  * Extract the embedded OMC version from a CLAUDE.md file.
  *
@@ -1619,49 +1636,37 @@ export function syncPersistedSetupVersion(options) {
  * @returns Merged content with markers
  */
 export function mergeClaudeMd(existingContent, omcContent, version) {
-    const START_MARKER = '<!-- OMC:START -->';
-    const END_MARKER = '<!-- OMC:END -->';
+    const START_MARKER = OMC_START_MARKER;
+    const END_MARKER = OMC_END_MARKER;
     const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-    const OMC_BLOCK_PATTERN = new RegExp(`^${escapeRegex(START_MARKER)}\\r?\\n[\\s\\S]*?^${escapeRegex(END_MARKER)}(?:\\r?\\n)?`, 'gm');
-    const markerStartRegex = createLineAnchoredMarkerRegex(START_MARKER);
-    const markerEndRegex = createLineAnchoredMarkerRegex(END_MARKER);
-    // Idempotency guard: strip markers from omcContent if already present
-    // This handles the case where docs/CLAUDE.md ships with markers
+    // Idempotency guard: accept the current managed representation as input.
     let cleanOmcContent = omcContent;
-    const omcStartIdx = findLineAnchoredMarker(omcContent, START_MARKER);
-    const omcEndIdx = findLineAnchoredMarker(omcContent, END_MARKER, true);
-    if (omcStartIdx !== -1 && omcEndIdx !== -1 && omcStartIdx < omcEndIdx) {
-        // Extract content between markers, trimming any surrounding whitespace
-        cleanOmcContent = omcContent
-            .substring(omcStartIdx + START_MARKER.length, omcEndIdx)
-            .trim();
+    const sourceMarkers = parseClaudeMdMarkers(omcContent);
+    if (sourceMarkers.state === 'corrupt' || sourceMarkers.managedRanges.length > 1) {
+        throw new Error('OMC content must contain at most one complete managed block');
     }
-    // Strip any existing version marker from content and inject current version
+    if (sourceMarkers.managedRanges.length === 1) {
+        const managed = sourceMarkers.managedRanges[0];
+        cleanOmcContent = omcContent.slice(managed.contentStart, managed.contentEnd).trim();
+    }
     cleanOmcContent = cleanOmcContent.replace(/<!-- OMC:VERSION:[^\s]*? -->\n?/, '');
     const versionMarker = version ? `<!-- OMC:VERSION:${version} -->\n` : '';
-    // Case 1: No existing content - wrap omcContent in markers
     if (!existingContent) {
         return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
     }
-    const strippedExistingContent = existingContent.replace(OMC_BLOCK_PATTERN, '');
-    const hasResidualStartMarker = markerStartRegex.test(strippedExistingContent);
-    const hasResidualEndMarker = markerEndRegex.test(strippedExistingContent);
-    // Case 2: Corrupted markers (unmatched markers remain after removing complete blocks)
-    if (hasResidualStartMarker || hasResidualEndMarker) {
-        // Handle corrupted state - backup will be created by caller
-        // Strip unmatched OMC markers from recovered content to prevent unbounded
-        // growth on repeated calls (each call would re-detect corruption and append again)
-        const recoveredContent = strippedExistingContent
-            .replace(markerStartRegex, '')
-            .replace(markerEndRegex, '')
-            .trim();
-        return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n<!-- User customizations (recovered from corrupted markers) -->\n${recoveredContent}`;
+    const existingMarkers = parseClaudeMdMarkers(existingContent);
+    if (existingMarkers.state === 'corrupt') {
+        throw new Error(`Existing CLAUDE.md has corrupt OMC markers: ${existingMarkers.diagnostics.join(', ')}`);
     }
-    const preservedUserContent = trimClaudeUserContent(stripGeneratedUserCustomizationHeaders(strippedExistingContent));
-    if (!preservedUserContent) {
+    const legacy = analyzeLegacyClaudeMd(existingContent);
+    const preservedUserContent = removeClaudeMdRanges(existingContent, [
+        ...existingMarkers.managedRanges,
+        ...legacy.exactMatches,
+        ...generatedUserCustomizationHeaderRanges(existingMarkers),
+    ]);
+    if (preservedUserContent.trim().length === 0) {
         return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n`;
     }
-    // Case 3: Preserve only user-authored content that lives outside OMC markers
     return `${START_MARKER}\n${versionMarker}${cleanOmcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${preservedUserContent}`;
 }
 /**
@@ -1902,35 +1907,24 @@ export function install(options = {}) {
                 log(`Synced ${syncedUserSkillCompat.length} user skill compatibility shim(s)`);
             }
         }
-        // Install CLAUDE.md with merge support.
-        // This runs regardless of plugin context so that `omc update` (which re-execs
-        // as `update-reconcile` with CLAUDE_PLUGIN_ROOT still set) always keeps the
-        // version marker and OMC instructions in ~/.claude/CLAUDE.md up to date.
-        // Skipped only for project-scoped plugins to avoid mutating global config.
+        // Keep the public installer on the same raw-byte transaction path as setup.
+        // The public string merger remains exported for callers that use it directly.
         if (!projectScoped) {
             const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
-            const omcContent = loadClaudeMdContent();
-            // Read existing content if it exists
-            let existingContent = null;
-            if (existsSync(claudeMdPath)) {
-                existingContent = readFileSync(claudeMdPath, 'utf-8');
-            }
-            // Always create backup before modification (if file exists)
-            if (existingContent !== null) {
-                const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0]; // YYYY-MM-DDTHH-MM-SS
-                const backupPath = join(CLAUDE_CONFIG_DIR, `CLAUDE.md.backup.${timestamp}`);
-                writeFileSync(backupPath, existingContent);
+            const transaction = executeClaudeMdTransaction({
+                mode: 'global-overwrite',
+                root: CLAUDE_CONFIG_DIR,
+                source: join(getPackageDir(), 'docs', 'CLAUDE.md'),
+                sourceRoot: getPackageDir(),
+                version: targetVersion,
+            });
+            if (!transaction.ok)
+                throw new Error(transaction.error ?? 'CLAUDE.md transaction failed');
+            for (const backupPath of transaction.backups)
                 log(`Backed up existing CLAUDE.md to ${backupPath}`);
-            }
-            // Merge OMC content with existing content
-            const mergedContent = mergeClaudeMd(existingContent, omcContent, targetVersion);
-            writeFileSync(claudeMdPath, mergedContent);
-            if (existingContent) {
-                log('Updated CLAUDE.md (merged with existing content)');
-            }
-            else {
-                log('Created CLAUDE.md');
-            }
+            log(transaction.operations.some(operation => operation.existedBefore && operation.path === claudeMdPath)
+                ? 'Updated CLAUDE.md (merged with existing content)'
+                : 'Created CLAUDE.md');
         }
         // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)
         let hudScriptPath = null;

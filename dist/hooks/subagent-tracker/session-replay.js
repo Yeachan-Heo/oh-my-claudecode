@@ -92,13 +92,16 @@ export function recordAgentStart(directory, sessionId, agentId, agentType, task,
 /**
  * Record agent stop event
  */
-export function recordAgentStop(directory, sessionId, agentId, agentType, success, durationMs) {
+export function recordAgentStop(directory, sessionId, agentId, agentType, success, durationMs, metadata) {
     appendReplayEvent(directory, sessionId, {
         agent: agentId.substring(0, 7),
         agent_type: agentType.replace('oh-my-claudecode:', ''),
         event: 'agent_stop',
         success,
         duration_ms: durationMs,
+        synthetic: metadata?.synthetic,
+        telemetry_status: metadata?.telemetry_status,
+        reason: metadata?.reason,
     });
 }
 /**
@@ -235,6 +238,10 @@ export function getReplaySummary(directory, sessionId) {
                 }
                 break;
             case 'agent_stop':
+                if (event.synthetic || event.telemetry_status === 'unmatched_stop') {
+                    summary.agents_untracked_stops = (summary.agents_untracked_stops || 0) + 1;
+                    break;
+                }
                 if (event.success)
                     summary.agents_completed++;
                 else

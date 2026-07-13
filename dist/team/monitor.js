@@ -12,7 +12,10 @@ import { existsSync } from 'fs';
 import { readFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { performance } from 'perf_hooks';
+import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES } from '../shared/types.js';
+import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { TeamPaths, absPath } from './state-paths.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { normalizeTeamManifest } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 // ---------------------------------------------------------------------------
@@ -27,6 +30,14 @@ async function readJsonSafe(filePath) {
     }
     catch {
         return null;
+    }
+}
+async function readJsonFileState(filePath) {
+    try {
+        return { kind: 'value', value: JSON.parse(await readFile(filePath, 'utf8')) };
+    }
+    catch (error) {
+        return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'invalid' };
     }
 }
 async function writeAtomic(filePath, data) {
@@ -63,13 +74,245 @@ function configFromManifest(manifest) {
         resize_hook_name: manifest.resize_hook_name,
         resize_hook_target: manifest.resize_hook_target,
         next_worker_index: manifest.next_worker_index,
+        service_descriptor: manifest.service_descriptor,
     };
 }
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function isNonEmptyString(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+function isSafeCounter(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+function isTimestamp(value) {
+    return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+function isStringArray(value) {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+function isWorkerInfo(value) {
+    if (!isRecord(value) || typeof value.name !== 'string' || !WORKER_NAME_SAFE_PATTERN.test(value.name) || !isSafeCounter(value.index) || value.index < 1)
+        return false;
+    return (value.role === undefined || typeof value.role === 'string')
+        && (value.assigned_tasks === undefined || isStringArray(value.assigned_tasks))
+        && (value.worker_cli === undefined || ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(value.worker_cli))
+        && (value.pid === undefined || (isSafeCounter(value.pid) && value.pid > 0))
+        && (value.pane_id === undefined || typeof value.pane_id === 'string')
+        && (value.working_dir === undefined || typeof value.working_dir === 'string')
+        && (value.worktree_repo_root === undefined || typeof value.worktree_repo_root === 'string')
+        && (value.worktree_path === undefined || typeof value.worktree_path === 'string')
+        && (value.worktree_branch === undefined || typeof value.worktree_branch === 'string')
+        && (value.worktree_detached === undefined || typeof value.worktree_detached === 'boolean')
+        && (value.worktree_created === undefined || typeof value.worktree_created === 'boolean')
+        && (value.team_state_root === undefined || typeof value.team_state_root === 'string')
+        && (value.output_file === undefined || typeof value.output_file === 'string')
+        && (value.recovery_id === undefined || isNonEmptyString(value.recovery_id))
+        && (value.replacement_generation === undefined || isSafeCounter(value.replacement_generation))
+        && (value.pane_attempt_id === undefined || isNonEmptyString(value.pane_attempt_id))
+        && (value.operational_state === undefined || ['starting', 'active', 'dead', 'stopped'].includes(value.operational_state))
+        && (value.launch_descriptor === undefined || isLaunchDescriptor(value.launch_descriptor));
+}
+function isLaunchDescriptor(value) {
+    return isRecord(value) && value.schema_version === 1
+        && ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(value.provider)
+        && (value.model === null || typeof value.model === 'string')
+        && isNonEmptyString(value.binary) && isStringArray(value.args);
+}
+function isOwnerEpoch(value) {
+    return isRecord(value) && isSafeCounter(value.epoch) && value.epoch > 0 && isNonEmptyString(value.nonce)
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isTimestamp(value.created_at);
+}
+function isRecoveryAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.request_id) && isNonEmptyString(value.recovery_id)
+        && isNonEmptyString(value.worker_name) && isSafeCounter(value.owner_epoch) && value.owner_epoch > 0
+        && isNonEmptyString(value.owner_nonce) && ['reserved', 'requeued', 'ready', 'active', 'services_pending', 'adopted', 'failed'].includes(value.phase)
+        && (value.original_pane_id === undefined || typeof value.original_pane_id === 'string')
+        && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at);
+}
+function isScaleUpAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.operation_id) && ['reserved', 'effects', 'failed'].includes(value.phase)
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision)
+        && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
+        && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
+}
+function isScaleDownAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.operation_id) && ['draining', 'effects', 'failed'].includes(value.phase)
+        && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && Array.isArray(value.workers)
+        && value.workers.every(worker => isRecord(worker) && isNonEmptyString(worker.name)
+            && (worker.pane_id === undefined || typeof worker.pane_id === 'string')
+            && (worker.worktree_path === undefined || typeof worker.worktree_path === 'string')
+            && (worker.worktree_created === undefined || typeof worker.worktree_created === 'boolean'))
+        && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
+        && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
+}
+function isServiceDescriptor(value) {
+    return isRecord(value) && value.schema_version === 1 && isSafeCounter(value.service_generation)
+        && isNonEmptyString(value.service_attempt_id) && typeof value.auto_merge_enabled === 'boolean'
+        && isNonEmptyString(value.workspace_root) && (value.leader_branch === undefined || typeof value.leader_branch === 'string')
+        && ['disabled', 'worker-auto-commit-v1'].includes(value.cadence_policy);
+}
+function isShutdownAttempt(value) {
+    return isRecord(value) && isNonEmptyString(value.nonce) && isSafeCounter(value.pid) && value.pid > 0
+        && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at);
+}
+function isAllDeadRecovery(value) {
+    return isRecord(value) && isTimestamp(value.detected_at) && isTimestamp(value.deadline_at) && isSafeCounter(value.state_revision);
+}
+function isTeamConfig(value, requireRevision, expectedTeamName) {
+    if (!isRecord(value) || !isNonEmptyString(value.name) || (expectedTeamName !== undefined && value.name !== expectedTeamName)
+        || !isNonEmptyString(value.agent_type)
+        || (value.task !== undefined && typeof value.task !== 'string')
+        || (value.worker_launch_mode !== undefined && !['interactive', 'prompt'].includes(value.worker_launch_mode))
+        || !isSafeCounter(value.worker_count)
+        || (value.max_workers !== undefined && !isSafeCounter(value.max_workers))
+        || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
+        || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
+        || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
+        || (value.next_task_id !== undefined && !isSafeCounter(value.next_task_id))
+        || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance)
+        || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value)
+        || !isOptionalRouting(value.resolved_routing))
+        return false;
+    if (requireRevision ? !isSafeCounter(value.state_revision) : value.state_revision !== undefined && !isSafeCounter(value.state_revision))
+        return false;
+    if (!requireRevision && Object.hasOwn(value, 'state_revision'))
+        return false;
+    return (value.lifecycle_state === undefined || ['active', 'shutting_down', 'stopped'].includes(value.lifecycle_state))
+        && (value.runtime_owner_epoch === undefined || isOwnerEpoch(value.runtime_owner_epoch))
+        && (value.active_recovery === undefined || isRecoveryAttempt(value.active_recovery))
+        && (value.last_recovery === undefined || isRecoveryAttempt(value.last_recovery))
+        && (value.active_scale_up === undefined || isScaleUpAttempt(value.active_scale_up))
+        && (value.active_scale_down === undefined || isScaleDownAttempt(value.active_scale_down))
+        && (value.service_descriptor === undefined || isServiceDescriptor(value.service_descriptor))
+        && (value.shutdown_attempt === undefined || isShutdownAttempt(value.shutdown_attempt))
+        && (value.all_dead_recovery === undefined || isAllDeadRecovery(value.all_dead_recovery))
+        && hasMatchingActiveFenceRevisions(value);
+}
+function hasUniqueWorkerIdentity(workers) {
+    const names = new Set();
+    const indices = new Set();
+    return workers.every(worker => {
+        if (!isRecord(worker) || typeof worker.name !== 'string' || !WORKER_NAME_SAFE_PATTERN.test(worker.name) || typeof worker.index !== 'number')
+            return false;
+        if (names.has(worker.name) || indices.has(worker.index))
+            return false;
+        names.add(worker.name);
+        indices.add(worker.index);
+        return true;
+    });
+}
+function isOptionalPolicy(value) {
+    return value === undefined || (isRecord(value)
+        && ['split_pane', 'auto'].includes(value.display_mode)
+        && ['interactive', 'prompt'].includes(value.worker_launch_mode)
+        && ['hook_preferred_with_fallback', 'transport_direct'].includes(value.dispatch_mode)
+        && isSafeCounter(value.dispatch_ack_timeout_ms));
+}
+function isOptionalGovernance(value) {
+    return value === undefined || (isRecord(value)
+        && typeof value.delegation_only === 'boolean'
+        && typeof value.plan_approval_required === 'boolean'
+        && typeof value.nested_teams_allowed === 'boolean'
+        && typeof value.one_team_per_leader_session === 'boolean'
+        && typeof value.cleanup_requires_all_workers_inactive === 'boolean');
+}
+function isOptionalWorkspaceShape(value) {
+    return (value.leader_cwd === undefined || typeof value.leader_cwd === 'string')
+        && (value.team_state_root === undefined || typeof value.team_state_root === 'string')
+        && (value.workspace_mode === undefined || ['single', 'worktree'].includes(value.workspace_mode))
+        && (value.worktree_mode === undefined || ['disabled', 'detached', 'named'].includes(value.worktree_mode))
+        && (value.lifecycle_profile === undefined || ['default', 'linked_ralph'].includes(value.lifecycle_profile));
+}
+function isOptionalPaneShape(value) {
+    return (value.leader_pane_id === undefined || value.leader_pane_id === null || typeof value.leader_pane_id === 'string')
+        && (value.hud_pane_id === undefined || value.hud_pane_id === null || typeof value.hud_pane_id === 'string')
+        && (value.resize_hook_name === undefined || value.resize_hook_name === null || typeof value.resize_hook_name === 'string')
+        && (value.resize_hook_target === undefined || value.resize_hook_target === null || typeof value.resize_hook_target === 'string')
+        && (value.next_worker_index === undefined || (isSafeCounter(value.next_worker_index) && value.next_worker_index > 0));
+}
+function isOptionalRouting(value) {
+    if (value === undefined)
+        return true;
+    if (!isRecord(value) || Object.keys(value).length !== CANONICAL_TEAM_ROLES.length)
+        return false;
+    return CANONICAL_TEAM_ROLES.every(role => isResolvedRoleRoute(value[role]));
+}
+function isResolvedRoleRoute(value) {
+    return isRecord(value) && isRoleAssignment(value.primary) && isRoleAssignment(value.fallback);
+}
+function isRoleAssignment(value) {
+    return isRecord(value)
+        && ['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity'].includes(value.provider)
+        && isNonEmptyString(value.model)
+        && KNOWN_AGENT_NAMES.some(agent => agent === value.agent);
+}
+function hasMatchingActiveFenceRevisions(value) {
+    if (!isSafeCounter(value.state_revision))
+        return true;
+    const revision = value.state_revision;
+    return [value.active_recovery, value.active_scale_up, value.active_scale_down, value.shutdown_attempt, value.all_dead_recovery]
+        .every(fence => fence === undefined || (isRecord(fence) && fence.state_revision === revision));
+}
+function alignActiveFenceRevisions(config, revision) {
+    return {
+        ...config,
+        ...(config.active_recovery ? { active_recovery: { ...config.active_recovery, state_revision: revision } } : {}),
+        ...(config.active_scale_up ? { active_scale_up: { ...config.active_scale_up, state_revision: revision } } : {}),
+        ...(config.active_scale_down ? { active_scale_down: { ...config.active_scale_down, state_revision: revision } } : {}),
+        ...(config.shutdown_attempt ? { shutdown_attempt: { ...config.shutdown_attempt, state_revision: revision } } : {}),
+        ...(config.all_dead_recovery ? { all_dead_recovery: { ...config.all_dead_recovery, state_revision: revision } } : {}),
+    };
+}
+/** Accept only a complete revisioned authoritative config; return null for malformed values. */
+export function validateRevisionedTeamConfig(value, expectedTeamName) {
+    return isTeamConfig(value, true, expectedTeamName) ? value : null;
+}
+/** Legacy configs predate revision authority and require the complete historical core shape. */
+export function validateLegacyTeamConfig(value, expectedTeamName) {
+    return isTeamConfig(value, false, expectedTeamName) ? value : null;
+}
+async function assertPersistedConfigPathBinding(teamName, cwd, includeManifestWhenAbsent = false) {
+    const state = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (state.kind === 'value') {
+        const valid = Object.hasOwn(state.value, 'state_revision')
+            ? validateRevisionedTeamConfig(state.value, teamName)
+            : validateLegacyTeamConfig(state.value, teamName);
+        if (!valid)
+            throw new Error('invalid_persisted_state');
+        return;
+    }
+    if (!includeManifestWhenAbsent)
+        return;
+    const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (manifestState.kind === 'value' && !validateLegacyTeamConfig(configFromManifest(normalizeTeamManifest(manifestState.value)), teamName)) {
+        throw new Error('invalid_persisted_state');
+    }
+}
 export async function readTeamConfig(teamName, cwd) {
-    const [config, manifest] = await Promise.all([
-        readJsonSafe(absPath(cwd, TeamPaths.config(teamName))),
-        readTeamManifest(teamName, cwd),
+    const [configState, manifestState] = await Promise.all([
+        readJsonFileState(absPath(cwd, TeamPaths.config(teamName))),
+        readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName))),
     ]);
+    if (configState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const config = configState.kind === 'value' ? configState.value : null;
+    if (config && Object.hasOwn(config, 'state_revision')) {
+        const revisioned = validateRevisionedTeamConfig(config, teamName);
+        if (!revisioned)
+            throw new Error('invalid_persisted_state');
+        return canonicalizeTeamConfigWorkers(revisioned);
+    }
+    if (config && !validateLegacyTeamConfig(config, teamName))
+        throw new Error('invalid_persisted_state');
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const manifest = manifestState.kind === 'value' ? normalizeTeamManifest(manifestState.value) : null;
     if (!config && !manifest)
         return null;
     if (!manifest)
@@ -85,9 +328,88 @@ export async function readTeamConfig(teamName, cwd) {
         max_workers: Math.max(config.max_workers ?? 0, 20),
     });
 }
+/** Recovery readers keep revisioned config authoritative without changing legacy reads. */
+export async function readRevisionedTeamConfig(teamName, cwd) {
+    const state = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    if (state.kind === 'missing')
+        return null;
+    const revisioned = validateRevisionedTeamConfig(state.value, teamName);
+    if (revisioned)
+        return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+    if (!validateLegacyTeamConfig(state.value, teamName))
+        throw new Error('invalid_persisted_state');
+    return null;
+}
+/** Reject a stale recovery writer before projecting config/manifest. */
+export function withTeamConfigMutationLock(teamName, cwd, fn) {
+    return withProcessIdentityFileLock(absPath(cwd, TeamPaths.configMutationLock(teamName)), fn);
+}
+/** Establish revision authority from a locked re-read of a legacy config. */
+export async function migrateTeamConfigRevision(teamName, cwd) {
+    await assertPersistedConfigPathBinding(teamName, cwd, true);
+    return withTeamConfigMutationLock(teamName, cwd, async () => {
+        const configState = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+        if (configState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        let current;
+        if (configState.kind === 'value') {
+            const legacy = validateLegacyTeamConfig(configState.value, teamName);
+            if (legacy) {
+                current = legacy;
+            }
+            else {
+                const revisioned = validateRevisionedTeamConfig(configState.value, teamName);
+                if (!revisioned)
+                    throw new Error('invalid_persisted_state');
+                return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+            }
+        }
+        else {
+            const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+            if (manifestState.kind === 'invalid')
+                throw new Error('invalid_persisted_state');
+            if (manifestState.kind === 'missing')
+                return null;
+            current = configFromManifest(normalizeTeamManifest(manifestState.value));
+        }
+        const revisioned = validateRevisionedTeamConfig(current, teamName);
+        if (revisioned)
+            return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+        if (!validateLegacyTeamConfig(current, teamName))
+            throw new Error('invalid_persisted_state');
+        current.state_revision = 0;
+        current.lifecycle_state ??= 'active';
+        if (!validateRevisionedTeamConfig(current, teamName))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(current, cwd);
+        return { config: canonicalizeTeamConfigWorkers(current), stateRevision: 0 };
+    });
+}
+export async function saveTeamConfigAtRevision(config, expectedRevision, cwd, afterCommit) {
+    if (!validateRevisionedTeamConfig(config, config.name))
+        throw new Error('invalid_persisted_state');
+    await assertPersistedConfigPathBinding(config.name, cwd);
+    return withTeamConfigMutationLock(config.name, cwd, async () => {
+        const current = await readRevisionedTeamConfig(config.name, cwd);
+        if (!current || current.stateRevision !== expectedRevision)
+            return false;
+        if (!validateRevisionedTeamConfig(config, config.name))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(config, cwd);
+        const verified = await readRevisionedTeamConfig(config.name, cwd);
+        if (verified?.stateRevision !== config.state_revision)
+            return false;
+        await afterCommit?.();
+        return true;
+    });
+}
 export async function readTeamManifest(teamName, cwd) {
-    const manifest = await readJsonSafe(absPath(cwd, TeamPaths.manifest(teamName)));
-    return manifest ? normalizeTeamManifest(manifest) : null;
+    const state = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+    if (state.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    return state.kind === 'value' ? normalizeTeamManifest(state.value) : null;
 }
 // ---------------------------------------------------------------------------
 // Worker status / heartbeat readers
@@ -304,10 +626,12 @@ export async function getTeamSummary(teamName, cwd) {
 // ---------------------------------------------------------------------------
 // Team config save
 // ---------------------------------------------------------------------------
-export async function saveTeamConfig(config, cwd) {
-    await writeAtomic(absPath(cwd, TeamPaths.config(config.name)), JSON.stringify(config, null, 2));
+async function saveTeamConfigUnlocked(config, cwd) {
     const manifestPath = absPath(cwd, TeamPaths.manifest(config.name));
-    const existingManifest = await readJsonSafe(manifestPath);
+    const manifestState = await readJsonFileState(manifestPath);
+    if (manifestState.kind === 'invalid')
+        throw new Error('invalid_persisted_state');
+    const existingManifest = manifestState.kind === 'value' ? manifestState.value : null;
     if (existingManifest) {
         const nextManifest = normalizeTeamManifest({
             ...existingManifest,
@@ -327,35 +651,58 @@ export async function saveTeamConfig(config, cwd) {
             next_worker_index: config.next_worker_index,
             policy: config.policy ?? existingManifest.policy,
             governance: config.governance ?? existingManifest.governance,
+            state_revision: config.state_revision,
+            service_descriptor: config.service_descriptor,
         });
+        // Config is authoritative. Publish its projection first so a projection
+        // failure cannot leave callers uncertain whether the config commit won.
         await writeAtomic(manifestPath, JSON.stringify(nextManifest, null, 2));
     }
+    await writeAtomic(absPath(cwd, TeamPaths.config(config.name)), JSON.stringify(config, null, 2));
+}
+export async function saveTeamConfig(config, cwd, expectedRevision) {
+    const inputIsRevisioned = Object.hasOwn(config, 'state_revision');
+    if (!(inputIsRevisioned ? validateRevisionedTeamConfig(config, config.name) : validateLegacyTeamConfig(config, config.name))) {
+        throw new Error('invalid_persisted_state');
+    }
+    await assertPersistedConfigPathBinding(config.name, cwd);
+    await withTeamConfigMutationLock(config.name, cwd, async () => {
+        const currentState = await readJsonFileState(absPath(cwd, TeamPaths.config(config.name)));
+        if (currentState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        const current = currentState.kind === 'value' ? currentState.value : null;
+        if (current && Object.hasOwn(current, 'state_revision') && !validateRevisionedTeamConfig(current, config.name))
+            throw new Error('invalid_persisted_state');
+        if (current && !Object.hasOwn(current, 'state_revision') && !validateLegacyTeamConfig(current, config.name))
+            throw new Error('invalid_persisted_state');
+        const currentRevision = current?.state_revision;
+        let nextRevision;
+        if (typeof currentRevision === 'number' && Number.isSafeInteger(currentRevision)) {
+            if (expectedRevision !== currentRevision || config.state_revision !== expectedRevision) {
+                throw new Error('stale_state_revision');
+            }
+            nextRevision = currentRevision + 1;
+        }
+        else if (current) {
+            if (expectedRevision !== undefined)
+                throw new Error('stale_state_revision');
+            nextRevision = 0;
+        }
+        else {
+            nextRevision = config.state_revision ?? 0;
+        }
+        const committed = alignActiveFenceRevisions({ ...config, state_revision: nextRevision }, nextRevision);
+        if (!validateRevisionedTeamConfig(committed, config.name))
+            throw new Error('invalid_persisted_state');
+        await saveTeamConfigUnlocked(committed, cwd);
+        Object.assign(config, committed);
+    });
 }
 // ---------------------------------------------------------------------------
 // Scaling lock (file-based mutex for scale up/down)
 // ---------------------------------------------------------------------------
 export async function withScalingLock(teamName, cwd, fn, timeoutMs = 10_000) {
-    const lockDir = absPath(cwd, TeamPaths.scalingLock(teamName));
-    const { mkdir: mkdirAsync, rm } = await import('fs/promises');
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-        try {
-            await mkdirAsync(lockDir, { recursive: false });
-            try {
-                return await fn();
-            }
-            finally {
-                await rm(lockDir, { recursive: true, force: true }).catch(() => { });
-            }
-        }
-        catch (error) {
-            const code = error.code;
-            if (code !== 'EEXIST')
-                throw error;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-    }
-    throw new Error(`scaling lock timeout for team ${teamName}`);
+    return withProcessIdentityFileLock(absPath(cwd, TeamPaths.scalingLock(teamName)), fn, timeoutMs);
 }
 /**
  * Compare two consecutive monitor snapshots and derive events.
