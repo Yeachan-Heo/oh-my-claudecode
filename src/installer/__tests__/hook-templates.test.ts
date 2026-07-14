@@ -285,3 +285,27 @@ describe('pre-tool-use packaged artifacts', () => {
     );
   });
 });
+
+describe('workflow profile runtime packaged artifacts (#3487)', () => {
+  it('ships the same descriptor and stop-transition helper with plugin and standalone hook payloads', () => {
+    const templateHelper = readFileSync(join(packageRoot, 'templates', 'hooks', 'lib', 'workflow-profile-runtime.mjs'), 'utf-8');
+    const pluginHelper = readFileSync(join(packageRoot, 'scripts', 'lib', 'workflow-profile-runtime.mjs'), 'utf-8');
+
+    for (const contractTerm of ['selectWorkflowProfile', 'createWorkflowState', 'advanceWorkflowOnStop', 'profileHash', 'pipelineTracking', 'completionObservations']) {
+      expect(pluginHelper).toContain(contractTerm);
+      expect(templateHelper).toContain(contractTerm);
+    }
+  });
+
+  it('loads workflow profile transition helpers before running either persistent hook', () => {
+    for (const script of [
+      join(packageRoot, 'scripts', 'persistent-mode.mjs'),
+      join(packageRoot, 'templates', 'hooks', 'persistent-mode.mjs'),
+    ]) {
+      const payload = readFileSync(script, 'utf-8');
+      expect(payload).toContain('workflow-profile-runtime.mjs');
+      expect(payload).toContain('advanceWorkflowOnStop');
+      expect(payload).toContain('pipelineTracking?.trackingRevision');
+    }
+  });
+});

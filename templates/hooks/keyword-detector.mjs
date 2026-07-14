@@ -33,9 +33,10 @@ const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module (use pathToFileURL for Windows compatibility, #524)
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
-const { atomicWriteFileSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
+const { atomicWriteFileSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const { resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
+const { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, 'lib', 'workflow-profile-runtime.mjs')).href);
 
 
 const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
@@ -910,6 +911,87 @@ async function activateState(directory, prompt, stateName, sessionId) {
   } catch {}
 }
 
+function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
+  const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
+  withStateFileLockSync(signalPath, () => {
+    if (!existsSync(signalPath)) return;
+    try {
+      const signal = JSON.parse(readFileSync(signalPath, 'utf8'));
+      if (signal.target_workflow_run_id !== workflowRunId) unlinkSync(signalPath);
+    } catch {
+      // Malformed signals fail closed in Stop and are left for explicit cleanup.
+    }
+  });
+}
+
+async function resumeWorkflowProfile(directory, sessionId, workflowName) {
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const { writePath } = await resolveSessionStatePathsForHook(directory, 'autopilot', safeSessionId || undefined);
+  try {
+    mkdirSync(dirname(writePath), { recursive: true });
+    const result = withStateFileLockSync(writePath, () => {
+      if (!existsSync(writePath)) return null;
+      const current = JSON.parse(readFileSync(writePath, 'utf8'));
+      if (current?.active !== false || current?.workflow?.workflowName !== workflowName) return null;
+      const resumed = { ...current, active: true };
+      if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
+      const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
+      const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
+      if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+      atomicWriteFileSync(writePath, JSON.stringify(resumed, null, 2));
+      return { stagePrompt, workflowRunId: resumed.workflowRunId };
+    });
+    if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
+    if (!result.acquired || !result.value?.stagePrompt) return null;
+    retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    return result.value.stagePrompt;
+  } catch {
+    return false;
+  }
+}
+
+async function activateWorkflowProfile(directory, sessionId, task, workflow, transcriptPath) {
+  const stateInput = { directory, sessionId, task, workflow, transcriptPath };
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
+  const { writePath } = await resolveSessionStatePathsForHook(directory, 'autopilot', safeSessionId || undefined);
+  try {
+    mkdirSync(dirname(writePath), { recursive: true });
+    const result = withStateFileLockSync(writePath, () => {
+      if (existsSync(writePath)) {
+        try {
+          const current = JSON.parse(readFileSync(writePath, 'utf8'));
+          if (current?.active === true) return { error: 'active_workflow_conflict' };
+          if (current?.active === false && current?.workflow) {
+            if (current.workflow.workflowName !== workflow.workflowName) return { error: 'active_workflow_conflict' };
+            const resumed = { ...current, active: true };
+            if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
+            const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
+            const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
+            if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+            atomicWriteFileSync(writePath, JSON.stringify(resumed, null, 2));
+            return { stagePrompt, workflowRunId: resumed.workflowRunId };
+          }
+        } catch {
+          return { error: 'active_workflow_conflict' };
+        }
+      }
+      const state = createWorkflowState(stateInput);
+      if (!state) return null;
+      const stagePrompt = resolveWorkflowStagePrompt(state, workflow.stages[0]);
+      if (!stagePrompt) return null;
+      atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
+      return { stagePrompt, workflowRunId: state.workflowRunId };
+    });
+    if (result.acquired && result.value?.error === 'active_workflow_conflict') throw new Error('an autopilot workflow is already active; run /cancel before activating another workflow');
+    if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
+    if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;
+    retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    return result.value.stagePrompt;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Clear state files for cancel operation
  */
@@ -917,8 +999,8 @@ async function clearStateFiles(directory, modeNames) {
   for (const name of modeNames) {
     const { writePath: localPath } = await resolveSessionStatePathsForHook(directory, name, undefined);
     const globalPath = join(homedir(), '.omc', 'state', `${name}-state.json`);
-    try { if (existsSync(localPath)) unlinkSync(localPath); } catch {}
-    try { if (existsSync(globalPath)) unlinkSync(globalPath); } catch {}
+    try { withStateFileLockSync(localPath, () => { if (existsSync(localPath)) unlinkSync(localPath); }); } catch {}
+    try { withStateFileLockSync(globalPath, () => { if (existsSync(globalPath)) unlinkSync(globalPath); }); } catch {}
   }
 }
 
@@ -1229,6 +1311,40 @@ async function main() {
       return;
     }
 
+    // Named profiles are parsed before generic autopilot detection so a failed
+    // profile lookup cannot leave a generic autopilot state behind.
+    const workflowInvocation = parseWorkflowInvocation(prompt);
+    if (workflowInvocation.kind === 'invalid-explicit-workflow-invocation') {
+      console.log(JSON.stringify(createHookOutput(
+        `[AUTOPILOT WORKFLOW ERROR] ${workflowInvocation.error} No autopilot state was activated.`
+      )));
+      return;
+    }
+    if (workflowInvocation.kind === 'valid') {
+      try {
+        if (!isWorkflowRuntimeSupported()) throw new Error('named autopilot workflow profiles require Linux with flock');
+        const invocationSessionId = data.session_id || data.sessionId || '';
+        const resumedPrompt = await resumeWorkflowProfile(directory, invocationSessionId, workflowInvocation.workflowName);
+        if (resumedPrompt === false) throw new Error('workflow_descriptor_integrity_failed');
+        if (resumedPrompt) {
+          console.log(JSON.stringify(createHookOutput(resumedPrompt)));
+          return;
+        }
+        const workflow = selectWorkflowProfile(directory, workflowInvocation.workflowName);
+        const stagePrompt = await activateWorkflowProfile(directory, invocationSessionId, workflowInvocation.task, workflow, data.transcript_path || data.transcriptPath);
+        if (!stagePrompt) {
+          throw new Error('Could not persist workflow state.');
+        }
+        console.log(JSON.stringify(createHookOutput(stagePrompt)));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Workflow activation failed.';
+        console.log(JSON.stringify(createHookOutput(
+          `[AUTOPILOT WORKFLOW ERROR] ${message} No autopilot state was activated.`
+        )));
+      }
+      return;
+    }
+
     // `/ask <provider> ...` delegates the remainder of the prompt to an
     // advisor process. Magic keywords inside that delegated payload must not
     // activate modes in the current Claude Code session.
@@ -1359,7 +1475,7 @@ async function main() {
 
     // Handle cancel specially - clear states and emit
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      await clearStateFiles(directory, ['ralph', 'autopilot', 'ultrawork']);
+      await clearStateFiles(directory, ['ralph', 'ultrawork']);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }

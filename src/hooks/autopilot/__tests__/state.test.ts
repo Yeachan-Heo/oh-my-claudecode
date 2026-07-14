@@ -12,6 +12,7 @@ import {
   updateExecution,
 } from "../state.js";
 
+
 describe("AutopilotState", () => {
   let testDir: string;
 
@@ -91,5 +92,27 @@ describe("AutopilotState", () => {
       const state = readAutopilotState(testDir);
       expect(state?.execution.tasks_completed).toBe(5);
     });
+  });
+});
+
+describe('workflow profile state contract (#3487)', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'workflow-profile-state-'));
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+
+  it('keeps legacy autopilot state readable without profile metadata', () => {
+    const state = initAutopilot(testDir, 'legacy task', 'legacy-session');
+    const persisted = readAutopilotState(testDir, 'legacy-session') as Record<string, unknown> | null;
+
+    expect(state).not.toBeNull();
+    expect(persisted?.workflow).toBeUndefined();
+    expect(persisted?.pipelineTracking).toBeUndefined();
   });
 });

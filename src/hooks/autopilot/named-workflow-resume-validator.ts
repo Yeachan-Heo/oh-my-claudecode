@@ -1,0 +1,98 @@
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from "fs";
+import { createHash } from "crypto";
+import { basename, join, parse, relative, resolve, sep } from "path";
+import { getClaudeConfigDir } from "../../utils/config-dir.js";
+import { verifyWorkflowDescriptor } from "./pipeline.js";
+import type { AutopilotState } from "./types.js";
+
+const NAMED_SIGNALS: Record<string, string> = { ralplan: "PIPELINE_RALPLAN_COMPLETE", execution: "PIPELINE_EXECUTION_COMPLETE", ralph: "PIPELINE_RALPH_COMPLETE", qa: "PIPELINE_QA_COMPLETE" };
+const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+
+type RecordValue = Record<string, unknown>;
+
+function isRecord(value: unknown): value is RecordValue { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function exactKeys(value: RecordValue, keys: string[]): boolean { const actual = Object.keys(value).sort(); const expected = [...keys].sort(); return actual.length === expected.length && actual.every((key, index) => key === expected[index]); }
+function safeInteger(value: unknown): value is number { return Number.isSafeInteger(value) && Number(value) >= 0; }
+function timestamp(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
+function validFileIdentity(value: unknown): value is RecordValue { return isRecord(value) && exactKeys(value, ["device", "inode", "size", "mtimeNs", "ctimeNs", "contentSha256"]) && safeInteger(value.device) && safeInteger(value.inode) && safeInteger(value.size) && typeof value.mtimeNs === "string" && /^\d+$/.test(value.mtimeNs) && typeof value.ctimeNs === "string" && /^\d+$/.test(value.ctimeNs) && typeof value.contentSha256 === "string" && /^[a-f0-9]{64}$/.test(value.contentSha256); }
+
+/** Named persisted state is supported only where its no-follow contract can be enforced. */
+export function namedWorkflowRuntimeSupported(): boolean {
+  return process.platform === "linux"
+    && typeof constants.O_NOFOLLOW === "number"
+    && typeof constants.O_DIRECTORY === "number"
+    && typeof constants.O_RDONLY === "number"
+    && (() => { try { return lstatSync("/proc/self/fd").isDirectory(); } catch { return false; } })()
+    && process.env.OMC_TEST_FLOCK_AVAILABLE !== "0"
+    && (existsSync("/usr/bin/flock") || existsSync("/bin/flock"));
+}
+
+function noFollowCanonicalFile(path: string, root: string): { fd: number; path: string } | null {
+  const canonicalRoot = realpathSync(root);
+  const absolute = resolve(path);
+  if (absolute !== path) return null;
+  const relativePath = relative(canonicalRoot, absolute);
+  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`)) return null;
+  const pathRoot = parse(absolute).root;
+  const components = absolute.slice(pathRoot.length).split(sep).filter(Boolean);
+  let fd: number | undefined;
+  try {
+    fd = openSync(pathRoot, constants.O_RDONLY | constants.O_DIRECTORY);
+    for (let index = 0; index < components.length; index += 1) {
+      const final = index === components.length - 1;
+      const nextFd = openSync(`/proc/self/fd/${fd}/${components[index]}`, constants.O_RDONLY | constants.O_NOFOLLOW | (final ? 0 : constants.O_DIRECTORY));
+      const stat = fstatSync(nextFd);
+      if ((final && !stat.isFile()) || (!final && !stat.isDirectory())) { closeSync(nextFd); return null; }
+      closeSync(fd);
+      fd = nextFd;
+    }
+    const canonicalPath = realpathSync(`/proc/self/fd/${fd}`);
+    if (canonicalPath !== absolute || !canonicalPath.startsWith(canonicalRoot + sep)) return null;
+    const result = { fd, path: canonicalPath };
+    fd = undefined;
+    return result;
+  } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
+}
+
+function validBoundary(value: unknown, sessionId: string | undefined, root: string): boolean {
+  if (!isRecord(value) || !exactKeys(value, ["transcriptPath", "transcriptRoot", "transcriptBasename", "sessionId", "byteOffset", "fileIdentity"]) || typeof sessionId !== "string" || value.sessionId !== sessionId || value.transcriptRoot !== root || value.transcriptBasename !== `${sessionId}.jsonl` || typeof value.transcriptPath !== "string" || basename(value.transcriptPath) !== `${sessionId}.jsonl` || !safeInteger(value.byteOffset) || value.byteOffset > MAX_TRANSCRIPT_BYTES || !validFileIdentity(value.fileIdentity)) return false;
+  const opened = noFollowCanonicalFile(value.transcriptPath, root);
+  if (!opened) return false;
+  try {
+    const stat = fstatSync(opened.fd);
+    const identity = value.fileIdentity;
+    if (stat.dev !== identity.device || stat.ino !== identity.inode || stat.size < value.byteOffset || identity.size !== value.byteOffset) return false;
+    const prefix = Buffer.alloc(value.byteOffset);
+    if (readSync(opened.fd, prefix, 0, prefix.length, 0) !== prefix.length) return false;
+    return createHash("sha256").update(prefix).digest("hex") === identity.contentSha256;
+  } catch { return false; } finally { closeSync(opened.fd); }
+}
+
+export type NamedWorkflowValidation = { tracking: NonNullable<AutopilotState["pipelineTracking"]>; task: string };
+
+/** Validate the complete descriptor and authenticated transcript chain without mutating state. */
+export function validateNamedWorkflowState(state: AutopilotState, sessionId: string | undefined): NamedWorkflowValidation | null {
+  const workflow = state.workflow; const tracking = state.pipelineTracking; const task = typeof state.prompt === "string" ? state.prompt.trim() : "";
+  let root: string;
+  try { root = realpathSync(join(getClaudeConfigDir(), "projects")); } catch { return null; }
+  if (!verifyWorkflowDescriptor(workflow) || state.session_id !== sessionId || !isRecord(tracking) || task.length === 0 || typeof state.workflowRunId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId)) return null;
+  if (!exactKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) || !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !safeInteger(tracking.currentStageIndex) || !safeInteger(tracking.trackingRevision) || tracking.currentStageIndex >= workflow.stages.length || tracking.trackingRevision !== tracking.currentStageIndex || tracking.completionObservations.length !== tracking.currentStageIndex || !validBoundary(tracking.activationBoundary, sessionId, root) || tracking.stages.length !== workflow.stages.length) return null;
+  for (let index = 0; index < tracking.stages.length; index += 1) {
+    const stage = tracking.stages[index]; if (!isRecord(stage)) return null;
+    const status = index < tracking.currentStageIndex ? "complete" : index === tracking.currentStageIndex ? "active" : "pending";
+    const keys = status === "complete" ? ["id", "status", "iterations", "startedAt", "completedAt"] : status === "active" ? ["id", "status", "iterations", "startedAt"] : ["id", "status", "iterations"];
+    if (!exactKeys(stage, keys) || stage.id !== workflow.stages[index] || stage.status !== status || !safeInteger(stage.iterations) || (stage.startedAt !== undefined && !timestamp(stage.startedAt)) || (stage.completedAt !== undefined && !timestamp(stage.completedAt))) return null;
+  }
+  let previousObservation: RecordValue | null = null;
+  for (let index = 0; index < tracking.completionObservations.length; index += 1) {
+    const observation = tracking.completionObservations[index];
+    if (!isRecord(observation) || !exactKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== NAMED_SIGNALS[String(observation.stageId)] || !safeInteger(observation.lineNumber) || !safeInteger(observation.byteOffset) || typeof observation.recordContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !validFileIdentity(observation.stableFile) || !validBoundary(observation.activationBoundary, sessionId, root) || !timestamp(observation.observedAt)) return null;
+    const boundary = observation.activationBoundary as unknown as RecordValue; const stable = observation.stableFile as unknown as RecordValue;
+    if (Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(stable.size) < Number(observation.byteOffset)) return null;
+    if (previousObservation) { const previousBoundary = previousObservation.activationBoundary as RecordValue; const previousStable = previousObservation.stableFile as RecordValue; if (boundary.transcriptPath !== previousBoundary.transcriptPath || boundary.byteOffset !== previousStable.size || JSON.stringify(boundary.fileIdentity) !== JSON.stringify(previousStable)) return null; }
+    previousObservation = observation;
+  }
+  if (previousObservation) { const current = tracking.activationBoundary as unknown as RecordValue; const stable = previousObservation.stableFile as RecordValue; const boundary = previousObservation.activationBoundary as RecordValue; if (current.transcriptPath !== boundary.transcriptPath || current.byteOffset !== stable.size || JSON.stringify(current.fileIdentity) !== JSON.stringify(stable)) return null; }
+  if (state.phase !== workflow.stages[tracking.currentStageIndex]) return null;
+  return { tracking: tracking as NonNullable<AutopilotState["pipelineTracking"]>, task };
+}

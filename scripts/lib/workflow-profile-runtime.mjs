@@ -1,0 +1,187 @@
+import { createHash, randomUUID } from 'crypto';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { basename, join, parse, resolve, sep } from 'path';
+import { getClaudeConfigDir } from './config-dir.mjs';
+import { resolveCanonicalWorkflowStagePrompt } from './workflow-stage-prompts.mjs';
+
+const SEQUENCES = Object.freeze([Object.freeze(['ralplan', 'execution']), Object.freeze(['ralplan', 'execution', 'ralph']), Object.freeze(['ralplan', 'execution', 'qa']), Object.freeze(['ralplan', 'execution', 'ralph', 'qa'])]);
+const SIGNALS = { ralplan: 'PIPELINE_RALPLAN_COMPLETE', execution: 'PIPELINE_EXECUTION_COMPLETE', ralph: 'PIPELINE_RALPH_COMPLETE', qa: 'PIPELINE_QA_COMPLETE' };
+const NAME = /^[a-z][a-z0-9-]{0,62}$/;
+const RESERVED_WORKFLOW_NAMES = new Set(['autopilot', 'ralplan', 'execution', 'ralph', 'qa', 'autoresearch', 'ultraqa', 'merge-readiness', 'self-improve', 'ultrawork', 'ultragoal', 'ultrapilot', 'swarm', 'pipeline', 'plan', 'team', 'cancel', 'deep-interview', 'deepsearch', 'ultrathink', 'tdd', 'code-review', 'security-review', 'analyze', 'search', 'default']);
+const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+function workflowPlatform() { return process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_PLATFORM ? process.env.OMC_WORKFLOW_TEST_PLATFORM : process.platform; }
+export function isWorkflowRuntimeSupported() { return workflowPlatform() === 'linux' && process.env.OMC_WORKFLOW_TEST_FLOCK_AVAILABLE !== '0' && (existsSync('/usr/bin/flock') || existsSync('/bin/flock')); }
+function assertWorkflowRuntimeSupported() { if (!isWorkflowRuntimeSupported()) throw new Error('named autopilot workflow profiles require Linux with flock'); }
+function isApprovedSequence(stages) { return Array.isArray(stages) && SEQUENCES.some(sequence => stages.length === sequence.length && stages.every((stage, index) => typeof stage === 'string' && stage === sequence[index])); }
+
+function stripJsonc(value) { let result = ''; let quoted = false; let escaped = false; for (let i = 0; i < value.length; i += 1) { const char = value[i]; if (quoted) { result += char; if (escaped) escaped = false; else if (char === '\\') escaped = true; else if (char === '"') quoted = false; continue; } if (char === '"') { quoted = true; result += char; continue; } if (char === '/' && value[i + 1] === '/') { while (i < value.length && value[i] !== '\n') i += 1; result += '\n'; continue; } if (char === '/' && value[i + 1] === '*') { i += 2; while (i < value.length && !(value[i] === '*' && value[i + 1] === '/')) i += 1; i += 1; continue; } result += char; } return result.replace(/,(\s*[}\]])/g, '$1'); }
+function readConfig(path) { if (!existsSync(path)) return {}; try { return JSON.parse(stripJsonc(readFileSync(path, 'utf8'))); } catch { throw new Error(`invalid JSONC in ${path}`); } }
+function validateDefinitions(config, source) { const workflows = config?.autopilot?.workflows; if (workflows === undefined) return {}; if (!workflows || typeof workflows !== 'object' || Array.isArray(workflows)) throw new Error(`${source} autopilot.workflows must be an object map`); for (const [name, profile] of Object.entries(workflows)) { if (!NAME.test(name)) throw new Error(`${source} autopilot.workflows.${name} name must match ^[a-z][a-z0-9-]{0,62}$`); if (RESERVED_WORKFLOW_NAMES.has(name)) throw new Error(`${source} autopilot.workflows.${name} name "${name}" is reserved`); if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw new Error(`${source} autopilot.workflows.${name} must be an object`); const unknownKey = Object.keys(profile).find(key => key !== 'version' && key !== 'stages'); if (unknownKey) throw new Error(`${source} autopilot.workflows.${name}.${unknownKey} unknown profile key`); if (profile.version !== 1) throw new Error(`${source} autopilot.workflows.${name}.version must be the number 1`); if (!Array.isArray(profile.stages)) throw new Error(`${source} autopilot.workflows.${name}.stages must be an array`); if (!isApprovedSequence(profile.stages)) throw new Error(`${source} autopilot.workflows.${name}.stages must be one of: [ralplan, execution], [ralplan, execution, ralph], [ralplan, execution, qa], [ralplan, execution, ralph, qa]`); } return workflows; }
+export function parseWorkflowInvocation(prompt) { const command = typeof prompt === 'string' && prompt.match(/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$)/); if (!command) return { kind: 'not-workflow-invocation' }; const invocation = prompt.slice(command[0].length); const attempts = [...invocation.matchAll(/(?:^|\s)--workflow\S*/g)]; if (attempts.length === 0) return { kind: 'not-workflow-invocation' }; if (attempts.length > 1) return { kind: 'invalid-explicit-workflow-invocation', error: 'Specify --workflow exactly once.' }; if (/^\s*--workflow=/.test(invocation)) return { kind: 'invalid-explicit-workflow-invocation', error: 'Use --workflow <name> followed by a task.' }; const match = invocation.match(/^\s*--workflow\s+(\S+)(?:\s+([\s\S]*?\S))?\s*$/); if (!match) return { kind: 'invalid-explicit-workflow-invocation', error: 'Use /autopilot --workflow <name> <task>.' }; if (!NAME.test(match[1])) return { kind: 'invalid-explicit-workflow-invocation', error: 'Workflow name must match ^[a-z][a-z0-9-]{0,62}$.' }; if (!match[2]) return { kind: 'invalid-explicit-workflow-invocation', error: 'Provide a task after the workflow name.' }; return { kind: 'valid', workflowName: match[1], task: match[2] }; }
+function getOmcUserConfigDir() { if (process.platform === 'win32') return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'); return process.env.XDG_CONFIG_HOME || join(homedir(), '.config'); }
+export function selectWorkflowProfile(directory, workflowName) { assertWorkflowRuntimeSupported(); const user = validateDefinitions(readConfig(join(getOmcUserConfigDir(), 'claude-omc', 'config.jsonc')), 'user'); const project = validateDefinitions(readConfig(join(directory, '.claude', 'omc.jsonc')), 'project'); const profile = { ...user, ...project }[workflowName]; if (!profile) throw new Error(`workflow profile "${workflowName}" was not found`); const descriptor = { descriptorVersion: 1, workflowName, profileVersion: 1, stages: [...profile.stages] }; return { ...descriptor, profileHash: createHash('sha256').update(canonicalJson(descriptor)).digest('hex') }; }
+function canonicalJson(value) { if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`; if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`; return JSON.stringify(value); }
+
+function hasValidWorkflowHash(workflow) {
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) return false;
+  const keys = Object.keys(workflow).sort();
+  const expectedKeys = ['descriptorVersion', 'profileHash', 'profileVersion', 'stages', 'workflowName'];
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) return false;
+  if (workflow.descriptorVersion !== 1 || workflow.profileVersion !== 1 || typeof workflow.workflowName !== 'string' || !NAME.test(workflow.workflowName) || RESERVED_WORKFLOW_NAMES.has(workflow.workflowName) || !isApprovedSequence(workflow.stages) || typeof workflow.profileHash !== 'string' || !/^[a-f0-9]{64}$/.test(workflow.profileHash)) return false;
+  const descriptor = { descriptorVersion: 1, workflowName: workflow.workflowName, profileVersion: 1, stages: workflow.stages };
+  return createHash('sha256').update(canonicalJson(descriptor)).digest('hex') === workflow.profileHash;
+}
+export function isValidWorkflowDescriptor(workflow) { return hasValidWorkflowHash(workflow); }
+export function resolveWorkflowStagePrompt(state, stageId) {
+  const task = typeof state?.prompt === 'string' ? state.prompt.trim() : '';
+  const workflow = state?.workflow;
+  if (!task || !hasValidWorkflowHash(workflow) || !workflow.stages.includes(stageId)) return null;
+  return resolveCanonicalWorkflowStagePrompt(stageId, task);
+}
+function transcriptRoot() { return realpathSync(resolve(getClaudeConfigDir(), 'projects')); }
+function fileIdentity(stat, content) { return { device: Number(stat.dev), inode: Number(stat.ino), size: Number(stat.size), mtimeNs: stat.mtimeNs.toString(), ctimeNs: stat.ctimeNs.toString(), contentSha256: createHash('sha256').update(content).digest('hex') }; }
+function readStableTranscript(path, sessionId, maximumSize = MAX_TRANSCRIPT_BYTES) {
+  if (!isWorkflowRuntimeSupported() || !existsSync('/proc/self/fd') || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') return null;
+  const absolute = resolve(path);
+  const pathRoot = parse(absolute).root;
+  const components = absolute.slice(pathRoot.length).split(sep).filter(Boolean);
+  if (components.length === 0) return null;
+  let fd;
+  try {
+    fd = openSync(pathRoot, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+    const pathIdentity = [];
+    for (let index = 0; index < components.length; index += 1) {
+      const isFinal = index === components.length - 1;
+      const nextFd = openSync(`/proc/self/fd/${fd}/${components[index]}`, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (isFinal ? 0 : fsConstants.O_DIRECTORY));
+      const nextStat = fstatSync(nextFd);
+      pathIdentity.push({ device: Number(nextStat.dev), inode: Number(nextStat.ino) });
+      if ((isFinal && !nextStat.isFile()) || (!isFinal && !nextStat.isDirectory())) { closeSync(nextFd); return null; }
+      closeSync(fd);
+      fd = nextFd;
+    }
+    const before = fstatSync(fd, { bigint: true });
+    const canonicalPath = realpathSync(`/proc/self/fd/${fd}`);
+    const root = transcriptRoot();
+    if (before.size > BigInt(maximumSize) || !canonicalPath.startsWith(root + sep) || basename(canonicalPath) !== `${sessionId}.jsonl`) return null;
+    const content = readFileSync(fd);
+    if (process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64) {
+      writeFileSync(canonicalPath, Buffer.from(process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64, 'base64'));
+    }
+    const after = fstatSync(fd, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs || after.size > BigInt(maximumSize) || content.byteLength !== Number(after.size)) return null;
+    return { content, identity: fileIdentity(after, content), canonicalPath, pathIdentity, root };
+  } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
+}
+function activationBoundary(transcriptPath, sessionId) {
+  const transcript = readStableTranscript(transcriptPath, sessionId);
+  return transcript ? Object.freeze({ transcriptPath: transcript.canonicalPath, transcriptRoot: transcript.root, transcriptBasename: basename(transcript.canonicalPath), sessionId, byteOffset: transcript.content.byteLength, fileIdentity: transcript.identity }) : null;
+}
+export function createWorkflowState({ directory, sessionId, task, workflow, transcriptPath }) { const boundary = typeof transcriptPath === 'string' && transcriptPath ? activationBoundary(transcriptPath, sessionId) : null; if (!boundary) return null; const now = new Date().toISOString(); const stages = workflow.stages.map((id, index) => ({ id, status: index === 0 ? 'active' : 'pending', iterations: 0, ...(index === 0 ? { startedAt: now } : {}) })); return { active: true, mode: 'autopilot', prompt: task, directory, project_dir: directory, project_path: directory, session_id: sessionId, workflowRunId: randomUUID(), started_at: now, updated_at: now, last_checked_at: now, phase: workflow.stages[0], workflow, pipelineTracking: { stages, currentStageIndex: 0, trackingRevision: 0, activationBoundary: boundary, completionObservations: [] } }; }
+function isFiniteInteger(value) { return Number.isSafeInteger(value) && value >= 0; }
+function hasExactKeys(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value)) return false; const actual = Object.keys(value).sort(); const expected = [...keys].sort(); return actual.length === expected.length && actual.every((key, index) => key === expected[index]); }
+function isTimestamp(value) { return typeof value === 'string' && Number.isFinite(Date.parse(value)); }
+function isFileIdentity(value) { return hasExactKeys(value, ['device', 'inode', 'size', 'mtimeNs', 'ctimeNs', 'contentSha256']) && isFiniteInteger(value.device) && isFiniteInteger(value.inode) && isFiniteInteger(value.size) && /^\d+$/.test(value.mtimeNs) && /^\d+$/.test(value.ctimeNs) && /^[a-f0-9]{64}$/.test(value.contentSha256); }
+function isBoundary(value, sessionId, root) { return hasExactKeys(value, ['transcriptPath', 'transcriptRoot', 'transcriptBasename', 'sessionId', 'byteOffset', 'fileIdentity']) && typeof value.transcriptPath === 'string' && value.transcriptPath.startsWith(root + sep) && value.transcriptRoot === root && value.transcriptBasename === `${sessionId}.jsonl` && value.sessionId === sessionId && isFiniteInteger(value.byteOffset) && isFileIdentity(value.fileIdentity) && value.fileIdentity.size === value.byteOffset; }
+function hasAuthenticatedBoundary(value, sessionId, root) {
+  if (!isBoundary(value, sessionId, root)) return false;
+  const transcript = readStableTranscript(value.transcriptPath, sessionId);
+  if (!transcript || transcript.root !== root || transcript.canonicalPath !== value.transcriptPath || basename(transcript.canonicalPath) !== `${sessionId}.jsonl`) return false;
+  if (transcript.identity.device !== value.fileIdentity.device || transcript.identity.inode !== value.fileIdentity.inode || transcript.identity.size < value.byteOffset) return false;
+  return createHash('sha256').update(transcript.content.subarray(0, value.byteOffset)).digest('hex') === value.fileIdentity.contentSha256;
+}
+export function isValidWorkflowTrackingState(state, sessionId = state?.session_id) {
+  try {
+    const workflow = state?.workflow; const tracking = state?.pipelineTracking; const root = transcriptRoot();
+    if (typeof state?.prompt !== 'string' || state.prompt.trim().length === 0) return false;
+    if (!hasValidWorkflowHash(workflow) || typeof state?.workflowRunId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId) || state?.session_id !== sessionId) return false;
+    const terminal = state?.active === false && state?.phase === 'complete';
+    const maxIndex = terminal ? workflow.stages.length : workflow.stages.length - 1;
+    if (!hasExactKeys(tracking, ['stages', 'currentStageIndex', 'trackingRevision', 'activationBoundary', 'completionObservations']) || !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !isFiniteInteger(tracking.currentStageIndex) || tracking.currentStageIndex > maxIndex || !isFiniteInteger(tracking.trackingRevision)) return false;
+    if (!terminal && !((state.active === true || state.active === false) && state.phase === workflow.stages[tracking.currentStageIndex])) return false;
+    if (tracking.stages.length !== workflow.stages.length || tracking.completionObservations.length !== tracking.currentStageIndex || !hasAuthenticatedBoundary(tracking.activationBoundary, sessionId, root)) return false;
+    for (let index = 0; index < tracking.stages.length; index += 1) {
+      const stage = tracking.stages[index]; const expectedStatus = terminal || index < tracking.currentStageIndex ? 'complete' : index === tracking.currentStageIndex ? 'active' : 'pending';
+      const expectedKeys = expectedStatus === 'complete' ? ['id', 'status', 'iterations', 'startedAt', 'completedAt'] : expectedStatus === 'active' ? ['id', 'status', 'iterations', 'startedAt'] : ['id', 'status', 'iterations'];
+      if (!hasExactKeys(stage, expectedKeys) || stage.id !== workflow.stages[index] || stage.status !== expectedStatus || !isFiniteInteger(stage.iterations) || (stage.startedAt !== undefined && !isTimestamp(stage.startedAt)) || (stage.completedAt !== undefined && !isTimestamp(stage.completedAt))) return false;
+    }
+    let previousObservation = null;
+    const validObservations = tracking.completionObservations.every((observation, index) => {
+      if (!hasExactKeys(observation, ['stageId', 'sessionId', 'signalId', 'lineNumber', 'byteOffset', 'recordContentSha256', 'stableFile', 'activationBoundary', 'observedAt'])) return false;
+      if (observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== SIGNALS[observation.stageId] || !isFiniteInteger(observation.lineNumber) || !isFiniteInteger(observation.byteOffset) || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isTimestamp(observation.observedAt) || !isFileIdentity(observation.stableFile) || !hasAuthenticatedBoundary(observation.activationBoundary, sessionId, root)) return false;
+      if (observation.byteOffset < observation.activationBoundary.byteOffset || observation.stableFile.size < observation.byteOffset) return false;
+      if (previousObservation && (observation.activationBoundary.transcriptPath !== previousObservation.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previousObservation.stableFile.size || canonicalJson(observation.activationBoundary.fileIdentity) !== canonicalJson(previousObservation.stableFile))) return false;
+      previousObservation = observation;
+      return true;
+    });
+    if (!validObservations) return false;
+    if (tracking.currentStageIndex > 0) {
+      const latest = tracking.completionObservations.at(-1);
+      if (tracking.activationBoundary.transcriptPath !== latest.activationBoundary.transcriptPath || tracking.activationBoundary.byteOffset !== latest.stableFile.size || canonicalJson(tracking.activationBoundary.fileIdentity) !== canonicalJson(latest.stableFile)) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function recordSessionId(record) { return record?.sessionId; }
+function assistantText(record) { const content = record?.message?.content; if (!Array.isArray(content) || content.length === 0) return null; const text = content.map(block => block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0 ? block.text : null); return text.every(value => value !== null) ? text.join('') : null; }
+function completionEvidence(content, signal, sessionId, boundary) {
+  let byteOffset = boundary.byteOffset;
+  let lineNumber = 0;
+  let evidence = null;
+  const lines = content.split(/\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (line.trim().length === 0) {
+      if (index === lines.length - 1 && line === '') continue;
+      return null;
+    }
+    let record;
+    try { record = JSON.parse(line); } catch { return null; }
+    const text = assistantText(record);
+    const isAssistant = recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null;
+    if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === signal) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') };
+    byteOffset += Buffer.byteLength(rawLine) + 1;
+    lineNumber += 1;
+  }
+  return evidence;
+}
+export function advanceWorkflowOnStop(state, input, sessionId) {
+  const workflow = state?.workflow; const tracking = state?.pipelineTracking;
+  if (!isValidWorkflowTrackingState(state, sessionId)) return null;
+  const index = tracking.currentStageIndex; const stageId = workflow.stages[index];
+  const suppliedPath = input.transcript_path || input.transcriptPath; const boundary = tracking.activationBoundary;
+  const transcript = typeof suppliedPath === 'string' ? readStableTranscript(suppliedPath, sessionId) : null;
+  const absolute = transcript?.canonicalPath;
+  if (!boundary || !transcript || absolute !== boundary.transcriptPath || boundary.transcriptRoot !== transcript.root || boundary.transcriptBasename !== `${sessionId}.jsonl` || boundary.sessionId !== sessionId || !Number.isSafeInteger(boundary.byteOffset) || boundary.byteOffset < 0) return null;
+  if (transcript.identity.size < boundary.byteOffset || boundary.fileIdentity.device !== transcript.identity.device || boundary.fileIdentity.inode !== transcript.identity.inode || createHash('sha256').update(transcript.content.subarray(0, boundary.byteOffset)).digest('hex') !== boundary.fileIdentity.contentSha256) return null;
+  const evidence = completionEvidence(transcript.content.subarray(boundary.byteOffset).toString('utf8'), SIGNALS[stageId], sessionId, boundary);
+  if (!evidence) return null;
+  const revision = Number.isSafeInteger(tracking.trackingRevision) ? tracking.trackingRevision : 0; const observedAt = new Date().toISOString(); const nextIndex = index + 1; const nextStage = workflow.stages[nextIndex] || null;
+  const nextStagePrompt = nextStage ? resolveWorkflowStagePrompt(state, nextStage) : null;
+  if (nextStage && !nextStagePrompt) return null;
+  const updated = JSON.parse(JSON.stringify(state)); updated.pipelineTracking.stages[index].status = 'complete'; updated.pipelineTracking.stages[index].completedAt = observedAt;
+  if (nextStage) {
+    updated.pipelineTracking.stages[nextIndex].status = 'active';
+    updated.pipelineTracking.stages[nextIndex].startedAt = observedAt;
+    updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity });
+    updated.phase = nextStage;
+  } else { updated.active = false; updated.phase = 'complete'; }
+  updated.pipelineTracking.currentStageIndex = nextIndex; updated.pipelineTracking.trackingRevision = revision + 1;
+  updated.pipelineTracking.completionObservations = [...(Array.isArray(tracking.completionObservations) ? tracking.completionObservations : []), Object.freeze({ stageId, sessionId, signalId: SIGNALS[stageId], lineNumber: evidence.lineNumber, byteOffset: evidence.byteOffset, recordContentSha256: evidence.recordContentSha256, stableFile: Object.freeze(transcript.identity), activationBoundary: Object.freeze({ transcriptPath: boundary.transcriptPath, transcriptRoot: boundary.transcriptRoot, transcriptBasename: boundary.transcriptBasename, sessionId: boundary.sessionId, byteOffset: boundary.byteOffset, fileIdentity: boundary.fileIdentity }), observedAt })];
+  updated.updated_at = observedAt; updated.last_checked_at = observedAt;
+  return { updated, nextStage, nextStagePrompt, expectedRevision: revision, expectedProfileHash: workflow.profileHash, expectedWorkflowRunId: state.workflowRunId, expectedSessionId: sessionId, expectedStageId: stageId, expectedStageIndex: index, expectedTranscriptPath: absolute, expectedTranscriptIdentity: transcript.identity, expectedTranscriptPathIdentity: transcript.pathIdentity, expectedEvidenceHash: evidence.recordContentSha256 };
+}
+export function refreshWorkflowBoundaryForCommit(advance) {
+  const transcript = readStableTranscript(advance.expectedTranscriptPath, advance.expectedSessionId);
+  const absolute = transcript?.canonicalPath;
+  if (!transcript || transcript.canonicalPath !== advance.expectedTranscriptPath || canonicalJson(transcript.identity) !== canonicalJson(advance.expectedTranscriptIdentity) || canonicalJson(transcript.pathIdentity) !== canonicalJson(advance.expectedTranscriptPathIdentity)) return false;
+  const observation = advance.updated?.pipelineTracking?.completionObservations?.at(-1);
+  const boundary = observation?.activationBoundary;
+  if (!boundary || transcript.identity.size < boundary.byteOffset) return false;
+  const evidence = completionEvidence(transcript.content.subarray(boundary.byteOffset).toString('utf8'), SIGNALS[advance.expectedStageId], advance.expectedSessionId, boundary);
+  if (!evidence || evidence.recordContentSha256 !== advance.expectedEvidenceHash) return false;
+  advance.updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId: advance.expectedSessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity });
+  return true;
+}

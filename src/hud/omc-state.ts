@@ -5,6 +5,8 @@
  * These are read-only functions that don't modify the state files.
  */
 
+import { createHash } from 'crypto';
+
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
@@ -260,18 +262,105 @@ export function readPrdStateForHud(directory: string): PrdStateForHud | null {
 // Autopilot State
 // ============================================================================
 
+interface WorkflowDescriptor {
+  descriptorVersion: number;
+  workflowName: string;
+  profileVersion: number;
+  stages: string[];
+  profileHash: string;
+}
+
 interface AutopilotStateFile {
   active: boolean;
   phase?: string;
   current_phase?: string;
   iteration: number;
   max_iterations: number;
+  workflow?: WorkflowDescriptor;
+  pipelineTracking?: {
+    stages?: Array<{ id?: string; status?: string }>;
+    currentStageIndex?: number;
+    trackingRevision?: number;
+    activationBoundary?: { transcriptPath?: string; byteOffset?: number } | null;
+    completionObservations?: unknown[];
+  };
   execution?: {
     tasks_completed?: number;
     tasks_total?: number;
     files_created?: string[];
   };
 }
+
+function canonicalizeWorkflowJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalizeWorkflowJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalizeWorkflowJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+function isValidWorkflow(profile: WorkflowDescriptor): boolean {
+  const allowedSequences = new Set([
+    'ralplan,execution',
+    'ralplan,execution,ralph',
+    'ralplan,execution,qa',
+    'ralplan,execution,ralph,qa',
+  ]);
+  if (
+    profile.descriptorVersion !== 1 ||
+    profile.profileVersion !== 1 ||
+    typeof profile.workflowName !== 'string' ||
+    profile.workflowName.trim().length === 0 ||
+    !Array.isArray(profile.stages) ||
+    !allowedSequences.has(profile.stages.join(',')) ||
+    !/^[a-f0-9]{64}$/.test(profile.profileHash)
+  ) {
+    return false;
+  }
+
+  const canonicalDescriptor = canonicalizeWorkflowJson({
+    descriptorVersion: 1,
+    workflowName: profile.workflowName,
+    profileVersion: 1,
+    stages: profile.stages,
+  });
+  return createHash('sha256').update(canonicalDescriptor).digest('hex') === profile.profileHash;
+}
+
+function getWorkflowHudState(state: AutopilotStateFile): AutopilotStateForHud['workflow'] | undefined {
+  if (!state.workflow) {
+    return undefined;
+  }
+  if (!isValidWorkflow(state.workflow)) {
+    return { invalid: true };
+  }
+
+  const pipelineStages = state.pipelineTracking?.stages;
+  const currentStageIndex = state.pipelineTracking?.currentStageIndex;
+  if (
+    !pipelineStages ||
+    typeof currentStageIndex !== 'number' ||
+    !Number.isInteger(state.pipelineTracking?.trackingRevision) ||
+    !Array.isArray(state.pipelineTracking?.completionObservations) ||
+    pipelineStages.length !== state.workflow.stages.length ||
+    pipelineStages.some((stage, index) => stage.id !== state.workflow?.stages[index]) ||
+    currentStageIndex < 0 ||
+    currentStageIndex > pipelineStages.length
+  ) {
+    return { invalid: true };
+  }
+
+  const currentStage = pipelineStages[currentStageIndex]?.id;
+  return {
+    name: state.workflow.workflowName,
+    version: state.workflow.profileVersion,
+    shortHash: state.workflow.profileHash.slice(0, 12),
+    currentStage: currentStage ?? state.phase ?? state.current_phase ?? 'complete',
+    currentStageIndex: Math.min(currentStageIndex + 1, state.workflow.stages.length),
+    stagesTotal: state.workflow.stages.length,
+  };
+}
+
 
 /**
  * Read Autopilot state for HUD display.
@@ -309,7 +398,8 @@ export function readAutopilotStateForHud(directory: string, sessionId?: string):
       maxIterations: state.max_iterations,
       tasksCompleted: state.execution?.tasks_completed,
       tasksTotal: state.execution?.tasks_total,
-      filesCreated: state.execution?.files_created?.length
+      filesCreated: state.execution?.files_created?.length,
+      workflow: getWorkflowHudState(state),
     };
   } catch {
     return null;

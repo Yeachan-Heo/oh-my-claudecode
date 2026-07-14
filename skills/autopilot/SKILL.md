@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: Full autonomous execution from idea to working code
-argument-hint: "<product idea or task description>"
+argument-hint: "[--workflow <name>] <product idea or task description>"
 level: 4
 ---
 
@@ -35,6 +35,48 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 - Validation requires approval from all reviewers; rejected items get fixed and re-validated
 - Cancel with `/oh-my-claudecode:cancel` at any time; progress is preserved for resume
 </Execution_Policy>
+
+<Workflow_Profiles>
+## Named stage profiles (v1)
+
+Select a configured profile only with `/autopilot --workflow <name> <task>`. A profile is an autopilot-owned stage schedule, not a command, mode, plugin, filename, or separate state identity. Without `--workflow`, autopilot retains its legacy lifecycle and behavior.
+
+Named workflow profiles require Linux with the `flock` utility in v1 because their transcript evidence boundary uses Linux no-follow file-descriptor traversal and their recoverable mutation lock uses kernel advisory locking. Unsupported environments reject explicit `--workflow` activation before state mutation; use legacy autopilot instead.
+
+Profiles are configured in project or user JSONC as `autopilot.workflows.<slug>`. Every v1 profile has exactly `version: 1` and `stages`; no other profile keys are accepted. The only admitted stage sequences are:
+
+```jsonc
+{
+  "autopilot": {
+    "workflows": {
+      "plan-build-qa": {
+        "version": 1,
+        "stages": ["ralplan", "execution", "qa"]
+      }
+    }
+  }
+}
+```
+
+```text
+[ralplan, execution]
+[ralplan, execution, ralph]
+[ralplan, execution, qa]
+[ralplan, execution, ralph, qa]
+```
+
+`ralplan` creates the plan consumed by `execution`; `execution` creates the implemented workspace required by `ralph` and `qa`. Thus omitted or reordered prerequisites, duplicate stages, and non-built-in stages are invalid. Profile names use `^[a-z][a-z0-9-]{0,62}$`, are validated metadata only, and cannot collide with built-in stages, autopilot/mode names, or deprecated aliases.
+
+User and project configuration sources are each validated before composition. Different names coexist; a project profile with the same name replaces the complete user profile rather than deep-merging it. Environment configuration cannot define or replace profiles.
+
+On successful selection, autopilot atomically creates its existing session-scoped state with an immutable normalized descriptor and selected-only pipeline tracking. The descriptor contains the workflow name, profile version, canonical stages, and a deterministic SHA-256 profile hash; it excludes task text and mutable progress. Resume and Stop verify that hash and refuse a mismatch without reloading configuration or emitting a stage prompt. Cancel, resume, cleanup, state inspection, HUD, and Stop continuation remain owned by autopilot.
+
+The installed plugin and standalone-installed Stop hooks advance only after an authorized assistant completion record for the active stage appears after that stage's persisted activation transcript boundary. They bind evidence to the owner session and bounded, non-symlink transcript; reject user/tool/local-command output and stale or wrong-stage evidence; and use compare-before-write tracking updates so duplicate or concurrent Stop events advance exactly once. Public state, HUD, and Stop output show only safe workflow metadata and progress, never the task, descriptor internals, transcript references, offsets, or record hashes.
+
+### V1 deferrals
+
+V1 does not support `stageModels`, model routing, provider or role selection; inline/no-spawn execution; dynamic commands, modes, or state files; arbitrary stages, prompts, plugins, branches, loops, DAGs, or callbacks; or environment-defined profile definitions. The separate custom-skill inline-array frontmatter parser mismatch is also deferred.
+</Workflow_Profiles>
 
 <Steps>
 1. **Phase 0 - Expansion**: Turn the user's idea into a detailed spec

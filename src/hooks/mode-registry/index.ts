@@ -12,14 +12,13 @@
 import {
   existsSync,
   readFileSync,
-  unlinkSync,
   mkdirSync,
   readdirSync,
   statSync,
   rmdirSync,
   rmSync,
 } from "fs";
-import { atomicWriteJsonSync } from "../../lib/atomic-write.js";
+import { canClearStateForSession, clearStateFileLockedIf, writeStateFileLocked } from "../../lib/mode-state-io.js";
 import { join, dirname } from "path";
 import type {
   ExecutionMode,
@@ -398,6 +397,51 @@ export function getAllModeStatuses(
   }));
 }
 
+function clearObservedJsonFile(
+  filePath: string,
+  predicate: (state: Record<string, unknown>) => boolean = () => true,
+): boolean {
+  if (!existsSync(filePath)) return true;
+  let observed: Record<string, unknown>;
+  try {
+    observed = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  if (!predicate(observed)) return true;
+  const snapshot = JSON.stringify(observed);
+  return clearStateFileLockedIf(
+    filePath,
+    (current) => predicate(current) && JSON.stringify(current) === snapshot,
+  ) !== 'failed';
+}
+
+function readJsonSnapshot(filePath: string): { state: Record<string, unknown>; snapshot: string } | null {
+  try {
+    const state = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    return { state, snapshot: JSON.stringify(state) };
+  } catch {
+    return null;
+  }
+}
+
+function clearDiscoveredJsonFile(
+  filePath: string,
+  observed: { state: Record<string, unknown>; snapshot: string } | null,
+  predicate: (state: Record<string, unknown>) => boolean = () => true,
+): boolean {
+  if (!observed) {
+    const result = clearStateFileLockedIf(filePath, predicate);
+    return result !== 'failed' && !(result === 'skipped' && existsSync(filePath));
+  }
+  if (!predicate(observed.state)) return true;
+  const result = clearStateFileLockedIf(
+    filePath,
+    (current) => predicate(current) && JSON.stringify(current) === observed.snapshot,
+  );
+  return result !== 'failed' && !(result === 'skipped' && existsSync(filePath));
+}
+
 /**
  * Clear all state files for a mode
  *
@@ -413,17 +457,24 @@ export function clearModeState(
   mode: ExecutionMode,
   cwd: string,
   sessionId?: string,
+  expectedState?: Record<string, unknown>,
 ): boolean {
   const config = MODE_CONFIGS[mode];
   let success = true;
   const markerFile = getMarkerFilePath(cwd, mode);
   const isSessionScopedClear = Boolean(sessionId);
+  const markerSnapshot = markerFile ? readJsonSnapshot(markerFile) : null;
+  const sessionMarkerFile = isSessionScopedClear && sessionId && config.markerFile
+    ? resolveSessionStatePath(config.markerFile.replace(/\.json$/i, ""), sessionId, cwd)
+    : null;
+  const sessionMarkerSnapshot = sessionMarkerFile ? readJsonSnapshot(sessionMarkerFile) : null;
 
   // Delete session-scoped state file if sessionId provided
   if (isSessionScopedClear && sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     try {
-      unlinkSync(sessionStateFile);
+      const result = clearStateFileLockedIf(sessionStateFile, (current) => canClearStateForSession(current, sessionId) && (!expectedState || JSON.stringify(current) === JSON.stringify(expectedState)));
+      if (result === 'failed' || (result === 'skipped' && existsSync(sessionStateFile))) throw new Error("state mutation lock unavailable");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         success = false;
@@ -432,15 +483,9 @@ export function clearModeState(
 
     // Clear session-scoped marker artifacts (e.g., ralph-verification-state.json).
     // Keep legacy/shared marker files untouched for isolation.
-    if (config.markerFile) {
-      const markerStateName = config.markerFile.replace(/\.json$/i, "");
-      const sessionMarkerFile = resolveSessionStatePath(
-        markerStateName,
-        sessionId,
-        cwd,
-      );
+    if (sessionMarkerFile) {
       try {
-        unlinkSync(sessionMarkerFile);
+        if (!clearDiscoveredJsonFile(sessionMarkerFile, sessionMarkerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
           success = false;
@@ -459,7 +504,7 @@ export function clearModeState(
         const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
         if (!markerSessionId || markerSessionId === sessionId) {
           try {
-            unlinkSync(markerFile);
+            if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
           } catch (err) {
             if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
               success = false;
@@ -467,9 +512,9 @@ export function clearModeState(
           }
         }
       } catch {
-        // If marker is not JSON (or unreadable), best-effort delete for cleanup.
+        // Malformed or unreadable session-scoped markers fail closed.
         try {
-          unlinkSync(markerFile);
+          if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             success = false;
@@ -483,7 +528,8 @@ export function clearModeState(
   const stateFile = getStateFilePath(cwd, mode);
   if (!isSessionScopedClear) {
     try {
-      unlinkSync(stateFile);
+      const result = clearStateFileLockedIf(stateFile, (current) => !expectedState || JSON.stringify(current) === JSON.stringify(expectedState));
+      if (result === 'failed' || (result === 'skipped' && existsSync(stateFile))) throw new Error("state mutation lock unavailable");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         success = false;
@@ -491,43 +537,12 @@ export function clearModeState(
     }
   }
 
-  // Delete marker file if applicable, but respect ownership when session-scoped.
-  if (markerFile) {
-    if (isSessionScopedClear) {
-      // Only delete if the marker is unowned or owned by this session.
-      try {
-        const markerRaw = JSON.parse(readFileSync(markerFile, "utf-8")) as {
-          session_id?: string;
-          sessionId?: string;
-        };
-        const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
-        if (!markerSessionId || markerSessionId === sessionId) {
-          try {
-            unlinkSync(markerFile);
-          } catch (err) {
-            if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-              success = false;
-            }
-          }
-        }
-      } catch {
-        // Marker is not valid JSON or unreadable — best-effort delete for cleanup.
-        try {
-          unlinkSync(markerFile);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-            success = false;
-          }
-        }
-      }
-    } else {
-      try {
-        unlinkSync(markerFile);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-          success = false;
-        }
-      }
+  // Session-scoped marker paths were handled once above from their original snapshots.
+  if (markerFile && !isSessionScopedClear) {
+    try {
+      if (!clearDiscoveredJsonFile(markerFile, markerSnapshot)) throw new Error("state mutation lock unavailable");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") success = false;
     }
   }
 
@@ -551,7 +566,7 @@ export function clearAllModeStates(cwd: string): boolean {
   // Clear skill-active-state.json (issue #1033)
   const skillStatePath = join(getStateDir(cwd), "skill-active-state.json");
   try {
-    unlinkSync(skillStatePath);
+    if (!clearObservedJsonFile(skillStatePath)) throw new Error("state mutation lock unavailable");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       success = false;
@@ -691,11 +706,11 @@ export function createModeMarker(
     const dir = dirname(markerPath);
     mkdirSync(dir, { recursive: true });
 
-    atomicWriteJsonSync(markerPath, {
+    if (!writeStateFileLocked(markerPath, {
       mode,
       startedAt: new Date().toISOString(),
       ...metadata,
-    });
+    })) return false;
     return true;
   } catch (error) {
     console.error(`Failed to create marker file for ${mode}:`, error);
@@ -716,7 +731,7 @@ export function removeModeMarker(mode: ExecutionMode, cwd: string): boolean {
   }
 
   try {
-    unlinkSync(markerPath);
+    if (!clearObservedJsonFile(markerPath)) return false;
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -767,7 +782,7 @@ export function forceRemoveMarker(mode: ExecutionMode, cwd: string): boolean {
   }
 
   try {
-    unlinkSync(markerPath);
+    if (!clearObservedJsonFile(markerPath)) return false;
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {

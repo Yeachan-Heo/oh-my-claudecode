@@ -13,6 +13,7 @@ import {
   writeModeState,
   readModeState,
   clearModeStateFile,
+  writeStateFileLockedIf,
 } from "../../lib/mode-state-io.js";
 import {
   resolveStatePath,
@@ -25,6 +26,7 @@ import type {
   AutopilotConfig,
 } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+
 import { loadConfig } from "../../config/loader.js";
 import { resolvePlanOutputAbsolutePath } from "../../config/plan-output.js";
 import {
@@ -117,8 +119,85 @@ export function writeAutopilotState(
 export function clearAutopilotState(
   directory: string,
   sessionId?: string,
+  expectedState?: AutopilotState,
 ): boolean {
-  return clearModeStateFile("autopilot", directory, sessionId);
+  return clearModeStateFile("autopilot", directory, sessionId, expectedState as unknown as Record<string, unknown> | undefined);
+}
+
+function sameAutopilotRun(current: Record<string, unknown>, observed: AutopilotState): boolean {
+  const currentWorkflow = current.workflow as Record<string, unknown> | undefined;
+  const observedWorkflow = observed.workflow as unknown as Record<string, unknown> | undefined;
+  return current.session_id === observed.session_id &&
+    current.started_at === observed.started_at &&
+    current.workflowRunId === observed.workflowRunId &&
+    currentWorkflow?.profileHash === observedWorkflow?.profileHash;
+}
+
+export function updateAutopilotStateIfCurrent(
+  directory: string,
+  observed: AutopilotState,
+  update: Partial<AutopilotState>,
+  sessionId?: string,
+): AutopilotState | null {
+  const stateFile = sessionId
+    ? resolveSessionStatePath("autopilot", sessionId, directory)
+    : resolveStatePath("autopilot", directory);
+  let updated: AutopilotState | null = null;
+  const result = writeStateFileLockedIf(
+    stateFile,
+    (current) => sameAutopilotRun(current, observed),
+    (current) => {
+      const next = { ...current, ...update } as unknown as AutopilotState;
+      updated = next;
+      return next as unknown as Record<string, unknown>;
+    },
+  );
+  return result === 'written' ? updated : null;
+}
+
+function canonicalStateJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalStateJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStateJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function namedResumeIdentity(state: Record<string, unknown>): string {
+  return canonicalStateJson({
+    active: state.active,
+    session_id: state.session_id,
+    workflowRunId: state.workflowRunId,
+    phase: state.phase,
+    prompt: state.prompt,
+    workflow: state.workflow,
+    pipelineTracking: state.pipelineTracking,
+  });
+}
+
+export function updateAutopilotStateIfExact(
+  directory: string,
+  observed: AutopilotState,
+  update: Partial<AutopilotState>,
+  sessionId: string | undefined,
+  validateCurrent: (current: AutopilotState) => boolean,
+): AutopilotState | null {
+  const stateFile = sessionId
+    ? resolveSessionStatePath("autopilot", sessionId, directory)
+    : resolveStatePath("autopilot", directory);
+  const observedSnapshot = namedResumeIdentity(observed as unknown as Record<string, unknown>);
+  let updated: AutopilotState | null = null;
+  const result = writeStateFileLockedIf(
+    stateFile,
+    (current) => namedResumeIdentity(current) === observedSnapshot && validateCurrent(current as unknown as AutopilotState),
+    (current) => {
+      const next = { ...current, ...update } as unknown as AutopilotState;
+      updated = next;
+      return next as unknown as Record<string, unknown>;
+    },
+  );
+  return result === "written" ? updated : null;
 }
 
 /**
@@ -153,6 +232,7 @@ export function isAutopilotActive(
   const state = readAutopilotState(directory, sessionId);
   return state !== null && state.active === true;
 }
+
 
 /**
  * Initialize a new autopilot session

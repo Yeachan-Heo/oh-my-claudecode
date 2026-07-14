@@ -8,12 +8,14 @@
 import {
   readAutopilotState,
   clearAutopilotState,
-  writeAutopilotState,
-  getAutopilotStateAge
+  getAutopilotStateAge,
+  updateAutopilotStateIfCurrent,
+  updateAutopilotStateIfExact,
 } from './state.js';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import type { AutopilotState } from './types.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from './named-workflow-resume-validator.js';
 
 export interface CancelResult {
   success: boolean;
@@ -79,9 +81,11 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     cleanedUp.push('ultraqa');
   }
 
-  // Mark autopilot as inactive but preserve state for resume
-  state.active = false;
-  writeAutopilotState(directory, state, sessionId);
+  // Mark only the exact observed run inactive; a replacement activation must survive.
+  const cancelledState = updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
+  if (!cancelledState) {
+    return { success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' };
+  }
 
   const cleanupMsg = cleanedUp.length > 0
     ? ` Cleaned up: ${cleanedUp.join(', ')}.`
@@ -89,8 +93,8 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
 
   return {
     success: true,
-    message: `Autopilot cancelled at phase: ${state.phase}.${cleanupMsg} Progress preserved for resume.`,
-    preservedState: state
+    message: `Autopilot cancelled at phase: ${cancelledState.phase}.${cleanupMsg} Progress preserved for resume.`,
+    preservedState: cancelledState
   };
 }
 
@@ -137,8 +141,10 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     }
   }
 
-  // Clear autopilot state completely
-  clearAutopilotState(directory, sessionId);
+  // Clear only the exact observed run completely.
+  if (!clearAutopilotState(directory, sessionId, state)) {
+    return { success: false, message: 'Autopilot run changed before clear; retry /cancel.' };
+  }
 
   return {
     success: true,
@@ -162,11 +168,22 @@ export function canResumeAutopilot(directory: string, sessionId?: string): {
   canResume: boolean;
   state?: AutopilotState;
   resumePhase?: string;
+  integrityFailed?: boolean;
+  unsupportedRuntime?: boolean;
 } {
   const state = readAutopilotState(directory, sessionId);
 
   if (!state) {
     return { canResume: false };
+  }
+
+  if (state.workflow) {
+    if (!namedWorkflowRuntimeSupported()) {
+      return { canResume: false, resumePhase: state.phase, unsupportedRuntime: true };
+    }
+    if (!validateNamedWorkflowState(state, sessionId)) {
+      return { canResume: false, resumePhase: state.phase, integrityFailed: true };
+    }
   }
 
   // Cannot resume terminal states
@@ -185,7 +202,7 @@ export function canResumeAutopilot(directory: string, sessionId?: string): {
   const ageMs = getAutopilotStateAge(directory, sessionId);
   if (ageMs !== null && ageMs > STALE_STATE_MAX_AGE_MS) {
     // Auto-cleanup stale state to prevent future false positives
-    clearAutopilotState(directory, sessionId);
+    clearAutopilotState(directory, sessionId, state);
     return { canResume: false, state, resumePhase: state.phase };
   }
 
@@ -204,30 +221,45 @@ export function resumeAutopilot(directory: string, sessionId?: string): {
   message: string;
   state?: AutopilotState;
 } {
-  const { canResume, state } = canResumeAutopilot(directory, sessionId);
+  const { canResume, state, integrityFailed, unsupportedRuntime } = canResumeAutopilot(directory, sessionId);
 
   if (!canResume || !state) {
     return {
       success: false,
-      message: 'No autopilot session available to resume'
+      message: unsupportedRuntime
+        ? 'unsupported-runtime'
+        : integrityFailed
+          ? 'workflow_descriptor_integrity_failed'
+          : 'No autopilot session available to resume'
     };
   }
 
-  // Re-activate
-  state.active = true;
-  state.iteration++;
-
-  if (!writeAutopilotState(directory, state, sessionId)) {
+  // Re-activate only the exact paused run observed by canResumeAutopilot.
+  const resumedState = state.workflow
+    ? updateAutopilotStateIfExact(
+        directory,
+        state,
+        { active: true },
+        sessionId,
+        (current) => Boolean(validateNamedWorkflowState(current, sessionId)),
+      )
+    : updateAutopilotStateIfCurrent(
+        directory,
+        state,
+        { active: true, iteration: state.iteration + 1 },
+        sessionId,
+      );
+  if (!resumedState) {
     return {
       success: false,
-      message: 'Failed to update autopilot state'
+      message: state.workflow ? 'workflow_descriptor_integrity_failed' : 'Autopilot run changed before resume; retry.'
     };
   }
 
   return {
     success: true,
     message: `Resuming autopilot at phase: ${state.phase}`,
-    state
+    state: resumedState
   };
 }
 

@@ -40,11 +40,16 @@ import {
   getCurrentStageAdapter,
   getCurrentCompletionSignal,
   advanceStage,
+
   incrementStageIteration,
+  verifyWorkflowDescriptor,
+
   generateTransitionPrompt,
   formatPipelineHUD,
 } from "./pipeline.js";
+import { DEFAULT_PIPELINE_CONFIG } from "./pipeline-types.js";
 import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
+import { validateNamedWorkflowState } from "./named-workflow-resume-validator.js";
 
 export interface AutopilotEnforcementResult {
   /** Whether to block the stop event */
@@ -62,6 +67,7 @@ export interface AutopilotEnforcementResult {
     toolError?: ToolErrorState;
   };
 }
+
 
 // ============================================================================
 // SIGNAL DETECTION
@@ -238,6 +244,35 @@ export async function checkAutopilot(
     return null;
   }
 
+  if (state.workflow && !verifyWorkflowDescriptor(state.workflow)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
+
+  if (state.workflow) {
+    const validated = validateNamedWorkflowState(state, sessionId);
+    if (!validated) {
+      return { shouldBlock: false, message: "workflow_descriptor_integrity_failed", phase: state.phase };
+    }
+    const { tracking, task } = validated;
+    const adapter = getCurrentStageAdapter(tracking);
+    if (!adapter) return { shouldBlock: false, message: "workflow_descriptor_integrity_failed", phase: state.phase };
+    const stagePrompt = adapter.getPrompt({
+      idea: task,
+      directory: state.project_path || workingDir,
+      sessionId,
+      config: DEFAULT_PIPELINE_CONFIG,
+    });
+    return {
+      shouldBlock: true,
+      message: stagePrompt,
+      phase: state.phase,
+    };
+  }
+
   if (isAwaitingConfirmation(state)) {
     return null;
   }
@@ -245,6 +280,7 @@ export async function checkAutopilot(
   if (isOrphanedRoutingEchoState(state)) {
     return null;
   }
+
 
   // Check hard max iterations (global security limit)
   const hardMax = getHardMaxIterations();
@@ -356,7 +392,7 @@ function generateContinuationPrompt(
   writeAutopilotState(directory, state, sessionId);
 
   const phasePrompt = getPhasePrompt(state.phase, {
-    idea: state.originalIdea,
+    idea: state.originalIdea || state.prompt || "",
     specPath: state.expansion.spec_path || `.omc/autopilot/spec.md`,
     planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
     openQuestionsPath: resolveOpenQuestionsPlanPath(),
@@ -428,15 +464,13 @@ function checkPipelineAutopilot(
   // Check if the current stage's completion signal has been emitted
   const completionSignal = getCurrentCompletionSignal(tracking);
   if (
+    !state.workflow &&
     completionSignal &&
     sessionId &&
     detectPipelineSignal(sessionId, completionSignal)
   ) {
     // Current stage complete — advance to next stage
-    const { adapter: nextAdapter, phase: nextPhase } = advanceStage(
-      directory,
-      sessionId,
-    );
+    const { adapter: nextAdapter, phase: nextPhase } = advanceStage(directory, sessionId);
 
     if (!nextAdapter || nextPhase === "complete") {
       // Pipeline complete
@@ -471,13 +505,13 @@ function checkPipelineAutopilot(
     const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
 
     const context = {
-      idea: state.originalIdea,
+      idea: state.originalIdea || state.prompt || "",
       directory: state.project_path || directory,
       sessionId,
       specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
       planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
       openQuestionsPath: resolveOpenQuestionsPlanPath(),
-      config: tracking.pipelineConfig,
+      config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
     };
 
     const stagePrompt = nextAdapter.getPrompt(context);
@@ -520,13 +554,13 @@ ${stagePrompt}
   const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
 
   const context = {
-    idea: state.originalIdea,
+    idea: state.originalIdea || state.prompt || "",
     directory: state.project_path || directory,
     sessionId,
     specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
     planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
     openQuestionsPath: resolveOpenQuestionsPlanPath(),
-    config: tracking.pipelineConfig,
+    config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
   };
 
   const stagePrompt = currentAdapter.getPrompt(context);

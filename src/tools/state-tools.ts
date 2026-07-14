@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -21,13 +22,18 @@ import {
   OmcPaths,
 } from '../lib/worktree-paths.js';
 import { resolveSessionId } from '../lib/session-id.js';
-import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { validatePayload } from '../lib/payload-limits.js';
 import {
   canClearStateForSession,
   findCompletedSessionStateFiles,
+  findCompletedSessionStateCandidates,
+  findSessionOwnedStateCandidates,
+  type StateFileDiscovery,
   findSessionOwnedStateFiles,
   getStateSessionOwner,
+  writeStateFileLocked,
+  writeStateFileLockedIf,
+  clearStateFileLockedIf,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -154,35 +160,50 @@ function isConvergedCandidateActiveForSession(statePath: string, sessionId?: str
   return canClearStateForSession(raw, sessionId);
 }
 
+
+function clearDiscoveredStateCandidate(
+  candidate: StateFileDiscovery,
+  predicate: (state: Record<string, unknown>) => boolean,
+): 'cleared' | 'skipped' | 'failed' {
+  return clearStateFileLockedIf(
+    candidate.path,
+    (current) => predicate(current) && JSON.stringify(current) === candidate.snapshot,
+  );
+}
+
+function discoverStatePaths(paths: string[]): StateFileDiscovery[] {
+  const discovered: StateFileDiscovery[] = [];
+  for (const path of paths) {
+    const state = readJsonRecord(path);
+    if (!state) continue;
+    discovered.push({
+      path,
+      state,
+      snapshot: JSON.stringify(state),
+      ownerSessionId: getStateSessionOwner(state),
+      workflowRunId: typeof state.workflowRunId === 'string' ? state.workflowRunId : undefined,
+    });
+  }
+  return discovered;
+}
+
 function clearConvergedStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId)),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = getConvergedStateCandidates(mode, root, sessionId);
-
-  for (const statePath of paths) {
-    if (!existsSync(statePath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId) {
-        const raw = readJsonRecord(statePath);
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => !sessionId || canClearStateForSession(current, sessionId),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function hasActiveConvergedState(mode: StateToolMode, root: string, sessionId?: string): boolean {
@@ -346,63 +367,38 @@ function clearWorkingDirectoryLocalStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId);
   const localLegacyPaths = new Set(getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root));
-
-  for (const statePath of paths) {
-    if (!existsSync(statePath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId && localLegacyPaths.has(statePath)) {
-        const raw = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => !sessionId || !localLegacyPaths.has(candidate.path) || canClearStateForSession(current, sessionId),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function clearLegacyStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getLegacyStateFileCandidates(mode, root)),
 ): { cleared: number; hadFailure: boolean } {
   let cleared = 0;
   let hadFailure = false;
-
-  for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
-    if (!existsSync(legacyPath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId) {
-        const raw = JSON.parse(readFileSync(legacyPath, 'utf-8')) as Record<string, unknown>;
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-
-      unlinkSync(legacyPath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => !sessionId || canClearStateForSession(current, sessionId),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
   return { cleared, hadFailure };
 }
 
@@ -410,42 +406,38 @@ function clearSessionOwnedStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId: string,
+  discovered = findSessionOwnedStateCandidates(mode, sessionId, root),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = findSessionOwnedStateFiles(mode, sessionId, root);
-
-  for (const statePath of paths) {
-    try {
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => canClearStateForSession(current, sessionId),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function clearCompletedSessionStateCandidates(
   mode: StateToolMode,
   root: string,
   requesterSessionId?: string,
+  discovered = findCompletedSessionStateCandidates(mode, root, requesterSessionId),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = findCompletedSessionStateFiles(mode, root, requesterSessionId);
-
-  for (const statePath of paths) {
-    try {
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => current.active === true && Boolean(candidate.completionEvidencePath && existsSync(candidate.completionEvidencePath)),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 
@@ -545,16 +537,23 @@ function writeSessionCancelSignal(
   root: string,
   sessionId: string,
   mode: StateToolMode,
+  candidate?: StateFileDiscovery,
 ): void {
+  ensureSessionStateDir(sessionId, root);
   const now = Date.now();
   const cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, root);
-  atomicWriteJsonSync(cancelSignalPath, {
+  const payload = {
     active: true,
     requested_at: new Date(now).toISOString(),
     expires_at: new Date(now + CANCEL_SIGNAL_TTL_MS).toISOString(),
     mode,
-    source: 'state_clear'
-  });
+    source: 'state_clear',
+    ...(candidate?.workflowRunId ? { target_workflow_run_id: candidate.workflowRunId } : {}),
+    ...(candidate ? { target_state_sha256: createHash('sha256').update(candidate.snapshot).digest('hex') } : {}),
+  };
+  if (!writeStateFileLocked(cancelSignalPath, payload)) {
+    throw new Error(`state mutation lock unavailable for cancel signal: ${cancelSignalPath}`);
+  }
 }
 
 function isSessionModeActive(
@@ -591,7 +590,85 @@ function findSingleOwningSessionForMode(
   return owningSessions.length === 1 ? owningSessions[0] : undefined;
 }
 
+interface WorkflowPublicState {
+  name: string;
+  version: number;
+  shortHash: string;
+  stages: string[];
+  currentStage: string | null;
+  status: string | null;
+  workflowRunId?: string;
+  progress: string;
+}
+
+function canonicalWorkflowJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkflowJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalWorkflowJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isValidPublicWorkflowDescriptor(descriptor: Record<string, unknown>): boolean {
+  const stages = descriptor.stages;
+  if (descriptor.descriptorVersion !== 1 || descriptor.profileVersion !== 1 || typeof descriptor.workflowName !== 'string' || !Array.isArray(stages) || !stages.every(stage => typeof stage === 'string') || typeof descriptor.profileHash !== 'string') return false;
+  const allowed = new Set(['ralplan,execution', 'ralplan,execution,ralph', 'ralplan,execution,qa', 'ralplan,execution,ralph,qa']);
+  if (!allowed.has(stages.join(','))) return false;
+  const canonical = canonicalWorkflowJson({ descriptorVersion: 1, workflowName: descriptor.workflowName, profileVersion: 1, stages });
+  return createHash('sha256').update(canonical).digest('hex') === descriptor.profileHash;
+}
+export function redactAutopilotPublicState(state: unknown): unknown {
+  if (!state || typeof state !== 'object') {
+    return state;
+  }
+  const record = state as Record<string, unknown>;
+  const workflow = record.workflow;
+  if (!workflow || typeof workflow !== 'object') {
+    return state;
+  }
+  const descriptor = workflow as Record<string, unknown>;
+  if (!isValidPublicWorkflowDescriptor(descriptor)) {
+    return { name: 'invalid', version: 1, shortHash: 'invalid', stages: [], currentStage: null, status: 'workflow_descriptor_integrity_failed', progress: '0/0' } satisfies WorkflowPublicState;
+  }
+  const stages = Array.isArray(descriptor.stages) && descriptor.stages.every((stage) => typeof stage === 'string')
+    ? descriptor.stages as string[]
+    : [];
+  const pipelineTracking = record.pipelineTracking && typeof record.pipelineTracking === 'object'
+    ? record.pipelineTracking as Record<string, unknown>
+    : undefined;
+  const currentStageIndex = typeof pipelineTracking?.currentStageIndex === 'number'
+    ? pipelineTracking.currentStageIndex
+    : -1;
+  const pipelineStages = Array.isArray(pipelineTracking?.stages) ? pipelineTracking.stages : [];
+  const currentPipelineStage = pipelineStages[currentStageIndex];
+  const currentStage = currentPipelineStage && typeof currentPipelineStage === 'object'
+    && typeof (currentPipelineStage as Record<string, unknown>).id === 'string'
+    ? (currentPipelineStage as Record<string, unknown>).id as string
+    : null;
+  const currentStageStatus = currentPipelineStage && typeof currentPipelineStage === 'object'
+    && typeof (currentPipelineStage as Record<string, unknown>).status === 'string'
+    ? (currentPipelineStage as Record<string, unknown>).status as string
+    : null;
+  const safeState: WorkflowPublicState = {
+    workflowRunId: typeof record.workflowRunId === 'string' ? record.workflowRunId : undefined,
+    name: typeof descriptor.workflowName === 'string' ? descriptor.workflowName.slice(0, 32) : 'invalid',
+    version: typeof descriptor.profileVersion === 'number' ? descriptor.profileVersion : 1,
+    shortHash: typeof descriptor.profileHash === 'string' ? descriptor.profileHash.slice(0, 12) : 'invalid',
+    stages,
+    currentStage,
+    status: typeof record.status === 'string'
+      ? record.status
+      : currentStageStatus ?? (typeof record.phase === 'string' ? record.phase : typeof record.current_phase === 'string' ? record.current_phase : null),
+    progress: currentStageIndex >= 0 ? `${currentStageIndex + 1}/${stages.length}` : `0/${stages.length}`,
+  };
+  return safeState;
+}
+
 function publicStateForMode(mode: StateToolMode, state: unknown): unknown {
+  if (mode === 'autopilot') {
+    return redactAutopilotPublicState(state);
+  }
   return mode === 'merge-readiness'
     ? redactMergeReadinessState(state as Parameters<typeof redactMergeReadinessState>[0])
     : state;
@@ -860,8 +937,20 @@ export const stateWriteTool: ToolDefinition<{
           updatedBy: 'state_write_tool'
         }
       };
+      if (mode === 'autopilot' && builtState.active === false) {
+        const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
+        const result = writeStateFileLockedIf(
+          statePath,
+          (current) => !current.workflow || (typeof current.workflowRunId === 'string' && current.workflowRunId === requestedRunId),
+          (current) => current.workflow
+            ? { ...current, active: false, _meta: stateWithMeta._meta }
+            : stateWithMeta,
+        );
+        if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
+      } else if (!writeStateFileLocked(statePath, stateWithMeta)) {
+        throw new Error('state mutation lock unavailable');
+      }
 
-      atomicWriteJsonSync(statePath, stateWithMeta);
 
       const sessionInfo = sessionId ? ` (session: ${sessionId})` : ' (legacy path)';
       const warningMessage = sessionId ? '' : '\n\nWARNING: No session_id provided. State written to legacy shared path which may leak across parallel sessions. Pass session_id for session-scoped isolation.';
@@ -958,7 +1047,8 @@ export const stateClearTool: ToolDefinition<{
       // If session_id provided, clear only session-specific state
       if (sessionId) {
         validateSessionId(sessionId);
-        const requestedSessionOwnedPaths = findSessionOwnedStateFiles(mode, sessionId, root);
+        const requestedSessionCandidates = findSessionOwnedStateCandidates(mode, sessionId, root);
+        const requestedSessionOwnedPaths = requestedSessionCandidates.map((candidate) => candidate.path);
         for (const teamStatePath of findSessionOwnedStateFiles('team', sessionId, root)) {
           collectTeamNamesForCleanup(teamStatePath);
         }
@@ -967,23 +1057,38 @@ export const stateClearTool: ToolDefinition<{
             collectTeamNamesForCleanup(teamStatePath);
           }
         }
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId);
+        const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId);
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates);
+        const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
+        const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId));
+        const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId));
+        const operationCandidates = [...new Map([
+          ...requestedSessionCandidates,
+          ...completedCandidates,
+          ...legacyCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+          ...localCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+          ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+        ].map((candidate) => [candidate.path, candidate])).values()];
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        writeSessionCancelSignal(root, sessionId, mode);
+        const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
+        let directCleared = 0;
+        writeSessionCancelSignal(root, sessionId, mode, directCandidate);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
-          const success = clearModeState(mode as ExecutionMode, root, sessionId);
-          const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
-          const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+          const expectedDirectState = directCandidate?.state;
+          const success = clearModeState(mode as ExecutionMode, root, sessionId, expectedDirectState);
+          if (directCandidate && !existsSync(directCandidate.path)) directCleared = 1;
+          const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
+          const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
           const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
             legacyCleanup.cleared === 0;
           const workingDirectoryLocalCleanup = shouldUseLocalFallback
-            ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+            ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates)
             : { cleared: 0, hadFailure: false, paths: [] as string[] };
-          convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
+          convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
           let ownerSessionId: string | undefined;
           let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
           let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -991,6 +1096,8 @@ export const stateClearTool: ToolDefinition<{
           if (
             OWNER_SESSION_FALLBACK_MODES.has(mode) &&
             requestedSessionOwnedPaths.length === 0 &&
+            completedCandidates.length === 0 &&
+            legacyCandidates.length === 0 &&
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
             legacyCleanup.cleared === 0 &&
@@ -1004,12 +1111,14 @@ export const stateClearTool: ToolDefinition<{
                   collectTeamNamesForCleanup(teamStatePath);
                 }
               }
-              writeSessionCancelSignal(root, ownerSessionId, mode);
+              const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
+              const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
+              writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
               const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
               runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
               runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-              clearModeState(mode as ExecutionMode, root, ownerSessionId);
-              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
+              clearModeState(mode as ExecutionMode, root, ownerSessionId, ownerDirectCandidate?.state);
+              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates);
               ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
             }
           }
@@ -1047,8 +1156,7 @@ export const stateClearTool: ToolDefinition<{
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(', ')})` : '';
           })();
-          const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
-            completedSessionCleanup.cleared +
+          const clearedStateOrArtifacts = directCleared + completedSessionCleanup.cleared +
             sessionCleanup.cleared +
             legacyCleanup.cleared +
             convergedCleanup.cleared +
@@ -1056,7 +1164,9 @@ export const stateClearTool: ToolDefinition<{
             ownerSessionCleanup.cleared +
             ownerLegacyCleanup.cleared +
             runtimeCleanup.cleared;
+          const capturedCleanupIncomplete = operationCandidates.some((candidate) => existsSync(candidate.path));
           if (!ownerSessionId && clearedStateOrArtifacts === 0 && success &&
+            !capturedCleanupIncomplete &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
             !workingDirectoryLocalCleanup.hadFailure &&
@@ -1074,6 +1184,7 @@ export const stateClearTool: ToolDefinition<{
             };
           }
           if (
+            !capturedCleanupIncomplete &&
             success &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
@@ -1095,22 +1206,23 @@ export const stateClearTool: ToolDefinition<{
               content: [{
                 type: 'text' as const,
                 text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
-              }]
+              }],
+              isError: true,
             };
           }
         }
 
         // Fallback for modes not in registry (e.g., ralplan)
-        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
-        const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
+        const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
         const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
           legacyCleanup.cleared === 0;
         const workingDirectoryLocalCleanup = shouldUseLocalFallback
-          ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+          ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates)
           : { cleared: 0, hadFailure: false, paths: [] as string[] };
-        convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
+        convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
         let ownerSessionId: string | undefined;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -1118,6 +1230,8 @@ export const stateClearTool: ToolDefinition<{
         if (
           OWNER_SESSION_FALLBACK_MODES.has(mode) &&
           requestedSessionOwnedPaths.length === 0 &&
+          completedCandidates.length === 0 &&
+          legacyCandidates.length === 0 &&
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
           legacyCleanup.cleared === 0 &&
@@ -1131,11 +1245,13 @@ export const stateClearTool: ToolDefinition<{
                 collectTeamNamesForCleanup(teamStatePath);
               }
             }
-            writeSessionCancelSignal(root, ownerSessionId, mode);
+            const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
+            const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
+            writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
             const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
             runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
             runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-            ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
+            ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates);
             ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
           }
         }
@@ -1173,8 +1289,7 @@ export const stateClearTool: ToolDefinition<{
           if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(', ')})` : '';
         })();
-        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
-          completedSessionCleanup.cleared +
+        const clearedStateOrArtifacts = completedSessionCleanup.cleared +
           sessionCleanup.cleared +
           legacyCleanup.cleared +
           convergedCleanup.cleared +
@@ -1182,7 +1297,8 @@ export const stateClearTool: ToolDefinition<{
           ownerSessionCleanup.cleared +
           ownerLegacyCleanup.cleared +
           runtimeCleanup.cleared;
-        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
+        const capturedCleanupIncomplete = operationCandidates.some((candidate) => existsSync(candidate.path));
+        const hadFailure = capturedCleanupIncomplete || legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
           workingDirectoryLocalCleanup.hadFailure || convergedCleanup.hadFailure ||
           completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
           ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure;
@@ -1198,7 +1314,8 @@ export const stateClearTool: ToolDefinition<{
           content: [{
             type: 'text' as const,
             text: `${hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
-          }]
+          }],
+          ...(hadFailure ? { isError: true } : {}),
         };
       }
 
@@ -1206,6 +1323,9 @@ export const stateClearTool: ToolDefinition<{
       // Write cancel signals FIRST (before deleting files) so the stop hook's
       // isSessionCancelInProgress check sees the signal during the deletion window.
       // Mirrors the session_id path at line ~403. (patch: fix missing cancel signal)
+      const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
+      const broadSessionCandidates = listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root));
+      const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root));
       {
         const now = Date.now();
         const cancelSignalPayload = {
@@ -1215,14 +1335,18 @@ export const stateClearTool: ToolDefinition<{
           mode,
           source: 'state_clear' as const,
         };
-        // Write to legacy path (checked by stop hook fallback)
         const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
-        try { atomicWriteJsonSync(legacySignalPath, cancelSignalPayload); } catch { /* best-effort */ }
-        // Write to each session path (checked by stop hook primary check)
+        const legacyCandidate = broadLegacyCandidates[0];
+        const legacyPayload = {
+          ...cancelSignalPayload,
+          ...(legacyCandidate?.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {}),
+          ...(legacyCandidate ? { target_state_sha256: createHash('sha256').update(legacyCandidate.snapshot).digest('hex') } : {}),
+        };
+        try { writeStateFileLocked(legacySignalPath, legacyPayload); } catch { /* best-effort */ }
         for (const sid of listSessionIds(root)) {
           try {
-            const sessionSignalPath = resolveSessionStatePath('cancel-signal', sid, root);
-            atomicWriteJsonSync(sessionSignalPath, cancelSignalPayload);
+            const candidate = broadSessionCandidates.find((item) => item.path === resolveSessionStatePath(mode, sid, root)) ?? broadSessionCandidates.find((item) => item.ownerSessionId === sid);
+            writeSessionCancelSignal(root, candidate?.ownerSessionId ?? sid, mode, candidate);
           } catch { /* best-effort */ }
         }
       }
@@ -1236,21 +1360,25 @@ export const stateClearTool: ToolDefinition<{
       // Clear legacy path
       if (MODE_CONFIGS[mode as ExecutionMode]) {
         const primaryLegacyStatePath = getStateFilePath(root, mode as ExecutionMode);
-        if (existsSync(primaryLegacyStatePath)) {
-          if (clearModeState(mode as ExecutionMode, root)) {
+        const primaryCandidate = broadLegacyCandidates.find((candidate) => candidate.path === primaryLegacyStatePath);
+        if (primaryCandidate) {
+          const success = clearModeState(mode as ExecutionMode, root, undefined, primaryCandidate.state);
+          if (success && !existsSync(primaryCandidate.path)) {
             clearedCount++;
-          } else {
+          } else if (existsSync(primaryCandidate.path)) {
+            errors.push('legacy path skipped');
+          } else if (!success) {
             errors.push('legacy path');
           }
         }
       }
 
-      const extraLegacyCleanup = clearLegacyStateCandidates(mode, root);
+      const extraLegacyCleanup = clearLegacyStateCandidates(mode, root, undefined, broadLegacyCandidates);
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push('legacy path');
       }
-      const convergedCleanup = clearConvergedStateCandidates(mode, root);
+      const convergedCleanup = clearConvergedStateCandidates(mode, root, undefined, broadConvergedCandidates);
       clearedCount += convergedCleanup.cleared;
       if (convergedCleanup.hadFailure) {
         errors.push('converged paths');
@@ -1259,35 +1387,34 @@ export const stateClearTool: ToolDefinition<{
       if (runtimeCleanup.hadFailure) {
         errors.push('runtime artifacts');
       }
+      const processedBroadPaths = new Set([
+        ...broadLegacyCandidates.map((candidate) => candidate.path),
+        ...broadConvergedCandidates.map((candidate) => candidate.path),
+      ]);
 
-      // Clear all session-scoped state files
-      const sessionIds = listSessionIds(root);
-      for (const sid of sessionIds) {
-        if (mode === 'team') {
-          collectTeamNamesForCleanup(resolveSessionStatePath('team', sid, root));
-        }
-        if (MODE_CONFIGS[mode as ExecutionMode]) {
-          // Only clear if state file exists - avoid false counts for missing files
-          const sessionStatePath = getStateFilePath(root, mode as ExecutionMode, sid);
-          if (existsSync(sessionStatePath)) {
-            if (clearModeState(mode as ExecutionMode, root, sid)) {
-              clearedCount++;
-            } else {
-              errors.push(`session: ${sid}`);
-            }
-          }
-        } else {
-          const statePath = resolveSessionStatePath(mode, sid, root);
-          if (existsSync(statePath)) {
-            try {
-              unlinkSync(statePath);
-              clearedCount++;
-            } catch {
-              errors.push(`session: ${sid}`);
-            }
-          }
+      // Clear each captured session candidate by its exact discovered path.
+      for (const candidate of broadSessionCandidates) {
+        if (processedBroadPaths.has(candidate.path)) continue;
+        processedBroadPaths.add(candidate.path);
+        if (mode === 'team') collectTeamNamesForCleanup(candidate.path);
+        const result = clearDiscoveredStateCandidate(candidate, () => true);
+        if (result === 'cleared') {
+          clearedCount++;
+        } else if (result === 'failed' || existsSync(candidate.path)) {
+          errors.push(`session candidate: ${candidate.path}`);
         }
       }
+      const broadCapturedCandidates = [...new Map([
+        ...broadLegacyCandidates,
+        ...broadConvergedCandidates,
+        ...broadSessionCandidates,
+      ].map((candidate) => [candidate.path, candidate])).values()];
+      for (const candidate of broadCapturedCandidates) {
+        if (existsSync(candidate.path) && !errors.some((error) => error.includes(candidate.path))) {
+          errors.push(`captured candidate survived: ${candidate.path}`);
+        }
+      }
+      clearedCount = broadCapturedCandidates.filter((candidate) => !existsSync(candidate.path)).length + runtimeCleanup.cleared;
 
       let removedTeamRoots = 0;
       let prunedMissionEntries = 0;
@@ -1325,7 +1452,8 @@ export const stateClearTool: ToolDefinition<{
         content: [{
           type: 'text' as const,
           text: message
-        }]
+        }],
+        ...(errors.length > 0 ? { isError: true } : {})
       };
     } catch (error) {
       return {

@@ -10,6 +10,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import type {
+  AutopilotWorkflowProfileV1,
   PluginConfig,
   ExternalModelsConfig,
   DelegationProvider,
@@ -605,11 +606,127 @@ const AUTOPILOT_TEAM_AGENT_TYPES = new Set([
   "antigravity",
 ]);
 
+const AUTOPILOT_WORKFLOW_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+const AUTOPILOT_WORKFLOW_RESERVED_NAMES = new Set([
+  "autopilot",
+  "ralplan",
+  "execution",
+  "ralph",
+  "qa",
+  "autoresearch",
+  "ultraqa",
+  "merge-readiness",
+  "self-improve",
+  "ultrawork",
+  "ultrapilot",
+  "swarm",
+  "pipeline",
+  "plan",
+  "team",
+  "cancel",
+  "deep-interview",
+  "deepsearch",
+  "ultrathink",
+  "tdd",
+  "code-review",
+  "security-review",
+  "analyze",
+  "search",
+  "ultragoal",
+  "default",
+]);
+const AUTOPILOT_WORKFLOW_SEQUENCES = [
+  ["ralplan", "execution"],
+  ["ralplan", "execution", "ralph"],
+  ["ralplan", "execution", "qa"],
+  ["ralplan", "execution", "ralph", "qa"],
+] as const;
+
+function isAutopilotWorkflowSequence(stages: unknown[]): boolean {
+  return AUTOPILOT_WORKFLOW_SEQUENCES.some(
+    (sequence) => stages.length === sequence.length && stages.every((stage, index) => typeof stage === "string" && stage === sequence[index]),
+  );
+}
+
+function workflowError(source: string, path: string, message: string): never {
+  throw new Error(`[OMC] ${source} ${path}: ${message}`);
+}
+
+/** Validate the closed v1 workflow block without changing legacy config validation. */
+export function validateAutopilotWorkflows(config: unknown, source: string): void {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return;
+  const autopilot = (config as Record<string, unknown>).autopilot;
+  if (autopilot === undefined) return;
+  if (!autopilot || typeof autopilot !== "object" || Array.isArray(autopilot)) return;
+
+  const workflows = (autopilot as Record<string, unknown>).workflows;
+  if (workflows === undefined) return;
+  if (!workflows || typeof workflows !== "object" || Array.isArray(workflows)) {
+    workflowError(source, "autopilot.workflows", "must be an object map");
+  }
+
+  for (const [name, profile] of Object.entries(workflows as Record<string, unknown>)) {
+    const path = `autopilot.workflows.${name}`;
+    if (!AUTOPILOT_WORKFLOW_NAME.test(name)) {
+      workflowError(source, path, "name must match ^[a-z][a-z0-9-]{0,62}$");
+    }
+    if (AUTOPILOT_WORKFLOW_RESERVED_NAMES.has(name)) {
+      workflowError(source, path, `name "${name}" is reserved`);
+    }
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+      workflowError(source, path, "must be an object");
+    }
+
+    const profileRecord = profile as Record<string, unknown>;
+    for (const key of Object.keys(profileRecord)) {
+      if (key !== "version" && key !== "stages") {
+        workflowError(source, `${path}.${key}`, "unknown profile key");
+      }
+    }
+    if (profileRecord.version !== 1) {
+      workflowError(source, `${path}.version`, "must be the number 1");
+    }
+    if (!Array.isArray(profileRecord.stages)) {
+      workflowError(source, `${path}.stages`, "must be an array");
+    }
+    if (!isAutopilotWorkflowSequence(profileRecord.stages)) {
+      workflowError(
+        source,
+        `${path}.stages`,
+        "must be one of: [ralplan, execution], [ralplan, execution, ralph], [ralplan, execution, qa], [ralplan, execution, ralph, qa]",
+      );
+    }
+  }
+}
+
+function composeAutopilotWorkflows(
+  config: PluginConfig,
+  userConfig: PluginConfig | null,
+  projectConfig: PluginConfig | null,
+): PluginConfig {
+  const userWorkflows = (userConfig?.autopilot as Record<string, unknown> | undefined)?.workflows;
+  const projectWorkflows = (projectConfig?.autopilot as Record<string, unknown> | undefined)?.workflows;
+  if (userWorkflows === undefined && projectWorkflows === undefined) return config;
+
+  return {
+    ...config,
+    autopilot: {
+      ...config.autopilot,
+      workflows: {
+        ...(userWorkflows as Record<string, AutopilotWorkflowProfileV1> | undefined),
+        ...(projectWorkflows as Record<string, AutopilotWorkflowProfileV1> | undefined),
+      },
+    },
+  };
+}
+
 export function validateAutopilotConfig(config: PluginConfig): void {
   const autopilot = (config as Record<string, unknown>).autopilot as
     | Record<string, unknown>
     | undefined;
   if (!autopilot || typeof autopilot !== "object") return;
+
+  validateAutopilotWorkflows(config, "effective");
 
   if (
     autopilot.execution !== undefined &&
@@ -687,19 +804,26 @@ export function loadConfig(): PluginConfig {
   // Start with fresh defaults so env-based model overrides are resolved at call time
   let config = buildDefaultConfig();
 
-  // Merge user config
+  // Validate workflow profiles in each file before ordinary merging so a malformed
+  // project replacement can never mask a malformed user profile.
   const userConfig = loadJsoncFile(paths.user);
   if (userConfig) {
+    validateAutopilotWorkflows(userConfig, "user");
     config = deepMerge(config, userConfig);
   }
 
-  // Merge project config (takes precedence over user)
   const projectConfig = loadJsoncFile(paths.project);
   if (projectConfig) {
+    validateAutopilotWorkflows(projectConfig, "project");
     config = deepMerge(config, projectConfig);
   }
 
-  // Merge environment variables (highest precedence)
+  // Workflow profiles are atomic definitions: project replaces a same-named user
+  // profile instead of deep-merging its closed fields.
+  config = composeAutopilotWorkflows(config, userConfig, projectConfig);
+
+  // Merge environment variables (highest precedence); environment has no workflow
+  // profile inputs and therefore cannot define or replace profiles.
   const envConfig = loadEnvConfig();
   config = deepMerge(config, envConfig);
 
@@ -1210,6 +1334,39 @@ export function generateConfigSchema(): object {
             ],
           },
           qa: { type: "boolean", default: true },
+          workflows: {
+            type: "object",
+            description:
+              "Named v1 autopilot stage profiles. Project profiles replace same-named user profiles.",
+            propertyNames: {
+              pattern: "^[a-z][a-z0-9-]{0,62}$",
+              not: {
+                enum: [
+                  "autopilot", "ralplan", "execution", "ralph", "qa", "autoresearch", "ultraqa",
+                  "merge-readiness", "self-improve", "ultrawork", "ultrapilot", "swarm", "pipeline",
+                  "plan", "team", "cancel", "deep-interview", "deepsearch", "ultrathink", "tdd",
+                  "code-review", "security-review", "analyze", "search",
+                ],
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                version: { type: "integer", enum: [1] },
+                stages: {
+                  type: "array",
+                  enum: [
+                    ["ralplan", "execution"],
+                    ["ralplan", "execution", "ralph"],
+                    ["ralplan", "execution", "qa"],
+                    ["ralplan", "execution", "ralph", "qa"],
+                  ],
+                },
+              },
+              required: ["version", "stages"],
+            },
+          },
           team: {
             type: "object",
             properties: {

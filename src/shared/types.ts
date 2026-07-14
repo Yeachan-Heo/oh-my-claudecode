@@ -26,6 +26,15 @@ export type AutopilotTeamAgentType =
   | "cursor"
   | "antigravity";
 
+/** Built-in stages admitted by version 1 named autopilot workflows. */
+export type AutopilotWorkflowStage = "ralplan" | "execution" | "ralph" | "qa";
+
+/** Closed, versioned named autopilot workflow profile. */
+export interface AutopilotWorkflowProfileV1 {
+  version: 1;
+  stages: AutopilotWorkflowStage[];
+}
+
 export interface AutopilotConfigBlock {
   /** Maximum total iterations across all phases. */
   maxIterations?: number;
@@ -49,6 +58,8 @@ export interface AutopilotConfigBlock {
   verification?: { engine: "ralph"; maxIterations: number } | false;
   /** Whether to run QA build/lint/test cycling. */
   qa?: boolean;
+  /** Named, fixed-stage workflow profiles. Project profiles replace user profiles of the same name. */
+  workflows?: Record<string, AutopilotWorkflowProfileV1>;
   /** Team execution options used when execution is 'team'. */
   team?: {
     /** Preferred CLI worker types for executor-style implementation tasks. */

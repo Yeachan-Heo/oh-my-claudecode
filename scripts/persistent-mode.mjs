@@ -95,6 +95,8 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (error) => {
   forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
 });
+const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
+const { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);
 const { readStdin } = await import(
@@ -165,6 +167,28 @@ function writeJsonFile(path, data) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function workflowStopResponse(state) {
+  const stage = state?.workflow?.stages?.[state?.pipelineTracking?.currentStageIndex];
+  if (!stage) return { continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." };
+  const prompt = resolveWorkflowStagePrompt(state, stage);
+  return { continue: false, decision: "block", reason: prompt || "[AUTOPILOT WORKFLOW] workflow_stage_dispatch_failed. Run /cancel and re-invoke the workflow." };
+}
+
+function commitWorkflowAdvance(path, advance) {
+  const lock = acquireStateFileLockSync(path);
+  if (!lock) return { committed: false, state: readJsonFile(path) };
+  try {
+    const current = readJsonFile(path);
+    const currentStage = current?.pipelineTracking?.stages?.[advance.expectedStageIndex];
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') return { committed: false, state: current };
+    if (!refreshWorkflowBoundaryForCommit(advance)) return { committed: false, state: current };
+    if (!writeJsonFile(path, advance.updated)) return { committed: false, state: readJsonFile(path) };
+    return { committed: true, state: advance.updated };
+  } finally {
+    releaseStateFileLockSync(lock);
   }
 }
 
@@ -527,7 +551,7 @@ function clearLoadedStateFile(loaded) {
   if (!statePath || !existsSync(statePath)) return;
 
   try {
-    unlinkSync(statePath);
+    withStateFileLockSync(statePath, () => { if (existsSync(statePath)) unlinkSync(statePath); });
   } catch {
     // Best effort: failing to clean an orphan should not re-arm stop blocking.
   }
@@ -708,31 +732,29 @@ function getUltragoalObjective(state, omcRoot) {
   return "";
 }
 
-function isSessionCancelInProgress(stateDir, sessionId) {
+function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
   const isActiveSignal = (signalPath) => {
-    const signal = readJsonFile(signalPath);
-    if (!signal) {
-      return false;
-    }
-
-    const now = Date.now();
-    const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
-    const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
-    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-
-    if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
-      return true;
-    }
-
-    if (existsSync(signalPath)) {
-      try {
-        unlinkSync(signalPath);
-      } catch {
-        // best effort cleanup
+    let active = false;
+    const locked = withStateFileLockSync(signalPath, () => {
+      const signal = readJsonFile(signalPath);
+      if (!signal) return;
+      const now = Date.now();
+      const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
+      const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
+      const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+      const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
+      if (signal.mode === 'autopilot' && currentAutopilot?.workflowRunId) {
+        if (signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      } else if (signal.target_workflow_run_id) {
+        return;
       }
-    }
-    return false;
+      if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
+        active = true;
+        return;
+      }
+      if (Number.isFinite(effectiveExpiry) && existsSync(signalPath)) unlinkSync(signalPath);
+    });
+    return locked.acquired && active;
   };
 
   if (sessionId) {
@@ -1150,7 +1172,7 @@ async function main() {
       sessionId,
     );
 
-    if (isSessionCancelInProgress(stateDir, sessionId)) {
+    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -1301,6 +1323,28 @@ async function main() {
         ? autopilot.state.session_id === sessionId
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
+        const workflowAdvance = advanceWorkflowOnStop(autopilot.state, data, sessionId);
+        if (workflowAdvance) {
+          const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
+          if (commit.committed) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
+              ? workflowAdvance.nextStagePrompt
+              : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
+          } else if (commit.state?.workflow && !isValidWorkflowDescriptor(commit.state.workflow)) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          } else {
+            console.log(JSON.stringify(commit.state?.workflow ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
+          }
+          return;
+        }
+        if (autopilot.state.workflow && !isValidWorkflowDescriptor(autopilot.state.workflow)) {
+          console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          return;
+        }
+        if (autopilot.state.workflow) {
+          console.log(JSON.stringify(workflowStopResponse(autopilot.state)));
+          return;
+        }
         const phase = getAutopilotPhase(autopilot.state);
         if (phase !== "complete") {
           const newCount = (autopilot.state.reinforcement_count || 0) + 1;
@@ -1310,7 +1354,7 @@ async function main() {
 
             autopilot.state.reinforcement_count = newCount;
             autopilot.state.last_checked_at = new Date().toISOString();
-            writeJsonFile(autopilot.path, autopilot.state);
+            withStateFileLockSync(autopilot.path, () => writeJsonFile(autopilot.path, autopilot.state));
 
             const cancelGuidance = hasValidSessionId && autopilot.state.session_id === sessionId
               ? " When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up this session's autopilot state files. If cancel fails, retry with /oh-my-claudecode:cancel --force."

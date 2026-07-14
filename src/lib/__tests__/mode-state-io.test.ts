@@ -1,7 +1,8 @@
+import { randomUUID } from 'crypto';
+import { execSync, spawn } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, mkdtempSync } from 'fs';
-import { join } from 'path';
-import { execSync } from 'child_process';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 
 import { writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
@@ -19,6 +20,9 @@ describe('mode-state-io', () => {
     rmSync(tempDir, { recursive: true, force: true });
     clearWorktreeCache();
     delete process.env.OMC_STATE_DIR;
+    delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
   });
 
   // -----------------------------------------------------------------------
@@ -88,6 +92,14 @@ describe('mode-state-io', () => {
       expect(existsSync(filePath)).toBe(true);
       // atomicWriteJsonSync uses random UUID-based temp files, not shared .tmp suffix
       expect(existsSync(filePath + '.tmp')).toBe(false);
+    });
+
+    it('releases normal writes without external flock', () => {
+      process.env.NODE_ENV = 'test';
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
+      expect(writeModeState('autopilot', { active: false }, tempDir)).toBe(true);
+      expect(existsSync(join(tempDir, '.omc', 'state', 'autopilot-state.json.mutation.lock'))).toBe(false);
     });
 
     it('should include sessionId in _meta when sessionId is provided', () => {
@@ -277,6 +289,61 @@ describe('mode-state-io', () => {
   // clearModeStateFile
   // -----------------------------------------------------------------------
   describe('clearModeStateFile', () => {
+    it('reclaims an abandoned session lock during cleanup', () => {
+      const sessionId = 'workflow-session';
+      expect(writeModeState('autopilot', { active: true }, tempDir, sessionId)).toBe(true);
+      const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const lockPath = `${statePath}.mutation.lock`;
+      writeFileSync(lockPath, JSON.stringify({
+        version: 1,
+        pid: 999999999,
+        processStart: '1',
+        createdAt: new Date().toISOString(),
+        nonce: randomUUID(),
+      }));
+
+      expect(clearModeStateFile('autopilot', tempDir, sessionId)).toBe(true);
+      expect(existsSync(statePath)).toBe(false);
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    it('preserves a replacement activation during ghost-legacy cleanup', () => {
+      const sessionId = 'ghost-owner';
+      expect(writeModeState('autopilot', { active: true, session_id: sessionId, workflowRunId: 'old-run' }, tempDir)).toBe(true);
+      const legacyPath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      const replacement = { active: true, session_id: 'new-session', workflowRunId: 'new-run' };
+      process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = legacyPath;
+      process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
+
+      expect(clearModeStateFile('autopilot', tempDir, sessionId)).toBe(true);
+      expect(JSON.parse(readFileSync(legacyPath, 'utf8'))).toEqual(replacement);
+    });
+
+    it('waits for an in-flight publisher before deciding the state is absent', async () => {
+      const sessionId = 'in-flight-activation';
+      const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      const lockPath = `${statePath}.mutation.lock`;
+      writeFileSync(lockPath, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
+      const childScript = String.raw`
+        const fs = require('fs');
+        const [statePath, lockPath] = process.argv.slice(1);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+        fs.writeFileSync(statePath, JSON.stringify({ active: true, session_id: 'in-flight-activation' }));
+        fs.unlinkSync(lockPath);
+      `;
+      const child = spawn(process.execPath, ['-e', childScript, statePath, lockPath], { stdio: 'ignore' });
+      const completed = new Promise<void>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', code => code === 0 ? resolve() : reject(new Error(`publisher exited ${code}`)));
+      });
+
+      expect(clearModeStateFile('autopilot', tempDir, sessionId)).toBe(true);
+      await completed;
+      expect(existsSync(statePath)).toBe(false);
+    });
     it('should clear state from the git worktree root when given a subdirectory', () => {
       const nestedDir = join(tempDir, 'nested', 'cwd');
       mkdirSync(nestedDir, { recursive: true });

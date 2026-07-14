@@ -22,7 +22,17 @@ export interface AutopilotStateForHud {
   tasksCompleted?: number;
   tasksTotal?: number;
   filesCreated?: number;
+  workflow?: {
+    invalid?: boolean;
+    name?: string;
+    version?: number;
+    shortHash?: string;
+    currentStage?: string;
+    currentStageIndex?: number;
+    stagesTotal?: number;
+  };
 }
+
 
 const PHASE_NAMES: Record<string, string> = {
   expansion: 'Expand',
@@ -56,6 +66,14 @@ export function renderAutopilot(
 ): string | null {
   if (!state?.active) {
     return null;
+  }
+
+  if (state.workflow?.invalid) {
+    return `${CYAN}[AUTOPILOT]${RESET} ${RED}workflow:invalid${RESET}`;
+  }
+  if (state.workflow?.name && state.workflow.currentStage && state.workflow.currentStageIndex && state.workflow.stagesTotal) {
+    const workflowName = state.workflow.name.slice(0, 32);
+    return `${CYAN}[AUTOPILOT]${RESET} workflow:${workflowName} v${state.workflow.version}#${state.workflow.shortHash} | ${state.workflow.currentStage} ${state.workflow.currentStageIndex}/${state.workflow.stagesTotal}`;
   }
 
   const { phase, iteration, maxIterations, tasksCompleted, tasksTotal, filesCreated } = state;
@@ -114,6 +132,12 @@ export function renderAutopilotCompact(
     return null;
   }
 
+  if (state.workflow?.invalid) {
+    return `${RED}AP:workflow:invalid${RESET}`;
+  }
+  if (state.workflow?.currentStageIndex && state.workflow.stagesTotal) {
+    return `${CYAN}AP:${state.workflow.currentStageIndex}/${state.workflow.stagesTotal}${RESET}`;
+  }
   const { phase } = state;
   const phaseNum = PHASE_INDEX[phase] || 0;
 
