@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +60,27 @@ function abandonedLockOwner() {
 function stateBytes(cwd: string) {
   const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
   return existsSync(statePath) ? readFileSync(statePath) : null;
+}
+
+function fileIdentity(path: string, content: Buffer) {
+  const stat = lstatSync(path);
+  return { device: stat.dev, inode: stat.ino, size: stat.size, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update(content).digest('hex') };
+}
+
+function advancePausedWorkflowState(state: any, transcriptPath: string, signal = 'PIPELINE_RALPLAN_COMPLETE') {
+  const record = JSON.stringify({ sessionId: 'workflow-activation-fixture', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: signal }] } });
+  const content = Buffer.from(`${record}\n`);
+  writeFileSync(transcriptPath, content);
+  const stableFile = fileIdentity(transcriptPath, content);
+  const boundary = state.pipelineTracking.activationBoundary;
+  const now = new Date().toISOString();
+  state.pipelineTracking.stages[0] = { id: 'ralplan', status: 'complete', iterations: 0, startedAt: now, completedAt: now };
+  state.pipelineTracking.stages[1] = { id: 'execution', status: 'active', iterations: 0, startedAt: now };
+  state.pipelineTracking.currentStageIndex = 1;
+  state.pipelineTracking.trackingRevision = 1;
+  state.pipelineTracking.completionObservations = [{ stageId: 'ralplan', sessionId: 'workflow-activation-fixture', signalId: 'PIPELINE_RALPLAN_COMPLETE', lineNumber: 0, byteOffset: 0, recordContentSha256: createHash('sha256').update(record).digest('hex'), stableFile, activationBoundary: boundary, observedAt: now }];
+  state.pipelineTracking.activationBoundary = { transcriptPath, transcriptRoot: boundary.transcriptRoot, transcriptBasename: boundary.transcriptBasename, sessionId: boundary.sessionId, byteOffset: stableFile.size, fileIdentity: stableFile };
+  state.phase = 'execution';
 }
 
 function createFixture() {
@@ -236,6 +257,38 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
           const resumed = JSON.parse(readFileSync(statePath, 'utf8'));
           expect(output.hookSpecificOutput?.additionalContext, name).toContain('## PIPELINE STAGE: RALPLAN');
           expect(resumed).toMatchObject({ active: true, workflowRunId: paused.workflowRunId, pipelineTracking: paused.pipelineTracking });
+        } else {
+          expect(output.hookSpecificOutput?.additionalContext, name).toContain('workflow_descriptor_integrity_failed');
+          expect(readFileSync(statePath), name).toEqual(before);
+        }
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it.each(HOOKS)('rejects forged paused completion observations and resumes authenticated advanced state through %s', (script) => {
+    for (const [name, signal, hash, resumes] of [
+      ['forged hash', 'PIPELINE_RALPLAN_COMPLETE', '0'.repeat(64), false],
+      ['stage skip', 'PIPELINE_EXECUTION_COMPLETE', undefined, false],
+      ['authenticated advance', 'PIPELINE_RALPLAN_COMPLETE', undefined, true],
+    ] as const) {
+      const { cwd, configHome } = createFixture();
+      const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+      const transcriptPath = join(cwd, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl');
+      try {
+        runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+        const paused = JSON.parse(readFileSync(statePath, 'utf8'));
+        paused.active = false;
+        advancePausedWorkflowState(paused, transcriptPath, signal);
+        if (hash) paused.pipelineTracking.completionObservations[0].recordContentSha256 = hash;
+        writeFileSync(statePath, JSON.stringify(paused, null, 2));
+        const before = readFileSync(statePath);
+        const output = runHook(script, '/autopilot --workflow release-flow ignored replacement task', cwd, configHome);
+        if (resumes) {
+          const resumed = JSON.parse(readFileSync(statePath, 'utf8'));
+          expect(output.hookSpecificOutput?.additionalContext, name).toContain('## PIPELINE STAGE: EXECUTION');
+          expect(resumed).toMatchObject({ active: true, phase: 'execution', workflowRunId: paused.workflowRunId });
         } else {
           expect(output.hookSpecificOutput?.additionalContext, name).toContain('workflow_descriptor_integrity_failed');
           expect(readFileSync(statePath), name).toEqual(before);

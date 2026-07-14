@@ -658,7 +658,55 @@ describe('AutopilotCancel', () => {
       expect(finalResume.message).toBe('Resuming autopilot at phase: ralplan');
       expect(finalResume).toMatchObject({ success: true, state: { active: true, workflowRunId: state.workflowRunId } });
     });
+    it('rejects forged completion observations and resumes an authenticated advanced named workflow', () => {
+      const sessionId = 'resume-observation-session';
+      const root = join(testDir, 'claude-config', 'projects');
+      const project = join(root, '-workspace-project');
+      const transcript = join(project, `${sessionId}.jsonl`);
+      process.env.CLAUDE_CONFIG_DIR = join(testDir, 'claude-config');
+      mkdirSync(project, { recursive: true });
+      writeFileSync(transcript, '');
+      const initial = statSync(transcript);
+      const initialIdentity = { device: initial.dev, inode: initial.ino, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update('').digest('hex') };
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      const descriptor = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      const record = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'PIPELINE_RALPLAN_COMPLETE' }] } });
+      const content = Buffer.from(`${record}\n`);
+      writeFileSync(transcript, content);
+      const stable = statSync(transcript);
+      const stableIdentity = { device: stable.dev, inode: stable.ino, size: stable.size, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update(content).digest('hex') };
+      const now = new Date().toISOString();
+      Object.assign(state, { active: false, phase: 'execution', prompt: 'ship it', workflow: descriptor, workflowRunId: '11111111-1111-4111-8111-111111111111', pipelineTracking: { stages: [{ id: 'ralplan', status: 'complete', iterations: 0, startedAt: now, completedAt: now }, { id: 'execution', status: 'active', iterations: 0, startedAt: now }], currentStageIndex: 1, trackingRevision: 1, activationBoundary: { transcriptPath: transcript, transcriptRoot: root, transcriptBasename: `${sessionId}.jsonl`, sessionId, byteOffset: stable.size, fileIdentity: stableIdentity }, completionObservations: [{ stageId: 'ralplan', sessionId, signalId: 'PIPELINE_RALPLAN_COMPLETE', lineNumber: 0, byteOffset: 0, recordContentSha256: createHash('sha256').update(record).digest('hex'), stableFile: stableIdentity, activationBoundary: { transcriptPath: transcript, transcriptRoot: root, transcriptBasename: `${sessionId}.jsonl`, sessionId, byteOffset: 0, fileIdentity: initialIdentity }, observedAt: now }] } });
+      writeAutopilotState(testDir, state, sessionId);
+      expect(validateNamedWorkflowState(readAutopilotState(testDir, sessionId)!, sessionId)).not.toBeNull();
+      const forged = structuredClone(state);
+      forged.pipelineTracking!.completionObservations![0].recordContentSha256 = '0'.repeat(64);
+      writeAutopilotState(testDir, forged, sessionId);
+      const stateFile = resolveSessionStatePath('autopilot', sessionId, testDir);
+      const before = require('fs').readFileSync(stateFile);
+      expect(resumeAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
+      expect(require('fs').readFileSync(stateFile)).toEqual(before);
+      const skippedRecord = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'PIPELINE_EXECUTION_COMPLETE' }] } });
+      const skippedContent = Buffer.from(`${skippedRecord}\n`);
+      writeFileSync(transcript, skippedContent);
+      const skippedStat = statSync(transcript);
+      const skippedIdentity = { device: skippedStat.dev, inode: skippedStat.ino, size: skippedStat.size, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update(skippedContent).digest('hex') };
+      const skipped = structuredClone(state);
+      skipped.pipelineTracking!.completionObservations![0].stableFile = skippedIdentity;
+      skipped.pipelineTracking!.completionObservations![0].recordContentSha256 = createHash('sha256').update(skippedRecord).digest('hex');
+      skipped.pipelineTracking!.activationBoundary!.fileIdentity = skippedIdentity;
+      skipped.pipelineTracking!.activationBoundary!.byteOffset = skippedIdentity.size;
+      writeAutopilotState(testDir, skipped, sessionId);
+      const skippedBefore = require('fs').readFileSync(stateFile);
+      expect(resumeAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
+      expect(require('fs').readFileSync(stateFile)).toEqual(skippedBefore);
+      writeFileSync(transcript, content);
+      forged.pipelineTracking!.completionObservations![0].recordContentSha256 = createHash('sha256').update(record).digest('hex');
+      writeAutopilotState(testDir, forged, sessionId);
+      expect(resumeAutopilot(testDir, sessionId)).toMatchObject({ success: true, state: { active: true, phase: 'execution' } });
+    });
   });
+
 
   describe('formatCancelMessage', () => {
     it('should format failure message', () => {

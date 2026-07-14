@@ -90,6 +90,29 @@ function hasAuthenticatedBoundary(value, sessionId, root) {
   if (transcript.identity.device !== value.fileIdentity.device || transcript.identity.inode !== value.fileIdentity.inode || transcript.identity.size < value.byteOffset) return false;
   return createHash('sha256').update(transcript.content.subarray(0, value.byteOffset)).digest('hex') === value.fileIdentity.contentSha256;
 }
+function hasAuthenticatedObservation(observation, sessionId, root) {
+  if (!hasAuthenticatedBoundary(observation.activationBoundary, sessionId, root)) return false;
+  const transcript = readStableTranscript(observation.activationBoundary.transcriptPath, sessionId);
+  if (!transcript || transcript.root !== root || transcript.canonicalPath !== observation.activationBoundary.transcriptPath || transcript.identity.device !== observation.stableFile.device || transcript.identity.inode !== observation.stableFile.inode || transcript.identity.size < observation.stableFile.size || createHash('sha256').update(transcript.content.subarray(0, observation.stableFile.size)).digest('hex') !== observation.stableFile.contentSha256) return false;
+  const boundary = observation.activationBoundary;
+  if (observation.byteOffset < boundary.byteOffset || observation.byteOffset >= observation.stableFile.size) return false;
+  const content = transcript.content.subarray(boundary.byteOffset, observation.stableFile.size).toString('utf8');
+  let byteOffset = boundary.byteOffset;
+  const lines = content.split(/\n/);
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const rawLine = lines[lineNumber];
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (byteOffset === observation.byteOffset && lineNumber === observation.lineNumber) {
+      let record;
+      try { record = JSON.parse(line); } catch { return false; }
+      const text = assistantText(record);
+      return createHash('sha256').update(line).digest('hex') === observation.recordContentSha256 && recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null && !text.includes('<local-command-stdout>') && text.trim() === SIGNALS[observation.stageId];
+    }
+    byteOffset += Buffer.byteLength(rawLine) + 1;
+  }
+  return false;
+}
+
 export function isValidWorkflowTrackingState(state, sessionId = state?.session_id) {
   try {
     const workflow = state?.workflow; const tracking = state?.pipelineTracking; const root = transcriptRoot();
@@ -108,8 +131,7 @@ export function isValidWorkflowTrackingState(state, sessionId = state?.session_i
     let previousObservation = null;
     const validObservations = tracking.completionObservations.every((observation, index) => {
       if (!hasExactKeys(observation, ['stageId', 'sessionId', 'signalId', 'lineNumber', 'byteOffset', 'recordContentSha256', 'stableFile', 'activationBoundary', 'observedAt'])) return false;
-      if (observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== SIGNALS[observation.stageId] || !isFiniteInteger(observation.lineNumber) || !isFiniteInteger(observation.byteOffset) || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isTimestamp(observation.observedAt) || !isFileIdentity(observation.stableFile) || !hasAuthenticatedBoundary(observation.activationBoundary, sessionId, root)) return false;
-      if (observation.byteOffset < observation.activationBoundary.byteOffset || observation.stableFile.size < observation.byteOffset) return false;
+      if (observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== SIGNALS[observation.stageId] || !isFiniteInteger(observation.lineNumber) || !isFiniteInteger(observation.byteOffset) || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isTimestamp(observation.observedAt) || !isFileIdentity(observation.stableFile) || !hasAuthenticatedObservation(observation, sessionId, root)) return false;
       if (previousObservation && (observation.activationBoundary.transcriptPath !== previousObservation.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previousObservation.stableFile.size || canonicalJson(observation.activationBoundary.fileIdentity) !== canonicalJson(previousObservation.stableFile))) return false;
       previousObservation = observation;
       return true;

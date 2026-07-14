@@ -1,8 +1,6 @@
 /**
  * Atomic file writes for oh-my-claudecode hooks.
  * Self-contained module with no external dependencies.
- *
- * Mirrors templates/hooks/lib/atomic-write.mjs for use by plugin hook scripts.
  */
 
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, linkSync } from 'fs';
@@ -139,31 +137,75 @@ function processStartIdentity(pid) {
     if (end < 0) return null;
     const fields = stat.slice(end + 2).trim().split(/\s+/);
     return fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-  } catch (error) {
-    return error?.code === 'ENOENT' ? 'absent' : null;
-  }
+  } catch (error) { return error?.code === 'ENOENT' ? 'absent' : null; }
 }
-
-function releaseOwnedLockWithoutFlock(lockPath, owner) {
+function readLockOwner(path) {
   try {
-    const current = JSON.parse(readFileSync(lockPath, 'utf8'));
-    if (current.pid !== owner?.pid || current.processStart !== owner?.processStart || current.nonce !== owner?.nonce) return 'replaced';
-    unlinkSync(lockPath);
-    return 'retry';
-  } catch {
-    return 'unverifiable';
-  }
+    const owner = JSON.parse(readFileSync(path, 'utf8'));
+    const keys = Object.keys(owner).sort();
+    return keys.length === 5 && keys.every((key, index) => key === ['createdAt', 'nonce', 'pid', 'processStart', 'version'][index]) && owner.version === 1 && Number.isSafeInteger(owner.pid) && owner.pid > 0 && typeof owner.processStart === 'string' && /^\d+$/.test(owner.processStart) && typeof owner.createdAt === 'string' && Number.isFinite(Date.parse(owner.createdAt)) && typeof owner.nonce === 'string' && /^[0-9a-f-]{36}$/i.test(owner.nonce) ? owner : null;
+  } catch { return null; }
 }
-
+function ownerDisposition(owner) {
+  if (process.platform === 'linux') {
+    const current = processStartIdentity(owner.pid);
+    if (current === 'absent') return 'retry';
+    return current === null ? 'unverifiable' : current === owner.processStart ? 'live' : 'retry';
+  }
+  try { process.kill(owner.pid, 0); return 'live'; } catch (error) { return error?.code === 'ESRCH' ? 'retry' : 'unverifiable'; }
+}
+function sameOwner(left, right) { return !!left && left.pid === right?.pid && left.processStart === right?.processStart && left.nonce === right?.nonce; }
+function acquireReclaimGuard(path) {
+  const guardPath = `${path}.reclaim.guard`;
+  const processStart = processStartIdentity(process.pid);
+  if (!processStart || processStart === 'absent') return null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const owner = { version: LOCK_SCHEMA_VERSION, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
+    const tempPath = `${guardPath}.${process.pid}.${owner.nonce}.tmp`;
+    let fd;
+    try {
+      fd = openSync(tempPath, 'wx', 0o600); writeSync(fd, JSON.stringify(owner)); fsyncSync(fd);
+      linkSync(tempPath, guardPath); unlinkSync(tempPath);
+      return { fd, lockPath: guardPath, owner };
+    } catch (error) {
+      if (fd !== undefined) try { closeSync(fd); } catch {}
+      try { unlinkSync(tempPath); } catch {}
+      if (error?.code !== 'EEXIST') return null;
+      const existing = readLockOwner(guardPath);
+      if (!existing || ownerDisposition(existing) !== 'retry') return null;
+      try { unlinkSync(guardPath); } catch {}
+    }
+  }
+  return null;
+}
+function releaseOwnedLockWithoutFlock(lockPath, owner) {
+  const current = readLockOwner(lockPath);
+  if (!current) return 'unverifiable';
+  if (!sameOwner(current, owner)) return 'replaced';
+  try { unlinkSync(lockPath); return 'retry'; } catch { return 'unverifiable'; }
+}
 function guardedLockRemoval(lockPath, operation, owner) {
   const flock = flockPath();
-  if (!flock) return operation === 'release' ? releaseOwnedLockWithoutFlock(lockPath, owner) : 'unverifiable';
-  const guardPath = `${lockPath}.reclaim.guard`;
-  const result = spawnSync(flock, ['-x', guardPath, process.execPath, '-e', LOCK_REMOVAL_SCRIPT, operation, lockPath, owner ? JSON.stringify(owner) : ''], { stdio: 'ignore', timeout: 2000 });
-  if (result.status === 0) return 'retry';
-  if (result.status === 2) return 'live';
-  if (result.status === 4) return 'replaced';
-  return 'unverifiable';
+  if (flock) {
+    const result = spawnSync(flock, ['-x', `${lockPath}.reclaim.guard`, process.execPath, '-e', LOCK_REMOVAL_SCRIPT, operation, lockPath, owner ? JSON.stringify(owner) : ''], { stdio: 'ignore', timeout: 2000 });
+    if (result.status === 0) return 'retry';
+    if (result.status === 2) return 'live';
+    if (result.status === 4) return 'replaced';
+    return 'unverifiable';
+  }
+  const guard = acquireReclaimGuard(lockPath);
+  if (!guard) return 'unverifiable';
+  try {
+    const current = readLockOwner(lockPath);
+    if (!current) return 'unverifiable';
+    if (operation === 'release') return releaseOwnedLockWithoutFlock(lockPath, owner);
+    const disposition = ownerDisposition(current);
+    if (disposition !== 'retry') return disposition;
+    try { unlinkSync(lockPath); return 'retry'; } catch { return 'unverifiable'; }
+  } finally {
+    try { closeSync(guard.fd); } catch {}
+    releaseOwnedLockWithoutFlock(guard.lockPath, guard.owner);
+  }
 }
 
 export function acquireStateFileLockSync(filePath, attempts = 50) {

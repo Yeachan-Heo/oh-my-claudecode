@@ -68,6 +68,55 @@ function validBoundary(value: unknown, sessionId: string | undefined, root: stri
   } catch { return false; } finally { closeSync(opened.fd); }
 }
 
+function readStableTranscript(path: string, sessionId: string, root: string): { content: Buffer; path: string; device: number; inode: number; size: number } | null {
+  const opened = noFollowCanonicalFile(path, root);
+  if (!opened || opened.path !== path || basename(opened.path) !== `${sessionId}.jsonl`) return null;
+  try {
+    const before = fstatSync(opened.fd, { bigint: true });
+    if (!before.isFile() || before.size > BigInt(MAX_TRANSCRIPT_BYTES)) return null;
+    const content = Buffer.alloc(Number(before.size));
+    for (let offset = 0; offset < content.length;) {
+      const count = readSync(opened.fd, content, offset, content.length - offset, offset);
+      if (count <= 0) return null;
+      offset += count;
+    }
+    const after = fstatSync(opened.fd, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) return null;
+    return { content, path: opened.path, device: Number(after.dev), inode: Number(after.ino), size: Number(after.size) };
+  } catch { return null; } finally { closeSync(opened.fd); }
+}
+
+function assistantText(record: RecordValue): string | null {
+  const content = record.message;
+  if (!isRecord(content) || !Array.isArray(content.content) || content.content.length === 0) return null;
+  const text = content.content.map((block) => isRecord(block) && block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0 ? block.text : null);
+  return text.every((value) => value !== null) ? text.join("") : null;
+}
+
+function authenticatedObservation(observation: RecordValue, sessionId: string, root: string): boolean {
+  const boundary = observation.activationBoundary as RecordValue;
+  const stable = observation.stableFile as RecordValue;
+  if (!validBoundary(boundary, sessionId, root) || typeof boundary.transcriptPath !== "string") return false;
+  const transcript = readStableTranscript(boundary.transcriptPath, sessionId, root);
+  if (!transcript || transcript.device !== stable.device || transcript.inode !== stable.inode || transcript.size < Number(stable.size) || createHash("sha256").update(transcript.content.subarray(0, Number(stable.size))).digest("hex") !== stable.contentSha256 || Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(observation.byteOffset) >= Number(stable.size)) return false;
+  const lines = transcript.content.subarray(Number(boundary.byteOffset), Number(stable.size)).toString("utf8").split(/\n/);
+  let byteOffset = Number(boundary.byteOffset);
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const rawLine = lines[lineNumber];
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (byteOffset === observation.byteOffset && lineNumber === observation.lineNumber) {
+      let record: unknown;
+      try { record = JSON.parse(line); } catch { return false; }
+      if (!isRecord(record)) return false;
+      const message = record.message;
+      const text = assistantText(record);
+      return createHash("sha256").update(line).digest("hex") === observation.recordContentSha256 && record.sessionId === sessionId && record.type === "assistant" && isRecord(message) && message.role === "assistant" && !record.isMeta && !record.isReplay && !record.replay && !record.meta && text !== null && !text.includes("<local-command-stdout>") && text.trim() === NAMED_SIGNALS[String(observation.stageId)];
+    }
+    byteOffset += Buffer.byteLength(rawLine) + 1;
+  }
+  return false;
+}
+
 export type NamedWorkflowValidation = { tracking: NonNullable<AutopilotState["pipelineTracking"]>; task: string };
 
 /** Validate the complete descriptor and authenticated transcript chain without mutating state. */
@@ -86,7 +135,7 @@ export function validateNamedWorkflowState(state: AutopilotState, sessionId: str
   let previousObservation: RecordValue | null = null;
   for (let index = 0; index < tracking.completionObservations.length; index += 1) {
     const observation = tracking.completionObservations[index];
-    if (!isRecord(observation) || !exactKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== NAMED_SIGNALS[String(observation.stageId)] || !safeInteger(observation.lineNumber) || !safeInteger(observation.byteOffset) || typeof observation.recordContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !validFileIdentity(observation.stableFile) || !validBoundary(observation.activationBoundary, sessionId, root) || !timestamp(observation.observedAt)) return null;
+    if (!isRecord(observation) || !exactKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== NAMED_SIGNALS[String(observation.stageId)] || !safeInteger(observation.lineNumber) || !safeInteger(observation.byteOffset) || typeof observation.recordContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !validFileIdentity(observation.stableFile) || !timestamp(observation.observedAt) || !authenticatedObservation(observation, sessionId!, root)) return null;
     const boundary = observation.activationBoundary as unknown as RecordValue; const stable = observation.stableFile as unknown as RecordValue;
     if (Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(stable.size) < Number(observation.byteOffset)) return null;
     if (previousObservation) { const previousBoundary = previousObservation.activationBoundary as RecordValue; const previousStable = previousObservation.stableFile as RecordValue; if (boundary.transcriptPath !== previousBoundary.transcriptPath || boundary.byteOffset !== previousStable.size || JSON.stringify(boundary.fileIdentity) !== JSON.stringify(previousStable)) return null; }

@@ -102,6 +102,32 @@ describe('mode-state-io', () => {
       expect(existsSync(join(tempDir, '.omc', 'state', 'autopilot-state.json.mutation.lock'))).toBe(false);
     });
 
+    it('reclaims an abandoned generic write lock without flock', () => {
+      process.env.NODE_ENV = 'test';
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
+
+      expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
+      expect(existsSync(`${statePath}.mutation.lock`)).toBe(false);
+    });
+
+    it('fails closed for a live generic lock without flock', () => {
+      process.env.NODE_ENV = 'test';
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      const owner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify(owner));
+
+      expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(false);
+      expect(existsSync(`${statePath}.mutation.lock`)).toBe(true);
+      expect(existsSync(statePath)).toBe(false);
+    });
+
     it('should include sessionId in _meta when sessionId is provided', () => {
       writeModeState('ralph', { active: true }, tempDir, 'pid-session-42');
 
@@ -290,6 +316,8 @@ describe('mode-state-io', () => {
   // -----------------------------------------------------------------------
   describe('clearModeStateFile', () => {
     it('reclaims an abandoned session lock during cleanup', () => {
+      process.env.NODE_ENV = 'test';
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const sessionId = 'workflow-session';
       expect(writeModeState('autopilot', { active: true }, tempDir, sessionId)).toBe(true);
       const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
