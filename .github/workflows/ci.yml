@@ -98,6 +98,7 @@ jobs:
           src/hooks/merge-readiness/__tests__/win-cross-platform.test.ts
           src/hooks/merge-readiness/__tests__/runtime.test.ts
           src/hooks/merge-readiness/__tests__/tool-flow.test.ts
+          src/__tests__/windows-prompt-hook-runner.test.ts
 
   build:
     name: Build

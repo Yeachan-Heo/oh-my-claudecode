@@ -1,90 +1,93 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * OMC Cross-platform hook runner (run.cjs)
+ * OMC Cross-platform hook runner (run.cjs).
  *
  * Uses process.execPath (the Node binary already running this script) to spawn
- * the target .mjs hook. The shipped plugin manifest launches this runner directly with
- * `node ... run.cjs` so native Windows can spawn hooks without /bin/sh.
- * Once Node has launched this runner, process.execPath is used for the
- * hook-script handoff.
- * Fixes issues #909, #899, #892, #869.
- *
- * Manifest usage (from hooks.json):
- *   node "${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs" \
- *       "${CLAUDE_PLUGIN_ROOT}/scripts/<hook>.mjs" [args...]
+ * ordinary hooks. The two trusted UserPromptSubmit hooks run in a Worker so the
+ * runner retains ownership of their synchronous timeout boundary.
  */
 
 const { spawnSync } = require('child_process');
 const { existsSync, readFileSync, realpathSync } = require('fs');
-const { join, basename, dirname } = require('path');
+const path = require('path');
+const { join, basename, dirname } = path;
+const { pathToFileURL } = require('url');
+const { Worker } = require('worker_threads');
 
 const target = process.argv[2];
 if (!target) {
-  // Nothing to run — exit cleanly so Claude Code hooks are never blocked.
   process.exit(0);
+}
+
+function isPluginRoot(pluginRoot) {
+  return existsSync(join(pluginRoot, 'hooks', 'hooks.json')) &&
+    existsSync(join(pluginRoot, 'scripts', 'run.cjs')) &&
+    existsSync(join(pluginRoot, 'scripts'));
+}
+
+function canonicalPluginRoot(pluginRoot) {
+  try {
+    const canonicalRoot = path.resolve(realpathSync(pluginRoot));
+    return isPluginRoot(canonicalRoot) ? canonicalRoot : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Resolve the hook script target path, handling stale CLAUDE_PLUGIN_ROOT.
  *
- * When a plugin update replaces an old version directory with a symlink (or
- * deletes it entirely), sessions that still reference the old version via
- * CLAUDE_PLUGIN_ROOT will fail with MODULE_NOT_FOUND.
- *
- * Resolution strategy:
- *   1. Use the target as-is if it exists.
- *   2. Try resolving through realpathSync (follows symlinks).
- *   3. Scan the plugin cache for the latest available version that has the
- *      same script name and use that instead.
- *   4. If all else fails, return null (caller exits cleanly).
- *
- * See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1007
+ * A direct target remains valid for the generic child path even without a
+ * trusted plugin root. Worker eligibility receives only independently proven
+ * configured-root or selected-cache-version provenance.
  */
 function resolveTarget(targetPath) {
-  // Fast path: target exists (common case)
-  if (existsSync(targetPath)) return targetPath;
+  const configuredRoot = canonicalPluginRoot(process.env.CLAUDE_PLUGIN_ROOT);
 
-  // Try realpath resolution (handles broken symlinks that resolve elsewhere)
   try {
-    const resolved = realpathSync(targetPath);
-    if (existsSync(resolved)) return resolved;
+    if (existsSync(targetPath)) {
+      return {
+        targetPath: path.resolve(realpathSync(targetPath)),
+        trustedPluginRoot: configuredRoot,
+      };
+    }
   } catch {
-    // realpathSync throws if the path doesn't exist at all — expected
+    // Continue to stale-cache recovery.
   }
 
-  // Fallback: scan plugin cache for the same script in the latest version.
-  // CLAUDE_PLUGIN_ROOT is e.g. ~/.claude/plugins/cache/omc/oh-my-claudecode/4.2.14
-  // We look one level up for sibling version directories.
   try {
-    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-    if (!pluginRoot) return null;
+    const configuredPath = process.env.CLAUDE_PLUGIN_ROOT;
+    if (!configuredPath) return null;
 
-    const cacheBase = dirname(pluginRoot);          // .../oh-my-claudecode/
-    const scriptRelative = targetPath.slice(pluginRoot.length); // /scripts/persistent-mode.cjs
-
+    const cacheBase = dirname(configuredPath);
+    const scriptRelative = targetPath.slice(configuredPath.length);
     if (!scriptRelative || !existsSync(cacheBase)) return null;
 
-    // Find version directories (real dirs or valid symlinks), pick latest
-    const { readdirSync, lstatSync, readlinkSync } = require('fs');
-    const entries = readdirSync(cacheBase).filter(v => /^\d+\.\d+\.\d+/.test(v));
-
-    // Sort descending by semver
+    const { readdirSync } = require('fs');
+    const entries = readdirSync(cacheBase).filter(version => /^\d+\.\d+\.\d+/.test(version));
     entries.sort((a, b) => {
       const pa = a.split('.').map(Number);
       const pb = b.split('.').map(Number);
-      for (let i = 0; i < 3; i++) {
-        if ((pa[i] || 0) !== (pb[i] || 0)) return (pb[i] || 0) - (pa[i] || 0);
+      for (let index = 0; index < 3; index++) {
+        if ((pa[index] || 0) !== (pb[index] || 0)) return (pb[index] || 0) - (pa[index] || 0);
       }
       return 0;
     });
 
     for (const version of entries) {
-      const candidate = join(cacheBase, version) + scriptRelative;
-      if (existsSync(candidate)) return candidate;
+      const selectedRoot = join(cacheBase, version);
+      const candidate = selectedRoot + scriptRelative;
+      if (!existsSync(candidate)) continue;
+      const trustedPluginRoot = canonicalPluginRoot(selectedRoot);
+      return {
+        targetPath: path.resolve(realpathSync(candidate)),
+        trustedPluginRoot,
+      };
+
     }
   } catch {
-    // Any error in fallback scan — give up gracefully
+    // Any stale-cache recovery error remains fail-open.
   }
 
   return null;
@@ -121,8 +124,7 @@ function resolveInnerTimeoutMs(manifestHook) {
   return Math.max(1, manifestHook.timeoutMs - resolveTimeoutCushionMs(manifestHook.timeoutMs, manifestHook.event));
 }
 
-function resolveHookTimeoutMs(targetPath, extraArgs) {
-  const pluginRoot = dirname(dirname(targetPath));
+function resolveHookTimeoutMsFromRoot(pluginRoot, targetPath, extraArgs) {
   const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
   if (!existsSync(hooksJsonPath)) return null;
 
@@ -130,7 +132,7 @@ function resolveHookTimeoutMs(targetPath, extraArgs) {
     const hooksJson = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
     const scriptName = basename(targetPath);
     const scriptPattern = new RegExp(`[/\\\\]scripts[/\\\\]${escapeRegex(scriptName)}(?:\\s|$)`);
-    const argNeedles = extraArgs.filter((arg) => typeof arg === 'string' && arg.length > 0);
+    const argNeedles = extraArgs.filter(arg => typeof arg === 'string' && arg.length > 0);
 
     for (const { event, entry } of flattenHookEntries(hooksJson?.hooks)) {
       const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
@@ -139,7 +141,7 @@ function resolveHookTimeoutMs(targetPath, extraArgs) {
         const timeout = Number(hook?.timeout);
         if (!scriptPattern.test(command)) continue;
         if (!Number.isFinite(timeout) || timeout <= 0) continue;
-        if (!argNeedles.every((arg) => command.includes(` ${arg}`) || command.endsWith(` ${arg}`))) continue;
+        if (!argNeedles.every(arg => command.includes(` ${arg}`) || command.endsWith(` ${arg}`))) continue;
         return { event, timeoutMs: Math.floor(timeout * 1000) };
       }
     }
@@ -150,36 +152,167 @@ function resolveHookTimeoutMs(targetPath, extraArgs) {
   return null;
 }
 
-const resolved = resolveTarget(target);
-if (!resolved) {
-  // Target not found anywhere — exit cleanly so hooks are never blocked.
-  // This is the graceful fallback for stale CLAUDE_PLUGIN_ROOT paths.
-  process.exit(0);
+function resolveHookTimeoutMs(targetPath, extraArgs) {
+  return resolveHookTimeoutMsFromRoot(dirname(dirname(targetPath)), targetPath, extraArgs);
 }
 
-const manifestHook = resolveHookTimeoutMs(resolved, process.argv.slice(3));
-const timeoutMs = resolveInnerTimeoutMs(manifestHook);
+function normalizedComparisonPath(value) {
+  const canonical = path.resolve(realpathSync(value));
+  return process.platform === 'win32'
+    ? path.win32.normalize(canonical).toLowerCase()
+    : path.normalize(canonical);
+}
 
-const result = spawnSync(
-  process.execPath,
-  [resolved, ...process.argv.slice(3)],
-  {
-    stdio: 'inherit',
-    env: process.env,
-    windowsHide: true,
-    ...(timeoutMs ? {
-      timeout: timeoutMs,
-      killSignal: process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL',
-    } : {}),
+function isContainedBy(root, targetPath) {
+  const pathApi = process.platform === 'win32' ? path.win32 : path;
+  const relative = pathApi.relative(root, targetPath);
+  return relative !== '' && !pathApi.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${pathApi.sep}`);
+}
+
+function resolveWorkerTarget(resolution, extraArgs) {
+  const trustedRoot = resolution.trustedPluginRoot;
+  if (!trustedRoot || extraArgs.length !== 0) return null;
+
+  try {
+    const canonicalRoot = normalizedComparisonPath(trustedRoot);
+    const canonicalTarget = normalizedComparisonPath(resolution.targetPath);
+    if (!isContainedBy(canonicalRoot, canonicalTarget)) return null;
+
+    const expectedTargets = ['keyword-detector.mjs', 'skill-injector.mjs']
+      .map(script => normalizedComparisonPath(join(trustedRoot, 'scripts', script)));
+    if (!expectedTargets.includes(canonicalTarget)) return null;
+
+    const manifestHook = resolveHookTimeoutMsFromRoot(trustedRoot, resolution.targetPath, []);
+    if (manifestHook?.event !== 'UserPromptSubmit') return null;
+    return manifestHook;
+  } catch {
+    return null;
   }
-);
+}
 
-if (result.error?.code === 'ETIMEDOUT' && timeoutMs) {
-  const message = `[run.cjs] Hook ${basename(resolved)} timed out after ${timeoutMs}ms; exiting fail-open.\n`;
+function writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs) {
+  const message = `[run.cjs] Hook ${basename(targetPath)} timed out after ${timeoutMs}ms; exiting fail-open.\n`;
   if (manifestHook?.event !== 'UserPromptSubmit' || isDebugHooksEnabled()) {
     process.stderr.write(message);
   }
 }
 
-// Propagate the child exit code (null → 0 to avoid blocking hooks).
-process.exit(result.status ?? 0);
+async function runWorker(targetPath, manifestHook, timeoutMs) {
+  let worker;
+  let terminal = false;
+  let timer;
+  let discardOutput = false;
+  const stdout = [];
+  const stderr = [];
+
+  const cleanupInput = () => {
+    if (!worker) return;
+    process.stdin.unpipe(worker.stdin);
+    worker.stdin.destroy();
+  };
+  const waitForOutputEnd = stream => stream.readableEnded
+    ? Promise.resolve()
+    : new Promise(resolve => stream.once('end', resolve));
+  const writeBuffer = (stream, buffer) => new Promise(resolve => {
+    stream.write(buffer, () => resolve());
+  });
+  const forwardBuffers = async (workerError) => {
+    if (stdout.length) await writeBuffer(process.stdout, Buffer.concat(stdout));
+    if (stderr.length) await writeBuffer(process.stderr, Buffer.concat(stderr));
+    if (workerError) {
+      const diagnostic = workerError.stack || workerError.message || String(workerError);
+      await writeBuffer(process.stderr, Buffer.from(`${diagnostic}\n`));
+    }
+  };
+  const waitForWorkerOutput = () => Promise.all([
+    waitForOutputEnd(worker.stdout),
+    waitForOutputEnd(worker.stderr),
+  ]);
+
+  try {
+    return await new Promise((resolve) => {
+      const finish = async (status, workerError) => {
+        if (terminal) return;
+        terminal = true;
+        clearTimeout(timer);
+        cleanupInput();
+        if (worker) await waitForWorkerOutput();
+        await forwardBuffers(workerError);
+        resolve(status);
+      };
+
+      timer = setTimeout(async () => {
+        if (terminal) return;
+        discardOutput = true;
+        terminal = true;
+        cleanupInput();
+        try {
+          await worker.terminate();
+        } catch {
+          // Termination is best-effort; the hook must still fail open.
+        }
+        writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
+        resolve(0);
+      }, timeoutMs);
+
+      try {
+        worker = new Worker(pathToFileURL(targetPath), {
+          stdin: true,
+          stdout: true,
+          stderr: true,
+          env: process.env,
+        });
+        if (process.stdin.readableEnded) worker.stdin.end();
+        else process.stdin.pipe(worker.stdin);
+        worker.stdout.on('data', chunk => { if (!discardOutput) stdout.push(chunk); });
+        worker.stderr.on('data', chunk => { if (!discardOutput) stderr.push(chunk); });
+        worker.once('error', error => {
+          void finish(1, error);
+        });
+        worker.once('exit', code => {
+          void finish(code ?? 0);
+        });
+      } catch (error) {
+        void finish(1, error);
+      }
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const resolution = resolveTarget(target);
+if (!resolution) {
+  process.exitCode = 0;
+} else {
+  const extraArgs = process.argv.slice(3);
+  const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
+  if (workerManifestHook) {
+    const workerTimeoutMs = resolveInnerTimeoutMs(workerManifestHook);
+    runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
+      process.exitCode = status;
+    });
+  } else {
+    const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
+    const timeoutMs = resolveInnerTimeoutMs(manifestHook);
+    const result = spawnSync(
+      process.execPath,
+      [resolution.targetPath, ...extraArgs],
+      {
+        stdio: 'inherit',
+        env: process.env,
+        windowsHide: true,
+        ...(timeoutMs ? {
+          timeout: timeoutMs,
+          killSignal: process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL',
+        } : {}),
+      }
+    );
+
+    if (result.error?.code === 'ETIMEDOUT' && timeoutMs) {
+      writeTimeoutDiagnostic(resolution.targetPath, manifestHook, timeoutMs);
+    }
+
+    process.exitCode = result.status ?? 0;
+  }
+}

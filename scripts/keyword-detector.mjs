@@ -1387,7 +1387,11 @@ function createHookOutput(additionalContext) {
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
   const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
-  if (process.env.DISABLE_OMC === '1' || _skipHooks.includes('keyword-detector')) {
+  if (
+    process.env.DISABLE_OMC === '1' ||
+    process.env.DISABLE_OMC === 'true' ||
+    _skipHooks.includes('keyword-detector')
+  ) {
     console.log(JSON.stringify({ continue: true }));
     return;
   }
