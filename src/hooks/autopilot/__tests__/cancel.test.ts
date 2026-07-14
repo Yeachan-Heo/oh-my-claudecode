@@ -226,6 +226,22 @@ describe('AutopilotCancel', () => {
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, originalIdea: 'replacement run', workflowRunId: replacement.workflowRunId });
     });
 
+    it('preserves named state bytes when cancel or clear lacks flock support', () => {
+      const sessionId = 'named-cancel-platform-gate';
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      writeAutopilotState(testDir, state, sessionId);
+      const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
+      const before = require('fs').readFileSync(statePath);
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'unsupported-runtime' });
+      expect(require('fs').readFileSync(statePath)).toEqual(before);
+      expect(clearAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'unsupported-runtime' });
+      expect(require('fs').readFileSync(statePath)).toEqual(before);
+    });
+
     it('should not clear other session ralph/ultraqa state when sessionId provided', () => {
       const sessionId = 'session-a';
       initAutopilot(testDir, 'test idea', sessionId);

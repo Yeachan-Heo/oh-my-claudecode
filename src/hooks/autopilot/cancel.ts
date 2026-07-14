@@ -44,6 +44,10 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     };
   }
 
+  if (state.workflow && !namedWorkflowRuntimeSupported()) {
+    return { success: false, message: 'unsupported-runtime' };
+  }
+
   // Track what we cleaned up
   const cleanedUp: string[] = [];
 
@@ -109,6 +113,10 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
       success: true,
       message: 'No autopilot state to clear'
     };
+  }
+
+  if (state.workflow && !namedWorkflowRuntimeSupported()) {
+    return { success: false, message: 'unsupported-runtime' };
   }
 
   // Clean up all related state
