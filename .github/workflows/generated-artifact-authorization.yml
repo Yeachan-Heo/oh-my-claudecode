@@ -5,11 +5,14 @@ on:
     branches: [dev]
     types: [opened, synchronize, reopened]
 
-# GitHub loads pull_request_target workflow bytes from the default branch, main, even
-# when this trigger filters PRs targeting dev. Its GITHUB_REF is refs/heads/main,
-# which the verifier requires before authorization. This prerequisite dev PR cannot
-# activate or authorize itself until this exact workflow is promoted to main.
-# The trusted checkout below contains only base-owned verifier and manifest bytes.
+# GitHub loads pull_request_target workflow bytes from the default branch, main.
+# Its runtime GITHUB_REF/GITHUB_SHA bind main and its live main commit, while
+# GITHUB_WORKFLOW_REF/GITHUB_WORKFLOW_SHA bind this protected workflow and a
+# separately fetched live main commit. The explicit event-base inputs below bind
+# the dev target and its immutable event commit for the trusted detached checkout.
+# This prerequisite dev PR cannot activate or authorize itself until this exact
+# workflow is promoted to main. The trusted checkout contains only base-owned
+# verifier and manifest bytes.
 permissions:
   contents: read
   pull-requests: read
@@ -36,4 +39,6 @@ jobs:
         working-directory: trusted-base
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TRUSTED_EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          TRUSTED_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/verify-generated-artifact-authorization.mjs

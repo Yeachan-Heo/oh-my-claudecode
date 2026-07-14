@@ -16,6 +16,7 @@ const REPOSITORY_ROOT = resolve(SCRIPT_DIR, '..');
 const MANIFEST_PATH = join(REPOSITORY_ROOT, '.github', 'generated-artifact-authorizations.json');
 const OWNER = 'Yeachan-Heo';
 const DEFAULT_BRANCH = 'main';
+const WORKFLOW_PATH = '.github/workflows/generated-artifact-authorization.yml';
 const API_URL = 'https://api.github.com';
 const MAX_PULL_FILES = 3000;
 const ALLOWED_ACTIONS = new Set(['opened', 'synchronize', 'reopened']);
@@ -78,19 +79,7 @@ function parseRepository(repository) {
   return { owner: match[1], name: match[2] };
 }
 
-function assertDefaultMainProvenance(environment, repositoryMetadata, repository, owner) {
-  const runtime = requiredObject(environment, 'runtime environment');
-  if (runtime.githubEventName !== 'pull_request_target') {
-    fail('verifier only accepts pull_request_target events');
-  }
-  if (requiredString(runtime.githubRepository, 'runtime GITHUB_REPOSITORY') !== repository) {
-    fail('runtime repository does not match the base-owned authorization manifest');
-  }
-  if (requiredString(runtime.githubRef, 'runtime GITHUB_REF') !== `refs/heads/${DEFAULT_BRANCH}`) {
-    fail(`runtime GITHUB_REF is not refs/heads/${DEFAULT_BRANCH}`);
-  }
-  requiredSha(runtime.githubSha, 'runtime GITHUB_SHA');
-
+function assertProtectedRepositoryMetadata(repositoryMetadata, repository, owner) {
   const metadata = requiredObject(repositoryMetadata, 'live repository metadata');
   if (requiredString(metadata.full_name, 'live repository metadata.full_name') !== repository) {
     fail('live repository metadata repository does not match the protected repository');
@@ -103,6 +92,67 @@ function assertDefaultMainProvenance(environment, repositoryMetadata, repository
   }
   if (requiredString(metadata.default_branch, 'live repository metadata.default_branch') !== DEFAULT_BRANCH) {
     fail(`live repository metadata default branch is not ${DEFAULT_BRANCH}`);
+  }
+}
+
+function assertDefaultMainProvenance(environment, repositoryMetadata, runtimeCommit, workflowCommit, repository, owner) {
+  const runtime = requiredObject(environment, 'runtime environment');
+  assertExactKeys(
+    runtime,
+    [
+      'githubEventName',
+      'githubRepository',
+      'githubRef',
+      'githubSha',
+      'githubWorkflowRef',
+      'githubWorkflowSha',
+      'trustedEventBaseRef',
+      'trustedEventBaseSha',
+    ],
+    'runtime environment',
+  );
+  if (runtime.githubEventName !== 'pull_request_target') {
+    fail('verifier only accepts pull_request_target events');
+  }
+  if (requiredString(runtime.githubRepository, 'runtime GITHUB_REPOSITORY') !== repository) {
+    fail('runtime repository does not match the base-owned authorization manifest');
+  }
+  if (requiredString(runtime.githubRef, 'runtime GITHUB_REF') !== `refs/heads/${DEFAULT_BRANCH}`) {
+    fail('runtime GITHUB_REF is not the protected default branch');
+  }
+  const currentRuntimeSha = requiredSha(
+    requiredObject(runtimeCommit, 'current runtime default-main commit').sha,
+    'current runtime default-main commit SHA',
+  );
+  if (requiredSha(runtime.githubSha, 'runtime GITHUB_SHA') !== currentRuntimeSha) {
+    fail('runtime GITHUB_SHA does not match the current protected default-main commit SHA');
+  }
+  if (
+    requiredString(runtime.githubWorkflowRef, 'runtime GITHUB_WORKFLOW_REF') !==
+    `${repository}/${WORKFLOW_PATH}@refs/heads/${DEFAULT_BRANCH}`
+  ) {
+    fail('runtime GITHUB_WORKFLOW_REF is not the protected default-branch workflow');
+  }
+  const workflowSha = requiredSha(runtime.githubWorkflowSha, 'runtime GITHUB_WORKFLOW_SHA');
+  const currentWorkflowSha = requiredSha(
+    requiredObject(workflowCommit, 'current protected default-main workflow commit').sha,
+    'current protected default-main workflow commit SHA',
+  );
+  if (workflowSha !== currentWorkflowSha) {
+    fail('runtime GITHUB_WORKFLOW_SHA does not match the current protected default-main workflow commit SHA');
+  }
+  assertProtectedRepositoryMetadata(repositoryMetadata, repository, owner);
+}
+
+function assertTrustedEventBaseProvenance(environment, eventData, liveData) {
+  const runtime = requiredObject(environment, 'runtime environment');
+  if (requiredString(runtime.trustedEventBaseRef, 'TRUSTED_EVENT_BASE_REF') !== eventData.baseRef ||
+      runtime.trustedEventBaseRef !== liveData.baseRef) {
+    fail('explicit event base ref does not match the exact event/live pull request base ref');
+  }
+  if (requiredSha(runtime.trustedEventBaseSha, 'TRUSTED_EVENT_BASE_SHA') !== eventData.baseSha ||
+      runtime.trustedEventBaseSha !== liveData.baseSha) {
+    fail('explicit event base SHA does not match the exact event/live pull request base SHA');
   }
 }
 
@@ -401,6 +451,8 @@ export function authorizeGeneratedArtifactPullRequest({
   environment,
   manifest,
   repositoryMetadata,
+  workflowCommit,
+  runtimeCommit,
   checkedOutBaseSha,
   livePull,
   compare,
@@ -409,16 +461,19 @@ export function authorizeGeneratedArtifactPullRequest({
   files,
 }) {
   const trustedManifest = validateAuthorizationManifest(manifest);
-  assertDefaultMainProvenance(
-    environment,
-    repositoryMetadata,
-    trustedManifest.repository,
-    trustedManifest.owner,
-  );
-
   const eventData = eventIdentity(event, trustedManifest.repository, trustedManifest.owner);
   const liveData = livePullIdentity(livePull, trustedManifest.repository);
   assertLiveEventCoherence(eventData, liveData, trustedManifest.repository);
+  assertDefaultMainProvenance(
+    environment,
+    repositoryMetadata,
+    runtimeCommit,
+    workflowCommit,
+    trustedManifest.repository,
+    trustedManifest.owner,
+  );
+  assertTrustedEventBaseProvenance(environment, eventData, liveData);
+
   if (requiredSha(checkedOutBaseSha, 'checked-out base SHA') !== eventData.baseSha) {
     fail('checked-out base SHA does not match the exact event/live pull request base SHA');
   }
@@ -582,15 +637,34 @@ const SIGNATURE_QUERY = `query ExactHeadSignature($owner: String!, $name: String
   }
 }`;
 
-export async function verifyLiveGeneratedArtifactAuthorization({ event, manifest, environment, token, fetchImpl }) {
+export async function verifyLiveGeneratedArtifactAuthorization({
+  event,
+  manifest,
+  environment,
+  token,
+  fetchImpl,
+  repositoryRoot = REPOSITORY_ROOT,
+}) {
   const trustedManifest = validateAuthorizationManifest(manifest);
-  const checkedOutBaseSha = readDetachedCheckoutHead();
+  const eventData = eventIdentity(event, trustedManifest.repository, trustedManifest.owner);
+  const checkedOutBaseSha = readDetachedCheckoutHead(repositoryRoot);
   const api = createGitHubApiClient({ token, fetchImpl });
   const repositoryMetadata = await api.get(apiPath(trustedManifest.repository, ''));
-  const eventData = eventIdentity(event, trustedManifest.repository, trustedManifest.owner);
+  assertProtectedRepositoryMetadata(repositoryMetadata, trustedManifest.repository, trustedManifest.owner);
+  const runtimeCommit = await api.get(apiPath(trustedManifest.repository, '/commits/main'));
+  const workflowCommit = runtimeCommit;
+  assertDefaultMainProvenance(
+    environment,
+    repositoryMetadata,
+    runtimeCommit,
+    workflowCommit,
+    trustedManifest.repository,
+    trustedManifest.owner,
+  );
   const livePull = await api.get(apiPath(trustedManifest.repository, `/pulls/${eventData.pullNumber}`));
   const liveData = livePullIdentity(livePull, trustedManifest.repository);
   assertLiveEventCoherence(eventData, liveData, trustedManifest.repository);
+  assertTrustedEventBaseProvenance(environment, eventData, liveData);
 
   const files = await fetchCompletePullFiles(api, trustedManifest.repository, eventData.pullNumber, liveData.changedFiles);
   // Compare is queried only for the exact base and merge-base identity. Its files
@@ -621,6 +695,8 @@ export async function verifyLiveGeneratedArtifactAuthorization({ event, manifest
     environment,
     manifest: trustedManifest,
     repositoryMetadata,
+    workflowCommit,
+    runtimeCommit,
     checkedOutBaseSha,
     livePull,
     compare,
@@ -663,6 +739,10 @@ async function main() {
       githubRepository: process.env.GITHUB_REPOSITORY,
       githubRef: process.env.GITHUB_REF,
       githubSha: process.env.GITHUB_SHA,
+      githubWorkflowRef: process.env.GITHUB_WORKFLOW_REF,
+      githubWorkflowSha: process.env.GITHUB_WORKFLOW_SHA,
+      trustedEventBaseRef: process.env.TRUSTED_EVENT_BASE_REF,
+      trustedEventBaseSha: process.env.TRUSTED_EVENT_BASE_SHA,
     },
     token: process.env.GITHUB_TOKEN,
   });

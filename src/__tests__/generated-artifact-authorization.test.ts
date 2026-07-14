@@ -9,6 +9,7 @@ const OWNER = 'Yeachan-Heo';
 const MERGE_BASE_SHA = '761ed112868072c2bc5866f5b0dbe5b0dda114c2';
 const LIVE_BASE_SHA = '1111111111111111111111111111111111111111';
 const HEAD_SHA = '8065c11a32e58b4dd2e44b2c768e0d37fb4f4b86';
+const MAIN_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const PULL_NUMBER = 3479;
 const ROOT = process.cwd();
 const WORKFLOW_PATH = join(ROOT, '.github', 'workflows', 'generated-artifact-authorization.yml');
@@ -52,9 +53,15 @@ type MutableInput = {
     githubRepository: string;
     githubRef: string;
     githubSha: string;
+    githubWorkflowRef: string;
+    githubWorkflowSha: string;
+    trustedEventBaseRef: string;
+    trustedEventBaseSha: string;
   };
   manifest: Manifest;
   repositoryMetadata: { full_name: string; owner: { login: string }; default_branch: string };
+  workflowCommit: { sha: string };
+  runtimeCommit: { sha: string };
   checkedOutBaseSha: string;
   event: {
     action: string;
@@ -88,6 +95,14 @@ type MutableInput = {
 type VerifierModule = {
   calculateGeneratedDelta(records: CanonicalRecord[]): { count: number; sha256: string };
   evaluateGeneratedArtifactAuthorization(input: unknown): Evaluation;
+  verifyLiveGeneratedArtifactAuthorization(input: {
+    event: unknown;
+    manifest: unknown;
+    environment: unknown;
+    token: string;
+    fetchImpl: typeof fetch;
+    repositoryRoot: string;
+  }): Promise<unknown>;
   validateAuthorizationManifest(manifest: unknown): unknown;
   readDetachedCheckoutHead(repositoryRoot: string): string;
   fetchCompletePullFiles(
@@ -127,7 +142,11 @@ function authorizedInput(): MutableInput {
       githubEventName: 'pull_request_target',
       githubRepository: REPOSITORY,
       githubRef: 'refs/heads/main',
-      githubSha: 'a'.repeat(40),
+      githubSha: MAIN_SHA,
+      githubWorkflowRef: `${REPOSITORY}/.github/workflows/generated-artifact-authorization.yml@refs/heads/main`,
+      githubWorkflowSha: MAIN_SHA,
+      trustedEventBaseRef: 'dev',
+      trustedEventBaseSha: LIVE_BASE_SHA,
     },
     manifest: clone(manifest),
     repositoryMetadata: {
@@ -135,6 +154,8 @@ function authorizedInput(): MutableInput {
       owner: { login: OWNER },
       default_branch: 'main',
     },
+    workflowCommit: { sha: MAIN_SHA },
+    runtimeCommit: { sha: MAIN_SHA },
     checkedOutBaseSha: LIVE_BASE_SHA,
     event: {
       action: 'synchronize',
@@ -210,6 +231,8 @@ describe('generated-artifact base trust root workflow', () => {
     expect(workflow).not.toContain('secrets.');
     expect(workflow).not.toMatch(/github\.event\.pull_request\.head\.(?:sha|ref)/);
     expect(workflow).not.toMatch(/github\.(?:sha|head_ref|ref)/);
+    expect(workflow).toContain('TRUSTED_EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}');
+    expect(workflow).toContain('TRUSTED_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
     expect(workflow).not.toMatch(/^\s+run: (?!node scripts\/verify-generated-artifact-authorization\.mjs$)/m);
   });
 
@@ -217,8 +240,8 @@ describe('generated-artifact base trust root workflow', () => {
     const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 
     expect(workflow).toContain('workflow bytes from the default branch, main');
-    expect(workflow).toMatch(/cannot\s*\n# activate or authorize itself until this exact workflow is promoted to main/);
-    expect(workflow).toContain('GITHUB_REF is refs/heads/main');
+    expect(workflow).toMatch(/cannot activate or authorize itself until this exact\s*\n# workflow is promoted to main/);
+    expect(workflow).toContain('runtime GITHUB_REF/GITHUB_SHA bind main');
     expect(workflow).toContain('branches: [dev]');
   });
 
@@ -241,7 +264,7 @@ describe('generated-artifact base trust root workflow', () => {
     expect(verifierSource).toMatch(/from 'node:/);
     expect(verifierSource).not.toMatch(/from ['"](?!node:)/);
     expect(verifierSource).not.toMatch(/(?:execFile|execSync|spawn|child_process)/);
-    expect(verifierSource).toContain('const checkedOutBaseSha = readDetachedCheckoutHead();');
+    expect(verifierSource).toContain('const checkedOutBaseSha = readDetachedCheckoutHead(repositoryRoot)');
     expect(verifierSource).toContain("const repositoryMetadata = await api.get(apiPath(trustedManifest.repository, ''));");
     expect(verifierSource).toContain('?per_page=1&page=1');
     expect(verifierSource).not.toContain('compare response.files');
@@ -302,22 +325,59 @@ describe('generated-artifact base-owned authorization decision', () => {
     });
   });
 
-  it('requires default-main runtime and live repository provenance before every decision', () => {
+  it('requires separate main runtime/workflow and explicit event-base provenance before every decision', () => {
+    expect(verifier.evaluateGeneratedArtifactAuthorization(authorizedInput())).toMatchObject({ allowed: true });
     expectDenied(input => {
       input.environment.githubRef = 'refs/heads/dev';
-    }, 'runtime GITHUB_REF');
+    }, 'runtime GITHUB_REF is not the protected default branch');
+    expectDenied(input => {
+      input.environment.githubSha = LIVE_BASE_SHA;
+    }, 'runtime GITHUB_SHA does not match the current protected default-main commit SHA');
     expectDenied(input => {
       input.environment.githubSha = 'A'.repeat(40);
     }, 'runtime GITHUB_SHA');
     expectDenied(input => {
-      input.repositoryMetadata.default_branch = 'dev';
-    }, 'default branch is not main');
+      input.runtimeCommit.sha = 'b'.repeat(40);
+    }, 'runtime GITHUB_SHA does not match the current protected default-main commit SHA');
+    expectDenied(input => {
+      input.environment.githubWorkflowRef = `attacker/oh-my-claudecode/.github/workflows/generated-artifact-authorization.yml@refs/heads/main`;
+    }, 'runtime GITHUB_WORKFLOW_REF');
+    expectDenied(input => {
+      input.environment.githubWorkflowSha = 'b'.repeat(40);
+    }, 'runtime GITHUB_WORKFLOW_SHA does not match the current protected default-main workflow commit SHA');
+    expectDenied(input => {
+      input.workflowCommit.sha = 'b'.repeat(40);
+    }, 'runtime GITHUB_WORKFLOW_SHA does not match the current protected default-main workflow commit SHA');
+    expectDenied(input => {
+      input.environment.trustedEventBaseRef = 'main';
+    }, 'explicit event base ref does not match');
+    expectDenied(input => {
+      input.environment.trustedEventBaseRef = '';
+    }, 'TRUSTED_EVENT_BASE_REF');
+    expectDenied(input => {
+      input.environment.trustedEventBaseSha = 'b'.repeat(40);
+    }, 'explicit event base SHA does not match');
+    expectDenied(input => {
+      input.environment.trustedEventBaseSha = 'A'.repeat(40);
+    }, 'TRUSTED_EVENT_BASE_SHA');
+    expectDenied(input => {
+      delete (input.environment as Partial<typeof input.environment>).trustedEventBaseSha;
+    }, 'runtime environment has unexpected or missing fields');
+    expectDenied(input => {
+      input.event.pull_request.base.sha = 'b'.repeat(40);
+    }, 'stale or ref-confused');
+    expectDenied(input => {
+      input.livePull.base.sha = 'b'.repeat(40);
+    }, 'stale or ref-confused');
     expectDenied(input => {
       input.repositoryMetadata.full_name = 'attacker/oh-my-claudecode';
-    }, 'metadata repository');
+    }, 'live repository metadata repository does not match');
     expectDenied(input => {
       input.repositoryMetadata.owner.login = 'attacker';
-    }, 'metadata owner');
+    }, 'live repository metadata owner does not match');
+    expectDenied(input => {
+      input.repositoryMetadata.default_branch = 'dev';
+    }, 'default branch is not main');
   });
 
   it('rejects symbolic, unreadable, and wrong detached checkout heads', () => {
@@ -646,5 +706,111 @@ describe('generated-artifact base-owned authorization decision', () => {
     expectDenied(input => {
       input.files = input.files.slice(1);
     }, 'malformed or truncated');
+  });
+  it('fetches and binds the protected main commit before live pull evidence', async () => {
+    const checkoutRoot = mkdtempSync(join(tmpdir(), 'generated-artifact-authorization-'));
+    mkdirSync(join(checkoutRoot, '.git'));
+    writeFileSync(join(checkoutRoot, '.git', 'HEAD'), `${LIVE_BASE_SHA}\n`);
+
+    try {
+      const input = authorizedInput();
+      const requestedPaths: string[] = [];
+      let mainCommitRequests = 0;
+      const fetchImpl: typeof fetch = async request => {
+        const url = new URL(
+          typeof request === 'string' ? request : request instanceof URL ? request.href : request.url,
+        );
+        const path = `${url.pathname}${url.search}`;
+        requestedPaths.push(path);
+        let body: unknown;
+        if (path === `/repos/${REPOSITORY}`) body = input.repositoryMetadata;
+        else if (path === `/repos/${REPOSITORY}/commits/main`) body = ++mainCommitRequests === 1 ? input.runtimeCommit : input.workflowCommit;
+        else if (path === `/repos/${REPOSITORY}/pulls/${PULL_NUMBER}`) body = input.livePull;
+        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=1')) body = input.files;
+        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=2')) body = [];
+        else if (path.startsWith(`/repos/${REPOSITORY}/compare/`)) body = input.compare;
+        else if (path === `/repos/${REPOSITORY}/commits/${HEAD_SHA}`) body = input.commit;
+        else if (path === '/graphql') body = { data: { repository: { object: input.signature } } };
+        else throw new Error(`Unexpected GitHub API path ${path}`);
+        return { ok: true, json: async () => body } as Response;
+      };
+
+      await expect(
+        verifier.verifyLiveGeneratedArtifactAuthorization({
+          event: input.event,
+          manifest: input.manifest,
+          environment: input.environment,
+          token: 'test-token',
+          fetchImpl,
+          repositoryRoot: checkoutRoot,
+        }),
+      ).resolves.toMatchObject({ requiresAuthorization: true, pullNumber: PULL_NUMBER });
+      expect(requestedPaths).toContain(`/repos/${REPOSITORY}/commits/main`);
+      expect(requestedPaths.indexOf(`/repos/${REPOSITORY}`)).toBeLessThan(
+        requestedPaths.indexOf(`/repos/${REPOSITORY}/commits/main`),
+      );
+
+      const racedInput = authorizedInput();
+      const racePaths: string[] = [];
+      const raceFetch: typeof fetch = async request => {
+        const url = new URL(
+          typeof request === 'string' ? request : request instanceof URL ? request.href : request.url,
+        );
+        const path = `${url.pathname}${url.search}`;
+        racePaths.push(path);
+        if (path === `/repos/${REPOSITORY}`) {
+          return { ok: true, json: async () => racedInput.repositoryMetadata } as Response;
+        }
+        if (path === `/repos/${REPOSITORY}/commits/main`) {
+          return { ok: true, json: async () => ({ sha: 'b'.repeat(40) }) } as Response;
+        }
+        throw new Error(`Unexpected GitHub API path ${path}`);
+      };
+      await expect(
+        verifier.verifyLiveGeneratedArtifactAuthorization({
+          event: racedInput.event,
+          manifest: racedInput.manifest,
+          environment: racedInput.environment,
+          token: 'test-token',
+          fetchImpl: raceFetch,
+          repositoryRoot: checkoutRoot,
+        }),
+      ).rejects.toThrow('GITHUB_SHA does not match the current protected default-main commit SHA');
+      expect(racePaths).toEqual([`/repos/${REPOSITORY}`, `/repos/${REPOSITORY}/commits/main`]);
+    } finally {
+      rmSync(checkoutRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed before fetching main when metadata no longer identifies main as default', async () => {
+    const checkoutRoot = mkdtempSync(join(tmpdir(), 'generated-artifact-authorization-'));
+    mkdirSync(join(checkoutRoot, '.git'));
+    writeFileSync(join(checkoutRoot, '.git', 'HEAD'), `${LIVE_BASE_SHA}\n`);
+    const input = authorizedInput();
+    input.repositoryMetadata.default_branch = 'dev';
+    const requestedPaths: string[] = [];
+    const fetchImpl: typeof fetch = async request => {
+      const url = new URL(
+        typeof request === 'string' ? request : request instanceof URL ? request.href : request.url,
+      );
+      requestedPaths.push(`${url.pathname}${url.search}`);
+      return { ok: true, json: async () => input.repositoryMetadata } as Response;
+    };
+
+    try {
+      await expect(
+        verifier.verifyLiveGeneratedArtifactAuthorization({
+          event: input.event,
+          manifest: input.manifest,
+          environment: input.environment,
+          token: 'test-token',
+          fetchImpl,
+          repositoryRoot: checkoutRoot,
+        }),
+      ).rejects.toThrow('default branch is not main');
+      expect(requestedPaths).toEqual([`/repos/${REPOSITORY}`]);
+    } finally {
+      rmSync(checkoutRoot, { recursive: true, force: true });
+    }
   });
 });
