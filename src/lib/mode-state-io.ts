@@ -112,8 +112,8 @@ function acquireMutationLock(filePath: string): MutationLock | null {
       unlinkSync(tempPath);
       return { fd, path, owner };
     } catch (error) {
-      if (fd !== undefined) { try { closeSync(fd); } catch {} }
-      try { unlinkSync(tempPath); } catch {}
+      if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort descriptor cleanup */ } }
+      try { unlinkSync(tempPath); } catch { /* best-effort unpublished temp cleanup */ }
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
       const disposition = guardedLockRemoval(path, 'reclaim');
       if (disposition === 'unverifiable') {
@@ -128,7 +128,7 @@ function acquireMutationLock(filePath: string): MutationLock | null {
 
 function releaseMutationLock(lock: MutationLock | null): void {
   if (!lock) return;
-  try { closeSync(lock.fd); } catch {}
+  try { closeSync(lock.fd); } catch { /* lock metadata ownership still guards release */ }
   guardedLockRemoval(lock.path, 'release', lock.owner);
 }
 

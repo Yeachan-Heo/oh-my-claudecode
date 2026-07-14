@@ -51,7 +51,7 @@ function noFollowCanonicalFile(path: string, root: string): { fd: number; path: 
     const result = { fd, path: canonicalPath };
     fd = undefined;
     return result;
-  } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
+  } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort descriptor cleanup */ } } }
 }
 
 function validBoundary(value: unknown, sessionId: string | undefined, root: string): boolean {
