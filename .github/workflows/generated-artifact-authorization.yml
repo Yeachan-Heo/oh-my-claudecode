@@ -1,0 +1,39 @@
+name: Generated Artifact Authorization
+
+on:
+  pull_request_target:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+# GitHub loads pull_request_target workflow bytes from the default branch, main, even
+# when this trigger filters PRs targeting dev. Its GITHUB_REF is refs/heads/main,
+# which the verifier requires before authorization. This prerequisite dev PR cannot
+# activate or authorize itself until this exact workflow is promoted to main.
+# The trusted checkout below contains only base-owned verifier and manifest bytes.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  authorize-generated-artifacts:
+    name: Authorize generated artifacts from base trust root
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the immutable event base
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-base
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/generated-artifact-authorizations.json
+            scripts/verify-generated-artifact-authorization.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Verify base-owned generated-artifact authorization
+        working-directory: trusted-base
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-generated-artifact-authorization.mjs
