@@ -5,7 +5,7 @@
  * access to provider-specific adapters.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { ProviderName, RemoteUrlInfo, GitProvider } from './types.js';
 import { GitHubProvider } from './github.js';
 import { GitLabProvider } from './gitlab.js';
@@ -53,11 +53,12 @@ function getRemoteUrl(cwd?: string): string | null {
   if (cached !== undefined) return cached;
 
   try {
-    const url = execSync('git remote get-url origin', {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: resolvedCwd,
       encoding: 'utf-8',
       timeout: 3000,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
 
     const result = url || null;

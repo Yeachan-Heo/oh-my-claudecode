@@ -245,8 +245,8 @@ function syncMarketplaceClone(verbose: boolean = false): { ok: boolean; message:
   }
 
   const stdio = verbose ? 'inherit' : 'pipe';
-  const execOpts = { encoding: 'utf-8' as const, stdio: stdio as any, timeout: 60000 };
-  const queryExecOpts = { encoding: 'utf-8' as const, stdio: 'pipe' as const, timeout: 60000 };
+  const execOpts = { encoding: 'utf-8' as const, stdio: stdio as any, timeout: 60000, windowsHide: true };
+  const queryExecOpts = { encoding: 'utf-8' as const, stdio: 'pipe' as const, timeout: 60000, windowsHide: true };
 
   try {
     execFileSync('git', ['-C', marketplacePath, 'fetch', '--all', '--prune'], execOpts);

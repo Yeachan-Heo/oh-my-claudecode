@@ -9,7 +9,7 @@
  */
 
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { getOmcRoot, getWorktreeRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { toForwardSlash } from '../../utils/paths.js';
@@ -177,18 +177,20 @@ function isDelegationToolName(toolName: string): boolean {
  */
 export function getGitDiffStats(directory: string): GitFileStat[] {
   try {
-    const output = execSync('git diff --numstat HEAD', {
+    const output = execFileSync('git', ['diff', '--numstat', 'HEAD'], {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     }).trim();
 
     if (!output) return [];
 
-    const statusOutput = execSync('git status --porcelain', {
+    const statusOutput = execFileSync('git', ['status', '--porcelain'], {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     }).trim();
 
     const statusMap = new Map<string, 'modified' | 'added' | 'deleted'>();

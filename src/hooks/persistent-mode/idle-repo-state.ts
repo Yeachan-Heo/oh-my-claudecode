@@ -32,6 +32,7 @@ function runCommand(command: string, args: string[], cwd: string): string | null
       encoding: 'utf-8',
       timeout: COMMAND_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(command === 'git' ? { windowsHide: true } : {}),
     }).trim();
   } catch {
     return null;

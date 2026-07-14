@@ -411,6 +411,7 @@ function resolveLeaderBranch(cwd: string): string {
     cwd,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
   }).trim();
   if (!out) {
     throw new Error('auto-merge requires a non-detached leader branch (git branch --show-current returned empty)');

@@ -17,6 +17,7 @@ interface GitCall {
   cmd: string;
   args: readonly string[];
   cwd?: string;
+  options?: { cwd?: string; encoding?: string; stdio?: string; windowsHide?: boolean };
 }
 
 const mocks = vi.hoisted(() => {
@@ -42,8 +43,8 @@ const mocks = vi.hoisted(() => {
     calls,
     handlers,
     reset,
-    execFileSync: vi.fn((cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: string }) => {
-      calls.push({ cmd, args, cwd: opts?.cwd });
+    execFileSync: vi.fn((cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: string; stdio?: string; windowsHide?: boolean }) => {
+      calls.push({ cmd, args, cwd: opts?.cwd, options: opts });
       for (const h of handlers) {
         if (h.match(args, opts?.cwd)) {
           const r = h.handler(args, opts?.cwd);
@@ -174,6 +175,34 @@ function defaultHappyPath(_repoRoot: string, leaderBranch: string): void {
 beforeEach(() => {
   mocks.reset();
   process.env.OMC_RUNTIME_V2 = '1';
+});
+
+describe('Git process construction', () => {
+  it('uses git argv with hidden-window options for merger worktree setup', async () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      const cfg = defaultConfig(repoRoot);
+      defaultHappyPath(repoRoot, cfg.leaderBranch);
+
+      const handle = await startMergeOrchestrator(cfg);
+      await handle.drainAndStop();
+
+      expect(mocks.calls).not.toHaveLength(0);
+      for (const call of mocks.calls) {
+        expect(call.cmd).toBe('git');
+        expect(Array.isArray(call.args)).toBe(true);
+        expect(call.options).toEqual(expect.objectContaining({ windowsHide: true }));
+      }
+      expect(mocks.calls).toContainEqual(expect.objectContaining({
+        cmd: 'git',
+        args: ['worktree', 'add', '--force', expect.any(String), cfg.leaderBranch],
+        cwd: repoRoot,
+        options: expect.objectContaining({ stdio: 'pipe', windowsHide: true }),
+      }));
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 afterEach(() => {

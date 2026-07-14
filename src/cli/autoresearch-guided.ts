@@ -311,6 +311,7 @@ function resolveMissionRepoRoot(missionDir: string): string {
     cwd: missionDir,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   }).trim();
 }
 
