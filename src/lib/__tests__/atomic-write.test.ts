@@ -194,7 +194,7 @@ describe('atomicWriteJson', () => {
     expect(existsSync(filePath)).toBe(true);
   });
 
-  it('reclaims a demonstrably abandoned generic lock without flock', () => {
+  it('bypasses stale generic lock artifacts without flock', () => {
     const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-'));
     directories.push(directory);
     process.env.NODE_ENV = 'test';
@@ -203,10 +203,10 @@ describe('atomicWriteJson', () => {
     writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
 
     expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
-    expect(existsSync(`${filePath}.mutation.lock`)).toBe(false);
+    expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
   });
 
-  it('fails closed for a live generic lock without flock', () => {
+  it('preserves legacy unlocked behavior without flock even when a lock artifact exists', () => {
     const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-live-'));
     directories.push(directory);
     process.env.NODE_ENV = 'test';
@@ -216,7 +216,7 @@ describe('atomicWriteJson', () => {
     const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
     writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
 
-    expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: false, value: undefined });
+    expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
     expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
   });
 });

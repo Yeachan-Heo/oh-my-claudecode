@@ -22,7 +22,7 @@ import {
 import { atomicWriteJsonSync } from './atomic-write.js';
 
 type MutationLockOwner = { version: 1; pid: number; processStart: string; createdAt: string; nonce: string };
-type MutationLock = { fd: number; path: string; owner: MutationLockOwner };
+type MutationLock = { fd: number; path: string; owner: MutationLockOwner } | { unlocked: true };
 function flockPath(): string | null { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
@@ -71,95 +71,20 @@ function processStartIdentity(pid: number): string | 'absent' | null {
   }
 }
 
-function readLockOwner(path: string): MutationLockOwner | null {
-  try {
-    const owner = JSON.parse(readFileSync(path, 'utf8')) as MutationLockOwner;
-    const keys = Object.keys(owner).sort();
-    return keys.length === 5 && keys.every((key, index) => key === ['createdAt', 'nonce', 'pid', 'processStart', 'version'][index])
-      && owner.version === 1 && Number.isSafeInteger(owner.pid) && owner.pid > 0
-      && typeof owner.processStart === 'string' && /^\d+$/.test(owner.processStart)
-      && typeof owner.createdAt === 'string' && Number.isFinite(Date.parse(owner.createdAt))
-      && typeof owner.nonce === 'string' && /^[0-9a-f-]{36}$/i.test(owner.nonce)
-      ? owner : null;
-  } catch { return null; }
-}
-
-function ownerDisposition(owner: MutationLockOwner): 'retry' | 'live' | 'unverifiable' {
-  if (process.platform === 'linux') {
-    const current = processStartIdentity(owner.pid);
-    if (current === 'absent') return 'retry';
-    return current === null ? 'unverifiable' : current === owner.processStart ? 'live' : 'retry';
-  }
-  try {
-    process.kill(owner.pid, 0);
-    return 'live';
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'retry' : 'unverifiable';
-  }
-}
-
-function sameOwner(left: MutationLockOwner | null, right?: MutationLockOwner): boolean {
-  return !!left && left.pid === right?.pid && left.processStart === right?.processStart && left.nonce === right?.nonce;
-}
-
-function acquireReclaimGuard(path: string): MutationLock | null {
-  const guardPath = `${path}.reclaim.guard`;
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === 'absent') return null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const owner: MutationLockOwner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
-    const tempPath = `${guardPath}.${process.pid}.${owner.nonce}.tmp`;
-    let fd: number | undefined;
-    try {
-      fd = openSync(tempPath, 'wx', 0o600); writeSync(fd, JSON.stringify(owner)); fsyncSync(fd);
-      linkSync(tempPath, guardPath); unlinkSync(tempPath);
-      return { fd, path: guardPath, owner };
-    } catch (error) {
-      if (fd !== undefined) try { closeSync(fd); } catch { /* best-effort reclaim guard descriptor cleanup */ }
-      try { unlinkSync(tempPath); } catch { /* best-effort unpublished reclaim guard cleanup */ }
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
-      const existing = readLockOwner(guardPath);
-      if (!existing || ownerDisposition(existing) !== 'retry') return null;
-      try { unlinkSync(guardPath); } catch { /* another reclaimer may have won */ }
-    }
-  }
-  return null;
-}
-
-function releaseOwnedLockWithoutFlock(path: string, owner?: MutationLockOwner): 'retry' | 'replaced' | 'unverifiable' {
-  const current = readLockOwner(path);
-  if (!current) return 'unverifiable';
-  if (!sameOwner(current, owner)) return 'replaced';
-  try { unlinkSync(path); return 'retry'; } catch { return 'unverifiable'; }
-}
-
 function guardedLockRemoval(path: string, operation: 'reclaim' | 'release', owner?: MutationLockOwner): 'retry' | 'live' | 'replaced' | 'unverifiable' {
   const flock = flockPath();
-  if (flock) {
-    const result = spawnSync(flock, ['-x', `${path}.reclaim.guard`, process.execPath, '-e', LOCK_REMOVAL_SCRIPT, operation, path, owner ? JSON.stringify(owner) : ''], { stdio: 'ignore', timeout: 2000 });
-    if (result.status === 0) return 'retry';
-    if (result.status === 2) return 'live';
-    if (result.status === 4) return 'replaced';
-    return 'unverifiable';
-  }
-  const guard = acquireReclaimGuard(path);
-  if (!guard) return 'unverifiable';
-  try {
-    const current = readLockOwner(path);
-    if (!current) return 'unverifiable';
-    if (operation === 'release') return releaseOwnedLockWithoutFlock(path, owner);
-    const disposition = ownerDisposition(current);
-    if (disposition !== 'retry') return disposition;
-    try { unlinkSync(path); return 'retry'; } catch { return 'unverifiable'; }
-  } finally {
-    try { closeSync(guard.fd); } catch { /* owner metadata still authenticates guard release */ }
-    releaseOwnedLockWithoutFlock(guard.path, guard.owner);
-  }
+  if (!flock) return 'unverifiable';
+  const result = spawnSync(flock, ['-x', `${path}.reclaim.guard`, process.execPath, '-e', LOCK_REMOVAL_SCRIPT, operation, path, owner ? JSON.stringify(owner) : ''], { stdio: 'ignore', timeout: 2000 });
+  if (result.status === 0) return 'retry';
+  if (result.status === 2) return 'live';
+  if (result.status === 4) return 'replaced';
+  return 'unverifiable';
 }
 
 function acquireMutationLock(filePath: string): MutationLock | null {
   mkdirSync(dirname(filePath), { recursive: true });
   const path = `${filePath}.mutation.lock`;
+  if (!flockPath()) return { unlocked: true };
   const processStart = processStartIdentity(process.pid);
   if (!processStart || processStart === 'absent') {
     console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${path}`);
@@ -192,7 +117,7 @@ function acquireMutationLock(filePath: string): MutationLock | null {
 }
 
 function releaseMutationLock(lock: MutationLock | null): void {
-  if (!lock) return;
+  if (!lock || 'unlocked' in lock) return;
   try { closeSync(lock.fd); } catch { /* lock metadata ownership still guards release */ }
   guardedLockRemoval(lock.path, 'release', lock.owner);
 }

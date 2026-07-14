@@ -102,7 +102,7 @@ describe('mode-state-io', () => {
       expect(existsSync(join(tempDir, '.omc', 'state', 'autopilot-state.json.mutation.lock'))).toBe(false);
     });
 
-    it('reclaims an abandoned generic write lock without flock', () => {
+    it('bypasses abandoned generic lock artifacts without flock', () => {
       process.env.NODE_ENV = 'test';
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
@@ -110,10 +110,10 @@ describe('mode-state-io', () => {
       writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
 
       expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
-      expect(existsSync(`${statePath}.mutation.lock`)).toBe(false);
+      expect(existsSync(`${statePath}.mutation.lock`)).toBe(true);
     });
 
-    it('fails closed for a live generic lock without flock', () => {
+    it('preserves legacy unlocked writes without flock when a lock artifact exists', () => {
       process.env.NODE_ENV = 'test';
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
@@ -123,9 +123,9 @@ describe('mode-state-io', () => {
       const owner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
       writeFileSync(`${statePath}.mutation.lock`, JSON.stringify(owner));
 
-      expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(false);
+      expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
       expect(existsSync(`${statePath}.mutation.lock`)).toBe(true);
-      expect(existsSync(statePath)).toBe(false);
+      expect(existsSync(statePath)).toBe(true);
     });
 
     it('should include sessionId in _meta when sessionId is provided', () => {
@@ -315,7 +315,7 @@ describe('mode-state-io', () => {
   // clearModeStateFile
   // -----------------------------------------------------------------------
   describe('clearModeStateFile', () => {
-    it('reclaims an abandoned session lock during cleanup', () => {
+    it('clears state without consulting stale lock artifacts when flock is unavailable', () => {
       process.env.NODE_ENV = 'test';
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const sessionId = 'workflow-session';
@@ -332,7 +332,7 @@ describe('mode-state-io', () => {
 
       expect(clearModeStateFile('autopilot', tempDir, sessionId)).toBe(true);
       expect(existsSync(statePath)).toBe(false);
-      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(lockPath)).toBe(true);
     });
 
     it('preserves a replacement activation during ghost-legacy cleanup', () => {
