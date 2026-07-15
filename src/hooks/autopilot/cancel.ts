@@ -271,13 +271,18 @@ export function formatCancelMessage(result: CancelResult): string {
 
   if (result.preservedState) {
     const state = result.preservedState;
-    lines.push('Progress Summary:');
-    lines.push(`- Phase reached: ${state.phase}`);
-    lines.push(`- Files created: ${state.execution.files_created.length}`);
-    lines.push(`- Files modified: ${state.execution.files_modified.length}`);
-    lines.push(`- Agents used: ${state.total_agents_spawned}`);
-    lines.push('');
-    lines.push('Run /autopilot to resume from where you left off.');
+    if (state.workflow) {
+      lines.push('');
+      lines.push('Run /autopilot to resume from where you left off.');
+    } else {
+      lines.push('Progress Summary:');
+      lines.push(`- Phase reached: ${state.phase}`);
+      lines.push(`- Files created: ${state.execution?.files_created?.length ?? 0}`);
+      lines.push(`- Files modified: ${state.execution?.files_modified?.length ?? 0}`);
+      lines.push(`- Agents used: ${state.total_agents_spawned ?? 0}`);
+      lines.push('');
+      lines.push('Run /autopilot to resume from where you left off.');
+    }
   }
 
   return lines.join('\n');

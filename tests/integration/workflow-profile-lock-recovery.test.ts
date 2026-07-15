@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,6 +48,7 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
     return import(`${pathToFileURL(modulePath).href}?test=${randomUUID()}`) as Promise<{
       acquireStateFileLockSync(path: string, attempts?: number): { fd: number; lockPath: string; owner: ReturnType<typeof owner> } | null;
       releaseStateFileLockSync(lock: unknown): void;
+      recoverEmergencyStateFile(path: string): boolean;
     }>;
   }
 
@@ -138,5 +139,64 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
     expect(second).not.toBeNull();
     lockApi.releaseStateFileLockSync(second);
     expect(existsSync(lockPath)).toBe(false);
+  });
+});
+
+describe.each(modules)('guarded emergency recovery claim (%s)', (modulePath) => {
+  async function api() {
+    return import(`${pathToFileURL(modulePath).href}?recovery=${randomUUID()}`) as Promise<{
+      recoverEmergencyStateFile(path: string): boolean;
+    }>;
+  }
+
+  function writeDeadJournal(statePath: string, raw: string): void {
+    const transactionId = randomUUID();
+    const quarantinePath = `${statePath}.emergency-quarantine.${transactionId}`;
+    const next = JSON.stringify({ active: false, run: 'recovered' });
+    writeFileSync(`${quarantinePath}.payload`, next);
+    writeFileSync(`${statePath}.emergency-journal.json`, JSON.stringify({
+      version: 1,
+      transactionId,
+      owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+      originalDigest: createHash('sha256').update(raw).digest('hex'),
+      intendedDigest: createHash('sha256').update(next).digest('hex'),
+      intent: 'publish',
+      quarantinePath,
+      phase: 'prepared',
+    }));
+  }
+
+  it('serializes stale-claim recovery and releases the exact claim before reacquisition', async () => {
+    const { statePath } = fixture();
+    const recovery = await api();
+    const raw = JSON.stringify({ active: true, run: 'original' });
+    const claimPath = `${statePath}.emergency-recovery.claim`;
+    writeFileSync(statePath, raw);
+    writeDeadJournal(statePath, raw);
+    writeFileSync(claimPath, JSON.stringify(owner({ pid: 999999999, processStart: '1' })));
+
+    expect(recovery.recoverEmergencyStateFile(statePath)).toBe(true);
+    expect(existsSync(claimPath)).toBe(false);
+    writeFileSync(statePath, raw);
+    writeDeadJournal(statePath, raw);
+    expect(recovery.recoverEmergencyStateFile(statePath)).toBe(true);
+    expect(existsSync(claimPath)).toBe(false);
+  });
+
+  it('does not reclaim an existing stale recovery claim without flock', async () => {
+    const { statePath } = fixture();
+    const recovery = await api();
+    const raw = JSON.stringify({ active: true, run: 'original' });
+    const claimPath = `${statePath}.emergency-recovery.claim`;
+    const stale = owner({ pid: 999999999, processStart: '1' });
+    writeFileSync(statePath, raw);
+    writeDeadJournal(statePath, raw);
+    writeFileSync(claimPath, JSON.stringify(stale));
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+    expect(recovery.recoverEmergencyStateFile(statePath)).toBe(false);
+    expect(JSON.parse(readFileSync(claimPath, 'utf8'))).toEqual(stale);
+    expect(readFileSync(statePath, 'utf8')).toBe(raw);
   });
 });

@@ -91,23 +91,52 @@ const WORKFLOW_STAGE_SEQUENCES = [
 
 function isWorkflowStageSequence(stages: string[]): boolean {
   return WORKFLOW_STAGE_SEQUENCES.some(
-    (sequence) => stages.length === sequence.length && stages.every((stage, index) => stage === sequence[index]),
+    (sequence) =>
+      stages.length === sequence.length &&
+      stages.every((stage, index) => stage === sequence[index]),
   );
 }
 const RESERVED_WORKFLOW_NAMES = new Set([
-  "autopilot", "ralplan", "execution", "ralph", "qa", "autoresearch", "ultraqa",
-  "merge-readiness", "self-improve", "ultrawork", "ultragoal", "ultrapilot", "swarm",
-  "pipeline", "plan", "team", "cancel", "deep-interview", "deepsearch", "ultrathink",
-  "tdd", "code-review", "security-review", "analyze", "search", "default",
+  "autopilot",
+  "ralplan",
+  "execution",
+  "ralph",
+  "qa",
+  "autoresearch",
+  "ultraqa",
+  "merge-readiness",
+  "self-improve",
+  "ultrawork",
+  "ultragoal",
+  "ultrapilot",
+  "swarm",
+  "pipeline",
+  "plan",
+  "team",
+  "cancel",
+  "deep-interview",
+  "deepsearch",
+  "ultrathink",
+  "tdd",
+  "code-review",
+  "security-review",
+  "analyze",
+  "search",
+  "default",
 ]);
 
 /** Serialize JSON values with object keys sorted recursively in lexical order. */
 export function canonicalizeJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
     return JSON.stringify(value);
   }
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Canonical JSON requires finite numbers");
+    if (!Number.isFinite(value))
+      throw new TypeError("Canonical JSON requires finite numbers");
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
@@ -127,14 +156,19 @@ export function canonicalizeJson(value: unknown): string {
 export function normalizeWorkflowProfile(
   profile: unknown,
 ): { version: 1; stages: WorkflowProfileStages } | null {
-  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile))
+    return null;
   const record = profile as Record<string, unknown>;
   if (record.version !== 1 || !Array.isArray(record.stages)) return null;
-  if (Object.keys(record).some((key) => key !== "version" && key !== "stages")) return null;
+  if (Object.keys(record).some((key) => key !== "version" && key !== "stages"))
+    return null;
   const stages = record.stages;
   if (!stages.every((stage) => typeof stage === "string")) return null;
   if (!isWorkflowStageSequence(stages as string[])) return null;
-  return { version: 1, stages: [...stages] as unknown as WorkflowProfileStages };
+  return {
+    version: 1,
+    stages: [...stages] as unknown as WorkflowProfileStages,
+  };
 }
 
 /** Build the deterministic SHA-256 descriptor persisted for a named workflow run. */
@@ -142,7 +176,11 @@ export function createWorkflowDescriptor(
   workflowName: string,
   profile: AutopilotWorkflowProfileV1 | unknown,
 ): WorkflowDescriptor | null {
-  if (!/^[a-z][a-z0-9-]{0,62}$/.test(workflowName) || RESERVED_WORKFLOW_NAMES.has(workflowName)) return null;
+  if (
+    !/^[a-z][a-z0-9-]{0,62}$/.test(workflowName) ||
+    RESERVED_WORKFLOW_NAMES.has(workflowName)
+  )
+    return null;
   const normalized = normalizeWorkflowProfile(profile);
   if (!normalized) return null;
   const canonical = canonicalizeJson({
@@ -164,7 +202,12 @@ export function createWorkflowDescriptor(
 export function verifyWorkflowDescriptor(
   descriptor: unknown,
 ): descriptor is WorkflowDescriptor {
-  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)) return false;
+  if (
+    !descriptor ||
+    typeof descriptor !== "object" ||
+    Array.isArray(descriptor)
+  )
+    return false;
   const record = descriptor as Record<string, unknown>;
   const expectedKeys = [
     "descriptorVersion",
@@ -234,9 +277,7 @@ export function buildPipelineTracking(
     activationBoundary: null,
     completionObservations: [],
   };
-
 }
-
 
 /**
  * Get the ordered list of active (non-skipped) adapters for a given config.
@@ -329,7 +370,6 @@ export function initPipeline(
   return state;
 }
 
-
 // ============================================================================
 // STAGE TRANSITIONS
 // ============================================================================
@@ -404,7 +444,10 @@ export function advanceStage(
   }
   const currentStage = stages[currentStageIndex];
   if (currentStage.status !== "active") {
-    return { adapter: getCurrentStageAdapter(tracking), phase: currentStage.id };
+    return {
+      adapter: getCurrentStageAdapter(tracking),
+      phase: currentStage.id,
+    };
   }
   currentStage.status = "complete";
   currentStage.completedAt = new Date().toISOString();
@@ -415,7 +458,6 @@ export function advanceStage(
     const context = buildContext(state, tracking);
     currentAdapter.onExit(context);
   }
-
 
   // Find next non-skipped stage
   let nextIndex = -1;
@@ -471,7 +513,6 @@ export function failCurrentStage(
     stages[currentStageIndex].status = "failed";
     stages[currentStageIndex].error = error;
     advanceTrackingRevision(state, tracking);
-
   }
 
   return writePipelineTracking(directory, tracking, sessionId);
@@ -494,7 +535,6 @@ export function incrementStageIteration(
   if (currentStageIndex >= 0 && currentStageIndex < stages.length) {
     stages[currentStageIndex].iterations++;
     advanceTrackingRevision(state, tracking);
-
   }
 
   return writePipelineTracking(directory, tracking, sessionId);
@@ -673,7 +713,6 @@ function advanceTrackingRevision(
   tracking.trackingRevision += 1;
 }
 
-
 // ============================================================================
 
 /**
@@ -683,13 +722,20 @@ function buildContext(
   state: AutopilotState,
   tracking: PipelineTracking,
 ): PipelineContext {
+  const namedWorkflow = Boolean(state.workflow);
   return {
-    idea: state.originalIdea || state.prompt || "",
+    idea: namedWorkflow
+      ? state.prompt || ""
+      : state.originalIdea || state.prompt || "",
     directory: state.project_path || process.cwd(),
     sessionId: state.session_id,
-    specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
-    planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
-    openQuestionsPath: resolveOpenQuestionsPlanPath(),
+    ...(namedWorkflow
+      ? {}
+      : {
+          specPath: state.expansion?.spec_path || ".omc/autopilot/spec.md",
+          planPath: state.planning?.plan_path || resolveAutopilotPlanPath(),
+          openQuestionsPath: resolveOpenQuestionsPlanPath(),
+        }),
     config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
   };
 }

@@ -21,6 +21,7 @@ import {
   readSync,
   closeSync,
 } from "fs";
+import { createHash } from "node:crypto";
 import { spawn } from "child_process";
 import { join, dirname, resolve, normalize } from "path";
 import { homedir } from "os";
@@ -759,8 +760,10 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
       const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
       const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
       const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-      if (currentAutopilot?.workflowRunId) return;
-      if (signal.target_workflow_run_id) return;
+      if (currentAutopilot?.workflowRunId) {
+        if (signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+        if (typeof signal.target_state_sha256 === "string" && signal.target_state_sha256 !== createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex")) return;
+      } else if (signal.target_workflow_run_id) return;
       if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
         active = true;
         return;

@@ -18,6 +18,7 @@ import {
 import {
   readAutopilotState,
   writeAutopilotState,
+  updateAutopilotStateIfExact,
   transitionPhase,
   transitionRalphToUltraQA,
   transitionUltraQAToValidation,
@@ -40,16 +41,17 @@ import {
   getCurrentStageAdapter,
   getCurrentCompletionSignal,
   advanceStage,
-
   incrementStageIteration,
   verifyWorkflowDescriptor,
-
   generateTransitionPrompt,
   formatPipelineHUD,
 } from "./pipeline.js";
 import { DEFAULT_PIPELINE_CONFIG } from "./pipeline-types.js";
 import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
-import { validateNamedWorkflowState } from "./named-workflow-resume-validator.js";
+import {
+  prepareNamedWorkflowAdvance,
+  validateNamedWorkflowState,
+} from "./named-workflow-resume-validator.js";
 
 export interface AutopilotEnforcementResult {
   /** Whether to block the stop event */
@@ -67,7 +69,6 @@ export interface AutopilotEnforcementResult {
     toolError?: ToolErrorState;
   };
 }
-
 
 // ============================================================================
 // SIGNAL DETECTION
@@ -160,7 +161,7 @@ export function detectAnySignal(sessionId: string): AutopilotSignal | null {
 const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 
 function isAwaitingConfirmation(state: unknown): boolean {
-  if (!state || typeof state !== 'object') {
+  if (!state || typeof state !== "object") {
     return false;
   }
 
@@ -170,8 +171,9 @@ function isAwaitingConfirmation(state: unknown): boolean {
   }
 
   const setAt =
-    (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
-    (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+    (typeof stateRecord.awaiting_confirmation_set_at === "string" &&
+      stateRecord.awaiting_confirmation_set_at) ||
+    (typeof stateRecord.started_at === "string" && stateRecord.started_at) ||
     null;
 
   if (!setAt) {
@@ -187,7 +189,8 @@ function isAwaitingConfirmation(state: unknown): boolean {
 }
 
 function isOrphanedRoutingEchoState(state: AutopilotState): boolean {
-  const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+  const phase =
+    typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
   if (phase && phase !== "unspecified") return false;
 
   const stateRecord = state as unknown as Record<string, unknown>;
@@ -201,7 +204,9 @@ function isOrphanedRoutingEchoState(state: AutopilotState): boolean {
     .join("\n")
     .trim();
 
-  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(
+    promptText,
+  );
 }
 
 /**
@@ -255,20 +260,63 @@ export async function checkAutopilot(
   if (state.workflow) {
     const validated = validateNamedWorkflowState(state, sessionId);
     if (!validated) {
-      return { shouldBlock: false, message: "workflow_descriptor_integrity_failed", phase: state.phase };
+      return {
+        shouldBlock: false,
+        message: "workflow_descriptor_integrity_failed",
+        phase: state.phase,
+      };
     }
-    const { tracking, task } = validated;
-    const adapter = getCurrentStageAdapter(tracking);
-    if (!adapter) return { shouldBlock: false, message: "workflow_descriptor_integrity_failed", phase: state.phase };
-    const stagePrompt = adapter.getPrompt({
-      idea: task,
-      directory: state.project_path || workingDir,
-      sessionId,
-      config: DEFAULT_PIPELINE_CONFIG,
-    });
+    const advanced = prepareNamedWorkflowAdvance(state, sessionId);
+    if (advanced) {
+      const committed = updateAutopilotStateIfExact(
+        workingDir,
+        state,
+        advanced,
+        sessionId,
+        (current) => Boolean(validateNamedWorkflowState(current, sessionId)),
+      );
+      if (!committed) {
+        return {
+          shouldBlock: false,
+          message: "workflow_descriptor_integrity_failed",
+          phase: state.phase,
+        };
+      }
+      if (!committed.active || committed.phase === "complete") {
+        return {
+          shouldBlock: false,
+          message:
+            "[AUTOPILOT COMPLETE] All pipeline stages finished successfully!",
+          phase: "complete",
+        };
+      }
+      return generateNamedWorkflowPrompt(committed, workingDir, sessionId);
+    }
+    return generateNamedWorkflowPrompt(state, workingDir, sessionId);
+  }
+
+  function generateNamedWorkflowPrompt(
+    state: AutopilotState,
+    directory: string,
+    sessionId?: string,
+  ): AutopilotEnforcementResult {
+    const validated = validateNamedWorkflowState(state, sessionId);
+    const adapter = validated && getCurrentStageAdapter(validated.tracking);
+    if (!validated || !adapter) {
+      return {
+        shouldBlock: false,
+        message: "workflow_descriptor_integrity_failed",
+        phase: state.phase,
+      };
+    }
     return {
       shouldBlock: true,
-      message: stagePrompt,
+      message: adapter.getPrompt({
+        idea: validated.task,
+        directory: state.project_path || directory,
+        sessionId,
+        config: DEFAULT_PIPELINE_CONFIG,
+      }),
       phase: state.phase,
     };
   }
@@ -280,7 +328,6 @@ export async function checkAutopilot(
   if (isOrphanedRoutingEchoState(state)) {
     return null;
   }
-
 
   // Check hard max iterations (global security limit)
   const hardMax = getHardMaxIterations();
@@ -470,7 +517,10 @@ function checkPipelineAutopilot(
     detectPipelineSignal(sessionId, completionSignal)
   ) {
     // Current stage complete — advance to next stage
-    const { adapter: nextAdapter, phase: nextPhase } = advanceStage(directory, sessionId);
+    const { adapter: nextAdapter, phase: nextPhase } = advanceStage(
+      directory,
+      sessionId,
+    );
 
     if (!nextAdapter || nextPhase === "complete") {
       // Pipeline complete
@@ -609,7 +659,7 @@ function detectPipelineSignal(sessionId: string, signal: string): boolean {
     join(claudeDir, "transcripts", `${sessionId}.md`),
   ];
 
-  const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(escaped, "i");
 
   for (const transcriptPath of possiblePaths) {

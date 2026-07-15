@@ -761,6 +761,56 @@ describe('mode-state-io', () => {
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(true);
       expect(readFileSync(path, 'utf8')).toBe(raw);
     });
+    it('fails closed rather than reclaiming a stale recovery claim without flock', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-portable-stale-claim.json');
+      const raw = JSON.stringify({ active: true, run: 'portable-stale-claim' });
+      const transactionId = randomUUID();
+      const quarantinePath = `${path}.emergency-quarantine.${transactionId}`;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, raw);
+      writeFileSync(`${quarantinePath}.payload`, JSON.stringify({ active: false, run: 'portable-stale-claim' }));
+      writeFileSync(`${path}.emergency-journal.json`, JSON.stringify({
+        version: 1, transactionId, owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+        originalDigest: createHash('sha256').update(raw).digest('hex'), intendedDigest: createHash('sha256').update(JSON.stringify({ active: false, run: 'portable-stale-claim' })).digest('hex'),
+        intent: 'publish', quarantinePath, phase: 'prepared',
+      }));
+      const claimPath = `${path}.emergency-recovery.claim`;
+      const staleClaim = { version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() };
+      writeFileSync(claimPath, JSON.stringify(staleClaim));
+      process.env.NODE_ENV = 'test';
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      expect(recoverEmergencyStateFile(path)).toBe(false);
+      expect(JSON.parse(readFileSync(claimPath, 'utf8'))).toEqual(staleClaim);
+      expect(readFileSync(path, 'utf8')).toBe(raw);
+    });
+
+    it('reclaims a stale recovery claim under the state guard and releases it for a second recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-guarded-stale-claim.json');
+      const raw = JSON.stringify({ active: true, run: 'guarded-stale-claim' });
+      const writeDeadJournal = () => {
+        const transactionId = randomUUID();
+        const quarantinePath = `${path}.emergency-quarantine.${transactionId}`;
+        writeFileSync(`${quarantinePath}.payload`, JSON.stringify({ active: false, run: 'guarded-stale-claim' }));
+        writeFileSync(`${path}.emergency-journal.json`, JSON.stringify({
+          version: 1, transactionId, owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+          originalDigest: createHash('sha256').update(raw).digest('hex'), intendedDigest: createHash('sha256').update(JSON.stringify({ active: false, run: 'guarded-stale-claim' })).digest('hex'),
+          intent: 'publish', quarantinePath, phase: 'prepared',
+        }));
+      };
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, raw);
+      writeDeadJournal();
+      const claimPath = `${path}.emergency-recovery.claim`;
+      writeFileSync(claimPath, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
+
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(existsSync(claimPath)).toBe(false);
+      writeFileSync(path, raw);
+      writeDeadJournal();
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(existsSync(claimPath)).toBe(false);
+    });
     it('marks deterministic crash ownership abandoned before same-process recovery', () => {
       const path = join(tempDir, '.omc', 'state', 'autopilot-abandoned-owner.json');
       mkdirSync(dirname(path), { recursive: true });
@@ -803,6 +853,66 @@ describe('mode-state-io', () => {
       expect(recoverEmergencyStateFile(path)).toBe(true);
       expect(readFileSync(path, 'utf8')).toBe(raw);
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
+    it('reconciles dead journal, payload, and claim publication temps in TypeScript and shipped helpers', async () => {
+      const helpers = [
+        { name: 'typescript', recover: recoverEmergencyStateFile },
+        // @ts-expect-error shipped JavaScript helper intentionally has no TypeScript declaration
+        { name: 'plugin', recover: (await import('../../../scripts/lib/atomic-write.mjs')).recoverEmergencyStateFile as typeof recoverEmergencyStateFile },
+        // @ts-expect-error shipped JavaScript helper intentionally has no TypeScript declaration
+        { name: 'template', recover: (await import('../../../templates/hooks/lib/atomic-write.mjs')).recoverEmergencyStateFile as typeof recoverEmergencyStateFile },
+      ];
+      for (const { name, recover } of helpers) {
+        const path = join(tempDir, '.omc', 'state', `autopilot-dead-publication-${name}.json`);
+        const processStart = '1';
+        const transactionId = randomUUID();
+        const temps = [
+          `${path}.emergency-journal.json.999999999.${processStart}.${randomUUID()}.tmp`,
+          `${path}.emergency-quarantine.${transactionId}.payload.999999999.${processStart}.${randomUUID()}.tmp`,
+          `${path}.emergency-recovery.claim.999999999.${processStart}.${randomUUID()}.tmp`,
+        ];
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify({ active: true, run: name }));
+        temps.forEach((temp) => writeFileSync(temp, 'unpublished'));
+        expect(recover(path)).toBe(true);
+        temps.forEach((temp) => expect(existsSync(temp)).toBe(false));
+      }
+    });
+
+    it('lets state clear converge through a dead emergency publication temp', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      const temp = `${path}.emergency-recovery.claim.999999999.1.${randomUUID()}.tmp`;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true }));
+      writeFileSync(temp, 'unpublished');
+      expect(clearModeStateFile('autopilot', tempDir)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(existsSync(temp)).toBe(false);
+    });
+
+    it('fails closed for live and unknown emergency publication temp owners', async () => {
+      const helpers = [
+        recoverEmergencyStateFile,
+        // @ts-expect-error shipped JavaScript helper intentionally has no TypeScript declaration
+        (await import('../../../scripts/lib/atomic-write.mjs')).recoverEmergencyStateFile as typeof recoverEmergencyStateFile,
+        // @ts-expect-error shipped JavaScript helper intentionally has no TypeScript declaration
+        (await import('../../../templates/hooks/lib/atomic-write.mjs')).recoverEmergencyStateFile as typeof recoverEmergencyStateFile,
+      ];
+      const processStart = readFileSync(`/proc/${process.pid}/stat`, 'utf8').slice(readFileSync(`/proc/${process.pid}/stat`, 'utf8').lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      for (const [index, recover] of helpers.entries()) {
+        const path = join(tempDir, '.omc', 'state', `autopilot-live-publication-${index}.json`);
+        const temp = `${path}.emergency-journal.json.${process.pid}.${processStart}.${randomUUID()}.tmp`;
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, '{}');
+        writeFileSync(temp, 'unpublished');
+        expect(recover(path)).toBe(false);
+        expect(existsSync(temp)).toBe(true);
+        writeFileSync(temp, 'unpublished');
+        process.env.OMC_TEST_EMERGENCY_PROCESS_START_UNKNOWN_PID = String(process.pid);
+        expect(recover(path)).toBe(false);
+        expect(existsSync(temp)).toBe(true);
+        delete process.env.OMC_TEST_EMERGENCY_PROCESS_START_UNKNOWN_PID;
+      }
     });
   });
 });

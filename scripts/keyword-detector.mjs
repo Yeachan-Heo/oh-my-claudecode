@@ -30,7 +30,7 @@ import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } from './lib/atomic-write.mjs';
 import { readStdin } from './lib/stdin.mjs';
-import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt } from './lib/workflow-profile-runtime.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
@@ -972,8 +972,7 @@ function hasActionableRalplanKeyword(text, pattern) {
 }
 
 // Create state file for a mode
-function activateState(directory, prompt, stateName, sessionId, omcRoot) {
-  const _omcRoot = omcRoot;
+async function activateState(directory, prompt, stateName, sessionId) {
   const now = new Date().toISOString();
   // Sanitize prompt BEFORE writing to state: prevents pasted system echoes
   // and oversized blobs from being persisted and re-emitted by Stop hook.
@@ -1036,25 +1035,26 @@ function activateState(directory, prompt, stateName, sessionId, omcRoot) {
     };
   }
 
-  // Write to session-scoped path if sessionId available. Use atomic writes
-  // so that concurrent hook processes cannot expose half-written JSON to
-  // persistent-mode.mjs's readJsonFile (which would otherwise return null
-  // and temporarily drop mode enforcement).
-  if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
-    const sessionDir = join(_omcRoot, 'state', 'sessions', sessionId);
-    if (!existsSync(sessionDir)) {
-      try { mkdirSync(sessionDir, { recursive: true }); } catch {}
-    }
-    try { atomicWriteFileSync(join(sessionDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
-    return;
-  }
-
-  // Fallback: write to legacy local .omc/state directory
-  const localDir = join(_omcRoot, 'state');
-  if (!existsSync(localDir)) {
-    try { mkdirSync(localDir, { recursive: true }); } catch {}
-  }
-  try { atomicWriteFileSync(join(localDir, `${stateName}-state.json`), JSON.stringify(state, null, 2)); } catch {}
+  const safeSessionId = sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId) ? sessionId : undefined;
+  const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId);
+  try {
+    mkdirSync(dirname(writePath), { recursive: true });
+    withStateFileLockSync(writePath, () => {
+      if (!recoverEmergencyStateFile(writePath)) return;
+      // A legacy autopilot activation must never replace an active named run.
+      // Keep the complete descriptor byte-for-byte intact for its owner.
+      if (stateName === 'autopilot' && existsSync(writePath)) {
+        try {
+          const current = JSON.parse(readFileSync(writePath, 'utf8'));
+          if (current?.active === true && current?.workflow) return;
+        } catch {
+          // A malformed existing state is not safe to replace while serialized.
+          return;
+        }
+      }
+      atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
+    });
+  } catch {}
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
@@ -1780,7 +1780,7 @@ async function main() {
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
     const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
-      activateState(directory, prompt, mode.name, sessionId, omcRoot);
+      await activateState(directory, prompt, mode.name, sessionId);
     }
 
     // Record mode changes to flow trace
@@ -1794,7 +1794,7 @@ async function main() {
     const hasRalph = resolved.some(m => m.name === 'ralph');
     const hasUltrawork = resolved.some(m => m.name === 'ultrawork');
     if (hasRalph && !hasUltrawork) {
-      activateState(directory, prompt, 'ultrawork', sessionId, omcRoot);
+      await activateState(directory, prompt, 'ultrawork', sessionId);
     }
 
     const additionalContextParts = [];

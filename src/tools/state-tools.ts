@@ -93,6 +93,14 @@ function readJsonRecord(filePath: string): Record<string, unknown> | null {
   }
 }
 
+function hasSameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isActiveNamedAutopilotState(state: Record<string, unknown>): boolean {
+  return state.active === true && state.workflow !== null && typeof state.workflow === 'object';
+}
+
 function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
   const sessionsDir = join(omcRoot, 'state', 'sessions');
   if (!existsSync(sessionsDir)) {
@@ -940,6 +948,7 @@ export const stateWriteTool: ToolDefinition<{
           updatedBy: 'state_write_tool'
         }
       };
+      let writtenState: Record<string, unknown> = stateWithMeta;
       if (mode === 'autopilot' && builtState.active === false) {
         let currentState: Record<string, unknown> | null = null;
         try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled below */ }
@@ -960,6 +969,37 @@ export const stateWriteTool: ToolDefinition<{
           );
           if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
         }
+      } else if (mode === 'autopilot' && existsSync(statePath)) {
+        let attemptedNamedMutation = false;
+        const result = writeStateFileLockedIf(
+          statePath,
+          (current) => {
+            if (!isActiveNamedAutopilotState(current)) return true;
+            for (const field of ['workflowRunId', 'workflow', 'pipelineTracking'] as const) {
+              if (Object.prototype.hasOwnProperty.call(builtState, field) && !hasSameJsonValue(builtState[field], current[field])) {
+                attemptedNamedMutation = true;
+                return false;
+              }
+            }
+            return true;
+          },
+          (current) => {
+            if (!isActiveNamedAutopilotState(current)) return stateWithMeta;
+            writtenState = {
+              ...current,
+              ...builtState,
+              workflowRunId: current.workflowRunId,
+              workflow: current.workflow,
+              pipelineTracking: current.pipelineTracking,
+              _meta: stateWithMeta._meta,
+            };
+            return writtenState;
+          },
+        );
+        if (result !== 'written') {
+          if (attemptedNamedMutation) throw new Error('active named autopilot workflow identity and pipeline tracking are immutable');
+          throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot state changed before write');
+        }
       } else if (!writeStateFileLocked(statePath, stateWithMeta)) {
         throw new Error('state mutation lock unavailable');
       }
@@ -970,7 +1010,7 @@ export const stateWriteTool: ToolDefinition<{
       return {
         content: [{
           type: 'text' as const,
-          text: `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(stateWithMeta, null, 2)}\n\`\`\`${warningMessage}`
+          text: `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}`
         }]
       };
     } catch (error) {
@@ -1034,7 +1074,7 @@ function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string)
     if (!recoverEmergencyStateFile(path)) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
     const artifactPrefix = `${basename(path)}.emergency-`;
     let artifacts: string[];
-    try { artifacts = readdirSync(dirname(path)).filter((name) => name.startsWith(artifactPrefix)); }
+    try { artifacts = readdirSync(dirname(path)).filter((name) => name.startsWith(artifactPrefix) && !name.endsWith('.recovery.guard')); }
     catch { artifacts = []; }
     if (artifacts.length > 0) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
   }

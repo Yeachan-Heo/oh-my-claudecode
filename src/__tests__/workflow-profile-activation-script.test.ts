@@ -634,10 +634,45 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     }
   });
 
+  it.each(HOOKS)('accepts the /omc:autopilot named workflow command through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    try {
+      const output = runHook(script, '/omc:autopilot --workflow release-flow ship the release', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN (Consensus Planning)');
+      expect(JSON.parse(stateBytes(cwd)!.toString()).prompt).toBe('ship the release');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('keeps later --workflow tokens in named workflow task text through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    try {
+      const output = runHook(script, '/autopilot --workflow release-flow explain --workflow literally', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN (Consensus Planning)');
+      expect(JSON.parse(stateBytes(cwd)!.toString()).prompt).toBe('explain --workflow literally');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('resolves project workflow profiles from a nested working directory through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const nested = join(cwd, 'packages', 'feature');
+    const transcriptPath = join(cwd, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl');
+    try {
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({ autopilot: { workflows: { 'root-only': { version: 1, stages: ['ralplan', 'execution'] } } } }));
+      const output = runHook(script, '/autopilot --workflow root-only ship it', nested, configHome, transcriptPath, { CLAUDE_CONFIG_DIR: join(cwd, 'claude-config') });
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN (Consensus Planning)');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['/autopilot --workflow', 'Use /autopilot --workflow <name> <task>.'],
     ['/autopilot --workflow=release-flow ship it', 'Use --workflow <name> followed by a task.'],
-    ['/autopilot --workflow release-flow --workflow release-flow ship it', 'Specify --workflow exactly once.'],
     ['/autopilot --workflow release-flow', 'Provide a task after the workflow name.'],
     ['/autopilot --workflow Release_Flow ship it', 'Workflow name must match'],
     ['/autopilot --workflow unknown-flow ship it', 'workflow profile "unknown-flow" was not found'],

@@ -165,6 +165,48 @@ describe('state-tools', () => {
       await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
       expect(JSON.parse(readFileSync(legacyPath, 'utf8'))).toEqual(legacyReplacement);
     });
+    it('preserves active named workflow identity while accepting safe writes', async () => {
+      const sessionId = 'named-safe-write';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const namedState = {
+        active: true,
+        session_id: sessionId,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        workflow: { profileHash: 'a'.repeat(64), stages: ['ralplan'] },
+        pipelineTracking: { currentStageIndex: 0, stages: [{ id: 'ralplan', status: 'active' }] },
+      };
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify(namedState));
+
+      const result = await stateWriteTool.handler({ mode: 'autopilot', iteration: 2, state: { note: 'safe' }, session_id: sessionId, workingDirectory: TEST_DIR });
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ ...namedState, iteration: 2, note: 'safe' });
+    });
+
+    it('rejects active named workflow identity and tracking mutations without changing bytes', async () => {
+      const sessionId = 'named-immutable-write';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const namedState = {
+        active: true,
+        session_id: sessionId,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        workflow: { profileHash: 'a'.repeat(64), stages: ['ralplan'] },
+        pipelineTracking: { currentStageIndex: 0, stages: [{ id: 'ralplan', status: 'active' }] },
+      };
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify(namedState));
+      const before = readFileSync(statePath);
+
+      for (const mutation of [
+        { workflowRunId: '22222222-2222-4222-8222-222222222222' },
+        { workflow: { profileHash: 'b'.repeat(64), stages: ['execution'] } },
+        { pipelineTracking: { currentStageIndex: 1, stages: [{ id: 'execution', status: 'active' }] } },
+      ]) {
+        const result = await stateWriteTool.handler({ mode: 'autopilot', state: mutation, session_id: sessionId, workingDirectory: TEST_DIR });
+        expect(result.isError).toBe(true);
+        expect(readFileSync(statePath)).toEqual(before);
+      }
+    });
   });
 
     it('pauses named autopilot exactly without flock', async () => {
@@ -284,7 +326,7 @@ describe('state-tools', () => {
       }
 
       const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
-      expect(result.isError).toBeUndefined();
+      expect(result.isError, JSON.stringify(result)).toBeUndefined();
       expect(existsSync(canonical)).toBe(false);
       expect(existsSync(`${canonical}.emergency-journal.json`), 'canonical journal').toBe(false);
       expect(existsSync(legacy)).toBe(false);
@@ -303,7 +345,7 @@ describe('state-tools', () => {
         delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
 
         const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
-        expect(result.isError).toBeUndefined();
+        expect(result.isError, JSON.stringify(result)).toBeUndefined();
         expect(existsSync(statePath)).toBe(false);
         expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
       } finally {

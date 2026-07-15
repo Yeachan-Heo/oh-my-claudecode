@@ -893,22 +893,31 @@ async function activateState(directory, prompt, stateName, sessionId) {
     };
   }
 
-  // Write to session-scoped local path when sessionId is available (must match persistent-mode.mjs reads)
-  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : '';
-  const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId || undefined);
-  const targetDir = join(writePath, '..');
+  const writeState = (writePath) => {
+    try {
+      mkdirSync(dirname(writePath), { recursive: true });
+      withStateFileLockSync(writePath, () => {
+        if (!recoverEmergencyStateFile(writePath)) return;
+        if (stateName === 'autopilot' && existsSync(writePath)) {
+          try {
+            const current = JSON.parse(readFileSync(writePath, 'utf8'));
+            if (current?.active === true && current?.workflow) return;
+          } catch {
+            return;
+          }
+        }
+        atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
+      });
+    } catch {}
+  };
 
-  try {
-    if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-    atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
-  } catch {}
+  const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : undefined;
+  const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId);
+  writeState(writePath);
 
-  // Also write to global fallback
-  const globalDir = join(homedir(), '.omc', 'state');
-  try {
-    if (!existsSync(globalDir)) mkdirSync(globalDir, { recursive: true });
-    atomicWriteFileSync(join(globalDir, `${stateName}-state.json`), JSON.stringify(state, null, 2));
-  } catch {}
+  // Preserve the template's global fallback while applying the same recovery
+  // and mutation-fence protocol before it is read or written.
+  writeState(join(homedir(), '.omc', 'state', `${stateName}-state.json`));
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {

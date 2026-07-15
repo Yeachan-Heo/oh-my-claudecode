@@ -869,6 +869,24 @@ describe('AutopilotCancel', () => {
       expect(formatted).toContain('- Agents used: 0');
     });
 
+    it('omits the legacy execution summary for a named workflow without execution metrics', () => {
+      const state = initAutopilot(testDir, 'test named workflow')!;
+      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      delete (state as Partial<typeof state>).execution;
+
+      const formatted = formatCancelMessage({
+        success: true,
+        message: 'Named workflow cancelled.',
+        preservedState: state,
+      });
+
+      expect(formatted).toContain('[AUTOPILOT CANCELLED]');
+      expect(formatted).not.toContain('Progress Summary:');
+      expect(formatted).not.toContain('Files created:');
+      expect(formatted).toContain('Run /autopilot to resume from where you left off.');
+    });
+
     it('should handle cleanup message in preserved state format', () => {
       const state = initAutopilot(testDir, 'test idea');
       if (!state) {

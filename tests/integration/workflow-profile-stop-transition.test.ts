@@ -296,6 +296,25 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f).workflowRunId).toBe(state.workflowRunId);
   });
 
+  it('honors an exact same-run cancel signal for a named workflow', () => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    writeState(f, state);
+    const signalPath = join(dirname(f.statePath), 'cancel-signal-state.json');
+    writeFileSync(signalPath, JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      target_workflow_run_id: state.workflowRunId,
+      target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
+    }));
+
+    expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
+    expect(readState(f)).toEqual(state);
+  });
+
   it('ignores expired and forged same-run cancel signals for named workflows', () => {
     const f = fixture(kind);
     const state = workflowState(f);
@@ -311,10 +330,15 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeFileSync(signalPath, JSON.stringify(expired));
 
     expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
-    expect(existsSync(signalPath)).toBe(true);
+    expect(existsSync(signalPath)).toBe(false);
 
-    const fresh = { ...expired, requested_at: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString() };
-    writeFileSync(signalPath, JSON.stringify(fresh));
+    const forged = {
+      ...expired,
+      requested_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      target_state_sha256: '0'.repeat(64),
+    };
+    writeFileSync(signalPath, JSON.stringify(forged));
     expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
   });
 
