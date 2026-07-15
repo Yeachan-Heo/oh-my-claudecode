@@ -242,6 +242,27 @@ describe('AutopilotCancel', () => {
       expect(require('fs').readFileSync(statePath)).toEqual(before);
     });
 
+    it('does not clean linked state when the primary named mutation lock is held', () => {
+      const sessionId = 'named-primary-lock';
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      writeAutopilotState(testDir, state, sessionId);
+      const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
+      const stat = require('fs').readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: '22222222-2222-4222-8222-222222222222' }));
+      vi.mocked(ralphLoop.readRalphState).mockReturnValue({ active: true, linked_ultrawork: true } as any);
+      vi.mocked(ultraqaLoop.readUltraQAState).mockReturnValue({ active: true } as any);
+
+      expect(cancelAutopilot(testDir, sessionId).success).toBe(false);
+      expect(clearAutopilot(testDir, sessionId).success).toBe(false);
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+      expect(ralphLoop.clearLinkedUltraworkState).not.toHaveBeenCalled();
+      expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
+      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, workflowRunId: state.workflowRunId });
+    });
+
     it('should not clear other session ralph/ultraqa state when sessionId provided', () => {
       const sessionId = 'session-a';
       initAutopilot(testDir, 'test idea', sessionId);

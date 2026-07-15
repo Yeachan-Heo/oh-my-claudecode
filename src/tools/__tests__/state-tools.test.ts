@@ -39,6 +39,7 @@ describe('state-tools', () => {
     rmSync(TEST_DIR, { recursive: true, force: true });
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH;
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
   });
 
   describe('state_read', () => {
@@ -164,7 +165,42 @@ describe('state-tools', () => {
     });
   });
 
+    it('rejects named autopilot deactivation without flock and preserves bytes', async () => {
+      const sessionId = 'named-write-no-flock';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      const state = { active: true, session_id: sessionId, workflowRunId: '11111111-1111-4111-8111-111111111111', workflow: { profileHash: 'a'.repeat(64) } };
+      writeFileSync(statePath, JSON.stringify(state));
+      const before = readFileSync(statePath);
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      const result = await stateWriteTool.handler({ mode: 'autopilot', active: false, session_id: sessionId, state: { workflowRunId: state.workflowRunId }, workingDirectory: TEST_DIR });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('unsupported-runtime');
+      expect(readFileSync(statePath)).toEqual(before);
+    });
+
   describe('state_clear', () => {
+    it('rejects session and broad named autopilot clear without flock before artifacts mutate', async () => {
+      const sessionId = 'named-clear-no-flock';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify({ active: true, session_id: sessionId, workflowRunId: '11111111-1111-4111-8111-111111111111', workflow: { profileHash: 'a'.repeat(64) } }));
+      const before = readFileSync(statePath);
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      const sessionResult = await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
+      expect(sessionResult.isError).toBe(true);
+      expect(sessionResult.content[0].text).toContain('unsupported-runtime');
+      expect(readFileSync(statePath)).toEqual(before);
+      expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'cancel-signal-state.json'))).toBe(false);
+
+      const broadResult = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+      expect(broadResult.isError).toBe(true);
+      expect(broadResult.content[0].text).toContain('unsupported-runtime');
+      expect(readFileSync(statePath)).toEqual(before);
+      expect(existsSync(join(TEST_DIR, '.omc', 'state', 'cancel-signal-state.json'))).toBe(false);
+    });
     it('should remove legacy state file when no session_id provided', async () => {
       await stateWriteTool.handler({
         mode: 'ralph',

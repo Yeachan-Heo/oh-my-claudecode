@@ -46,6 +46,7 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
+import { namedWorkflowRuntimeSupported } from '../hooks/autopilot/named-workflow-resume-validator.js';
 import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
 
@@ -938,6 +939,13 @@ export const stateWriteTool: ToolDefinition<{
         }
       };
       if (mode === 'autopilot' && builtState.active === false) {
+        let currentState: Record<string, unknown> | null = null;
+        try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled by the locked writer */ }
+        if (currentState?.workflow && !namedWorkflowRuntimeSupported()) {
+          throw new Error('unsupported-runtime');
+        }
+      }
+      if (mode === 'autopilot' && builtState.active === false) {
         const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
         const result = writeStateFileLockedIf(
           statePath,
@@ -1058,7 +1066,6 @@ export const stateClearTool: ToolDefinition<{
           }
         }
         const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId);
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates);
         const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
         const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId));
         const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId));
@@ -1069,6 +1076,10 @@ export const stateClearTool: ToolDefinition<{
           ...localCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
           ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
         ].map((candidate) => [candidate.path, candidate])).values()];
+        if (mode === 'autopilot' && operationCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
+          throw new Error('unsupported-runtime');
+        }
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates);
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
@@ -1246,6 +1257,9 @@ export const stateClearTool: ToolDefinition<{
               }
             }
             const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
+            if (mode === 'autopilot' && ownerCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
+              throw new Error('unsupported-runtime');
+            }
             const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
             writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
             const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
@@ -1326,6 +1340,14 @@ export const stateClearTool: ToolDefinition<{
       const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
       const broadSessionCandidates = listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root));
       const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root));
+      const broadOperationCandidates = [...new Map([
+        ...broadLegacyCandidates,
+        ...broadSessionCandidates,
+        ...broadConvergedCandidates,
+      ].map((candidate) => [candidate.path, candidate])).values()];
+      if (mode === 'autopilot' && broadOperationCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
+        throw new Error('unsupported-runtime');
+      }
       {
         const now = Date.now();
         const cancelSignalPayload = {

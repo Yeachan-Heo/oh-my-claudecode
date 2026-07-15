@@ -48,6 +48,12 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     return { success: false, message: 'unsupported-runtime' };
   }
 
+  // Commit the primary run mutation before deleting any linked lifecycle state.
+  const cancelledState = updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
+  if (!cancelledState) {
+    return { success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' };
+  }
+
   // Track what we cleaned up
   const cleanedUp: string[] = [];
 
@@ -85,11 +91,6 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     cleanedUp.push('ultraqa');
   }
 
-  // Mark only the exact observed run inactive; a replacement activation must survive.
-  const cancelledState = updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
-  if (!cancelledState) {
-    return { success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' };
-  }
 
   const cleanupMsg = cleanedUp.length > 0
     ? ` Cleaned up: ${cleanedUp.join(', ')}.`
@@ -117,6 +118,11 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
 
   if (state.workflow && !namedWorkflowRuntimeSupported()) {
     return { success: false, message: 'unsupported-runtime' };
+  }
+
+  // Delete the primary run before deleting any linked lifecycle state.
+  if (!clearAutopilotState(directory, sessionId, state)) {
+    return { success: false, message: 'Autopilot run changed before clear; retry /cancel.' };
   }
 
   // Clean up all related state
@@ -149,10 +155,6 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     }
   }
 
-  // Clear only the exact observed run completely.
-  if (!clearAutopilotState(directory, sessionId, state)) {
-    return { success: false, message: 'Autopilot run changed before clear; retry /cancel.' };
-  }
 
   return {
     success: true,
