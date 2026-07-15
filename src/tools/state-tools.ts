@@ -723,6 +723,7 @@ function findSingleOwningSessionForMode(
 
 interface WorkflowPublicState {
   name: string;
+  workflowRunId?: string;
   version: number;
   shortHash: string;
   stages: string[];
@@ -786,6 +787,7 @@ export function redactAutopilotPublicState(state: unknown): unknown {
     : null;
   const safeState: WorkflowPublicState = {
     name: typeof descriptor.workflowName === 'string' ? descriptor.workflowName.slice(0, 32) : 'invalid',
+    workflowRunId: record.workflowRunId as string,
     version: typeof descriptor.profileVersion === 'number' ? descriptor.profileVersion : 1,
     shortHash: typeof descriptor.profileHash === 'string' ? descriptor.profileHash.slice(0, 12) : 'invalid',
     stages,

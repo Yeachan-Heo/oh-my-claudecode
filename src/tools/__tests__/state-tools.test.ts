@@ -184,6 +184,30 @@ describe('state-tools', () => {
       });
       expect(result.content[0].text).not.toContain('private prompt');
     });
+    it('uses the public run capability to pause the exact named workflow', async () => {
+      const sessionId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify(portableWorkflowState(sessionId)));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      const readResult = await stateReadTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
+      const publicState = JSON.parse(readResult.content[0].text.match(/```json\n([\s\S]*?)\n```/)![1]);
+      expect(publicState.workflowRunId).toBe('11111111-1111-4111-8111-111111111111');
+
+      const pauseResult = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: false,
+        state: { workflowRunId: publicState.workflowRunId },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      expect(pauseResult.isError).not.toBe(true);
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+        active: false,
+        workflowRunId: publicState.workflowRunId,
+      });
+    });
     it('derives public status from validated current-stage topology rather than private record status', async () => {
       const sessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
       const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
