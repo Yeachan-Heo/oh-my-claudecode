@@ -474,8 +474,7 @@ function hasNamedWorkflowMarkers(state) {
   return Boolean(
     state &&
     typeof state === "object" &&
-    (Object.prototype.hasOwnProperty.call(state, "workflowRunId") ||
-      Object.prototype.hasOwnProperty.call(state, "pipelineTracking")),
+    ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)),
   );
 }
 

@@ -410,25 +410,59 @@ function sameFile(path, expected) {
   return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
 }
 
-function reconcileEmergencyPublicationTemps(filePath) {
+function reconcileEmergencyPublicationTemps(filePath, authorizeState) {
   const directory = dirname(filePath);
   const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${base}\\.emergency-(?:journal\\.json|recovery\\.claim|quarantine\\.[0-9a-f-]{36}\\.payload)\\.(\\d+)\\.(\\d+)\\.([0-9a-f-]{36})\\.tmp$`, 'i');
+  const pattern = new RegExp(`^${base}\\.emergency-(journal\\.json|recovery\\.claim|quarantine\\.[0-9a-f-]{36}\\.payload)\\.(\\d+)\\.(\\d+)\\.([0-9a-f-]{36})\\.tmp$`, 'i');
   let names;
   try { names = readdirSync(directory); } catch (error) { return error?.code === 'ENOENT'; }
   for (const name of names) {
     const match = pattern.exec(name);
     if (!match) continue;
-    const currentStart = processStartIdentity(Number(match[1]));
-    if (currentStart === null || currentStart === match[2]) return false;
     const path = join(directory, name);
+    const currentStart = processStartIdentity(Number(match[2]));
+    if (currentStart === null || currentStart === match[3]) return false;
     const generation = fileIdentity(path);
     try {
-      if (!generation || !sameFile(path, generation)) return false;
+      if (!generation) return false;
+      const raw = readFileSync(path, 'utf8');
+      if (authorizeState) {
+        if (match[1] === 'journal.json') {
+          const journal = readEmergencyJournal(path);
+          if (!journal || !recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return false;
+        } else if (match[1].startsWith('quarantine.')) {
+          const state = JSON.parse(raw);
+          if (!state || typeof state !== 'object' || Array.isArray(state) || !authorizeState(state)) return false;
+        } else {
+          const claim = readRecoveryClaim(path);
+          if (!claim || claim.pid !== Number(match[2]) || claim.processStart !== match[3] || claim.nonce !== match[4]) return false;
+        }
+      }
+      if (!sameFile(path, generation) || stateDigest(readFileSync(path, 'utf8')) !== stateDigest(raw)) return false;
       unlinkSync(path);
     } catch { return false; }
   }
   return true;
+}
+
+function recoveryGenerationsAuthorized(filePath, journal, authorizeState) {
+  if (!authorizeState) return true;
+  const paths = [filePath, ...(journal ? [journal.quarantinePath, `${journal.quarantinePath}.payload`] : [])];
+  let authenticatedJournalGeneration = journal === null;
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let raw;
+    let state;
+    try {
+      raw = readFileSync(path, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+      state = parsed;
+    } catch { return false; }
+    if (!authorizeState(state)) return false;
+    if (journal && (stateDigest(raw) === journal.originalDigest || (journal.intent === 'publish' && stateDigest(raw) === journal.intendedDigest))) authenticatedJournalGeneration = true;
+  }
+  return authenticatedJournalGeneration;
 }
 
 function replacePrimaryDuringRecoveryForTest(filePath) {
@@ -466,41 +500,60 @@ function removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine) {
 }
 
 /** A dead transaction is recovered under a state-scoped, generation-verified exclusive claim. */
-export function recoverEmergencyStateFile(filePath) {
+export function recoverEmergencyStateFile(filePath, options) {
+  const authorizeState = options?.authorizeState;
   const journalPath = emergencyJournalPath(filePath);
-  if (!reconcileEmergencyPublicationTemps(filePath)) return false;
-  if (!existsSync(journalPath)) return true;
+  if (!existsSync(journalPath)) {
+    if (!authorizeState) return reconcileEmergencyPublicationTemps(filePath);
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    const claim = acquireRecoveryClaim(claimPath);
+    if (!claim) return false;
+    try {
+      if (existsSync(journalPath)) return false;
+      return reconcileEmergencyPublicationTemps(filePath, authorizeState);
+    } finally { releaseRecoveryClaim(claimPath, claim); }
+  }
   const journal = readEmergencyJournal(journalPath);
-  if (journal && (journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}` || isEmergencyOwnerLive(journal.owner))) return false;
+  if (!journal) {
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    const claim = acquireRecoveryClaim(claimPath);
+    if (!claim) return false;
+    try {
+      const generation = fileIdentity(journalPath);
+      if (authorizeState) {
+        // A malformed journal cannot prove project ownership. Preserve it,
+        // but only after serializing that decision with a recovery claim.
+        return false;
+      }
+      if (!reconcileEmergencyPublicationTemps(filePath)) return false;
+      if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
+      unlinkSync(journalPath);
+      return true;
+    } catch { return false; } finally { releaseRecoveryClaim(claimPath, claim); }
+  }
   const claimPath = `${filePath}.emergency-recovery.claim`;
   const claim = acquireRecoveryClaim(claimPath);
   if (!claim) return false;
   try {
-    if (!journal) {
-      const generation = fileIdentity(journalPath);
-      if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
-      unlinkSync(journalPath);
-      return true;
-    }
     const current = readEmergencyJournal(journalPath);
+    if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
+    if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath);
-  } catch { return false; }
-  finally { releaseRecoveryClaim(claimPath, claim); }
+    return recoverDeadEmergencyStateFile(filePath, authorizeState);
+  } finally { releaseRecoveryClaim(claimPath, claim); }
 }
 
 /** Recover a previously interrupted emergency mutation while holding the recovery claim. */
-function recoverDeadEmergencyStateFile(filePath) {
+function recoverDeadEmergencyStateFile(filePath, authorizeState) {
   const journalPath = emergencyJournalPath(filePath);
   if (!existsSync(journalPath)) return true;
   const journal = readEmergencyJournal(journalPath);
   if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}` || isEmergencyOwnerLive(journal.owner)) return false;
+  if (!recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return true;
   const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
   if (!owned()) return false;
   const payloadPath = `${journal.quarantinePath}.payload`;
-  const digest = (path) => {
-    try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; }
-  };
+  const digest = (path) => { try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; } };
   if (journal.phase === 'preparing') {
     const complete = typeof journal.originalDigest === 'string' && (journal.intent === 'clear' || (journal.intent === 'publish' && typeof journal.intendedDigest === 'string'));
     if (!complete) {
@@ -508,14 +561,10 @@ function recoverDeadEmergencyStateFile(filePath) {
       return removeOwnedEmergencyArtifacts(journalPath, journal, false);
     }
     const originalStillPrimary = !existsSync(journal.quarantinePath) && digest(filePath) === journal.originalDigest;
-    if (journal.intent === 'publish' && digest(payloadPath) !== journal.intendedDigest) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
-    }
-    if (journal.intent === 'clear' && existsSync(payloadPath)) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
-    }
+    if (journal.intent === 'publish' && digest(payloadPath) !== journal.intendedDigest) return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    if (journal.intent === 'clear' && existsSync(payloadPath)) return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
     journal.phase = 'prepared';
-    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath);
+    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
   }
   const originalDigest = journal.originalDigest;
   const intent = journal.intent;
@@ -523,7 +572,6 @@ function recoverDeadEmergencyStateFile(filePath) {
   const hasPrimary = existsSync(filePath);
   const hasQuarantine = existsSync(journal.quarantinePath);
   const finalize = () => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
-
   if (hasPrimary && hasQuarantine) {
     if (intent === 'publish' && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) return finalize();
     return removeOwnedEmergencyArtifacts(journalPath, journal, true);
@@ -533,13 +581,11 @@ function recoverDeadEmergencyStateFile(filePath) {
       if (intent === 'publish' && digest(payloadPath) !== intendedDigest) return false;
       if (!owned()) return false;
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
-        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) {
-          removeOwnedEmergencyArtifacts(journalPath, journal, true);
-        }
+        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) removeOwnedEmergencyArtifacts(journalPath, journal, true);
         return false;
       }
       journal.phase = 'quarantined';
-      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath);
+      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
     }
     return false;
   }

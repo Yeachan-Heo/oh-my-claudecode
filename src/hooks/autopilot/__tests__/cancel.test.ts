@@ -189,88 +189,34 @@ describe('AutopilotCancel', () => {
       expect(state?.originalIdea).toBe('test idea');
     });
 
-    it('does not cancel a replacement run in the same session', () => {
-      const sessionId = 'same-session-replacement';
-      const observed = initAutopilot(testDir, 'old run', sessionId)!;
-      observed.workflowRunId = '11111111-1111-4111-8111-111111111111';
-      writeAutopilotState(testDir, observed, sessionId);
-      const statePath = join(testDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
-      const replacement = {
-        ...observed,
-        active: true,
-        originalIdea: 'replacement run',
-        workflowRunId: '22222222-2222-4222-8222-222222222222',
-      };
-      process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH = statePath;
-      process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
-
-      const result = cancelAutopilot(testDir, sessionId);
-      expect(result.success).toBe(false);
-      expect(readAutopilotState(testDir, sessionId)).toMatchObject({
-        active: true,
-        originalIdea: 'replacement run',
-        workflowRunId: replacement.workflowRunId,
-      });
-    });
 
     it('does not clear a replacement run in the same session', () => {
       const sessionId = 'same-session-clear-replacement';
       const observed = initAutopilot(testDir, 'old run', sessionId)!;
-      observed.workflowRunId = '11111111-1111-4111-8111-111111111111';
       writeAutopilotState(testDir, observed, sessionId);
       const statePath = join(testDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
-      const replacement = { ...observed, originalIdea: 'replacement run', workflowRunId: '22222222-2222-4222-8222-222222222222' };
+      const replacement = { ...observed, originalIdea: 'replacement run' };
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = statePath;
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
 
       expect(clearAutopilot(testDir, sessionId).success).toBe(false);
-      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, originalIdea: 'replacement run', workflowRunId: replacement.workflowRunId });
+      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, originalIdea: 'replacement run' });
     });
 
-    it('uses the portable exact transaction for named state without flock support', () => {
+    it('allows exact-snapshot cancellation but rejects clearing partial named state', () => {
       const sessionId = 'named-cancel-platform-gate';
       const state = initAutopilot(testDir, 'ship it', sessionId)!;
       state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
       state.workflowRunId = '11111111-1111-4111-8111-111111111111';
       writeAutopilotState(testDir, state, sessionId);
       const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
+      const before = require('fs').readFileSync(statePath);
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
       expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: true });
+      expect(clearAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
+      expect(require('fs').readFileSync(statePath)).not.toEqual(before);
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
-      expect(clearAutopilot(testDir, sessionId)).toMatchObject({ success: true });
-      expect(require('fs').existsSync(statePath)).toBe(false);
-    });
-
-    it('cancels and clears a legacy named workflow through the emergency path without a session id', () => {
-      const state = initAutopilot(testDir, 'legacy named')!;
-      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
-      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
-      writeAutopilotState(testDir, state);
-      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
-      expect(cancelAutopilot(testDir)).toMatchObject({ success: true, preservedState: { active: false } });
-      expect(clearAutopilot(testDir)).toMatchObject({ success: true });
-      expect(readAutopilotState(testDir)).toBeNull();
-    });
-
-    it('recovers interrupted named pause and clear transactions before reading their primary', () => {
-      const sessionId = 'named-journal-recovery';
-      const state = initAutopilot(testDir, 'recover', sessionId)!;
-      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
-      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
-      writeAutopilotState(testDir, state, sessionId);
-      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
-      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
-      expect(cancelAutopilot(testDir, sessionId).success).toBe(false);
-      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
-      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
-
-      const paused = readAutopilotState(testDir, sessionId)!;
-      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
-      expect(clearAutopilot(testDir, sessionId).success).toBe(false);
-      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
-      expect(readAutopilotState(testDir, sessionId)).toBeNull();
-      expect(paused.active).toBe(false);
     });
 
     it('does not clean linked state when the primary named mutation lock is held', () => {
@@ -527,17 +473,16 @@ describe('AutopilotCancel', () => {
     it('does not let stale resume cleanup delete a replacement run', () => {
       const observed = initAutopilot(testDir, 'old run')!;
       observed.active = false;
-      observed.workflowRunId = '11111111-1111-4111-8111-111111111111';
       writeAutopilotState(testDir, observed);
       const stateFile = join(testDir, '.omc', 'state', 'autopilot-state.json');
       const pastTime = new Date(Date.now() - STALE_STATE_MAX_AGE_MS - 60_000);
       utimesSync(stateFile, pastTime, pastTime);
-      const replacement = { ...observed, active: true, originalIdea: 'replacement run', workflowRunId: '22222222-2222-4222-8222-222222222222' };
+      const replacement = { ...observed, active: true, originalIdea: 'replacement run' };
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = stateFile;
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
 
       expect(canResumeAutopilot(testDir).canResume).toBe(false);
-      expect(readAutopilotState(testDir)).toMatchObject({ active: true, originalIdea: 'replacement run', workflowRunId: replacement.workflowRunId });
+      expect(readAutopilotState(testDir)).toMatchObject({ active: true, originalIdea: 'replacement run' });
     });
 
     it('should allow resume for recently cancelled state within 1 hour', () => {
@@ -680,7 +625,19 @@ describe('AutopilotCancel', () => {
       expect(result.message).toBe('No autopilot session available to resume');
     });
 
-    it('does not mutate a named paused state when runtime support is unavailable', () => {
+    it('rejects a descriptor-less paused workflow marker without mutating bytes', () => {
+      const state = initAutopilot(testDir, 'test idea')!;
+      state.active = false;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      writeAutopilotState(testDir, state);
+      const stateFile = join(testDir, '.omc', 'state', 'autopilot-state.json');
+      const before = require('fs').readFileSync(stateFile);
+
+      expect(canResumeAutopilot(testDir)).toMatchObject({ canResume: false, integrityFailed: true });
+      expect(resumeAutopilot(testDir)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
+      expect(require('fs').readFileSync(stateFile)).toEqual(before);
+    });
+    it('does not mutate an invalid named paused state when runtime support is unavailable', () => {
       const state = initAutopilot(testDir, 'test idea')!;
       state.active = false;
       state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
@@ -689,7 +646,7 @@ describe('AutopilotCancel', () => {
       const before = require('fs').readFileSync(stateFile);
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
-      expect(resumeAutopilot(testDir)).toMatchObject({ success: false, message: 'unsupported-runtime' });
+      expect(resumeAutopilot(testDir)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
       expect(require('fs').readFileSync(stateFile)).toEqual(before);
     });
 

@@ -546,7 +546,7 @@ function isAutopilotRoutingEchoPrompt(promptText) {
 
 function isOrphanedAutopilotRoutingEchoState(state) {
   if (!state || typeof state !== "object") return false;
-  if (state.workflow || state.pipelineTracking) return false;
+  if (hasNamedWorkflowMarkers(state)) return false;
 
   const phase = getAutopilotPhase(state);
   if (phase && phase !== "unspecified") return false;
@@ -807,8 +807,7 @@ function hasNamedWorkflowMarkers(state) {
   return Boolean(
     state &&
     typeof state === "object" &&
-    (Object.prototype.hasOwnProperty.call(state, "workflowRunId") ||
-      Object.prototype.hasOwnProperty.call(state, "pipelineTracking")),
+    ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)),
   );
 }
 

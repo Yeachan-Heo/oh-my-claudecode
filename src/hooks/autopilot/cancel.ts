@@ -23,6 +23,18 @@ export interface CancelResult {
   preservedState?: AutopilotState;
 }
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+    typeof state === 'object' &&
+    ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)),
+  );
+}
+
+function hasValidNamedWorkflowState(state: AutopilotState, sessionId?: string): boolean {
+  return hasNamedWorkflowMarkers(state) && Boolean(validateNamedWorkflowState(state, sessionId));
+}
+
 /**
  * Cancel autopilot and clean up all related state
  * Progress is preserved for potential resume
@@ -43,6 +55,7 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
       message: 'Autopilot is not currently active'
     };
   }
+
 
 
   // Commit the primary run mutation before deleting any linked lifecycle state.
@@ -103,6 +116,10 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
       success: true,
       message: 'No autopilot state to clear'
     };
+  }
+
+  if (hasNamedWorkflowMarkers(state) && !hasValidNamedWorkflowState(state, sessionId)) {
+    return { success: false, message: 'workflow_descriptor_integrity_failed' };
   }
 
 
@@ -167,12 +184,12 @@ export function canResumeAutopilot(directory: string, sessionId?: string): {
     return { canResume: false };
   }
 
-  if (state.workflow) {
-    if (!namedWorkflowRuntimeSupported()) {
-      return { canResume: false, resumePhase: state.phase, unsupportedRuntime: true };
-    }
-    if (!validateNamedWorkflowState(state, sessionId)) {
+  if (hasNamedWorkflowMarkers(state)) {
+    if (!hasValidNamedWorkflowState(state, sessionId)) {
       return { canResume: false, resumePhase: state.phase, integrityFailed: true };
+    }
+    if (!namedWorkflowRuntimeSupported()) {
+      return { canResume: false, state, resumePhase: state.phase, unsupportedRuntime: true };
     }
   }
 
@@ -225,13 +242,13 @@ export function resumeAutopilot(directory: string, sessionId?: string): {
   }
 
   // Re-activate only the exact paused run observed by canResumeAutopilot.
-  const resumedState = state.workflow
+  const resumedState = hasNamedWorkflowMarkers(state)
     ? updateAutopilotStateIfExact(
         directory,
         state,
         { active: true },
         sessionId,
-        (current) => Boolean(validateNamedWorkflowState(current, sessionId)),
+        (current) => hasValidNamedWorkflowState(current, sessionId),
       )
     : updateAutopilotStateIfCurrent(
         directory,
@@ -242,7 +259,7 @@ export function resumeAutopilot(directory: string, sessionId?: string): {
   if (!resumedState) {
     return {
       success: false,
-      message: state.workflow ? 'workflow_descriptor_integrity_failed' : 'Autopilot run changed before resume; retry.'
+      message: hasNamedWorkflowMarkers(state) ? 'workflow_descriptor_integrity_failed' : 'Autopilot run changed before resume; retry.'
     };
   }
 

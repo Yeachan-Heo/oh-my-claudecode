@@ -24,7 +24,7 @@
  */
 
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -893,11 +893,24 @@ async function activateState(directory, prompt, stateName, sessionId) {
     };
   }
 
-  const writeState = (writePath) => {
+  const writeState = (writePath, authorizeState) => {
     try {
       mkdirSync(dirname(writePath), { recursive: true });
       withStateFileLockSync(writePath, () => {
-        if (!recoverEmergencyStateFile(writePath)) return;
+        if (!recoverEmergencyStateFile(writePath, authorizeState ? { authorizeState } : undefined)) return;
+        // Shared home fallbacks are project-scoped. A foreign or unverifiable
+        // primary/recovery generation must win over this activation.
+        if (authorizeState) {
+          if (existsSync(`${writePath}.emergency-journal.json`)) return;
+          if (existsSync(writePath)) {
+            try {
+              const current = JSON.parse(readFileSync(writePath, 'utf8'));
+              if (!current || typeof current !== 'object' || Array.isArray(current) || !authorizeState(current)) return;
+            } catch {
+              return;
+            }
+          }
+        }
         if (stateName === 'autopilot' && existsSync(writePath)) {
           try {
             const current = JSON.parse(readFileSync(writePath, 'utf8'));
@@ -915,9 +928,12 @@ async function activateState(directory, prompt, stateName, sessionId) {
   const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId);
   writeState(writePath);
 
-  // Preserve the template's global fallback while applying the same recovery
-  // and mutation-fence protocol before it is read or written.
-  writeState(join(homedir(), '.omc', 'state', `${stateName}-state.json`));
+  // The standalone compatibility fallback is shared by every project, so it
+  // may only recover or replace generations owned by this canonical project.
+  const globalStatePath = join(homedir(), '.omc', 'state', `${stateName}-state.json`);
+  const authorizeGlobalState = (candidate) =>
+    typeof candidate?.project_path === 'string' && resolve(candidate.project_path) === resolve(directory);
+  writeState(globalStatePath, authorizeGlobalState);
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -168,6 +168,52 @@ describe('keyword-detector packaged artifacts', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves foreign shared-home state and every dead recovery generation during generic autopilot activation', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const projectA = mkdtempSync(join(tmpdir(), 'keyword-hook-project-a-'));
+    const projectB = mkdtempSync(join(tmpdir(), 'keyword-hook-project-b-'));
+    const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-home-'));
+    const emptyXdg = mkdtempSync(join(tmpdir(), 'keyword-hook-xdg-'));
+    const globalStatePath = join(fakeHome, '.omc', 'state', 'autopilot-state.json');
+    const foreignState = JSON.stringify({ active: true, project_path: projectB, sentinel: 'project-b' });
+    const deadTempPath = `${globalStatePath}.emergency-quarantine.00000000-0000-4000-8000-000000000001.payload.999999999.1.00000000-0000-4000-8000-000000000002.tmp`;
+    try {
+      execFileSync('git', ['init'], { cwd: projectA, stdio: 'pipe' });
+      mkdirSync(dirname(globalStatePath), { recursive: true });
+      writeFileSync(globalStatePath, foreignState);
+      writeFileSync(deadTempPath, foreignState);
+
+      execFileSync('node', [templatePath], {
+        cwd: packageRoot,
+        env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: emptyXdg, NODE_ENV: 'test' },
+        input: JSON.stringify({ prompt: 'autopilot fix the regression', directory: projectA, cwd: projectA, session_id: 'project-a-session' }),
+        encoding: 'utf-8',
+      });
+
+      expect(readFileSync(globalStatePath, 'utf-8')).toBe(foreignState);
+      expect(readFileSync(deadTempPath, 'utf-8')).toBe(foreignState);
+      expect(existsSync(join(projectA, '.omc', 'state', 'sessions', 'project-a-session', 'autopilot-state.json'))).toBe(true);
+
+      const malformedJournalPath = `${globalStatePath}.emergency-journal.json`;
+      writeFileSync(malformedJournalPath, '{not-json');
+      execFileSync('node', [templatePath], {
+        cwd: packageRoot,
+        env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: emptyXdg, NODE_ENV: 'test' },
+        input: JSON.stringify({ prompt: 'autopilot fix another regression', directory: projectA, cwd: projectA, session_id: 'project-a-session-2' }),
+        encoding: 'utf-8',
+      });
+
+      expect(readFileSync(globalStatePath, 'utf-8')).toBe(foreignState);
+      expect(readFileSync(deadTempPath, 'utf-8')).toBe(foreignState);
+      expect(readFileSync(malformedJournalPath, 'utf-8')).toBe('{not-json');
+    } finally {
+      rmSync(projectA, { recursive: true, force: true });
+      rmSync(projectB, { recursive: true, force: true });
+      rmSync(fakeHome, { recursive: true, force: true });
+      rmSync(emptyXdg, { recursive: true, force: true });
     }
   });
 

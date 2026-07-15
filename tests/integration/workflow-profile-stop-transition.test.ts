@@ -400,6 +400,39 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toEqual(workflowIntegrityFailure);
   });
 
+  it('fails closed for a descriptor-only named workflow marker', () => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    delete state.workflowRunId;
+    delete state.pipelineTracking;
+    writeState(f, state);
+
+    expect(invoke(f)).toEqual(workflowIntegrityFailure);
+  });
+
+  it('fails closed for a nonnegative tracking revision that does not match the current stage', () => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    state.pipelineTracking.trackingRevision = 1;
+    writeState(f, state);
+
+    expect(invoke(f)).toEqual(workflowIntegrityFailure);
+  });
+
+  it('fails closed for a nonnegative mismatched tracking revision in a terminal workflow', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    invoke(f);
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    invoke(f);
+    const terminal = readState(f);
+    terminal.pipelineTracking.trackingRevision = terminal.pipelineTracking.currentStageIndex - 1;
+    writeState(f, terminal);
+
+    expect(invoke(f)).toEqual(workflowIntegrityFailure);
+  });
+
   it('fails closed when named markers remain after the workflow descriptor is removed', () => {
     const f = fixture(kind);
     const state = workflowState(f);
