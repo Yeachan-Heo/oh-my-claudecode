@@ -366,6 +366,28 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readFileSync(f.statePath)).toEqual(before);
   });
 
+  it('honors cancellation beside an already-loaded global fallback without recreating it', async () => {
+    const f = fixture(kind);
+    rmSync(f.statePath, { force: true });
+    const globalPath = join(f.home, '.omc', 'state', 'autopilot-state.json');
+    mkdirSync(dirname(globalPath), { recursive: true });
+    const globalState = { active: true, mode: 'autopilot', phase: 'execution', prompt: workflowTask, project_path: f.project, session_id: f.sessionId, workflowRunId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', execution: { files_created: [], files_modified: [], current_task: 'ship' } };
+    const snapshot = JSON.stringify(globalState);
+    writeFileSync(globalPath, snapshot);
+    const signalPath = join(dirname(globalPath), 'cancel-signal-state.json');
+    writeFileSync(`${signalPath}.mutation.lock`, liveLockOwner());
+
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const now = Date.now();
+    writeFileSync(signalPath, JSON.stringify({ active: true, requested_at: new Date(now).toISOString(), expires_at: new Date(now + 30_000).toISOString(), mode: 'autopilot', source: 'state_clear', target_workflow_run_id: globalState.workflowRunId, target_state_sha256: createHash('sha256').update(snapshot).digest('hex') }));
+    unlinkSync(globalPath);
+    unlinkSync(`${signalPath}.mutation.lock`);
+
+    expect(await pending).toEqual({ continue: true, suppressOutput: true });
+    expect(existsSync(globalPath)).toBe(false);
+  });
+
   it('preserves a concurrent named workflow transition rather than returning a stale stage prompt', async () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));

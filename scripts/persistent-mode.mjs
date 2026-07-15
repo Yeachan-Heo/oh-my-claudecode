@@ -749,7 +749,7 @@ function getUltragoalObjective(state, omcRoot) {
   return "";
 }
 
-function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
+function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, currentAutopilotPath) {
   const isActiveSignal = (signalPath) => {
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
@@ -772,6 +772,8 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
     });
     return locked.acquired && active;
   };
+
+  if (currentAutopilotPath && isActiveSignal(join(dirname(currentAutopilotPath), "cancel-signal-state.json"))) return true;
 
   if (sessionId) {
     const sessionSignalPath = join(stateDir, "sessions", sessionId, "cancel-signal-state.json");
@@ -1188,7 +1190,7 @@ async function main() {
       sessionId,
     );
 
-    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state)) {
+    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state, autopilot.path)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }

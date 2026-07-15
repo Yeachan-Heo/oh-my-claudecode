@@ -357,6 +357,26 @@ describe('state-tools', () => {
       }
     });
 
+    it('preserves an unrelated-project home-global autopilot fallback without signaling', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-unrelated');
+      process.env.HOME = home;
+      try {
+        const statePath = join(home, '.omc', 'state', 'autopilot-state.json');
+        mkdirSync(dirname(statePath), { recursive: true });
+        const raw = JSON.stringify({ active: true, project_path: join(TEST_DIR, 'other-project'), workflowRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+        writeFileSync(statePath, raw);
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError).toBeUndefined();
+        expect(readFileSync(statePath, 'utf8')).toBe(raw);
+        expect(existsSync(join(dirname(statePath), 'cancel-signal-state.json'))).toBe(false);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
+
     it('recovers interrupted canonical and legacy named pauses before broad clear', async () => {
       const canonical = join(TEST_DIR, '.omc', 'state', 'sessions', 'broad-journal-owner', 'autopilot-state.json');
       const legacy = join(TEST_DIR, '.omc', 'state', 'autopilot-state.json');

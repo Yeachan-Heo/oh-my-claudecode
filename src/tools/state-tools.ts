@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import {
   resolveStatePath,
   ensureOmcDir,
@@ -322,7 +322,11 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
     getStatePath(mode, root),
     join(getOmcRoot(root), `${normalizedName}.json`),
   ];
-  if (mode === 'autopilot') candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
+  if (mode === 'autopilot') {
+    const globalPath = join(homedir(), '.omc', 'state', 'autopilot-state.json');
+    const globalState = readJsonRecord(globalPath);
+    if (typeof globalState?.project_path === 'string' && resolve(globalState.project_path) === resolve(root)) candidates.push(globalPath);
+  }
 
   return [...new Set(candidates)];
 }

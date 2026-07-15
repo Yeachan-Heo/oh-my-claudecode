@@ -423,7 +423,7 @@ function isStaleSkillState(state) {
  * @param {string} sessionId - Optional session ID
  * @returns {boolean} true if cancel is in progress
  */
-function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
+function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, currentAutopilotPath) {
   const CANCEL_SIGNAL_TTL_MS = 30000; // 30 seconds
   const isActiveSignal = (signalPath) => {
     let active = false;
@@ -447,6 +447,8 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
     });
     return locked.acquired && active;
   };
+
+  if (currentAutopilotPath && isActiveSignal(join(dirname(currentAutopilotPath), "cancel-signal-state.json"))) return true;
 
   // Try session-scoped path first
   if (sessionId) {
@@ -977,7 +979,7 @@ async function main() {
     const totalIncomplete = taskCount + todoCount;
 
     // Check if cancel is in progress - if so, allow stop immediately
-    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state)) {
+    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state, autopilot.path)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
