@@ -609,43 +609,93 @@ export function validateNamedWorkflowState(
   };
 }
 
-/**
- * Prepare an authenticated, one-stage named workflow transition from its
- * append-only transcript. The caller must persist this exact update atomically.
- */
-export function prepareNamedWorkflowAdvance(
-  state: AutopilotState,
-  sessionId: string | undefined,
-): AutopilotState | null {
-  const validated = validateNamedWorkflowState(state, sessionId);
-  if (!validated || !sessionId || !state.workflow || !state.pipelineTracking)
-    return null;
+export type PreparedNamedWorkflowAdvance = {
+  updated: AutopilotState;
+  commitToken: {
+    transcriptPath: string;
+    transcriptIdentity: RecordValue;
+    stageId: string;
+    sessionId: string;
+    boundary: RecordValue;
+    evidenceHash: string;
+  };
+};
 
+/**
+ * Reauthenticate a prepared transcript observation immediately before persistence.
+ * Callers must invoke this while holding the state mutation lock.
+ */
+export function refreshNamedWorkflowBoundaryForCommit(
+  advance: PreparedNamedWorkflowAdvance,
+): boolean {
   let root: string;
   try {
     root = realpathSync(join(getClaudeConfigDir(), "projects"));
   } catch {
-    return null;
+    return false;
   }
-  const boundary = state.pipelineTracking
-    .activationBoundary as unknown as RecordValue;
-  const transcript = readStableTranscript(
-    String(boundary.transcriptPath),
-    sessionId,
-    root,
-  );
-  const stageIndex = state.pipelineTracking.currentStageIndex;
-  const stageId = state.workflow.stages[stageIndex];
-  const signal = NAMED_SIGNALS[stageId];
-  if (!transcript || !signal) return null;
+  const token = advance.commitToken;
+  const transcript = readStableTranscript(token.transcriptPath, token.sessionId, root);
+  if (
+    !transcript ||
+    transcript.path !== token.transcriptPath ||
+    !sameFileIdentity(transcript.identity, token.transcriptIdentity)
+  )
+    return false;
 
-  let byteOffset = Number(boundary.byteOffset);
+  const observation = advance.updated.pipelineTracking?.completionObservations.at(-1);
+  if (!observation || !isRecord(observation)) return false;
+  const boundary = observation.activationBoundary;
+  if (
+    !isRecord(boundary) ||
+    JSON.stringify(boundary) !== JSON.stringify(token.boundary) ||
+    observation.stageId !== token.stageId ||
+    observation.sessionId !== token.sessionId ||
+    observation.recordContentSha256 !== token.evidenceHash
+  )
+    return false;
+
+  const evidence = findCompletionEvidence(
+    transcript.content,
+    Number(boundary.byteOffset),
+    token.sessionId,
+    NAMED_SIGNALS[token.stageId],
+  );
+  if (!evidence || evidence.hash !== token.evidenceHash) return false;
+
+  advance.updated.pipelineTracking!.activationBoundary = {
+    transcriptPath: transcript.path,
+    transcriptRoot: root,
+    transcriptBasename: `${token.sessionId}.jsonl`,
+    sessionId: token.sessionId,
+    byteOffset: Number(transcript.identity.size),
+    fileIdentity: transcript.identity as never,
+  };
+  return true;
+}
+
+function sameFileIdentity(left: RecordValue, right: RecordValue): boolean {
+  return (
+    left.device === right.device &&
+    left.inode === right.inode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs &&
+    left.contentSha256 === right.contentSha256
+  );
+}
+
+function findCompletionEvidence(
+  content: Buffer,
+  boundaryOffset: number,
+  sessionId: string,
+  signal: string | undefined,
+): { byteOffset: number; lineNumber: number; hash: string } | null {
+  if (!signal) return null;
+  let byteOffset = boundaryOffset;
   let evidence: { byteOffset: number; lineNumber: number; hash: string } | null =
     null;
-  const lines = transcript.content
-    .subarray(byteOffset)
-    .toString("utf8")
-    .split(/\n/);
+  const lines = content.subarray(byteOffset).toString("utf8").split(/\n/);
   for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
     const rawLine = lines[lineNumber];
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -653,14 +703,12 @@ export function prepareNamedWorkflowAdvance(
       if (lineNumber === lines.length - 1 && line === "") continue;
       return null;
     }
-
     let record: unknown;
     try {
       record = JSON.parse(line);
     } catch {
       return null;
     }
-
     const message = isRecord(record) ? record.message : null;
     const text = isRecord(record) ? assistantText(record) : null;
     if (
@@ -686,7 +734,45 @@ export function prepareNamedWorkflowAdvance(
     }
     byteOffset += Buffer.byteLength(rawLine) + 1;
   }
+  return evidence;
+}
 
+/**
+ * Prepare an authenticated, one-stage named workflow transition from its
+ * append-only transcript. The caller must persist this exact update atomically.
+ */
+export function prepareNamedWorkflowAdvance(
+  state: AutopilotState,
+  sessionId: string | undefined,
+): PreparedNamedWorkflowAdvance | null {
+  const validated = validateNamedWorkflowState(state, sessionId);
+  if (!validated || !sessionId || !state.workflow || !state.pipelineTracking)
+    return null;
+
+  let root: string;
+  try {
+    root = realpathSync(join(getClaudeConfigDir(), "projects"));
+  } catch {
+    return null;
+  }
+  const boundary = state.pipelineTracking
+    .activationBoundary as unknown as RecordValue;
+  const transcript = readStableTranscript(
+    String(boundary.transcriptPath),
+    sessionId,
+    root,
+  );
+  const stageIndex = state.pipelineTracking.currentStageIndex;
+  const stageId = state.workflow.stages[stageIndex];
+  const signal = NAMED_SIGNALS[stageId];
+  if (!transcript || !signal) return null;
+
+  const evidence = findCompletionEvidence(
+    transcript.content,
+    Number(boundary.byteOffset),
+    sessionId,
+    signal,
+  );
   if (!evidence) return null;
   const observedAt = new Date().toISOString();
   const updated = structuredClone(state);
@@ -726,5 +812,15 @@ export function prepareNamedWorkflowAdvance(
     updated.phase = "complete";
     updated.completed_at = observedAt;
   }
-  return updated;
+  return {
+    updated,
+    commitToken: {
+      transcriptPath: transcript.path,
+      transcriptIdentity: transcript.identity,
+      stageId,
+      sessionId,
+      boundary: structuredClone(boundary),
+      evidenceHash: evidence.hash,
+    },
+  };
 }

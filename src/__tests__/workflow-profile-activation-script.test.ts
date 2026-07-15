@@ -121,8 +121,7 @@ function writeEmergencyJournal(statePath: string, original: Buffer, intent: 'cle
   return { quarantinePath, transactionId };
 }
 
-function createFixture() {
-  const cwd = mkdtempSync(join(tmpdir(), 'omc-workflow-activation-'));
+function createFixture(cwd = mkdtempSync(join(tmpdir(), 'omc-workflow-activation-'))) {
   const configHome = join(cwd, 'config');
   mkdirSync(join(cwd, '.claude'), { recursive: true });
   mkdirSync(join(configHome, 'claude-omc'), { recursive: true });
@@ -142,19 +141,43 @@ function createFixture() {
   return { cwd, configHome };
 }
 
+function createNestedGitFixture() {
+  const parent = mkdtempSync(join(tmpdir(), 'omc-workflow-profile-root-'));
+  const cwd = join(parent, 'repo');
+  const fixture = createFixture(cwd);
+  const nested = join(cwd, 'nested', 'cwd');
+  mkdirSync(join(nested, 'claude-config', 'projects'), { recursive: true });
+  writeFileSync(join(nested, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl'), '');
+  execFileSync('git', ['init', '--quiet'], { cwd });
+  return { ...fixture, nested, parent };
+}
+
 describe('workflow profile activation hook fixtures (#3487)', () => {
-  it.each(HOOKS)('activates valid project-over-user workflow profiles through %s', (script) => {
-    const { cwd, configHome } = createFixture();
+  it.each(HOOKS)('activates root project profiles from a nested git CWD through %s', (script) => {
+    const { configHome, nested, parent } = createNestedGitFixture();
     try {
-      const output = runHook(script, '/autopilot --workflow release-flow ship the release', cwd, configHome);
+      const output = runHook(script, '/autopilot --workflow release-flow ship the release', nested, configHome);
       expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN (Consensus Planning)');
-      expect(JSON.parse(stateBytes(cwd)!.toString())).toMatchObject({
+      expect(JSON.parse(stateBytes(nested)!.toString())).toMatchObject({
         prompt: 'ship the release',
         workflow: { workflowName: 'release-flow', stages: ['ralplan', 'execution'] },
-        pipelineTracking: { activationBoundary: { transcriptPath: join(cwd, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl'), byteOffset: 0, fileIdentity: { inode: expect.any(Number), device: expect.any(Number), size: 0 } } },
+        pipelineTracking: { activationBoundary: { transcriptPath: join(nested, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl'), byteOffset: 0, fileIdentity: { inode: expect.any(Number), device: expect.any(Number), size: 0 } } },
       });
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('ignores profile config above the git root and falls back to the user profile through %s', (script) => {
+    const { cwd, configHome, nested, parent } = createNestedGitFixture();
+    try {
+      rmSync(join(cwd, '.claude', 'omc.jsonc'));
+      mkdirSync(join(parent, '.claude'), { recursive: true });
+      writeFileSync(join(parent, '.claude', 'omc.jsonc'), '{ "autopilot": { "workflows": { "release-flow": { "version": 1, "stages": ["ralplan", "execution", "qa"] } } } }');
+      runHook(script, '/autopilot --workflow release-flow ship the release', nested, configHome);
+      expect(JSON.parse(stateBytes(nested)!.toString())).toMatchObject({ workflow: { workflowName: 'release-flow', stages: ['ralplan', 'execution', 'ralph'] } });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 

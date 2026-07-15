@@ -51,7 +51,8 @@ import {
 import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
-  isAutopilotActive
+  isAutopilotActive,
+  readAutopilotState,
 } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 import { readTeamPipelineState } from '../team-pipeline/state.js';
@@ -161,7 +162,8 @@ interface LoadedAutopilotTarget {
 }
 
 interface SessionCancelCheck {
-  active: boolean;
+  autopilotCancellation: boolean;
+  nonAutopilotCancellation: boolean;
   enforceableAutopilot?: LoadedAutopilotTarget;
 }
 
@@ -173,11 +175,12 @@ function resolveAutopilotTargetPath(directory: string, sessionId?: string): stri
 
 function readAutopilotTarget(directory: string, sessionId?: string): LoadedAutopilotTarget | null {
   const path = resolveAutopilotTargetPath(directory, sessionId);
+  if (!readAutopilotState(directory, sessionId)) return null;
   try {
-    const serialized = readFileSync(path, 'utf-8');
-    const state = JSON.parse(serialized);
-    if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
-    return { path, state: state as Record<string, unknown> };
+    const state = JSON.parse(readFileSync(path, 'utf-8'));
+    return state && typeof state === 'object' && !Array.isArray(state)
+      ? { path, state: state as Record<string, unknown> }
+      : null;
   } catch {
     return null;
   }
@@ -269,6 +272,15 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
         if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
         return isAuthenticatedAutopilotCancelSignal(raw, target);
       }
+      // A requested-at-only signal belongs to Ralph/Ultrawork. It must never be
+      // interpreted as an unauthenticated autopilot cancellation.
+      if (
+        raw.mode === 'autopilot' ||
+        raw.target_state_sha256 !== undefined ||
+        raw.target_workflow_run_id !== undefined
+      ) {
+        return false;
+      }
       const effectiveExpiry = Number.isFinite(expiresAt)
         ? expiresAt
         : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
@@ -289,25 +301,35 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
     return locked.acquired && locked.value === true;
   };
 
-  // Lock before rereading so cancellation can only authenticate the generation
-  // that is still current when its signal is consumed, including when the
-  // state was absent at the first observation.
+  // A target-bearing signal must hold both locks. On runtimes without flock,
+  // requested-at-only Ralph/Ultrawork cancellation may proceed only after
+  // canonical discovery proves this session has no enforceable autopilot state.
   const locked = withStateFileMutationLock(autopilotPath, () => {
     const current = readAutopilotTarget(directory, sessionId);
     if (!current || !isCurrentAutopilotTarget(current.state, directory, sessionId)) {
-      return { active: validateSignal(null) };
+      return { autopilotCancellation: false, nonAutopilotCancellation: validateSignal(null) };
     }
     // Named integrity failures deliberately fail closed so checkAutopilot()
     // can propagate its diagnostic instead of a forged cancel hiding it.
     if (hasNamedWorkflowMarkers(current.state) && !isEnforceableNamedAutopilotState(current.state, directory, sessionId)) {
-      return { active: false };
+      return { autopilotCancellation: false, nonAutopilotCancellation: false };
     }
     return {
-      active: validateSignal(current),
+      autopilotCancellation: validateSignal(current),
+      nonAutopilotCancellation: false,
       enforceableAutopilot: current,
     };
   }, true);
-  return locked.acquired && locked.value ? locked.value : { active: false };
+  if (locked.acquired && locked.value) return locked.value;
+  if (namedWorkflowRuntimeSupported()) {
+    return { autopilotCancellation: false, nonAutopilotCancellation: false };
+  }
+
+  const current = readAutopilotTarget(directory, sessionId);
+  if (current && isCurrentAutopilotTarget(current.state, directory, sessionId)) {
+    return { autopilotCancellation: false, nonAutopilotCancellation: false, enforceableAutopilot: current };
+  }
+  return { autopilotCancellation: false, nonAutopilotCancellation: validateSignal(null) };
 }
 
 /**
@@ -2268,8 +2290,8 @@ async function resolvePersistentModeBlock(
   // Session-scoped cancel signals are authenticated against the current
   // autopilot generation while its mutation lock is held.
   const cancelCheck = isSessionCancelInProgress(workingDir, sessionId);
-  const cancelInProgress = cancelCheck.active;
-  if (cancelInProgress) {
+  const cancelInProgress = cancelCheck.nonAutopilotCancellation;
+  if (cancelCheck.autopilotCancellation) {
     return {
       shouldBlock: false,
       message: '',
@@ -2433,6 +2455,20 @@ async function resolvePersistentModeBlock(
     if (tombstonedWorkflowModes.has('ralph') || !isModeActive('ralph', workingDir, sessionId)) return null;
     return checkRalphLoop(sessionId, workingDir, cancelInProgress);
   };
+
+  if (cancelInProgress) {
+    // Requested-at-only signals may cancel Ralph/Ultrawork, never autopilot.
+    // Recheck autopilot after signal consumption so an active replacement wins.
+    const autopilotResult = await runAutopilotPriority();
+    // Terminal named diagnostics are not enforceable autopilot targets and
+    // must not alter the established generic-cancellation result contract.
+    if (autopilotResult?.shouldBlock) return autopilotResult;
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none',
+    };
+  }
 
   if (autopilotPriorityFirst) {
     const autopilotResult = await runAutopilotPriority();

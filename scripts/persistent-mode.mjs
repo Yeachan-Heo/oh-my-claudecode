@@ -790,13 +790,13 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
     return locked.acquired && active;
   };
   const isActiveSignal = (signalPath) => {
-    if (currentAutopilotPath && cancellationContext && !existsSync(signalPath)) return false;
+    if (!existsSync(signalPath)) return false;
     if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
     const stateLock = acquireStateFileLockSync(currentAutopilotPath, 50, true);
     if (!stateLock) return false;
     try {
       const currentAutopilot = readJsonFile(currentAutopilotPath);
-      if (!isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return false;
+      if (!isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return validateSignal(signalPath, null);
       authenticatedAutopilot = currentAutopilot;
       return validateSignal(signalPath, currentAutopilot);
     } finally {
@@ -1323,10 +1323,7 @@ async function main() {
       console.log(JSON.stringify(SAFE_CONTINUE));
       return;
     }
-    const cancellationTarget = isEnforceableAutopilotCancellationTarget(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
-      ? autopilot.state
-      : null;
-    const cancellation = isSessionCancelInProgress(stateDir, sessionId, cancellationTarget ? autopilot.path : null, cancellationTarget ? { directory, isGlobal: autopilot.isGlobal, hasValidSessionId } : null);
+    const cancellation = isSessionCancelInProgress(stateDir, sessionId, autopilot.path, { directory, isGlobal: autopilot.isGlobal, hasValidSessionId });
     if (cancellation.currentAutopilot) autopilot.state = cancellation.currentAutopilot;
     if (cancellation.active) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));

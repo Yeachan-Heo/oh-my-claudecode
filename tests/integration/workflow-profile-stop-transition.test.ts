@@ -477,6 +477,23 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
   });
 
+  it('does not let a requested-at-only signal suppress an autopilot activated while its canonical state path is locked', async () => {
+    const f = fixture(kind);
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      requested_at: new Date().toISOString(),
+      source: 'state_clear',
+    }));
+    const lockPath = `${f.statePath}.mutation.lock`;
+    writeFileSync(lockPath, liveLockOwner());
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 75));
+    writeState(f, workflowState(f));
+    unlinkSync(lockPath);
+
+    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+  });
+
   it('fails closed when a named workflow is missing tracking state', () => {
     const f = fixture(kind);
     const state = workflowState(f);

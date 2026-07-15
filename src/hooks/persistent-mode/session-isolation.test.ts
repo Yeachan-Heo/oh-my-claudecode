@@ -195,6 +195,50 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
     });
 
+    it("honors a requested-at-only Ultrawork cancellation without flock when canonical autopilot discovery finds no target", async () => {
+      const sessionId = "portable-generic-cancel-no-autopilot";
+      activateUltrawork("Finish the task", sessionId, tempDir);
+      writePendingTodo(tempDir, "Finish the task");
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writeFileSync(join(sessionDir, "cancel-signal-state.json"), JSON.stringify({
+        active: true,
+        requested_at: new Date().toISOString(),
+        source: "state_clear",
+      }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: false,
+        mode: "none",
+      });
+    });
+
+    it.each([
+      ["active", (state: Record<string, unknown>) => state],
+      ["replacement", (state: Record<string, unknown>) => ({ ...state, originalIdea: "Replacement run" })],
+    ])("does not let a requested-at-only Ultrawork cancellation suppress a %s autopilot without flock", async (_name, replace) => {
+      const sessionId = `portable-generic-cancel-autopilot-${_name}`;
+      activateUltrawork("Finish the task", sessionId, tempDir);
+      writePendingTodo(tempDir, "Finish the task");
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, "Finish the task", sessionId)!;
+      state.phase = "planning";
+      state.project_path = tempDir;
+      writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(replace(state as unknown as Record<string, unknown>)));
+      writeFileSync(join(sessionDir, "cancel-signal-state.json"), JSON.stringify({
+        active: true,
+        requested_at: new Date().toISOString(),
+        source: "state_clear",
+      }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: true,
+        mode: "autopilot",
+      });
+    });
+
     it.each([
       ['stage advance', (state: Record<string, unknown>) => ({ ...state, phase: 'execution' })],
       ['replacement run', (state: Record<string, unknown>) => ({ ...state, originalIdea: 'Replacement run' })],

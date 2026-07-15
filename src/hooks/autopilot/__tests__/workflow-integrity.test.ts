@@ -18,6 +18,8 @@ import {
   writeAutopilotState,
 } from "../state.js";
 import {
+  prepareNamedWorkflowAdvance,
+  refreshNamedWorkflowBoundaryForCommit,
   validateNamedWorkflowState,
   validateNamedWorkflowStateStructure,
 } from "../named-workflow-resume-validator.js";
@@ -515,5 +517,23 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
         trackingRevision: 0,
       });
     }
+
+    writeAutopilotState(testDir, unadvanced, sessionId);
+    writeFileSync(transcriptPath, `${signal}\n`);
+    const prepared = prepareNamedWorkflowAdvance(unadvanced, sessionId);
+    expect(prepared).not.toBeNull();
+
+    const appendedNextStageSignal = JSON.stringify({
+      sessionId,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Signal: PIPELINE_EXECUTION_COMPLETE" }],
+      },
+    });
+    writeFileSync(transcriptPath, `${signal}\n${appendedNextStageSignal}\n`);
+
+    expect(refreshNamedWorkflowBoundaryForCommit(prepared!)).toBe(false);
+    expect(readAutopilotState(testDir, sessionId)).toEqual(unadvanced);
   });
 });

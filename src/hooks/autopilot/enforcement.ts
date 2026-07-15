@@ -50,6 +50,7 @@ import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
 import {
   namedWorkflowRuntimeSupported,
   prepareNamedWorkflowAdvance,
+  refreshNamedWorkflowBoundaryForCommit,
   validateNamedWorkflowState,
   validateNamedWorkflowStateStructure,
 } from "./named-workflow-resume-validator.js";
@@ -297,9 +298,11 @@ export async function checkAutopilot(
       const committed = updateAutopilotStateIfExact(
         workingDir,
         state,
-        advanced,
+        advanced.updated,
         sessionId,
-        (current) => Boolean(validateNamedWorkflowState(current, sessionId)),
+        (current) =>
+          Boolean(validateNamedWorkflowState(current, sessionId)) &&
+          refreshNamedWorkflowBoundaryForCommit(advanced),
       );
       if (!committed) {
         return {
