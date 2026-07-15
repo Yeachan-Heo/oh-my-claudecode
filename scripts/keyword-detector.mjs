@@ -1082,6 +1082,8 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       if (!existsSync(target)) return null;
       const current = JSON.parse(readFileSync(target, 'utf8'));
       if (current?.active !== false || current?.workflow?.workflowName !== workflowName) return null;
+      const terminal = current?.phase === 'complete' && current?.pipelineTracking?.currentStageIndex === current?.workflow?.stages?.length;
+      if (terminal) return isValidWorkflowTrackingState(current, sessionId) ? null : { error: 'workflow_integrity_failure' };
       const resumed = { ...current, active: true };
       if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
       const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
@@ -1116,6 +1118,10 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
           const current = JSON.parse(readFileSync(target, 'utf8'));
           if (current?.active === true) return { error: 'active_workflow_conflict' };
           if (current?.active === false && current?.workflow) {
+            const terminal = current?.phase === 'complete' && current?.pipelineTracking?.currentStageIndex === current?.workflow?.stages?.length;
+            if (terminal) {
+              if (!isValidWorkflowTrackingState(current, sessionId)) return { error: 'workflow_integrity_failure' };
+            } else {
             if (current.workflow.workflowName !== workflow.workflowName) return { error: 'active_workflow_conflict' };
             const resumed = { ...current, active: true };
             if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
@@ -1125,6 +1131,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
             atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
             return { stagePrompt, workflowRunId: resumed.workflowRunId };
           }
+            }
         } catch {
           return { error: 'active_workflow_conflict' };
         }

@@ -773,5 +773,36 @@ describe('mode-state-io', () => {
       expect(recoverEmergencyStateFile(path)).toBe(true);
       expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, run: 'abandoned-owner' });
     });
+    it('discards a dead preparing transaction with a partial payload without touching the original primary', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-partial-payload.json');
+      const raw = JSON.stringify({ active: true, run: 'original' });
+      const transactionId = randomUUID();
+      const quarantinePath = `${path}.emergency-quarantine.${transactionId}`;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, raw);
+      writeFileSync(`${quarantinePath}.payload`, '{"active":false');
+      writeFileSync(`${path}.emergency-journal.json`, JSON.stringify({
+        version: 1, transactionId, owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+        originalDigest: createHash('sha256').update(raw).digest('hex'), intendedDigest: createHash('sha256').update(JSON.stringify({ active: false })).digest('hex'),
+        intent: 'publish', quarantinePath, phase: 'preparing',
+      }));
+
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(readFileSync(path, 'utf8')).toBe(raw);
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(`${quarantinePath}.payload`)).toBe(false);
+    });
+
+    it('removes an incomplete legacy journal only while its original primary remains present', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-partial-journal.json');
+      const raw = JSON.stringify({ active: true, run: 'original' });
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, raw);
+      writeFileSync(`${path}.emergency-journal.json`, '{"version":1');
+
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(readFileSync(path, 'utf8')).toBe(raw);
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
   });
 });

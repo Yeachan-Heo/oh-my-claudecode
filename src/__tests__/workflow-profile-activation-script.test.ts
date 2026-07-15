@@ -87,6 +87,24 @@ function advancePausedWorkflowState(state: any, transcriptPath: string, signal =
   state.phase = 'execution';
 }
 
+function completePausedWorkflowState(state: any, transcriptPath: string) {
+  advancePausedWorkflowState(state, transcriptPath);
+  const prefix = readFileSync(transcriptPath);
+  const record = JSON.stringify({ sessionId: 'workflow-activation-fixture', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Signal: PIPELINE_EXECUTION_COMPLETE' }] } });
+  const content = Buffer.concat([prefix, Buffer.from(`${record}\n`)]);
+  writeFileSync(transcriptPath, content);
+  const stableFile = fileIdentity(transcriptPath, content);
+  const boundary = state.pipelineTracking.activationBoundary;
+  const now = new Date().toISOString();
+  state.pipelineTracking.stages[1] = { id: 'execution', status: 'complete', iterations: 0, startedAt: now, completedAt: now };
+  state.pipelineTracking.currentStageIndex = 2;
+  state.pipelineTracking.trackingRevision = 2;
+  state.pipelineTracking.completionObservations.push({ stageId: 'execution', sessionId: 'workflow-activation-fixture', signalId: 'PIPELINE_EXECUTION_COMPLETE', lineNumber: 0, byteOffset: prefix.length, recordContentSha256: createHash('sha256').update(record).digest('hex'), stableFile, activationBoundary: boundary, observedAt: now });
+  state.pipelineTracking.activationBoundary = { ...boundary, byteOffset: stableFile.size, fileIdentity: stableFile };
+  state.active = false;
+  state.phase = 'complete';
+}
+
 function writeEmergencyJournal(statePath: string, original: Buffer, intent: 'clear' | 'publish', phase: 'preparing' | 'prepared' | 'quarantined' | 'published', intended?: Buffer, owner = { pid: 999999999, processStart: 'abandoned', nonce: randomUUID() }) {
   const transactionId = randomUUID();
   const quarantinePath = `${statePath}.emergency-quarantine.${transactionId}`;
@@ -240,6 +258,27 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     }
   });
 
+  it.each(HOOKS)('starts a fresh run after valid terminal workflow history through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    const transcriptPath = join(cwd, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl');
+    try {
+      runHook(script, '/autopilot --workflow release-flow first task', cwd, configHome);
+      const completed = JSON.parse(readFileSync(statePath, 'utf8'));
+      const previousRunId = completed.workflowRunId;
+      completePausedWorkflowState(completed, transcriptPath);
+      writeFileSync(statePath, JSON.stringify(completed, null, 2));
+
+      const output = runHook(script, '/autopilot --workflow release-flow second task', cwd, configHome);
+      const fresh = JSON.parse(readFileSync(statePath, 'utf8'));
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
+      expect(fresh).toMatchObject({ active: true, phase: 'ralplan', prompt: 'second task', pipelineTracking: { currentStageIndex: 0, trackingRevision: 0 } });
+      expect(fresh.workflowRunId).not.toBe(previousRunId);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it.each(HOOKS)('recovers a quarantined publish journal before resuming through %s', (script) => {
     const { cwd, configHome } = createFixture();
     const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
@@ -321,6 +360,55 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
       expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
       expect(existsSync(quarantinePath)).toBe(false);
       expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('reclaims a stale recovery claim and discards an uninitialized dead preparing journal through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      mkdirSync(join(statePath, '..'), { recursive: true });
+      const original = Buffer.from('{"active":false,"sentinel":"partial-preparing"}\n');
+      const transactionId = randomUUID();
+      const quarantinePath = `${statePath}.emergency-quarantine.${transactionId}`;
+      writeFileSync(statePath, original);
+      writeFileSync(`${statePath}.emergency-journal.json`, JSON.stringify({
+        version: 1,
+        transactionId,
+        owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+        quarantinePath,
+        phase: 'preparing',
+      }));
+      writeFileSync(`${statePath}.emergency-recovery.claim`, abandonedLockOwner());
+
+      const output = runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
+      expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(`${statePath}.emergency-recovery.claim`)).toBe(false);
+      expect(existsSync(quarantinePath)).toBe(false);
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, workflow: { workflowName: 'release-flow' } });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('discards a dead preparing publish journal with an absent payload when its original remains through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      mkdirSync(join(statePath, '..'), { recursive: true });
+      const original = Buffer.from('{"active":false,"sentinel":"missing-payload"}\n');
+      const intended = Buffer.from('{"active":false}\n');
+      const { quarantinePath } = writeEmergencyJournal(statePath, original, 'publish', 'preparing', intended);
+      writeFileSync(statePath, original);
+
+      const output = runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
+      expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(`${quarantinePath}.payload`)).toBe(false);
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, workflow: { workflowName: 'release-flow' } });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

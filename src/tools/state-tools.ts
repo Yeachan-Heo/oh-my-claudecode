@@ -989,6 +989,17 @@ export const stateWriteTool: ToolDefinition<{
 // state_clear - Clear state for a mode
 // ============================================================================
 
+function discoverAllRootSessionStateCandidates(mode: StateToolMode, root: string): StateFileDiscovery[] {
+  const paths = new Set<string>();
+  const roots = new Set([...getConvergedOmcRoots(root), getWorkingDirectoryLocalOmcRoot(root), getOmcRoot(root)]);
+  for (const omcRoot of roots) {
+    for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+      paths.add(join(omcRoot, 'state', 'sessions', sid, getStateFileName(mode)));
+    }
+  }
+  return discoverStatePaths([...paths]);
+}
+
 function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string): void {
   const broadPaths = new Set<string>([
     ...getLegacyStateFileCandidates('autopilot', root),
@@ -1398,7 +1409,10 @@ export const stateClearTool: ToolDefinition<{
       // isSessionCancelInProgress check sees the signal during the deletion window.
       // Mirrors the session_id path at line ~403. (patch: fix missing cancel signal)
       const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
-      const broadSessionCandidates = listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root));
+      const broadSessionCandidates = [...new Map([
+        ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root)),
+        ...discoverAllRootSessionStateCandidates(mode, root),
+      ].map((candidate) => [candidate.path, candidate])).values()];
       const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root));
       const broadOperationCandidates = [...new Map([
         ...broadLegacyCandidates,
@@ -1412,7 +1426,9 @@ export const stateClearTool: ToolDefinition<{
           : emergencyMutateStateFileIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot, null);
         if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
       }
-      if (broadNamedPrimaries.length === 0) {
+      const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !candidate.state.workflow);
+      const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !candidate.state.workflow);
+      if (broadLegacySignalCandidates.length > 0 || broadSessionSignalCandidates.length > 0) {
         const now = Date.now();
         const cancelSignalPayload = {
           active: true,
@@ -1421,19 +1437,22 @@ export const stateClearTool: ToolDefinition<{
           mode,
           source: 'state_clear' as const,
         };
-        const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
-        const legacyCandidate = broadLegacyCandidates[0];
-        const legacyPayload = {
-          ...cancelSignalPayload,
-          ...(legacyCandidate?.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {}),
-          ...(legacyCandidate ? { target_state_sha256: createHash('sha256').update(legacyCandidate.snapshot).digest('hex') } : {}),
-        };
-        try { writeStateFileLocked(legacySignalPath, legacyPayload); } catch { /* best-effort */ }
-        for (const sid of listSessionIds(root)) {
-          try {
-            const candidate = broadSessionCandidates.find((item) => item.path === resolveSessionStatePath(mode, sid, root)) ?? broadSessionCandidates.find((item) => item.ownerSessionId === sid);
-            writeSessionCancelSignal(root, candidate?.ownerSessionId ?? sid, mode, candidate);
-          } catch { /* best-effort */ }
+        const legacyCandidate = broadLegacySignalCandidates[0];
+        if (legacyCandidate) {
+          const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
+          const legacyPayload = {
+            ...cancelSignalPayload,
+            ...(legacyCandidate.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {}),
+            target_state_sha256: createHash('sha256').update(legacyCandidate.snapshot).digest('hex'),
+          };
+          try { writeStateFileLocked(legacySignalPath, legacyPayload); } catch { /* best-effort */ }
+        }
+        const signaledOwners = new Set<string>();
+        for (const candidate of broadSessionSignalCandidates) {
+          const owner = candidate.ownerSessionId;
+          if (!owner || signaledOwners.has(owner)) continue;
+          signaledOwners.add(owner);
+          try { writeSessionCancelSignal(root, owner, mode, candidate); } catch { /* best-effort */ }
         }
       }
       const runtimeCleanup = clearModeRuntimeArtifacts(mode, root);

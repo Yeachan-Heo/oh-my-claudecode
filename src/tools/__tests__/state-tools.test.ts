@@ -201,6 +201,23 @@ describe('state-tools', () => {
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'cancel-signal-state.json'))).toBe(false);
     });
 
+    it('signals legacy autopilot candidates beside named broad primaries', async () => {
+      const namedPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'mixed-named', 'autopilot-state.json');
+      const legacyPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'mixed-legacy', 'autopilot-state.json');
+      mkdirSync(dirname(namedPath), { recursive: true });
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(namedPath, JSON.stringify({ active: true, session_id: 'mixed-named', workflowRunId: '77777777-7777-4777-8777-777777777777', workflow: { profileHash: 'e'.repeat(64) } }));
+      writeFileSync(legacyPath, JSON.stringify({ active: true, session_id: 'mixed-legacy', workflowRunId: '88888888-8888-4888-8888-888888888888' }));
+
+      const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+      expect(result.isError).toBeUndefined();
+      expect(existsSync(namedPath)).toBe(false);
+      expect(existsSync(legacyPath)).toBe(false);
+      const signal = JSON.parse(readFileSync(join(dirname(legacyPath), 'cancel-signal-state.json'), 'utf8'));
+      expect(signal.target_workflow_run_id).toBe('88888888-8888-4888-8888-888888888888');
+      expect(existsSync(join(dirname(namedPath), 'cancel-signal-state.json'))).toBe(false);
+    });
+
     it('exact-clears every recovered named primary before session cleanup', async () => {
       const sessionId = 'multi-named-owner';
       const canonical = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
