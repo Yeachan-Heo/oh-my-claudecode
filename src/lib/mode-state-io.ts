@@ -244,6 +244,39 @@ export function writeStateFileLockedIf(
   }
 }
 
+export function writeStateFileLockedCreateIf(
+  filePath: string,
+  predicate: (current: Record<string, unknown> | null) => boolean,
+  transform: (current: Record<string, unknown> | null) => Record<string, unknown>,
+): ConditionalWriteResult {
+  if (!recoverEmergencyStateFile(filePath)) return 'failed';
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return 'failed';
+  try {
+    if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
+      try {
+        const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
+        atomicWriteJsonSync(filePath, replacement);
+      } finally {
+        delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
+        delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
+      }
+    }
+    let current: Record<string, unknown> | null = null;
+    if (existsSync(filePath)) {
+      try { current = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>; }
+      catch { return 'failed'; }
+    }
+    if (!predicate(current)) return 'skipped';
+    atomicWriteJsonSync(filePath, transform(current));
+    return 'written';
+  } catch {
+    return 'failed';
+  } finally {
+    releaseMutationLock(lock);
+  }
+}
+
 /**
  * Durable exact mutation for named workflow emergency cancellation. The journal
  * records every externally-visible step so a later reader can finish a partial

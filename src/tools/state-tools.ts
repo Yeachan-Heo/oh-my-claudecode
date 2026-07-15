@@ -33,6 +33,7 @@ import {
   getStateSessionOwner,
   writeStateFileLocked,
   writeStateFileLockedIf,
+  writeStateFileLockedCreateIf,
   clearStateFileLockedIf,
   emergencyMutateStateFileIf,
   recoverEmergencyStateFile,
@@ -962,12 +963,12 @@ export const stateWriteTool: ToolDefinition<{
           );
           if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
         }
-      } else if (mode === 'autopilot' && existsSync(statePath)) {
+      } else if (mode === 'autopilot') {
         let namedWorkflowExists = false;
-        const result = writeStateFileLockedIf(
+        const result = writeStateFileLockedCreateIf(
           statePath,
           (current) => {
-            if (!current.workflow) return true;
+            if (!current?.workflow) return true;
             namedWorkflowExists = true;
             return false;
           },

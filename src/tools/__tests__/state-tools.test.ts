@@ -42,6 +42,8 @@ describe('state-tools', () => {
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
     delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+    delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
   });
 
   describe('state_read', () => {
@@ -184,6 +186,23 @@ describe('state-tools', () => {
         expect(result.isError).toBe(true);
         expect(readFileSync(statePath)).toEqual(before);
       }
+    });
+
+    it('linearizes first state_write against a named activation winner', async () => {
+      const sessionId = 'named-first-write-race';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const namedWinner = { active: true, prompt: 'named task', session_id: sessionId, workflowRunId: '99999999-9999-4999-8999-999999999999', workflow: { profileHash: 'f'.repeat(64), stages: ['ralplan'] }, pipelineTracking: { currentStageIndex: 0, trackingRevision: 0, stages: [{ id: 'ralplan', status: 'active' }] } };
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH = statePath;
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(namedWinner)).toString('base64');
+
+      const rejected = await stateWriteTool.handler({ mode: 'autopilot', active: true, state: { prompt: 'legacy task' }, session_id: sessionId, workingDirectory: TEST_DIR });
+      expect(rejected.isError).toBe(true);
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toEqual(namedWinner);
+
+      rmSync(statePath, { force: true });
+      const firstWriter = await stateWriteTool.handler({ mode: 'autopilot', active: true, state: { prompt: 'legacy task' }, session_id: sessionId, workingDirectory: TEST_DIR });
+      expect(firstWriter.isError).toBeUndefined();
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, prompt: 'legacy task' });
     });
 
     it('rejects active named workflow identity and tracking mutations without changing bytes', async () => {

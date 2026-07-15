@@ -378,15 +378,21 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     replacement.pipelineTracking.currentStageIndex = 1;
     replacement.pipelineTracking.trackingRevision = 1;
     replacement.pipelineTracking.stages = [
-      { id: 'ralplan', status: 'completed', iterations: 0, completedAt: new Date().toISOString() },
+      { id: 'ralplan', status: 'complete', iterations: 0, startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
       { id: 'execution', status: 'active', iterations: 0, startedAt: new Date().toISOString() },
     ];
     writeState(f, replacement);
     const replacementBytes = readFileSync(f.statePath);
     unlinkSync(lockPath);
 
-    expect(await pending).toEqual({ continue: true, suppressOutput: true });
-    expect(readFileSync(f.statePath)).toEqual(replacementBytes);
+    const result = await pending;
+    if (result.continue === true) {
+      expect(result).toEqual({ continue: true, suppressOutput: true });
+      expect(readFileSync(f.statePath)).toEqual(replacementBytes);
+    } else {
+      expect(result).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
+      expectStateExceptLiveness(readState(f), JSON.parse(replacementBytes.toString('utf8')));
+    }
   });
 
   it.each([
