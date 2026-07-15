@@ -159,6 +159,16 @@ export function detectAnySignal(sessionId: string): AutopilotSignal | null {
 // ENFORCEMENT
 // ============================================================================
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+      typeof state === "object" &&
+      ["workflow", "workflowRunId", "pipelineTracking"].some((marker) =>
+        Object.prototype.hasOwnProperty.call(state, marker),
+      ),
+  );
+}
+
 const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 
 function isAwaitingConfirmation(state: unknown): boolean {
@@ -250,9 +260,9 @@ export async function checkAutopilot(
     return null;
   }
 
-  const hasNamedWorkflowMarkers = Boolean(state.workflow || state.workflowRunId || state.pipelineTracking);
+  const hasNamedMarkers = hasNamedWorkflowMarkers(state);
 
-  if (hasNamedWorkflowMarkers && (!state.workflow || !verifyWorkflowDescriptor(state.workflow))) {
+  if (hasNamedMarkers && (!state.workflow || !verifyWorkflowDescriptor(state.workflow))) {
     return {
       shouldBlock: false,
       message: "workflow_descriptor_integrity_failed",
@@ -260,7 +270,7 @@ export async function checkAutopilot(
     };
   }
 
-  if (hasNamedWorkflowMarkers && !namedWorkflowRuntimeSupported()) {
+  if (hasNamedMarkers && !namedWorkflowRuntimeSupported()) {
     return {
       shouldBlock: false,
       message:
@@ -269,7 +279,7 @@ export async function checkAutopilot(
     };
   }
 
-  if (hasNamedWorkflowMarkers) {
+  if (hasNamedMarkers) {
     const validated = validateNamedWorkflowState(state, sessionId);
     if (!validated) {
       return {
@@ -523,7 +533,7 @@ function checkPipelineAutopilot(
   // Check if the current stage's completion signal has been emitted
   const completionSignal = getCurrentCompletionSignal(tracking);
   if (
-    !state.workflow &&
+    !hasNamedWorkflowMarkers(state) &&
     completionSignal &&
     sessionId &&
     detectPipelineSignal(sessionId, completionSignal)

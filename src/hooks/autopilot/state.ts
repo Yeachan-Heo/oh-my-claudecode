@@ -122,6 +122,16 @@ export function writeAutopilotState(
   );
 }
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+      typeof state === "object" &&
+      ["workflow", "workflowRunId", "pipelineTracking"].some((marker) =>
+        Object.prototype.hasOwnProperty.call(state, marker),
+      ),
+  );
+}
+
 /**
  * Clear autopilot state
  */
@@ -130,7 +140,7 @@ export function clearAutopilotState(
   sessionId?: string,
   expectedState?: AutopilotState,
 ): boolean {
-  if (expectedState?.workflow && !namedWorkflowRuntimeSupported()) {
+  if (hasNamedWorkflowMarkers(expectedState) && !namedWorkflowRuntimeSupported()) {
     const stateFile = sessionId
       ? resolveSessionStatePath("autopilot", sessionId, directory)
       : resolveStatePath("autopilot", directory);
@@ -162,7 +172,7 @@ export function updateAutopilotStateIfCurrent(
   const stateFile = sessionId
     ? resolveSessionStatePath("autopilot", sessionId, directory)
     : resolveStatePath("autopilot", directory);
-  if (observed.workflow && !namedWorkflowRuntimeSupported()) {
+  if (hasNamedWorkflowMarkers(observed) && !namedWorkflowRuntimeSupported()) {
     const observedSnapshot = namedResumeIdentity(observed as unknown as Record<string, unknown>);
     return emergencyMutateStateFileIf(
       stateFile,

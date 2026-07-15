@@ -151,7 +151,7 @@ describe('state-tools', () => {
       const sessionId = 'stale-cleanup-owner';
       const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
       await stateWriteTool.handler({ mode: 'autopilot', active: true, session_id: sessionId, workingDirectory: TEST_DIR });
-      const replacement = { active: true, session_id: sessionId, workflowRunId: 'replacement-run' };
+      const replacement = { active: true, session_id: sessionId };
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = statePath;
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
 
@@ -159,8 +159,8 @@ describe('state-tools', () => {
       expect(JSON.parse(readFileSync(statePath, 'utf8'))).toEqual(replacement);
 
       const legacyPath = join(TEST_DIR, '.omc', 'state', 'autopilot-state.json');
-      writeFileSync(legacyPath, JSON.stringify({ active: true, session_id: sessionId, workflowRunId: 'old-run' }));
-      const legacyReplacement = { active: true, session_id: sessionId, workflowRunId: 'new-run' };
+      writeFileSync(legacyPath, JSON.stringify({ active: true, session_id: sessionId }));
+      const legacyReplacement = { active: true, session_id: sessionId, workflowRunId: 'replacement-run' };
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = legacyPath;
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(legacyReplacement)).toString('base64');
 
@@ -229,6 +229,53 @@ describe('state-tools', () => {
         expect(readFileSync(statePath)).toEqual(before);
       }
     });
+
+    it('rejects every own named-workflow marker, including falsy partial markers, without changing bytes', async () => {
+      const sessionId = 'named-own-marker-write';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      const markerStates = [
+        { workflow: false },
+        { workflowRunId: '' },
+        { pipelineTracking: null },
+        { workflow: { profileHash: 'invalid', stages: [] } },
+        {
+          workflow: { descriptorVersion: 1, workflowName: 'invalid', profileVersion: 1, profileHash: '0'.repeat(64), stages: ['ralplan', 'execution'] },
+          workflowRunId: '11111111-1111-4111-8111-111111111111',
+          pipelineTracking: {},
+        },
+      ];
+
+      for (const status of [
+        { active: true },
+        { active: false },
+        { active: false, phase: 'complete' },
+      ]) {
+        for (const marker of markerStates) {
+          writeFileSync(statePath, JSON.stringify({ ...status, session_id: sessionId, ...marker }));
+          const before = readFileSync(statePath);
+          const result = await stateWriteTool.handler({
+            mode: 'autopilot',
+            active: true,
+            state: { prompt: 'generic overwrite' },
+            session_id: sessionId,
+            workingDirectory: TEST_DIR,
+          });
+          expect(result.isError).toBe(true);
+          expect(readFileSync(statePath)).toEqual(before);
+        }
+      }
+      rmSync(statePath, { force: true });
+      const markerCreation = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: true,
+        state: { workflow: false },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      expect(markerCreation.isError).toBe(true);
+      expect(existsSync(statePath)).toBe(false);
+    });
   });
 
     it('pauses named autopilot exactly without flock', async () => {
@@ -271,15 +318,50 @@ describe('state-tools', () => {
       mkdirSync(dirname(namedPath), { recursive: true });
       mkdirSync(dirname(legacyPath), { recursive: true });
       writeFileSync(namedPath, JSON.stringify({ active: true, session_id: 'mixed-named', workflowRunId: '77777777-7777-4777-8777-777777777777', workflow: { profileHash: 'e'.repeat(64) } }));
-      writeFileSync(legacyPath, JSON.stringify({ active: true, session_id: 'mixed-legacy', workflowRunId: '88888888-8888-4888-8888-888888888888' }));
+      writeFileSync(legacyPath, JSON.stringify({ active: true, session_id: 'mixed-legacy' }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
       const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
       expect(result.isError).toBeUndefined();
       expect(existsSync(namedPath)).toBe(false);
       expect(existsSync(legacyPath)).toBe(false);
       const signal = JSON.parse(readFileSync(join(dirname(legacyPath), 'cancel-signal-state.json'), 'utf8'));
-      expect(signal.target_workflow_run_id).toBe('88888888-8888-4888-8888-888888888888');
+      expect(signal.target_workflow_run_id).toBeUndefined();
       expect(existsSync(join(dirname(namedPath), 'cancel-signal-state.json'))).toBe(false);
+    });
+
+    it('fails closed for active, paused, and terminal malformed named markers without legacy signals or deletion', async () => {
+      const sessionId = 'named-own-marker-clear';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      const markerStates = [
+        { workflow: false },
+        { workflowRunId: '' },
+        { pipelineTracking: null },
+        { workflow: { profileHash: 'invalid', stages: [] } },
+        {
+          workflow: { descriptorVersion: 1, workflowName: 'invalid', profileVersion: 1, profileHash: '0'.repeat(64), stages: ['ralplan', 'execution'] },
+          workflowRunId: '11111111-1111-4111-8111-111111111111',
+          pipelineTracking: {},
+        },
+      ];
+
+      for (const status of [
+        { active: true },
+        { active: false },
+        { active: false, phase: 'complete' },
+      ]) {
+        for (const marker of markerStates) {
+          rmSync(signalPath, { force: true });
+          writeFileSync(statePath, JSON.stringify({ ...status, session_id: sessionId, ...marker }));
+          const before = readFileSync(statePath);
+          const result = await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
+          expect(result.isError).toBe(true);
+          expect(readFileSync(statePath)).toEqual(before);
+          expect(existsSync(signalPath)).toBe(false);
+        }
+      }
     });
 
     it('exact-clears every recovered named primary before session cleanup', async () => {
@@ -324,6 +406,7 @@ describe('state-tools', () => {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, JSON.stringify({ active: true, session_id: owner, workflowRunId: run, workflow: { profileHash: 'c'.repeat(64) } }));
       }
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
       expect(emergencyMutateStateFileIf(otherPath, (state) => state.session_id === 'recovery-owner-b', (state) => ({ ...state, active: false }))).toBe(false);
       delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
@@ -342,14 +425,14 @@ describe('state-tools', () => {
       try {
         const statePath = join(home, '.omc', 'state', 'autopilot-state.json');
         mkdirSync(dirname(statePath), { recursive: true });
-        const state = { active: true, project_path: TEST_DIR, workflowRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
+        const state = { active: true, project_path: TEST_DIR };
         writeFileSync(statePath, JSON.stringify(state));
 
         const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
         expect(result.isError).toBeUndefined();
         expect(existsSync(statePath)).toBe(false);
         const signal = JSON.parse(readFileSync(join(dirname(statePath), 'cancel-signal-state.json'), 'utf8'));
-        expect(signal.target_workflow_run_id).toBe(state.workflowRunId);
+        expect(signal.target_workflow_run_id).toBeUndefined();
         expect(signal.target_state_sha256).toMatch(/^[a-f0-9]{64}$/);
       } finally {
         if (previousHome === undefined) delete process.env.HOME;
@@ -458,10 +541,11 @@ describe('state-tools', () => {
           mkdirSync(dirname(path), { recursive: true });
         }
         writeFileSync(projectAPath, JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workflow: { profileHash: 'a'.repeat(64) } }));
-        writeFileSync(projectALegacyPath, JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'abababab-abab-4bab-8bab-abababababab' }));
+        writeFileSync(projectALegacyPath, JSON.stringify({ active: true, project_path: TEST_DIR }));
         writeFileSync(projectBPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', workflow: { profileHash: 'b'.repeat(64) } }));
         writeFileSync(projectBRecoveryPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bdbdbdbd-bdbd-4dbd-8dbd-bdbdbdbdbdbd', workflow: { profileHash: 'd'.repeat(64) } }));
         writeFileSync(projectBLegacyPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc' }));
+        process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
         process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
         expect(emergencyMutateStateFileIf(projectBPath, (state) => state.project_path === otherProject, (state) => ({ ...state, active: false }))).toBe(false);
@@ -511,6 +595,7 @@ describe('state-tools', () => {
       for (const [path, run] of [[canonical, '22222222-2222-4222-8222-222222222222'], [legacy, '33333333-3333-4333-8333-333333333333']] as const) {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, JSON.stringify({ active: true, session_id: 'broad-journal-owner', workflowRunId: run, workflow: { profileHash: 'b'.repeat(64) } }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
         process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
         expect(emergencyMutateStateFileIf(path, (state) => state.workflowRunId === run, (state) => ({ ...state, active: false }))).toBe(false);
         delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
@@ -532,6 +617,7 @@ describe('state-tools', () => {
         const statePath = join(getOmcRoot(TEST_DIR), 'state', 'sessions', 'central-journal-owner', 'autopilot-state.json');
         mkdirSync(dirname(statePath), { recursive: true });
         writeFileSync(statePath, JSON.stringify({ active: true, session_id: 'central-journal-owner', workflowRunId: '66666666-6666-4666-8666-666666666666', workflow: { profileHash: 'd'.repeat(64) } }));
+        process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
         process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
         expect(emergencyMutateStateFileIf(statePath, (state) => state.session_id === 'central-journal-owner', (state) => ({ ...state, active: false }))).toBe(false);
         delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
@@ -792,9 +878,9 @@ describe('state-tools', () => {
     });
 
     it('does not count a broad-clear replacement run as deleted', async () => {
-      await stateWriteTool.handler({ mode: 'autopilot', active: true, state: { workflowRunId: 'old-run' }, workingDirectory: TEST_DIR });
+      await stateWriteTool.handler({ mode: 'autopilot', active: true, workingDirectory: TEST_DIR });
       const statePath = join(TEST_DIR, '.omc', 'state', 'autopilot-state.json');
-      const replacement = { active: true, workflowRunId: 'replacement-run' };
+      const replacement = { active: true };
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH = statePath;
       process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
 
@@ -808,14 +894,14 @@ describe('state-tools', () => {
     it('clears a stranded recovered workflow by its captured path in broad mode', async () => {
       const strandedPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'stale-dir', 'autopilot-state.json');
       mkdirSync(dirname(strandedPath), { recursive: true });
-      writeFileSync(strandedPath, JSON.stringify({ active: true, session_id: 'owner-session', workflowRunId: '44444444-4444-4444-8444-444444444444' }));
+      writeFileSync(strandedPath, JSON.stringify({ active: true, session_id: 'owner-session' }));
 
       const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
       expect(existsSync(strandedPath)).toBe(false);
       expect(result.content[0].text).toContain('Locations cleared: 1');
       expect(result.isError).not.toBe(true);
       const signalPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'owner-session', 'cancel-signal-state.json');
-      expect(JSON.parse(readFileSync(signalPath, 'utf8')).target_workflow_run_id).toBe('44444444-4444-4444-8444-444444444444');
+      expect(JSON.parse(readFileSync(signalPath, 'utf8')).target_workflow_run_id).toBeUndefined();
     });
 
     it('reports a broad converged-path replacement as incomplete', async () => {
@@ -1457,11 +1543,11 @@ describe('state-tools', () => {
       const sessionId = 'recovered-workflow-owner';
       const strandedPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'stale-workflow-dir', 'autopilot-state.json');
       mkdirSync(dirname(strandedPath), { recursive: true });
-      writeFileSync(strandedPath, JSON.stringify({ active: true, session_id: sessionId, workflowRunId: '33333333-3333-4333-8333-333333333333' }));
+      writeFileSync(strandedPath, JSON.stringify({ active: true, session_id: sessionId }));
 
       await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
       const signalPath = join(dirname(strandedPath), 'cancel-signal-state.json');
-      expect(JSON.parse(readFileSync(signalPath, 'utf8')).target_workflow_run_id).toBe('33333333-3333-4333-8333-333333333333');
+      expect(JSON.parse(readFileSync(signalPath, 'utf8')).target_workflow_run_id).toBeUndefined();
       expect(existsSync(strandedPath)).toBe(false);
     });
 

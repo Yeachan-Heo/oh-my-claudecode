@@ -670,6 +670,51 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     }
   });
 
+  it.each(HOOKS)('preserves partial own named markers for generic and named activation through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      mkdirSync(join(statePath, '..'), { recursive: true });
+      for (const marker of ['workflow', 'workflowRunId', 'pipelineTracking']) {
+        writeFileSync(statePath, JSON.stringify({ active: false, [marker]: false, sentinel: `partial-own-${marker}` }, null, 2));
+        const before = readFileSync(statePath);
+        for (const prompt of ['autopilot legacy activation', '/autopilot --workflow release-flow named activation']) {
+          const output = runHook(script, prompt, cwd, configHome);
+          expect(output.hookSpecificOutput?.additionalContext).toContain('workflow_descriptor_integrity_failed');
+          expect(readFileSync(statePath)).toEqual(before);
+        }
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves foreign shared-home recovery claims and publication temps while the template activates project A', () => {
+    const script = join(ROOT, 'templates', 'hooks', 'keyword-detector.mjs');
+    const projectA = createFixture();
+    const projectB = createFixture();
+    const globalStatePath = join(projectA.cwd, '.omc', 'state', 'autopilot-state.json');
+    try {
+      mkdirSync(join(globalStatePath, '..'), { recursive: true });
+      const foreignState = Buffer.from(JSON.stringify({ active: true, project_path: projectB.cwd, sentinel: 'project-b' }, null, 2));
+      for (const artifact of [
+        `${globalStatePath}.emergency-recovery.claim`,
+        `${globalStatePath}.emergency-recovery.claim.999999999.1.${randomUUID()}.tmp`,
+      ]) {
+        writeFileSync(globalStatePath, foreignState);
+        writeFileSync(artifact, abandonedLockOwner());
+        const before = readFileSync(artifact);
+        const output = runHook(script, 'autopilot activate project A', projectA.cwd, projectA.configHome, undefined, { HOME: projectA.cwd, USERPROFILE: projectA.cwd });
+        expect(output.hookSpecificOutput?.additionalContext).toContain('autopilot');
+        expect(readFileSync(globalStatePath)).toEqual(foreignState);
+        expect(readFileSync(artifact)).toEqual(before);
+        rmSync(artifact, { force: true });
+      }
+    } finally {
+      rmSync(projectA.cwd, { recursive: true, force: true });
+      rmSync(projectB.cwd, { recursive: true, force: true });
+    }
+  });
   it.each([
     ['/autopilot --workflow', 'Use /autopilot --workflow <name> <task>.'],
     ['/autopilot --workflow=release-flow ship it', 'Use --workflow <name> followed by a task.'],

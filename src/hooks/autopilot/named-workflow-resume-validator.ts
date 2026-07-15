@@ -403,6 +403,10 @@ export function validateNamedWorkflowState(
     tracking.currentStageIndex > maximumStageIndex ||
     tracking.trackingRevision !== tracking.currentStageIndex ||
     tracking.completionObservations.length !== tracking.currentStageIndex ||
+    (terminal &&
+      (tracking.currentStageIndex !== workflow.stages.length ||
+        tracking.trackingRevision !== workflow.stages.length ||
+        tracking.completionObservations.length !== workflow.stages.length)) ||
     !validBoundary(tracking.activationBoundary, sessionId, root) ||
     tracking.stages.length !== workflow.stages.length
   )

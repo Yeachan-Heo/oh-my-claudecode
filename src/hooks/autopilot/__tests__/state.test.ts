@@ -8,8 +8,10 @@ import {
   isAutopilotActive,
   initAutopilot,
   transitionPhase,
+  updateAutopilotStateIfCurrent,
   updateExpansion,
   updateExecution,
+  writeAutopilotState,
 } from "../state.js";
 
 
@@ -22,6 +24,7 @@ describe("AutopilotState", () => {
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
   });
 
   describe("readAutopilotState", () => {
@@ -114,5 +117,30 @@ describe('workflow profile state contract (#3487)', () => {
     expect(state).not.toBeNull();
     expect(persisted?.workflow).toBeUndefined();
     expect(persisted?.pipelineTracking).toBeUndefined();
+  });
+
+  it('uses an exact-snapshot emergency pause for falsy named markers without flock', () => {
+    const sessionId = 'partial-named-no-flock';
+    const state = initAutopilot(testDir, 'partial named task', sessionId)!;
+    const partialNamedState = {
+      ...state,
+      workflowRunId: '',
+    } as typeof state;
+    writeAutopilotState(testDir, partialNamedState, sessionId);
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+    const paused = updateAutopilotStateIfCurrent(
+      testDir,
+      partialNamedState,
+      { active: false },
+      sessionId,
+    );
+
+    expect(paused).toMatchObject({ active: false, workflowRunId: '' });
+    expect(readAutopilotState(testDir, sessionId)).toMatchObject({
+      active: false,
+      workflowRunId: '',
+    });
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
   });
 });

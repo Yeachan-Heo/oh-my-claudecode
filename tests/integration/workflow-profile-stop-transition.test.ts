@@ -433,6 +433,26 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toEqual(workflowIntegrityFailure);
   });
 
+  it('rejects a two-stage terminal state with a truncated authenticated completion chain', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    invoke(f);
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    invoke(f);
+    const truncated = readState(f);
+    truncated.pipelineTracking.currentStageIndex = 1;
+    truncated.pipelineTracking.trackingRevision = 1;
+    truncated.pipelineTracking.activationBoundary = structuredClone(
+      truncated.pipelineTracking.completionObservations[1].activationBoundary,
+    );
+    truncated.pipelineTracking.completionObservations =
+      truncated.pipelineTracking.completionObservations.slice(0, 1);
+    writeState(f, truncated);
+
+    expect(invoke(f)).toEqual(workflowIntegrityFailure);
+  });
+
   it('fails closed when named markers remain after the workflow descriptor is removed', () => {
     const f = fixture(kind);
     const state = workflowState(f);

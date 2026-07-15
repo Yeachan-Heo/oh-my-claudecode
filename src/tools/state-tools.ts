@@ -49,9 +49,10 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
-import { namedWorkflowRuntimeSupported } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from '../hooks/autopilot/named-workflow-resume-validator.js';
 import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
+import type { AutopilotState } from '../hooks/autopilot/types.js';
 
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
@@ -92,6 +93,34 @@ function readJsonRecord(filePath: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+const NAMED_WORKFLOW_MARKERS = ['workflow', 'workflowRunId', 'pipelineTracking'] as const;
+
+function hasOwnProperty(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** Any own named-workflow marker, including a falsy value, makes the record runtime-owned. */
+function hasNamedWorkflowMarker(record: Record<string, unknown> | null | undefined): boolean {
+  if (!record) return false;
+  return NAMED_WORKFLOW_MARKERS.some((marker) => hasOwnProperty(record, marker));
+}
+
+function hasValidatedNamedWorkflowTuple(record: Record<string, unknown>): boolean {
+  if (!NAMED_WORKFLOW_MARKERS.every((marker) => hasOwnProperty(record, marker))) return false;
+  const sessionId = getStateSessionOwner(record);
+  return typeof sessionId === 'string' && validateNamedWorkflowState(record as unknown as AutopilotState, sessionId) !== null;
+}
+
+/** The portable emergency path may only pause or clear an exact discovered run. */
+function isExactEmergencyNamedMutation(
+  record: Record<string, unknown>,
+  requestedRunId: string | undefined,
+): boolean {
+  return hasNamedWorkflowMarker(record) &&
+    typeof requestedRunId === 'string' &&
+    record.workflowRunId === requestedRunId;
 }
 
 
@@ -181,6 +210,30 @@ function clearDiscoveredStateCandidate(
     (current) => predicate(current) && JSON.stringify(current) === candidate.snapshot,
     recoveryOptions,
   );
+}
+
+function clearAutopilotMarkerCandidate(candidate: StateFileDiscovery, root: string): boolean {
+  if (!hasNamedWorkflowMarker(candidate.state)) return false;
+  const predicate = (current: Record<string, unknown>) =>
+    hasNamedWorkflowMarker(current) &&
+    isStateCandidateForProject('autopilot', candidate.path, current, root) &&
+    JSON.stringify(current) === candidate.snapshot;
+
+  if (!namedWorkflowRuntimeSupported()) {
+    return emergencyMutateStateFileIf(
+      candidate.path,
+      predicate,
+      null,
+      emergencyRecoveryOptionsForProject('autopilot', candidate.path, root),
+    );
+  }
+
+  if (!hasValidatedNamedWorkflowTuple(candidate.state)) return false;
+  return clearStateFileLockedIf(
+    candidate.path,
+    predicate,
+    emergencyRecoveryOptionsForProject('autopilot', candidate.path, root),
+  ) === 'cleared';
 }
 
 function discoverStatePaths(paths: string[]): StateFileDiscovery[] {
@@ -982,6 +1035,15 @@ export const stateWriteTool: ToolDefinition<{
         }
       }
 
+      const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
+      const isExactEmergencyPauseRequest = builtState.active === false &&
+        requestedRunId !== undefined &&
+        !hasOwnProperty(builtState, 'workflow') &&
+        !hasOwnProperty(builtState, 'pipelineTracking');
+      if (mode === 'autopilot' && hasNamedWorkflowMarker(builtState) && !isExactEmergencyPauseRequest) {
+        throw new Error('named autopilot workflow markers are runtime-owned; only exact-run emergency pause is allowed');
+      }
+
       // Add metadata
       const stateWithMeta = {
         ...builtState,
@@ -996,20 +1058,22 @@ export const stateWriteTool: ToolDefinition<{
       if (mode === 'autopilot' && builtState.active === false) {
         let currentState: Record<string, unknown> | null = null;
         try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled below */ }
-        const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
-        if (currentState?.workflow && !namedWorkflowRuntimeSupported()) {
+        if (hasNamedWorkflowMarker(currentState ?? {})) {
+          if (namedWorkflowRuntimeSupported()) {
+            throw new Error('named autopilot workflow state is runtime-owned; only exact-snapshot emergency pause is allowed without the named runtime');
+          }
           const snapshot = JSON.stringify(currentState);
           const written = emergencyMutateStateFileIf(
             statePath,
-            (current) => JSON.stringify(current) === snapshot && current.workflowRunId === requestedRunId,
+            (current) => JSON.stringify(current) === snapshot && isExactEmergencyNamedMutation(current, requestedRunId),
             (current) => ({ ...current, active: false, _meta: stateWithMeta._meta }),
           );
           if (!written) throw new Error('autopilot run changed before deactivation');
         } else {
           const result = writeStateFileLockedIf(
             statePath,
-            (current) => !current.workflow || (typeof current.workflowRunId === 'string' && current.workflowRunId === requestedRunId),
-            (current) => current.workflow ? { ...current, active: false, _meta: stateWithMeta._meta } : stateWithMeta,
+            (current) => !hasNamedWorkflowMarker(current),
+            () => stateWithMeta,
           );
           if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
         }
@@ -1018,7 +1082,7 @@ export const stateWriteTool: ToolDefinition<{
         const result = writeStateFileLockedCreateIf(
           statePath,
           (current) => {
-            if (!current?.workflow) return true;
+            if (!hasNamedWorkflowMarker(current)) return true;
             namedWorkflowExists = true;
             return false;
           },
@@ -1209,20 +1273,18 @@ export const stateClearTool: ToolDefinition<{
           ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
         ].map((candidate) => [candidate.path, candidate])).values()];
         const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
-        const namedPrimaries = mode === 'autopilot' ? operationCandidates.filter((candidate) => Boolean(candidate.state.workflow)) : [];
+        const namedPrimaries = mode === 'autopilot' ? operationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
         const namedPrimaryPaths = new Set(namedPrimaries.map((candidate) => candidate.path));
         let directCleared = 0;
         for (const candidate of namedPrimaries) {
-          const success = namedWorkflowRuntimeSupported()
-            ? clearStateFileLockedIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, emergencyRecoveryOptionsForProject(mode, candidate.path, root)) === 'cleared'
-            : emergencyMutateStateFileIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, null, emergencyRecoveryOptionsForProject(mode, candidate.path, root));
+          const success = clearAutopilotMarkerCandidate(candidate, root);
           if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
           directCleared += 1;
         }
         const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => !namedPrimaryPaths.has(candidate.path)));
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        const sessionSignalCandidates = operationCandidates.filter((candidate) => !candidate.state.workflow);
+        const sessionSignalCandidates = operationCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
         const signaledCandidateDirs = new Set<string>();
         for (const candidate of sessionSignalCandidates) {
           const signalDir = dirname(candidate.path);
@@ -1281,11 +1343,9 @@ export const stateClearTool: ToolDefinition<{
               }
               const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
               const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
-              const ownerNamedPrimary = mode === 'autopilot' && ownerDirectCandidate?.state.workflow ? ownerDirectCandidate : undefined;
+              const ownerNamedPrimary = mode === 'autopilot' && ownerDirectCandidate && hasNamedWorkflowMarker(ownerDirectCandidate.state) ? ownerDirectCandidate : undefined;
               if (ownerNamedPrimary) {
-                const success = namedWorkflowRuntimeSupported()
-                  ? clearStateFileLockedIf(ownerNamedPrimary.path, (current) => JSON.stringify(current) === ownerNamedPrimary.snapshot, emergencyRecoveryOptionsForProject(mode, ownerNamedPrimary.path, root)) === 'cleared'
-                  : emergencyMutateStateFileIf(ownerNamedPrimary.path, (current) => JSON.stringify(current) === ownerNamedPrimary.snapshot, null, emergencyRecoveryOptionsForProject(mode, ownerNamedPrimary.path, root));
+                const success = clearAutopilotMarkerCandidate(ownerNamedPrimary, root);
                 if (!success || existsSync(ownerNamedPrimary.path)) throw new Error('primary state mutation failed; dependent state preserved');
               } else {
                 writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
@@ -1422,7 +1482,7 @@ export const stateClearTool: ToolDefinition<{
               }
             }
             const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
-            if (mode === 'autopilot' && ownerCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
+            if (mode === 'autopilot' && ownerCandidates.some((candidate) => hasNamedWorkflowMarker(candidate.state)) && !namedWorkflowRuntimeSupported()) {
               throw new Error('unsupported-runtime');
             }
             const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
@@ -1515,15 +1575,13 @@ export const stateClearTool: ToolDefinition<{
         ...broadSessionCandidates,
         ...broadConvergedCandidates,
       ].map((candidate) => [candidate.path, candidate])).values()];
-      const broadNamedPrimaries = mode === 'autopilot' ? broadOperationCandidates.filter((candidate) => Boolean(candidate.state.workflow)) : [];
+      const broadNamedPrimaries = mode === 'autopilot' ? broadOperationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
       for (const candidate of broadNamedPrimaries) {
-        const success = namedWorkflowRuntimeSupported()
-          ? clearStateFileLockedIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, emergencyRecoveryOptionsForProject(mode, candidate.path, root)) === 'cleared'
-          : emergencyMutateStateFileIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, null, emergencyRecoveryOptionsForProject(mode, candidate.path, root));
+        const success = clearAutopilotMarkerCandidate(candidate, root);
         if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
       }
-      const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !candidate.state.workflow);
-      const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !candidate.state.workflow);
+      const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+      const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
       if (broadLegacySignalCandidates.length > 0 || broadSessionSignalCandidates.length > 0) {
         const now = Date.now();
         const cancelSignalPayload = {

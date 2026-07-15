@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
-import { checkPersistentModes } from "./index.js";
+import { checkPersistentModes, createHookOutput } from "./index.js";
 import { activateUltrawork, deactivateUltrawork } from "../ultrawork/index.js";
 
 function writePendingTodo(tempDir: string, content: string): void {
@@ -75,6 +75,61 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
 
       const result = await checkPersistentModes(undefined, tempDir);
       expect(result.shouldBlock).toBe(false);
+    });
+
+    it("propagates a named workflow integrity diagnostic through the public Stop output", async () => {
+      const sessionId = "partial-named-diagnostic";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          phase: "ralplan",
+          session_id: sessionId,
+          project_path: tempDir,
+          started_at: new Date().toISOString(),
+          workflow: false,
+        }),
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+
+      expect(result).toMatchObject({
+        shouldBlock: false,
+        mode: "autopilot",
+        message: "workflow_descriptor_integrity_failed",
+      });
+      expect(createHookOutput(result)).toEqual({
+        continue: true,
+        message: "workflow_descriptor_integrity_failed",
+      });
+    });
+
+    it("honors requested_at cancellation for an active non-autopilot mode beside a terminal named record", async () => {
+      const sessionId = "terminal-named-cancel-coexist";
+      activateUltrawork("Finish the task", sessionId, tempDir);
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          phase: "complete",
+          session_id: sessionId,
+          project_path: tempDir,
+          started_at: new Date().toISOString(),
+          workflow: false,
+        }),
+      );
+      writeFileSync(
+        join(sessionDir, "cancel-signal-state.json"),
+        JSON.stringify({ requested_at: new Date().toISOString() }),
+      );
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: false,
+        mode: "none",
+      });
     });
 
     it("should support session-scoped state files", async () => {

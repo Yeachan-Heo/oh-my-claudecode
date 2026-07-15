@@ -82,6 +82,27 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     });
   });
 
+  it.each([
+    ['workflow', false],
+    ['workflowRunId', ''],
+    ['pipelineTracking', null],
+  ])('fails closed without mutation for a falsy own %s marker', async (marker, value) => {
+    const sessionId = `falsy-marker-${marker}`;
+    const base = initAutopilot(testDir, 'ship the release', sessionId)!;
+    const partialNamed = { ...base, [marker]: value } as typeof base;
+    writeAutopilotState(testDir, partialNamed, sessionId);
+    const statePath = join(testDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+    const before = readFileSync(statePath);
+
+    await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
+      shouldBlock: false,
+      message: 'workflow_descriptor_integrity_failed',
+      phase: 'expansion',
+    });
+
+    expect(readFileSync(statePath)).toEqual(before);
+  });
+
   it("dispatches a valid named state without legacy mutation", async () => {
     const sessionId = "named-reader-session";
     const base = initAutopilot(testDir, "ship the release", sessionId)!;
@@ -395,6 +416,16 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       success: false,
       message: "No autopilot session available to resume",
     });
+
+    const truncatedTerminal = structuredClone(terminal);
+    truncatedTerminal.pipelineTracking!.currentStageIndex = 1;
+    truncatedTerminal.pipelineTracking!.trackingRevision = 1;
+    truncatedTerminal.pipelineTracking!.completionObservations =
+      truncatedTerminal.pipelineTracking!.completionObservations!.slice(0, 1);
+    truncatedTerminal.pipelineTracking!.activationBoundary = structuredClone(
+      terminal.pipelineTracking!.completionObservations![1].activationBoundary,
+    );
+    expect(validateNamedWorkflowState(truncatedTerminal, sessionId)).toBeNull();
 
     const malformedTerminal = structuredClone(terminal);
     malformedTerminal.pipelineTracking!.activationBoundary = structuredClone(

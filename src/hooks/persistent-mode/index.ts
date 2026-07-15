@@ -59,6 +59,8 @@ import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 import type { IdleNotificationRepoState } from './idle-repo-state.js';
 import { truncatePromptForEcho } from '../../lib/truncate-prompt.js';
 import { isModeActive } from '../mode-registry/index.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from '../autopilot/named-workflow-resume-validator.js';
+import type { AutopilotState } from '../autopilot/types.js';
 
 export interface ToolErrorState {
   tool_name: string;
@@ -108,6 +110,42 @@ const TERMINAL_WORKFLOW_PHASES = new Set([
   'stopped',
 ]);
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+      typeof state === 'object' &&
+      ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) =>
+        Object.prototype.hasOwnProperty.call(state, marker),
+      ),
+  );
+}
+
+function isEnforceableNamedAutopilotState(
+  state: Record<string, unknown> | null,
+  directory: string,
+  sessionId?: string,
+): boolean {
+  if (
+    !state ||
+    !sessionId ||
+    !hasNamedWorkflowMarkers(state) ||
+    state.active !== true ||
+    state.session_id !== sessionId ||
+    isTerminalWorkflowModeState(state) ||
+    typeof state.project_path !== 'string' ||
+    !namedWorkflowRuntimeSupported()
+  ) {
+    return false;
+  }
+
+  try {
+    return resolveToWorktreeRoot(state.project_path) === resolveToWorktreeRoot(directory)
+      && Boolean(validateNamedWorkflowState(state as unknown as AutopilotState, sessionId));
+  } catch {
+    return false;
+  }
+}
+
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
 
@@ -120,10 +158,10 @@ export function shouldWriteStateBack(statePath: string | null | undefined): bool
  * Used to prevent stop-hook re-enforcement races during /cancel.
  */
 function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
-  // Named workflows never honor an out-of-band stop signal: only their exact
-  // primary pause/delete transaction is authoritative for the active run.
+  // An out-of-band cancel signal is not authoritative only for an active,
+  // current-project/session, nonterminal named run that Stop can enforce.
   const autopilot = readModeState<Record<string, unknown>>('autopilot', directory, sessionId);
-  if (autopilot?.workflow) return false;
+  if (isEnforceableNamedAutopilotState(autopilot, directory, sessionId)) return false;
   let cancelSignalPath: string | undefined;
 
   if (sessionId) {
@@ -2260,9 +2298,13 @@ async function resolvePersistentModeBlock(
       return null;
     }
     const autopilotResult = await checkAutopilot(sessionId, workingDir);
-    if (!autopilotResult?.shouldBlock) return null;
+    if (!autopilotResult) return null;
+    const isNamedDiagnostic =
+      autopilotResult.message === 'workflow_descriptor_integrity_failed' ||
+      autopilotResult.message.startsWith('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+    if (!autopilotResult.shouldBlock && !isNamedDiagnostic) return null;
     return {
-      shouldBlock: true,
+      shouldBlock: autopilotResult.shouldBlock,
       message: autopilotResult.message,
       mode: 'autopilot',
       metadata: {

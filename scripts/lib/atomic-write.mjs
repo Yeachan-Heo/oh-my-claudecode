@@ -465,6 +465,33 @@ function recoveryGenerationsAuthorized(filePath, journal, authorizeState) {
   return authenticatedJournalGeneration;
 }
 
+/** Shared-home recovery claims contain no project identity, so pre-existing
+ * claim publications are never attributable to the caller and must survive. */
+function hasUnattributableRecoveryClaimArtifact(filePath) {
+  const directory = dirname(filePath);
+  const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tempPattern = new RegExp(`^${base}\\.emergency-recovery\\.claim\\.\\d+\\.\\d+\\.[0-9a-f-]{36}\\.tmp$`, 'i');
+  try {
+    return existsSync(`${filePath}.emergency-recovery.claim`) || readdirSync(directory).some((name) => tempPattern.test(name));
+  } catch (error) { return error?.code === 'ENOENT' ? false : true; }
+}
+
+function sharedRecoveryArtifactsAuthorized(filePath, authorizeState) {
+  if (!authorizeState) return true;
+  if (hasUnattributableRecoveryClaimArtifact(filePath)) return false;
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) {
+    if (!existsSync(filePath)) return true;
+    try {
+      const state = JSON.parse(readFileSync(filePath, 'utf8'));
+      return state !== null && typeof state === 'object' && !Array.isArray(state) && authorizeState(state);
+    } catch { return false; }
+  }
+  const journal = readEmergencyJournal(journalPath);
+  return journal !== null && recoveryGenerationsAuthorized(filePath, journal, authorizeState);
+}
+
+
 function replacePrimaryDuringRecoveryForTest(filePath) {
   if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_CAPTURE_REPLACEMENT_BASE64) return;
   try {
@@ -503,28 +530,28 @@ function removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine) {
 export function recoverEmergencyStateFile(filePath, options) {
   const authorizeState = options?.authorizeState;
   const journalPath = emergencyJournalPath(filePath);
+  // Prefilter before taking a claim so stale shared-home artifacts cannot be
+  // reclaimed solely because their process owner is dead. Revalidate while
+  // holding our own claim below.
+  if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState)) return false;
   if (!existsSync(journalPath)) {
     if (!authorizeState) return reconcileEmergencyPublicationTemps(filePath);
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
     try {
-      if (existsSync(journalPath)) return false;
+      if (existsSync(journalPath) || !sharedRecoveryArtifactsAuthorized(filePath, authorizeState)) return false;
       return reconcileEmergencyPublicationTemps(filePath, authorizeState);
     } finally { releaseRecoveryClaim(claimPath, claim); }
   }
   const journal = readEmergencyJournal(journalPath);
   if (!journal) {
+    if (authorizeState) return false;
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
     try {
       const generation = fileIdentity(journalPath);
-      if (authorizeState) {
-        // A malformed journal cannot prove project ownership. Preserve it,
-        // but only after serializing that decision with a recovery claim.
-        return false;
-      }
       if (!reconcileEmergencyPublicationTemps(filePath)) return false;
       if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
       unlinkSync(journalPath);
@@ -535,6 +562,7 @@ export function recoverEmergencyStateFile(filePath, options) {
   const claim = acquireRecoveryClaim(claimPath);
   if (!claim) return false;
   try {
+    if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState)) return false;
     const current = readEmergencyJournal(journalPath);
     if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
     if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;

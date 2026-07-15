@@ -971,6 +971,20 @@ function hasActionableRalplanKeyword(text, pattern) {
   return false;
 }
 
+const WORKFLOW_MARKER_KEYS = ['workflow', 'workflowRunId', 'pipelineTracking'];
+
+function hasWorkflowMarker(state) {
+  return state !== null && typeof state === 'object' && !Array.isArray(state) &&
+    WORKFLOW_MARKER_KEYS.some((key) => Object.prototype.hasOwnProperty.call(state, key));
+}
+
+function hasValidWorkflowDescriptor(state, sessionId) {
+  return hasWorkflowMarker(state) &&
+    WORKFLOW_MARKER_KEYS.every((key) => Object.prototype.hasOwnProperty.call(state, key)) &&
+    isValidWorkflowTrackingState(state, sessionId);
+}
+
+
 // Create state file for a mode
 async function activateState(directory, prompt, stateName, sessionId) {
   const now = new Date().toISOString();
@@ -1039,14 +1053,18 @@ async function activateState(directory, prompt, stateName, sessionId) {
   const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId);
   try {
     mkdirSync(dirname(writePath), { recursive: true });
+    let workflowIntegrityFailure = false;
     withStateFileLockSync(writePath, () => {
       if (!recoverEmergencyStateFile(writePath)) return;
-      // A legacy autopilot activation must never replace an active named run.
-      // Keep the complete descriptor byte-for-byte intact for its owner.
+      // A legacy autopilot activation must never replace named state. Own
+      // markers are authoritative even when their values are falsy.
       if (stateName === 'autopilot' && existsSync(writePath)) {
         try {
           const current = JSON.parse(readFileSync(writePath, 'utf8'));
-          if (current?.active === true && current?.workflow) return;
+          if (hasWorkflowMarker(current)) {
+            if (!hasValidWorkflowDescriptor(current, sessionId)) workflowIntegrityFailure = true;
+            return;
+          }
         } catch {
           // A malformed existing state is not safe to replace while serialized.
           return;
@@ -1054,7 +1072,8 @@ async function activateState(directory, prompt, stateName, sessionId) {
       }
       atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
     });
-  } catch {}
+    return workflowIntegrityFailure ? 'workflow_descriptor_integrity_failed' : null;
+  } catch { return null; }
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
@@ -1081,9 +1100,11 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       if (!recoverEmergencyStateFile(target)) return { error: 'workflow_recovery_failure' };
       if (!existsSync(target)) return null;
       const current = JSON.parse(readFileSync(target, 'utf8'));
-      if (current?.active !== false || current?.workflow?.workflowName !== workflowName) return null;
-      const terminal = current?.phase === 'complete' && current?.pipelineTracking?.currentStageIndex === current?.workflow?.stages?.length;
-      if (terminal) return isValidWorkflowTrackingState(current, sessionId) ? null : { error: 'workflow_integrity_failure' };
+      if (hasWorkflowMarker(current) && !hasValidWorkflowDescriptor(current, sessionId)) return { error: 'workflow_integrity_failure' };
+      if (!hasValidWorkflowDescriptor(current, sessionId) || current.active !== false || current.workflow.workflowName !== workflowName) return null;
+      const terminal = current.phase === 'complete' && current.pipelineTracking.currentStageIndex === current.workflow.stages.length;
+      if (terminal) return null;
+
       const resumed = { ...current, active: true };
       if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
       const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
@@ -1116,25 +1137,28 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
       if (existsSync(target)) {
         try {
           const current = JSON.parse(readFileSync(target, 'utf8'));
-          if (current?.active === true) return { error: 'active_workflow_conflict' };
-          if (current?.active === false && current?.workflow) {
-            const terminal = current?.phase === 'complete' && current?.pipelineTracking?.currentStageIndex === current?.workflow?.stages?.length;
+          if (hasWorkflowMarker(current) && !hasValidWorkflowDescriptor(current, sessionId)) return { error: 'workflow_integrity_failure' };
+          if (!hasValidWorkflowDescriptor(current, sessionId) && current?.active === true) return { error: 'active_workflow_conflict' };
+          if (hasValidWorkflowDescriptor(current, sessionId)) {
+            if (current.active === true) return { error: 'active_workflow_conflict' };
+            const terminal = current.phase === 'complete' && current.pipelineTracking.currentStageIndex === current.workflow.stages.length;
             if (terminal) {
-              if (!isValidWorkflowTrackingState(current, sessionId)) return { error: 'workflow_integrity_failure' };
+              // A valid terminal state intentionally starts a fresh run below.
             } else {
-            if (current.workflow.workflowName !== workflow.workflowName) return { error: 'active_workflow_conflict' };
-            const resumed = { ...current, active: true };
-            if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
-            const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
-            const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
-            if (!stagePrompt) return { error: 'workflow_integrity_failure' };
-            atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
-            return { stagePrompt, workflowRunId: resumed.workflowRunId };
-          }
+              if (current.workflow.workflowName !== workflow.workflowName) return { error: 'active_workflow_conflict' };
+              const resumed = { ...current, active: true };
+              if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
+              const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
+              const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
+              if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+              atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
+              return { stagePrompt, workflowRunId: resumed.workflowRunId };
             }
+          }
         } catch {
           return { error: 'active_workflow_conflict' };
         }
+
       }
       const state = createWorkflowState(stateInput);
       if (!state) return null;
@@ -1780,7 +1804,11 @@ async function main() {
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
     const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ultrawork', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
-      await activateState(directory, prompt, mode.name, sessionId);
+      const activationError = await activateState(directory, prompt, mode.name, sessionId);
+      if (activationError === 'workflow_descriptor_integrity_failed') {
+        console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
+        return;
+      }
     }
 
     // Record mode changes to flow trace
