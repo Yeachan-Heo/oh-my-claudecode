@@ -203,7 +203,7 @@ function clearConvergedStateCandidates(
   for (const candidate of discovered) {
     const result = clearDiscoveredStateCandidate(
       candidate,
-      (current) => !sessionId || canClearStateForSession(current, sessionId),
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && (!sessionId || canClearStateForSession(current, sessionId)),
     );
     if (result === 'cleared') cleared++;
     else if (result === 'failed') hadFailure = true;
@@ -327,9 +327,39 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
   return [...new Set(candidates)];
 }
 
+function isSharedHomeAutopilotCandidate(path: string, root: string): boolean {
+  const sharedHomeStateRoot = resolve(homedir(), '.omc', 'state');
+  const candidatePath = resolve(path);
+  const canonicalStateRoot = resolve(getOmcRoot(root), 'state');
+  return candidatePath !== canonicalStateRoot &&
+    !candidatePath.startsWith(`${canonicalStateRoot}/`) &&
+    candidatePath.startsWith(`${sharedHomeStateRoot}/`);
+}
+
 function isStateCandidateForProject(mode: StateToolMode, path: string, state: Record<string, unknown>, root: string): boolean {
-  if (mode !== 'autopilot' || path !== join(homedir(), '.omc', 'state', 'autopilot-state.json')) return true;
+  if (mode !== 'autopilot' || !isSharedHomeAutopilotCandidate(path, root)) return true;
   return typeof state.project_path === 'string' && resolve(state.project_path) === resolve(root);
+}
+
+function isAutopilotRecoveryCandidateForProject(path: string, root: string): boolean {
+  if (!isSharedHomeAutopilotCandidate(path, root)) return true;
+
+  const primary = readJsonRecord(path);
+  if (primary) return isStateCandidateForProject('autopilot', path, primary, root);
+
+  const artifactPrefix = `${basename(path)}.emergency-quarantine.`;
+  let artifacts: string[];
+  try {
+    artifacts = readdirSync(dirname(path)).filter((name) => name.startsWith(artifactPrefix) && name.endsWith('.payload'));
+  } catch {
+    return false;
+  }
+  if (artifacts.length === 0) return false;
+
+  return artifacts.every((name) => {
+    const state = readJsonRecord(join(dirname(path), name));
+    return state !== null && isStateCandidateForProject('autopilot', path, state, root);
+  });
 }
 
 function getWorkingDirectoryLocalOmcRoot(root: string): string {
@@ -424,7 +454,7 @@ function clearSessionOwnedStateCandidates(
   for (const candidate of discovered) {
     const result = clearDiscoveredStateCandidate(
       candidate,
-      (current) => canClearStateForSession(current, sessionId),
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && canClearStateForSession(current, sessionId),
     );
     if (result === 'cleared') cleared++;
     else if (result === 'failed') hadFailure = true;
@@ -1049,6 +1079,7 @@ function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string)
     for (const path of directSessionPaths) broadPaths.add(path);
   }
   for (const path of broadPaths) {
+    if (!isAutopilotRecoveryCandidateForProject(path, root)) continue;
     if (sessionId && !directSessionPaths.has(path)) {
       const visibleOwner = getStateSessionOwner(readJsonRecord(path) ?? {});
       const journal = readJsonRecord(`${path}.emergency-journal.json`);
@@ -1136,7 +1167,8 @@ export const stateClearTool: ToolDefinition<{
       // If session_id provided, clear only session-specific state
       if (sessionId) {
         validateSessionId(sessionId);
-        const requestedSessionCandidates = findSessionOwnedStateCandidates(mode, sessionId, root);
+        const requestedSessionCandidates = findSessionOwnedStateCandidates(mode, sessionId, root)
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
         const requestedSessionOwnedPaths = requestedSessionCandidates.map((candidate) => candidate.path);
         for (const teamStatePath of findSessionOwnedStateFiles('team', sessionId, root)) {
           collectTeamNamesForCleanup(teamStatePath);
@@ -1146,10 +1178,13 @@ export const stateClearTool: ToolDefinition<{
             collectTeamNamesForCleanup(teamStatePath);
           }
         }
-        const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId);
+        const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId)
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
         const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId));
-        const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId));
+        const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId))
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId))
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
         const operationCandidates = [...new Map([
           ...requestedSessionCandidates,
           ...completedCandidates,
@@ -1163,8 +1198,8 @@ export const stateClearTool: ToolDefinition<{
         let directCleared = 0;
         for (const candidate of namedPrimaries) {
           const success = namedWorkflowRuntimeSupported()
-            ? clearStateFileLockedIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot) === 'cleared'
-            : emergencyMutateStateFileIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot, null);
+            ? clearStateFileLockedIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot) === 'cleared'
+            : emergencyMutateStateFileIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, null);
           if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
           directCleared += 1;
         }
@@ -1455,8 +1490,10 @@ export const stateClearTool: ToolDefinition<{
       const broadSessionCandidates = [...new Map([
         ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root)),
         ...discoverAllRootSessionStateCandidates(mode, root),
-      ].map((candidate) => [candidate.path, candidate])).values()];
-      const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root));
+      ].map((candidate) => [candidate.path, candidate])).values()]
+        .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+      const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root))
+        .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
       const broadOperationCandidates = [...new Map([
         ...broadLegacyCandidates,
         ...broadSessionCandidates,
@@ -1465,8 +1502,8 @@ export const stateClearTool: ToolDefinition<{
       const broadNamedPrimaries = mode === 'autopilot' ? broadOperationCandidates.filter((candidate) => Boolean(candidate.state.workflow)) : [];
       for (const candidate of broadNamedPrimaries) {
         const success = namedWorkflowRuntimeSupported()
-          ? clearStateFileLockedIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot) === 'cleared'
-          : emergencyMutateStateFileIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot, null);
+          ? clearStateFileLockedIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot) === 'cleared'
+          : emergencyMutateStateFileIf(candidate.path, (current) => isStateCandidateForProject(mode, candidate.path, current, root) && JSON.stringify(current) === candidate.snapshot, null);
         if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
       }
       const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !candidate.state.workflow);
@@ -1548,7 +1585,7 @@ export const stateClearTool: ToolDefinition<{
         if (processedBroadPaths.has(candidate.path)) continue;
         processedBroadPaths.add(candidate.path);
         if (mode === 'team') collectTeamNamesForCleanup(candidate.path);
-        const result = clearDiscoveredStateCandidate(candidate, () => true);
+        const result = clearDiscoveredStateCandidate(candidate, (current) => isStateCandidateForProject(mode, candidate.path, current, root));
         if (result === 'cleared') {
           clearedCount++;
         } else if (result === 'failed' || existsSync(candidate.path)) {

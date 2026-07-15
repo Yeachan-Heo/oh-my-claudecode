@@ -430,20 +430,22 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
       const signal = readJsonFile(signalPath);
-      if (!signal) return;
+      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true || signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
       const now = Date.now();
-      const expiresAt = signal.expires_at ? new Date(signal.expires_at).getTime() : NaN;
-      const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
-      const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-      const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-      if (currentAutopilot?.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
-      if (!currentAutopilot?.workflowRunId && signal.target_workflow_run_id) return;
-      if (typeof signal.target_state_sha256 === 'string' && signal.target_state_sha256 !== createHash('sha256').update(JSON.stringify(currentAutopilot)).digest('hex')) return;
-      if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
-        active = true;
+      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
+      const requestedAt = typeof signal.requested_at === "string" ? new Date(signal.requested_at).getTime() : NaN;
+      if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
+      if (expiresAt <= now) {
+        if (existsSync(signalPath)) unlinkSync(signalPath);
         return;
       }
-      if (Number.isFinite(effectiveExpiry) && existsSync(signalPath)) unlinkSync(signalPath);
+      if (currentAutopilot) {
+        const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
+        if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
+      }
+      if (currentAutopilot?.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      if (!currentAutopilot?.workflowRunId && signal.target_workflow_run_id) return;
+      active = true;
     });
     return locked.acquired && active;
   };
@@ -1067,14 +1069,14 @@ async function main() {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
               ? workflowAdvance.nextStagePrompt
               : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
-          } else if (commit.state?.workflow && !isValidWorkflowDescriptor(commit.state.workflow)) {
+          } else if (commit.state?.workflow && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           } else {
             console.log(JSON.stringify(commit.state?.workflow ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
           }
           return;
         }
-        if (autopilot.state.workflow && !isValidWorkflowDescriptor(autopilot.state.workflow)) {
+        if (autopilot.state.workflow && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
           console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           return;
         }
@@ -1089,7 +1091,7 @@ async function main() {
             phase: autopilot.state.phase,
           };
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
-          if (refresh.integrityFailed) {
+          if (refresh.integrityFailed || (refresh.state?.workflow && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           } else {
             console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));

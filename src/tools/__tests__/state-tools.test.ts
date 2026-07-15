@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import {
   stateReadTool,
   stateWriteTool,
@@ -371,6 +371,67 @@ describe('state-tools', () => {
         expect(result.isError).toBeUndefined();
         expect(readFileSync(statePath, 'utf8')).toBe(raw);
         expect(existsSync(join(dirname(statePath), 'cancel-signal-state.json'))).toBe(false);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
+    it('preserves unrelated shared-session autopilot state and emergency artifacts during broad clear', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-shared-session-projects');
+      process.env.HOME = home;
+      try {
+        const projectAPath = join(home, '.omc', 'state', 'sessions', 'project-a-named', 'autopilot-state.json');
+        const projectALegacyPath = join(home, '.omc', 'state', 'sessions', 'project-a-legacy', 'autopilot-state.json');
+        const projectBPath = join(home, '.omc', 'state', 'sessions', 'project-b-named', 'autopilot-state.json');
+        const projectBRecoveryPath = join(home, '.omc', 'state', 'sessions', 'project-b-recovery', 'autopilot-state.json');
+        const projectBLegacyPath = join(home, '.omc', 'state', 'sessions', 'project-b-legacy', 'autopilot-state.json');
+        const otherProject = join(TEST_DIR, 'other-project');
+        for (const path of [projectAPath, projectALegacyPath, projectBPath, projectBRecoveryPath, projectBLegacyPath]) {
+          mkdirSync(dirname(path), { recursive: true });
+        }
+        writeFileSync(projectAPath, JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workflow: { profileHash: 'a'.repeat(64) } }));
+        writeFileSync(projectALegacyPath, JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'abababab-abab-4bab-8bab-abababababab' }));
+        writeFileSync(projectBPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', workflow: { profileHash: 'b'.repeat(64) } }));
+        writeFileSync(projectBRecoveryPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bdbdbdbd-bdbd-4dbd-8dbd-bdbdbdbdbdbd', workflow: { profileHash: 'd'.repeat(64) } }));
+        writeFileSync(projectBLegacyPath, JSON.stringify({ active: true, project_path: otherProject, workflowRunId: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc' }));
+
+        process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
+        expect(emergencyMutateStateFileIf(projectBPath, (state) => state.project_path === otherProject, (state) => ({ ...state, active: false }))).toBe(false);
+        delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+        const projectBBefore = readFileSync(projectBPath);
+        const projectBArtifacts = new Map(readdirSync(dirname(projectBPath))
+          .filter((name) => name.startsWith(`${basename(projectBPath)}.emergency-`))
+          .map((name) => [name, readFileSync(join(dirname(projectBPath), name))]));
+        expect(projectBArtifacts.size).toBeGreaterThan(0);
+
+        process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+        expect(emergencyMutateStateFileIf(projectBRecoveryPath, (state) => state.project_path === otherProject, (state) => ({ ...state, active: false }))).toBe(false);
+        delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+        expect(existsSync(projectBRecoveryPath)).toBe(false);
+        const projectBRecoveryArtifacts = new Map(readdirSync(dirname(projectBRecoveryPath))
+          .filter((name) => name.startsWith(`${basename(projectBRecoveryPath)}.emergency-`))
+          .map((name) => [name, readFileSync(join(dirname(projectBRecoveryPath), name))]));
+        expect(projectBRecoveryArtifacts.size).toBeGreaterThan(0);
+        const projectBLegacyBefore = readFileSync(projectBLegacyPath);
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+
+        expect(result.isError, JSON.stringify(result)).toBeUndefined();
+        expect(existsSync(projectAPath)).toBe(false);
+        expect(existsSync(projectALegacyPath)).toBe(false);
+        expect(readFileSync(projectBPath)).toEqual(projectBBefore);
+        expect(existsSync(projectBRecoveryPath)).toBe(false);
+        expect(readFileSync(projectBLegacyPath)).toEqual(projectBLegacyBefore);
+        expect(existsSync(join(dirname(projectBPath), 'cancel-signal-state.json'))).toBe(false);
+        expect(existsSync(join(dirname(projectBRecoveryPath), 'cancel-signal-state.json'))).toBe(false);
+        expect(existsSync(join(dirname(projectBLegacyPath), 'cancel-signal-state.json'))).toBe(false);
+        for (const [name, contents] of projectBArtifacts) {
+          expect(readFileSync(join(dirname(projectBPath), name))).toEqual(contents);
+        }
+        for (const [name, contents] of projectBRecoveryArtifacts) {
+          expect(readFileSync(join(dirname(projectBRecoveryPath), name))).toEqual(contents);
+        }
       } finally {
         if (previousHome === undefined) delete process.env.HOME;
         else process.env.HOME = previousHome;
