@@ -356,6 +356,30 @@ describe('state-tools', () => {
         else process.env.HOME = previousHome;
       }
     });
+    it('recovers a same-project shared-session clear transaction with no primary during broad clear', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-shared-session-clear-intent');
+      process.env.HOME = home;
+      try {
+        const statePath = join(home, '.omc', 'state', 'sessions', 'project-a-clear', 'autopilot-state.json');
+        mkdirSync(dirname(statePath), { recursive: true });
+        writeFileSync(statePath, JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'acacacac-acac-4cac-8cac-acacacacacac', workflow: { profileHash: 'a'.repeat(64) } }));
+        process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+        expect(emergencyMutateStateFileIf(statePath, (state) => state.project_path === TEST_DIR, null)).toBe(false);
+        delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+        expect(existsSync(statePath)).toBe(false);
+        expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(true);
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError, JSON.stringify(result)).toBeUndefined();
+        expect(existsSync(statePath)).toBe(false);
+        expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
+
 
     it('preserves an unrelated-project home-global autopilot fallback without signaling', async () => {
       const previousHome = process.env.HOME;
@@ -406,7 +430,7 @@ describe('state-tools', () => {
         expect(projectBArtifacts.size).toBeGreaterThan(0);
 
         process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
-        expect(emergencyMutateStateFileIf(projectBRecoveryPath, (state) => state.project_path === otherProject, (state) => ({ ...state, active: false }))).toBe(false);
+        expect(emergencyMutateStateFileIf(projectBRecoveryPath, (state) => state.project_path === otherProject, null)).toBe(false);
         delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
         expect(existsSync(projectBRecoveryPath)).toBe(false);
         const projectBRecoveryArtifacts = new Map(readdirSync(dirname(projectBRecoveryPath))

@@ -430,21 +430,27 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
       const signal = readJsonFile(signalPath);
-      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true || signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
+      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true) return;
       const now = Date.now();
-      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
       const requestedAt = typeof signal.requested_at === "string" ? new Date(signal.requested_at).getTime() : NaN;
-      if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
+      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
+      if (!Number.isFinite(requestedAt)) return;
+      if (!currentAutopilot) {
+        const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
+        if (effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
+        else if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        return;
+      }
+      if (signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
+      if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
       if (expiresAt <= now) {
         if (existsSync(signalPath)) unlinkSync(signalPath);
         return;
       }
-      if (currentAutopilot) {
-        const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
-        if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
-      }
-      if (currentAutopilot?.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
-      if (!currentAutopilot?.workflowRunId && signal.target_workflow_run_id) return;
+      const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
+      if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
+      if (currentAutopilot.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      if (!currentAutopilot.workflowRunId && signal.target_workflow_run_id) return;
       active = true;
     });
     return locked.acquired && active;

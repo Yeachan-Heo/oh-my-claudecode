@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'crypto';
 import { execSync, spawn } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, mkdtempSync } from 'fs';
-import { dirname, join } from 'path';
+import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'fs';
+import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 
 import { emergencyMutateStateFileIf, recoverEmergencyStateFile, writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
@@ -576,6 +576,62 @@ describe('mode-state-io', () => {
       expect(recoverEmergencyStateFile(path)).toBe(true);
       expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ active: false, run: 'one' });
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
+
+    it('preserves a foreign transaction under the recovery claim while default recovery still converges', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-autopilot-state.json');
+      mkdirSync(dirname(path), { recursive: true });
+      const foreign = { active: true, project_path: '/projects/b', run: 'foreign' };
+      writeFileSync(path, JSON.stringify(foreign));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'foreign', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      const artifacts = new Map(readdirSync(dirname(path))
+        .filter((name) => name.startsWith(`${basename(path)}.emergency-`))
+        .map((name) => [name, readFileSync(join(dirname(path), name), 'utf8')]));
+      const primary = readFileSync(path, 'utf8');
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(true);
+      expect(readFileSync(path, 'utf8')).toBe(primary);
+      for (const [name, contents] of artifacts) {
+        expect(readFileSync(join(dirname(path), name), 'utf8')).toBe(contents);
+      }
+
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, project_path: '/projects/b' });
+    });
+
+    it('authenticates the replacement generation after claiming recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'replacement-at-recovery.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, project_path: '/projects/a', run: 'a' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'a', null)).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+      const transactionId = randomUUID();
+      const quarantinePath = `${path}.emergency-quarantine.${transactionId}`;
+      const foreignRaw = JSON.stringify({ active: true, project_path: '/projects/b', run: 'b' });
+      const journalPath = `${path}.emergency-journal.json`;
+      const foreignJournal = JSON.stringify({
+        version: 1,
+        transactionId,
+        owner: { pid: 999999999, processStart: '1', nonce: randomUUID() },
+        originalDigest: createHash('sha256').update(foreignRaw).digest('hex'),
+        intent: 'clear',
+        quarantinePath,
+        phase: 'quarantined',
+      });
+      process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH = path;
+      process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify([
+        { path: journalPath, content: foreignJournal },
+        { path: quarantinePath, content: foreignRaw },
+      ])).toString('base64');
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(readFileSync(journalPath, 'utf8')).toBe(foreignJournal);
+      expect(readFileSync(quarantinePath, 'utf8')).toBe(foreignRaw);
     });
 
     it.each([

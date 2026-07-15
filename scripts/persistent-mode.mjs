@@ -546,6 +546,7 @@ function isAutopilotRoutingEchoPrompt(promptText) {
 
 function isOrphanedAutopilotRoutingEchoState(state) {
   if (!state || typeof state !== "object") return false;
+  if (state.workflow || state.pipelineTracking) return false;
 
   const phase = getAutopilotPhase(state);
   if (phase && phase !== "unspecified") return false;
@@ -566,13 +567,22 @@ function isOrphanedAutopilotRoutingEchoState(state) {
 
 function clearLoadedStateFile(loaded) {
   const statePath = loaded?.path;
-  if (!statePath || !existsSync(statePath)) return;
+  const expectedSnapshot = loaded?.state ? JSON.stringify(loaded.state) : null;
+  if (!statePath || !expectedSnapshot || !existsSync(statePath)) return false;
 
+  let cleared = false;
   try {
-    withStateFileLockSync(statePath, () => { if (existsSync(statePath)) unlinkSync(statePath); });
+    withStateFileLockSync(statePath, () => {
+      const current = readJsonFile(statePath);
+      if (current && JSON.stringify(current) === expectedSnapshot && existsSync(statePath)) {
+        unlinkSync(statePath);
+        cleared = true;
+      }
+    });
   } catch {
     // Best effort: failing to clean an orphan should not re-arm stop blocking.
   }
+  return cleared;
 }
 
 /**
@@ -755,21 +765,27 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
       const signal = readJsonFile(signalPath);
-      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true || signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
+      if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true) return;
       const now = Date.now();
-      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
       const requestedAt = typeof signal.requested_at === "string" ? new Date(signal.requested_at).getTime() : NaN;
-      if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
+      const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
+      if (!Number.isFinite(requestedAt)) return;
+      if (!currentAutopilot) {
+        const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
+        if (effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
+        else if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        return;
+      }
+      if (signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
+      if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
       if (expiresAt <= now) {
         if (existsSync(signalPath)) unlinkSync(signalPath);
         return;
       }
-      if (currentAutopilot) {
-        const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
-        if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
-      }
-      if (currentAutopilot?.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
-      if (!currentAutopilot?.workflowRunId && signal.target_workflow_run_id) return;
+      const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
+      if (typeof signal.target_state_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) || signal.target_state_sha256 !== stateDigest) return;
+      if (currentAutopilot.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      if (!currentAutopilot.workflowRunId && signal.target_workflow_run_id) return;
       active = true;
     });
     return locked.acquired && active;
@@ -1328,7 +1344,14 @@ async function main() {
     }
 
     // Priority 2: Autopilot (high-level orchestration)
-    if (isOrphanedAutopilotRoutingEchoState(autopilot.state)) {
+    const orphanSessionMatches = hasValidSessionId
+      ? autopilot.state?.session_id === sessionId
+      : !autopilot.state?.session_id || autopilot.state.session_id === sessionId;
+    if (
+      isOrphanedAutopilotRoutingEchoState(autopilot.state) &&
+      orphanSessionMatches &&
+      isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal)
+    ) {
       clearLoadedStateFile(autopilot);
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;

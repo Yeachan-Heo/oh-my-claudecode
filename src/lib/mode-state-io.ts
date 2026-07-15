@@ -6,8 +6,8 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeSync } from 'fs';
-import { dirname, join } from 'path';
+import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { basename, dirname, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 import {
@@ -170,13 +170,20 @@ export function clearStateFileLocked(filePath: string): boolean {
   }
 }
 
+export type EmergencyStateAuthorization = (state: Record<string, unknown>) => boolean;
+export interface EmergencyRecoveryOptions {
+  /** Evaluated under the recovery claim before a recovered generation is mutated. */
+  authorizeState?: EmergencyStateAuthorization;
+}
+
 export type ConditionalClearResult = 'cleared' | 'skipped' | 'failed';
 
 export function clearStateFileLockedIf(
   filePath: string,
   predicate: (current: Record<string, unknown>) => boolean,
+  recoveryOptions?: EmergencyRecoveryOptions,
 ): ConditionalClearResult {
-  if (!recoverEmergencyStateFile(filePath)) return 'failed';
+  if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64) {
     try {
       const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
@@ -553,19 +560,64 @@ function removeOwnedEmergencyArtifacts(journalPath: string, journal: EmergencyMu
   } catch { return false; }
 }
 
+function recoveryGenerationsAuthorized(
+  filePath: string,
+  journal: EmergencyMutationJournal | null,
+  authorizeState: EmergencyStateAuthorization | undefined,
+): boolean {
+  if (!authorizeState) return true;
+  const paths = [
+    filePath,
+    ...(journal ? [journal.quarantinePath, `${journal.quarantinePath}.payload`] : []),
+  ];
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let state: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+      state = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    if (!authorizeState(state)) return false;
+  }
+  return true;
+}
+
+function emergencyReplaceAtRecoveryBoundary(filePath: string): void {
+  if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64) return;
+  try {
+    const replacements = JSON.parse(Buffer.from(process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Array<{ path: string; content: string }>;
+    const directory = dirname(filePath);
+    for (const name of readdirSync(directory)) {
+      if (name === basename(filePath) || name.startsWith(`${basename(filePath)}.emergency-`)) unlinkSync(join(directory, name));
+    }
+    for (const replacement of replacements) {
+      if (dirname(replacement.path) !== directory) throw new Error('invalid recovery replacement path');
+      writeFileSync(replacement.path, replacement.content);
+    }
+  } finally {
+    delete process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64;
+  }
+}
+
 /** A dead transaction is recovered under a state-scoped, generation-verified exclusive claim. */
-export function recoverEmergencyStateFile(filePath: string): boolean {
+export function recoverEmergencyStateFile(filePath: string, options?: EmergencyRecoveryOptions): boolean {
   const journalPath = emergencyJournalPath(filePath);
-  if (!reconcileEmergencyPublicationTemps(filePath)) return false;
-  if (!existsSync(journalPath)) return true;
+  if (!existsSync(journalPath)) return reconcileEmergencyPublicationTemps(filePath);
   const journal = readEmergencyJournal(journalPath);
-  if (journal && (journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}` || isEmergencyOwnerLive(journal.owner))) return false;
   if (!journal) {
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
     try {
       const generation = fileIdentity(journalPath);
+      emergencyReplaceAtRecoveryBoundary(filePath);
+      const current = readEmergencyJournal(journalPath);
+      if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
+      if (!reconcileEmergencyPublicationTemps(filePath)) return false;
       if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
       unlinkSync(journalPath);
       return true;
@@ -577,21 +629,25 @@ export function recoverEmergencyStateFile(filePath: string): boolean {
   const claim = acquireRecoveryClaim(claimPath);
   if (!claim) return false;
   try {
+    emergencyReplaceAtRecoveryBoundary(filePath);
     const current = readEmergencyJournal(journalPath);
+    if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
+    if (!reconcileEmergencyPublicationTemps(filePath)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath);
+    return recoverDeadEmergencyStateFile(filePath, options?.authorizeState);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
   }
 }
 
 /** Recover a previously interrupted emergency mutation while holding the recovery claim. */
-function recoverDeadEmergencyStateFile(filePath: string): boolean {
+function recoverDeadEmergencyStateFile(filePath: string, authorizeState?: EmergencyStateAuthorization): boolean {
   const journalPath = emergencyJournalPath(filePath);
   if (!existsSync(journalPath)) return true;
   const journal = readEmergencyJournal(journalPath);
   if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}`) return false;
   if (isEmergencyOwnerLive(journal.owner)) return false;
+  if (!recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return true;
   const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
   if (!owned()) return false;
   const payloadPath = `${journal.quarantinePath}.payload`;
@@ -612,7 +668,7 @@ function recoverDeadEmergencyStateFile(filePath: string): boolean {
       return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
     }
     journal.phase = 'prepared';
-    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath);
+    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
   }
   const originalDigest = journal.originalDigest!;
   const intent = journal.intent!;
@@ -637,7 +693,7 @@ function recoverDeadEmergencyStateFile(filePath: string): boolean {
         return false;
       }
       journal.phase = 'quarantined';
-      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath);
+      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
     }
     return false;
   }
@@ -699,8 +755,9 @@ export function emergencyMutateStateFileIf(
   filePath: string,
   predicate: (current: Record<string, unknown>) => boolean,
   transform: ((current: Record<string, unknown>) => Record<string, unknown>) | null,
+  recoveryOptions?: EmergencyRecoveryOptions,
 ): boolean {
-  if (!recoverEmergencyStateFile(filePath)) return false;
+  if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return false;
   const owner = emergencyOwner();
   if (!owner) return false;
   const transactionId = randomUUID();

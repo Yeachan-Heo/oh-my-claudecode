@@ -370,6 +370,8 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const f = fixture(kind);
     const state = workflowState(f);
     delete state.pipelineTracking;
+    delete state.phase;
+    state.prompt = '/autopilot';
     writeState(f, state);
 
     expect(invoke(f)).toEqual(workflowIntegrityFailure);
