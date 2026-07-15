@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getAdapterById } from '../../src/hooks/autopilot/adapters/index.js';
@@ -581,6 +581,40 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
 
     expect(invoke(f, {}, { NODE_ENV: 'test', OMC_WORKFLOW_TEST_FLOCK_AVAILABLE: '0' })).toEqual(workflowIntegrityFailure);
     expect(readFileSync(f.statePath)).toEqual(before);
+  });
+
+  it.each(['linux', 'win32'])('fails closed for dot-segment, oversize, and out-of-range observations without flock on %s', (platform) => {
+    const cases = [
+      ['dot-segment transcript path', (state, f) => {
+        const boundary = state.pipelineTracking.activationBoundary;
+        boundary.transcriptPath = `${boundary.transcriptRoot}${sep}nested${sep}..${sep}${f.sessionId}.jsonl`;
+      }],
+      ['oversize boundary', (state) => {
+        const boundary = state.pipelineTracking.activationBoundary;
+        boundary.byteOffset = 16 * 1024 * 1024 + 1;
+        boundary.fileIdentity.size = boundary.byteOffset;
+      }],
+      ['out-of-range completion observation', (state) => {
+        const observation = state.pipelineTracking.completionObservations[0];
+        observation.byteOffset = observation.stableFile.size;
+      }],
+    ];
+
+    for (const [name, corrupt] of cases) {
+      const f = fixture(kind);
+      writeState(f, workflowState(f));
+      if (name === 'out-of-range completion observation') {
+        appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+        expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+      }
+      const state = readState(f);
+      corrupt(state, f);
+      writeState(f, state);
+      const before = readFileSync(f.statePath);
+
+      expect(invoke(f, {}, { NODE_ENV: 'test', OMC_WORKFLOW_TEST_PLATFORM: platform, OMC_WORKFLOW_TEST_FLOCK_AVAILABLE: '0' })).toEqual(workflowIntegrityFailure);
+      expect(readFileSync(f.statePath)).toEqual(before);
+    }
   });
 
   it('does not mutate or redispatch named workflow Stop after runtime support is lost', () => {

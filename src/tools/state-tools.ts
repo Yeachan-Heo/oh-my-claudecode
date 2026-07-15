@@ -236,9 +236,10 @@ function clearDiscoveredStateCandidate(
 }
 
 function clearAutopilotMarkerCandidate(candidate: StateFileDiscovery, root: string): boolean {
-  if (!hasValidatedNamedWorkflowTuple(candidate.state)) return false;
+  // A marker-bearing record may be malformed, but a clear is an exact deletion
+  // capability over the discovered bytes after ownership/project filtering.
+  // It must never become a pause, resume, or replacement write.
   const predicate = (current: Record<string, unknown>) =>
-    hasValidatedNamedWorkflowTuple(current) &&
     isStateCandidateForProject('autopilot', candidate.path, current, root) &&
     JSON.stringify(current) === candidate.snapshot;
 
@@ -773,7 +774,8 @@ export function redactAutopilotPublicState(state: unknown): unknown {
     ? pipelineTracking.currentStageIndex
     : -1;
   const pipelineStages = Array.isArray(pipelineTracking?.stages) ? pipelineTracking.stages : [];
-  const currentPipelineStage = pipelineStages[currentStageIndex];
+  const terminal = record.active === false && record.phase === 'complete' && currentStageIndex === stages.length;
+  const currentPipelineStage = terminal ? undefined : pipelineStages[currentStageIndex];
   const currentStage = currentPipelineStage && typeof currentPipelineStage === 'object'
     && typeof (currentPipelineStage as Record<string, unknown>).id === 'string'
     ? (currentPipelineStage as Record<string, unknown>).id as string
@@ -788,10 +790,8 @@ export function redactAutopilotPublicState(state: unknown): unknown {
     shortHash: typeof descriptor.profileHash === 'string' ? descriptor.profileHash.slice(0, 12) : 'invalid',
     stages,
     currentStage,
-    status: typeof record.status === 'string'
-      ? record.status
-      : currentStageStatus ?? (typeof record.phase === 'string' ? record.phase : typeof record.current_phase === 'string' ? record.current_phase : null),
-    progress: currentStageIndex >= 0 ? `${currentStageIndex + 1}/${stages.length}` : `0/${stages.length}`,
+    status: terminal ? 'complete' : currentStageStatus,
+    progress: currentStageIndex >= 0 ? `${Math.min(currentStageIndex + 1, stages.length)}/${stages.length}` : `0/${stages.length}`,
   };
   return safeState;
 }

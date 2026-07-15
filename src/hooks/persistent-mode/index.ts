@@ -26,7 +26,7 @@ import {
   type UltraworkState
 } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
-import { readModeState, writeModeState } from '../../lib/mode-state-io.js';
+import { readModeState, writeModeState, withStateFileMutationLock } from '../../lib/mode-state-io.js';
 import {
   readRalphState,
   writeRalphState,
@@ -156,18 +156,28 @@ export function shouldWriteStateBack(statePath: string | null | undefined): bool
 }
 
 interface LoadedAutopilotTarget {
+  path: string;
   state: Record<string, unknown>;
 }
 
-function readAutopilotTarget(directory: string, sessionId?: string): LoadedAutopilotTarget | null {
-  const path = sessionId
+interface SessionCancelCheck {
+  active: boolean;
+  enforceableAutopilot?: LoadedAutopilotTarget;
+}
+
+function resolveAutopilotTargetPath(directory: string, sessionId?: string): string {
+  return sessionId
     ? resolveSessionStatePath('autopilot', sessionId, directory)
     : resolveStatePath('autopilot', directory);
+}
+
+function readAutopilotTarget(directory: string, sessionId?: string): LoadedAutopilotTarget | null {
+  const path = resolveAutopilotTargetPath(directory, sessionId);
   try {
     const serialized = readFileSync(path, 'utf-8');
     const state = JSON.parse(serialized);
     if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
-    return { state: state as Record<string, unknown> };
+    return { path, state: state as Record<string, unknown> };
   } catch {
     return null;
   }
@@ -228,54 +238,76 @@ function isAuthenticatedAutopilotCancelSignal(
     : signal.target_workflow_run_id === undefined;
 }
 
-function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
-  const autopilot = readAutopilotTarget(directory, sessionId);
-  // An active current-project/session autopilot state is an enforceable target.
-  // Named integrity failures deliberately fail closed here so checkAutopilot()
-  // can propagate its diagnostic instead of a forged cancel hiding it.
-  const enforceableAutopilot = autopilot && isCurrentAutopilotTarget(autopilot.state, directory, sessionId);
-  if (enforceableAutopilot && hasNamedWorkflowMarkers(autopilot.state) && !isEnforceableNamedAutopilotState(autopilot.state, directory, sessionId)) {
-    return false;
-  }
+function isSessionCancelInProgress(directory: string, sessionId?: string): SessionCancelCheck {
+  const autopilotPath = resolveAutopilotTargetPath(directory, sessionId);
   let cancelSignalPath: string | undefined;
   if (sessionId) {
     try {
       cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
     } catch {
-      // fall through to legacy path
+      // Fall through to the legacy path.
     }
   }
   if (!cancelSignalPath) {
     cancelSignalPath = join(getOmcRoot(directory), 'state', 'cancel-signal-state.json');
   }
-  try {
-    const raw = JSON.parse(readFileSync(cancelSignalPath, 'utf-8')) as Record<string, unknown>;
-    const now = Date.now();
-    const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
-    const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
-    if (enforceableAutopilot) {
-      if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
-      return isAuthenticatedAutopilotCancelSignal(raw, autopilot);
+
+  const validateSignal = (target: LoadedAutopilotTarget | null): boolean => {
+    const locked = withStateFileMutationLock(cancelSignalPath, () => {
+      let raw: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(readFileSync(cancelSignalPath!, 'utf-8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+        raw = parsed as Record<string, unknown>;
+      } catch {
+        return false;
+      }
+      const now = Date.now();
+      const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
+      const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
+      if (target) {
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        return isAuthenticatedAutopilotCancelSignal(raw, target);
+      }
+      const effectiveExpiry = Number.isFinite(expiresAt)
+        ? expiresAt
+        : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+      if (
+        !Number.isFinite(requestedAt) ||
+        requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
+        now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+        !Number.isFinite(effectiveExpiry) ||
+        effectiveExpiry <= requestedAt ||
+        effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+        effectiveExpiry <= now
+      ) {
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        return false;
+      }
+      return true;
+    });
+    return locked.acquired && locked.value === true;
+  };
+
+  // Lock before rereading so cancellation can only authenticate the generation
+  // that is still current when its signal is consumed, including when the
+  // state was absent at the first observation.
+  const locked = withStateFileMutationLock(autopilotPath, () => {
+    const current = readAutopilotTarget(directory, sessionId);
+    if (!current || !isCurrentAutopilotTarget(current.state, directory, sessionId)) {
+      return { active: validateSignal(null) };
     }
-    const effectiveExpiry = Number.isFinite(expiresAt)
-      ? expiresAt
-      : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-    if (
-      !Number.isFinite(requestedAt) ||
-      requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
-      now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
-      !Number.isFinite(effectiveExpiry) ||
-      effectiveExpiry <= requestedAt ||
-      effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
-      effectiveExpiry <= now
-    ) {
-      if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
-      return false;
+    // Named integrity failures deliberately fail closed so checkAutopilot()
+    // can propagate its diagnostic instead of a forged cancel hiding it.
+    if (hasNamedWorkflowMarkers(current.state) && !isEnforceableNamedAutopilotState(current.state, directory, sessionId)) {
+      return { active: false };
     }
-    return true;
-  } catch {
-    return false;
-  }
+    return {
+      active: validateSignal(current),
+      enforceableAutopilot: current,
+    };
+  });
+  return locked.acquired && locked.value ? locked.value : { active: false };
 }
 
 /**
@@ -2233,9 +2265,10 @@ async function resolvePersistentModeBlock(
     };
   }
 
-  // Session-scoped cancel signal from state_clear during /cancel flow.
-  // Cache once and pass to sub-functions to avoid TOCTOU re-reads (issue #1058).
-  const cancelInProgress = isSessionCancelInProgress(workingDir, sessionId);
+  // Session-scoped cancel signals are authenticated against the current
+  // autopilot generation while its mutation lock is held.
+  const cancelCheck = isSessionCancelInProgress(workingDir, sessionId);
+  const cancelInProgress = cancelCheck.active;
   if (cancelInProgress) {
     return {
       shouldBlock: false,
@@ -2367,7 +2400,7 @@ async function resolvePersistentModeBlock(
   const runAutopilotPriority = async (): Promise<PersistentModeResult | null> => {
     if (
       tombstonedWorkflowModes.has('autopilot') ||
-      !isAutopilotActive(workingDir, sessionId)
+      !(cancelCheck.enforceableAutopilot || isAutopilotActive(workingDir, sessionId))
     ) {
       return null;
     }

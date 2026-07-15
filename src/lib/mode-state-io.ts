@@ -142,6 +142,20 @@ function releaseMutationLock(lock: MutationLock | null): void {
   guardedLockRemoval(lock.path, 'release', lock.owner);
 }
 
+/** Executes a read or mutation against a state file under its mutation lock. */
+export function withStateFileMutationLock<T>(
+  filePath: string,
+  callback: () => T,
+): { acquired: boolean; value: T | undefined } {
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return { acquired: false, value: undefined };
+  try {
+    return { acquired: true, value: callback() };
+  } finally {
+    releaseMutationLock(lock);
+  }
+}
+
 export function writeStateFileLocked(filePath: string, state: Record<string, unknown>): boolean {
   if (!recoverEmergencyStateFile(filePath)) return false;
   const lock = acquireMutationLock(filePath);

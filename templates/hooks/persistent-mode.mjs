@@ -514,14 +514,24 @@ function isWorkflowFileIdentity(value) {
     /^\d+$/.test(value.mtimeNs) && /^\d+$/.test(value.ctimeNs) && /^[a-f0-9]{64}$/.test(value.contentSha256);
 }
 
+const MAX_WORKFLOW_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+
 function hasWorkflowBoundaryTopology(value, sessionId) {
   let root;
   try { root = realpathSync(resolve(getClaudeConfigDir(), "projects")); } catch { root = resolve(getClaudeConfigDir(), "projects"); }
-  return hasExactWorkflowKeys(value, ["transcriptPath", "transcriptRoot", "transcriptBasename", "sessionId", "byteOffset", "fileIdentity"]) &&
-    typeof value.transcriptPath === "string" && value.transcriptPath.startsWith(root + sep) &&
-    value.transcriptRoot === root && value.transcriptBasename === `${sessionId}.jsonl` && value.sessionId === sessionId &&
-    Number.isSafeInteger(value.byteOffset) && value.byteOffset >= 0 && isWorkflowFileIdentity(value.fileIdentity) &&
-    value.fileIdentity.size === value.byteOffset;
+  if (!hasExactWorkflowKeys(value, ["transcriptPath", "transcriptRoot", "transcriptBasename", "sessionId", "byteOffset", "fileIdentity"]) ||
+    typeof value.transcriptPath !== "string" || value.transcriptRoot !== root || value.transcriptBasename !== `${sessionId}.jsonl` || value.sessionId !== sessionId ||
+    !Number.isSafeInteger(value.byteOffset) || value.byteOffset < 0 || value.byteOffset > MAX_WORKFLOW_TRANSCRIPT_BYTES || !isWorkflowFileIdentity(value.fileIdentity) ||
+    value.fileIdentity.size !== value.byteOffset) return false;
+  if (resolve(value.transcriptPath) !== value.transcriptPath || !value.transcriptPath.startsWith(root + sep)) return false;
+  const relativePath = value.transcriptPath.slice(root.length + sep.length);
+  return relativePath.length > 0 && relativePath.split(sep).every((component) => component && component !== "." && component !== "..") &&
+    value.transcriptPath.endsWith(`${sep}${sessionId}.jsonl`);
+}
+
+function workflowFileIdentityEquals(left, right) {
+  return left.device === right.device && left.inode === right.inode && left.size === right.size &&
+    left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs && left.contentSha256 === right.contentSha256;
 }
 
 function isStructurallyValidNamedWorkflowState(state, sessionId) {
@@ -546,11 +556,11 @@ function isStructurallyValidNamedWorkflowState(state, sessionId) {
   let previous;
   for (let index = 0; index < tracking.completionObservations.length; index += 1) {
     const observation = tracking.completionObservations[index];
-    if (!hasExactWorkflowKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== `PIPELINE_${observation.stageId.toUpperCase()}_COMPLETE` || !Number.isSafeInteger(observation.lineNumber) || observation.lineNumber < 0 || !Number.isSafeInteger(observation.byteOffset) || observation.byteOffset < 0 || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isWorkflowTimestamp(observation.observedAt) || !isWorkflowFileIdentity(observation.stableFile) || !hasWorkflowBoundaryTopology(observation.activationBoundary, sessionId) || (previous && (observation.activationBoundary.transcriptPath !== previous.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previous.stableFile.size || JSON.stringify(observation.activationBoundary.fileIdentity) !== JSON.stringify(previous.stableFile)))) return false;
+    if (!hasExactWorkflowKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== `PIPELINE_${observation.stageId.toUpperCase()}_COMPLETE` || !Number.isSafeInteger(observation.lineNumber) || observation.lineNumber < 0 || !Number.isSafeInteger(observation.byteOffset) || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isWorkflowTimestamp(observation.observedAt) || !isWorkflowFileIdentity(observation.stableFile) || observation.stableFile.size > MAX_WORKFLOW_TRANSCRIPT_BYTES || !hasWorkflowBoundaryTopology(observation.activationBoundary, sessionId) || observation.byteOffset < observation.activationBoundary.byteOffset || observation.byteOffset >= observation.stableFile.size || (previous && (observation.activationBoundary.transcriptPath !== previous.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previous.stableFile.size || !workflowFileIdentityEquals(observation.activationBoundary.fileIdentity, previous.stableFile)))) return false;
     previous = observation;
   }
   const latest = tracking.completionObservations.at(-1);
-  return !latest || (tracking.activationBoundary.transcriptPath === latest.activationBoundary.transcriptPath && tracking.activationBoundary.byteOffset === latest.stableFile.size && JSON.stringify(tracking.activationBoundary.fileIdentity) === JSON.stringify(latest.stableFile));
+  return !latest || (tracking.activationBoundary.transcriptPath === latest.activationBoundary.transcriptPath && tracking.activationBoundary.byteOffset === latest.stableFile.size && workflowFileIdentityEquals(tracking.activationBoundary.fileIdentity, latest.stableFile));
 }
 
 function isValidNamedWorkflowState(state, sessionId) {

@@ -170,6 +170,35 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
     });
 
     it.each([
+      ['stage advance', (state: Record<string, unknown>) => ({ ...state, phase: 'execution' })],
+      ['replacement run', (state: Record<string, unknown>) => ({ ...state, originalIdea: 'Replacement run' })],
+    ])('does not let a cancel signal for a prior autopilot generation suppress a %s', async (_name, replace) => {
+      const sessionId = `autopilot-cancel-prior-generation-${_name.replace(' ', '-')}`;
+      const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, 'Finish the task', sessionId)!;
+      state.phase = 'planning';
+      state.project_path = tempDir;
+      const statePath = join(sessionDir, 'autopilot-state.json');
+      const signalPath = join(sessionDir, 'cancel-signal-state.json');
+      writeFileSync(statePath, JSON.stringify(state));
+      writeFileSync(signalPath, JSON.stringify({
+        active: true,
+        mode: 'autopilot',
+        source: 'state_clear',
+        requested_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30_000).toISOString(),
+        target_state_sha256: createHash('sha256').update(JSON.stringify(state)).digest('hex'),
+      }));
+      writeFileSync(statePath, JSON.stringify(replace(state as unknown as Record<string, unknown>)));
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: true,
+        mode: 'autopilot',
+      });
+    });
+
+    it.each([
       ['future-dated', 6_000, true],
       ['stale', -30_001, true],
       ['fresh', 0, false],
