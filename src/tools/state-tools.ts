@@ -322,6 +322,7 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
     getStatePath(mode, root),
     join(getOmcRoot(root), `${normalizedName}.json`),
   ];
+  if (mode === 'autopilot') candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
 
   return [...new Set(candidates)];
 }
@@ -1455,9 +1456,12 @@ export const stateClearTool: ToolDefinition<{
           mode,
           source: 'state_clear' as const,
         };
-        const legacyCandidate = broadLegacySignalCandidates[0];
-        if (legacyCandidate) {
-          const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
+        const signaledLegacyDirs = new Set<string>();
+        for (const legacyCandidate of broadLegacySignalCandidates) {
+          const signalDir = dirname(legacyCandidate.path);
+          if (signaledLegacyDirs.has(signalDir)) continue;
+          signaledLegacyDirs.add(signalDir);
+          const legacySignalPath = join(signalDir, 'cancel-signal-state.json');
           const legacyPayload = {
             ...cancelSignalPayload,
             ...(legacyCandidate.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {}),

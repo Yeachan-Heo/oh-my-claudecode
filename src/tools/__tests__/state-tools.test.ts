@@ -335,6 +335,28 @@ describe('state-tools', () => {
       expect(existsSync(`${otherPath}.emergency-journal.json`)).toBe(true);
     });
 
+    it('signals and clears the home-global autopilot fallback during broad clear', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-global');
+      process.env.HOME = home;
+      try {
+        const statePath = join(home, '.omc', 'state', 'autopilot-state.json');
+        mkdirSync(dirname(statePath), { recursive: true });
+        const state = { active: true, project_path: TEST_DIR, workflowRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
+        writeFileSync(statePath, JSON.stringify(state));
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError).toBeUndefined();
+        expect(existsSync(statePath)).toBe(false);
+        const signal = JSON.parse(readFileSync(join(dirname(statePath), 'cancel-signal-state.json'), 'utf8'));
+        expect(signal.target_workflow_run_id).toBe(state.workflowRunId);
+        expect(signal.target_state_sha256).toMatch(/^[a-f0-9]{64}$/);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
+
     it('recovers interrupted canonical and legacy named pauses before broad clear', async () => {
       const canonical = join(TEST_DIR, '.omc', 'state', 'sessions', 'broad-journal-owner', 'autopilot-state.json');
       const legacy = join(TEST_DIR, '.omc', 'state', 'autopilot-state.json');
