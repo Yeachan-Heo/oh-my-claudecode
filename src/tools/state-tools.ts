@@ -322,13 +322,14 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
     getStatePath(mode, root),
     join(getOmcRoot(root), `${normalizedName}.json`),
   ];
-  if (mode === 'autopilot') {
-    const globalPath = join(homedir(), '.omc', 'state', 'autopilot-state.json');
-    const globalState = readJsonRecord(globalPath);
-    if (typeof globalState?.project_path === 'string' && resolve(globalState.project_path) === resolve(root)) candidates.push(globalPath);
-  }
+  if (mode === 'autopilot') candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
 
   return [...new Set(candidates)];
+}
+
+function isStateCandidateForProject(mode: StateToolMode, path: string, state: Record<string, unknown>, root: string): boolean {
+  if (mode !== 'autopilot' || path !== join(homedir(), '.omc', 'state', 'autopilot-state.json')) return true;
+  return typeof state.project_path === 'string' && resolve(state.project_path) === resolve(root);
 }
 
 function getWorkingDirectoryLocalOmcRoot(root: string): string {
@@ -404,7 +405,7 @@ function clearLegacyStateCandidates(
   for (const candidate of discovered) {
     const result = clearDiscoveredStateCandidate(
       candidate,
-      (current) => !sessionId || canClearStateForSession(current, sessionId),
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && (!sessionId || canClearStateForSession(current, sessionId)),
     );
     if (result === 'cleared') cleared++;
     else if (result === 'failed') hadFailure = true;
@@ -1431,7 +1432,7 @@ export const stateClearTool: ToolDefinition<{
       // Write cancel signals FIRST (before deleting files) so the stop hook's
       // isSessionCancelInProgress check sees the signal during the deletion window.
       // Mirrors the session_id path at line ~403. (patch: fix missing cancel signal)
-      const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
+      const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
       const broadSessionCandidates = [...new Map([
         ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root)),
         ...discoverAllRootSessionStateCandidates(mode, root),
