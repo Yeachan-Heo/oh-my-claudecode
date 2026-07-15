@@ -304,12 +304,13 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const state = workflowState(f);
     writeState(f, state);
     const signalPath = join(dirname(f.statePath), 'cancel-signal-state.json');
+    const now = Date.now();
     writeFileSync(signalPath, JSON.stringify({
       active: true,
       mode: 'autopilot',
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(now).toISOString(),
+      expires_at: new Date(now + 30_000).toISOString(),
       target_workflow_run_id: state.workflowRunId,
       target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
     }));

@@ -591,7 +591,7 @@ describe('mode-state-io', () => {
         .map((name) => [name, readFileSync(join(dirname(path), name), 'utf8')]));
       const primary = readFileSync(path, 'utf8');
 
-      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(true);
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(false);
       expect(readFileSync(path, 'utf8')).toBe(primary);
       for (const [name, contents] of artifacts) {
         expect(readFileSync(join(dirname(path), name), 'utf8')).toBe(contents);
@@ -599,6 +599,47 @@ describe('mode-state-io', () => {
 
       expect(recoverEmergencyStateFile(path)).toBe(true);
       expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, project_path: '/projects/b' });
+    });
+    it('preserves an unattributable recovery claim before authorizing shared-home recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-recovery-claim.json');
+      const claimPath = `${path}.emergency-recovery.claim`;
+      const primary = JSON.stringify({ active: true, project_path: '/projects/a' });
+      const claim = JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: '2026-01-01T00:00:00.000Z', nonce: '00000000-0000-4000-8000-000000000000' });
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, primary);
+      writeFileSync(claimPath, claim);
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(primary);
+      expect(readFileSync(claimPath, 'utf8')).toBe(claim);
+    });
+
+    it('preserves an unattributable recovery-claim publication temp before authorizing shared-home recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-recovery-claim-temp.json');
+      const tempPath = `${path}.emergency-recovery.claim.999999999.1.00000000-0000-4000-8000-000000000000.tmp`;
+      const primary = JSON.stringify({ active: true, project_path: '/projects/a' });
+      const temp = '{"version":1,"pid":999999999,"processStart":"1"}';
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, primary);
+      writeFileSync(tempPath, temp);
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(primary);
+      expect(readFileSync(tempPath, 'utf8')).toBe(temp);
+    });
+
+    it('converges a same-project interrupted transaction after claiming shared-home recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-same-project-recovery.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, project_path: '/projects/a', run: 'same-project' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'same-project', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(true);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, project_path: '/projects/a' });
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(`${path}.emergency-recovery.claim`)).toBe(false);
     });
 
     it('authenticates the replacement generation after claiming recovery', () => {

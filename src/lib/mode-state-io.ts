@@ -606,6 +606,45 @@ function recoveryGenerationsAuthorized(
   return authenticatedJournalGeneration;
 }
 
+/** Shared-home recovery claims contain no project identity, so pre-existing
+ * claim publications are never attributable to the caller and must survive. */
+function hasUnattributableRecoveryClaimArtifact(filePath: string, recoveryClaim?: MutationLockOwner): boolean {
+  const directory = dirname(filePath);
+  const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const tempPattern = new RegExp(`^${base}\\.emergency-recovery\\.claim\\.\\d+\\.\\d+\\.[0-9a-f-]{36}\\.tmp$`, 'i');
+  try {
+    if (readdirSync(directory).some((name) => tempPattern.test(name))) return true;
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    if (!existsSync(claimPath)) return recoveryClaim !== undefined;
+    if (!recoveryClaim) return true;
+    const current = readRecoveryClaim(claimPath);
+    return !current || !sameRecoveryClaim(current, recoveryClaim);
+  } catch {
+    return true;
+  }
+}
+
+function sharedRecoveryArtifactsAuthorized(
+  filePath: string,
+  authorizeState: EmergencyStateAuthorization | undefined,
+  recoveryClaim?: MutationLockOwner,
+): boolean {
+  if (!authorizeState) return true;
+  if (hasUnattributableRecoveryClaimArtifact(filePath, recoveryClaim)) return false;
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) {
+    if (!existsSync(filePath)) return true;
+    try {
+      const state = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+      return state !== null && typeof state === 'object' && !Array.isArray(state) && authorizeState(state as Record<string, unknown>);
+    } catch {
+      return false;
+    }
+  }
+  const journal = readEmergencyJournal(journalPath);
+  return journal !== null && recoveryGenerationsAuthorized(filePath, journal, authorizeState);
+}
+
 function emergencyReplaceAtRecoveryBoundary(filePath: string): void {
   if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64) return;
   try {
@@ -626,22 +665,27 @@ function emergencyReplaceAtRecoveryBoundary(filePath: string): void {
 
 /** A dead transaction is recovered under a state-scoped, generation-verified exclusive claim. */
 export function recoverEmergencyStateFile(filePath: string, options?: EmergencyRecoveryOptions): boolean {
+  const authorizeState = options?.authorizeState;
   const journalPath = emergencyJournalPath(filePath);
+  // Prefilter before taking a claim so stale shared-home artifacts cannot be
+  // reclaimed solely because their process owner is dead. Revalidate while
+  // holding our own claim below.
+  if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState)) return false;
   if (!existsSync(journalPath)) {
-    if (!options?.authorizeState) return reconcileEmergencyPublicationTemps(filePath);
+    if (!authorizeState) return reconcileEmergencyPublicationTemps(filePath);
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
     try {
-      if (existsSync(journalPath)) return false;
-      return reconcileEmergencyPublicationTemps(filePath, options.authorizeState);
+      if (existsSync(journalPath) || !sharedRecoveryArtifactsAuthorized(filePath, authorizeState, claim)) return false;
+      return reconcileEmergencyPublicationTemps(filePath, authorizeState);
     } finally {
       releaseRecoveryClaim(claimPath, claim);
     }
   }
   const journal = readEmergencyJournal(journalPath);
   if (!journal) {
-    if (options?.authorizeState) return false;
+    if (authorizeState) return false;
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
@@ -649,8 +693,8 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
       const generation = fileIdentity(journalPath);
       emergencyReplaceAtRecoveryBoundary(filePath);
       const current = readEmergencyJournal(journalPath);
-      if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
-      if (!reconcileEmergencyPublicationTemps(filePath, options?.authorizeState)) return false;
+      if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
+      if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
       if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
       unlinkSync(journalPath);
       return true;
@@ -662,12 +706,13 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
   const claim = acquireRecoveryClaim(claimPath);
   if (!claim) return false;
   try {
+    if (!sharedRecoveryArtifactsAuthorized(filePath, authorizeState, claim)) return false;
     emergencyReplaceAtRecoveryBoundary(filePath);
     const current = readEmergencyJournal(journalPath);
-    if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
-    if (!reconcileEmergencyPublicationTemps(filePath, options?.authorizeState)) return false;
+    if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
+    if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath, options?.authorizeState);
+    return recoverDeadEmergencyStateFile(filePath, authorizeState);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
   }
