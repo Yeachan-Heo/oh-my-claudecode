@@ -6,7 +6,7 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from 'fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -72,6 +72,22 @@ function processStartIdentity(pid: number): string | 'absent' | null {
   }
 }
 
+function writeAllSync(fd: number, content: string, label: string): void {
+  const bytes = Buffer.from(content, 'utf-8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0) {
+      throw new Error(`${label} made no progress`);
+    }
+    offset += written;
+  }
+  if (fstatSync(fd).size !== bytes.length) {
+    throw new Error(`${label} size verification failed`);
+  }
+}
+
+
 function guardedLockRemoval(path: string, operation: 'reclaim' | 'release', owner?: MutationLockOwner): 'retry' | 'live' | 'replaced' | 'unverifiable' {
   const flock = flockPath();
   if (!flock) return 'unverifiable';
@@ -96,7 +112,7 @@ function acquireLockAt(path: string, requireExclusive = false): MutationLock | n
     let fd: number | undefined;
     try {
       fd = openSync(tempPath, 'wx', 0o600);
-      writeSync(fd, JSON.stringify(owner));
+      writeAllSync(fd, JSON.stringify(owner), 'lock owner publication');
       fsyncSync(fd);
       linkSync(tempPath, path);
       unlinkSync(tempPath);

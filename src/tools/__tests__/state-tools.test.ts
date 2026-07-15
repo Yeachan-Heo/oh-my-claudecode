@@ -165,22 +165,25 @@ describe('state-tools', () => {
       await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
       expect(JSON.parse(readFileSync(legacyPath, 'utf8'))).toEqual(legacyReplacement);
     });
-    it('preserves active named workflow identity while accepting safe writes', async () => {
+    it('rejects generic writes to active and paused named workflow state', async () => {
       const sessionId = 'named-safe-write';
       const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
       const namedState = {
         active: true,
+        prompt: 'original task',
         session_id: sessionId,
         workflowRunId: '11111111-1111-4111-8111-111111111111',
         workflow: { profileHash: 'a'.repeat(64), stages: ['ralplan'] },
         pipelineTracking: { currentStageIndex: 0, stages: [{ id: 'ralplan', status: 'active' }] },
       };
       mkdirSync(dirname(statePath), { recursive: true });
-      writeFileSync(statePath, JSON.stringify(namedState));
-
-      const result = await stateWriteTool.handler({ mode: 'autopilot', iteration: 2, state: { note: 'safe' }, session_id: sessionId, workingDirectory: TEST_DIR });
-      expect(result.isError).toBeUndefined();
-      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ ...namedState, iteration: 2, note: 'safe' });
+      for (const active of [true, false]) {
+        writeFileSync(statePath, JSON.stringify({ ...namedState, active }));
+        const before = readFileSync(statePath);
+        const result = await stateWriteTool.handler({ mode: 'autopilot', iteration: 2, state: { prompt: 'different task' }, session_id: sessionId, workingDirectory: TEST_DIR });
+        expect(result.isError).toBe(true);
+        expect(readFileSync(statePath)).toEqual(before);
+      }
     });
 
     it('rejects active named workflow identity and tracking mutations without changing bytes', async () => {

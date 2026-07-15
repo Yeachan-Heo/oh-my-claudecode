@@ -514,6 +514,8 @@ export function prepareNamedWorkflowAdvance(
   if (!transcript || !signal) return null;
 
   let byteOffset = Number(boundary.byteOffset);
+  let evidence: { byteOffset: number; lineNumber: number; hash: string } | null =
+    null;
   const lines = transcript.content
     .subarray(byteOffset)
     .toString("utf8")
@@ -521,68 +523,82 @@ export function prepareNamedWorkflowAdvance(
   for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
     const rawLine = lines[lineNumber];
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.trim().length === 0) {
+      if (lineNumber === lines.length - 1 && line === "") continue;
+      return null;
+    }
+
+    let record: unknown;
     try {
-      const record: unknown = JSON.parse(line);
-      const message = isRecord(record) ? record.message : null;
-      const text = isRecord(record) ? assistantText(record) : null;
-      if (
-        isRecord(record) &&
-        record.sessionId === sessionId &&
-        record.type === "assistant" &&
-        isRecord(message) &&
-        message.role === "assistant" &&
-        !record.isMeta &&
-        !record.isReplay &&
-        !record.replay &&
-        !record.meta &&
-        text !== null &&
-        !text.includes("<local-command-stdout>") &&
-        text.trim() === `Signal: ${signal}`
-      ) {
-        const observedAt = new Date().toISOString();
-        const updated = structuredClone(state);
-        const tracking = updated.pipelineTracking!;
-        tracking.stages[stageIndex].status = "complete";
-        tracking.stages[stageIndex].completedAt = observedAt;
-        const nextIndex = stageIndex + 1;
-        tracking.currentStageIndex = nextIndex;
-        tracking.trackingRevision += 1;
-        tracking.completionObservations.push({
-          stageId,
-          sessionId,
-          signalId: signal,
-          lineNumber,
-          byteOffset,
-          recordContentSha256: createHash("sha256").update(line).digest("hex"),
-          stableFile: transcript.identity as never,
-          activationBoundary: structuredClone(
-            state.pipelineTracking!.activationBoundary!,
-          ),
-          observedAt,
-        });
-        if (nextIndex < updated.workflow!.stages.length) {
-          tracking.stages[nextIndex].status = "active";
-          tracking.stages[nextIndex].startedAt = observedAt;
-          tracking.activationBoundary = {
-            transcriptPath: transcript.path,
-            transcriptRoot: root,
-            transcriptBasename: `${sessionId}.jsonl`,
-            sessionId,
-            byteOffset: Number(transcript.identity.size),
-            fileIdentity: transcript.identity as never,
-          };
-          updated.phase = updated.workflow!.stages[nextIndex];
-        } else {
-          updated.active = false;
-          updated.phase = "complete";
-          updated.completed_at = observedAt;
-        }
-        return updated;
-      }
+      record = JSON.parse(line);
     } catch {
-      /* Non-record transcript entries are not completion evidence. */
+      return null;
+    }
+
+    const message = isRecord(record) ? record.message : null;
+    const text = isRecord(record) ? assistantText(record) : null;
+    if (
+      !evidence &&
+      isRecord(record) &&
+      record.sessionId === sessionId &&
+      record.type === "assistant" &&
+      isRecord(message) &&
+      message.role === "assistant" &&
+      !record.isMeta &&
+      !record.isReplay &&
+      !record.replay &&
+      !record.meta &&
+      text !== null &&
+      !text.includes("<local-command-stdout>") &&
+      text.trim() === `Signal: ${signal}`
+    ) {
+      evidence = {
+        byteOffset,
+        lineNumber,
+        hash: createHash("sha256").update(line).digest("hex"),
+      };
     }
     byteOffset += Buffer.byteLength(rawLine) + 1;
   }
-  return null;
+
+  if (!evidence) return null;
+  const observedAt = new Date().toISOString();
+  const updated = structuredClone(state);
+  const tracking = updated.pipelineTracking!;
+  tracking.stages[stageIndex].status = "complete";
+  tracking.stages[stageIndex].completedAt = observedAt;
+  const nextIndex = stageIndex + 1;
+  tracking.currentStageIndex = nextIndex;
+  tracking.trackingRevision += 1;
+  tracking.completionObservations.push({
+    stageId,
+    sessionId,
+    signalId: signal,
+    lineNumber: evidence.lineNumber,
+    byteOffset: evidence.byteOffset,
+    recordContentSha256: evidence.hash,
+    stableFile: transcript.identity as never,
+    activationBoundary: structuredClone(
+      state.pipelineTracking!.activationBoundary!,
+    ),
+    observedAt,
+  });
+  if (nextIndex < updated.workflow!.stages.length) {
+    tracking.stages[nextIndex].status = "active";
+    tracking.stages[nextIndex].startedAt = observedAt;
+    tracking.activationBoundary = {
+      transcriptPath: transcript.path,
+      transcriptRoot: root,
+      transcriptBasename: `${sessionId}.jsonl`,
+      sessionId,
+      byteOffset: Number(transcript.identity.size),
+      fileIdentity: transcript.identity as never,
+    };
+    updated.phase = updated.workflow!.stages[nextIndex];
+  } else {
+    updated.active = false;
+    updated.phase = "complete";
+    updated.completed_at = observedAt;
+  }
+  return updated;
 }

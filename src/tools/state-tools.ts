@@ -93,13 +93,6 @@ function readJsonRecord(filePath: string): Record<string, unknown> | null {
   }
 }
 
-function hasSameJsonValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function isActiveNamedAutopilotState(state: Record<string, unknown>): boolean {
-  return state.active === true && state.workflow !== null && typeof state.workflow === 'object';
-}
 
 function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
   const sessionsDir = join(omcRoot, 'state', 'sessions');
@@ -970,34 +963,18 @@ export const stateWriteTool: ToolDefinition<{
           if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
         }
       } else if (mode === 'autopilot' && existsSync(statePath)) {
-        let attemptedNamedMutation = false;
+        let namedWorkflowExists = false;
         const result = writeStateFileLockedIf(
           statePath,
           (current) => {
-            if (!isActiveNamedAutopilotState(current)) return true;
-            for (const field of ['workflowRunId', 'workflow', 'pipelineTracking'] as const) {
-              if (Object.prototype.hasOwnProperty.call(builtState, field) && !hasSameJsonValue(builtState[field], current[field])) {
-                attemptedNamedMutation = true;
-                return false;
-              }
-            }
-            return true;
+            if (!current.workflow) return true;
+            namedWorkflowExists = true;
+            return false;
           },
-          (current) => {
-            if (!isActiveNamedAutopilotState(current)) return stateWithMeta;
-            writtenState = {
-              ...current,
-              ...builtState,
-              workflowRunId: current.workflowRunId,
-              workflow: current.workflow,
-              pipelineTracking: current.pipelineTracking,
-              _meta: stateWithMeta._meta,
-            };
-            return writtenState;
-          },
+          () => stateWithMeta,
         );
         if (result !== 'written') {
-          if (attemptedNamedMutation) throw new Error('active named autopilot workflow identity and pipeline tracking are immutable');
+          if (namedWorkflowExists) throw new Error('named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed');
           throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot state changed before write');
         }
       } else if (!writeStateFileLocked(statePath, stateWithMeta)) {

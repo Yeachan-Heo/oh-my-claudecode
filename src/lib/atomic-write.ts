@@ -31,6 +31,22 @@ export function ensureDirSync(dir: string): void {
   }
 }
 
+function writeAllSync(fd: number, content: string, label: string): void {
+  const bytes = Buffer.from(content, "utf-8");
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = fsSync.writeSync(fd, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0) {
+      throw new Error(`${label} made no progress`);
+    }
+    offset += written;
+  }
+  if (fsSync.fstatSync(fd).size !== bytes.length) {
+    throw new Error(`${label} size verification failed`);
+  }
+}
+
+
 /**
  * Write JSON data atomically to a file.
  * Uses temp file + atomic rename pattern to ensure durability.
@@ -125,7 +141,7 @@ export function atomicWriteSync(filePath: string, content: string): void {
     // Write to temp file with exclusive creation
     const fd = fsSync.openSync(tempPath, 'wx', 0o600);
     try {
-      fsSync.writeSync(fd, content, 0, 'utf-8');
+      writeAllSync(fd, content, "atomic write");
       // Sync file data to disk before rename
       fsSync.fsyncSync(fd);
     } finally {
@@ -191,7 +207,7 @@ export function atomicWriteFileSync(filePath: string, content: string): void {
     fd = fsSync.openSync(tempPath, "wx", 0o600);
 
     // Write content
-    fsSync.writeSync(fd, content, 0, "utf-8");
+    writeAllSync(fd, content, "atomic write");
 
     // Sync file data to disk before rename
     fsSync.fsyncSync(fd);
@@ -300,7 +316,7 @@ export function atomicWriteBatchSync(writes: AtomicBatchWrite[]): void {
     for (const write of pending) {
       const fd = fsSync.openSync(write.tempPath, "wx", write.mode ?? 0o600);
       try {
-        fsSync.writeSync(fd, write.content, 0, "utf-8");
+        writeAllSync(fd, write.content, "atomic batch write");
         fsSync.fsyncSync(fd);
       } finally {
         fsSync.closeSync(fd);

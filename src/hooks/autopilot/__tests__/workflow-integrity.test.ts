@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+
 import { join } from "path";
 import { tmpdir } from "os";
 import { createHash } from "crypto";
@@ -31,6 +32,8 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
+
   });
 
   it("returns a redacted integrity failure without mutating or advancing profile state", async () => {
@@ -182,6 +185,78 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     });
   });
 
+  it("does not advance or dispatch a signed named workflow on an unsupported runtime", async () => {
+    const sessionId = "named-unsupported-runtime";
+    const base = initAutopilot(testDir, "ship the release", sessionId)!;
+    const descriptor = createWorkflowDescriptor("release-flow", {
+      version: 1,
+      stages: ["ralplan", "execution"],
+    })!;
+    const transcriptRoot = join(testDir, "claude-config", "projects");
+    const transcriptPath = join(transcriptRoot, `${sessionId}.jsonl`);
+    writeFileSync(transcriptPath, "");
+    const stat = statSync(transcriptPath);
+    const identity = {
+      device: stat.dev,
+      inode: stat.ino,
+      size: 0,
+      mtimeNs: "0",
+      ctimeNs: "0",
+      contentSha256: createHash("sha256").update("").digest("hex"),
+    };
+    writeAutopilotState(
+      testDir,
+      {
+        ...base,
+        phase: "ralplan",
+        workflow: descriptor,
+        workflowRunId: "11111111-1111-4111-8111-111111111111",
+        pipelineTracking: {
+          stages: [
+            { id: "ralplan", status: "active", iterations: 0, startedAt: new Date().toISOString() },
+            { id: "execution", status: "pending", iterations: 0 },
+          ],
+          currentStageIndex: 0,
+          trackingRevision: 0,
+          activationBoundary: {
+            transcriptPath,
+            transcriptRoot,
+            transcriptBasename: `${sessionId}.jsonl`,
+            sessionId,
+            byteOffset: 0,
+            fileIdentity: identity,
+          },
+          completionObservations: [],
+        },
+      },
+      sessionId,
+    );
+
+    const signal = JSON.stringify({
+      sessionId,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" }],
+      },
+    });
+    writeFileSync(transcriptPath, `${signal}\n`);
+    const statePath = join(testDir, ".omc", "state", "sessions", sessionId, "autopilot-state.json");
+    const before = readFileSync(statePath);
+    process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
+
+    const result = await checkAutopilot(sessionId, testDir);
+
+    expect(result).toEqual({
+      shouldBlock: false,
+      message:
+        "[AUTOPILOT NAMED WORKFLOW UNSUPPORTED] Named workflow enforcement requires Linux with flock. State was left unchanged; use /cancel to safely stop this workflow.",
+      phase: "ralplan",
+    });
+    expect(result?.message).not.toContain("PIPELINE STAGE");
+    expect(readFileSync(statePath)).toEqual(before);
+  });
+
   it("authenticates an exact named completion signal and advances without legacy state", async () => {
     const sessionId = "named-advance-session";
     const base = initAutopilot(testDir, "ship the release", sessionId)!;
@@ -234,6 +309,7 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       },
       sessionId,
     );
+    const unadvanced = readAutopilotState(testDir, sessionId)!;
     const signal = JSON.stringify({
       sessionId,
       type: "assistant",
@@ -242,7 +318,13 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
         content: [{ type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" }],
       },
     });
-    writeFileSync(transcriptPath, `${signal}\n`);
+    const unrelated = JSON.stringify({
+      sessionId,
+      type: "user",
+      message: { role: "user", content: "unrelated" },
+    });
+    writeFileSync(transcriptPath, `${signal}\n${unrelated}\n`);
+
 
     const result = await checkAutopilot(sessionId, testDir);
     const persisted = readAutopilotState(testDir, sessionId)!;
@@ -257,5 +339,24 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     expect(persisted.pipelineTracking?.completionObservations).toHaveLength(1);
     expect(persisted.expansion).toEqual(base.expansion);
     expect(persisted.planning).toEqual(base.planning);
+
+    for (const suffix of [
+      `${signal}\n{"truncated":\n`,
+      `{"truncated":\n${signal}\n`,
+      `${signal}\n\n\n`,
+      `\n${signal}\n`,
+    ]) {
+      writeAutopilotState(testDir, unadvanced, sessionId);
+      writeFileSync(transcriptPath, suffix);
+
+      const rejected = await checkAutopilot(sessionId, testDir);
+      const unchanged = readAutopilotState(testDir, sessionId)!;
+      expect(rejected).toMatchObject({ shouldBlock: true, phase: "ralplan" });
+      expect(unchanged.phase).toBe("ralplan");
+      expect(unchanged.pipelineTracking).toMatchObject({
+        currentStageIndex: 0,
+        trackingRevision: 0,
+      });
+    }
   });
 });

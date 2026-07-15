@@ -49,6 +49,7 @@ import {
 import { DEFAULT_PIPELINE_CONFIG } from "./pipeline-types.js";
 import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
 import {
+  namedWorkflowRuntimeSupported,
   prepareNamedWorkflowAdvance,
   validateNamedWorkflowState,
 } from "./named-workflow-resume-validator.js";
@@ -253,6 +254,15 @@ export async function checkAutopilot(
     return {
       shouldBlock: false,
       message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
+
+  if (state.workflow && !namedWorkflowRuntimeSupported()) {
+    return {
+      shouldBlock: false,
+      message:
+        "[AUTOPILOT NAMED WORKFLOW UNSUPPORTED] Named workflow enforcement requires Linux with flock. State was left unchanged; use /cancel to safely stop this workflow.",
       phase: state.phase,
     };
   }

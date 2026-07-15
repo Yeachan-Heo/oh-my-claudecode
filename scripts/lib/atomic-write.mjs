@@ -3,7 +3,7 @@
  * Self-contained module with no external dependencies.
  */
 
-import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, readdirSync, linkSync, statSync } from 'fs';
+import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, readdirSync, linkSync, statSync, fstatSync } from 'fs';
 import { dirname, basename, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -24,6 +24,18 @@ export function ensureDirSync(dir) {
     throw err;
   }
 }
+
+function writeAllSync(fd, content, label) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0) throw new Error(`${label} made no progress`);
+    offset += written;
+  }
+  if (fstatSync(fd).size !== bytes.length) throw new Error(`${label} size verification failed`);
+}
+
 
 /**
  * Write string content atomically to a file.
@@ -48,7 +60,7 @@ export function atomicWriteFileSync(filePath, content) {
     fd = openSync(tempPath, 'wx', 0o600);
 
     // Write content
-    writeSync(fd, content, 0, 'utf-8');
+    writeAllSync(fd, content, 'atomic write');
 
     // Sync file data to disk before rename
     fsyncSync(fd);
@@ -164,7 +176,7 @@ function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
     let fd;
     try {
       fd = openSync(tempPath, 'wx', 0o600);
-      writeSync(fd, JSON.stringify(owner));
+      writeAllSync(fd, JSON.stringify(owner), 'lock owner publication');
       fsyncSync(fd);
       linkSync(tempPath, lockPath);
       unlinkSync(tempPath);
