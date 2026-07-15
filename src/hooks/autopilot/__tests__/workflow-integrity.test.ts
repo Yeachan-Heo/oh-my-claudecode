@@ -17,6 +17,7 @@ import {
   readAutopilotState,
   writeAutopilotState,
 } from "../state.js";
+import { validateNamedWorkflowState } from "../named-workflow-resume-validator.js";
 
 describe("workflow descriptor integrity enforcement (#3487)", () => {
   let testDir: string;
@@ -150,6 +151,15 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     } as typeof before & { pipeline: unknown };
     delete (malformed as Partial<typeof before>).pipelineTracking;
     writeAutopilotState(testDir, malformed, sessionId);
+    await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: "ralplan",
+    });
+
+    const missingDescriptor = structuredClone(before);
+    delete (missingDescriptor as Partial<typeof before>).workflow;
+    writeAutopilotState(testDir, missingDescriptor, sessionId);
     await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
       shouldBlock: false,
       message: "workflow_descriptor_integrity_failed",
@@ -344,11 +354,85 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     expect(persisted.expansion).toEqual(base.expansion);
     expect(persisted.planning).toEqual(base.planning);
 
+    const terminalSignal = JSON.stringify({
+      sessionId,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Signal: PIPELINE_EXECUTION_COMPLETE" },
+        ],
+      },
+    });
+    writeFileSync(
+      transcriptPath,
+      `${signal}\n${unrelated}\n${terminalSignal}\n`,
+    );
+
+    const terminalResult = await checkAutopilot(sessionId, testDir);
+    const terminal = readAutopilotState(testDir, sessionId)!;
+    expect(terminalResult).toMatchObject({
+      shouldBlock: false,
+      phase: "complete",
+    });
+    expect(terminal).toMatchObject({ active: false, phase: "complete" });
+    expect(terminal.pipelineTracking).toMatchObject({
+      currentStageIndex: 2,
+      trackingRevision: 2,
+    });
+    expect(
+      terminal.pipelineTracking?.stages.every(
+        (stage) => stage.status === "complete",
+      ),
+    ).toBe(true);
+    expect(validateNamedWorkflowState(terminal, sessionId)).not.toBeNull();
+    expect(canResumeAutopilot(testDir, sessionId)).toEqual({
+      canResume: false,
+      state: terminal,
+      resumePhase: "complete",
+    });
+    expect(resumeAutopilot(testDir, sessionId)).toMatchObject({
+      success: false,
+      message: "No autopilot session available to resume",
+    });
+
+    const malformedTerminal = structuredClone(terminal);
+    malformedTerminal.pipelineTracking!.activationBoundary = structuredClone(
+      malformedTerminal.pipelineTracking!.completionObservations![0]
+        .activationBoundary,
+    );
+    writeAutopilotState(testDir, malformedTerminal, sessionId);
+    expect(
+      validateNamedWorkflowState(
+        readAutopilotState(testDir, sessionId)!,
+        sessionId,
+      ),
+    ).toBeNull();
+    expect(canResumeAutopilot(testDir, sessionId)).toMatchObject({
+      canResume: false,
+      resumePhase: "complete",
+      integrityFailed: true,
+    });
+
+    writeAutopilotState(testDir, unadvanced, sessionId);
+    const malformedThinkingSignal = JSON.stringify({
+      sessionId,
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: 1 },
+          { type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" },
+        ],
+      },
+    });
+
     for (const suffix of [
       `${signal}\n{"truncated":\n`,
       `{"truncated":\n${signal}\n`,
       `${signal}\n\n\n`,
       `\n${signal}\n`,
+      `${malformedThinkingSignal}\n`,
     ]) {
       writeAutopilotState(testDir, unadvanced, sessionId);
       writeFileSync(transcriptPath, suffix);

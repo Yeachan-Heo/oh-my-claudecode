@@ -250,7 +250,9 @@ export async function checkAutopilot(
     return null;
   }
 
-  if (state.workflow && !verifyWorkflowDescriptor(state.workflow)) {
+  const hasNamedWorkflowMarkers = Boolean(state.workflow || state.workflowRunId || state.pipelineTracking);
+
+  if (hasNamedWorkflowMarkers && (!state.workflow || !verifyWorkflowDescriptor(state.workflow))) {
     return {
       shouldBlock: false,
       message: "workflow_descriptor_integrity_failed",
@@ -258,7 +260,7 @@ export async function checkAutopilot(
     };
   }
 
-  if (state.workflow && !namedWorkflowRuntimeSupported()) {
+  if (hasNamedWorkflowMarkers && !namedWorkflowRuntimeSupported()) {
     return {
       shouldBlock: false,
       message:
@@ -267,7 +269,7 @@ export async function checkAutopilot(
     };
   }
 
-  if (state.workflow) {
+  if (hasNamedWorkflowMarkers) {
     const validated = validateNamedWorkflowState(state, sessionId);
     if (!validated) {
       return {

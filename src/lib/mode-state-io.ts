@@ -513,21 +513,35 @@ function sameFile(path: string, expected: FileIdentity): boolean {
   return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
 }
 
-function reconcileEmergencyPublicationTemps(filePath: string): boolean {
+function reconcileEmergencyPublicationTemps(filePath: string, authorizeState?: EmergencyStateAuthorization): boolean {
   const directory = dirname(filePath);
   const base = filePath.slice(directory.length + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${base}\\.emergency-(?:journal\\.json|recovery\\.claim|quarantine\\.[0-9a-f-]{36}\\.payload)\\.(\\d+)\\.(\\d+)\\.([0-9a-f-]{36})\\.tmp$`, 'i');
+  const pattern = new RegExp(`^${base}\\.emergency-(journal\\.json|recovery\\.claim|quarantine\\.[0-9a-f-]{36}\\.payload)\\.(\\d+)\\.(\\d+)\\.([0-9a-f-]{36})\\.tmp$`, 'i');
   let names: string[];
   try { names = readdirSync(directory); } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
   for (const name of names) {
     const match = pattern.exec(name);
     if (!match) continue;
-    const currentStart = processStartIdentity(Number(match[1]));
-    if (currentStart === null || currentStart === match[2]) return false;
     const path = join(directory, name);
+    const currentStart = processStartIdentity(Number(match[2]));
+    if (currentStart === null || currentStart === match[3]) return false;
     const generation = fileIdentity(path);
     try {
-      if (!generation || !sameFile(path, generation)) return false;
+      if (!generation) return false;
+      const raw = readFileSync(path, 'utf8');
+      if (authorizeState) {
+        if (match[1] === 'journal.json') {
+          const journal = readEmergencyJournal(path);
+          if (!journal || !recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return false;
+        } else if (match[1].startsWith('quarantine.')) {
+          const state = JSON.parse(raw) as unknown;
+          if (!state || typeof state !== 'object' || Array.isArray(state) || !authorizeState(state as Record<string, unknown>)) return false;
+        } else {
+          const claim = readRecoveryClaim(path);
+          if (!claim || claim.pid !== Number(match[2]) || claim.processStart !== match[3] || claim.nonce !== match[4]) return false;
+        }
+      }
+      if (!sameFile(path, generation) || stateDigest(readFileSync(path, 'utf8')) !== stateDigest(raw)) return false;
       unlinkSync(path);
     } catch { return false; }
   }
@@ -570,19 +584,26 @@ function recoveryGenerationsAuthorized(
     filePath,
     ...(journal ? [journal.quarantinePath, `${journal.quarantinePath}.payload`] : []),
   ];
+  let authenticatedJournalGeneration = journal === null;
   for (const path of paths) {
     if (!existsSync(path)) continue;
+    let raw: string;
     let state: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+      raw = readFileSync(path, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
       state = parsed as Record<string, unknown>;
     } catch {
       return false;
     }
     if (!authorizeState(state)) return false;
+    if (journal && (
+      stateDigest(raw) === journal.originalDigest ||
+      (journal.intent === 'publish' && stateDigest(raw) === journal.intendedDigest)
+    )) authenticatedJournalGeneration = true;
   }
-  return true;
+  return authenticatedJournalGeneration;
 }
 
 function emergencyReplaceAtRecoveryBoundary(filePath: string): void {
@@ -606,9 +627,21 @@ function emergencyReplaceAtRecoveryBoundary(filePath: string): void {
 /** A dead transaction is recovered under a state-scoped, generation-verified exclusive claim. */
 export function recoverEmergencyStateFile(filePath: string, options?: EmergencyRecoveryOptions): boolean {
   const journalPath = emergencyJournalPath(filePath);
-  if (!existsSync(journalPath)) return reconcileEmergencyPublicationTemps(filePath);
+  if (!existsSync(journalPath)) {
+    if (!options?.authorizeState) return reconcileEmergencyPublicationTemps(filePath);
+    const claimPath = `${filePath}.emergency-recovery.claim`;
+    const claim = acquireRecoveryClaim(claimPath);
+    if (!claim) return false;
+    try {
+      if (existsSync(journalPath)) return false;
+      return reconcileEmergencyPublicationTemps(filePath, options.authorizeState);
+    } finally {
+      releaseRecoveryClaim(claimPath, claim);
+    }
+  }
   const journal = readEmergencyJournal(journalPath);
   if (!journal) {
+    if (options?.authorizeState) return false;
     const claimPath = `${filePath}.emergency-recovery.claim`;
     const claim = acquireRecoveryClaim(claimPath);
     if (!claim) return false;
@@ -617,7 +650,7 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
       emergencyReplaceAtRecoveryBoundary(filePath);
       const current = readEmergencyJournal(journalPath);
       if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
-      if (!reconcileEmergencyPublicationTemps(filePath)) return false;
+      if (!reconcileEmergencyPublicationTemps(filePath, options?.authorizeState)) return false;
       if (!generation || readEmergencyJournal(journalPath) !== null || !existsSync(filePath) || !sameFile(journalPath, generation)) return false;
       unlinkSync(journalPath);
       return true;
@@ -632,7 +665,7 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
     emergencyReplaceAtRecoveryBoundary(filePath);
     const current = readEmergencyJournal(journalPath);
     if (!recoveryGenerationsAuthorized(filePath, current, options?.authorizeState)) return true;
-    if (!reconcileEmergencyPublicationTemps(filePath)) return false;
+    if (!reconcileEmergencyPublicationTemps(filePath, options?.authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
     return recoverDeadEmergencyStateFile(filePath, options?.authorizeState);
   } finally {

@@ -153,7 +153,9 @@ function assistantText(record) {
   const text = [];
   for (const block of content) {
     if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) text.push(block.text);
-    else if (block?.type !== 'thinking' && block?.type !== 'redacted_thinking') return null;
+    else if (block?.type === 'thinking' && typeof block.thinking === 'string') continue;
+    else if (block?.type === 'redacted_thinking' && typeof block.data === 'string') continue;
+    else return null;
   }
   return text.length > 0 ? text.join('') : null;
 }

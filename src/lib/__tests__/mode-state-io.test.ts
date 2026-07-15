@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { execSync, spawn } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 
@@ -909,6 +909,37 @@ describe('mode-state-io', () => {
       expect(recoverEmergencyStateFile(path)).toBe(true);
       expect(readFileSync(path, 'utf8')).toBe(raw);
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
+    it('authenticates dead no-journal payload publication temps before reconciling shared state', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-publication-temp.json');
+      const foreignTemp = `${path}.emergency-quarantine.${randomUUID()}.payload.999999999.1.${randomUUID()}.tmp`;
+      const localTemp = `${path}.emergency-quarantine.${randomUUID()}.payload.999999999.1.${randomUUID()}.tmp`;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, project_path: '/projects/a' }));
+      writeFileSync(foreignTemp, JSON.stringify({ active: false, project_path: '/projects/b' }));
+
+      const authorizeProjectA = { authorizeState: (state: Record<string, unknown>) => state.project_path === '/projects/a' };
+      expect(recoverEmergencyStateFile(path, authorizeProjectA)).toBe(false);
+      expect(existsSync(foreignTemp)).toBe(true);
+      expect(readFileSync(path, 'utf8')).toBe(JSON.stringify({ active: true, project_path: '/projects/a' }));
+
+      unlinkSync(foreignTemp);
+      writeFileSync(localTemp, JSON.stringify({ active: false, project_path: '/projects/a' }));
+      expect(recoverEmergencyStateFile(path, authorizeProjectA)).toBe(true);
+      expect(existsSync(localTemp)).toBe(false);
+    });
+
+    it('preserves malformed journals under project-aware recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'shared-home-malformed-journal.json');
+      const journalPath = `${path}.emergency-journal.json`;
+      const primary = JSON.stringify({ active: true, project_path: '/projects/a' });
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, primary);
+      writeFileSync(journalPath, '{"version":1');
+
+      expect(recoverEmergencyStateFile(path, { authorizeState: (state) => state.project_path === '/projects/a' })).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(primary);
+      expect(readFileSync(journalPath, 'utf8')).toBe('{"version":1');
     });
     it('reconciles dead journal, payload, and claim publication temps in TypeScript and shipped helpers', async () => {
       const helpers = [

@@ -803,6 +803,27 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
   return isActiveSignal(join(stateDir, "cancel-signal-state.json"));
 }
 
+function hasNamedWorkflowMarkers(state) {
+  return Boolean(
+    state &&
+    typeof state === "object" &&
+    (Object.prototype.hasOwnProperty.call(state, "workflowRunId") ||
+      Object.prototype.hasOwnProperty.call(state, "pipelineTracking")),
+  );
+}
+
+function isEnforceableAutopilotCancellationTarget(state, directory, isGlobal, hasValidSessionId, sessionId) {
+  if (!state?.active || isAwaitingConfirmation(state) || (isStaleState(state) && !hasNamedWorkflowMarkers(state))) return false;
+  if (!isStateForCurrentProject(state, directory, isGlobal)) return false;
+  if (hasValidSessionId ? state.session_id !== sessionId : state.session_id && state.session_id !== sessionId) return false;
+  return getAutopilotPhase(state) !== "complete";
+}
+
+function isCurrentAutopilotState(state, directory, isGlobal, hasValidSessionId, sessionId) {
+  if (!isStateForCurrentProject(state, directory, isGlobal)) return false;
+  return hasValidSessionId ? state?.session_id === sessionId : !state?.session_id || state.session_id === sessionId;
+}
+
 function shouldWriteStateBack(path) {
   return Boolean(path && existsSync(path));
 }
@@ -1208,7 +1229,21 @@ async function main() {
       sessionId,
     );
 
-    if (isSessionCancelInProgress(stateDir, sessionId, autopilot.state, autopilot.path)) {
+    const currentAutopilot = isCurrentAutopilotState(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
+      ? autopilot.state
+      : null;
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
+      console.log(JSON.stringify(SAFE_CONTINUE));
+      return;
+    }
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && (!isValidWorkflowDescriptor(currentAutopilot.workflow) || !isValidWorkflowTrackingState(currentAutopilot, sessionId))) {
+      console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+      return;
+    }
+    const cancellationTarget = isEnforceableAutopilotCancellationTarget(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
+      ? autopilot.state
+      : null;
+    if (isSessionCancelInProgress(stateDir, sessionId, cancellationTarget, cancellationTarget ? autopilot.path : null)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -1377,18 +1412,18 @@ async function main() {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
               ? workflowAdvance.nextStagePrompt
               : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
-          } else if (commit.state?.workflow && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
+          } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           } else {
-            console.log(JSON.stringify(commit.state?.workflow ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
+            console.log(JSON.stringify(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
           }
           return;
         }
-        if (autopilot.state.workflow && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
+        if (hasNamedWorkflowMarkers(autopilot.state) && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
           console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           return;
         }
-        if (autopilot.state.workflow) {
+        if (hasNamedWorkflowMarkers(autopilot.state)) {
           const expected = {
             workflowRunId: autopilot.state.workflowRunId,
             sessionId: autopilot.state.session_id,
@@ -1399,7 +1434,7 @@ async function main() {
             phase: autopilot.state.phase,
           };
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
-          if (refresh.integrityFailed || (refresh.state?.workflow && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
+          if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
           } else {
             console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));

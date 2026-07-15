@@ -259,8 +259,25 @@ function assistantText(record: RecordValue): string | null {
   const text: string[] = [];
   for (const block of content.content) {
     if (!isRecord(block)) return null;
-    if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) text.push(block.text);
-    else if (block.type !== "thinking" && block.type !== "redacted_thinking") return null;
+    if (
+      block.type === "text" &&
+      typeof block.text === "string" &&
+      block.text.trim().length > 0
+    ) {
+      text.push(block.text);
+    } else if (
+      block.type === "thinking" &&
+      typeof block.thinking === "string"
+    ) {
+      continue;
+    } else if (
+      block.type === "redacted_thinking" &&
+      typeof block.data === "string"
+    ) {
+      continue;
+    } else {
+      return null;
+    }
   }
   return text.length > 0 ? text.join("") : null;
 }
@@ -367,6 +384,10 @@ export function validateNamedWorkflowState(
     )
   )
     return null;
+  const terminal = state.active === false && state.phase === "complete";
+  const maximumStageIndex = terminal
+    ? workflow.stages.length
+    : workflow.stages.length - 1;
   if (
     !exactKeys(tracking, [
       "stages",
@@ -379,7 +400,7 @@ export function validateNamedWorkflowState(
     !Array.isArray(tracking.completionObservations) ||
     !safeInteger(tracking.currentStageIndex) ||
     !safeInteger(tracking.trackingRevision) ||
-    tracking.currentStageIndex >= workflow.stages.length ||
+    tracking.currentStageIndex > maximumStageIndex ||
     tracking.trackingRevision !== tracking.currentStageIndex ||
     tracking.completionObservations.length !== tracking.currentStageIndex ||
     !validBoundary(tracking.activationBoundary, sessionId, root) ||
@@ -389,8 +410,9 @@ export function validateNamedWorkflowState(
   for (let index = 0; index < tracking.stages.length; index += 1) {
     const stage = tracking.stages[index];
     if (!isRecord(stage)) return null;
-    const status =
-      index < tracking.currentStageIndex
+    const status = terminal
+      ? "complete"
+      : index < tracking.currentStageIndex
         ? "complete"
         : index === tracking.currentStageIndex
           ? "active"
@@ -474,7 +496,12 @@ export function validateNamedWorkflowState(
     )
       return null;
   }
-  if (state.phase !== workflow.stages[tracking.currentStageIndex]) return null;
+  if (
+    terminal
+      ? state.phase !== "complete"
+      : state.phase !== workflow.stages[tracking.currentStageIndex]
+  )
+    return null;
   return {
     tracking: tracking as NonNullable<AutopilotState["pipelineTracking"]>,
     task,

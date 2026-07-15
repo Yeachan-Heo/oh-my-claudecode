@@ -366,12 +366,44 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
   });
 
+  it.each([
+    ['inactive', state => ({ ...state, active: false })],
+    ['cross-project', (state, f) => ({ ...state, project_path: join(f.dir, 'other-project') })],
+  ])('honors requested_at-only cancellation for ultrawork when %s autopilot coexists', (_name, mutate) => {
+    const f = fixture(kind);
+    writeState(f, mutate(workflowState(f), f));
+    writeFileSync(join(dirname(f.statePath), 'ultrawork-state.json'), JSON.stringify({
+      active: true,
+      session_id: f.sessionId,
+      project_path: f.project,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      reinforcement_count: 0,
+    }));
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      requested_at: new Date().toISOString(),
+      source: 'state_clear',
+    }));
+
+    expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
+  });
+
   it('fails closed when a named workflow is missing tracking state', () => {
     const f = fixture(kind);
     const state = workflowState(f);
     delete state.pipelineTracking;
     delete state.phase;
     state.prompt = '/autopilot';
+    writeState(f, state);
+
+    expect(invoke(f)).toEqual(workflowIntegrityFailure);
+  });
+
+  it('fails closed when named markers remain after the workflow descriptor is removed', () => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    delete state.workflow;
     writeState(f, state);
 
     expect(invoke(f)).toEqual(workflowIntegrityFailure);
@@ -411,6 +443,19 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(refreshed.pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
+  it('rejects malformed thinking metadata without advancing', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    appendRawRecord(f, {
+      sessionId: f.sessionId,
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: 123 }, { type: 'text', text: completion('ralplan') }] },
+    });
+
+    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
+  });
+
   it('does not mutate or redispatch named workflow Stop after runtime support is lost', () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));
@@ -424,7 +469,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     rmSync(f.statePath, { force: true });
     const globalPath = join(f.home, '.omc', 'state', 'autopilot-state.json');
     mkdirSync(dirname(globalPath), { recursive: true });
-    const globalState = { active: true, mode: 'autopilot', phase: 'execution', prompt: workflowTask, project_path: f.project, session_id: f.sessionId, workflowRunId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', execution: { files_created: [], files_modified: [], current_task: 'ship' } };
+    const globalState = { active: true, mode: 'autopilot', phase: 'execution', prompt: workflowTask, project_path: f.project, session_id: f.sessionId, execution: { files_created: [], files_modified: [], current_task: 'ship' } };
     const snapshot = JSON.stringify(globalState);
     writeFileSync(globalPath, snapshot);
     const signalPath = join(dirname(globalPath), 'cancel-signal-state.json');
@@ -433,7 +478,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const pending = invokeAsync(f);
     await new Promise(resolve => setTimeout(resolve, 150));
     const now = Date.now();
-    writeFileSync(signalPath, JSON.stringify({ active: true, requested_at: new Date(now).toISOString(), expires_at: new Date(now + 30_000).toISOString(), mode: 'autopilot', source: 'state_clear', target_workflow_run_id: globalState.workflowRunId, target_state_sha256: createHash('sha256').update(snapshot).digest('hex') }));
+    writeFileSync(signalPath, JSON.stringify({ active: true, requested_at: new Date(now).toISOString(), expires_at: new Date(now + 30_000).toISOString(), mode: 'autopilot', source: 'state_clear', target_state_sha256: createHash('sha256').update(snapshot).digest('hex') }));
     unlinkSync(globalPath);
     unlinkSync(`${signalPath}.mutation.lock`);
 

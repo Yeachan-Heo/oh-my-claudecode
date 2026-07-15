@@ -303,6 +303,23 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       expect(output.decision).toBeUndefined();
     });
 
+    it.each([
+      ["inactive", { active: false, session_id: "session-cancel-coexist", project_path: "/inactive-project" }],
+      ["cross-project", { active: true, phase: "execution", session_id: "session-cancel-coexist", project_path: "/other-project", last_checked_at: new Date().toISOString() }],
+    ])("allows requested_at-only cancellation for ultrawork with a %s autopilot record", (_kind, autopilotState) => {
+      const sessionId = "session-cancel-coexist";
+      createUltraworkState(tempDir, sessionId, "Task being cancelled");
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(autopilotState));
+      writeFileSync(join(sessionDir, "cancel-signal-state.json"), JSON.stringify({
+        active: true,
+        requested_at: new Date().toISOString(),
+        source: "test",
+      }));
+
+      expect(runPersistentModeScript({ directory: tempDir, sessionId })).toMatchObject({ continue: true });
+    });
+
     it("should NOT block for legacy autopilot state when sessionId is provided", () => {
       const stateDir = join(tempDir, ".omc", "state");
       mkdirSync(stateDir, { recursive: true });

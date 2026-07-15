@@ -379,6 +379,49 @@ describe('state-tools', () => {
         else process.env.HOME = previousHome;
       }
     });
+    it('preserves a foreign dead publication temp beside an authorized home-global state', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-global-foreign-temp');
+      process.env.HOME = home;
+      try {
+        const statePath = join(home, '.omc', 'state', 'autopilot-state.json');
+        const foreignTemp = `${statePath}.emergency-quarantine.${randomUUID()}.payload.999999999.1.${randomUUID()}.tmp`;
+        const primary = JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'adadadad-adad-4dad-8dad-adadadadadad' });
+        mkdirSync(dirname(statePath), { recursive: true });
+        writeFileSync(statePath, primary);
+        writeFileSync(foreignTemp, JSON.stringify({ active: false, project_path: join(TEST_DIR, 'other-project') }));
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError).toBe(true);
+        expect(readFileSync(statePath, 'utf8')).toBe(primary);
+        expect(existsSync(foreignTemp)).toBe(true);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
+
+    it('preserves a malformed journal beside an authorized shared-session state', async () => {
+      const previousHome = process.env.HOME;
+      const home = join(TEST_DIR, 'home-shared-session-malformed-journal');
+      process.env.HOME = home;
+      try {
+        const statePath = join(home, '.omc', 'state', 'sessions', 'project-a', 'autopilot-state.json');
+        const journalPath = `${statePath}.emergency-journal.json`;
+        const primary = JSON.stringify({ active: true, project_path: TEST_DIR, workflowRunId: 'aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae' });
+        mkdirSync(dirname(statePath), { recursive: true });
+        writeFileSync(statePath, primary);
+        writeFileSync(journalPath, '{"version":1');
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError).toBe(true);
+        expect(readFileSync(statePath, 'utf8')).toBe(primary);
+        expect(readFileSync(journalPath, 'utf8')).toBe('{"version":1');
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    });
 
 
     it('preserves an unrelated-project home-global autopilot fallback without signaling', async () => {
