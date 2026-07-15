@@ -8,7 +8,6 @@
  * runner retains ownership of their synchronous timeout boundary.
  */
 
-const { spawnSync } = require('child_process');
 const { spawn } = require('child_process');
 const { existsSync, readFileSync, realpathSync } = require('fs');
 const path = require('path');
@@ -203,26 +202,30 @@ function writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs) {
 
 function reapTree(child) {
   if (process.platform === 'win32') {
+    // Fire-and-forget: a slow, denied, or missing taskkill must not block the
+    // runner past the outer hooks.json budget. The runner still exits fail-open
+    // via child.unref() on the timeout path; taskkill reaps the tree best-effort.
     try {
-      const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+      const killer = spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
         windowsHide: true,
-        timeout: 2000,
+        detached: true,
+        stdio: 'ignore',
       });
-      return result.status === 0;
+      killer.on('error', () => {});
+      killer.unref();
     } catch {
-      return false;
+      // best-effort; child.unref() still guarantees the runner exits
     }
+    return;
   }
 
   try {
     process.kill(-child.pid, 'SIGKILL');
-    return true;
   } catch {
     try {
       process.kill(child.pid, 'SIGKILL');
-      return true;
     } catch {
-      return false;
+      // best-effort; child.unref() still guarantees the runner exits
     }
   }
 }
@@ -267,6 +270,10 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
       terminal = true;
       detachHandlers();
       reapTree(child);
+      // The runner MUST exit fail-open even if the tree reap did not (or could
+      // not) complete — the core #3493 symptom is run.cjs parents living for
+      // tens of minutes. unref() releases the child handle from the event loop.
+      try { child.unref(); } catch { /* handle already released */ }
       writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
       resolve(0);
     }, timeoutMs);

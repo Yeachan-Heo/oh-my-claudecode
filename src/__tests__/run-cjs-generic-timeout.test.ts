@@ -111,7 +111,7 @@ describe('run.cjs generic hook timeout supervisor', () => {
   });
 
   it('reaps the detached hook tree when the runner is terminated before its timeout (POSIX)', async () => {
-    if (process.platform === 'win32') return; // POSIX process-group reap; Windows cancellation covered by the CI lane test
+    if (process.platform === 'win32') return; // POSIX-only: exercises process-group reap. Killing the grandchild proves its whole group (incl. the direct hook child) was reaped. Windows programmatic SIGTERM force-terminates rather than delivering a catchable signal, so this outer-cancellation path is POSIX-specific.
     const directory = mkdtempSync(join(tmpdir(), 'omc-runner-cancel-'));
     const pidfile = join(directory, 'grandchild.pid');
     let grandchildPid: number | undefined;
