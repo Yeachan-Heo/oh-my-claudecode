@@ -5,7 +5,7 @@
 
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, linkSync } from 'fs';
 import { dirname, basename, join } from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
 /**
@@ -198,4 +198,106 @@ export function withStateFileLockSync(filePath, callback) {
   } finally {
     releaseStateFileLockSync(lock);
   }
+}
+
+/** Recover an interrupted exact emergency state mutation without touching replacements. */
+function stateDigest(raw) {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+function emergencyJournalPath(filePath) {
+  return `${filePath}.emergency-journal.json`;
+}
+
+function writeEmergencyJournal(path, journal) {
+  atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
+}
+
+function readEmergencyJournal(path) {
+  try {
+    const journal = JSON.parse(readFileSync(path, 'utf8'));
+    if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) ||
+      typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest) ||
+      (journal.intent !== 'clear' && journal.intent !== 'publish') ||
+      (journal.intent === 'publish' && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) ||
+      typeof journal.quarantinePath !== 'string' ||
+      (journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
+    return journal;
+  } catch { return null; }
+}
+
+/** Recover a previously interrupted emergency mutation. False means do not use the primary. */
+export function recoverEmergencyStateFile(filePath) {
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) return true;
+  const journal = readEmergencyJournal(journalPath);
+  if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}`) return false;
+  const hasPrimary = existsSync(filePath);
+  const hasQuarantine = existsSync(journal.quarantinePath);
+  const digest = (path) => {
+    try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; }
+  };
+  const finalize = () => {
+    try {
+      if (hasQuarantine) unlinkSync(journal.quarantinePath);
+      try { unlinkSync(`${journal.quarantinePath}.payload`); } catch { /* already removed */ }
+      unlinkSync(journalPath);
+      return true;
+    } catch { return false; }
+  };
+
+  // Publication may have completed before its journal phase was persisted.
+  if (hasPrimary && hasQuarantine) {
+    if (journal.intent === 'publish' && digest(filePath) === journal.intendedDigest && digest(journal.quarantinePath) === journal.originalDigest) return finalize();
+    // The visible primary is not our exact result. Preserve the original
+    // quarantine for inspection, remove the blocking journal, and fail closed.
+    try { renameSync(journal.quarantinePath, `${journal.quarantinePath}.preserved-${journal.transactionId}`); } catch { return false; }
+    try { unlinkSync(journalPath); } catch { return false; }
+    return false;
+  }
+  if (hasPrimary) {
+    // A prepared journal has not made the primary undiscoverable. If it still
+    // has the authenticated original bytes, finish the transaction; otherwise
+    // it is a replacement and must not be touched.
+    if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === journal.originalDigest) {
+      const payloadPath = `${journal.quarantinePath}.payload`;
+      if (journal.intent === 'publish' && (!existsSync(payloadPath) || digest(payloadPath) !== journal.intendedDigest)) {
+        try { unlinkSync(journalPath); return true; } catch { return false; }
+      }
+      try {
+        renameSync(filePath, journal.quarantinePath);
+        journal.phase = 'quarantined';
+        writeEmergencyJournal(journalPath, journal);
+        return recoverEmergencyStateFile(filePath);
+      } catch { return false; }
+    }
+    return false;
+  }
+  if (!hasQuarantine) {
+    // Clear publication is complete even if journal cleanup was interrupted.
+    if (journal.intent === 'clear' && journal.phase === 'published') {
+      try { unlinkSync(journalPath); return true; } catch { return false; }
+    }
+    return false;
+  }
+  if (digest(journal.quarantinePath) !== journal.originalDigest) return false;
+  try {
+    if (journal.intent === 'clear') {
+      unlinkSync(journal.quarantinePath);
+      unlinkSync(journalPath);
+      return true;
+    }
+    const raw = readFileSync(journal.quarantinePath, 'utf8');
+    // The intended bytes are stored in the quarantine only for clear; publish
+    // recovery needs a persisted transformed payload alongside the journal.
+    const payloadPath = `${journal.quarantinePath}.payload`;
+    const payload = readFileSync(payloadPath, 'utf8');
+    if (stateDigest(payload) !== journal.intendedDigest) return false;
+    linkSync(payloadPath, filePath);
+    unlinkSync(payloadPath);
+    unlinkSync(journal.quarantinePath);
+    unlinkSync(journalPath);
+    void raw;
+    return true;
+  } catch { return false; }
 }

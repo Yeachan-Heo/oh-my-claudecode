@@ -198,6 +198,23 @@ describe('state-tools', () => {
       expect(existsSync(statePath)).toBe(false);
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'cancel-signal-state.json'))).toBe(false);
     });
+
+    it('exact-clears every recovered named primary before session cleanup', async () => {
+      const sessionId = 'multi-named-owner';
+      const canonical = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const stranded = join(TEST_DIR, '.omc', 'state', 'sessions', 'stale-dir', 'autopilot-state.json');
+      const state = { active: true, session_id: sessionId, workflowRunId: '11111111-1111-4111-8111-111111111111', workflow: { profileHash: 'a'.repeat(64) } };
+      mkdirSync(dirname(canonical), { recursive: true });
+      mkdirSync(dirname(stranded), { recursive: true });
+      writeFileSync(canonical, JSON.stringify(state));
+      writeFileSync(stranded, JSON.stringify({ ...state, workflowRunId: '22222222-2222-4222-8222-222222222222' }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+
+      const result = await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
+      expect(result.isError).toBeUndefined();
+      expect(existsSync(canonical)).toBe(false);
+      expect(existsSync(stranded)).toBe(false);
+    });
     it('should remove legacy state file when no session_id provided', async () => {
       await stateWriteTool.handler({
         mode: 'ralph',

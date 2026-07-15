@@ -28,7 +28,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
-import { atomicWriteFileSync, withStateFileLockSync } from './lib/atomic-write.mjs';
+import { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } from './lib/atomic-write.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt } from './lib/workflow-profile-runtime.mjs';
@@ -1078,6 +1078,7 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
   try {
     mkdirSync(dirname(target), { recursive: true });
     const result = withStateFileLockSync(target, () => {
+      if (!recoverEmergencyStateFile(target)) return { error: 'workflow_recovery_failure' };
       if (!existsSync(target)) return null;
       const current = JSON.parse(readFileSync(target, 'utf8'));
       if (current?.active !== false || current?.workflow?.workflowName !== workflowName) return null;
@@ -1089,11 +1090,13 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
       return { stagePrompt, workflowRunId: resumed.workflowRunId };
     });
+    if (result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
     if (!result.acquired || !result.value?.stagePrompt) return null;
     retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
     return result.value.stagePrompt;
-  } catch {
+  } catch (error) {
+    if (error?.message === 'workflow_emergency_recovery_failed') throw error;
     return false;
   }
 }
@@ -1107,6 +1110,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
   try {
     mkdirSync(dirname(target), { recursive: true });
     const result = withStateFileLockSync(target, () => {
+      if (!recoverEmergencyStateFile(target)) return { error: 'workflow_recovery_failure' };
       if (existsSync(target)) {
         try {
           const current = JSON.parse(readFileSync(target, 'utf8'));
@@ -1134,10 +1138,12 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
     });
     if (result.acquired && result.value?.error === 'active_workflow_conflict') throw new Error('an autopilot workflow is already active; run /cancel before activating another workflow');
     if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
+    if (result.acquired && result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;
     retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
     return result.value.stagePrompt;
-  } catch {
+  } catch (error) {
+    if (error?.message === 'workflow_emergency_recovery_failed') throw error;
     return false;
   }
 }

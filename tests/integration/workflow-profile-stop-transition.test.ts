@@ -334,6 +334,14 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(refreshed.pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
+  it('does not mutate or redispatch named workflow Stop after runtime support is lost', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const before = readFileSync(f.statePath);
+    expect(invoke(f, {}, { NODE_ENV: 'test', OMC_WORKFLOW_TEST_FLOCK_AVAILABLE: '0' })).toMatchObject({ continue: true, suppressOutput: true });
+    expect(readFileSync(f.statePath)).toEqual(before);
+  });
+
   it('preserves a concurrent named workflow transition rather than returning a stale stage prompt', async () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));

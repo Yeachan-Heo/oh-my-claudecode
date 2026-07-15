@@ -33,7 +33,7 @@ const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module (use pathToFileURL for Windows compatibility, #524)
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
-const { atomicWriteFileSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
+const { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const { resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 const { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, 'lib', 'workflow-profile-runtime.mjs')).href);
@@ -930,6 +930,7 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
   try {
     mkdirSync(dirname(writePath), { recursive: true });
     const result = withStateFileLockSync(writePath, () => {
+      if (!recoverEmergencyStateFile(writePath)) return { error: 'workflow_recovery_failure' };
       if (!existsSync(writePath)) return null;
       const current = JSON.parse(readFileSync(writePath, 'utf8'));
       if (current?.active !== false || current?.workflow?.workflowName !== workflowName) return null;
@@ -941,11 +942,13 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
       atomicWriteFileSync(writePath, JSON.stringify(resumed, null, 2));
       return { stagePrompt, workflowRunId: resumed.workflowRunId };
     });
+    if (result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
     if (!result.acquired || !result.value?.stagePrompt) return null;
     retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
     return result.value.stagePrompt;
-  } catch {
+  } catch (error) {
+    if (error?.message === 'workflow_emergency_recovery_failed') throw error;
     return false;
   }
 }
@@ -957,6 +960,7 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
   try {
     mkdirSync(dirname(writePath), { recursive: true });
     const result = withStateFileLockSync(writePath, () => {
+      if (!recoverEmergencyStateFile(writePath)) return { error: 'workflow_recovery_failure' };
       if (existsSync(writePath)) {
         try {
           const current = JSON.parse(readFileSync(writePath, 'utf8'));
@@ -984,10 +988,12 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
     });
     if (result.acquired && result.value?.error === 'active_workflow_conflict') throw new Error('an autopilot workflow is already active; run /cancel before activating another workflow');
     if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
+    if (result.acquired && result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;
     retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
     return result.value.stagePrompt;
-  } catch {
+  } catch (error) {
+    if (error?.message === 'workflow_emergency_recovery_failed') throw error;
     return false;
   }
 }

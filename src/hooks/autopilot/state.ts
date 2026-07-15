@@ -14,6 +14,7 @@ import {
   readModeState,
   clearModeStateFile,
   emergencyMutateStateFileIf,
+  recoverEmergencyStateFile,
   writeStateFileLockedIf,
 } from "../../lib/mode-state-io.js";
 import {
@@ -66,6 +67,12 @@ export function readAutopilotState(
   directory: string,
   sessionId?: string,
 ): AutopilotState | null {
+  const stateFile = sessionId
+    ? resolveSessionStatePath("autopilot", sessionId, directory)
+    : resolveStatePath("autopilot", directory);
+  if (!recoverEmergencyStateFile(stateFile)) {
+    return null;
+  }
   const state = readModeState<AutopilotState & { current_phase?: AutopilotPhase }>(
     "autopilot",
     directory,
@@ -123,8 +130,10 @@ export function clearAutopilotState(
   sessionId?: string,
   expectedState?: AutopilotState,
 ): boolean {
-  if (sessionId && expectedState?.workflow && !namedWorkflowRuntimeSupported()) {
-    const stateFile = resolveSessionStatePath("autopilot", sessionId, directory);
+  if (expectedState?.workflow && !namedWorkflowRuntimeSupported()) {
+    const stateFile = sessionId
+      ? resolveSessionStatePath("autopilot", sessionId, directory)
+      : resolveStatePath("autopilot", directory);
     const expectedSnapshot = canonicalStateJson(expectedState);
     return emergencyMutateStateFileIf(
       stateFile,
@@ -153,7 +162,7 @@ export function updateAutopilotStateIfCurrent(
   const stateFile = sessionId
     ? resolveSessionStatePath("autopilot", sessionId, directory)
     : resolveStatePath("autopilot", directory);
-  if (observed.workflow && sessionId && !namedWorkflowRuntimeSupported()) {
+  if (observed.workflow && !namedWorkflowRuntimeSupported()) {
     const observedSnapshot = namedResumeIdentity(observed as unknown as Record<string, unknown>);
     return emergencyMutateStateFileIf(
       stateFile,
@@ -230,6 +239,7 @@ export function getAutopilotStateAge(
   const stateFile = sessionId
     ? resolveSessionStatePath("autopilot", sessionId, directory)
     : resolveStatePath("autopilot", directory);
+  if (!recoverEmergencyStateFile(stateFile)) return null;
   try {
     const stats = statSync(stateFile);
     return Date.now() - stats.mtimeMs;

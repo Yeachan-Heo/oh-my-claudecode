@@ -5,7 +5,7 @@ import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, mkdtempSync
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 
-import { writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
+import { emergencyMutateStateFileIf, recoverEmergencyStateFile, writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
 import { clearWorktreeCache, getProjectIdentifier } from '../worktree-paths.js';
 
 let tempDir: string;
@@ -23,6 +23,7 @@ describe('mode-state-io', () => {
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH;
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
+    delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
   });
 
   // -----------------------------------------------------------------------
@@ -556,6 +557,69 @@ describe('mode-state-io', () => {
     it('should return true when file does not exist (already absent)', () => {
       const result = clearModeStateFile('ralph', tempDir);
       expect(result).toBe(true);
+    });
+  });
+
+  describe('durable emergency mutation journal', () => {
+    it('recovers a paused publication interrupted after primary publication', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'one' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ active: false, run: 'one' });
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
+
+    it.each([
+      ['before-rename', 'pause'],
+      ['after-rename', 'pause'],
+      ['after-publication', 'pause'],
+      ['before-cleanup', 'pause'],
+      ['before-rename', 'clear'],
+      ['after-rename', 'clear'],
+      ['before-cleanup', 'clear'],
+    ] as const)('recovers the %s crash boundary for exact %s', (phase, operation) => {
+      const path = join(tempDir, '.omc', 'state', `autopilot-${phase}-${operation}.json`);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: `${phase}-${operation}` }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = phase;
+      const transform = operation === 'pause' ? (state: Record<string, unknown>) => ({ ...state, active: false }) : null;
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === `${phase}-${operation}`, transform)).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      if (operation === 'pause') expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false });
+      else expect(existsSync(path)).toBe(false);
+    });
+
+    it('preserves an unrelated replacement after an interrupted clear and lets a retry converge', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'one' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', null)).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      const replacement = JSON.stringify({ active: true, run: 'replacement' });
+      writeFileSync(path, replacement);
+      expect(recoverEmergencyStateFile(path)).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(replacement);
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'replacement', null)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('preserves an unrelated replacement after an interrupted pause', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-pause-replacement.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'one' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      const replacement = JSON.stringify({ active: true, run: 'replacement' });
+      writeFileSync(path, replacement);
+      expect(recoverEmergencyStateFile(path)).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(replacement);
     });
   });
 });

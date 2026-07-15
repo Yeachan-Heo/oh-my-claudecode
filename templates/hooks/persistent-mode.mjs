@@ -97,7 +97,7 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
-const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
+const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
 const { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 function readJsonFile(path) {
@@ -1051,6 +1051,10 @@ async function main() {
         ? autopilot.state.session_id === sessionId
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
+        if (autopilot.state.workflow && !isWorkflowRuntimeSupported()) {
+          console.log(JSON.stringify(SAFE_CONTINUE));
+          return;
+        }
         const workflowAdvance = advanceWorkflowOnStop(autopilot.state, data, sessionId);
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);

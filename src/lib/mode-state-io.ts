@@ -8,7 +8,7 @@
 
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 import {
   getGitTopLevel,
@@ -221,66 +221,171 @@ export function writeStateFileLockedIf(
 }
 
 /**
- * Portable, fail-closed exact mutation for named workflow emergency cancellation.
- * The primary is first atomically quarantined, then either removed or published
- * through an exclusive hard-link. A replacement at the primary is never replaced.
+ * Durable exact mutation for named workflow emergency cancellation. The journal
+ * records every externally-visible step so a later reader can finish a partial
+ * transaction without guessing whether the primary is a replacement.
  */
+type EmergencyMutationJournal = {
+  version: 1;
+  transactionId: string;
+  originalDigest: string;
+  intendedDigest?: string;
+  intent: 'clear' | 'publish';
+  quarantinePath: string;
+  phase: 'prepared' | 'quarantined' | 'published';
+};
+
+function stateDigest(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+function emergencyJournalPath(filePath: string): string {
+  return `${filePath}.emergency-journal.json`;
+}
+
+function writeEmergencyJournal(path: string, journal: EmergencyMutationJournal): void {
+  atomicWriteJsonSync(path, journal);
+}
+
+function readEmergencyJournal(path: string): EmergencyMutationJournal | null {
+  try {
+    const journal = JSON.parse(readFileSync(path, 'utf8')) as EmergencyMutationJournal;
+    if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) ||
+      typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest) ||
+      (journal.intent !== 'clear' && journal.intent !== 'publish') ||
+      (journal.intent === 'publish' && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) ||
+      typeof journal.quarantinePath !== 'string' ||
+      (journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
+    return journal;
+  } catch { return null; }
+}
+
+/** Recover a previously interrupted emergency mutation. False means do not use the primary. */
+export function recoverEmergencyStateFile(filePath: string): boolean {
+  const journalPath = emergencyJournalPath(filePath);
+  if (!existsSync(journalPath)) return true;
+  const journal = readEmergencyJournal(journalPath);
+  if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}`) return false;
+  const hasPrimary = existsSync(filePath);
+  const hasQuarantine = existsSync(journal.quarantinePath);
+  const digest = (path: string): string | null => {
+    try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; }
+  };
+  const finalize = (): boolean => {
+    try {
+      if (hasQuarantine) unlinkSync(journal.quarantinePath);
+      try { unlinkSync(`${journal.quarantinePath}.payload`); } catch { /* already removed */ }
+      unlinkSync(journalPath);
+      return true;
+    } catch { return false; }
+  };
+
+  // Publication may have completed before its journal phase was persisted.
+  if (hasPrimary && hasQuarantine) {
+    if (journal.intent === 'publish' && digest(filePath) === journal.intendedDigest && digest(journal.quarantinePath) === journal.originalDigest) return finalize();
+    // The visible primary is not our exact result. Preserve the original
+    // quarantine for inspection, remove the blocking journal, and fail closed.
+    try { renameSync(journal.quarantinePath, `${journal.quarantinePath}.preserved-${journal.transactionId}`); } catch { return false; }
+    try { unlinkSync(journalPath); } catch { return false; }
+    return false;
+  }
+  if (hasPrimary) {
+    // A prepared journal has not made the primary undiscoverable. If it still
+    // has the authenticated original bytes, finish the transaction; otherwise
+    // it is a replacement and must not be touched.
+    if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === journal.originalDigest) {
+      const payloadPath = `${journal.quarantinePath}.payload`;
+      if (journal.intent === 'publish' && (!existsSync(payloadPath) || digest(payloadPath) !== journal.intendedDigest)) {
+        try { unlinkSync(journalPath); return true; } catch { return false; }
+      }
+      try {
+        renameSync(filePath, journal.quarantinePath);
+        journal.phase = 'quarantined';
+        writeEmergencyJournal(journalPath, journal);
+        return recoverEmergencyStateFile(filePath);
+      } catch { return false; }
+    }
+    return false;
+  }
+  if (!hasQuarantine) {
+    // Clear publication is complete even if journal cleanup was interrupted.
+    if (journal.intent === 'clear' && journal.phase === 'published') {
+      try { unlinkSync(journalPath); return true; } catch { return false; }
+    }
+    return false;
+  }
+  if (digest(journal.quarantinePath) !== journal.originalDigest) return false;
+  try {
+    if (journal.intent === 'clear') {
+      unlinkSync(journal.quarantinePath);
+      unlinkSync(journalPath);
+      return true;
+    }
+    const raw = readFileSync(journal.quarantinePath, 'utf8');
+    // The intended bytes are stored in the quarantine only for clear; publish
+    // recovery needs a persisted transformed payload alongside the journal.
+    const payloadPath = `${journal.quarantinePath}.payload`;
+    const payload = readFileSync(payloadPath, 'utf8');
+    if (stateDigest(payload) !== journal.intendedDigest) return false;
+    linkSync(payloadPath, filePath);
+    unlinkSync(payloadPath);
+    unlinkSync(journal.quarantinePath);
+    unlinkSync(journalPath);
+    void raw;
+    return true;
+  } catch { return false; }
+}
+
+function emergencyCrashAt(phase: string): boolean {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_EMERGENCY_CRASH_PHASE === phase;
+}
+
 export function emergencyMutateStateFileIf(
   filePath: string,
   predicate: (current: Record<string, unknown>) => boolean,
   transform: ((current: Record<string, unknown>) => Record<string, unknown>) | null,
 ): boolean {
-  const quarantinePath = `${filePath}.emergency-quarantine`;
-  const restore = (): boolean => {
-    if (existsSync(filePath)) return false;
-    try {
-      linkSync(quarantinePath, filePath);
-      unlinkSync(quarantinePath);
-      return true;
-    } catch { return false; }
-  };
-  const publish = (current: Record<string, unknown>): boolean => {
-    const tempPath = `${filePath}.emergency-publish.${process.pid}.${randomUUID()}.tmp`;
-    let fd: number | undefined;
-    try {
-      fd = openSync(tempPath, 'wx', 0o600);
-      writeSync(fd, JSON.stringify(transform!(current)));
-      fsyncSync(fd);
-      closeSync(fd);
-      fd = undefined;
-      linkSync(tempPath, filePath); // exclusive publication: never overwrite a replacement
-      unlinkSync(tempPath);
-      unlinkSync(quarantinePath);
-      return true;
-    } catch {
-      if (fd !== undefined) try { closeSync(fd); } catch { /* best effort */ }
-      try { unlinkSync(tempPath); } catch { /* best effort */ }
-      return false;
-    }
-  };
+  if (!recoverEmergencyStateFile(filePath)) return false;
   try {
-    if (existsSync(quarantinePath)) {
-      if (existsSync(filePath)) return false;
-      const raw = readFileSync(quarantinePath, 'utf8');
-      const current = JSON.parse(raw) as Record<string, unknown>;
-      if (!predicate(current)) return false;
-      return transform ? publish(current) : (unlinkSync(quarantinePath), true);
-    }
     if (!existsSync(filePath)) return false;
-    const raw = readFileSync(filePath, 'utf8');
-    const current = JSON.parse(raw) as Record<string, unknown>;
+    const originalRaw = readFileSync(filePath, 'utf8');
+    const current = JSON.parse(originalRaw) as Record<string, unknown>;
     if (!predicate(current)) return false;
-    renameSync(filePath, quarantinePath);
-    const quarantinedRaw = readFileSync(quarantinePath, 'utf8');
-    const quarantined = JSON.parse(quarantinedRaw) as Record<string, unknown>;
-    if (quarantinedRaw !== raw || !predicate(quarantined)) {
-      restore();
-      return false;
+    const transactionId = randomUUID();
+    const quarantinePath = `${filePath}.emergency-quarantine.${transactionId}`;
+    const journalPath = emergencyJournalPath(filePath);
+    const payloadPath = `${quarantinePath}.payload`;
+    const transformedRaw = transform ? JSON.stringify(transform(current)) : undefined;
+    const journal: EmergencyMutationJournal = {
+      version: 1, transactionId, originalDigest: stateDigest(originalRaw),
+      ...(transformedRaw === undefined ? { intent: 'clear' as const } : { intent: 'publish' as const, intendedDigest: stateDigest(transformedRaw) }),
+      quarantinePath, phase: 'prepared',
+    };
+    writeEmergencyJournal(journalPath, journal);
+    if (transformedRaw !== undefined) {
+      const fd = openSync(payloadPath, 'wx', 0o600);
+      try { writeSync(fd, transformedRaw); fsyncSync(fd); } finally { closeSync(fd); }
     }
-    return transform ? publish(quarantined) : (unlinkSync(quarantinePath), true);
-  } catch {
-    return false;
-  }
+    if (emergencyCrashAt('before-rename')) return false;
+    renameSync(filePath, quarantinePath);
+    journal.phase = 'quarantined';
+    writeEmergencyJournal(journalPath, journal);
+    if (emergencyCrashAt('after-rename')) return false;
+    if (transformedRaw !== undefined) {
+      linkSync(payloadPath, filePath); // exclusive: never overwrite a replacement
+      journal.phase = 'published';
+      writeEmergencyJournal(journalPath, journal);
+      if (emergencyCrashAt('after-publication')) return false;
+      unlinkSync(payloadPath);
+    } else {
+      journal.phase = 'published';
+      writeEmergencyJournal(journalPath, journal);
+    }
+    if (emergencyCrashAt('before-cleanup')) return false;
+    unlinkSync(quarantinePath);
+    unlinkSync(journalPath);
+    return true;
+  } catch { return false; }
 }
 
 export function getStateSessionOwner(state: Record<string, unknown> | null | undefined): string | undefined {

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -81,6 +81,21 @@ function advancePausedWorkflowState(state: any, transcriptPath: string, signal =
   state.pipelineTracking.completionObservations = [{ stageId: 'ralplan', sessionId: 'workflow-activation-fixture', signalId: 'PIPELINE_RALPLAN_COMPLETE', lineNumber: 0, byteOffset: 0, recordContentSha256: createHash('sha256').update(record).digest('hex'), stableFile, activationBoundary: boundary, observedAt: now }];
   state.pipelineTracking.activationBoundary = { transcriptPath, transcriptRoot: boundary.transcriptRoot, transcriptBasename: boundary.transcriptBasename, sessionId: boundary.sessionId, byteOffset: stableFile.size, fileIdentity: stableFile };
   state.phase = 'execution';
+}
+
+function writeEmergencyJournal(statePath: string, original: Buffer, intent: 'clear' | 'publish', phase: 'prepared' | 'quarantined' | 'published', intended?: Buffer) {
+  const transactionId = randomUUID();
+  const quarantinePath = `${statePath}.emergency-quarantine.${transactionId}`;
+  writeFileSync(`${statePath}.emergency-journal.json`, JSON.stringify({
+    version: 1,
+    transactionId,
+    originalDigest: createHash('sha256').update(original).digest('hex'),
+    ...(intent === 'publish' ? { intendedDigest: createHash('sha256').update(intended!).digest('hex') } : {}),
+    intent,
+    quarantinePath,
+    phase,
+  }, null, 2));
+  return { quarantinePath, transactionId };
 }
 
 function createFixture() {
@@ -215,6 +230,69 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
       expect(resumed.workflowRunId).toBe(paused.workflowRunId);
       expect(resumed.pipelineTracking).toEqual(paused.pipelineTracking);
       expect(resumed.prompt).toBe(paused.prompt);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('recovers a quarantined publish journal before resuming through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      const original = readFileSync(statePath);
+      const paused = JSON.parse(original.toString());
+      paused.active = false;
+      const intended = Buffer.from(JSON.stringify(paused, null, 2));
+      const { quarantinePath } = writeEmergencyJournal(statePath, original, 'publish', 'quarantined', intended);
+      renameSync(statePath, quarantinePath);
+      writeFileSync(`${quarantinePath}.payload`, intended);
+
+      const output = runHook(script, '/autopilot --workflow release-flow ignored replacement task', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, workflowRunId: paused.workflowRunId });
+      expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(quarantinePath)).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('converges a quarantined clear journal before activating through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      mkdirSync(join(statePath, '..'), { recursive: true });
+      const original = Buffer.from('{"active":true,"sentinel":"interrupted-cancellation"}\n');
+      writeFileSync(statePath, original);
+      const { quarantinePath } = writeEmergencyJournal(statePath, original, 'clear', 'quarantined');
+      renameSync(statePath, quarantinePath);
+
+      const output = runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, workflow: { workflowName: 'release-flow' } });
+      expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      expect(existsSync(quarantinePath)).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('rejects an unrelated replacement beside an interrupted journal through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
+    try {
+      mkdirSync(join(statePath, '..'), { recursive: true });
+      const original = Buffer.from('{"active":true,"sentinel":"original"}\n');
+      const replacement = Buffer.from('{"active":false,"sentinel":"replacement"}\n');
+      const { quarantinePath, transactionId } = writeEmergencyJournal(statePath, original, 'clear', 'quarantined');
+      writeFileSync(quarantinePath, original);
+      writeFileSync(statePath, replacement);
+
+      const output = runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      expect(output.hookSpecificOutput?.additionalContext).toContain('workflow_emergency_recovery_failed');
+      expect(readFileSync(statePath)).toEqual(replacement);
+      expect(existsSync(`${quarantinePath}.preserved-${transactionId}`)).toBe(true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

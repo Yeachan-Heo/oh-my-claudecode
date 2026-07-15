@@ -1081,21 +1081,20 @@ export const stateClearTool: ToolDefinition<{
           ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
         ].map((candidate) => [candidate.path, candidate])).values()];
         const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
-        const namedPrimary = mode === 'autopilot'
-          ? (directCandidate?.state.workflow ? directCandidate : operationCandidates.find((candidate) => Boolean(candidate.state.workflow)))
-          : undefined;
+        const namedPrimaries = mode === 'autopilot' ? operationCandidates.filter((candidate) => Boolean(candidate.state.workflow)) : [];
+        const namedPrimaryPaths = new Set(namedPrimaries.map((candidate) => candidate.path));
         let directCleared = 0;
-        if (namedPrimary) {
+        for (const candidate of namedPrimaries) {
           const success = namedWorkflowRuntimeSupported()
-            ? clearStateFileLockedIf(namedPrimary.path, (current) => JSON.stringify(current) === namedPrimary.snapshot) === 'cleared'
-            : emergencyMutateStateFileIf(namedPrimary.path, (current) => JSON.stringify(current) === namedPrimary.snapshot, null);
-          if (!success || existsSync(namedPrimary.path)) throw new Error('primary state mutation failed; dependent state preserved');
-          directCleared = 1;
+            ? clearStateFileLockedIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot) === 'cleared'
+            : emergencyMutateStateFileIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot, null);
+          if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+          directCleared += 1;
         }
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => candidate.path !== namedPrimary?.path));
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => !namedPrimaryPaths.has(candidate.path)));
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        if (!namedPrimary) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
+        if (namedPrimaries.length === 0) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
           const expectedDirectState = directCandidate?.state;

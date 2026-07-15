@@ -95,7 +95,7 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (error) => {
   forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
 });
-const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
+const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
 const { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);
@@ -1336,6 +1336,10 @@ async function main() {
         ? autopilot.state.session_id === sessionId
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
+        if (autopilot.state.workflow && !isWorkflowRuntimeSupported()) {
+          console.log(JSON.stringify(SAFE_CONTINUE));
+          return;
+        }
         const workflowAdvance = advanceWorkflowOnStop(autopilot.state, data, sessionId);
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);

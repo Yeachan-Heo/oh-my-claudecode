@@ -56,6 +56,7 @@ describe('AutopilotCancel', () => {
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH;
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
+    delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
     delete process.env.CLAUDE_CONFIG_DIR;
   });
 
@@ -239,6 +240,37 @@ describe('AutopilotCancel', () => {
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
       expect(clearAutopilot(testDir, sessionId)).toMatchObject({ success: true });
       expect(require('fs').existsSync(statePath)).toBe(false);
+    });
+
+    it('cancels and clears a legacy named workflow through the emergency path without a session id', () => {
+      const state = initAutopilot(testDir, 'legacy named')!;
+      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      writeAutopilotState(testDir, state);
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      expect(cancelAutopilot(testDir)).toMatchObject({ success: true, preservedState: { active: false } });
+      expect(clearAutopilot(testDir)).toMatchObject({ success: true });
+      expect(readAutopilotState(testDir)).toBeNull();
+    });
+
+    it('recovers interrupted named pause and clear transactions before reading their primary', () => {
+      const sessionId = 'named-journal-recovery';
+      const state = initAutopilot(testDir, 'recover', sessionId)!;
+      state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
+      state.workflowRunId = '11111111-1111-4111-8111-111111111111';
+      writeAutopilotState(testDir, state, sessionId);
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-publication';
+      expect(cancelAutopilot(testDir, sessionId).success).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
+
+      const paused = readAutopilotState(testDir, sessionId)!;
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+      expect(clearAutopilot(testDir, sessionId).success).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      expect(readAutopilotState(testDir, sessionId)).toBeNull();
+      expect(paused.active).toBe(false);
     });
 
     it('does not clean linked state when the primary named mutation lock is held', () => {
