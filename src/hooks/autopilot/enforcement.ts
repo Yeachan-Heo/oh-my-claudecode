@@ -251,7 +251,7 @@ export async function checkAutopilot(
   const workingDir = directory || process.cwd();
   const state = readAutopilotState(workingDir, sessionId);
 
-  if (!state || !state.active) {
+  if (!state) {
     return null;
   }
 
@@ -268,6 +268,10 @@ export async function checkAutopilot(
       message: "workflow_descriptor_integrity_failed",
       phase: state.phase,
     };
+  }
+
+  if (!state.active) {
+    return null;
   }
 
   if (hasNamedMarkers && !namedWorkflowRuntimeSupported()) {

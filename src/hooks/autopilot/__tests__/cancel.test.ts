@@ -21,7 +21,10 @@ import {
 } from '../state.js';
 import { createWorkflowDescriptor } from '../pipeline.js';
 import { resolveSessionStatePath } from '../../../lib/worktree-paths.js';
-import { validateNamedWorkflowState } from '../named-workflow-resume-validator.js';
+import {
+  validateNamedWorkflowState,
+  validateNamedWorkflowStateStructure,
+} from '../named-workflow-resume-validator.js';
 
 // Mock the ralph and ultraqa modules
 vi.mock('../../ralph/index.js', () => ({
@@ -58,6 +61,8 @@ describe('AutopilotCancel', () => {
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
     delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
     delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64;
   });
 
   describe('cancelAutopilot', () => {
@@ -239,9 +244,42 @@ describe('AutopilotCancel', () => {
         },
       });
       writeAutopilotState(testDir, state, sessionId);
+      expect(validateNamedWorkflowStateStructure(readAutopilotState(testDir, sessionId)!, sessionId)).not.toBeNull();
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
       expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: true, preservedState: { active: false, workflowRunId: state.workflowRunId } });
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
+    });
+
+    it('does not pause a replacement named run without flock before linked cleanup', () => {
+      const sessionId = 'portable-named-replacement';
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      const transcriptRoot = join(testDir, 'transcripts');
+      const identity = { device: 1, inode: 1, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update('').digest('hex') };
+      Object.assign(state, {
+        phase: 'ralplan',
+        prompt: 'ship it',
+        workflow: createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        pipelineTracking: {
+          stages: [{ id: 'ralplan', status: 'active', iterations: 0, startedAt: new Date().toISOString() }, { id: 'execution', status: 'pending', iterations: 0 }],
+          currentStageIndex: 0,
+          trackingRevision: 0,
+          activationBoundary: { transcriptPath: join(transcriptRoot, `${sessionId}.jsonl`), transcriptRoot, transcriptBasename: `${sessionId}.jsonl`, sessionId, byteOffset: 0, fileIdentity: identity },
+          completionObservations: [],
+        },
+      });
+      writeAutopilotState(testDir, state, sessionId);
+      const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
+      const replacement = { ...state, originalIdea: 'replacement run' };
+      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+      process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH = statePath;
+      process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
+
+      expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' });
+      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, originalIdea: 'replacement run' });
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+      expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
     });
 
     it('does not clean linked state when the primary named mutation lock is held', () => {

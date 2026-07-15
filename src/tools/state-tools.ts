@@ -49,7 +49,7 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
-import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
 import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
 import type { AutopilotState } from '../hooks/autopilot/types.js';
@@ -110,7 +110,7 @@ function hasNamedWorkflowMarker(record: Record<string, unknown> | null | undefin
 function hasValidatedNamedWorkflowTuple(record: Record<string, unknown>): boolean {
   if (!NAMED_WORKFLOW_MARKERS.every((marker) => hasOwnProperty(record, marker))) return false;
   const sessionId = getStateSessionOwner(record);
-  return typeof sessionId === 'string' && validateNamedWorkflowState(record as unknown as AutopilotState, sessionId) !== null;
+  return typeof sessionId === 'string' && validateNamedWorkflowStateStructure(record as unknown as AutopilotState, sessionId) !== null;
 }
 
 /** The portable emergency path may only pause or clear an exact discovered run. */
@@ -727,7 +727,6 @@ interface WorkflowPublicState {
   stages: string[];
   currentStage: string | null;
   status: string | null;
-  workflowRunId?: string;
   progress: string;
 }
 
@@ -784,7 +783,6 @@ export function redactAutopilotPublicState(state: unknown): unknown {
     ? (currentPipelineStage as Record<string, unknown>).status as string
     : null;
   const safeState: WorkflowPublicState = {
-    workflowRunId: typeof record.workflowRunId === 'string' ? record.workflowRunId : undefined,
     name: typeof descriptor.workflowName === 'string' ? descriptor.workflowName.slice(0, 32) : 'invalid',
     version: typeof descriptor.profileVersion === 'number' ? descriptor.profileVersion : 1,
     shortHash: typeof descriptor.profileHash === 'string' ? descriptor.profileHash.slice(0, 12) : 'invalid',

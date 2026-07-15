@@ -28,11 +28,33 @@ const profileHash = createHash('sha256').update(canonicalJson({
 })).digest('hex');
 
 function workflowState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  const transcriptRoot = '/tmp/omc-autopilot-profile-transcripts';
+  const fileIdentity = {
+    device: 0,
+    inode: 0,
+    size: 0,
+    mtimeNs: '0',
+    ctimeNs: '0',
+    contentSha256: '0'.repeat(64),
+  };
+  const activationBoundary = {
+    transcriptPath: `${transcriptRoot}/${sessionId}.jsonl`,
+    transcriptRoot,
+    transcriptBasename: `${sessionId}.jsonl`,
+    sessionId,
+    byteOffset: 0,
+    fileIdentity,
+  };
+  const observedAt = '2026-01-01T00:00:00.000Z';
   return {
     active: true,
+    session_id: sessionId,
+    prompt: 'private user task',
     phase: 'execution',
     iteration: 1,
     max_iterations: 10,
+    workflowRunId: '22222222-2222-4222-8222-222222222222',
     workflow: {
       descriptorVersion: 1,
       workflowName,
@@ -42,10 +64,25 @@ function workflowState(overrides: Record<string, unknown> = {}): Record<string, 
     },
     pipelineTracking: {
       currentStageIndex: 1,
-      trackingRevision: 0,
-      activationBoundary: null,
-      completionObservations: [],
-      stages: stages.map((id, index) => ({ id, status: index === 1 ? 'active' : 'pending' })),
+      trackingRevision: 1,
+      activationBoundary,
+      completionObservations: [{
+        stageId: 'ralplan',
+        sessionId,
+        signalId: 'PIPELINE_RALPLAN_COMPLETE',
+        lineNumber: 0,
+        byteOffset: 0,
+        recordContentSha256: '0'.repeat(64),
+        stableFile: fileIdentity,
+        activationBoundary,
+        observedAt,
+      }],
+      stages: [
+        { id: 'ralplan', status: 'complete', iterations: 0, startedAt: observedAt, completedAt: observedAt },
+        { id: 'execution', status: 'active', iterations: 0, startedAt: observedAt },
+        { id: 'ralph', status: 'pending', iterations: 0 },
+        { id: 'qa', status: 'pending', iterations: 0 },
+      ],
     },
     originalIdea: 'private user task',
     expansion: { spec_path: '/private/spec.md' },
@@ -103,6 +140,24 @@ describe('autopilot workflow profile observability', () => {
     writeFileSync(statePath, JSON.stringify(workflowState({
       workflow: { descriptorVersion: 1, workflowName, profileVersion: 1, stages, profileHash: 'bad' },
     })), 'utf-8');
+
+    const hudState = readAutopilotStateForHud(directory);
+    expect(hudState?.workflow).toEqual({ invalid: true });
+    expect(renderAutopilot(hudState)).toContain('workflow:invalid');
+  });
+
+  it('marks a falsy named-workflow marker invalid instead of rendering legacy autopilot state', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-autopilot-profile-'));
+    directories.push(directory);
+    const statePath = join(directory, '.omc', 'state', 'autopilot-state.json');
+    mkdirSync(join(statePath, '..'), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      active: true,
+      phase: 'execution',
+      iteration: 1,
+      max_iterations: 10,
+      workflow: false,
+    }), 'utf-8');
 
     const hudState = readAutopilotStateForHud(directory);
     expect(hudState?.workflow).toEqual({ invalid: true });

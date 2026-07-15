@@ -43,7 +43,11 @@ import {
   readUltraQAState,
 } from "../ultraqa/index.js";
 import { canStartMode } from "../mode-registry/index.js";
-import { namedWorkflowRuntimeSupported } from "./named-workflow-resume-validator.js";
+import {
+  namedWorkflowRuntimeSupported,
+  validateNamedWorkflowState,
+  validateNamedWorkflowStateStructure,
+} from "./named-workflow-resume-validator.js";
 
 const SPEC_DIR = "autopilot";
 
@@ -140,16 +144,22 @@ export function clearAutopilotState(
   sessionId?: string,
   expectedState?: AutopilotState,
 ): boolean {
-  if (hasNamedWorkflowMarkers(expectedState) && !namedWorkflowRuntimeSupported()) {
-    const stateFile = sessionId
-      ? resolveSessionStatePath("autopilot", sessionId, directory)
-      : resolveStatePath("autopilot", directory);
-    const expectedSnapshot = canonicalStateJson(expectedState);
-    return emergencyMutateStateFileIf(
-      stateFile,
-      (current) => canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === expectedSnapshot,
-      null,
-    );
+  if (hasNamedWorkflowMarkers(expectedState)) {
+    const valid = namedWorkflowRuntimeSupported()
+      ? validateNamedWorkflowState(expectedState!, sessionId)
+      : validateNamedWorkflowStateStructure(expectedState!, sessionId);
+    if (!valid) return false;
+    if (!namedWorkflowRuntimeSupported()) {
+      const stateFile = sessionId
+        ? resolveSessionStatePath("autopilot", sessionId, directory)
+        : resolveStatePath("autopilot", directory);
+      const expectedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(expectedState as unknown as Record<string, unknown>).filter(([key]) => key !== "_meta")));
+      return emergencyMutateStateFileIf(
+        stateFile,
+        (current) => canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === expectedSnapshot,
+        null,
+      );
+    }
   }
   return clearModeStateFile("autopilot", directory, sessionId, expectedState as unknown as Record<string, unknown> | undefined);
 }
@@ -172,18 +182,24 @@ export function updateAutopilotStateIfCurrent(
   const stateFile = sessionId
     ? resolveSessionStatePath("autopilot", sessionId, directory)
     : resolveStatePath("autopilot", directory);
-  if (hasNamedWorkflowMarkers(observed) && !namedWorkflowRuntimeSupported()) {
-    const observedSnapshot = namedResumeIdentity(observed as unknown as Record<string, unknown>);
-    return emergencyMutateStateFileIf(
-      stateFile,
-      (current) => namedResumeIdentity(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === observedSnapshot,
-      (current) => ({ ...current, ...update }),
-    ) ? readAutopilotState(directory, sessionId) : null;
+  if (hasNamedWorkflowMarkers(observed)) {
+    const valid = namedWorkflowRuntimeSupported()
+      ? validateNamedWorkflowState(observed, sessionId)
+      : validateNamedWorkflowStateStructure(observed, sessionId);
+    if (!valid) return null;
+    if (!namedWorkflowRuntimeSupported()) {
+      const observedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(observed as unknown as Record<string, unknown>).filter(([key]) => key !== "_meta")));
+      return emergencyMutateStateFileIf(
+        stateFile,
+        (current) => canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === observedSnapshot,
+        (current) => ({ ...current, ...update }),
+      ) ? readAutopilotState(directory, sessionId) : null;
+    }
   }
   let updated: AutopilotState | null = null;
   const result = writeStateFileLockedIf(
     stateFile,
-    (current) => sameAutopilotRun(current, observed),
+    (current) => sameAutopilotRun(current, observed) && (!hasNamedWorkflowMarkers(observed) || Boolean(validateNamedWorkflowState(current as unknown as AutopilotState, sessionId))),
     (current) => {
       const next = { ...current, ...update } as unknown as AutopilotState;
       updated = next;
@@ -224,11 +240,21 @@ export function updateAutopilotStateIfExact(
   const stateFile = sessionId
     ? resolveSessionStatePath("autopilot", sessionId, directory)
     : resolveStatePath("autopilot", directory);
-  const observedSnapshot = namedResumeIdentity(observed as unknown as Record<string, unknown>);
+  const observedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(observed as unknown as Record<string, unknown>).filter(([key]) => key !== "_meta")));
+  if (!namedWorkflowRuntimeSupported()) {
+    return emergencyMutateStateFileIf(
+      stateFile,
+      (current) =>
+        current.workflowRunId === observed.workflowRunId &&
+        canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === observedSnapshot &&
+        validateCurrent(current as unknown as AutopilotState),
+      (current) => ({ ...current, ...update }),
+    ) ? readAutopilotState(directory, sessionId) : null;
+  }
   let updated: AutopilotState | null = null;
   const result = writeStateFileLockedIf(
     stateFile,
-    (current) => namedResumeIdentity(current) === observedSnapshot && validateCurrent(current as unknown as AutopilotState),
+    (current) => namedResumeIdentity(current) === namedResumeIdentity(observed as unknown as Record<string, unknown>) && validateCurrent(current as unknown as AutopilotState),
     (current) => {
       const next = { ...current, ...update } as unknown as AutopilotState;
       updated = next;

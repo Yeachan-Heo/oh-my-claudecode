@@ -31,12 +31,18 @@ function hasNamedWorkflowMarkers(state: unknown): boolean {
   );
 }
 
-function hasValidNamedWorkflowState(state: AutopilotState, sessionId?: string): boolean {
-  return hasNamedWorkflowMarkers(state) && Boolean(validateNamedWorkflowState(state, sessionId));
+function validNamedWorkflowForMutation(state: AutopilotState, sessionId?: string): boolean {
+  return hasNamedWorkflowMarkers(state) && Boolean(
+    validateNamedWorkflowStateStructure(state, sessionId),
+  );
 }
 
-function hasValidNamedWorkflowStructure(state: AutopilotState, sessionId?: string): boolean {
-  return hasNamedWorkflowMarkers(state) && Boolean(validateNamedWorkflowStateStructure(state, sessionId));
+function validNamedWorkflowForResume(state: AutopilotState, sessionId?: string): boolean {
+  return hasNamedWorkflowMarkers(state) && Boolean(
+    namedWorkflowRuntimeSupported()
+      ? validateNamedWorkflowState(state, sessionId)
+      : validateNamedWorkflowStateStructure(state, sessionId),
+  );
 }
 
 /**
@@ -62,7 +68,7 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
 
 
 
-  if (hasNamedWorkflowMarkers(state) && !hasValidNamedWorkflowStructure(state, sessionId)) {
+  if (hasNamedWorkflowMarkers(state) && !validNamedWorkflowForMutation(state, sessionId)) {
     return { success: false, message: 'workflow_descriptor_integrity_failed' };
   }
 
@@ -73,7 +79,7 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
         state,
         { active: false },
         sessionId,
-        (current) => hasValidNamedWorkflowStructure(current, sessionId),
+        (current) => validNamedWorkflowForMutation(current, sessionId),
       )
     : updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
   if (!cancelledState) {
@@ -134,7 +140,7 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     };
   }
 
-  if (hasNamedWorkflowMarkers(state) && !hasValidNamedWorkflowState(state, sessionId)) {
+  if (hasNamedWorkflowMarkers(state) && !validNamedWorkflowForMutation(state, sessionId)) {
     return { success: false, message: 'workflow_descriptor_integrity_failed' };
   }
 
@@ -201,7 +207,7 @@ export function canResumeAutopilot(directory: string, sessionId?: string): {
   }
 
   if (hasNamedWorkflowMarkers(state)) {
-    if (!hasValidNamedWorkflowState(state, sessionId)) {
+    if (!validNamedWorkflowForResume(state, sessionId)) {
       return { canResume: false, resumePhase: state.phase, integrityFailed: true };
     }
     if (!namedWorkflowRuntimeSupported()) {
@@ -264,7 +270,7 @@ export function resumeAutopilot(directory: string, sessionId?: string): {
         state,
         { active: true },
         sessionId,
-        (current) => hasValidNamedWorkflowState(current, sessionId),
+        (current) => validNamedWorkflowForResume(current, sessionId),
       )
     : updateAutopilotStateIfCurrent(
         directory,

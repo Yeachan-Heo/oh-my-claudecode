@@ -319,6 +319,39 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f)).toEqual(state);
   });
 
+  it.each(['advanced stage', 'replaced run'])('does not let an old exact cancel signal suppress a %s committed under the state lock', async (change) => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    writeState(f, state);
+    let replacement;
+    if (change === 'advanced stage') {
+      appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+      expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+      replacement = readState(f);
+      writeState(f, state);
+    } else {
+      replacement = workflowState(f);
+      replacement.workflowRunId = '22222222-2222-4222-8222-222222222222';
+    }
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      target_workflow_run_id: state.workflowRunId,
+      target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
+    }));
+    const lockPath = `${f.statePath}.mutation.lock`;
+    writeFileSync(lockPath, liveLockOwner());
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 75));
+    writeState(f, replacement);
+    unlinkSync(lockPath);
+
+    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt(change === 'advanced stage' ? 'execution' : 'ralplan') });
+  });
+
   it.each([
     ['future-dated', 6_000, false],
     ['stale', -30_001, false],

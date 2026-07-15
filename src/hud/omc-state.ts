@@ -5,7 +5,6 @@
  * These are read-only functions that don't modify the state files.
  */
 
-import { createHash } from 'crypto';
 
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -16,6 +15,8 @@ import type {
   PrdStateForHud,
 } from './types.js';
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import { validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import type { AutopilotState } from '../hooks/autopilot/types.js';
 
 /**
  * Maximum age for state files to be considered "active".
@@ -291,73 +292,37 @@ interface AutopilotStateFile {
   };
 }
 
-function canonicalizeWorkflowJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalizeWorkflowJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalizeWorkflowJson(record[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-function isValidWorkflow(profile: WorkflowDescriptor): boolean {
-  const allowedSequences = new Set([
-    'ralplan,execution',
-    'ralplan,execution,ralph',
-    'ralplan,execution,qa',
-    'ralplan,execution,ralph,qa',
-  ]);
-  if (
-    profile.descriptorVersion !== 1 ||
-    profile.profileVersion !== 1 ||
-    typeof profile.workflowName !== 'string' ||
-    profile.workflowName.trim().length === 0 ||
-    !Array.isArray(profile.stages) ||
-    !allowedSequences.has(profile.stages.join(',')) ||
-    !/^[a-f0-9]{64}$/.test(profile.profileHash)
-  ) {
-    return false;
-  }
 
-  const canonicalDescriptor = canonicalizeWorkflowJson({
-    descriptorVersion: 1,
-    workflowName: profile.workflowName,
-    profileVersion: 1,
-    stages: profile.stages,
-  });
-  return createHash('sha256').update(canonicalDescriptor).digest('hex') === profile.profileHash;
+function hasNamedWorkflowMarker(state: AutopilotStateFile): boolean {
+  const record = state as unknown as Record<string, unknown>;
+  return ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => (
+    Object.prototype.hasOwnProperty.call(record, marker)
+  ));
 }
 
 function getWorkflowHudState(state: AutopilotStateFile): AutopilotStateForHud['workflow'] | undefined {
-  if (!state.workflow) {
+  if (!hasNamedWorkflowMarker(state)) {
     return undefined;
   }
-  if (!isValidWorkflow(state.workflow)) {
+  const record = state as unknown as Record<string, unknown>;
+  const sessionId = typeof record.session_id === 'string'
+    ? record.session_id
+    : undefined;
+  if (!sessionId || !validateNamedWorkflowStateStructure(state as unknown as AutopilotState, sessionId)) {
     return { invalid: true };
   }
 
-  const pipelineStages = state.pipelineTracking?.stages;
-  const currentStageIndex = state.pipelineTracking?.currentStageIndex;
-  if (
-    !pipelineStages ||
-    typeof currentStageIndex !== 'number' ||
-    !Number.isInteger(state.pipelineTracking?.trackingRevision) ||
-    !Array.isArray(state.pipelineTracking?.completionObservations) ||
-    pipelineStages.length !== state.workflow.stages.length ||
-    pipelineStages.some((stage, index) => stage.id !== state.workflow?.stages[index]) ||
-    currentStageIndex < 0 ||
-    currentStageIndex > pipelineStages.length
-  ) {
-    return { invalid: true };
-  }
-
-  const currentStage = pipelineStages[currentStageIndex]?.id;
+  const workflow = state.workflow!;
+  const pipelineTracking = state.pipelineTracking!;
+  const currentStageIndex = pipelineTracking.currentStageIndex!;
+  const currentStage = pipelineTracking.stages![currentStageIndex]?.id;
   return {
-    name: state.workflow.workflowName,
-    version: state.workflow.profileVersion,
-    shortHash: state.workflow.profileHash.slice(0, 12),
-    currentStage: currentStage ?? state.phase ?? state.current_phase ?? 'complete',
-    currentStageIndex: Math.min(currentStageIndex + 1, state.workflow.stages.length),
-    stagesTotal: state.workflow.stages.length,
+    name: workflow.workflowName,
+    version: workflow.profileVersion,
+    shortHash: workflow.profileHash.slice(0, 12),
+    currentStage: currentStage ?? 'complete',
+    currentStageIndex: Math.min(currentStageIndex + 1, workflow.stages.length),
+    stagesTotal: workflow.stages.length,
   };
 }
 

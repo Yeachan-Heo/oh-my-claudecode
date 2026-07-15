@@ -31,6 +31,42 @@ function liveLockOwner() {
   return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
 }
 
+function portableWorkflowState(sessionId: string): Record<string, unknown> {
+  const transcriptRoot = '/tmp/state-tools-transcripts';
+  const fileIdentity = { device: 0, inode: 0, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: '0'.repeat(64) };
+  const activationBoundary = {
+    transcriptPath: `${transcriptRoot}/${sessionId}.jsonl`,
+    transcriptRoot,
+    transcriptBasename: `${sessionId}.jsonl`,
+    sessionId,
+    byteOffset: 0,
+    fileIdentity,
+  };
+  const startedAt = '2026-01-01T00:00:00.000Z';
+  const stages = ['ralplan', 'execution'];
+  return {
+    active: true,
+    session_id: sessionId,
+    prompt: 'private prompt',
+    phase: 'ralplan',
+    workflowRunId: '11111111-1111-4111-8111-111111111111',
+    workflow: {
+      descriptorVersion: 1,
+      workflowName: 'release-train',
+      profileVersion: 1,
+      stages,
+      profileHash: createHash('sha256').update('{"descriptorVersion":1,"profileVersion":1,"stages":["ralplan","execution"],"workflowName":"release-train"}').digest('hex'),
+    },
+    pipelineTracking: {
+      stages: [{ id: 'ralplan', status: 'active', iterations: 0, startedAt }, { id: 'execution', status: 'pending', iterations: 0 }],
+      currentStageIndex: 0,
+      trackingRevision: 0,
+      activationBoundary,
+      completionObservations: [],
+    },
+  };
+}
+
 describe('state-tools', () => {
   beforeEach(() => {
     mkdirSync(join(TEST_DIR, '.omc', 'state'), { recursive: true });
@@ -102,6 +138,22 @@ describe('state-tools', () => {
         });
         expect(result.content[0].text).not.toMatch(/private prompt|private transcript|private evidence|private-run-id/);
       }
+    });
+
+    it('projects a structurally valid portable named workflow without transcript authentication', async () => {
+      const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify(portableWorkflowState(sessionId)));
+
+      const result = await stateReadTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
+      const publicState = JSON.parse(result.content[0].text.match(/```json\n([\s\S]*?)\n```/)![1]);
+      expect(publicState).toMatchObject({
+        name: 'release-train',
+        currentStage: 'ralplan',
+        progress: '1/2',
+      });
+      expect(result.content[0].text).not.toContain('private prompt');
     });
   });
 

@@ -17,7 +17,10 @@ import {
   readAutopilotState,
   writeAutopilotState,
 } from "../state.js";
-import { validateNamedWorkflowState } from "../named-workflow-resume-validator.js";
+import {
+  validateNamedWorkflowState,
+  validateNamedWorkflowStateStructure,
+} from "../named-workflow-resume-validator.js";
 
 describe("workflow descriptor integrity enforcement (#3487)", () => {
   let testDir: string;
@@ -278,7 +281,9 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     });
     writeFileSync(transcriptPath, `${signal}\n`);
     const statePath = join(testDir, ".omc", "state", "sessions", sessionId, "autopilot-state.json");
+    const validState = readAutopilotState(testDir, sessionId)!;
     const before = readFileSync(statePath);
+    expect(validateNamedWorkflowStateStructure(validState, sessionId)).not.toBeNull();
     process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
 
     const result = await checkAutopilot(sessionId, testDir);
@@ -291,6 +296,24 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     });
     expect(result?.message).not.toContain("PIPELINE STAGE");
     expect(readFileSync(statePath)).toEqual(before);
+
+    const nonBooleanActive = readAutopilotState(testDir, sessionId)!;
+    nonBooleanActive.active = 0 as never;
+    writeAutopilotState(testDir, nonBooleanActive, sessionId);
+    await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: "ralplan",
+    });
+
+    const sizeMismatch = structuredClone(validState);
+    sizeMismatch.pipelineTracking!.activationBoundary!.fileIdentity.size = 1;
+    writeAutopilotState(testDir, sizeMismatch, sessionId);
+    await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: "ralplan",
+    });
   });
 
   it("authenticates an exact named completion signal and advances without legacy state", async () => {
@@ -412,6 +435,16 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       ),
     ).toBe(true);
     expect(validateNamedWorkflowState(terminal, sessionId)).not.toBeNull();
+
+    const activeTerminal = structuredClone(terminal);
+    activeTerminal.active = true;
+    expect(validateNamedWorkflowStateStructure(activeTerminal, sessionId)).toBeNull();
+
+    const observationSizeMismatch = structuredClone(terminal);
+    observationSizeMismatch.pipelineTracking!.completionObservations![0].activationBoundary.fileIdentity.size += 1;
+    expect(
+      validateNamedWorkflowStateStructure(observationSizeMismatch, sessionId),
+    ).toBeNull();
     expect(canResumeAutopilot(testDir, sessionId)).toEqual({
       canResume: false,
       state: terminal,

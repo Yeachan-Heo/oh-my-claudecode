@@ -161,7 +161,8 @@ function validBoundaryShape(value: unknown, sessionId: string | undefined): bool
     value.transcriptBasename !== `${sessionId}.jsonl` ||
     !safeInteger(value.byteOffset) ||
     value.byteOffset > MAX_TRANSCRIPT_BYTES ||
-    !validFileIdentity(value.fileIdentity)
+    !validFileIdentity(value.fileIdentity) ||
+    value.fileIdentity.size !== value.byteOffset
   )
     return false;
   const relativePath = relative(value.transcriptRoot, value.transcriptPath);
@@ -386,10 +387,42 @@ export function validateNamedWorkflowStateStructure(
   const workflow = state.workflow;
   const tracking = state.pipelineTracking;
   const task = typeof state.prompt === "string" ? state.prompt.trim() : "";
-  if (!verifyWorkflowDescriptor(workflow) || state.session_id !== sessionId || !isRecord(tracking) || task.length === 0 || typeof state.workflowRunId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId)) return null;
-  const terminal = state.active === false && state.phase === "complete";
-  const maximumStageIndex = terminal ? workflow.stages.length : workflow.stages.length - 1;
-  if (!exactKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) || !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !safeInteger(tracking.currentStageIndex) || !safeInteger(tracking.trackingRevision) || tracking.currentStageIndex > maximumStageIndex || tracking.trackingRevision !== tracking.currentStageIndex || tracking.completionObservations.length !== tracking.currentStageIndex || (terminal && (tracking.currentStageIndex !== workflow.stages.length || tracking.trackingRevision !== workflow.stages.length || tracking.completionObservations.length !== workflow.stages.length)) || !validBoundaryShape(tracking.activationBoundary, sessionId) || tracking.stages.length !== workflow.stages.length) return null;
+  if (
+    !verifyWorkflowDescriptor(workflow) ||
+    typeof sessionId !== "string" ||
+    typeof state.session_id !== "string" ||
+    state.session_id !== sessionId ||
+    !isRecord(tracking) ||
+    task.length === 0 ||
+    typeof state.active !== "boolean" ||
+    typeof state.workflowRunId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      state.workflowRunId,
+    )
+  )
+    return null;
+  const terminal = state.phase === "complete";
+  if (terminal && state.active) return null;
+  const maximumStageIndex = terminal
+    ? workflow.stages.length
+    : workflow.stages.length - 1;
+  if (
+    !exactKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) ||
+    !Array.isArray(tracking.stages) ||
+    !Array.isArray(tracking.completionObservations) ||
+    !safeInteger(tracking.currentStageIndex) ||
+    !safeInteger(tracking.trackingRevision) ||
+    tracking.currentStageIndex > maximumStageIndex ||
+    tracking.trackingRevision !== tracking.currentStageIndex ||
+    tracking.completionObservations.length !== tracking.currentStageIndex ||
+    (terminal &&
+      (tracking.currentStageIndex !== workflow.stages.length ||
+        tracking.trackingRevision !== workflow.stages.length ||
+        tracking.completionObservations.length !== workflow.stages.length)) ||
+    !validBoundaryShape(tracking.activationBoundary, sessionId) ||
+    tracking.stages.length !== workflow.stages.length
+  )
+    return null;
   for (let index = 0; index < tracking.stages.length; index += 1) {
     const stage = tracking.stages[index];
     if (!isRecord(stage)) return null;

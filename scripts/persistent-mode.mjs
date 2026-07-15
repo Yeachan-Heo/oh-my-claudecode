@@ -762,8 +762,9 @@ function getUltragoalObjective(state, omcRoot) {
   return "";
 }
 
-function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, currentAutopilotPath) {
-  const isActiveSignal = (signalPath) => {
+function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, cancellationContext) {
+  let authenticatedAutopilot = null;
+  const validateSignal = (signalPath, currentAutopilot) => {
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
       const signal = readJsonFile(signalPath);
@@ -797,17 +798,30 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
     });
     return locked.acquired && active;
   };
+  const isActiveSignal = (signalPath) => {
+    if (currentAutopilotPath && cancellationContext && !existsSync(signalPath)) return false;
+    if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
+    const stateLock = acquireStateFileLockSync(currentAutopilotPath);
+    if (!stateLock) return false;
+    try {
+      const currentAutopilot = readJsonFile(currentAutopilotPath);
+      if (!isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return false;
+      authenticatedAutopilot = currentAutopilot;
+      return validateSignal(signalPath, currentAutopilot);
+    } finally {
+      releaseStateFileLockSync(stateLock);
+    }
+  };
 
-  if (currentAutopilotPath && isActiveSignal(join(dirname(currentAutopilotPath), "cancel-signal-state.json"))) return true;
-
+  const localSignalPath = currentAutopilotPath && join(dirname(currentAutopilotPath), "cancel-signal-state.json");
+  if (localSignalPath && isActiveSignal(localSignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
   if (sessionId) {
     const sessionSignalPath = join(stateDir, "sessions", sessionId, "cancel-signal-state.json");
-    if (isActiveSignal(sessionSignalPath)) {
-      return true;
-    }
+    if (sessionSignalPath !== localSignalPath && isActiveSignal(sessionSignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
   }
-
-  return isActiveSignal(join(stateDir, "cancel-signal-state.json"));
+  const legacySignalPath = join(stateDir, "cancel-signal-state.json");
+  if (legacySignalPath !== localSignalPath && isActiveSignal(legacySignalPath)) return { active: true, currentAutopilot: authenticatedAutopilot };
+  return { active: false, currentAutopilot: authenticatedAutopilot };
 }
 
 function hasNamedWorkflowMarkers(state) {
@@ -1311,7 +1325,9 @@ async function main() {
     const cancellationTarget = isEnforceableAutopilotCancellationTarget(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
       ? autopilot.state
       : null;
-    if (isSessionCancelInProgress(stateDir, sessionId, cancellationTarget, cancellationTarget ? autopilot.path : null)) {
+    const cancellation = isSessionCancelInProgress(stateDir, sessionId, cancellationTarget ? autopilot.path : null, cancellationTarget ? { directory, isGlobal: autopilot.isGlobal, hasValidSessionId } : null);
+    if (cancellation.currentAutopilot) autopilot.state = cancellation.currentAutopilot;
+    if (cancellation.active) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
