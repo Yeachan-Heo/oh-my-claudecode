@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   PLUGIN_JSON_PATH,
   listSourceControlledPackageFiles,
@@ -169,6 +170,7 @@ function getPackedPackage(): PackedPackage {
       'package/.claude-plugin/plugin.json',
       'package/.mcp.json',
       'package/agents',
+      'package/dist',
       'package/bridge/cli.cjs',
       'package/bridge/runtime-cli.cjs',
       'package/bridge/team.js',
@@ -352,5 +354,114 @@ describe('npm package bin surface regression', () => {
       ],
       omc: ['omc', 'omc.cmd', 'omc.ps1'],
     });
+  });
+});
+
+// Regression guard for #3494: the *built/packed* project-memory learner must never
+// harvest arbitrary shell text (e.g. any command containing "npm test" / "npm run build")
+// into the durable build.testCommand / build.buildCommand facts. Source was fixed by #3426,
+// but dist is gitignored and rebuilt at prepack, so only an assertion over the shipped
+// artifact catches source->dist drift that reintroduces the dangerous command harvesting.
+describe('packed project-memory learner command-harvest regression (#3494)', () => {
+  function projectMemoryDistDir(): string {
+    return join(packDirCache!, 'package', 'dist', 'hooks', 'project-memory');
+  }
+
+  async function importPackedLearner(): Promise<{
+    learnFromToolOutput: (
+      toolName: string,
+      toolInput: unknown,
+      toolOutput: unknown,
+      projectRoot: string,
+      userMessage?: string,
+    ) => Promise<void>;
+    saveProjectMemory: (projectRoot: string, memory: unknown) => Promise<void>;
+    loadProjectMemory: (projectRoot: string) => Promise<any>;
+    SCHEMA_VERSION: unknown;
+  }> {
+    const dir = projectMemoryDistDir();
+    const learner = await import(pathToFileURL(join(dir, 'learner.js')).href);
+    const storage = await import(pathToFileURL(join(dir, 'storage.js')).href);
+    const constants = await import(pathToFileURL(join(dir, 'constants.js')).href);
+    return {
+      learnFromToolOutput: learner.learnFromToolOutput,
+      saveProjectMemory: storage.saveProjectMemory,
+      loadProjectMemory: storage.loadProjectMemory,
+      SCHEMA_VERSION: constants.SCHEMA_VERSION,
+    };
+  }
+
+  function createBaseMemory(projectRoot: string, schemaVersion: unknown): Record<string, unknown> {
+    return {
+      version: schemaVersion,
+      lastScanned: Date.now(),
+      projectRoot,
+      techStack: { languages: [], frameworks: [], packageManager: null, runtime: null },
+      build: { buildCommand: null, testCommand: null, lintCommand: null, devCommand: null, scripts: {} },
+      conventions: { namingStyle: null, importStyle: null, testPattern: null, fileOrganization: null },
+      structure: { isMonorepo: false, workspaces: [], mainDirectories: [], gitBranches: null },
+      customNotes: [],
+      directoryMap: {},
+      hotPaths: [],
+      userDirectives: [],
+    };
+  }
+
+  it('ships a project-memory learner in the packed dist tree', () => {
+    getPackedPackage();
+    expect(existsSync(join(projectMemoryDistDir(), 'learner.js'))).toBe(true);
+  });
+
+  it.each([
+    ['npm test', 'npm test'],
+    ['npm run build', 'npm run build'],
+    ['compound pipeline containing npm test', 'git diff --name-only | xargs npm test'],
+  ])(
+    'does not harvest shell text into durable build/test commands: %s',
+    async (_name, command) => {
+      getPackedPackage();
+      const { learnFromToolOutput, saveProjectMemory, loadProjectMemory, SCHEMA_VERSION } =
+        await importPackedLearner();
+
+      const tempDir = mkdtempSync(join(tmpdir(), 'omc-packed-learner-'));
+      try {
+        await saveProjectMemory(tempDir, createBaseMemory(tempDir, SCHEMA_VERSION));
+
+        await learnFromToolOutput('Bash', { command }, 'Node.js v20.10.0', tempDir);
+
+        const updated = await loadProjectMemory(tempDir);
+        expect(updated?.build.testCommand).toBeNull();
+        expect(updated?.build.buildCommand).toBeNull();
+        // Positive control: the learner still works (extracts env hints) so the null
+        // assertions above cannot pass vacuously via a no-op learner.
+        expect(
+          updated?.customNotes.some((note: { content: string }) => note.content === 'Node.js v20.10.0'),
+        ).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not overwrite existing trusted build/test commands from Bash command shape', async () => {
+    getPackedPackage();
+    const { learnFromToolOutput, saveProjectMemory, loadProjectMemory, SCHEMA_VERSION } =
+      await importPackedLearner();
+
+    const tempDir = mkdtempSync(join(tmpdir(), 'omc-packed-learner-'));
+    try {
+      const memory = createBaseMemory(tempDir, SCHEMA_VERSION);
+      (memory.build as Record<string, unknown>).buildCommand = 'trusted build';
+      (memory.build as Record<string, unknown>).testCommand = 'trusted test';
+      await saveProjectMemory(tempDir, memory);
+
+      await learnFromToolOutput('Bash', { command: 'npm test' }, 'Node.js v20.10.0', tempDir);
+
+      const updated = await loadProjectMemory(tempDir);
+      expect(updated?.build.buildCommand).toBe('trusted build');
+      expect(updated?.build.testCommand).toBe('trusted test');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
