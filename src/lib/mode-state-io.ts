@@ -6,7 +6,7 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -235,6 +235,8 @@ type EmergencyMutationJournal = {
   phase: 'prepared' | 'quarantined' | 'published';
 };
 
+type FileIdentity = { dev: number; ino: number };
+
 function stateDigest(raw: string): string {
   return createHash('sha256').update(raw).digest('hex');
 }
@@ -245,6 +247,21 @@ function emergencyJournalPath(filePath: string): string {
 
 function writeEmergencyJournal(path: string, journal: EmergencyMutationJournal): void {
   atomicWriteJsonSync(path, journal);
+}
+
+/** Claims a transaction journal without replacing a concurrent transaction. */
+function createEmergencyJournal(path: string, journal: EmergencyMutationJournal): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'wx', 0o600);
+    writeSync(fd, JSON.stringify(journal));
+    fsyncSync(fd);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 function readEmergencyJournal(path: string): EmergencyMutationJournal | null {
@@ -258,6 +275,34 @@ function readEmergencyJournal(path: string): EmergencyMutationJournal | null {
       (journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
     return journal;
   } catch { return null; }
+}
+
+function fileIdentity(path: string): FileIdentity | null {
+  try {
+    const stat = statSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch { return null; }
+}
+
+function sameFile(path: string, expected: FileIdentity): boolean {
+  const actual = fileIdentity(path);
+  return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
+}
+
+/**
+ * Captures the source without renaming it.  The hard link makes the exact
+ * generation durable; checking the primary immediately before unlink prevents
+ * a replacement observed between predicate evaluation and capture from being
+ * removed.
+ */
+function captureAndUnlinkPrimary(filePath: string, quarantinePath: string, expectedDigest: string): boolean {
+  try {
+    linkSync(filePath, quarantinePath);
+    const captured = fileIdentity(quarantinePath);
+    if (!captured || stateDigest(readFileSync(quarantinePath, 'utf8')) !== expectedDigest || !sameFile(filePath, captured)) return false;
+    unlinkSync(filePath);
+    return true;
+  } catch { return false; }
 }
 
 /** Recover a previously interrupted emergency mutation. False means do not use the primary. */
@@ -283,23 +328,18 @@ export function recoverEmergencyStateFile(filePath: string): boolean {
   // Publication may have completed before its journal phase was persisted.
   if (hasPrimary && hasQuarantine) {
     if (journal.intent === 'publish' && digest(filePath) === journal.intendedDigest && digest(journal.quarantinePath) === journal.originalDigest) return finalize();
-    // The visible primary is not our exact result. Preserve the original
-    // quarantine for inspection, remove the blocking journal, and fail closed.
     try { renameSync(journal.quarantinePath, `${journal.quarantinePath}.preserved-${journal.transactionId}`); } catch { return false; }
     try { unlinkSync(journalPath); } catch { return false; }
     return false;
   }
   if (hasPrimary) {
-    // A prepared journal has not made the primary undiscoverable. If it still
-    // has the authenticated original bytes, finish the transaction; otherwise
-    // it is a replacement and must not be touched.
     if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === journal.originalDigest) {
       const payloadPath = `${journal.quarantinePath}.payload`;
       if (journal.intent === 'publish' && (!existsSync(payloadPath) || digest(payloadPath) !== journal.intendedDigest)) {
         try { unlinkSync(journalPath); return true; } catch { return false; }
       }
+      if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, journal.originalDigest)) return false;
       try {
-        renameSync(filePath, journal.quarantinePath);
         journal.phase = 'quarantined';
         writeEmergencyJournal(journalPath, journal);
         return recoverEmergencyStateFile(filePath);
@@ -308,7 +348,6 @@ export function recoverEmergencyStateFile(filePath: string): boolean {
     return false;
   }
   if (!hasQuarantine) {
-    // Clear publication is complete even if journal cleanup was interrupted.
     if (journal.intent === 'clear' && journal.phase === 'published') {
       try { unlinkSync(journalPath); return true; } catch { return false; }
     }
@@ -321,9 +360,6 @@ export function recoverEmergencyStateFile(filePath: string): boolean {
       unlinkSync(journalPath);
       return true;
     }
-    const raw = readFileSync(journal.quarantinePath, 'utf8');
-    // The intended bytes are stored in the quarantine only for clear; publish
-    // recovery needs a persisted transformed payload alongside the journal.
     const payloadPath = `${journal.quarantinePath}.payload`;
     const payload = readFileSync(payloadPath, 'utf8');
     if (stateDigest(payload) !== journal.intendedDigest) return false;
@@ -331,7 +367,6 @@ export function recoverEmergencyStateFile(filePath: string): boolean {
     unlinkSync(payloadPath);
     unlinkSync(journal.quarantinePath);
     unlinkSync(journalPath);
-    void raw;
     return true;
   } catch { return false; }
 }
@@ -340,11 +375,24 @@ function emergencyCrashAt(phase: string): boolean {
   return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_EMERGENCY_CRASH_PHASE === phase;
 }
 
+function emergencyReplaceAfterPredicate(filePath: string): void {
+  if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64) return;
+  try {
+    const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
+    atomicWriteJsonSync(filePath, replacement);
+  } finally {
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64;
+  }
+}
+
 export function emergencyMutateStateFileIf(
   filePath: string,
   predicate: (current: Record<string, unknown>) => boolean,
   transform: ((current: Record<string, unknown>) => Record<string, unknown>) | null,
 ): boolean {
+  // A pre-existing claim belongs to a prior writer. Recover it before trying
+  // to claim; never overwrite its journal or generation-specific quarantine.
   if (!recoverEmergencyStateFile(filePath)) return false;
   try {
     if (!existsSync(filePath)) return false;
@@ -361,13 +409,22 @@ export function emergencyMutateStateFileIf(
       ...(transformedRaw === undefined ? { intent: 'clear' as const } : { intent: 'publish' as const, intendedDigest: stateDigest(transformedRaw) }),
       quarantinePath, phase: 'prepared',
     };
-    writeEmergencyJournal(journalPath, journal);
+    if (!createEmergencyJournal(journalPath, journal)) return false;
+    // The claim is durable. Authenticate the exact snapshot and predicate again
+    // because another writer may have replaced it before this claim was made.
+    const authenticatedRaw = readFileSync(filePath, 'utf8');
+    const authenticated = JSON.parse(authenticatedRaw) as Record<string, unknown>;
+    if (stateDigest(authenticatedRaw) !== journal.originalDigest || !predicate(authenticated)) {
+      unlinkSync(journalPath);
+      return false;
+    }
+    emergencyReplaceAfterPredicate(filePath);
     if (transformedRaw !== undefined) {
       const fd = openSync(payloadPath, 'wx', 0o600);
       try { writeSync(fd, transformedRaw); fsyncSync(fd); } finally { closeSync(fd); }
     }
     if (emergencyCrashAt('before-rename')) return false;
-    renameSync(filePath, quarantinePath);
+    if (!captureAndUnlinkPrimary(filePath, quarantinePath, journal.originalDigest)) return false;
     journal.phase = 'quarantined';
     writeEmergencyJournal(journalPath, journal);
     if (emergencyCrashAt('after-rename')) return false;

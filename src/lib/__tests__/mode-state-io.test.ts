@@ -24,6 +24,8 @@ describe('mode-state-io', () => {
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
     delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64;
   });
 
   // -----------------------------------------------------------------------
@@ -620,6 +622,38 @@ describe('mode-state-io', () => {
       writeFileSync(path, replacement);
       expect(recoverEmergencyStateFile(path)).toBe(false);
       expect(readFileSync(path, 'utf8')).toBe(replacement);
+    });
+
+    it('does not remove a replacement made between authenticated predicate and capture', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-replaced-before-capture.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'one' }));
+      const replacement = { active: true, run: 'replacement', untouched: true };
+      const replacementRaw = JSON.stringify(replacement, null, 2);
+      process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH = path;
+      process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64 = Buffer.from(replacementRaw).toString('base64');
+
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', null)).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(replacementRaw);
+      expect(recoverEmergencyStateFile(path)).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(replacementRaw);
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'replacement', null)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it('lets only the claimed pause transaction mutate a primary while a concurrent clear recovers it', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-concurrent-emergency.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'one' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'before-rename';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+      // The clear cannot replace the pause journal. It recovers the owner, then
+      // observes the paused state and leaves it intact.
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one' && state.active === true, null)).toBe(false);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ active: false, run: 'one' });
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
     });
   });
 });

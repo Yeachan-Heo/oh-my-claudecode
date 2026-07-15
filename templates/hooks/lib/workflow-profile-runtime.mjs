@@ -106,7 +106,7 @@ function hasAuthenticatedObservation(observation, sessionId, root) {
       let record;
       try { record = JSON.parse(line); } catch { return false; }
       const text = assistantText(record);
-      return createHash('sha256').update(line).digest('hex') === observation.recordContentSha256 && recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null && !text.includes('<local-command-stdout>') && text.trim() === SIGNALS[observation.stageId];
+      return createHash('sha256').update(line).digest('hex') === observation.recordContentSha256 && recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${SIGNALS[observation.stageId]}`;
     }
     byteOffset += Buffer.byteLength(rawLine) + 1;
   }
@@ -163,7 +163,7 @@ function completionEvidence(content, signal, sessionId, boundary) {
     try { record = JSON.parse(line); } catch { return null; }
     const text = assistantText(record);
     const isAssistant = recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null;
-    if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === signal) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') };
+    if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${signal}`) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') };
     byteOffset += Buffer.byteLength(rawLine) + 1;
     lineNumber += 1;
   }

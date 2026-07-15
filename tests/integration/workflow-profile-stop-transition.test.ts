@@ -163,7 +163,7 @@ function invokeAsync(f, input = {}, extraEnv = {}) {
 
 
 function completion(stage) {
-  return `PIPELINE_${stage.toUpperCase()}_COMPLETE`;
+  return `Signal: PIPELINE_${stage.toUpperCase()}_COMPLETE`;
 }
 
 afterEach(() => {
@@ -217,7 +217,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(state.phase).toBe('execution');
     expect(state.pipelineTracking).toMatchObject({ currentStageIndex: 1, trackingRevision: 1 });
     expect(state.pipelineTracking.completionObservations).toEqual([expect.objectContaining({
-      stageId: 'ralplan', sessionId: f.sessionId, signalId: completion('ralplan'), byteOffset: initial.pipelineTracking.activationBoundary.byteOffset + Buffer.byteLength(JSON.stringify({ sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'unrelated secret-token-never-in-output' }] } })) + 1,
+      stageId: 'ralplan', sessionId: f.sessionId, signalId: 'PIPELINE_RALPLAN_COMPLETE', byteOffset: initial.pipelineTracking.activationBoundary.byteOffset + Buffer.byteLength(JSON.stringify({ sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'unrelated secret-token-never-in-output' }] } })) + 1,
       lineNumber: 1, recordContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/), stableFile: expect.objectContaining({ device: expect.any(Number), inode: expect.any(Number), size: expect.any(Number) }), activationBoundary: expect.objectContaining({ sessionId: f.sessionId, transcriptBasename: `${f.sessionId}.jsonl` }), observedAt: expect.any(String),
     })]);
   });

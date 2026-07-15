@@ -110,7 +110,7 @@ function authenticatedObservation(observation: RecordValue, sessionId: string, r
       if (!isRecord(record)) return false;
       const message = record.message;
       const text = assistantText(record);
-      return createHash("sha256").update(line).digest("hex") === observation.recordContentSha256 && record.sessionId === sessionId && record.type === "assistant" && isRecord(message) && message.role === "assistant" && !record.isMeta && !record.isReplay && !record.replay && !record.meta && text !== null && !text.includes("<local-command-stdout>") && text.trim() === NAMED_SIGNALS[String(observation.stageId)];
+      return createHash("sha256").update(line).digest("hex") === observation.recordContentSha256 && record.sessionId === sessionId && record.type === "assistant" && isRecord(message) && message.role === "assistant" && !record.isMeta && !record.isReplay && !record.replay && !record.meta && text !== null && !text.includes("<local-command-stdout>") && text.trim() === `Signal: ${NAMED_SIGNALS[String(observation.stageId)]}`;
     }
     byteOffset += Buffer.byteLength(rawLine) + 1;
   }

@@ -756,7 +756,7 @@ describe('AutopilotCancel', () => {
       const initialIdentity = { device: initial.dev, inode: initial.ino, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update('').digest('hex') };
       const state = initAutopilot(testDir, 'ship it', sessionId)!;
       const descriptor = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
-      const record = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'PIPELINE_RALPLAN_COMPLETE' }] } });
+      const record = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Signal: PIPELINE_RALPLAN_COMPLETE' }] } });
       const content = Buffer.from(`${record}\n`);
       writeFileSync(transcript, content);
       const stable = statSync(transcript);
@@ -772,7 +772,7 @@ describe('AutopilotCancel', () => {
       const before = require('fs').readFileSync(stateFile);
       expect(resumeAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
       expect(require('fs').readFileSync(stateFile)).toEqual(before);
-      const skippedRecord = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'PIPELINE_EXECUTION_COMPLETE' }] } });
+      const skippedRecord = JSON.stringify({ sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Signal: PIPELINE_EXECUTION_COMPLETE' }] } });
       const skippedContent = Buffer.from(`${skippedRecord}\n`);
       writeFileSync(transcript, skippedContent);
       const skippedStat = statSync(transcript);

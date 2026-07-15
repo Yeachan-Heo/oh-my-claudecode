@@ -68,7 +68,7 @@ function fileIdentity(path: string, content: Buffer) {
 }
 
 function advancePausedWorkflowState(state: any, transcriptPath: string, signal = 'PIPELINE_RALPLAN_COMPLETE') {
-  const record = JSON.stringify({ sessionId: 'workflow-activation-fixture', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: signal }] } });
+  const record = JSON.stringify({ sessionId: 'workflow-activation-fixture', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `Signal: ${signal}` }] } });
   const content = Buffer.from(`${record}\n`);
   writeFileSync(transcriptPath, content);
   const stableFile = fileIdentity(transcriptPath, content);

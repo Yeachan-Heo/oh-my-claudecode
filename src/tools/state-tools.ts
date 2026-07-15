@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { basename, dirname, join } from 'path';
 import {
   resolveStatePath,
   ensureOmcDir,
@@ -35,6 +35,7 @@ import {
   writeStateFileLockedIf,
   clearStateFileLockedIf,
   emergencyMutateStateFileIf,
+  recoverEmergencyStateFile,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -988,6 +989,25 @@ export const stateWriteTool: ToolDefinition<{
 // state_clear - Clear state for a mode
 // ============================================================================
 
+function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string): void {
+  const sessionIds = new Set(listSessionIds(root));
+  if (sessionId) sessionIds.add(sessionId);
+  const paths = new Set<string>([
+    ...getLegacyStateFileCandidates('autopilot', root),
+    ...getWorkingDirectoryLocalStateClearCandidates('autopilot', root, sessionId),
+    ...getConvergedStateCandidates('autopilot', root),
+  ]);
+  for (const sid of sessionIds) paths.add(resolveSessionStatePath('autopilot', sid, root));
+  for (const path of paths) {
+    if (!recoverEmergencyStateFile(path)) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
+    const artifactPrefix = `${basename(path)}.emergency-`;
+    let artifacts: string[];
+    try { artifacts = readdirSync(dirname(path)).filter((name) => name.startsWith(artifactPrefix)); }
+    catch { artifacts = []; }
+    if (artifacts.length > 0) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
+  }
+}
+
 export const stateClearTool: ToolDefinition<{
   mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
   workingDirectory: z.ZodOptional<z.ZodString>;
@@ -1047,6 +1067,7 @@ export const stateClearTool: ToolDefinition<{
           ...(blocked ? { isError: true } : {}),
         };
       }
+      if (mode === 'autopilot') recoverAutopilotEmergencyTransactions(root, sessionId);
       const cleanedTeamNames = new Set<string>();
 
       const collectTeamNamesForCleanup = (statePath: string): void => {
