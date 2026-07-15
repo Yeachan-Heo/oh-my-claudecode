@@ -41,7 +41,7 @@ Your task: Expand the idea into a detailed spec and implementation plan using co
 
 ### Part 1: Idea Expansion (Spec Creation)
 
-${getExpansionPrompt(context.idea)}
+${getExpansionPrompt(context.idea, undefined, false)}
 
 ### Part 2: Consensus Planning
 
@@ -73,7 +73,7 @@ Your task: Expand the idea into a spec and create an implementation plan.
 
 ### Part 1: Idea Expansion
 
-${getExpansionPrompt(context.idea)}
+${getExpansionPrompt(context.idea, undefined, false)}
 
 ### Part 2: Direct Planning
 

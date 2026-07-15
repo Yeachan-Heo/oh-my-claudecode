@@ -199,7 +199,8 @@ function refreshNamedWorkflowDispatch(path, expected) {
   try {
     const current = readJsonFile(path);
     const currentStage = current?.pipelineTracking?.stages?.[expected.stageIndex];
-    if (!isValidWorkflowDescriptor(current?.workflow) || current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) return { committed: false, state: current };
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) return { committed: false, state: current, integrityFailed: true };
+    if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) return { committed: false, state: current };
     const now = new Date().toISOString();
     const refreshed = { ...current, last_checked_at: now, updated_at: now };
     if (!writeJsonFile(path, refreshed)) return { committed: false, state: readJsonFile(path) };
@@ -760,10 +761,9 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
       const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
       const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
       const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-      if (currentAutopilot?.workflowRunId) {
-        if (signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
-        if (typeof signal.target_state_sha256 === "string" && signal.target_state_sha256 !== createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex")) return;
-      } else if (signal.target_workflow_run_id) return;
+      if (currentAutopilot?.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
+      if (!currentAutopilot?.workflowRunId && signal.target_workflow_run_id) return;
+      if (typeof signal.target_state_sha256 === "string" && signal.target_state_sha256 !== createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex")) return;
       if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
         active = true;
         return;
@@ -1374,19 +1374,32 @@ async function main() {
             phase: autopilot.state.phase,
           };
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
-          console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
+          if (refresh.integrityFailed) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          } else {
+            console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
+          }
           return;
         }
         const phase = getAutopilotPhase(autopilot.state);
         if (phase !== "complete") {
+          const loadedSnapshot = JSON.stringify(autopilot.state);
           const newCount = (autopilot.state.reinforcement_count || 0) + 1;
           if (newCount <= 20) {
             const toolError = readLastToolError(stateDir);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
-
-            autopilot.state.reinforcement_count = newCount;
-            autopilot.state.last_checked_at = new Date().toISOString();
-            withStateFileLockSync(autopilot.path, () => writeJsonFile(autopilot.path, autopilot.state));
+            const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
+            let committed = false;
+            const locked = withStateFileLockSync(autopilot.path, () => {
+              const current = readJsonFile(autopilot.path);
+              if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+              committed = writeJsonFile(autopilot.path, reinforced);
+            });
+            if (!locked.acquired || !committed) {
+              console.log(JSON.stringify(SAFE_CONTINUE));
+              return;
+            }
+            autopilot.state = reinforced;
 
             const cancelGuidance = hasValidSessionId && autopilot.state.session_id === sessionId
               ? " When all phases are complete, run /oh-my-claudecode:cancel to cleanly exit and clean up this session's autopilot state files. If cancel fails, retry with /oh-my-claudecode:cancel --force."

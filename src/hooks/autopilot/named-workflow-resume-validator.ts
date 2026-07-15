@@ -256,15 +256,13 @@ function assistantText(record: RecordValue): string | null {
     content.content.length === 0
   )
     return null;
-  const text = content.content.map((block) =>
-    isRecord(block) &&
-    block.type === "text" &&
-    typeof block.text === "string" &&
-    block.text.trim().length > 0
-      ? block.text
-      : null,
-  );
-  return text.every((value) => value !== null) ? text.join("") : null;
+  const text: string[] = [];
+  for (const block of content.content) {
+    if (!isRecord(block)) return null;
+    if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) text.push(block.text);
+    else if (block.type !== "thinking" && block.type !== "redacted_thinking") return null;
+  }
+  return text.length > 0 ? text.join("") : null;
 }
 
 function authenticatedObservation(
@@ -583,17 +581,17 @@ export function prepareNamedWorkflowAdvance(
     ),
     observedAt,
   });
+  tracking.activationBoundary = {
+    transcriptPath: transcript.path,
+    transcriptRoot: root,
+    transcriptBasename: `${sessionId}.jsonl`,
+    sessionId,
+    byteOffset: Number(transcript.identity.size),
+    fileIdentity: transcript.identity as never,
+  };
   if (nextIndex < updated.workflow!.stages.length) {
     tracking.stages[nextIndex].status = "active";
     tracking.stages[nextIndex].startedAt = observedAt;
-    tracking.activationBoundary = {
-      transcriptPath: transcript.path,
-      transcriptRoot: root,
-      transcriptBasename: `${sessionId}.jsonl`,
-      sessionId,
-      byteOffset: Number(transcript.identity.size),
-      fileIdentity: transcript.identity as never,
-    };
     updated.phase = updated.workflow!.stages[nextIndex];
   } else {
     updated.active = false;

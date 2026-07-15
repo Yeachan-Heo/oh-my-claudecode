@@ -147,7 +147,16 @@ export function isValidWorkflowTrackingState(state, sessionId = state?.session_i
 }
 
 function recordSessionId(record) { return record?.sessionId; }
-function assistantText(record) { const content = record?.message?.content; if (!Array.isArray(content) || content.length === 0) return null; const text = content.map(block => block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0 ? block.text : null); return text.every(value => value !== null) ? text.join('') : null; }
+function assistantText(record) {
+  const content = record?.message?.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+  const text = [];
+  for (const block of content) {
+    if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) text.push(block.text);
+    else if (block?.type !== 'thinking' && block?.type !== 'redacted_thinking') return null;
+  }
+  return text.length > 0 ? text.join('') : null;
+}
 function completionEvidence(content, signal, sessionId, boundary) {
   let byteOffset = boundary.byteOffset;
   let lineNumber = 0;

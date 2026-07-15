@@ -1332,7 +1332,7 @@ describe('state-tools', () => {
       writeFileSync(strandedPath, JSON.stringify({ active: true, session_id: sessionId, workflowRunId: '33333333-3333-4333-8333-333333333333' }));
 
       await stateClearTool.handler({ mode: 'autopilot', session_id: sessionId, workingDirectory: TEST_DIR });
-      const signalPath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'cancel-signal-state.json');
+      const signalPath = join(dirname(strandedPath), 'cancel-signal-state.json');
       expect(JSON.parse(readFileSync(signalPath, 'utf8')).target_workflow_run_id).toBe('33333333-3333-4333-8333-333333333333');
       expect(existsSync(strandedPath)).toBe(false);
     });

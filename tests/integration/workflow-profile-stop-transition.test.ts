@@ -166,6 +166,8 @@ function completion(stage) {
   return `Signal: PIPELINE_${stage.toUpperCase()}_COMPLETE`;
 }
 
+const workflowIntegrityFailure = { continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.' };
+
 afterEach(() => {
   while (created.length) rmSync(created.pop(), { recursive: true, force: true });
 });
@@ -249,6 +251,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const completed = readState(f);
     expect(completed).toMatchObject({ active: false, phase: 'complete' });
     expect(completed.pipelineTracking.trackingRevision).toBe(2);
+    expect(completed.pipelineTracking.activationBoundary.byteOffset).toBe(readFileSync(f.transcript).byteLength);
     expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
     expect(readState(f)).toEqual(completed);
   });
@@ -412,7 +415,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       expect(result).toEqual({ continue: true, suppressOutput: true });
       expect(readFileSync(f.statePath)).toEqual(replacementBytes);
     } else {
-      expect(result).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
+      expect(result).toMatchObject(workflowIntegrityFailure);
       expectStateExceptLiveness(readState(f), JSON.parse(replacementBytes.toString('utf8')));
     }
   });
@@ -472,7 +475,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     rmSync(f.transcript);
     symlinkSync(target, f.transcript);
     expect(lstatSync(f.transcript).isSymbolicLink()).toBe(true);
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject(workflowIntegrityFailure);
     expectStateExceptLiveness(readState(f), state);
 
     rmSync(f.transcript);
@@ -497,7 +500,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, state);
     const bytesBefore = readFileSync(f.statePath);
 
-    expect(invoke(f, { transcript_path: escapedTranscript })).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f, { transcript_path: escapedTranscript })).toMatchObject(workflowIntegrityFailure);
     expectStateExceptLiveness(readState(f), JSON.parse(bytesBefore.toString('utf8')));
   });
 
@@ -559,7 +562,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
     const before = readFileSync(f.statePath);
 
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject(workflowIntegrityFailure);
     expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
@@ -634,10 +637,12 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(replacement.byteLength).toBe(original.byteLength);
     const before = readFileSync(f.statePath);
 
-    expect(invoke(f, {}, {
+    const result = invoke(f, {}, {
       NODE_ENV: 'test',
       OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64: replacement.toString('base64'),
-    })).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    });
+    expect(result).toMatchObject({ continue: false, decision: 'block' });
+    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.reason]).toContain(result.reason);
     expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
@@ -657,7 +662,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const before = readFileSync(f.statePath);
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject(workflowIntegrityFailure);
     expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 

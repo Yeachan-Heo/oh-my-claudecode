@@ -315,7 +315,11 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       type: "assistant",
       message: {
         role: "assistant",
-        content: [{ type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" }],
+        content: [
+          { type: "thinking", thinking: "validate stage completion" },
+          { type: "redacted_thinking", data: "redacted" },
+          { type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" },
+        ],
       },
     });
     const unrelated = JSON.stringify({

@@ -1147,7 +1147,7 @@ export const stateClearTool: ToolDefinition<{
           }
         }
         const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId);
-        const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root));
+        const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
         const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId));
         const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId));
         const operationCandidates = [...new Map([
@@ -1171,7 +1171,26 @@ export const stateClearTool: ToolDefinition<{
         const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => !namedPrimaryPaths.has(candidate.path)));
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        if (namedPrimaries.length === 0) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
+        const sessionSignalCandidates = operationCandidates.filter((candidate) => !candidate.state.workflow);
+        const signaledCandidateDirs = new Set<string>();
+        for (const candidate of sessionSignalCandidates) {
+          const signalDir = dirname(candidate.path);
+          if (signaledCandidateDirs.has(signalDir)) continue;
+          signaledCandidateDirs.add(signalDir);
+          const now = Date.now();
+          const signalPath = join(signalDir, 'cancel-signal-state.json');
+          const payload = {
+            active: true,
+            requested_at: new Date(now).toISOString(),
+            expires_at: new Date(now + CANCEL_SIGNAL_TTL_MS).toISOString(),
+            mode,
+            source: 'state_clear' as const,
+            ...(candidate.workflowRunId ? { target_workflow_run_id: candidate.workflowRunId } : {}),
+            target_state_sha256: createHash('sha256').update(candidate.snapshot).digest('hex'),
+          };
+          try { writeStateFileLocked(signalPath, payload); } catch { /* best-effort */ }
+        }
+        if (sessionSignalCandidates.length === 0 && namedPrimaries.length === 0) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
           const expectedDirectState = directCandidate?.state;
