@@ -999,6 +999,11 @@ function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string)
   for (const sid of listSessionIdsUnderOmcRoot(localOmcRoot)) {
     broadPaths.add(join(localOmcRoot, 'state', 'sessions', sid, getStateFileName('autopilot')));
   }
+  for (const omcRoot of getConvergedOmcRoots(root)) {
+    for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+      broadPaths.add(join(omcRoot, 'state', 'sessions', sid, getStateFileName('autopilot')));
+    }
+  }
   const directSessionPaths = new Set<string>();
   if (sessionId) {
     directSessionPaths.add(resolveSessionStatePath('autopilot', sessionId, root));

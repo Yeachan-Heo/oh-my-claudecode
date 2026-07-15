@@ -273,6 +273,28 @@ describe('state-tools', () => {
       expect(existsSync(legacy)).toBe(false);
       expect(existsSync(`${legacy}.emergency-journal.json`), 'legacy journal').toBe(false);
     });
+    it('recovers an interrupted named transaction from the centralized root before broad clear', async () => {
+      const previous = process.env.OMC_STATE_DIR;
+      process.env.OMC_STATE_DIR = join(TEST_DIR, 'central-emergency-root');
+      try {
+        const { getOmcRoot } = await import('../../lib/worktree-paths.js');
+        const statePath = join(getOmcRoot(TEST_DIR), 'state', 'sessions', 'central-journal-owner', 'autopilot-state.json');
+        mkdirSync(dirname(statePath), { recursive: true });
+        writeFileSync(statePath, JSON.stringify({ active: true, session_id: 'central-journal-owner', workflowRunId: '66666666-6666-4666-8666-666666666666', workflow: { profileHash: 'd'.repeat(64) } }));
+        process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+        expect(emergencyMutateStateFileIf(statePath, (state) => state.session_id === 'central-journal-owner', (state) => ({ ...state, active: false }))).toBe(false);
+        delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+        const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
+        expect(result.isError).toBeUndefined();
+        expect(existsSync(statePath)).toBe(false);
+        expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
+      } finally {
+        if (previous === undefined) delete process.env.OMC_STATE_DIR;
+        else process.env.OMC_STATE_DIR = previous;
+      }
+    });
+
     it('should remove legacy state file when no session_id provided', async () => {
       await stateWriteTool.handler({
         mode: 'ralph',
