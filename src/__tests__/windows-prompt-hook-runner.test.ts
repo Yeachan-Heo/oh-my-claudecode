@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -75,5 +75,61 @@ describe('Windows-safe prompt hook runner paths', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('Hook keyword-detector.mjs timed out after 1ms; exiting fail-open.');
+  });
+
+  it('reaps a timed-out generic hook process tree', async () => {
+    const cacheBase = mkdtempSync(join(tmpdir(), 'omc generic tree reap-'));
+    tempDirs.push(cacheBase);
+    const root = join(cacheBase, '4.6.0');
+    const target = join(root, 'scripts', 'post-tool-verifier.mjs');
+    const pidfile = join(cacheBase, 'generic-grandchild.pid');
+    let grandchildPid: number | undefined;
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    mkdirSync(join(root, 'hooks'), { recursive: true });
+    writeFileSync(join(root, 'scripts', 'run.cjs'), '// plugin-root marker');
+    writeFileSync(target, `
+      import { spawn } from 'node:child_process';
+      const childSource = "require('node:fs').writeFileSync(process.env.OMC_TEST_PIDFILE, String(process.pid)); setInterval(() => {}, 1e9);";
+      spawn(process.execPath, ['-e', childSource], { stdio: 'ignore', env: process.env });
+      setInterval(() => {}, 1e9);
+    `);
+    writeFileSync(join(root, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        PostToolUse: [{ matcher: '', hooks: [{
+          type: 'command',
+          command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-verifier.mjs',
+          timeout: 1,
+        }] }],
+      },
+    }));
+
+    try {
+      const startedAt = Date.now();
+      const result = run(target, root, { OMC_TEST_PIDFILE: pidfile });
+      const elapsed = Date.now() - startedAt;
+      expect(result.status).toBe(0);
+      expect(elapsed).toBeGreaterThanOrEqual(400);
+      expect(elapsed).toBeLessThan(30000);
+      grandchildPid = Number(readFileSync(pidfile, 'utf8'));
+      expect(grandchildPid).toBeGreaterThan(0);
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(grandchildPid!, 0);
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code === 'ESRCH') break;
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(() => process.kill(grandchildPid!, 0)).toThrow();
+    } finally {
+      if (grandchildPid) {
+        try {
+          process.kill(grandchildPid, 'SIGKILL');
+        } catch { /* already dead */ }
+      }
+    }
   });
 });

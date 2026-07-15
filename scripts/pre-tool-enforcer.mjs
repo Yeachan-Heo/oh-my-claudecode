@@ -19,6 +19,7 @@ import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-prefl
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
+import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -480,7 +481,7 @@ function resolveOmcRoot(startDir) {
       cwd: dir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
     if (top) return join(top, '.omc');
@@ -517,6 +518,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 
@@ -527,6 +529,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 

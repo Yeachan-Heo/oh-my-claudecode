@@ -48,6 +48,17 @@ function productionManifest(): ProductionSource[] {
     .map((path) => ({ path: toForwardSlash(relative(REPO_ROOT, path)), content: readFileSync(path, 'utf8') }));
 }
 
+function genericHookManifest(): ProductionSource[] {
+  const registeredScripts = new Set(
+    [...readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf8').matchAll(/scripts\/([\w-]+\.mjs)/g)]
+      .map((match) => join(REPO_ROOT, 'scripts', match[1]!)),
+  );
+  const installedTemplates = walkFiles(join(REPO_ROOT, INSTALLED_HOOK_TEMPLATE_ROOT), (path) => path.endsWith('.mjs'));
+  return [...new Set([...registeredScripts, ...installedTemplates])]
+    .sort()
+    .map((path) => ({ path: toForwardSlash(relative(REPO_ROOT, path)), content: readFileSync(path, 'utf8') }));
+}
+
 function unwrap(expression: ts.Expression): ts.Expression {
   while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
     expression = expression.expression;
@@ -117,6 +128,52 @@ function optionValue(
     if (ts.isSpreadAssignment(property)) {
       // An unresolved spread could overwrite the option, so only a proven value is effective.
       return optionValue(property.expression, name, declarations, commandParameter, seen);
+    }
+  }
+  return false;
+}
+
+function isPositiveTimeout(expression: ts.Expression | undefined, declarations: Map<string, ts.Expression>, seen = new Set<string>()): boolean {
+  if (!expression) return false;
+  expression = unwrap(expression);
+  if (ts.isNumericLiteral(expression)) return Number(expression.text) > 0;
+  if (ts.isIdentifier(expression)) {
+    if (expression.text === 'BOUNDED_GIT_TIMEOUT_MS' || expression.text === 'GIT_PROBE_TIMEOUT_MS') return true;
+    if (seen.has(expression.text)) return false;
+    const declaration = declarations.get(expression.text);
+    if (!declaration) return false;
+    seen.add(expression.text);
+    return isPositiveTimeout(declaration, declarations, seen);
+  }
+  return false;
+}
+
+function hasBoundedTimeout(
+  expression: ts.Expression | undefined,
+  declarations: Map<string, ts.Expression>,
+  commandParameter?: string,
+  seen = new Set<string>(),
+): boolean {
+  if (!expression) return false;
+  expression = unwrap(expression);
+  if (ts.isIdentifier(expression)) {
+    if (seen.has(expression.text)) return false;
+    const declaration = declarations.get(expression.text);
+    if (!declaration) return false;
+    seen.add(expression.text);
+    return hasBoundedTimeout(declaration, declarations, commandParameter, seen);
+  }
+  if (ts.isConditionalExpression(expression)) {
+    return isGitCondition(expression.condition, commandParameter) &&
+      hasBoundedTimeout(expression.whenTrue, declarations, commandParameter, seen);
+  }
+  if (!ts.isObjectLiteralExpression(expression)) return false;
+  for (const property of [...expression.properties].reverse()) {
+    if (ts.isPropertyAssignment(property) && propertyName(property) === 'timeout') {
+      return isPositiveTimeout(property.initializer, declarations);
+    }
+    if (ts.isSpreadAssignment(property)) {
+      return hasBoundedTimeout(property.expression, declarations, commandParameter, seen);
     }
   }
   return false;
@@ -236,6 +293,122 @@ function scanGitProcessCalls(path: string, content: string): string[] {
   return violations;
 }
 
+function scanGitTimeouts(path: string, content: string): string[] {
+  const sourceFile = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);
+  const declarations = collectDeclarations(sourceFile);
+  const callees = childProcessCallees(sourceFile);
+  const violations: string[] = [];
+  const report = (node: ts.Node, kind: string) => {
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+    violations.push(`${path}:${line}: ${kind} runs Git without an effective positive timeout`);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const kind = callKind(node, callees);
+      const directGit = kind !== undefined && (kind === 'exec' || kind === 'execSync'
+        ? isGitShellCommand(node.arguments[0])
+        : isGitCommand(node.arguments[0]));
+      const commandParameter = kind ? enclosingRunCommand(node) : undefined;
+      const helperProcessCall = kind !== undefined && commandParameter !== undefined;
+      if (directGit || helperProcessCall) {
+        const options = kind === 'exec' || kind === 'execSync' ? node.arguments[1] : node.arguments[2];
+        if (!hasBoundedTimeout(options, declarations, commandParameter)) report(node, kind);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
+const OWNED_NESTED_GIT_FILES = [
+  'scripts/post-tool-verifier.mjs',
+  'scripts/pre-tool-enforcer.mjs',
+  'scripts/code-simplifier.mjs',
+  'templates/hooks/code-simplifier.mjs',
+];
+const OWNED_NESTED_GIT_CALL_COUNT = 8;
+
+// Tier 2 (ownership): the owned #3493 sites must use the shared BOUNDED_GIT_TIMEOUT_MS
+// constant specifically — not merely "some positive timeout" (tier 1). This resolves the
+// property to the exact identifier so a regression to `timeout: 5000` or a different
+// constant at an owned site fails, while already-compliant sites are left untouched.
+function timeoutIsSharedConstant(
+  expression: ts.Expression | undefined,
+  declarations: Map<string, ts.Expression>,
+  commandParameter?: string,
+  seen = new Set<string>(),
+): boolean {
+  if (!expression) return false;
+  expression = unwrap(expression);
+  if (ts.isIdentifier(expression)) {
+    if (seen.has(expression.text)) return false;
+    const declaration = declarations.get(expression.text);
+    if (!declaration) return false;
+    seen.add(expression.text);
+    return timeoutIsSharedConstant(declaration, declarations, commandParameter, seen);
+  }
+  if (ts.isConditionalExpression(expression)) {
+    return isGitCondition(expression.condition, commandParameter) &&
+      timeoutIsSharedConstant(expression.whenTrue, declarations, commandParameter, seen);
+  }
+  if (!ts.isObjectLiteralExpression(expression)) return false;
+  for (const property of [...expression.properties].reverse()) {
+    if (ts.isPropertyAssignment(property) && propertyName(property) === 'timeout') {
+      const initializer = unwrap(property.initializer);
+      return ts.isIdentifier(initializer) && initializer.text === 'BOUNDED_GIT_TIMEOUT_MS';
+    }
+    if (ts.isSpreadAssignment(property)) {
+      return timeoutIsSharedConstant(property.expression, declarations, commandParameter, seen);
+    }
+  }
+  return false;
+}
+
+function forEachGitProcessCall(
+  path: string,
+  content: string,
+  handler: (node: ts.CallExpression, options: ts.Expression | undefined, declarations: Map<string, ts.Expression>, commandParameter?: string) => void,
+): void {
+  const sourceFile = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);
+  const declarations = collectDeclarations(sourceFile);
+  const callees = childProcessCallees(sourceFile);
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const kind = callKind(node, callees);
+      const directGit = kind !== undefined && (kind === 'exec' || kind === 'execSync'
+        ? isGitShellCommand(node.arguments[0])
+        : isGitCommand(node.arguments[0]));
+      const commandParameter = kind ? enclosingRunCommand(node) : undefined;
+      const helperProcessCall = kind !== undefined && commandParameter !== undefined;
+      if (directGit || helperProcessCall) {
+        const options = kind === 'exec' || kind === 'execSync' ? node.arguments[1] : node.arguments[2];
+        handler(node, options, declarations, commandParameter);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
+function scanOwnedGitConstant(path: string, content: string): string[] {
+  const violations: string[] = [];
+  const sourceFile = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);
+  forEachGitProcessCall(path, content, (node, options, declarations, commandParameter) => {
+    if (!timeoutIsSharedConstant(options, declarations, commandParameter)) {
+      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+      violations.push(`${path}:${line}: owned nested-Git call must use BOUNDED_GIT_TIMEOUT_MS`);
+    }
+  });
+  return violations;
+}
+
+function countGitProcessCalls(path: string, content: string): number {
+  let count = 0;
+  forEachGitProcessCall(path, content, () => { count += 1; });
+  return count;
+}
+
 describe('Windows Git child-process hardening', () => {
   it('scans the defined production manifest and excludes developer automation', () => {
     const manifest = productionManifest();
@@ -247,6 +420,45 @@ describe('Windows Git child-process hardening', () => {
     expect(paths).not.toContain('scripts/release.ts');
     expect(paths).not.toContain('src/__tests__/context-guard-stop.test.ts');
     expect(manifest.flatMap(({ path, content }) => scanGitProcessCalls(path, content))).toEqual([]);
+  });
+
+  it('requires every generic-hook Git child-process call to have a positive timeout', () => {
+    expect(genericHookManifest().flatMap(({ path, content }) => scanGitTimeouts(path, content))).toEqual([]);
+  });
+
+  it('requires the owned #3493 nested-git sites to use the shared BOUNDED_GIT_TIMEOUT_MS constant', () => {
+    const manifest = productionManifest();
+    const owned = manifest.filter(({ path }) => OWNED_NESTED_GIT_FILES.includes(path));
+    expect(owned.map(({ path }) => path).sort()).toEqual([...OWNED_NESTED_GIT_FILES].sort());
+    expect(owned.flatMap(({ path, content }) => scanOwnedGitConstant(path, content))).toEqual([]);
+    const totalOwnedGitCalls = owned.reduce((sum, { path, content }) => sum + countGitProcessCalls(path, content), 0);
+    expect(totalOwnedGitCalls).toBe(OWNED_NESTED_GIT_CALL_COUNT);
+  });
+
+  it('leaves already-compliant git sites on their existing non-shared timeout forms', () => {
+    const contextGuard = readFileSync(join(REPO_ROOT, 'scripts', 'context-guard-stop.mjs'), 'utf8');
+    expect(contextGuard).toContain('GIT_PROBE_TIMEOUT_MS');
+    expect(contextGuard).not.toContain('BOUNDED_GIT_TIMEOUT_MS');
+    for (const driftGuard of ['scripts/workflow-drift-guard.mjs', 'templates/hooks/workflow-drift-guard.mjs']) {
+      const content = readFileSync(join(REPO_ROOT, driftGuard), 'utf8');
+      expect(content).toContain('timeout: 2000');
+      expect(content).not.toContain('BOUNDED_GIT_TIMEOUT_MS');
+    }
+  });
+
+  it('fails the two static tiers independently', () => {
+    const missingTimeout = `import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['diff'], { windowsHide: true });`;
+    const rawLiteral = `import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['diff'], { timeout: 5000, windowsHide: true });`;
+    const otherConstant = `import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['diff'], { timeout: GIT_PROBE_TIMEOUT_MS });`;
+    const sharedConstant = `import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['diff'], { timeout: BOUNDED_GIT_TIMEOUT_MS, windowsHide: true });`;
+
+    // Tier 1 (positive timeout) catches a missing timeout but NOT an over-budget literal.
+    expect(scanGitTimeouts('seed.ts', missingTimeout)).not.toEqual([]);
+    expect(scanGitTimeouts('seed.ts', rawLiteral)).toEqual([]);
+    // Tier 2 (ownership) catches the over-budget literal AND a different constant, and accepts the shared one.
+    expect(scanOwnedGitConstant('seed.ts', rawLiteral)).not.toEqual([]);
+    expect(scanOwnedGitConstant('seed.ts', otherConstant)).not.toEqual([]);
+    expect(scanOwnedGitConstant('seed.ts', sharedConstant)).toEqual([]);
   });
 
   it('rejects owned Git shell strings, shell mode, missing options, aliases, and unsafe helpers', () => {

@@ -29,6 +29,9 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
+const { BOUNDED_GIT_TIMEOUT_MS } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'bounded-git-timeout.mjs')).href
+);
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -57,7 +60,7 @@ function getModifiedFiles(cwd, extensions, maxFiles) {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     });
 

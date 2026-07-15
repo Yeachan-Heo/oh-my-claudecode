@@ -9,16 +9,13 @@
  */
 
 const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const { existsSync, readFileSync, realpathSync } = require('fs');
 const path = require('path');
 const { join, basename, dirname } = path;
 const { pathToFileURL } = require('url');
 const { Worker } = require('worker_threads');
 
-const target = process.argv[2];
-if (!target) {
-  process.exit(0);
-}
 
 function isPluginRoot(pluginRoot) {
   return existsSync(join(pluginRoot, 'hooks', 'hooks.json')) &&
@@ -118,10 +115,17 @@ function resolveTimeoutCushionMs(manifestTimeoutMs, hookEvent) {
 }
 
 const TIMEOUT_CUSHION_MS = 500;
+// = max declared manifest budget (60000ms, setup-maintenance) minus the 500ms cushion; applied ONLY when manifest resolution is null so long legit hooks are not prematurely reaped.
+const DEFAULT_GENERIC_TIMEOUT_MS = 59500;
+
 
 function resolveInnerTimeoutMs(manifestHook) {
   if (!manifestHook) return null;
   return Math.max(1, manifestHook.timeoutMs - resolveTimeoutCushionMs(manifestHook.timeoutMs, manifestHook.event));
+}
+
+function resolveGenericTimeoutMs(manifestHook) {
+  return manifestHook ? resolveInnerTimeoutMs(manifestHook) : DEFAULT_GENERIC_TIMEOUT_MS;
 }
 
 function resolveHookTimeoutMsFromRoot(pluginRoot, targetPath, extraArgs) {
@@ -195,6 +199,58 @@ function writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs) {
   if (manifestHook?.event !== 'UserPromptSubmit' || isDebugHooksEnabled()) {
     process.stderr.write(message);
   }
+}
+
+function reapTree(child) {
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+        windowsHide: true,
+        timeout: 2000,
+      });
+    } catch {}
+    return;
+  }
+
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(child.pid, 'SIGKILL');
+    } catch {}
+  }
+}
+
+function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
+  return new Promise(resolve => {
+    let terminal = false;
+    const child = spawn(process.execPath, [targetPath, ...extraArgs], {
+      stdio: 'inherit',
+      env: process.env,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+    });
+    const timer = setTimeout(() => {
+      if (terminal) return;
+      terminal = true;
+      reapTree(child);
+      writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
+      resolve(0);
+    }, timeoutMs);
+
+    child.once('exit', (code, signal) => {
+      if (terminal) return;
+      terminal = true;
+      clearTimeout(timer);
+      resolve(typeof code === 'number' ? code : 0);
+    });
+    child.once('error', () => {
+      if (terminal) return;
+      terminal = true;
+      clearTimeout(timer);
+      resolve(0);
+    });
+  });
 }
 
 async function runWorker(targetPath, manifestHook, timeoutMs) {
@@ -281,38 +337,38 @@ async function runWorker(targetPath, manifestHook, timeoutMs) {
   }
 }
 
-const resolution = resolveTarget(target);
-if (!resolution) {
-  process.exitCode = 0;
-} else {
-  const extraArgs = process.argv.slice(3);
-  const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
-  if (workerManifestHook) {
-    const workerTimeoutMs = resolveInnerTimeoutMs(workerManifestHook);
-    runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
-      process.exitCode = status;
-    });
+if (require.main === module) {
+  const target = process.argv[2];
+  if (!target) {
+    process.exit(0);
+  }
+
+  const resolution = resolveTarget(target);
+  if (!resolution) {
+    process.exitCode = 0;
   } else {
-    const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
-    const timeoutMs = resolveInnerTimeoutMs(manifestHook);
-    const result = spawnSync(
-      process.execPath,
-      [resolution.targetPath, ...extraArgs],
-      {
-        stdio: 'inherit',
-        env: process.env,
-        windowsHide: true,
-        ...(timeoutMs ? {
-          timeout: timeoutMs,
-          killSignal: process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL',
-        } : {}),
-      }
-    );
-
-    if (result.error?.code === 'ETIMEDOUT' && timeoutMs) {
-      writeTimeoutDiagnostic(resolution.targetPath, manifestHook, timeoutMs);
+    const extraArgs = process.argv.slice(3);
+    const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
+    if (workerManifestHook) {
+      const workerTimeoutMs = resolveInnerTimeoutMs(workerManifestHook);
+      runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
+        process.exitCode = status;
+      });
+    } else {
+      const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
+      const timeoutMs = resolveGenericTimeoutMs(manifestHook);
+      runGenericChild(resolution.targetPath, extraArgs, timeoutMs, manifestHook).then(status => {
+        process.exitCode = status;
+      });
     }
-
-    process.exitCode = result.status ?? 0;
   }
 }
+
+module.exports = {
+  resolveInnerTimeoutMs,
+  resolveWorkerTarget,
+  resolveHookTimeoutMs,
+  resolveGenericTimeoutMs,
+  runGenericChild,
+  DEFAULT_GENERIC_TIMEOUT_MS,
+};

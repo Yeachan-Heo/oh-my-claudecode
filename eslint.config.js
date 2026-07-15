@@ -62,6 +62,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', '*.js', '*.mjs', 'src/__tests__/benchmark-scoring.test.ts'],
+    ignores: ['dist/**', 'node_modules/**', '*.js', '*.mjs', 'src/__tests__/fixtures/**', 'src/__tests__/benchmark-scoring.test.ts'],
   }
 );

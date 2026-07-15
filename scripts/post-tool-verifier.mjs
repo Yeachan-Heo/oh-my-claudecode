@@ -17,6 +17,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
+import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
 const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
@@ -83,7 +84,7 @@ function resolveOmcRoot(startDir) {
       cwd: dir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
     if (top) return join(top, '.omc');
@@ -385,6 +386,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 
@@ -393,6 +395,7 @@ function resolveTranscriptPath(transcriptPath, cwd) {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 
