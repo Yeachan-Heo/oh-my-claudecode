@@ -120,6 +120,10 @@ export function shouldWriteStateBack(statePath: string | null | undefined): bool
  * Used to prevent stop-hook re-enforcement races during /cancel.
  */
 function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
+  // Named workflows never honor an out-of-band stop signal: only their exact
+  // primary pause/delete transaction is authoritative for the active run.
+  const autopilot = readModeState<Record<string, unknown>>('autopilot', directory, sessionId);
+  if (autopilot?.workflow) return false;
   let cancelSignalPath: string | undefined;
 
   if (sessionId) {

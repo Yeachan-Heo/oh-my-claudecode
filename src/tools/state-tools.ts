@@ -34,6 +34,7 @@ import {
   writeStateFileLocked,
   writeStateFileLockedIf,
   clearStateFileLockedIf,
+  emergencyMutateStateFileIf,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -940,21 +941,24 @@ export const stateWriteTool: ToolDefinition<{
       };
       if (mode === 'autopilot' && builtState.active === false) {
         let currentState: Record<string, unknown> | null = null;
-        try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled by the locked writer */ }
-        if (currentState?.workflow && !namedWorkflowRuntimeSupported()) {
-          throw new Error('unsupported-runtime');
-        }
-      }
-      if (mode === 'autopilot' && builtState.active === false) {
+        try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled below */ }
         const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
-        const result = writeStateFileLockedIf(
-          statePath,
-          (current) => !current.workflow || (typeof current.workflowRunId === 'string' && current.workflowRunId === requestedRunId),
-          (current) => current.workflow
-            ? { ...current, active: false, _meta: stateWithMeta._meta }
-            : stateWithMeta,
-        );
-        if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
+        if (currentState?.workflow && !namedWorkflowRuntimeSupported()) {
+          const snapshot = JSON.stringify(currentState);
+          const written = emergencyMutateStateFileIf(
+            statePath,
+            (current) => JSON.stringify(current) === snapshot && current.workflowRunId === requestedRunId,
+            (current) => ({ ...current, active: false, _meta: stateWithMeta._meta }),
+          );
+          if (!written) throw new Error('autopilot run changed before deactivation');
+        } else {
+          const result = writeStateFileLockedIf(
+            statePath,
+            (current) => !current.workflow || (typeof current.workflowRunId === 'string' && current.workflowRunId === requestedRunId),
+            (current) => current.workflow ? { ...current, active: false, _meta: stateWithMeta._meta } : stateWithMeta,
+          );
+          if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
+        }
       } else if (!writeStateFileLocked(statePath, stateWithMeta)) {
         throw new Error('state mutation lock unavailable');
       }
@@ -1076,15 +1080,22 @@ export const stateClearTool: ToolDefinition<{
           ...localCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
           ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
         ].map((candidate) => [candidate.path, candidate])).values()];
-        if (mode === 'autopilot' && operationCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
-          throw new Error('unsupported-runtime');
+        const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
+        const namedPrimary = mode === 'autopilot'
+          ? (directCandidate?.state.workflow ? directCandidate : operationCandidates.find((candidate) => Boolean(candidate.state.workflow)))
+          : undefined;
+        let directCleared = 0;
+        if (namedPrimary) {
+          const success = namedWorkflowRuntimeSupported()
+            ? clearStateFileLockedIf(namedPrimary.path, (current) => JSON.stringify(current) === namedPrimary.snapshot) === 'cleared'
+            : emergencyMutateStateFileIf(namedPrimary.path, (current) => JSON.stringify(current) === namedPrimary.snapshot, null);
+          if (!success || existsSync(namedPrimary.path)) throw new Error('primary state mutation failed; dependent state preserved');
+          directCleared = 1;
         }
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates);
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => candidate.path !== namedPrimary?.path));
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
-        let directCleared = 0;
-        writeSessionCancelSignal(root, sessionId, mode, directCandidate);
+        if (!namedPrimary) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
           const expectedDirectState = directCandidate?.state;
@@ -1124,12 +1135,20 @@ export const stateClearTool: ToolDefinition<{
               }
               const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
               const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
-              writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
+              const ownerNamedPrimary = mode === 'autopilot' && ownerDirectCandidate?.state.workflow ? ownerDirectCandidate : undefined;
+              if (ownerNamedPrimary) {
+                const success = namedWorkflowRuntimeSupported()
+                  ? clearStateFileLockedIf(ownerNamedPrimary.path, (current) => JSON.stringify(current) === ownerNamedPrimary.snapshot) === 'cleared'
+                  : emergencyMutateStateFileIf(ownerNamedPrimary.path, (current) => JSON.stringify(current) === ownerNamedPrimary.snapshot, null);
+                if (!success || existsSync(ownerNamedPrimary.path)) throw new Error('primary state mutation failed; dependent state preserved');
+              } else {
+                writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
+                clearModeState(mode as ExecutionMode, root, ownerSessionId, ownerDirectCandidate?.state);
+              }
               const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
               runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
               runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-              clearModeState(mode as ExecutionMode, root, ownerSessionId, ownerDirectCandidate?.state);
-              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates);
+              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates.filter((candidate) => candidate.path !== ownerNamedPrimary?.path));
               ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
             }
           }
@@ -1345,10 +1364,14 @@ export const stateClearTool: ToolDefinition<{
         ...broadSessionCandidates,
         ...broadConvergedCandidates,
       ].map((candidate) => [candidate.path, candidate])).values()];
-      if (mode === 'autopilot' && broadOperationCandidates.some((candidate) => Boolean(candidate.state.workflow)) && !namedWorkflowRuntimeSupported()) {
-        throw new Error('unsupported-runtime');
+      const broadNamedPrimaries = mode === 'autopilot' ? broadOperationCandidates.filter((candidate) => Boolean(candidate.state.workflow)) : [];
+      for (const candidate of broadNamedPrimaries) {
+        const success = namedWorkflowRuntimeSupported()
+          ? clearStateFileLockedIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot) === 'cleared'
+          : emergencyMutateStateFileIf(candidate.path, (current) => JSON.stringify(current) === candidate.snapshot, null);
+        if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
       }
-      {
+      if (broadNamedPrimaries.length === 0) {
         const now = Date.now();
         const cancelSignalPayload = {
           active: true,

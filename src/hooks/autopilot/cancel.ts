@@ -44,9 +44,6 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     };
   }
 
-  if (state.workflow && !namedWorkflowRuntimeSupported()) {
-    return { success: false, message: 'unsupported-runtime' };
-  }
 
   // Commit the primary run mutation before deleting any linked lifecycle state.
   const cancelledState = updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
@@ -108,9 +105,6 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     };
   }
 
-  if (state.workflow && !namedWorkflowRuntimeSupported()) {
-    return { success: false, message: 'unsupported-runtime' };
-  }
 
   // Delete the primary run before deleting any linked lifecycle state.
   if (!clearAutopilotState(directory, sessionId, state)) {

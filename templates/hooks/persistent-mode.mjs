@@ -144,6 +144,22 @@ function commitWorkflowAdvance(path, advance) {
   }
 }
 
+function refreshNamedWorkflowDispatch(path, expected) {
+  const lock = acquireStateFileLockSync(path);
+  if (!lock) return { committed: false, state: readJsonFile(path) };
+  try {
+    const current = readJsonFile(path);
+    const currentStage = current?.pipelineTracking?.stages?.[expected.stageIndex];
+    if (!isValidWorkflowDescriptor(current?.workflow) || current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) return { committed: false, state: current };
+    const now = new Date().toISOString();
+    const refreshed = { ...current, last_checked_at: now, updated_at: now };
+    if (!writeJsonFile(path, refreshed)) return { committed: false, state: readJsonFile(path) };
+    return { committed: true, state: refreshed };
+  } finally {
+    releaseStateFileLockSync(lock);
+  }
+}
+
 function shouldWriteStateBack(path) {
   return Boolean(path && existsSync(path));
 }
@@ -418,11 +434,8 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot) {
       const requestedAt = signal.requested_at ? new Date(signal.requested_at).getTime() : NaN;
       const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
       const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-      if (signal.mode === 'autopilot' && currentAutopilot?.workflowRunId) {
-        if (signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
-      } else if (signal.target_workflow_run_id) {
-        return;
-      }
+      if (currentAutopilot?.workflowRunId) return;
+      if (signal.target_workflow_run_id) return;
       if (Number.isFinite(effectiveExpiry) && effectiveExpiry > now) {
         active = true;
         return;
@@ -1031,7 +1044,7 @@ async function main() {
     // Priority 2: Autopilot (high-level orchestration)
     if (
       autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
-      !isStaleState(autopilot.state) &&
+      (!isStaleState(autopilot.state) || autopilot.state.workflow) &&
       isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal)
     ) {
       const sessionMatches = hasValidSessionId
@@ -1057,7 +1070,17 @@ async function main() {
           return;
         }
         if (autopilot.state.workflow) {
-          console.log(JSON.stringify(workflowStopResponse(autopilot.state)));
+          const expected = {
+            workflowRunId: autopilot.state.workflowRunId,
+            sessionId: autopilot.state.session_id,
+            profileHash: autopilot.state.workflow.profileHash,
+            trackingRevision: autopilot.state.pipelineTracking.trackingRevision,
+            stageIndex: autopilot.state.pipelineTracking.currentStageIndex,
+            stageId: autopilot.state.pipelineTracking.stages?.[autopilot.state.pipelineTracking.currentStageIndex]?.id,
+            phase: autopilot.state.phase,
+          };
+          const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
+          console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
           return;
         }
         const phase = autopilot.state.phase || "unspecified";

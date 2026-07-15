@@ -106,6 +106,18 @@ function readState(f) {
   return JSON.parse(readFileSync(f.statePath, 'utf8'));
 }
 
+function expectStateExceptLiveness(actual, expected) {
+  const strip = (state) => {
+    const copy = structuredClone(state);
+    delete copy.last_checked_at;
+    delete copy.updated_at;
+    return copy;
+  };
+  expect(strip(actual)).toEqual(strip(expected));
+  expect(Date.parse(actual.last_checked_at)).toBeGreaterThanOrEqual(Date.parse(expected.last_checked_at));
+  expect(Date.parse(actual.updated_at)).toBeGreaterThanOrEqual(Date.parse(expected.updated_at));
+}
+
 function appendRecord(f, record) {
   const role = record?.message?.role;
   const type = record?.type ?? (role === 'assistant' || role === 'user' ? role : undefined);
@@ -167,9 +179,9 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
   ])('dispatches every selected stage exactly once for %s', (_name, stages) => {
     const f = fixture(kind);
     writeState(f, workflowState(f, stages));
-    const initialBytes = readFileSync(f.statePath);
+    const initial = readState(f);
     expect(invoke(f).reason).toBe(expectedStagePrompt(stages[0]));
-    expect(readFileSync(f.statePath)).toEqual(initialBytes);
+    expect(readState(f)).toMatchObject({ ...initial, last_checked_at: expect.any(String), updated_at: expect.any(String) });
 
     for (let index = 0; index < stages.length; index += 1) {
       appendRecord(f, { message: { role: 'assistant', content: completion(stages[index]) } });
@@ -178,9 +190,8 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       expect(state.pipelineTracking.trackingRevision).toBe(index + 1);
       if (index + 1 < stages.length) {
         expect(result.reason).toBe(expectedStagePrompt(stages[index + 1]));
-        const committedBytes = readFileSync(f.statePath);
         expect(invoke(f).reason).toBe(expectedStagePrompt(stages[index + 1]));
-        expect(readFileSync(f.statePath)).toEqual(committedBytes);
+        expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: index + 1, trackingRevision: index + 1 });
       } else {
         expect(result.reason).toBe('[AUTOPILOT WORKFLOW] All selected stages are complete.');
         expect(state.active).toBe(false);
@@ -220,9 +231,8 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
     const advanced = readState(f);
     expect(advanced.pipelineTracking.activationBoundary.byteOffset).toBe(readFileSync(f.transcript).byteLength);
-    const bytesBefore = readFileSync(f.statePath);
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
-    expect(readFileSync(f.statePath)).toEqual(bytesBefore);
+    expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 1, trackingRevision: 1 });
 
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
     expect(invoke(f).reason).toContain('All selected stages are complete');
@@ -286,7 +296,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f).workflowRunId).toBe(state.workflowRunId);
   });
 
-  it('ignores expired signals without deleting a replacement path', () => {
+  it('ignores expired and forged same-run cancel signals for named workflows', () => {
     const f = fixture(kind);
     const state = workflowState(f);
     writeState(f, state);
@@ -301,11 +311,50 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeFileSync(signalPath, JSON.stringify(expired));
 
     expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
-    expect(existsSync(signalPath)).toBe(false);
+    expect(existsSync(signalPath)).toBe(true);
 
     const fresh = { ...expired, requested_at: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString() };
     writeFileSync(signalPath, JSON.stringify(fresh));
-    expect(invoke(f)).toMatchObject({ continue: true, suppressOutput: true });
+    expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
+  });
+
+  it('refreshes named workflow liveness when an active stage redispatches after two hours', () => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    const stale = new Date(Date.now() - (2 * 60 * 60 * 1000) - 1_000).toISOString();
+    state.last_checked_at = stale;
+    state.updated_at = stale;
+    state.started_at = stale;
+    writeState(f, state);
+
+    expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
+    const refreshed = readState(f);
+    expect(new Date(refreshed.last_checked_at).getTime()).toBeGreaterThan(new Date(stale).getTime());
+    expect(new Date(refreshed.updated_at).getTime()).toBeGreaterThan(new Date(stale).getTime());
+    expect(refreshed.pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
+  });
+
+  it('preserves a concurrent named workflow transition rather than returning a stale stage prompt', async () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const lockPath = `${f.statePath}.mutation.lock`;
+    writeFileSync(lockPath, liveLockOwner());
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 75));
+    const replacement = workflowState(f);
+    replacement.phase = 'execution';
+    replacement.pipelineTracking.currentStageIndex = 1;
+    replacement.pipelineTracking.trackingRevision = 1;
+    replacement.pipelineTracking.stages = [
+      { id: 'ralplan', status: 'completed', iterations: 0, completedAt: new Date().toISOString() },
+      { id: 'execution', status: 'active', iterations: 0, startedAt: new Date().toISOString() },
+    ];
+    writeState(f, replacement);
+    const replacementBytes = readFileSync(f.statePath);
+    unlinkSync(lockPath);
+
+    expect(await pending).toEqual({ continue: true, suppressOutput: true });
+    expect(readFileSync(f.statePath)).toEqual(replacementBytes);
   });
 
   it.each([
@@ -322,15 +371,13 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     ['leading blank record', (f) => { writeFileSync(f.transcript, '\n'); appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } }); }],
     ['embedded blank record', (f) => { appendRecord(f, { message: { role: 'assistant', content: 'unrelated' } }); writeFileSync(f.transcript, '\n', { flag: 'a' }); appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } }); }],
     ['repeated terminal newline', (f) => { appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } }); writeFileSync(f.transcript, '\n', { flag: 'a' }); }],
-  ])('rejects %s without mutating profile state', (_name, append) => {
+  ])('rejects %s without advancing profile state', (_name, append) => {
     const f = fixture(kind);
     const state = workflowState(f);
     writeState(f, state);
     append(f);
-    const bytesBefore = readFileSync(f.statePath);
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readState(f)).toEqual(state);
-    expect(readFileSync(f.statePath)).toEqual(bytesBefore);
+    expect(readState(f)).toMatchObject({ ...state, last_checked_at: expect.any(String), updated_at: expect.any(String) });
   });
 
   it('rejects a matching signal outside the canonical assistant envelope', () => {
@@ -340,10 +387,8 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRawRecord(f, { sessionId: f.sessionId, type: 'system', message: { role: 'assistant', content: [{ type: 'text', text: completion('ralplan') }] } });
     appendRawRecord(f, { session_id: f.sessionId, type: 'assistant', message: { role: 'assistant', content: completion('ralplan') } });
     appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '   ' }, { type: 'text', text: completion('ralplan') }] } });
-    const bytesBefore = readFileSync(f.statePath);
-
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(bytesBefore);
+    expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
   symlinkIt('rejects wrong-session, descriptor mismatch, escaped paths, and symlink transcripts without mutation', () => {
@@ -358,7 +403,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeFileSync(join(f.dir, 'escaped.jsonl'), JSON.stringify({ message: { role: 'assistant', content: completion('ralplan') } }));
     for (const [input, expected] of cases) {
       expect(invoke(f, input)).toMatchObject(expected);
-      expect(readState(f)).toEqual(state);
+      expectStateExceptLiveness(readState(f), state);
     }
 
     const target = join(f.claudeConfigDir, 'projects', 'nested', `${f.sessionId}.jsonl`);
@@ -368,7 +413,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     symlinkSync(target, f.transcript);
     expect(lstatSync(f.transcript).isSymbolicLink()).toBe(true);
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readState(f)).toEqual(state);
+    expectStateExceptLiveness(readState(f), state);
 
     rmSync(f.transcript);
     writeFileSync(f.transcript, '');
@@ -393,7 +438,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const bytesBefore = readFileSync(f.statePath);
 
     expect(invoke(f, { transcript_path: escapedTranscript })).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(bytesBefore);
+    expectStateExceptLiveness(readState(f), JSON.parse(bytesBefore.toString('utf8')));
   });
 
   it.each([
@@ -455,7 +500,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const before = readFileSync(f.statePath);
 
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(before);
+    expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
   it('rejects malformed tracking and nested completion history without mutation', () => {
@@ -478,7 +523,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       const before = readFileSync(f.statePath);
       appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
       expect(invoke(f)).toMatchObject({ continue: false, decision: 'block' });
-      expect(readFileSync(f.statePath)).toEqual(before);
+      expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
       writeState(f, validState);
     }
   });
@@ -533,7 +578,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       NODE_ENV: 'test',
       OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64: replacement.toString('base64'),
     })).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(before);
+    expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
   it('rejects transcript parent replacement before commit', async () => {
@@ -553,7 +598,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     unlinkSync(lockPath);
 
     expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(before);
+    expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
   it('rejects a stale transcript snapshot under the Stop lock and refreshes on retry', async () => {
@@ -572,9 +617,8 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
     const committed = readState(f);
     expect(committed.pipelineTracking.activationBoundary.byteOffset).toBe(readFileSync(f.transcript).byteLength);
-    const bytesBeforeReplay = readFileSync(f.statePath);
     expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
-    expect(readFileSync(f.statePath)).toEqual(bytesBeforeReplay);
+    expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 1, trackingRevision: 1 });
 
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
     expect(invoke(f).reason).toContain('All selected stages are complete');

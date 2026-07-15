@@ -6,7 +6,7 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -217,6 +217,69 @@ export function writeStateFileLockedIf(
     return 'failed';
   } finally {
     releaseMutationLock(lock);
+  }
+}
+
+/**
+ * Portable, fail-closed exact mutation for named workflow emergency cancellation.
+ * The primary is first atomically quarantined, then either removed or published
+ * through an exclusive hard-link. A replacement at the primary is never replaced.
+ */
+export function emergencyMutateStateFileIf(
+  filePath: string,
+  predicate: (current: Record<string, unknown>) => boolean,
+  transform: ((current: Record<string, unknown>) => Record<string, unknown>) | null,
+): boolean {
+  const quarantinePath = `${filePath}.emergency-quarantine`;
+  const restore = (): boolean => {
+    if (existsSync(filePath)) return false;
+    try {
+      linkSync(quarantinePath, filePath);
+      unlinkSync(quarantinePath);
+      return true;
+    } catch { return false; }
+  };
+  const publish = (current: Record<string, unknown>): boolean => {
+    const tempPath = `${filePath}.emergency-publish.${process.pid}.${randomUUID()}.tmp`;
+    let fd: number | undefined;
+    try {
+      fd = openSync(tempPath, 'wx', 0o600);
+      writeSync(fd, JSON.stringify(transform!(current)));
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
+      linkSync(tempPath, filePath); // exclusive publication: never overwrite a replacement
+      unlinkSync(tempPath);
+      unlinkSync(quarantinePath);
+      return true;
+    } catch {
+      if (fd !== undefined) try { closeSync(fd); } catch { /* best effort */ }
+      try { unlinkSync(tempPath); } catch { /* best effort */ }
+      return false;
+    }
+  };
+  try {
+    if (existsSync(quarantinePath)) {
+      if (existsSync(filePath)) return false;
+      const raw = readFileSync(quarantinePath, 'utf8');
+      const current = JSON.parse(raw) as Record<string, unknown>;
+      if (!predicate(current)) return false;
+      return transform ? publish(current) : (unlinkSync(quarantinePath), true);
+    }
+    if (!existsSync(filePath)) return false;
+    const raw = readFileSync(filePath, 'utf8');
+    const current = JSON.parse(raw) as Record<string, unknown>;
+    if (!predicate(current)) return false;
+    renameSync(filePath, quarantinePath);
+    const quarantinedRaw = readFileSync(quarantinePath, 'utf8');
+    const quarantined = JSON.parse(quarantinedRaw) as Record<string, unknown>;
+    if (quarantinedRaw !== raw || !predicate(quarantined)) {
+      restore();
+      return false;
+    }
+    return transform ? publish(quarantined) : (unlinkSync(quarantinePath), true);
+  } catch {
+    return false;
   }
 }
 
