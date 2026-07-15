@@ -1,9 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const runCjs = require('../../scripts/run.cjs');
+const RUN_CJS_PATH = join(process.cwd(), 'scripts', 'run.cjs');
 const HUNG_PARENT = join(process.cwd(), 'src', '__tests__', 'fixtures', 'hung-hooks', 'hung-parent.cjs');
 
 function withWatchdog<T>(promise: Promise<T>, timeoutMs = 5000): Promise<T> {
@@ -104,6 +106,40 @@ describe('run.cjs generic hook timeout supervisor', () => {
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reaps the detached hook tree when the runner is terminated before its timeout (POSIX)', async () => {
+    if (process.platform === 'win32') return; // POSIX process-group reap; Windows cancellation covered by the CI lane test
+    const directory = mkdtempSync(join(tmpdir(), 'omc-runner-cancel-'));
+    const pidfile = join(directory, 'grandchild.pid');
+    let grandchildPid: number | undefined;
+    // Manifest-null target => the runner arms the 59500ms default timer; we terminate the
+    // runner well before it fires, so only the new signal-handler reap can prevent an orphan.
+    const runner = spawn(process.execPath, [RUN_CJS_PATH, HUNG_PARENT], {
+      stdio: 'ignore',
+      env: { ...process.env, OMC_TEST_PIDFILE: pidfile },
+    });
+    try {
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline && !existsSync(pidfile)) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(existsSync(pidfile)).toBe(true);
+      grandchildPid = Number(readFileSync(pidfile, 'utf8'));
+      expect(grandchildPid).toBeGreaterThan(0);
+
+      const runnerExit = new Promise<void>(resolve => runner.once('exit', () => resolve()));
+      runner.kill('SIGTERM');
+      await Promise.race([
+        runnerExit,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('runner did not exit after SIGTERM')), 5000)),
+      ]);
+      await waitForDeath(grandchildPid);
+    } finally {
+      killIfAlive(grandchildPid);
+      try { runner.kill('SIGKILL'); } catch { /* already gone */ }
       rmSync(directory, { recursive: true, force: true });
     }
   });

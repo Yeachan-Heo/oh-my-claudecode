@@ -204,52 +204,88 @@ function writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs) {
 function reapTree(child) {
   if (process.platform === 'win32') {
     try {
-      spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+      const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
         windowsHide: true,
         timeout: 2000,
       });
-    } catch {}
-    return;
+      return result.status === 0;
+    } catch {
+      return false;
+    }
   }
 
   try {
     process.kill(-child.pid, 'SIGKILL');
+    return true;
   } catch {
     try {
       process.kill(child.pid, 'SIGKILL');
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
+
+const RUNNER_TERMINATION_SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
 
 function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
   return new Promise(resolve => {
     let terminal = false;
+    let timer;
     const child = spawn(process.execPath, [targetPath, ...extraArgs], {
       stdio: 'inherit',
       env: process.env,
       windowsHide: true,
       detached: process.platform !== 'win32',
     });
-    const timer = setTimeout(() => {
+
+    // The generic child is detached into its own process group (POSIX). If the
+    // runner is terminated or cancelled BEFORE the inner timer fires (outer
+    // hooks.json timeout, Ctrl-C, parent kill), reap the tree so the detached
+    // hook cannot be orphaned — the exact failure class #3493 must not leave open.
+    const detachHandlers = () => {
+      clearTimeout(timer);
+      for (const signal of RUNNER_TERMINATION_SIGNALS) process.off(signal, onRunnerSignal);
+      process.off('exit', onRunnerExit);
+    };
+    function onRunnerSignal() {
       if (terminal) return;
       terminal = true;
+      detachHandlers();
+      reapTree(child);
+      process.exit(0);
+    }
+    function onRunnerExit() {
+      if (terminal) return;
+      terminal = true;
+      reapTree(child);
+    }
+
+    timer = setTimeout(() => {
+      if (terminal) return;
+      terminal = true;
+      detachHandlers();
       reapTree(child);
       writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
       resolve(0);
     }, timeoutMs);
 
-    child.once('exit', (code, signal) => {
+    child.once('exit', (code) => {
       if (terminal) return;
       terminal = true;
-      clearTimeout(timer);
+      detachHandlers();
       resolve(typeof code === 'number' ? code : 0);
     });
     child.once('error', () => {
       if (terminal) return;
       terminal = true;
-      clearTimeout(timer);
+      detachHandlers();
       resolve(0);
     });
+
+    for (const signal of RUNNER_TERMINATION_SIGNALS) process.on(signal, onRunnerSignal);
+    process.on('exit', onRunnerExit);
   });
 }
 
