@@ -795,13 +795,13 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
       if (currentAutopilot.workflowRunId && signal.target_workflow_run_id !== currentAutopilot.workflowRunId) return;
       if (!currentAutopilot.workflowRunId && signal.target_workflow_run_id) return;
       active = true;
-    });
+    }, currentAutopilot !== null);
     return locked.acquired && active;
   };
   const isActiveSignal = (signalPath) => {
     if (currentAutopilotPath && cancellationContext && !existsSync(signalPath)) return false;
     if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
-    const stateLock = acquireStateFileLockSync(currentAutopilotPath);
+    const stateLock = acquireStateFileLockSync(currentAutopilotPath, 50, true);
     if (!stateLock) return false;
     try {
       const currentAutopilot = readJsonFile(currentAutopilotPath);

@@ -319,6 +319,22 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f)).toEqual(state);
   });
 
+  it('does not honor an exact legacy autopilot cancel signal without exclusive locking', () => {
+    const f = fixture(kind);
+    const now = new Date().toISOString();
+    const legacy = { active: true, phase: 'planning', session_id: f.sessionId, project_path: f.project, started_at: now, updated_at: now, last_checked_at: now };
+    writeState(f, legacy);
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: now,
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
+    }));
+
+    expect(invoke(f, {}, { OMC_TEST_FLOCK_AVAILABLE: '0' }).reason).toContain('[AUTOPILOT - Phase: planning]');
+  });
   it.each(['advanced stage', 'replaced run'])('does not let an old exact cancel signal suppress a %s committed under the state lock', async (change) => {
     const f = fixture(kind);
     const state = workflowState(f);

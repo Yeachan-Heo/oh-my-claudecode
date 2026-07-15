@@ -196,8 +196,8 @@ function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   return null;
 }
 
-export function acquireStateFileLockSync(filePath, attempts = 50) {
-  return acquireLockAt(`${filePath}.mutation.lock`, attempts);
+export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false) {
+  return acquireLockAt(`${filePath}.mutation.lock`, attempts, requireExclusive);
 }
 
 export function releaseStateFileLockSync(lock) {
@@ -206,8 +206,8 @@ export function releaseStateFileLockSync(lock) {
   guardedLockRemoval(lock.lockPath, 'release', lock.owner);
 }
 
-export function withStateFileLockSync(filePath, callback) {
-  const lock = acquireStateFileLockSync(filePath);
+export function withStateFileLockSync(filePath, callback, requireExclusive = false) {
+  const lock = acquireStateFileLockSync(filePath, 50, requireExclusive);
   if (!lock) return { acquired: false, value: undefined };
   try {
     return { acquired: true, value: callback() };
