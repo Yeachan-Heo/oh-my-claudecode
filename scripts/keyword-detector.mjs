@@ -1173,23 +1173,6 @@ function activateRalplanStartupState(directory, prompt, sessionId, omcRoot) {
   try { atomicWriteFileSync(join(localDir, 'ralplan-state.json'), JSON.stringify(state, null, 2)); } catch {}
 }
 
-/**
- * Clear state files for cancel operation
- */
-function clearStateFiles(directory, modeNames, sessionId, omcRoot) {
-  const _omcRoot = omcRoot;
-  for (const name of modeNames) {
-    const localPath = join(_omcRoot, 'state', `${name}-state.json`);
-    const globalPath = join(homedir(), '.omc', 'state', `${name}-state.json`);
-    try { withStateFileLockSync(localPath, () => { if (existsSync(localPath)) unlinkSync(localPath); }); } catch {}
-    try { withStateFileLockSync(globalPath, () => { if (existsSync(globalPath)) unlinkSync(globalPath); }); } catch {}
-    // Clear session-scoped file too
-    if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
-      const sessionPath = join(_omcRoot, 'state', 'sessions', sessionId, `${name}-state.json`);
-      try { withStateFileLockSync(sessionPath, () => { if (existsSync(sessionPath)) unlinkSync(sessionPath); }); } catch {}
-    }
-  }
-}
 
 /**
  * Link ralph and team state files for composition.
@@ -1775,9 +1758,8 @@ async function main() {
       }
     }
 
-    // Handle cancel specially - clear states and emit
+    // Route cancellation without mutating state; the cancel workflow commits the primary mode first.
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      clearStateFiles(directory, ['ralph', 'ultragoal', 'ultrawork', 'swarm', 'ralplan'], sessionId, omcRoot);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }

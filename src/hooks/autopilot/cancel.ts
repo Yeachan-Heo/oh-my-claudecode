@@ -54,48 +54,40 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     return { success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' };
   }
 
-  // Track what we cleaned up
   const cleanedUp: string[] = [];
-
-  // Clean up any active Ralph state
-  const ralphState = sessionId
-    ? readRalphState(directory, sessionId)
-    : readRalphState(directory);
+  const failedCleanup: string[] = [];
+  const ralphState = sessionId ? readRalphState(directory, sessionId) : readRalphState(directory);
   if (ralphState?.active) {
+    let mayClearRalph = true;
     if (ralphState.linked_ultrawork) {
-      if (sessionId) {
-        clearLinkedUltraworkState(directory, sessionId);
-      } else {
-        clearLinkedUltraworkState(directory);
-      }
-      cleanedUp.push('ultrawork');
+      const cleared = sessionId ? clearLinkedUltraworkState(directory, sessionId) : clearLinkedUltraworkState(directory);
+      if (cleared) cleanedUp.push('ultrawork');
+      else { failedCleanup.push('ultrawork'); mayClearRalph = false; }
     }
-    if (sessionId) {
-      clearRalphState(directory, sessionId);
+    if (mayClearRalph) {
+      const cleared = sessionId ? clearRalphState(directory, sessionId) : clearRalphState(directory);
+      if (cleared) cleanedUp.push('ralph');
+      else failedCleanup.push('ralph');
     } else {
-      clearRalphState(directory);
+      failedCleanup.push('ralph');
     }
-    cleanedUp.push('ralph');
   }
 
-  // Clean up any active UltraQA state
-  const ultraqaState = sessionId
-    ? readUltraQAState(directory, sessionId)
-    : readUltraQAState(directory);
+  const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
   if (ultraqaState?.active) {
-    if (sessionId) {
-      clearUltraQAState(directory, sessionId);
-    } else {
-      clearUltraQAState(directory);
-    }
-    cleanedUp.push('ultraqa');
+    const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+    if (cleared) cleanedUp.push('ultraqa');
+    else failedCleanup.push('ultraqa');
   }
 
-
-  const cleanupMsg = cleanedUp.length > 0
-    ? ` Cleaned up: ${cleanedUp.join(', ')}.`
-    : '';
-
+  const cleanupMsg = cleanedUp.length > 0 ? ` Cleaned up: ${cleanedUp.join(', ')}.` : '';
+  if (failedCleanup.length > 0) {
+    return {
+      success: false,
+      message: `Autopilot paused at phase: ${cancelledState.phase}, but linked cleanup failed for: ${failedCleanup.join(', ')}. Retry /cancel.`,
+      preservedState: cancelledState,
+    };
+  }
   return {
     success: true,
     message: `Autopilot cancelled at phase: ${cancelledState.phase}.${cleanupMsg} Progress preserved for resume.`,
@@ -125,37 +117,31 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     return { success: false, message: 'Autopilot run changed before clear; retry /cancel.' };
   }
 
-  // Clean up all related state
-  const ralphState = sessionId
-    ? readRalphState(directory, sessionId)
-    : readRalphState(directory);
+  const failedCleanup: string[] = [];
+  const ralphState = sessionId ? readRalphState(directory, sessionId) : readRalphState(directory);
   if (ralphState) {
+    let mayClearRalph = true;
     if (ralphState.linked_ultrawork) {
-      if (sessionId) {
-        clearLinkedUltraworkState(directory, sessionId);
-      } else {
-        clearLinkedUltraworkState(directory);
-      }
+      const cleared = sessionId ? clearLinkedUltraworkState(directory, sessionId) : clearLinkedUltraworkState(directory);
+      if (!cleared) { failedCleanup.push('ultrawork'); mayClearRalph = false; }
     }
-    if (sessionId) {
-      clearRalphState(directory, sessionId);
+    if (mayClearRalph) {
+      const cleared = sessionId ? clearRalphState(directory, sessionId) : clearRalphState(directory);
+      if (!cleared) failedCleanup.push('ralph');
     } else {
-      clearRalphState(directory);
+      failedCleanup.push('ralph');
     }
   }
 
-  const ultraqaState = sessionId
-    ? readUltraQAState(directory, sessionId)
-    : readUltraQAState(directory);
+  const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
   if (ultraqaState) {
-    if (sessionId) {
-      clearUltraQAState(directory, sessionId);
-    } else {
-      clearUltraQAState(directory);
-    }
+    const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+    if (!cleared) failedCleanup.push('ultraqa');
   }
 
-
+  if (failedCleanup.length > 0) {
+    return { success: false, message: `Autopilot state cleared, but linked cleanup failed for: ${failedCleanup.join(', ')}. Retry /cancel --force.` };
+  }
   return {
     success: true,
     message: 'Autopilot state cleared completely'

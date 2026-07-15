@@ -504,7 +504,7 @@ export function clearModeStateFile(
         directPath,
         (current) => JSON.stringify(Object.fromEntries(Object.entries(current).filter(([key]) => key !== '_meta'))) === expectedSnapshot,
       );
-      if (result === 'failed' || (result === 'skipped' && existsSync(directPath))) success = false;
+      if (result === 'failed' || (result === 'skipped' && existsSync(directPath))) return false;
     } else {
       unlinkIfPresent(directPath);
     }
@@ -518,7 +518,7 @@ export function clearModeStateFile(
       directPath,
       (current) => JSON.stringify(Object.fromEntries(Object.entries(current).filter(([key]) => key !== '_meta'))) === expectedSnapshot,
     );
-    if (result === 'failed' || (result === 'skipped' && existsSync(directPath))) success = false;
+    if (result === 'failed' || (result === 'skipped' && existsSync(directPath))) return false;
     for (const artifactPath of getRuntimeArtifactCandidates(mode, baseDir)) unlinkIfPresent(artifactPath);
   } else {
     for (const legacyPath of getLegacyStateCandidates(mode, baseDir)) unlinkIfPresent(legacyPath);

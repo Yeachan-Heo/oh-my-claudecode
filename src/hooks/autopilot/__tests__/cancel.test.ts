@@ -252,8 +252,6 @@ describe('AutopilotCancel', () => {
       const stat = require('fs').readFileSync(`/proc/${process.pid}/stat`, 'utf8');
       const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
       writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: '22222222-2222-4222-8222-222222222222' }));
-      vi.mocked(ralphLoop.readRalphState).mockReturnValue({ active: true, linked_ultrawork: true } as any);
-      vi.mocked(ultraqaLoop.readUltraQAState).mockReturnValue({ active: true } as any);
 
       expect(cancelAutopilot(testDir, sessionId).success).toBe(false);
       expect(clearAutopilot(testDir, sessionId).success).toBe(false);
@@ -261,6 +259,26 @@ describe('AutopilotCancel', () => {
       expect(ralphLoop.clearLinkedUltraworkState).not.toHaveBeenCalled();
       expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, workflowRunId: state.workflowRunId });
+    });
+
+    it('reports linked cleanup failures after committing the primary mutation', () => {
+      const sessionId = 'dependent-cleanup-failure';
+      initAutopilot(testDir, 'ship it', sessionId);
+      vi.mocked(ralphLoop.readRalphState).mockReturnValueOnce({ active: true, linked_ultrawork: true } as any).mockReturnValueOnce({ active: true, linked_ultrawork: true } as any);
+      vi.mocked(ralphLoop.clearLinkedUltraworkState).mockReturnValueOnce(false).mockReturnValueOnce(false);
+
+      const cancelled = cancelAutopilot(testDir, sessionId);
+      expect(cancelled).toMatchObject({ success: false, preservedState: { active: false } });
+      expect(cancelled.message).toContain('ultrawork');
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+
+      const paused = readAutopilotState(testDir, sessionId)!;
+      paused.active = true;
+      writeAutopilotState(testDir, paused, sessionId);
+      const cleared = clearAutopilot(testDir, sessionId);
+      expect(cleared.success).toBe(false);
+      expect(cleared.message).toContain('ultrawork');
+      expect(readAutopilotState(testDir, sessionId)).toBeNull();
     });
 
     it('should not clear other session ralph/ultraqa state when sessionId provided', () => {

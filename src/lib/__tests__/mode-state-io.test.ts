@@ -347,6 +347,27 @@ describe('mode-state-io', () => {
       expect(JSON.parse(readFileSync(legacyPath, 'utf8'))).toEqual(replacement);
     });
 
+    it('preserves runtime artifacts and ghost legacy state when expected primary clear is locked', () => {
+      const sessionId = 'locked-primary-cleanup';
+      const stateDir = join(tempDir, '.omc', 'state');
+      const sessionDir = join(stateDir, 'sessions', sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = { active: true, session_id: sessionId, workflowRunId: '11111111-1111-4111-8111-111111111111', workflow: { profileHash: 'a'.repeat(64) } };
+      const statePath = join(sessionDir, 'autopilot-state.json');
+      const legacyPath = join(stateDir, 'autopilot-state.json');
+      const artifactPath = join(sessionDir, 'autopilot-stop-breaker.json');
+      writeFileSync(statePath, JSON.stringify(state));
+      writeFileSync(legacyPath, JSON.stringify(state));
+      writeFileSync(artifactPath, JSON.stringify({ count: 2 }));
+      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
+      const snapshots = [statePath, legacyPath, artifactPath].map((path) => readFileSync(path));
+
+      expect(clearModeStateFile('autopilot', tempDir, sessionId, state)).toBe(false);
+      [statePath, legacyPath, artifactPath].forEach((path, index) => expect(readFileSync(path)).toEqual(snapshots[index]));
+    });
+
     it('waits for an in-flight publisher before deciding the state is absent', async () => {
       const sessionId = 'in-flight-activation';
       const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');

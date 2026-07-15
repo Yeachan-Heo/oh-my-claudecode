@@ -992,17 +992,6 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
   }
 }
 
-/**
- * Clear state files for cancel operation
- */
-async function clearStateFiles(directory, modeNames) {
-  for (const name of modeNames) {
-    const { writePath: localPath } = await resolveSessionStatePathsForHook(directory, name, undefined);
-    const globalPath = join(homedir(), '.omc', 'state', `${name}-state.json`);
-    try { withStateFileLockSync(localPath, () => { if (existsSync(localPath)) unlinkSync(localPath); }); } catch {}
-    try { withStateFileLockSync(globalPath, () => { if (existsSync(globalPath)) unlinkSync(globalPath); }); } catch {}
-  }
-}
 
 /**
  * Link ralph and team state files for composition.
@@ -1473,9 +1462,8 @@ async function main() {
     // Resolve conflicts
     const resolved = resolveConflicts(uniqueMatches);
 
-    // Handle cancel specially - clear states and emit
+    // Route cancellation without mutating state; the cancel workflow commits the primary mode first.
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      await clearStateFiles(directory, ['ralph', 'ultrawork']);
       console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
       return;
     }

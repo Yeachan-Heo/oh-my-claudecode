@@ -187,9 +187,13 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     const { cwd, configHome } = createFixture();
     try {
       runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
+      const dependentPath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'ralph-state.json');
+      writeFileSync(dependentPath, JSON.stringify({ active: true, linked_ultrawork: true }));
+      const dependentBefore = readFileSync(dependentPath);
       const before = stateBytes(cwd);
       runHook(script, '/cancel', cwd, configHome);
       expect(stateBytes(cwd)).toEqual(before);
+      expect(readFileSync(dependentPath)).toEqual(dependentBefore);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
