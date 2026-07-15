@@ -146,8 +146,9 @@ function releaseMutationLock(lock: MutationLock | null): void {
 export function withStateFileMutationLock<T>(
   filePath: string,
   callback: () => T,
+  requireExclusive = false,
 ): { acquired: boolean; value: T | undefined } {
-  const lock = acquireMutationLock(filePath);
+  const lock = acquireLockAt(`${filePath}.mutation.lock`, requireExclusive);
   if (!lock) return { acquired: false, value: undefined };
   try {
     return { acquired: true, value: callback() };

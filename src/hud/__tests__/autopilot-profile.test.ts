@@ -30,7 +30,7 @@ const profileHash = createHash('sha256').update(canonicalJson({
 function workflowState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const sessionId = '11111111-1111-4111-8111-111111111111';
   const transcriptRoot = '/tmp/omc-autopilot-profile-transcripts';
-  const fileIdentity = {
+  const initialIdentity = {
     device: 0,
     inode: 0,
     size: 0,
@@ -38,13 +38,14 @@ function workflowState(overrides: Record<string, unknown> = {}): Record<string, 
     ctimeNs: '0',
     contentSha256: '0'.repeat(64),
   };
+  const stableIdentity = { ...initialIdentity, size: 1, contentSha256: '1'.repeat(64) };
   const activationBoundary = {
     transcriptPath: `${transcriptRoot}/${sessionId}.jsonl`,
     transcriptRoot,
     transcriptBasename: `${sessionId}.jsonl`,
     sessionId,
-    byteOffset: 0,
-    fileIdentity,
+    byteOffset: 1,
+    fileIdentity: stableIdentity,
   };
   const observedAt = '2026-01-01T00:00:00.000Z';
   return {
@@ -73,8 +74,8 @@ function workflowState(overrides: Record<string, unknown> = {}): Record<string, 
         lineNumber: 0,
         byteOffset: 0,
         recordContentSha256: '0'.repeat(64),
-        stableFile: fileIdentity,
-        activationBoundary,
+        stableFile: stableIdentity,
+        activationBoundary: { ...activationBoundary, byteOffset: 0, fileIdentity: initialIdentity },
         observedAt,
       }],
       stages: [

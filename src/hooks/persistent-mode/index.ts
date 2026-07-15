@@ -285,7 +285,7 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
         return false;
       }
       return true;
-    });
+    }, target !== null);
     return locked.acquired && locked.value === true;
   };
 
@@ -306,7 +306,7 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
       active: validateSignal(current),
       enforceableAutopilot: current,
     };
-  });
+  }, true);
   return locked.acquired && locked.value ? locked.value : { active: false };
 }
 

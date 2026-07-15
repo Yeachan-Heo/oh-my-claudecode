@@ -436,7 +436,7 @@ export function validateNamedWorkflowStateStructure(
     if (!isRecord(observation) || !exactKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== NAMED_SIGNALS[String(observation.stageId)] || !safeInteger(observation.lineNumber) || !safeInteger(observation.byteOffset) || typeof observation.recordContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !validFileIdentity(observation.stableFile) || !validBoundaryShape(observation.activationBoundary, sessionId) || !timestamp(observation.observedAt)) return null;
     const boundary = observation.activationBoundary as unknown as RecordValue;
     const stable = observation.stableFile as RecordValue;
-    if (Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(stable.size) < Number(observation.byteOffset)) return null;
+    if (Number(stable.size) > MAX_TRANSCRIPT_BYTES || Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(stable.size) <= Number(observation.byteOffset)) return null;
     if (previousObservation) {
       const previousBoundary = previousObservation.activationBoundary as RecordValue;
       const previousStable = previousObservation.stableFile as RecordValue;
@@ -570,7 +570,7 @@ export function validateNamedWorkflowState(
     const stable = observation.stableFile as unknown as RecordValue;
     if (
       Number(observation.byteOffset) < Number(boundary.byteOffset) ||
-      Number(stable.size) < Number(observation.byteOffset)
+      Number(stable.size) <= Number(observation.byteOffset)
     )
       return null;
     if (previousObservation) {

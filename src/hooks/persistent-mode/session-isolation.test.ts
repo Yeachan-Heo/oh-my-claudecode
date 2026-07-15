@@ -34,6 +34,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
   });
 
   describe("checkPersistentModes session isolation", () => {
@@ -166,6 +167,31 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
         shouldBlock: false,
         mode: "none",
+      });
+    });
+
+    it("does not honor an autopilot cancel signal without an exclusive state lock", async () => {
+      const sessionId = "legacy-autopilot-cancel-no-flock";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, "Finish the task", sessionId)!;
+      state.phase = "planning";
+      state.project_path = tempDir;
+      writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(state));
+      const now = Date.now();
+      writeFileSync(join(sessionDir, "cancel-signal-state.json"), JSON.stringify({
+        active: true,
+        mode: "autopilot",
+        source: "state_clear",
+        requested_at: new Date(now).toISOString(),
+        expires_at: new Date(now + 30_000).toISOString(),
+        target_state_sha256: createHash("sha256").update(JSON.stringify(state)).digest("hex"),
+      }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: true,
+        mode: "autopilot",
       });
     });
 

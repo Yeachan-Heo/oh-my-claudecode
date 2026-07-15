@@ -70,23 +70,27 @@ function portableWorkflowState(sessionId: string): Record<string, unknown> {
 function completedPortableWorkflowState(sessionId: string): Record<string, unknown> {
   const state = portableWorkflowState(sessionId);
   const tracking = state.pipelineTracking as Record<string, unknown>;
-  const activationBoundary = tracking.activationBoundary as Record<string, unknown>;
+  const initialBoundary = structuredClone(tracking.activationBoundary as Record<string, unknown>);
+  const initialIdentity = structuredClone(initialBoundary.fileIdentity as Record<string, unknown>);
   const completedAt = '2026-01-01T00:01:00.000Z';
   const stages = ['ralplan', 'execution'];
   tracking.stages = stages.map((id) => ({ id, status: 'complete', iterations: 0, startedAt: '2026-01-01T00:00:00.000Z', completedAt }));
   tracking.currentStageIndex = stages.length;
   tracking.trackingRevision = stages.length;
-  tracking.completionObservations = stages.map((stageId, index) => ({
-    stageId,
-    sessionId,
-    signalId: index === 0 ? 'PIPELINE_RALPLAN_COMPLETE' : 'PIPELINE_EXECUTION_COMPLETE',
-    lineNumber: 0,
-    byteOffset: 0,
-    recordContentSha256: '0'.repeat(64),
-    stableFile: activationBoundary.fileIdentity,
-    activationBoundary,
-    observedAt: completedAt,
-  }));
+  const firstStable = { ...initialIdentity, size: 1, contentSha256: '1'.repeat(64) };
+  const secondBoundary = { ...initialBoundary, byteOffset: 1, fileIdentity: firstStable };
+  const secondStable = { ...firstStable, size: 2, contentSha256: '2'.repeat(64) };
+  tracking.completionObservations = [
+    {
+      stageId: 'ralplan', sessionId, signalId: 'PIPELINE_RALPLAN_COMPLETE', lineNumber: 0, byteOffset: 0,
+      recordContentSha256: '1'.repeat(64), stableFile: firstStable, activationBoundary: initialBoundary, observedAt: completedAt,
+    },
+    {
+      stageId: 'execution', sessionId, signalId: 'PIPELINE_EXECUTION_COMPLETE', lineNumber: 1, byteOffset: 1,
+      recordContentSha256: '2'.repeat(64), stableFile: secondStable, activationBoundary: secondBoundary, observedAt: completedAt,
+    },
+  ];
+  tracking.activationBoundary = { ...initialBoundary, byteOffset: 2, fileIdentity: secondStable };
   return { ...state, active: false, phase: 'complete', status: 'private-terminal-status' };
 }
 
