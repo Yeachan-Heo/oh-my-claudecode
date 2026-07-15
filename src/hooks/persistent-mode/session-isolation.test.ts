@@ -169,6 +169,56 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
     });
 
+    it.each([
+      ['future-dated', 6_000, true],
+      ['stale', -30_001, true],
+      ['fresh', 0, false],
+    ])('applies requested_at freshness to an exact-digest active legacy autopilot cancellation (%s)', async (_name, offsetMs, shouldBlock) => {
+      const sessionId = `legacy-autopilot-cancel-freshness-${offsetMs}`;
+      const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, 'Finish the task', sessionId)!;
+      state.phase = 'planning';
+      state.project_path = tempDir;
+      writeFileSync(join(sessionDir, 'autopilot-state.json'), JSON.stringify(state));
+      const requestedAt = Date.now() + offsetMs;
+      writeFileSync(join(sessionDir, 'cancel-signal-state.json'), JSON.stringify({
+        active: true,
+        mode: 'autopilot',
+        source: 'state_clear',
+        requested_at: new Date(requestedAt).toISOString(),
+        expires_at: new Date(requestedAt + 30_000).toISOString(),
+        target_state_sha256: createHash('sha256').update(JSON.stringify(state)).digest('hex'),
+      }));
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock,
+        mode: shouldBlock ? 'autopilot' : 'none',
+      });
+    });
+
+    it.each([
+      ['future-dated', 6_000, true],
+      ['stale', -30_001, true],
+      ['fresh', 0, false],
+    ])('applies requested_at freshness to requested_at-only non-autopilot cancellation (%s)', async (_name, offsetMs, shouldBlock) => {
+      const sessionId = `ultrawork-cancel-freshness-${offsetMs}`;
+      activateUltrawork('Finish the task', sessionId, tempDir);
+      writePendingTodo(tempDir, 'Finish the task');
+      const requestedAt = Date.now() + offsetMs;
+      const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      writeFileSync(join(sessionDir, 'cancel-signal-state.json'), JSON.stringify({
+        active: true,
+        requested_at: new Date(requestedAt).toISOString(),
+        source: 'state_clear',
+      }));
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock,
+        mode: shouldBlock ? 'ultrawork' : 'none',
+      });
+    });
+
     it("should support session-scoped state files", async () => {
       const sessionId = "session-scoped-test";
       writePendingTodo(tempDir, "Finish the session-scoped task");

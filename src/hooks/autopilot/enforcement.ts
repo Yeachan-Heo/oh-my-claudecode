@@ -42,7 +42,6 @@ import {
   getCurrentCompletionSignal,
   advanceStage,
   incrementStageIteration,
-  verifyWorkflowDescriptor,
   generateTransitionPrompt,
   formatPipelineHUD,
 } from "./pipeline.js";
@@ -52,6 +51,7 @@ import {
   namedWorkflowRuntimeSupported,
   prepareNamedWorkflowAdvance,
   validateNamedWorkflowState,
+  validateNamedWorkflowStateStructure,
 } from "./named-workflow-resume-validator.js";
 
 export interface AutopilotEnforcementResult {
@@ -262,7 +262,7 @@ export async function checkAutopilot(
 
   const hasNamedMarkers = hasNamedWorkflowMarkers(state);
 
-  if (hasNamedMarkers && (!state.workflow || !verifyWorkflowDescriptor(state.workflow))) {
+  if (hasNamedMarkers && !validateNamedWorkflowStateStructure(state, sessionId)) {
     return {
       shouldBlock: false,
       message: "workflow_descriptor_integrity_failed",

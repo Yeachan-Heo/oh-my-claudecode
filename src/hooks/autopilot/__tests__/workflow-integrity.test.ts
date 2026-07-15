@@ -75,7 +75,10 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       integrityFailed: true,
     });
 
-    expect(cancelAutopilot(testDir, sessionId).success).toBe(true);
+    expect(cancelAutopilot(testDir, sessionId)).toMatchObject({
+      success: false,
+      message: "workflow_descriptor_integrity_failed",
+    });
     expect(resumeAutopilot(testDir, sessionId)).toMatchObject({
       success: false,
       message: "workflow_descriptor_integrity_failed",
@@ -92,6 +95,7 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
     const partialNamed = { ...base, [marker]: value } as typeof base;
     writeAutopilotState(testDir, partialNamed, sessionId);
     const statePath = join(testDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
     const before = readFileSync(statePath);
 
     await expect(checkAutopilot(sessionId, testDir)).resolves.toEqual({
@@ -240,6 +244,7 @@ describe("workflow descriptor integrity enforcement (#3487)", () => {
       {
         ...base,
         phase: "ralplan",
+        prompt: "ship the release",
         workflow: descriptor,
         workflowRunId: "11111111-1111-4111-8111-111111111111",
         pipelineTracking: {

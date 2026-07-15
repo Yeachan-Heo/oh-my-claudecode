@@ -203,7 +203,7 @@ describe('AutopilotCancel', () => {
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, originalIdea: 'replacement run' });
     });
 
-    it('allows exact-snapshot cancellation but rejects clearing partial named state', () => {
+    it('preserves malformed marker-bearing state bytes and linked state', () => {
       const sessionId = 'named-cancel-platform-gate';
       const state = initAutopilot(testDir, 'ship it', sessionId)!;
       state.workflow = createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!;
@@ -211,11 +211,36 @@ describe('AutopilotCancel', () => {
       writeAutopilotState(testDir, state, sessionId);
       const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
       const before = require('fs').readFileSync(statePath);
-      process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
 
-      expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: true });
-      expect(clearAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
-      expect(require('fs').readFileSync(statePath)).not.toEqual(before);
+      expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
+      expect(require('fs').readFileSync(statePath)).toEqual(before);
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
+      expect(ralphLoop.clearLinkedUltraworkState).not.toHaveBeenCalled();
+      expect(ultraqaLoop.clearUltraQAState).not.toHaveBeenCalled();
+    });
+
+    it('cancels a structurally valid exact named run', () => {
+      const sessionId = 'named-exact-cancel';
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      const transcriptRoot = join(testDir, 'transcripts');
+      const transcriptPath = join(transcriptRoot, `${sessionId}.jsonl`);
+      const identity = { device: 1, inode: 1, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update('').digest('hex') };
+      Object.assign(state, {
+        phase: 'ralplan',
+        prompt: 'ship it',
+        workflow: createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        pipelineTracking: {
+          stages: [{ id: 'ralplan', status: 'active', iterations: 0, startedAt: new Date().toISOString() }, { id: 'execution', status: 'pending', iterations: 0 }],
+          currentStageIndex: 0,
+          trackingRevision: 0,
+          activationBoundary: { transcriptPath, transcriptRoot, transcriptBasename: `${sessionId}.jsonl`, sessionId, byteOffset: 0, fileIdentity: identity },
+          completionObservations: [],
+        },
+      });
+      writeAutopilotState(testDir, state, sessionId);
+
+      expect(cancelAutopilot(testDir, sessionId)).toMatchObject({ success: true, preservedState: { active: false, workflowRunId: state.workflowRunId } });
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
     });
 

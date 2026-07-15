@@ -140,11 +140,7 @@ function noFollowCanonicalFile(
   }
 }
 
-function validBoundary(
-  value: unknown,
-  sessionId: string | undefined,
-  root: string,
-): boolean {
+function validBoundaryShape(value: unknown, sessionId: string | undefined): boolean {
   if (
     !isRecord(value) ||
     !exactKeys(value, [
@@ -157,28 +153,46 @@ function validBoundary(
     ]) ||
     typeof sessionId !== "string" ||
     value.sessionId !== sessionId ||
-    value.transcriptRoot !== root ||
-    value.transcriptBasename !== `${sessionId}.jsonl` ||
+    typeof value.transcriptRoot !== "string" ||
+    resolve(value.transcriptRoot) !== value.transcriptRoot ||
     typeof value.transcriptPath !== "string" ||
+    resolve(value.transcriptPath) !== value.transcriptPath ||
     basename(value.transcriptPath) !== `${sessionId}.jsonl` ||
+    value.transcriptBasename !== `${sessionId}.jsonl` ||
     !safeInteger(value.byteOffset) ||
     value.byteOffset > MAX_TRANSCRIPT_BYTES ||
     !validFileIdentity(value.fileIdentity)
   )
     return false;
-  const opened = noFollowCanonicalFile(value.transcriptPath, root);
+  const relativePath = relative(value.transcriptRoot, value.transcriptPath);
+  return (
+    relativePath.length > 0 &&
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${sep}`)
+  );
+}
+
+function validBoundary(
+  value: unknown,
+  sessionId: string | undefined,
+  root: string,
+): boolean {
+  if (!validBoundaryShape(value, sessionId)) return false;
+  const boundary = value as unknown as NonNullable<NonNullable<AutopilotState["pipelineTracking"]>["activationBoundary"]>;
+  if (boundary.transcriptRoot !== root) return false;
+  const opened = noFollowCanonicalFile(boundary.transcriptPath, root);
   if (!opened) return false;
   try {
     const stat = fstatSync(opened.fd);
-    const identity = value.fileIdentity;
+    const identity = boundary.fileIdentity;
     if (
       stat.dev !== identity.device ||
       stat.ino !== identity.inode ||
-      stat.size < value.byteOffset ||
-      identity.size !== value.byteOffset
+      stat.size < boundary.byteOffset ||
+      identity.size !== boundary.byteOffset
     )
       return false;
-    const prefix = Buffer.alloc(value.byteOffset);
+    const prefix = Buffer.alloc(boundary.byteOffset);
     if (readSync(opened.fd, prefix, 0, prefix.length, 0) !== prefix.length)
       return false;
     return (
@@ -359,11 +373,61 @@ export type NamedWorkflowValidation = {
   task: string;
 };
 
+/** Validate persisted named workflow structure without filesystem or transcript access. */
+export function validateNamedWorkflowStateStructure(
+  state: AutopilotState,
+  sessionId: string | undefined,
+): NamedWorkflowValidation | null {
+  if (
+    !Object.prototype.hasOwnProperty.call(state, "workflow") ||
+    !Object.prototype.hasOwnProperty.call(state, "workflowRunId") ||
+    !Object.prototype.hasOwnProperty.call(state, "pipelineTracking")
+  ) return null;
+  const workflow = state.workflow;
+  const tracking = state.pipelineTracking;
+  const task = typeof state.prompt === "string" ? state.prompt.trim() : "";
+  if (!verifyWorkflowDescriptor(workflow) || state.session_id !== sessionId || !isRecord(tracking) || task.length === 0 || typeof state.workflowRunId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId)) return null;
+  const terminal = state.active === false && state.phase === "complete";
+  const maximumStageIndex = terminal ? workflow.stages.length : workflow.stages.length - 1;
+  if (!exactKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) || !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !safeInteger(tracking.currentStageIndex) || !safeInteger(tracking.trackingRevision) || tracking.currentStageIndex > maximumStageIndex || tracking.trackingRevision !== tracking.currentStageIndex || tracking.completionObservations.length !== tracking.currentStageIndex || (terminal && (tracking.currentStageIndex !== workflow.stages.length || tracking.trackingRevision !== workflow.stages.length || tracking.completionObservations.length !== workflow.stages.length)) || !validBoundaryShape(tracking.activationBoundary, sessionId) || tracking.stages.length !== workflow.stages.length) return null;
+  for (let index = 0; index < tracking.stages.length; index += 1) {
+    const stage = tracking.stages[index];
+    if (!isRecord(stage)) return null;
+    const status = terminal ? "complete" : index < tracking.currentStageIndex ? "complete" : index === tracking.currentStageIndex ? "active" : "pending";
+    const keys = status === "complete" ? ["id", "status", "iterations", "startedAt", "completedAt"] : status === "active" ? ["id", "status", "iterations", "startedAt"] : ["id", "status", "iterations"];
+    if (!exactKeys(stage, keys) || stage.id !== workflow.stages[index] || stage.status !== status || !safeInteger(stage.iterations) || (stage.startedAt !== undefined && !timestamp(stage.startedAt)) || (stage.completedAt !== undefined && !timestamp(stage.completedAt))) return null;
+  }
+  let previousObservation: RecordValue | null = null;
+  for (let index = 0; index < tracking.completionObservations.length; index += 1) {
+    const observation = tracking.completionObservations[index];
+    if (!isRecord(observation) || !exactKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== NAMED_SIGNALS[String(observation.stageId)] || !safeInteger(observation.lineNumber) || !safeInteger(observation.byteOffset) || typeof observation.recordContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !validFileIdentity(observation.stableFile) || !validBoundaryShape(observation.activationBoundary, sessionId) || !timestamp(observation.observedAt)) return null;
+    const boundary = observation.activationBoundary as unknown as RecordValue;
+    const stable = observation.stableFile as RecordValue;
+    if (Number(observation.byteOffset) < Number(boundary.byteOffset) || Number(stable.size) < Number(observation.byteOffset)) return null;
+    if (previousObservation) {
+      const previousBoundary = previousObservation.activationBoundary as RecordValue;
+      const previousStable = previousObservation.stableFile as RecordValue;
+      if (boundary.transcriptPath !== previousBoundary.transcriptPath || boundary.byteOffset !== previousStable.size || JSON.stringify(boundary.fileIdentity) !== JSON.stringify(previousStable)) return null;
+    }
+    previousObservation = observation;
+  }
+  if (previousObservation) {
+    const current = tracking.activationBoundary as unknown as RecordValue;
+    const stable = previousObservation.stableFile as RecordValue;
+    const boundary = previousObservation.activationBoundary as RecordValue;
+    if (current.transcriptPath !== boundary.transcriptPath || current.byteOffset !== stable.size || JSON.stringify(current.fileIdentity) !== JSON.stringify(stable)) return null;
+  }
+  if (terminal ? state.phase !== "complete" : state.phase !== workflow.stages[tracking.currentStageIndex]) return null;
+  return { tracking: tracking as NonNullable<AutopilotState["pipelineTracking"]>, task };
+}
+
 /** Validate the complete descriptor and authenticated transcript chain without mutating state. */
 export function validateNamedWorkflowState(
   state: AutopilotState,
   sessionId: string | undefined,
 ): NamedWorkflowValidation | null {
+  const structural = validateNamedWorkflowStateStructure(state, sessionId);
+  if (!structural) return null;
   const workflow = state.workflow;
   const tracking = state.pipelineTracking;
   const task = typeof state.prompt === "string" ? state.prompt.trim() : "";

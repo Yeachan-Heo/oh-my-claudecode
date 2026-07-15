@@ -118,7 +118,7 @@ function isExactEmergencyNamedMutation(
   record: Record<string, unknown>,
   requestedRunId: string | undefined,
 ): boolean {
-  return hasNamedWorkflowMarker(record) &&
+  return hasValidatedNamedWorkflowTuple(record) &&
     typeof requestedRunId === 'string' &&
     record.workflowRunId === requestedRunId;
 }
@@ -236,9 +236,9 @@ function clearDiscoveredStateCandidate(
 }
 
 function clearAutopilotMarkerCandidate(candidate: StateFileDiscovery, root: string): boolean {
-  if (!hasNamedWorkflowMarker(candidate.state)) return false;
+  if (!hasValidatedNamedWorkflowTuple(candidate.state)) return false;
   const predicate = (current: Record<string, unknown>) =>
-    hasNamedWorkflowMarker(current) &&
+    hasValidatedNamedWorkflowTuple(current) &&
     isStateCandidateForProject('autopilot', candidate.path, current, root) &&
     JSON.stringify(current) === candidate.snapshot;
 
@@ -251,7 +251,6 @@ function clearAutopilotMarkerCandidate(candidate: StateFileDiscovery, root: stri
     );
   }
 
-  if (!hasValidatedNamedWorkflowTuple(candidate.state)) return false;
   return clearStateFileLockedIf(
     candidate.path,
     predicate,
@@ -754,9 +753,12 @@ export function redactAutopilotPublicState(state: unknown): unknown {
     return state;
   }
   const record = state as Record<string, unknown>;
-  const workflow = record.workflow;
-  if (!workflow || typeof workflow !== 'object') {
+  if (!hasNamedWorkflowMarker(record)) {
     return state;
+  }
+  const workflow = record.workflow;
+  if (!hasValidatedNamedWorkflowTuple(record) || !workflow || typeof workflow !== 'object') {
+    return { name: 'invalid', version: 1, shortHash: 'invalid', stages: [], currentStage: null, status: 'workflow_descriptor_integrity_failed', progress: '0/0' } satisfies WorkflowPublicState;
   }
   const descriptor = workflow as Record<string, unknown>;
   if (!isValidPublicWorkflowDescriptor(descriptor)) {
@@ -1103,9 +1105,10 @@ export const stateWriteTool: ToolDefinition<{
               (current) => JSON.stringify(current) === snapshot &&
                 isExactEmergencyNamedMutation(current, requestedRunId) &&
                 (requestedStateDigest === undefined || createHash('sha256').update(JSON.stringify(current)).digest('hex') === requestedStateDigest),
-              (current) => ({ ...current, active: false, _meta: stateWithMeta._meta }),
+              (current) => ({ ...current, active: false }),
             );
             if (!written) throw new Error('autopilot run changed before deactivation');
+            namedPauseCommitted = true;
           }
         } else {
           const result = writeStateFileLockedIf(

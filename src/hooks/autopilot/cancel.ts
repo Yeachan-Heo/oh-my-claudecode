@@ -15,7 +15,7 @@ import {
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import type { AutopilotState } from './types.js';
-import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from './named-workflow-resume-validator.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure } from './named-workflow-resume-validator.js';
 
 export interface CancelResult {
   success: boolean;
@@ -33,6 +33,10 @@ function hasNamedWorkflowMarkers(state: unknown): boolean {
 
 function hasValidNamedWorkflowState(state: AutopilotState, sessionId?: string): boolean {
   return hasNamedWorkflowMarkers(state) && Boolean(validateNamedWorkflowState(state, sessionId));
+}
+
+function hasValidNamedWorkflowStructure(state: AutopilotState, sessionId?: string): boolean {
+  return hasNamedWorkflowMarkers(state) && Boolean(validateNamedWorkflowStateStructure(state, sessionId));
 }
 
 /**
@@ -58,8 +62,20 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
 
 
 
+  if (hasNamedWorkflowMarkers(state) && !hasValidNamedWorkflowStructure(state, sessionId)) {
+    return { success: false, message: 'workflow_descriptor_integrity_failed' };
+  }
+
   // Commit the primary run mutation before deleting any linked lifecycle state.
-  const cancelledState = updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
+  const cancelledState = hasNamedWorkflowMarkers(state)
+    ? updateAutopilotStateIfExact(
+        directory,
+        state,
+        { active: false },
+        sessionId,
+        (current) => hasValidNamedWorkflowStructure(current, sessionId),
+      )
+    : updateAutopilotStateIfCurrent(directory, state, { active: false }, sessionId);
   if (!cancelledState) {
     return { success: false, message: 'Autopilot run changed before cancellation; retry /cancel.' };
   }

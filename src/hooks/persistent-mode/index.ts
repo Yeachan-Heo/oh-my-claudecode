@@ -95,6 +95,7 @@ export interface PersistentModeResult {
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const CANCEL_SIGNAL_CLOCK_SKEW_MS = 5_000;
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
@@ -199,14 +200,17 @@ function isAuthenticatedAutopilotCancelSignal(
   if (signal.active !== true || signal.mode !== 'autopilot' || typeof signal.source !== 'string' || signal.source.length === 0) {
     return false;
   }
+  const now = Date.now();
   const requestedAt = typeof signal.requested_at === 'string' ? new Date(signal.requested_at).getTime() : NaN;
   const expiresAt = typeof signal.expires_at === 'string' ? new Date(signal.expires_at).getTime() : NaN;
   if (
     !Number.isFinite(requestedAt) ||
+    requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
+    now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= requestedAt ||
     expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS ||
-    expiresAt <= Date.now()
+    expiresAt <= now
   ) {
     return false;
   }
@@ -256,8 +260,16 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): boole
     const effectiveExpiry = Number.isFinite(expiresAt)
       ? expiresAt
       : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-    if (!Number.isFinite(effectiveExpiry) || effectiveExpiry <= now) {
-      if (existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
+    if (
+      !Number.isFinite(requestedAt) ||
+      requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
+      now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+      !Number.isFinite(effectiveExpiry) ||
+      effectiveExpiry <= requestedAt ||
+      effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+      effectiveExpiry <= now
+    ) {
+      if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
       return false;
     }
     return true;

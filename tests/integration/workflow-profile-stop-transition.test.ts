@@ -319,6 +319,32 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f)).toEqual(state);
   });
 
+  it.each([
+    ['future-dated', 6_000, false],
+    ['stale', -30_001, false],
+    ['fresh', 0, true],
+  ])('only honors a %s exact-digest named cancel signal while its request is fresh', (_name, offsetMs, shouldSuppress) => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    writeState(f, state);
+    const requestedAt = Date.now() + offsetMs;
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+      target_workflow_run_id: state.workflowRunId,
+      target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
+    }));
+
+    if (shouldSuppress) {
+      expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
+    } else {
+      expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
+    }
+  });
+
   it('ignores expired and forged same-run cancel signals for named workflows', () => {
     const f = fixture(kind);
     const state = workflowState(f);

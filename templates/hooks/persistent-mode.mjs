@@ -427,6 +427,7 @@ function isStaleSkillState(state) {
  */
 function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, currentAutopilotPath) {
   const CANCEL_SIGNAL_TTL_MS = 30000; // 30 seconds
+  const CANCEL_SIGNAL_CLOCK_SKEW_MS = 5000;
   const isActiveSignal = (signalPath) => {
     let active = false;
     const locked = withStateFileLockSync(signalPath, () => {
@@ -436,10 +437,15 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilot, curren
       const requestedAt = typeof signal.requested_at === "string" ? new Date(signal.requested_at).getTime() : NaN;
       const expiresAt = typeof signal.expires_at === "string" ? new Date(signal.expires_at).getTime() : NaN;
       if (!Number.isFinite(requestedAt)) return;
+      const isFreshRequest = requestedAt <= now + CANCEL_SIGNAL_CLOCK_SKEW_MS && now - requestedAt <= CANCEL_SIGNAL_TTL_MS;
       if (!currentAutopilot) {
         const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
-        if (effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
+        if (isFreshRequest && effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
         else if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        return;
+      }
+      if (!isFreshRequest) {
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(signalPath)) unlinkSync(signalPath);
         return;
       }
       if (signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
