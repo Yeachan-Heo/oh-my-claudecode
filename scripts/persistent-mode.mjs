@@ -11,11 +11,9 @@
 import {
   existsSync,
   readFileSync,
-  writeFileSync,
   readdirSync,
   mkdirSync,
   unlinkSync,
-  renameSync,
   statSync,
   realpathSync,
   openSync,
@@ -98,7 +96,7 @@ process.on("unhandledRejection", (error) => {
   forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
 });
 const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
-const { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);
 const { readStdin } = await import(
@@ -158,14 +156,7 @@ function readSecurityConfigValue(key) {
 
 function writeJsonFile(path, data) {
   try {
-    // Ensure directory exists
-    const dir = dirname(path);
-    if (dir && dir !== "." && !existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2));
-    renameSync(tmp, path);
+    atomicWriteFileSync(path, JSON.stringify(data, null, 2));
     return true;
   } catch {
     return false;

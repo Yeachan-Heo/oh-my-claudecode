@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -222,6 +222,18 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       stageId: 'ralplan', sessionId: f.sessionId, signalId: 'PIPELINE_RALPLAN_COMPLETE', byteOffset: initial.pipelineTracking.activationBoundary.byteOffset + Buffer.byteLength(JSON.stringify({ sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'unrelated secret-token-never-in-output' }] } })) + 1,
       lineNumber: 1, recordContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/), stableFile: expect.objectContaining({ device: expect.any(Number), inode: expect.any(Number), size: expect.any(Number) }), activationBoundary: expect.objectContaining({ sessionId: f.sessionId, transcriptBasename: `${f.sessionId}.jsonl` }), observedAt: expect.any(String),
     })]);
+  });
+
+  it('preserves private state permissions and leaves no temp on stage publication', () => {
+    if (process.platform === 'win32') return;
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    chmodSync(f.statePath, 0o600);
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+
+    expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+    expect(statSync(f.statePath).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dirname(f.statePath)).filter(name => name.includes('.tmp.'))).toEqual([]);
   });
 
   it('refreshes the boundary for each next stage so earlier signals cannot be replayed', () => {

@@ -11,8 +11,6 @@
 import {
   existsSync,
   readFileSync,
-  writeFileSync,
-  renameSync,
   readdirSync,
   realpathSync,
   mkdirSync,
@@ -100,7 +98,7 @@ const { readStdin } = await import(
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
 const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
-const { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 function readJsonFile(path) {
   try {
@@ -113,13 +111,7 @@ function readJsonFile(path) {
 
 function writeJsonFile(path, data) {
   try {
-    const dir = dirname(path);
-    if (dir && dir !== "." && !existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    const tmpPath = path + '.tmp.' + process.pid;
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-    renameSync(tmpPath, path);
+    atomicWriteFileSync(path, JSON.stringify(data, null, 2));
     return true;
   } catch { return false; }
 }
