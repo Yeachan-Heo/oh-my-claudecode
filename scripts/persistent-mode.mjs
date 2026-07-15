@@ -767,8 +767,9 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
       const isFreshRequest = requestedAt <= now + CANCEL_SIGNAL_CLOCK_SKEW_MS && now - requestedAt <= CANCEL_SIGNAL_TTL_MS;
       if (!currentAutopilot) {
         const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        if (signal.mode === "autopilot" || Object.prototype.hasOwnProperty.call(signal, "target_state_sha256") || Object.prototype.hasOwnProperty.call(signal, "target_workflow_run_id")) return;
         if (isFreshRequest && effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
-        else if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
         return;
       }
       if (!isFreshRequest) {

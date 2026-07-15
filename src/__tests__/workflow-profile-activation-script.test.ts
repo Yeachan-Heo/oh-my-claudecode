@@ -181,6 +181,53 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     }
   });
 
+  it.each(HOOKS)('does not load profile config above a literal non-Git project through %s', (script) => {
+    const parent = mkdtempSync(join(tmpdir(), 'omc-workflow-profile-literal-'));
+    const cwd = join(parent, 'project');
+    const { configHome } = createFixture(cwd);
+    try {
+      mkdirSync(join(parent, '.claude'), { recursive: true });
+      writeFileSync(join(parent, '.claude', 'omc.jsonc'), '{ "autopilot": { "workflows": { "release-flow": { "version": 1, "stages": ["ralplan", "execution", "qa"] } } } }');
+      runHook(script, '/autopilot --workflow release-flow ship the release', cwd, configHome);
+      expect(JSON.parse(stateBytes(cwd)!.toString())).toMatchObject({ workflow: { workflowName: 'release-flow', stages: ['ralplan', 'execution'] } });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('falls back to user profiles instead of loading config above a literal non-Git project through %s', (script) => {
+    const parent = mkdtempSync(join(tmpdir(), 'omc-workflow-profile-user-fallback-'));
+    const cwd = join(parent, 'project');
+    const { configHome } = createFixture(cwd);
+    try {
+      rmSync(join(cwd, '.claude'), { recursive: true, force: true });
+      mkdirSync(join(parent, '.claude'), { recursive: true });
+      writeFileSync(join(parent, '.claude', 'omc.jsonc'), '{ "autopilot": { "workflows": { "release-flow": { "version": 1, "stages": ["ralplan", "execution", "qa"] } } } }');
+      runHook(script, '/autopilot --workflow release-flow ship the release', cwd, configHome);
+      expect(JSON.parse(stateBytes(cwd)!.toString())).toMatchObject({ workflow: { workflowName: 'release-flow', stages: ['ralplan', 'execution', 'ralph'] } });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it.each(HOOKS)('does not load profile config above a non-Git workspace boundary through %s', (script) => {
+    const parent = mkdtempSync(join(tmpdir(), 'omc-workflow-profile-workspace-'));
+    const workspace = join(parent, 'workspace');
+    const { configHome } = createFixture(workspace);
+    const nested = join(workspace, 'packages', 'feature');
+    const transcriptPath = join(workspace, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl');
+    try {
+      writeFileSync(join(workspace, '.omc-workspace'), '{}');
+      mkdirSync(nested, { recursive: true });
+      mkdirSync(join(parent, '.claude'), { recursive: true });
+      writeFileSync(join(parent, '.claude', 'omc.jsonc'), '{ "autopilot": { "workflows": { "release-flow": { "version": 1, "stages": ["ralplan", "execution", "qa"] } } } }');
+      runHook(script, '/autopilot --workflow release-flow ship the release', nested, configHome, transcriptPath, { CLAUDE_CONFIG_DIR: join(workspace, 'claude-config') });
+      expect(JSON.parse(stateBytes(nested)!.toString())).toMatchObject({ workflow: { workflowName: 'release-flow', stages: ['ralplan', 'execution'] } });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it.each(HOOKS)('rejects named workflows explicitly on unsupported platforms through %s', (script) => {
     const { cwd, configHome } = createFixture();
     try {
@@ -679,13 +726,13 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     }
   });
 
-  it.each(HOOKS)('resolves project workflow profiles from a nested working directory through %s', (script) => {
+  it.each(HOOKS)('resolves project workflow profiles from a literal non-Git working directory through %s', (script) => {
     const { cwd, configHome } = createFixture();
     const nested = join(cwd, 'packages', 'feature');
     const transcriptPath = join(cwd, 'claude-config', 'projects', 'workflow-activation-fixture.jsonl');
     try {
-      mkdirSync(nested, { recursive: true });
-      writeFileSync(join(cwd, '.claude', 'omc.jsonc'), JSON.stringify({ autopilot: { workflows: { 'root-only': { version: 1, stages: ['ralplan', 'execution'] } } } }));
+      mkdirSync(join(nested, '.claude'), { recursive: true });
+      writeFileSync(join(nested, '.claude', 'omc.jsonc'), JSON.stringify({ autopilot: { workflows: { 'root-only': { version: 1, stages: ['ralplan', 'execution'] } } } }));
       const output = runHook(script, '/autopilot --workflow root-only ship it', nested, configHome, transcriptPath, { CLAUDE_CONFIG_DIR: join(cwd, 'claude-config') });
       expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN (Consensus Planning)');
     } finally {
