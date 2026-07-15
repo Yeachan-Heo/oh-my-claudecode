@@ -236,6 +236,24 @@ describe('state-tools', () => {
       expect(existsSync(`${statePath}.emergency-journal.json`)).toBe(false);
     });
 
+    it('does not recover or reject another session emergency transaction', async () => {
+      const ownPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'recovery-owner-a', 'autopilot-state.json');
+      const otherPath = join(TEST_DIR, '.omc', 'state', 'sessions', 'recovery-owner-b', 'autopilot-state.json');
+      for (const [path, owner, run] of [[ownPath, 'recovery-owner-a', '44444444-4444-4444-8444-444444444444'], [otherPath, 'recovery-owner-b', '55555555-5555-4555-8555-555555555555']] as const) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify({ active: true, session_id: owner, workflowRunId: run, workflow: { profileHash: 'c'.repeat(64) } }));
+      }
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'after-rename';
+      expect(emergencyMutateStateFileIf(otherPath, (state) => state.session_id === 'recovery-owner-b', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+      expect(existsSync(`${otherPath}.emergency-journal.json`)).toBe(true);
+
+      const result = await stateClearTool.handler({ mode: 'autopilot', session_id: 'recovery-owner-a', workingDirectory: TEST_DIR });
+      expect(result.isError).toBeUndefined();
+      expect(existsSync(ownPath)).toBe(false);
+      expect(existsSync(`${otherPath}.emergency-journal.json`)).toBe(true);
+    });
+
     it('recovers interrupted canonical and legacy named pauses before broad clear', async () => {
       const canonical = join(TEST_DIR, '.omc', 'state', 'sessions', 'broad-journal-owner', 'autopilot-state.json');
       const legacy = join(TEST_DIR, '.omc', 'state', 'autopilot-state.json');
@@ -250,10 +268,10 @@ describe('state-tools', () => {
 
       const result = await stateClearTool.handler({ mode: 'autopilot', workingDirectory: TEST_DIR });
       expect(result.isError).toBeUndefined();
-      for (const path of [canonical, legacy]) {
-        expect(existsSync(path)).toBe(false);
-        expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
-      }
+      expect(existsSync(canonical)).toBe(false);
+      expect(existsSync(`${canonical}.emergency-journal.json`), 'canonical journal').toBe(false);
+      expect(existsSync(legacy)).toBe(false);
+      expect(existsSync(`${legacy}.emergency-journal.json`), 'legacy journal').toBe(false);
     });
     it('should remove legacy state file when no session_id provided', async () => {
       await stateWriteTool.handler({

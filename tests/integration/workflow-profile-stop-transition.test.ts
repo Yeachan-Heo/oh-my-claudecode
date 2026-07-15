@@ -553,7 +553,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     unlinkSync(lockPath);
 
     expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
-    expect(readFileSync(f.statePath)).toEqual(replacementBytes);
+    expectStateExceptLiveness(readState(f), JSON.parse(replacementBytes.toString('utf8')));
   });
 
   it('rejects same-size in-place transcript mutation before commit', async () => {
@@ -616,7 +616,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const lockPath = `${f.statePath}.mutation.lock`;
     writeFileSync(lockPath, liveLockOwner());
     const pending = invokeAsync(f);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
     unlinkSync(lockPath);
 

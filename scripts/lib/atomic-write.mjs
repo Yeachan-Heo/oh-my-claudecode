@@ -3,7 +3,7 @@
  * Self-contained module with no external dependencies.
  */
 
-import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, linkSync } from 'fs';
+import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, linkSync, statSync } from 'fs';
 import { dirname, basename, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -209,14 +209,35 @@ function emergencyJournalPath(filePath) {
   return `${filePath}.emergency-journal.json`;
 }
 
+
+function sameEmergencyOwner(left, right) {
+  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
+}
+
+/** Unknown process identity is treated as live: stealing a claim is never safe. */
+function isEmergencyOwnerLive(owner) {
+  return processStartIdentity(owner.pid) !== 'absent';
+}
+
+function journalIsOwned(path, transactionId, owner) {
+  const current = readEmergencyJournal(path);
+  return current !== null && current.transactionId === transactionId && sameEmergencyOwner(current.owner, owner);
+}
+
 function writeEmergencyJournal(path, journal) {
-  atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
+  if (!journalIsOwned(path, journal.transactionId, journal.owner)) return false;
+  try {
+    atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
+    return journalIsOwned(path, journal.transactionId, journal.owner);
+  } catch { return false; }
 }
 
 function readEmergencyJournal(path) {
   try {
     const journal = JSON.parse(readFileSync(path, 'utf8'));
     if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) ||
+      !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== 'string' ||
+      typeof journal.owner.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) ||
       typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest) ||
       (journal.intent !== 'clear' && journal.intent !== 'publish') ||
       (journal.intent === 'publish' && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) ||
@@ -226,78 +247,101 @@ function readEmergencyJournal(path) {
   } catch { return null; }
 }
 
+function fileIdentity(path) {
+  try {
+    const stat = statSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch { return null; }
+}
+
+function sameFile(path, expected) {
+  const actual = fileIdentity(path);
+  return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
+}
+
+function replacePrimaryDuringRecoveryForTest(filePath) {
+  if (process.env.NODE_ENV !== 'test' || process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH !== filePath || !process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64) return;
+  try {
+    atomicWriteFileSync(filePath, Buffer.from(process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64, 'base64').toString('utf8'));
+  } finally {
+    delete process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_EMERGENCY_RECOVERY_REPLACEMENT_BASE64;
+  }
+}
+
+/** Capture the authenticated generation without renaming a possible replacement. */
+function captureAndUnlinkPrimary(filePath, quarantinePath, expectedDigest) {
+  let linked = false;
+  try {
+    linkSync(filePath, quarantinePath);
+    linked = true;
+    const captured = fileIdentity(quarantinePath);
+    if (!captured || stateDigest(readFileSync(quarantinePath, 'utf8')) !== expectedDigest || !sameFile(filePath, captured)) {
+      unlinkSync(quarantinePath);
+      return false;
+    }
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    if (linked) try { unlinkSync(quarantinePath); } catch { /* no owned capture artifact */ }
+    return false;
+  }
+}
+
+function removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine) {
+  try {
+    if (!journalIsOwned(journalPath, journal.transactionId, journal.owner)) return false;
+    if (removeQuarantine) try { unlinkSync(journal.quarantinePath); } catch { /* absent */ }
+    try { unlinkSync(`${journal.quarantinePath}.payload`); } catch { /* absent */ }
+    if (!journalIsOwned(journalPath, journal.transactionId, journal.owner)) return false;
+    unlinkSync(journalPath);
+    return true;
+  } catch { return false; }
+}
+
 /** Recover a previously interrupted emergency mutation. False means do not use the primary. */
 export function recoverEmergencyStateFile(filePath) {
   const journalPath = emergencyJournalPath(filePath);
   if (!existsSync(journalPath)) return true;
   const journal = readEmergencyJournal(journalPath);
   if (!journal || journal.quarantinePath !== `${filePath}.emergency-quarantine.${journal.transactionId}`) return false;
+  // The journal is the transaction claim. Never inspect or delete a live owner's
+  // transaction; its payload may be durable just before a phase update.
+  if (isEmergencyOwnerLive(journal.owner)) return false;
+  const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
+  if (!owned()) return false;
   const hasPrimary = existsSync(filePath);
   const hasQuarantine = existsSync(journal.quarantinePath);
   const digest = (path) => {
     try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; }
   };
-  const finalize = () => {
-    try {
-      if (hasQuarantine) unlinkSync(journal.quarantinePath);
-      try { unlinkSync(`${journal.quarantinePath}.payload`); } catch { /* already removed */ }
-      unlinkSync(journalPath);
-      return true;
-    } catch { return false; }
-  };
+  const finalize = () => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
 
-  // Publication may have completed before its journal phase was persisted.
   if (hasPrimary && hasQuarantine) {
     if (journal.intent === 'publish' && digest(filePath) === journal.intendedDigest && digest(journal.quarantinePath) === journal.originalDigest) return finalize();
-    // The visible primary is not our exact result. Preserve the original
-    // quarantine for inspection, remove the blocking journal, and fail closed.
-    try { renameSync(journal.quarantinePath, `${journal.quarantinePath}.preserved-${journal.transactionId}`); } catch { return false; }
-    try { unlinkSync(journalPath); } catch { return false; }
     return false;
   }
   if (hasPrimary) {
-    // A prepared journal has not made the primary undiscoverable. If it still
-    // has the authenticated original bytes, finish the transaction; otherwise
-    // it is a replacement and must not be touched.
     if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === journal.originalDigest) {
       const payloadPath = `${journal.quarantinePath}.payload`;
-      if (journal.intent === 'publish' && (!existsSync(payloadPath) || digest(payloadPath) !== journal.intendedDigest)) {
-        try { unlinkSync(journalPath); return true; } catch { return false; }
-      }
-      try {
-        renameSync(filePath, journal.quarantinePath);
-        journal.phase = 'quarantined';
-        writeEmergencyJournal(journalPath, journal);
-        return recoverEmergencyStateFile(filePath);
-      } catch { return false; }
+      if (journal.intent === 'publish' && (!existsSync(payloadPath) || digest(payloadPath) !== journal.intendedDigest)) return false;
+      replacePrimaryDuringRecoveryForTest(filePath);
+      if (!owned() || !captureAndUnlinkPrimary(filePath, journal.quarantinePath, journal.originalDigest)) return false;
+      journal.phase = 'quarantined';
+      return writeEmergencyJournal(journalPath, journal) && recoverEmergencyStateFile(filePath);
     }
     return false;
   }
-  if (!hasQuarantine) {
-    // Clear publication is complete even if journal cleanup was interrupted.
-    if (journal.intent === 'clear' && journal.phase === 'published') {
-      try { unlinkSync(journalPath); return true; } catch { return false; }
-    }
-    return false;
-  }
-  if (digest(journal.quarantinePath) !== journal.originalDigest) return false;
+  if (!hasQuarantine) return journal.intent === 'clear' && journal.phase === 'published' && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+  if (digest(journal.quarantinePath) !== journal.originalDigest || !owned()) return false;
   try {
-    if (journal.intent === 'clear') {
-      unlinkSync(journal.quarantinePath);
-      unlinkSync(journalPath);
-      return true;
-    }
-    const raw = readFileSync(journal.quarantinePath, 'utf8');
-    // The intended bytes are stored in the quarantine only for clear; publish
-    // recovery needs a persisted transformed payload alongside the journal.
+    if (journal.intent === 'clear') return removeOwnedEmergencyArtifacts(journalPath, journal, true);
     const payloadPath = `${journal.quarantinePath}.payload`;
     const payload = readFileSync(payloadPath, 'utf8');
-    if (stateDigest(payload) !== journal.intendedDigest) return false;
-    linkSync(payloadPath, filePath);
-    unlinkSync(payloadPath);
-    unlinkSync(journal.quarantinePath);
-    unlinkSync(journalPath);
-    void raw;
-    return true;
+    if (stateDigest(payload) !== journal.intendedDigest || !owned()) return false;
+    linkSync(payloadPath, filePath); // exclusive: never overwrite a replacement
+    journal.phase = 'published';
+    if (!writeEmergencyJournal(journalPath, journal)) return false;
+    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
   } catch { return false; }
 }

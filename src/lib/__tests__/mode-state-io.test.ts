@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { execSync, spawn } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, mkdtempSync } from 'fs';
@@ -654,6 +654,45 @@ describe('mode-state-io', () => {
       expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one' && state.active === true, null)).toBe(false);
       expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ active: false, run: 'one' });
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+    });
+
+    it('refuses recovery and competing writers while the journal owner is live', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-live-owner.json');
+      const raw = JSON.stringify({ active: true, run: 'live-owner' });
+      const transactionId = randomUUID();
+      const processStart = readFileSync(`/proc/${process.pid}/stat`, 'utf8').slice(readFileSync(`/proc/${process.pid}/stat`, 'utf8').lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      const quarantinePath = `${path}.emergency-quarantine.${transactionId}`;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, raw);
+      writeFileSync(`${quarantinePath}.payload`, JSON.stringify({ active: false, run: 'live-owner' }));
+      writeFileSync(`${path}.emergency-journal.json`, JSON.stringify({
+        version: 1,
+        transactionId,
+        owner: { pid: process.pid, processStart, nonce: randomUUID() },
+        originalDigest: createHash('sha256').update(raw).digest('hex'),
+        intendedDigest: createHash('sha256').update(JSON.stringify({ active: false, run: 'live-owner' })).digest('hex'),
+        intent: 'publish',
+        quarantinePath,
+        phase: 'prepared',
+      }));
+
+      expect(recoverEmergencyStateFile(path)).toBe(false);
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'live-owner', null)).toBe(false);
+      expect(readFileSync(path, 'utf8')).toBe(raw);
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(true);
+    });
+
+    it('marks deterministic crash ownership abandoned before same-process recovery', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-abandoned-owner.json');
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ active: true, run: 'abandoned-owner' }));
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'before-rename';
+      expect(emergencyMutateStateFileIf(path, (state) => state.run === 'abandoned-owner', (state) => ({ ...state, active: false }))).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+      expect(JSON.parse(readFileSync(`${path}.emergency-journal.json`, 'utf8')).owner.pid).toBe(999999999);
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, run: 'abandoned-owner' });
     });
   });
 });

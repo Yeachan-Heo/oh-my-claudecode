@@ -990,15 +990,31 @@ export const stateWriteTool: ToolDefinition<{
 // ============================================================================
 
 function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string): void {
-  const sessionIds = new Set(listSessionIds(root));
-  if (sessionId) sessionIds.add(sessionId);
-  const paths = new Set<string>([
+  const broadPaths = new Set<string>([
     ...getLegacyStateFileCandidates('autopilot', root),
-    ...getWorkingDirectoryLocalStateClearCandidates('autopilot', root, sessionId),
+    ...getWorkingDirectoryLocalStateClearCandidates('autopilot', root),
     ...getConvergedStateCandidates('autopilot', root),
   ]);
-  for (const sid of sessionIds) paths.add(resolveSessionStatePath('autopilot', sid, root));
-  for (const path of paths) {
+  const localOmcRoot = getWorkingDirectoryLocalOmcRoot(root);
+  for (const sid of listSessionIdsUnderOmcRoot(localOmcRoot)) {
+    broadPaths.add(join(localOmcRoot, 'state', 'sessions', sid, getStateFileName('autopilot')));
+  }
+  const directSessionPaths = new Set<string>();
+  if (sessionId) {
+    directSessionPaths.add(resolveSessionStatePath('autopilot', sessionId, root));
+    directSessionPaths.add(getWorkingDirectoryLocalSessionStatePath('autopilot', root, sessionId));
+    for (const omcRoot of getConvergedOmcRoots(root)) {
+      directSessionPaths.add(join(omcRoot, 'state', 'sessions', sessionId, getStateFileName('autopilot')));
+    }
+    for (const path of directSessionPaths) broadPaths.add(path);
+  }
+  for (const path of broadPaths) {
+    if (sessionId && !directSessionPaths.has(path)) {
+      const visibleOwner = getStateSessionOwner(readJsonRecord(path) ?? {});
+      const journal = readJsonRecord(`${path}.emergency-journal.json`);
+      const journalOwner = typeof journal?.sessionOwner === 'string' ? journal.sessionOwner : undefined;
+      if (visibleOwner !== sessionId && journalOwner !== sessionId) continue;
+    }
     if (!recoverEmergencyStateFile(path)) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
     const artifactPrefix = `${basename(path)}.emergency-`;
     let artifacts: string[];
