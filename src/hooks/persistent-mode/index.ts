@@ -10,6 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
@@ -153,17 +154,86 @@ export function shouldWriteStateBack(statePath: string | null | undefined): bool
   return Boolean(statePath && existsSync(statePath));
 }
 
-/**
- * Check whether this session is in an explicit cancel window.
- * Used to prevent stop-hook re-enforcement races during /cancel.
- */
-function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
-  // An out-of-band cancel signal is not authoritative only for an active,
-  // current-project/session, nonterminal named run that Stop can enforce.
-  const autopilot = readModeState<Record<string, unknown>>('autopilot', directory, sessionId);
-  if (isEnforceableNamedAutopilotState(autopilot, directory, sessionId)) return false;
-  let cancelSignalPath: string | undefined;
+interface LoadedAutopilotTarget {
+  state: Record<string, unknown>;
+}
 
+function readAutopilotTarget(directory: string, sessionId?: string): LoadedAutopilotTarget | null {
+  const path = sessionId
+    ? resolveSessionStatePath('autopilot', sessionId, directory)
+    : resolveStatePath('autopilot', directory);
+  try {
+    const serialized = readFileSync(path, 'utf-8');
+    const state = JSON.parse(serialized);
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+    return { state: state as Record<string, unknown> };
+  } catch {
+    return null;
+  }
+}
+
+function isCurrentAutopilotTarget(
+  state: Record<string, unknown>,
+  directory: string,
+  sessionId?: string,
+): boolean {
+  if (
+    state.active !== true ||
+    state.session_id !== sessionId ||
+    typeof state.project_path !== 'string' ||
+    isTerminalWorkflowModeState(state)
+  ) {
+    return false;
+  }
+  try {
+    return resolveToWorktreeRoot(state.project_path) === resolveToWorktreeRoot(directory);
+  } catch {
+    return false;
+  }
+}
+
+function isAuthenticatedAutopilotCancelSignal(
+  signal: Record<string, unknown>,
+  target: LoadedAutopilotTarget,
+): boolean {
+  if (signal.active !== true || signal.mode !== 'autopilot' || typeof signal.source !== 'string' || signal.source.length === 0) {
+    return false;
+  }
+  const requestedAt = typeof signal.requested_at === 'string' ? new Date(signal.requested_at).getTime() : NaN;
+  const expiresAt = typeof signal.expires_at === 'string' ? new Date(signal.expires_at).getTime() : NaN;
+  if (
+    !Number.isFinite(requestedAt) ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= requestedAt ||
+    expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+    expiresAt <= Date.now()
+  ) {
+    return false;
+  }
+  const digest = createHash('sha256').update(JSON.stringify(target.state)).digest('hex');
+  if (
+    typeof signal.target_state_sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) ||
+    signal.target_state_sha256 !== digest
+  ) {
+    return false;
+  }
+  const workflowRunId = target.state.workflowRunId;
+  return typeof workflowRunId === 'string'
+    ? signal.target_workflow_run_id === workflowRunId
+    : signal.target_workflow_run_id === undefined;
+}
+
+function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
+  const autopilot = readAutopilotTarget(directory, sessionId);
+  // An active current-project/session autopilot state is an enforceable target.
+  // Named integrity failures deliberately fail closed here so checkAutopilot()
+  // can propagate its diagnostic instead of a forged cancel hiding it.
+  const enforceableAutopilot = autopilot && isCurrentAutopilotTarget(autopilot.state, directory, sessionId);
+  if (enforceableAutopilot && hasNamedWorkflowMarkers(autopilot.state) && !isEnforceableNamedAutopilotState(autopilot.state, directory, sessionId)) {
+    return false;
+  }
+  let cancelSignalPath: string | undefined;
   if (sessionId) {
     try {
       cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
@@ -171,33 +241,25 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): boole
       // fall through to legacy path
     }
   }
-
-  // Fallback: check legacy (non-session-scoped) cancel signal
   if (!cancelSignalPath) {
     cancelSignalPath = join(getOmcRoot(directory), 'state', 'cancel-signal-state.json');
   }
-
-  if (!existsSync(cancelSignalPath)) {
-    return false;
-  }
-
   try {
-    const raw = JSON.parse(readFileSync(cancelSignalPath, 'utf-8')) as {
-      requested_at?: string;
-      expires_at?: string;
-    };
-
+    const raw = JSON.parse(readFileSync(cancelSignalPath, 'utf-8')) as Record<string, unknown>;
     const now = Date.now();
-    const expiresAt = raw.expires_at ? new Date(raw.expires_at).getTime() : NaN;
-    const requestedAt = raw.requested_at ? new Date(raw.requested_at).getTime() : NaN;
-    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-
+    const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
+    const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
+    if (enforceableAutopilot) {
+      if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
+      return isAuthenticatedAutopilotCancelSignal(raw, autopilot);
+    }
+    const effectiveExpiry = Number.isFinite(expiresAt)
+      ? expiresAt
+      : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
     if (!Number.isFinite(effectiveExpiry) || effectiveExpiry <= now) {
-      unlinkSync(cancelSignalPath);
+      if (existsSync(cancelSignalPath)) unlinkSync(cancelSignalPath);
       return false;
     }
-
     return true;
   } catch {
     return false;

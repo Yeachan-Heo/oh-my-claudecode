@@ -14,13 +14,14 @@ import {
   writeFileSync,
   renameSync,
   readdirSync,
+  realpathSync,
   mkdirSync,
   unlinkSync,
   openSync,
   closeSync,
 } from "fs";
 import { createHash } from 'node:crypto';
-import { join, dirname, resolve, normalize } from "path";
+import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 
@@ -476,6 +477,68 @@ function hasNamedWorkflowMarkers(state) {
     typeof state === "object" &&
     ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)),
   );
+}
+
+function hasExactWorkflowKeys(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isWorkflowTimestamp(value) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function isWorkflowFileIdentity(value) {
+  return hasExactWorkflowKeys(value, ["device", "inode", "size", "mtimeNs", "ctimeNs", "contentSha256"]) &&
+    [value.device, value.inode, value.size].every((field) => Number.isSafeInteger(field) && field >= 0) &&
+    /^\d+$/.test(value.mtimeNs) && /^\d+$/.test(value.ctimeNs) && /^[a-f0-9]{64}$/.test(value.contentSha256);
+}
+
+function hasWorkflowBoundaryTopology(value, sessionId) {
+  let root;
+  try { root = realpathSync(resolve(getClaudeConfigDir(), "projects")); } catch { root = resolve(getClaudeConfigDir(), "projects"); }
+  return hasExactWorkflowKeys(value, ["transcriptPath", "transcriptRoot", "transcriptBasename", "sessionId", "byteOffset", "fileIdentity"]) &&
+    typeof value.transcriptPath === "string" && value.transcriptPath.startsWith(root + sep) &&
+    value.transcriptRoot === root && value.transcriptBasename === `${sessionId}.jsonl` && value.sessionId === sessionId &&
+    Number.isSafeInteger(value.byteOffset) && value.byteOffset >= 0 && isWorkflowFileIdentity(value.fileIdentity) &&
+    value.fileIdentity.size === value.byteOffset;
+}
+
+function isStructurallyValidNamedWorkflowState(state, sessionId) {
+  const workflow = state?.workflow;
+  const tracking = state?.pipelineTracking;
+  if (!isValidWorkflowDescriptor(workflow) || typeof state?.prompt !== "string" || state.prompt.trim().length === 0 ||
+    typeof state?.workflowRunId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state.workflowRunId) || state?.session_id !== sessionId) return false;
+  const terminal = state.active === false && state.phase === "complete";
+  const maxIndex = terminal ? workflow.stages.length : workflow.stages.length - 1;
+  if (!hasExactWorkflowKeys(tracking, ["stages", "currentStageIndex", "trackingRevision", "activationBoundary", "completionObservations"]) ||
+    !Array.isArray(tracking.stages) || !Array.isArray(tracking.completionObservations) || !Number.isSafeInteger(tracking.currentStageIndex) || tracking.currentStageIndex < 0 || tracking.currentStageIndex > maxIndex ||
+    !Number.isSafeInteger(tracking.trackingRevision) || tracking.trackingRevision !== tracking.currentStageIndex ||
+    (terminal && (tracking.currentStageIndex !== workflow.stages.length || tracking.completionObservations.length !== workflow.stages.length)) ||
+    (!terminal && !((state.active === true || state.active === false) && state.phase === workflow.stages[tracking.currentStageIndex])) ||
+    tracking.stages.length !== workflow.stages.length || tracking.completionObservations.length !== tracking.currentStageIndex || !hasWorkflowBoundaryTopology(tracking.activationBoundary, sessionId)) return false;
+  for (let index = 0; index < tracking.stages.length; index += 1) {
+    const stage = tracking.stages[index];
+    const status = terminal || index < tracking.currentStageIndex ? "complete" : index === tracking.currentStageIndex ? "active" : "pending";
+    const keys = status === "complete" ? ["id", "status", "iterations", "startedAt", "completedAt"] : status === "active" ? ["id", "status", "iterations", "startedAt"] : ["id", "status", "iterations"];
+    if (!hasExactWorkflowKeys(stage, keys) || stage.id !== workflow.stages[index] || stage.status !== status || !Number.isSafeInteger(stage.iterations) || stage.iterations < 0 || (stage.startedAt !== undefined && !isWorkflowTimestamp(stage.startedAt)) || (stage.completedAt !== undefined && !isWorkflowTimestamp(stage.completedAt))) return false;
+  }
+  let previous;
+  for (let index = 0; index < tracking.completionObservations.length; index += 1) {
+    const observation = tracking.completionObservations[index];
+    if (!hasExactWorkflowKeys(observation, ["stageId", "sessionId", "signalId", "lineNumber", "byteOffset", "recordContentSha256", "stableFile", "activationBoundary", "observedAt"]) || observation.stageId !== workflow.stages[index] || observation.sessionId !== sessionId || observation.signalId !== `PIPELINE_${observation.stageId.toUpperCase()}_COMPLETE` || !Number.isSafeInteger(observation.lineNumber) || observation.lineNumber < 0 || !Number.isSafeInteger(observation.byteOffset) || observation.byteOffset < 0 || !/^[a-f0-9]{64}$/.test(observation.recordContentSha256) || !isWorkflowTimestamp(observation.observedAt) || !isWorkflowFileIdentity(observation.stableFile) || !hasWorkflowBoundaryTopology(observation.activationBoundary, sessionId) || (previous && (observation.activationBoundary.transcriptPath !== previous.activationBoundary.transcriptPath || observation.activationBoundary.byteOffset !== previous.stableFile.size || JSON.stringify(observation.activationBoundary.fileIdentity) !== JSON.stringify(previous.stableFile)))) return false;
+    previous = observation;
+  }
+  const latest = tracking.completionObservations.at(-1);
+  return !latest || (tracking.activationBoundary.transcriptPath === latest.activationBoundary.transcriptPath && tracking.activationBoundary.byteOffset === latest.stableFile.size && JSON.stringify(tracking.activationBoundary.fileIdentity) === JSON.stringify(latest.stableFile));
+}
+
+function isValidNamedWorkflowState(state, sessionId) {
+  return isWorkflowRuntimeSupported()
+    ? isValidWorkflowDescriptor(state?.workflow) && isValidWorkflowTrackingState(state, sessionId)
+    : isStructurallyValidNamedWorkflowState(state, sessionId);
 }
 
 function isEnforceableAutopilotCancellationTarget(state, directory, isGlobal, hasValidSessionId, sessionId) {
@@ -1009,12 +1072,12 @@ async function main() {
     const currentAutopilot = isCurrentAutopilotState(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
       ? autopilot.state
       : null;
-    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
-      console.log(JSON.stringify(SAFE_CONTINUE));
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isValidNamedWorkflowState(currentAutopilot, sessionId)) {
+      console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
       return;
     }
-    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && (!isValidWorkflowDescriptor(currentAutopilot.workflow) || !isValidWorkflowTrackingState(currentAutopilot, sessionId))) {
-      console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+    if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
+      console.log(JSON.stringify(SAFE_CONTINUE));
       return;
     }
     const cancellationTarget = isEnforceableAutopilotCancellationTarget(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
@@ -1097,7 +1160,11 @@ async function main() {
         ? autopilot.state.session_id === sessionId
         : !autopilot.state.session_id || autopilot.state.session_id === sessionId;
       if (sessionMatches) {
-        if (autopilot.state.workflow && !isWorkflowRuntimeSupported()) {
+        if (hasNamedWorkflowMarkers(autopilot.state) && !isValidNamedWorkflowState(autopilot.state, sessionId)) {
+          console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          return;
+        }
+        if (hasNamedWorkflowMarkers(autopilot.state) && !isWorkflowRuntimeSupported()) {
           console.log(JSON.stringify(SAFE_CONTINUE));
           return;
         }

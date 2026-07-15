@@ -510,6 +510,20 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
+  it.each([
+    ['a falsy workflow descriptor marker', (state) => { state.workflow = null; }],
+    ['missing workflow tracking', (state) => { delete state.pipelineTracking; }],
+  ])('fails closed before the unsupported-runtime escape for %s', (_name, corrupt) => {
+    const f = fixture(kind);
+    const state = workflowState(f);
+    corrupt(state);
+    writeState(f, state);
+    const before = readFileSync(f.statePath);
+
+    expect(invoke(f, {}, { NODE_ENV: 'test', OMC_WORKFLOW_TEST_FLOCK_AVAILABLE: '0' })).toEqual(workflowIntegrityFailure);
+    expect(readFileSync(f.statePath)).toEqual(before);
+  });
+
   it('does not mutate or redispatch named workflow Stop after runtime support is lost', () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));

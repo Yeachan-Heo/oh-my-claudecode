@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { KEYWORD_DETECTOR_SCRIPT_NODE } from '../hooks.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -329,6 +329,48 @@ describe('pre-tool-use packaged artifacts', () => {
     expect(JSON.stringify(runPreToolHook(scriptPath, 'cat app.js > backup.txt'))).toContain(
       'Bash command may modify source files',
     );
+  });
+});
+
+describe('atomic write packaged helpers', () => {
+  it.each([
+    ['plugin helper', join(packageRoot, 'scripts', 'lib', 'atomic-write.mjs')],
+    ['standalone hook helper', join(packageRoot, 'templates', 'hooks', 'lib', 'atomic-write.mjs')],
+  ])('allows its own recovery claim to converge while preserving foreign claim artifacts through the %s', async (_label, helperPath) => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'atomic-write-recovery-claim-'));
+    const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+    const claimPath = `${statePath}.emergency-recovery.claim`;
+    const projectPath = join(tempDir, 'project-a');
+    const state = JSON.stringify({ active: true, project_path: projectPath });
+    const foreignClaim = JSON.stringify({
+      version: 1,
+      pid: 424242,
+      processStart: '1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      nonce: '00000000-0000-4000-8000-000000000001',
+    });
+    const foreignClaimTemp = `${claimPath}.424242.1.00000000-0000-4000-8000-000000000001.tmp`;
+    try {
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, state);
+      const { recoverEmergencyStateFile } = await import(pathToFileURL(helperPath).href);
+      const authorizeState = (candidate: Record<string, unknown>) => candidate.project_path === projectPath;
+
+      expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(true);
+      expect(readFileSync(statePath, 'utf-8')).toBe(state);
+      expect(existsSync(claimPath)).toBe(false);
+
+      writeFileSync(claimPath, foreignClaim);
+      expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(false);
+      expect(readFileSync(claimPath, 'utf-8')).toBe(foreignClaim);
+      rmSync(claimPath);
+
+      writeFileSync(foreignClaimTemp, foreignClaim);
+      expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(false);
+      expect(readFileSync(foreignClaimTemp, 'utf-8')).toBe(foreignClaim);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

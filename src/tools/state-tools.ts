@@ -123,6 +123,29 @@ function isExactEmergencyNamedMutation(
     record.workflowRunId === requestedRunId;
 }
 
+/** A named pause request is an exact capability, not a state replay payload. */
+function isExactNamedPauseRequest(record: Record<string, unknown>): boolean {
+  const allowed = new Set(['active', 'workflowRunId', 'target_state_sha256']);
+  return record.active === false &&
+    typeof record.workflowRunId === 'string' &&
+    Object.keys(record).every((key) => allowed.has(key)) &&
+    (!hasOwnProperty(record, 'target_state_sha256') ||
+      (typeof record.target_state_sha256 === 'string' && /^[a-f0-9]{64}$/.test(record.target_state_sha256)));
+}
+
+function matchesNamedPauseTarget(
+  current: Record<string, unknown>,
+  sessionId: string | undefined,
+  workflowRunId: string,
+  stateDigest: string | undefined,
+): boolean {
+  return current.active === true &&
+    current.workflowRunId === workflowRunId &&
+    hasValidatedNamedWorkflowTuple(current) &&
+    getStateSessionOwner(current) === sessionId &&
+    (stateDigest === undefined || createHash('sha256').update(JSON.stringify(current)).digest('hex') === stateDigest);
+}
+
 
 function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
   const sessionsDir = join(omcRoot, 'state', 'sessions');
@@ -1036,12 +1059,10 @@ export const stateWriteTool: ToolDefinition<{
       }
 
       const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
-      const isExactEmergencyPauseRequest = builtState.active === false &&
-        requestedRunId !== undefined &&
-        !hasOwnProperty(builtState, 'workflow') &&
-        !hasOwnProperty(builtState, 'pipelineTracking');
-      if (mode === 'autopilot' && hasNamedWorkflowMarker(builtState) && !isExactEmergencyPauseRequest) {
-        throw new Error('named autopilot workflow markers are runtime-owned; only exact-run emergency pause is allowed');
+      const requestedStateDigest = typeof builtState.target_state_sha256 === 'string' ? builtState.target_state_sha256 : undefined;
+      const isExactNamedPause = isExactNamedPauseRequest(builtState);
+      if (mode === 'autopilot' && (hasNamedWorkflowMarker(builtState) || hasOwnProperty(builtState, 'target_state_sha256')) && !isExactNamedPause) {
+        throw new Error('named autopilot workflow markers are runtime-owned; only active:false with an exact workflowRunId and optional state digest may pause a run');
       }
 
       // Add metadata
@@ -1055,20 +1076,37 @@ export const stateWriteTool: ToolDefinition<{
         }
       };
       let writtenState: Record<string, unknown> = stateWithMeta;
+      let namedPauseCommitted = false;
       if (mode === 'autopilot' && builtState.active === false) {
         let currentState: Record<string, unknown> | null = null;
         try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled below */ }
         if (hasNamedWorkflowMarker(currentState ?? {})) {
-          if (namedWorkflowRuntimeSupported()) {
-            throw new Error('named autopilot workflow state is runtime-owned; only exact-snapshot emergency pause is allowed without the named runtime');
+          if (!isExactNamedPause || !requestedRunId) {
+            throw new Error('named autopilot workflow state requires active:false with its exact workflowRunId');
           }
-          const snapshot = JSON.stringify(currentState);
-          const written = emergencyMutateStateFileIf(
-            statePath,
-            (current) => JSON.stringify(current) === snapshot && isExactEmergencyNamedMutation(current, requestedRunId),
-            (current) => ({ ...current, active: false, _meta: stateWithMeta._meta }),
-          );
-          if (!written) throw new Error('autopilot run changed before deactivation');
+          if (namedWorkflowRuntimeSupported()) {
+            const result = writeStateFileLockedIf(
+              statePath,
+              (current) => matchesNamedPauseTarget(current, sessionId, requestedRunId, requestedStateDigest),
+              (current) => ({ ...current, active: false }),
+            );
+            if (result !== 'written') {
+              throw new Error(result === 'failed'
+                ? 'state mutation lock unavailable'
+                : 'named autopilot run changed, is stale, or failed integrity validation');
+            }
+            namedPauseCommitted = true;
+          } else {
+            const snapshot = JSON.stringify(currentState);
+            const written = emergencyMutateStateFileIf(
+              statePath,
+              (current) => JSON.stringify(current) === snapshot &&
+                isExactEmergencyNamedMutation(current, requestedRunId) &&
+                (requestedStateDigest === undefined || createHash('sha256').update(JSON.stringify(current)).digest('hex') === requestedStateDigest),
+              (current) => ({ ...current, active: false, _meta: stateWithMeta._meta }),
+            );
+            if (!written) throw new Error('autopilot run changed before deactivation');
+          }
         } else {
           const result = writeStateFileLockedIf(
             statePath,
@@ -1102,7 +1140,9 @@ export const stateWriteTool: ToolDefinition<{
       return {
         content: [{
           type: 'text' as const,
-          text: `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}`
+          text: namedPauseCommitted
+            ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.`
+            : `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}`
         }]
       };
     } catch (error) {

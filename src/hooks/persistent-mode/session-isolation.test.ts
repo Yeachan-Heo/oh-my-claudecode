@@ -1,10 +1,12 @@
+import { createHash } from "crypto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
 import { checkPersistentModes, createHookOutput } from "./index.js";
 import { activateUltrawork, deactivateUltrawork } from "../ultrawork/index.js";
+import { initAutopilot } from "../autopilot/index.js";
 
 function writePendingTodo(tempDir: string, content: string): void {
   mkdirSync(join(tempDir, '.claude'), { recursive: true });
@@ -126,6 +128,41 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
         JSON.stringify({ requested_at: new Date().toISOString() }),
       );
 
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: false,
+        mode: "none",
+      });
+    });
+
+    it("requires an authenticated exact digest before cancelling an active legacy autopilot target", async () => {
+      const sessionId = "legacy-autopilot-cancel-auth";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, "Finish the task", sessionId)!;
+      state.phase = "planning";
+      state.project_path = tempDir;
+      writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(state));
+      const signalPath = join(sessionDir, "cancel-signal-state.json");
+      const signal = (target_state_sha256?: string) => ({
+        active: true,
+        mode: "autopilot",
+        source: "state_clear",
+        requested_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30_000).toISOString(),
+        ...(target_state_sha256 ? { target_state_sha256 } : {}),
+      });
+
+      writeFileSync(signalPath, JSON.stringify(signal()));
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: true,
+        mode: "autopilot",
+      });
+
+      const currentState = JSON.parse(readFileSync(join(sessionDir, "autopilot-state.json"), "utf-8"));
+      writeFileSync(
+        signalPath,
+        JSON.stringify(signal(createHash("sha256").update(JSON.stringify(currentState)).digest("hex"))),
+      );
       await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
         shouldBlock: false,
         mode: "none",

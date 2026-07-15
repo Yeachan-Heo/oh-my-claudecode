@@ -1,6 +1,6 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, lstatSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, dirname, join } from 'path';
 import {
@@ -275,6 +275,82 @@ describe('state-tools', () => {
       });
       expect(markerCreation.isError).toBe(true);
       expect(existsSync(statePath)).toBe(false);
+    });
+    it('pauses only an authenticated exact named run on Linux/flock and preserves every resume field', async () => {
+      if (process.platform !== 'linux' || (!existsSync('/usr/bin/flock') && !existsSync('/bin/flock'))) return;
+      const sessionId = 'named-resume-pause';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const configDir = mkdtempSync(join(tmpdir(), 'state-tools-claude-'));
+      const transcript = join(configDir, 'projects', `${sessionId}.jsonl`);
+      mkdirSync(dirname(transcript), { recursive: true });
+      writeFileSync(transcript, '');
+      const stat = lstatSync(transcript, { bigint: true });
+      const now = new Date().toISOString();
+      const descriptor = { descriptorVersion: 1, workflowName: 'release-flow', profileVersion: 1, stages: ['ralplan', 'execution'] };
+      const state = {
+        active: true,
+        mode: 'autopilot',
+        prompt: 'keep this private task',
+        phase: 'ralplan',
+        session_id: sessionId,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        workflow: { ...descriptor, profileHash: createHash('sha256').update('{"descriptorVersion":1,"profileVersion":1,"stages":["ralplan","execution"],"workflowName":"release-flow"}').digest('hex') },
+        pipelineTracking: {
+          stages: [{ id: 'ralplan', status: 'active', iterations: 0, startedAt: now }, { id: 'execution', status: 'pending', iterations: 0 }],
+          currentStageIndex: 0,
+          trackingRevision: 0,
+          activationBoundary: {
+            transcriptPath: transcript,
+            transcriptRoot: dirname(transcript),
+            transcriptBasename: `${sessionId}.jsonl`,
+            sessionId,
+            byteOffset: 0,
+            fileIdentity: { device: Number(stat.dev), inode: Number(stat.ino), size: Number(stat.size), mtimeNs: stat.mtimeNs.toString(), ctimeNs: stat.ctimeNs.toString(), contentSha256: createHash('sha256').update(readFileSync(transcript)).digest('hex') },
+          },
+          completionObservations: [],
+        },
+      };
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify(state));
+      const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+      try {
+        process.env.CLAUDE_CONFIG_DIR = configDir;
+        const result = await stateWriteTool.handler({
+          mode: 'autopilot',
+          active: false,
+          state: { workflowRunId: state.workflowRunId, target_state_sha256: createHash('sha256').update(JSON.stringify(state)).digest('hex') },
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+        expect(result.isError, result.content[0].text).toBeUndefined();
+        expect(result.content[0].text).toContain('Paused named autopilot workflow');
+        expect(result.content[0].text).not.toContain(state.prompt);
+        expect(JSON.parse(readFileSync(statePath, 'utf8'))).toEqual({ ...state, active: false });
+        writeFileSync(statePath, JSON.stringify(state));
+        const beforeRejectedPause = readFileSync(statePath);
+        const staleDigest = await stateWriteTool.handler({
+          mode: 'autopilot',
+          active: false,
+          state: { workflowRunId: state.workflowRunId, target_state_sha256: '0'.repeat(64) },
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+        expect(staleDigest.isError).toBe(true);
+        expect(readFileSync(statePath)).toEqual(beforeRejectedPause);
+        const forgedMarkerWrite = await stateWriteTool.handler({
+          mode: 'autopilot',
+          active: false,
+          state: { workflowRunId: '22222222-2222-4222-8222-222222222222' },
+          session_id: sessionId,
+          workingDirectory: TEST_DIR,
+        });
+        expect(forgedMarkerWrite.isError).toBe(true);
+        expect(readFileSync(statePath)).toEqual(beforeRejectedPause);
+      } finally {
+        if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+        else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+        rmSync(configDir, { recursive: true, force: true });
+      }
     });
   });
 

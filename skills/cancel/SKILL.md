@@ -277,7 +277,7 @@ Team "{team_name}" cancelled:
 Autopilot handles its own primary-first cleanup including linked ralph and ultraqa.
 
 1. Read autopilot state via `state_read(mode="autopilot", session_id)` to capture the exact current run, including `workflowRunId` when present.
-2. Mark that exact autopilot run inactive first via `state_write(mode="autopilot", session_id, state={active: false, ...existing})`.
+2. Pause that exact run with the narrow mutation `state_write(mode="autopilot", session_id, active=false, state={workflowRunId: "<exact run id>"})`. Do **not** replay or copy the state readback. On Linux with `flock`, the tool revalidates the held run and workflow integrity under its mutation lock before changing only `active` to `false`; it preserves workflow, pipeline tracking, and task identity. `target_state_sha256` may be included only when it is the exact SHA-256 of the current serialized state.
    - If this write fails, stop immediately. Do not clear linked state, cancel signals, or runtime artifacts.
 3. Only after the primary pause commits, check linked ralph via `state_read(mode="ralph", session_id)`:
    - If ralph is active and has `linked_ultrawork: true`, clear ultrawork first and require success.
