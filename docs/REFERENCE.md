@@ -12,9 +12,9 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Plugin directory flags](#plugin-directory-flags)
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
-- [Agents (29 Total)](#agents-29-total)
+- [Agents](#agents)
 - [Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal)
-- [Skills (38 Total)](#skills-38-total)
+- [Skills](#skills)
 - [Slash Commands](#slash-commands)
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
 - [Hooks System](#hooks-system)
@@ -663,7 +663,7 @@ Bounded handoff policy:
 2. For larger payloads, pass a short summary plus the descriptor.
 3. Keep durable content in artifact paths such as `.omc/plans/`, `.omc/prompts/`, and related artifact stores rather than embedding full bodies into queue or status records.
 
-## Agents (29 Total)
+## Agents
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
@@ -682,6 +682,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | **Critique**       | -                       | -                     | `critic`            |
 | **Pre-Planning**   | -                       | -                     | `analyst`           |
 | **Testing**        | -                       | `qa-tester`           | -                   |
+| **Verification**   | -                       | `verifier`            | -                   |
 | **Tracing**        | -                       | `tracer`              | -                   |
 | **Security**       | `security-reviewer-low` | -                     | `security-reviewer` |
 | **Build**          | -                       | `debugger`            | -                   |
@@ -762,7 +763,7 @@ When multiple loops could apply, use this deterministic policy:
 
 For the shorter user-facing chooser, see [Mode Selection Guide](./shared/mode-selection-guide.md#goal-oriented-workflow-selection).
 
-## Skills (38 Total)
+## Skills
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -779,6 +780,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
 | `ccg`                     | Tri-model workflow via `ask codex` + `ask antigravity`, then Claude synthesis | `/oh-my-claudecode:ccg`                     |
 | `configure-notifications` | Configure notification integrations (Telegram, Discord, Slack) via natural language | `/oh-my-claudecode:configure-notifications` |
+| `debug`                   | Diagnose the current OMC session or repo state using logs, traces, and focused reproduction | `/oh-my-claudecode:debug`                   |
 | `deep-dive`               | Two-stage trace → deep-interview pipeline with context handoff   | `/oh-my-claudecode:deep-dive`               |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/deep-interview`                           |
 | `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/oh-my-claudecode:deepinit`                |
@@ -786,7 +788,9 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `hud`                     | Configure HUD/statusline                                         | `/oh-my-claudecode:hud`                     |
 | `skillify`                | Extract reusable skill from session                              | `/oh-my-claudecode:skillify`                |
 | `learner`                 | **Deprecated** compatibility alias for `skillify`                | `/oh-my-claudecode:learner`                 |
+| `local-build-reminder`    | Remind to rebuild OMC after editing TypeScript in a local dev install | Auto-triggered reference only               |
 | `mcp-setup`               | Configure MCP servers                                            | `/oh-my-claudecode:mcp-setup`               |
+| `merge-readiness`         | Post-task merge readiness gate with state-backed explanation report | `/oh-my-claudecode:merge-readiness`         |
 | `omc-doctor`              | Diagnose and fix installation issues                             | `/oh-my-claudecode:omc-doctor`              |
 | `omc-plan`                | Planning workflow (`/plan` safe alias; bundled directory ID is `plan`) | `/oh-my-claudecode:plan`                    |
 | `omc-reference`           | Detailed OMC agent/tools/team/commit reference skill             | Auto-loaded reference only                  |
@@ -797,14 +801,17 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `ralph`                   | Persistence loop until verified completion                       | `/oh-my-claudecode:ralph`                   |
 | `ralplan`                 | Consensus planning alias for `/plan --consensus`                 | `/oh-my-claudecode:ralplan`                 |
 | `release`                 | Automated release workflow                                       | `/oh-my-claudecode:release`                 |
+| `remember`                | Review reusable project knowledge for memory, notepad, or docs   | `/oh-my-claudecode:remember`                |
 | `self-improve`            | Autonomous evolutionary code improvement engine with tournament selection; artifacts are topic-scoped under `.omc/self-improve/topics/<topic-slug>/` by default, with flat `.omc/self-improve/` preserved for legacy single-track resumes | `/oh-my-claudecode:self-improve`    |
 | `setup`                   | Unified setup entrypoint for install, diagnostics, and MCP configuration | `/oh-my-claudecode:setup`              |
 | `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
 | `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
 | `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/oh-my-claudecode:trace`                   |
+| `ultragoal`               | Durable multi-goal workflow with plan/ledger artifacts under `.omc/ultragoal` | `/oh-my-claudecode:ultragoal`               |
 | `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |
 | `ultrawork`               | Maximum parallel throughput mode                                 | `/oh-my-claudecode:ultrawork`               |
+| `verify`                  | Verify that a change really works before claiming completion     | `/oh-my-claudecode:verify`                  |
 | `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons | `/oh-my-claudecode:visual-verdict`          |
 | `wiki`                    | LLM Wiki — persistent markdown knowledge base that compounds across sessions | `/oh-my-claudecode:wiki`           |
 | `writer-memory`           | Agentic memory system for writing projects                       | `/oh-my-claudecode:writer-memory`           |

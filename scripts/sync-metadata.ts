@@ -152,6 +152,21 @@ function getFileSyncConfigs(): FileSync[] {
       ],
     },
     {
+      path: '.claude-plugin/marketplace.json',
+      replacements: [
+        {
+          pattern: /\d+ agents, \d+ skills/g,
+          replacement: () => `${agentCount} agents, ${skillCount} skills`,
+          description: 'Marketplace description counts',
+        },
+        {
+          pattern: /\d+ agents, and \d+ powerful skills/g,
+          replacement: () => `${agentCount} agents, and ${skillCount} powerful skills`,
+          description: 'Plugin description counts',
+        },
+      ],
+    },
+    {
       path: '.github/CLAUDE.md',
       replacements: [
         {
