@@ -392,31 +392,124 @@ describe("Pipeline Orchestrator (with state)", () => {
     });
   });
 
-  it("generates named workflow prompts without legacy expansion or planning fields", () => {
-    const base = initPipeline(testDir, "legacy task")!;
+  it("generates prompts only for structurally valid named workflow state", () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const base = initPipeline(testDir, "legacy task", sessionId)!;
     const named = {
       ...base,
+      phase: "ralplan",
       prompt: "named task",
       workflow: createWorkflowDescriptor("release-flow", {
         version: 1,
         stages: ["ralplan", "execution"],
       })!,
-      pipelineTracking: base.pipeline!,
+      workflowRunId: "22222222-2222-4222-8222-222222222222",
+      pipelineTracking: {
+        stages: [
+          {
+            id: "ralplan" as const,
+            status: "active" as const,
+            iterations: 0,
+            startedAt: new Date().toISOString(),
+          },
+          { id: "execution" as const, status: "pending" as const, iterations: 0 },
+        ],
+        currentStageIndex: 0,
+        trackingRevision: 0,
+        activationBoundary: {
+          transcriptPath: join(testDir, `${sessionId}.jsonl`),
+          transcriptRoot: testDir,
+          transcriptBasename: `${sessionId}.jsonl`,
+          sessionId,
+          byteOffset: 0,
+          fileIdentity: {
+            device: 0,
+            inode: 0,
+            size: 0,
+            mtimeNs: "0",
+            ctimeNs: "0",
+            contentSha256: "0".repeat(64),
+          },
+        },
+        completionObservations: [],
+      },
     } as typeof base;
     delete (named as Partial<typeof named>).pipeline;
     delete (named as Partial<typeof named>).expansion;
     delete (named as Partial<typeof named>).planning;
-    writeAutopilotState(testDir, named);
+    writeAutopilotState(testDir, named, sessionId);
 
-    expect(generatePipelinePrompt(testDir)).toContain(
+    expect(generatePipelinePrompt(testDir, sessionId)).toContain(
       "## PIPELINE STAGE: RALPLAN",
     );
+    expect(generatePipelinePrompt(testDir)).toBeNull();
 
-    expect(advanceStage(testDir)).toEqual({ adapter: null, phase: "failed" });
-    expect(readPipelineTracking(readAutopilotState(testDir)!)).toMatchObject({
-      currentStageIndex: 0,
-      stages: expect.arrayContaining([expect.objectContaining({ id: "ralplan", status: "active" })]),
+    expect(advanceStage(testDir, sessionId)).toEqual({
+      adapter: null,
+      phase: "failed",
     });
+  });
+
+  it.each([
+    ["partial", (state: Record<string, unknown>) => delete state.workflowRunId],
+    ["tampered descriptor", (state: Record<string, unknown>) => {
+      (state.workflow as Record<string, unknown>).profileHash = "0".repeat(64);
+    }],
+    ["mismatched session", (state: Record<string, unknown>) => {
+      state.session_id = "other-session";
+    }],
+    ["corrupt tracking", (state: Record<string, unknown>) => {
+      (state.pipelineTracking as Record<string, unknown>).trackingRevision = 1;
+    }],
+  ])("fails closed for %s named workflow markers", (_kind, corrupt) => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const base = initPipeline(testDir, "legacy task", sessionId)!;
+    const state = {
+      ...base,
+      phase: "ralplan",
+      prompt: "named task",
+      workflow: createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages: ["ralplan", "execution"],
+      })!,
+      workflowRunId: "22222222-2222-4222-8222-222222222222",
+      pipelineTracking: {
+        stages: [
+          {
+            id: "ralplan",
+            status: "active",
+            iterations: 0,
+            startedAt: new Date().toISOString(),
+          },
+          { id: "execution", status: "pending", iterations: 0 },
+        ],
+        currentStageIndex: 0,
+        trackingRevision: 0,
+        activationBoundary: {
+          transcriptPath: join(testDir, `${sessionId}.jsonl`),
+          transcriptRoot: testDir,
+          transcriptBasename: `${sessionId}.jsonl`,
+          sessionId,
+          byteOffset: 0,
+          fileIdentity: {
+            device: 0,
+            inode: 0,
+            size: 0,
+            mtimeNs: "0",
+            ctimeNs: "0",
+            contentSha256: "0".repeat(64),
+          },
+        },
+        completionObservations: [],
+      },
+    } as Record<string, unknown>;
+    delete state.pipeline;
+    delete state.expansion;
+    delete state.planning;
+    corrupt(state);
+    writeAutopilotState(testDir, state as unknown as typeof base, sessionId);
+
+    expect(generatePipelinePrompt(testDir, sessionId)).toBeNull();
   });
 
   describe("getCurrentCompletionSignal", () => {

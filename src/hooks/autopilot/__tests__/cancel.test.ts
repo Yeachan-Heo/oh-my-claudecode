@@ -304,24 +304,38 @@ describe('AutopilotCancel', () => {
       expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: true, workflowRunId: state.workflowRunId });
     });
 
-    it('reports linked cleanup failures after committing the primary mutation', () => {
+    it('retries failed dependent cleanup for an already-paused named run', () => {
       const sessionId = 'dependent-cleanup-failure';
-      initAutopilot(testDir, 'ship it', sessionId);
-      vi.mocked(ralphLoop.readRalphState).mockReturnValueOnce({ active: true, linked_ultrawork: true } as any).mockReturnValueOnce({ active: true, linked_ultrawork: true } as any);
-      vi.mocked(ralphLoop.clearLinkedUltraworkState).mockReturnValueOnce(false).mockReturnValueOnce(false);
+      const state = initAutopilot(testDir, 'ship it', sessionId)!;
+      const transcriptRoot = join(testDir, 'transcripts');
+      const identity = { device: 1, inode: 1, size: 0, mtimeNs: '0', ctimeNs: '0', contentSha256: createHash('sha256').update('').digest('hex') };
+      Object.assign(state, {
+        phase: 'ralplan',
+        prompt: 'ship it',
+        workflow: createWorkflowDescriptor('release-flow', { version: 1, stages: ['ralplan', 'execution'] })!,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        pipelineTracking: {
+          stages: [{ id: 'ralplan', status: 'active', iterations: 0, startedAt: new Date().toISOString() }, { id: 'execution', status: 'pending', iterations: 0 }],
+          currentStageIndex: 0,
+          trackingRevision: 0,
+          activationBoundary: { transcriptPath: join(transcriptRoot, `${sessionId}.jsonl`), transcriptRoot, transcriptBasename: `${sessionId}.jsonl`, sessionId, byteOffset: 0, fileIdentity: identity },
+          completionObservations: [],
+        },
+      });
+      writeAutopilotState(testDir, state, sessionId);
+      vi.mocked(ralphLoop.readRalphState).mockReturnValue({ active: true, linked_ultrawork: true } as any);
+      vi.mocked(ralphLoop.clearLinkedUltraworkState).mockReturnValueOnce(false);
 
       const cancelled = cancelAutopilot(testDir, sessionId);
-      expect(cancelled).toMatchObject({ success: false, preservedState: { active: false } });
+      expect(cancelled).toMatchObject({ success: false, preservedState: { active: false, workflowRunId: state.workflowRunId } });
       expect(cancelled.message).toContain('ultrawork');
       expect(ralphLoop.clearRalphState).not.toHaveBeenCalled();
 
-      const paused = readAutopilotState(testDir, sessionId)!;
-      paused.active = true;
-      writeAutopilotState(testDir, paused, sessionId);
-      const cleared = clearAutopilot(testDir, sessionId);
-      expect(cleared.success).toBe(false);
-      expect(cleared.message).toContain('ultrawork');
-      expect(readAutopilotState(testDir, sessionId)).toBeNull();
+      const retried = cancelAutopilot(testDir, sessionId);
+      expect(retried).toMatchObject({ success: true, preservedState: { active: false, workflowRunId: state.workflowRunId } });
+      expect(readAutopilotState(testDir, sessionId)).toMatchObject({ active: false, workflowRunId: state.workflowRunId });
+      expect(ralphLoop.clearLinkedUltraworkState).toHaveBeenCalledTimes(2);
+      expect(ralphLoop.clearRalphState).toHaveBeenCalledWith(testDir, sessionId);
     });
 
     it('should not clear other session ralph/ultraqa state when sessionId provided', () => {

@@ -31,7 +31,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } from './lib/atomic-write.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
-import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt } from './lib/workflow-profile-runtime.mjs';
+import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
 const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT ||
@@ -1106,7 +1106,7 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       if (terminal) return null;
 
       const resumed = { ...current, active: true };
-      if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
+      if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: takeWorkflowTranscriptFailure(sessionId) || 'workflow_integrity_failure' };
       const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
       const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
       if (!stagePrompt) return { error: 'workflow_integrity_failure' };
@@ -1114,6 +1114,7 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       return { stagePrompt, workflowRunId: resumed.workflowRunId };
     });
     if (result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
+    if (result.value?.error === 'workflow_transcript_record_too_large') throw new Error('workflow_transcript_record_too_large');
     if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
     if (!result.acquired || !result.value?.stagePrompt) return null;
     retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
@@ -1147,7 +1148,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
             } else {
               if (current.workflow.workflowName !== workflow.workflowName) return { error: 'active_workflow_conflict' };
               const resumed = { ...current, active: true };
-              if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: 'workflow_integrity_failure' };
+              if (!isValidWorkflowTrackingState(resumed, sessionId)) return { error: takeWorkflowTranscriptFailure(sessionId) || 'workflow_integrity_failure' };
               const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
               const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
               if (!stagePrompt) return { error: 'workflow_integrity_failure' };
@@ -1161,13 +1162,14 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
 
       }
       const state = createWorkflowState(stateInput);
-      if (!state) return null;
+      if (!state) return { error: takeWorkflowTranscriptFailure(sessionId) || 'workflow_integrity_failure' };
       const stagePrompt = resolveWorkflowStagePrompt(state, workflow.stages[0]);
       if (!stagePrompt) return null;
       atomicWriteFileSync(target, JSON.stringify(state, null, 2));
       return { stagePrompt, workflowRunId: state.workflowRunId };
     });
     if (result.acquired && result.value?.error === 'active_workflow_conflict') throw new Error('an autopilot workflow is already active; run /cancel before activating another workflow');
+    if (result.acquired && result.value?.error === 'workflow_transcript_record_too_large') throw new Error('workflow_transcript_record_too_large');
     if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
     if (result.acquired && result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;

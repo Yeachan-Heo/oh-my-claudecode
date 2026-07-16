@@ -42,6 +42,8 @@ import {
   resolveAutopilotPlanPath,
   resolveOpenQuestionsPlanPath,
 } from "../../config/plan-output.js";
+import { validateNamedWorkflowStateStructure } from "./named-workflow-resume-validator.js";
+
 
 // ============================================================================
 // CONFIGURATION
@@ -589,8 +591,10 @@ export function generatePipelinePrompt(
 ): string | null {
   const state = readAutopilotState(directory, sessionId);
   if (!state) return null;
-
-  const tracking = readPipelineTracking(state);
+  const namedWorkflow = hasNamedWorkflowMarkers(state);
+  const tracking = namedWorkflow
+    ? validateNamedWorkflowStateStructure(state, sessionId)?.tracking ?? null
+    : readPipelineTracking(state);
   if (!tracking) return null;
 
   const adapter = getCurrentStageAdapter(tracking);

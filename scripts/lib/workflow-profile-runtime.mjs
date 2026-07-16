@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'fs';
+import { TextDecoder } from 'util';
 import { homedir } from 'os';
 import { basename, dirname, join, parse, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.mjs';
@@ -13,12 +14,10 @@ const RESERVED_WORKFLOW_NAMES = new Set(['autopilot', 'ralplan', 'execution', 'r
 const TRANSCRIPT_CHUNK_BYTES = 64 * 1024;
 const MAX_JSONL_RECORD_BYTES = 8 * 1024 * 1024;
 export const WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE = 'workflow_transcript_record_too_large';
-let workflowTranscriptFailure = null;
-export function takeWorkflowTranscriptFailure() {
-  const failure = workflowTranscriptFailure;
-  workflowTranscriptFailure = null;
-  return failure;
-}
+const workflowTranscriptFailures = new Map();
+export function takeWorkflowTranscriptFailure(sessionId) { if (!sessionId) return null; const failure = workflowTranscriptFailures.get(sessionId) || null; workflowTranscriptFailures.delete(sessionId); return failure; }
+function clearWorkflowTranscriptFailure(sessionId) { if (sessionId) workflowTranscriptFailures.delete(sessionId); }
+
 
 
 function workflowPlatform() { return process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_PLATFORM ? process.env.OMC_WORKFLOW_TEST_PLATFORM : process.platform; }
@@ -55,7 +54,7 @@ export function resolveWorkflowStagePrompt(state, stageId) {
 function transcriptRoot() { return realpathSync(resolve(getClaudeConfigDir(), 'projects')); }
 function fileIdentity(stat, contentSha256) { return { device: Number(stat.dev), inode: Number(stat.ino), size: Number(stat.size), mtimeNs: stat.mtimeNs.toString(), ctimeNs: stat.ctimeNs.toString(), contentSha256 }; }
 function hashRange(fd, start, end) { const hash = createHash('sha256'); const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES); for (let offset = start; offset < end;) { const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset), offset); if (count <= 0) return null; hash.update(chunk.subarray(0, count)); offset += count; } return hash.digest('hex'); }
-function scanJsonl(fd, start, end, callback) { const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES); let record = Buffer.allocUnsafe(MAX_JSONL_RECORD_BYTES + 1); let recordBytes = 0; let byteOffset = start; let lineNumber = 0; for (let offset = start; offset < end;) { const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset), offset); if (count <= 0) return false; for (let index = 0; index < count; index += 1) { const byte = chunk[index]; if (byte === 0x0a) { const length = recordBytes - (recordBytes > 0 && record[recordBytes - 1] === 0x0d ? 1 : 0); if (length > MAX_JSONL_RECORD_BYTES) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } if (callback && callback(record.subarray(0, length).toString('utf8'), byteOffset, lineNumber) === false) return false; byteOffset += recordBytes + 1; recordBytes = 0; lineNumber += 1; } else { if (recordBytes >= MAX_JSONL_RECORD_BYTES + 1) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } record[recordBytes++] = byte; } } offset += count; } if (recordBytes > 0) { const length = recordBytes - (record[recordBytes - 1] === 0x0d ? 1 : 0); if (length > MAX_JSONL_RECORD_BYTES) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } if (callback && callback(record.subarray(0, length).toString('utf8'), byteOffset, lineNumber) === false) return false; } return true; }
+function scanJsonl(fd, start, end, sessionId, callback, hash) { const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES); const record = Buffer.allocUnsafe(MAX_JSONL_RECORD_BYTES + 1); let recordBytes = 0; let byteOffset = start; let lineNumber = 0; const decodeRecord = length => { try { return new TextDecoder('utf-8', { fatal: true }).decode(record.subarray(0, length)); } catch { return null; } }; const emitRecord = () => { const length = recordBytes - (recordBytes > 0 && record[recordBytes - 1] === 0x0d ? 1 : 0); const line = decodeRecord(length); if (line === null) return false; return !callback || callback(line, byteOffset, lineNumber) !== false; }; for (let offset = start; offset < end;) { const maxRead = recordBytes >= MAX_JSONL_RECORD_BYTES ? 1 : MAX_JSONL_RECORD_BYTES + 1 - recordBytes; const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset, maxRead), offset); if (count <= 0) return false; hash?.update(chunk.subarray(0, count)); for (let index = 0; index < count; index += 1) { const byte = chunk[index]; if (byte === 0x0a) { if (!emitRecord()) return false; byteOffset += recordBytes + 1; recordBytes = 0; lineNumber += 1; } else if ((recordBytes === MAX_JSONL_RECORD_BYTES && byte !== 0x0d) || recordBytes > MAX_JSONL_RECORD_BYTES) { workflowTranscriptFailures.set(sessionId, WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE); return false; } else { record[recordBytes++] = byte; } } offset += count; } return recordBytes === 0 || emitRecord(); }
 function readStableTranscript(path, sessionId) {
   if (!isWorkflowRuntimeSupported() || !existsSync('/proc/self/fd') || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') return null;
   const absolute = resolve(path); const pathRoot = parse(absolute).root; const components = absolute.slice(pathRoot.length).split(sep).filter(Boolean); if (components.length === 0) return null;
@@ -64,10 +63,10 @@ function readStableTranscript(path, sessionId) {
     fd = openSync(pathRoot, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY); const pathIdentity = [];
     for (let index = 0; index < components.length; index += 1) { const isFinal = index === components.length - 1; const nextFd = openSync(`/proc/self/fd/${fd}/${components[index]}`, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (isFinal ? 0 : fsConstants.O_DIRECTORY)); const nextStat = fstatSync(nextFd); pathIdentity.push({ device: Number(nextStat.dev), inode: Number(nextStat.ino) }); if ((isFinal && !nextStat.isFile()) || (!isFinal && !nextStat.isDirectory())) { closeSync(nextFd); return null; } closeSync(fd); fd = nextFd; }
     const before = fstatSync(fd, { bigint: true }); const size = Number(before.size); const canonicalPath = realpathSync(`/proc/self/fd/${fd}`); const root = transcriptRoot(); if (!canonicalPath.startsWith(root + sep) || basename(canonicalPath) !== `${sessionId}.jsonl`) return null;
-    const contentSha256 = hashRange(fd, 0, size); if (!contentSha256 || !scanJsonl(fd, 0, size)) return null;
+    const hash = createHash('sha256'); if (!scanJsonl(fd, 0, size, sessionId, undefined, hash)) return null; const contentSha256 = hash.digest('hex');
     if (process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64) writeFileSync(canonicalPath, Buffer.from(process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64, 'base64'));
     const after = fstatSync(fd, { bigint: true }); if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) return null;
-    const stableFd = fd; const identity = fileIdentity(after, contentSha256); const stable = { fd: stableFd, identity, canonicalPath, pathIdentity, root, hashRange: (start, end) => start >= 0 && end >= start && end <= size ? hashRange(stableFd, start, end) : null, scanJsonl: (start, end, callback) => start >= 0 && end >= start && end <= size ? scanJsonl(stableFd, start, end, callback) : false };
+    const stableFd = fd; const identity = fileIdentity(after, contentSha256); const stable = { fd: stableFd, identity, canonicalPath, pathIdentity, root, hashRange: (start, end) => start >= 0 && end >= start && end <= size ? hashRange(stableFd, start, end) : null, scanJsonl: (start, end, callback) => start >= 0 && end >= start && end <= size ? scanJsonl(stableFd, start, end, sessionId, callback) : false };
     fd = undefined; return stable;
   } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
 }
@@ -76,7 +75,7 @@ function activationBoundary(transcriptPath, sessionId) {
   const transcript = readStableTranscript(transcriptPath, sessionId);
   return transcript ? (() => { try { return Object.freeze({ transcriptPath: transcript.canonicalPath, transcriptRoot: transcript.root, transcriptBasename: basename(transcript.canonicalPath), sessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity }); } finally { closeStableTranscript(transcript); } })() : null;
 }
-export function createWorkflowState({ directory, sessionId, task, workflow, transcriptPath }) { const boundary = typeof transcriptPath === 'string' && transcriptPath ? activationBoundary(transcriptPath, sessionId) : null; if (!boundary) return null; const now = new Date().toISOString(); const stages = workflow.stages.map((id, index) => ({ id, status: index === 0 ? 'active' : 'pending', iterations: 0, ...(index === 0 ? { startedAt: now } : {}) })); return { active: true, mode: 'autopilot', prompt: task, directory, project_dir: directory, project_path: directory, session_id: sessionId, workflowRunId: randomUUID(), started_at: now, updated_at: now, last_checked_at: now, phase: workflow.stages[0], workflow, pipelineTracking: { stages, currentStageIndex: 0, trackingRevision: 0, activationBoundary: boundary, completionObservations: [] } }; }
+export function createWorkflowState({ directory, sessionId, task, workflow, transcriptPath }) { clearWorkflowTranscriptFailure(sessionId); const boundary = typeof transcriptPath === 'string' && transcriptPath ? activationBoundary(transcriptPath, sessionId) : null; if (!boundary) return null; const now = new Date().toISOString(); const stages = workflow.stages.map((id, index) => ({ id, status: index === 0 ? 'active' : 'pending', iterations: 0, ...(index === 0 ? { startedAt: now } : {}) })); return { active: true, mode: 'autopilot', prompt: task, directory, project_dir: directory, project_path: directory, session_id: sessionId, workflowRunId: randomUUID(), started_at: now, updated_at: now, last_checked_at: now, phase: workflow.stages[0], workflow, pipelineTracking: { stages, currentStageIndex: 0, trackingRevision: 0, activationBoundary: boundary, completionObservations: [] } }; }
 function isFiniteInteger(value) { return Number.isSafeInteger(value) && value >= 0; }
 function hasExactKeys(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value)) return false; const actual = Object.keys(value).sort(); const expected = [...keys].sort(); return actual.length === expected.length && actual.every((key, index) => key === expected[index]); }
 function isTimestamp(value) { return typeof value === 'string' && Number.isFinite(Date.parse(value)); }
@@ -100,7 +99,7 @@ function hasAuthenticatedObservation(observation, sessionId, root) {
   } finally { closeStableTranscript(transcript); }
 }
 
-export function isValidWorkflowTrackingState(state, sessionId = state?.session_id) {
+export function isValidWorkflowTrackingState(state, sessionId = state?.session_id) { clearWorkflowTranscriptFailure(sessionId);
   try {
     const workflow = state?.workflow; const tracking = state?.pipelineTracking; const root = transcriptRoot();
     if (typeof state?.prompt !== 'string' || state.prompt.trim().length === 0) return false;
@@ -146,7 +145,7 @@ function assistantText(record) {
   return text.length > 0 ? text.join('') : null;
 }
 function completionEvidence(transcript, start, end, signal, sessionId) { let evidence = null; const valid = transcript.scanJsonl(start, end, (line, byteOffset, lineNumber) => { if (line.trim().length === 0) return false; let record; try { record = JSON.parse(line); } catch { return false; } const text = assistantText(record); const isAssistant = recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null; if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${signal}`) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') }; return true; }); return valid ? evidence : null; }
-export function advanceWorkflowOnStop(state, input, sessionId) {
+export function advanceWorkflowOnStop(state, input, sessionId) { clearWorkflowTranscriptFailure(sessionId);
   const workflow = state?.workflow; const tracking = state?.pipelineTracking;
   if (!isValidWorkflowTrackingState(state, sessionId)) return null;
   const index = tracking.currentStageIndex; const stageId = workflow.stages[index];
@@ -163,13 +162,17 @@ export function advanceWorkflowOnStop(state, input, sessionId) {
   const result = { updated, nextStage, nextStagePrompt, expectedRevision: revision, expectedProfileHash: workflow.profileHash, expectedWorkflowRunId: state.workflowRunId, expectedSessionId: sessionId, expectedStageId: stageId, expectedStageIndex: index, expectedTranscriptPath: absolute, expectedTranscriptIdentity: transcript.identity, expectedTranscriptPathIdentity: transcript.pathIdentity, expectedEvidenceHash: evidence.recordContentSha256 }; closeStableTranscript(transcript); return result;
 }
 export function refreshWorkflowBoundaryForCommit(advance) {
+  clearWorkflowTranscriptFailure(advance.expectedSessionId);
   const transcript = readStableTranscript(advance.expectedTranscriptPath, advance.expectedSessionId);
-  const absolute = transcript?.canonicalPath;
-  if (!transcript || transcript.canonicalPath !== advance.expectedTranscriptPath || canonicalJson(transcript.identity) !== canonicalJson(advance.expectedTranscriptIdentity) || canonicalJson(transcript.pathIdentity) !== canonicalJson(advance.expectedTranscriptPathIdentity)) return false;
-  const observation = advance.updated?.pipelineTracking?.completionObservations?.at(-1);
-  const boundary = observation?.activationBoundary;
-  if (!boundary || transcript.identity.size < boundary.byteOffset) { closeStableTranscript(transcript); return false; }
-  const evidence = completionEvidence(transcript, boundary.byteOffset, transcript.identity.size, SIGNALS[advance.expectedStageId], advance.expectedSessionId);
-  if (!evidence || evidence.recordContentSha256 !== advance.expectedEvidenceHash) { closeStableTranscript(transcript); return false; }
-  advance.updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId: advance.expectedSessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity }); closeStableTranscript(transcript); return true;
+  if (!transcript) return false;
+  try {
+    if (transcript.canonicalPath !== advance.expectedTranscriptPath || canonicalJson(transcript.identity) !== canonicalJson(advance.expectedTranscriptIdentity) || canonicalJson(transcript.pathIdentity) !== canonicalJson(advance.expectedTranscriptPathIdentity)) return false;
+    const observation = advance.updated?.pipelineTracking?.completionObservations?.at(-1);
+    const boundary = observation?.activationBoundary;
+    if (!boundary || transcript.identity.size < boundary.byteOffset) return false;
+    const evidence = completionEvidence(transcript, boundary.byteOffset, transcript.identity.size, SIGNALS[advance.expectedStageId], advance.expectedSessionId);
+    if (!evidence || evidence.recordContentSha256 !== advance.expectedEvidenceHash) return false;
+    advance.updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: transcript.canonicalPath, transcriptRoot: transcript.root, transcriptBasename: basename(transcript.canonicalPath), sessionId: advance.expectedSessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity });
+    return true;
+  } finally { closeStableTranscript(transcript); }
 }

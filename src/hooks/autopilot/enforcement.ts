@@ -288,7 +288,7 @@ export async function checkAutopilot(
   if (hasNamedMarkers) {
     const validated = validateNamedWorkflowState(state, sessionId);
     if (!validated) {
-      const transcriptFailure = takeNamedWorkflowTranscriptFailure();
+      const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
       return {
         shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
         message: transcriptFailure === "workflow_transcript_record_too_large"
@@ -309,9 +309,12 @@ export async function checkAutopilot(
           refreshNamedWorkflowBoundaryForCommit(advanced),
       );
       if (!committed) {
+        const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
         return {
-          shouldBlock: false,
-          message: "workflow_descriptor_integrity_failed",
+          shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+          message: transcriptFailure === "workflow_transcript_record_too_large"
+            ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+            : "workflow_descriptor_integrity_failed",
           phase: state.phase,
         };
       }
@@ -325,7 +328,7 @@ export async function checkAutopilot(
       }
       return generateNamedWorkflowPrompt(committed, workingDir, sessionId);
     }
-    if (takeNamedWorkflowTranscriptFailure() === "workflow_transcript_record_too_large") {
+    if (takeNamedWorkflowTranscriptFailure(sessionId) === "workflow_transcript_record_too_large") {
       return {
         shouldBlock: true,
         message:

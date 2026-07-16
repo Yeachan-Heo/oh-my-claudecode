@@ -75,25 +75,28 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     };
   }
 
-  if (!state.active) {
+  const namedWorkflow = hasNamedWorkflowMarkers(state);
+  if (namedWorkflow && !validNamedWorkflowForMutation(state, sessionId)) {
+    return { success: false, message: 'workflow_descriptor_integrity_failed' };
+  }
+
+  // A named run may already be paused when a previous cancellation committed
+  // the primary mutation but dependent cleanup failed. Retry only that cleanup.
+  if (!state.active && !namedWorkflow) {
     return {
       success: false,
       message: 'Autopilot is not currently active'
     };
   }
 
-
-
-  if (hasNamedWorkflowMarkers(state) && !validNamedWorkflowForMutation(state, sessionId)) {
-    return { success: false, message: 'workflow_descriptor_integrity_failed' };
-  }
-
   // Commit the primary run mutation before deleting any linked lifecycle state.
-  const cancelledState = hasNamedWorkflowMarkers(state)
+  // On a paused named run, the empty exact update acts as a conditional ownership
+  // check without reactivating or otherwise replaying the primary state.
+  const cancelledState = namedWorkflow
     ? updateAutopilotStateIfExact(
         directory,
         state,
-        { active: false },
+        state.active ? { active: false } : {},
         sessionId,
         (current) => validNamedWorkflowForMutation(current, sessionId),
       )
