@@ -358,14 +358,38 @@ async function resolveProjectMemorySummary(directory, projectMemoryModules) {
   return formatContextSummary(memory)?.trim() || '';
 }
 
-// Semantic version comparison (for cache cleanup sorting)
+// Semantic version comparison (for cache cleanup sorting and update checks)
+function parseSemver(version) {
+  if (typeof version !== 'string') return null;
+  const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
+  if (!match) return null;
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
 function semverCompare(a, b) {
-  const pa = a.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-  const pb = b.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (!pa || !pb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  if (pa.prerelease.length === 0 || pb.prerelease.length === 0) {
+    return pb.prerelease.length - pa.prerelease.length;
+  }
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    const aPart = pa.prerelease[i];
+    const bPart = pb.prerelease[i];
+    if (aPart === undefined) return -1;
+    if (bPart === undefined) return 1;
+    if (aPart === bPart) continue;
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
+    if (aNumeric && bNumeric) return Number(aPart) - Number(bPart);
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return aPart.localeCompare(bPart);
   }
   return 0;
 }
@@ -588,6 +612,40 @@ function getLatestPluginCacheVersion() {
   } catch { return null; }
 }
 
+function getMarketplaceCloneVersion() {
+  try {
+    const marketplaceRoot = join(configDir, 'plugins', 'marketplaces', 'omc');
+    if (!existsSync(marketplaceRoot)) return null;
+
+    const marketplaceManifest = readJsonFile(join(marketplaceRoot, '.claude-plugin', 'marketplace.json'));
+    const pluginEntry = Array.isArray(marketplaceManifest?.plugins)
+      ? marketplaceManifest.plugins.find(plugin => plugin?.name === 'oh-my-claudecode')
+      : null;
+    const version = typeof pluginEntry?.version === 'string' ? pluginEntry.version.trim() : '';
+    return parseSemver(version) ? version : null;
+  } catch { return null; }
+}
+
+function writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, source) {
+  try {
+    const dir = join(configDir, '.omc');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(getUpdateCheckCachePath(), JSON.stringify({
+      timestamp: Date.now(),
+      latestVersion,
+      currentVersion,
+      updateAvailable,
+      source,
+    }));
+  } catch {}
+}
+
+function getPluginUpdateChannelVersion() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot || !isManagedPluginCacheRoot(pluginRoot)) return { managed: false, version: null };
+  return { managed: true, version: getMarketplaceCloneVersion() };
+}
+
 // Get plugin version from CLAUDE_PLUGIN_ROOT
 function getPluginVersion() {
   try {
@@ -681,8 +739,23 @@ function shouldNotifyDrift(driftInfo) {
   return true;
 }
 
-// Check npm registry for available update (with 24h cache)
+// Check the actionable update channel for the active install (with 24h npm cache).
+// Plugin marketplace installs update from the marketplace clone (usually origin/main),
+// not from the npm package. Keep those channels separate so HUD/session notices do
+// not advertise npm-only releases that `/plugin marketplace update` cannot install.
 async function checkNpmUpdate(currentVersion) {
+  const marketplaceChannel = getPluginUpdateChannelVersion();
+  if (marketplaceChannel.managed) {
+    const marketplaceVersion = marketplaceChannel.version;
+    if (!marketplaceVersion) {
+      writeUpdateCheckCache(currentVersion, currentVersion, false, 'marketplace-unavailable');
+      return null;
+    }
+    const updateAvailable = semverCompare(marketplaceVersion, currentVersion) > 0;
+    writeUpdateCheckCache(marketplaceVersion, currentVersion, updateAvailable, 'marketplace');
+    return updateAvailable ? { currentVersion, latestVersion: marketplaceVersion } : null;
+  }
+
   const cacheFile = getUpdateCheckCachePath();
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
   const now = Date.now();
@@ -691,7 +764,7 @@ async function checkNpmUpdate(currentVersion) {
   try {
     if (existsSync(cacheFile)) {
       const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
-      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION) {
+      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION && (!cached.source || cached.source === 'npm')) {
         return (cached.updateAvailable && semverCompare(cached.latestVersion, currentVersion) > 0)
           ? { currentVersion, latestVersion: cached.latestVersion }
           : null;
@@ -712,12 +785,7 @@ async function checkNpmUpdate(currentVersion) {
     const latestVersion = data.version;
     const updateAvailable = semverCompare(latestVersion, currentVersion) > 0;
 
-    // Update cache
-    try {
-      const dir = join(configDir, '.omc');
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(cacheFile, JSON.stringify({ timestamp: now, latestVersion, currentVersion, updateAvailable }));
-    } catch {}
+    writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, 'npm');
 
     return updateAvailable ? { currentVersion, latestVersion } : null;
   } catch { return null; } finally { clearTimeout(timeoutId); }
