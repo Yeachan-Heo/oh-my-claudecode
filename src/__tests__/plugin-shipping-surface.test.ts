@@ -391,4 +391,37 @@ describe('plugin shipping surface transaction', () => {
       'required generated runtime artifacts are not tracked at HEAD: bridge/cli.cjs',
     );
   });
+  it('uses the unique merge base when the supplied local base is ahead of HEAD', () => {
+    const fixture = createFixture();
+    const head = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    const tree = git(fixture.root, ['rev-parse', `${head}^{tree}`]).trim();
+    const aheadBase = git(fixture.root, ['commit-tree', tree, '-p', head, '-m', 'base ahead']).trim();
+
+    const result = run(fixture.root, 'check-pr', '--base', aheadBase);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`since ${head}`);
+  });
+
+  it('rejects local check-pr histories without one unique merge base', () => {
+    const fixture = createFixture();
+    const head = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    const tree = git(fixture.root, ['rev-parse', `${head}^{tree}`]).trim();
+    const orphan = git(fixture.root, ['commit-tree', tree, '-m', 'orphan']).trim();
+
+    expect(run(fixture.root, 'check-pr', '--base', orphan).stderr).toContain(
+      'check-pr has no common merge base with HEAD',
+    );
+
+    const a1 = git(fixture.root, ['commit-tree', tree, '-p', head, '-m', 'a1']).trim();
+    const b1 = git(fixture.root, ['commit-tree', tree, '-p', head, '-m', 'b1']).trim();
+    const a2 = git(fixture.root, ['commit-tree', tree, '-p', a1, '-p', b1, '-m', 'a2']).trim();
+    const b2 = git(fixture.root, ['commit-tree', tree, '-p', b1, '-p', a1, '-m', 'b2']).trim();
+    expect(git(fixture.root, ['merge-base', '--all', a2, b2]).trim().split(/\s+/)).toHaveLength(2);
+    git(fixture.root, ['checkout', '--quiet', '--detach', b2]);
+
+    expect(run(fixture.root, 'check-pr', '--base', a2).stderr).toContain(
+      'check-pr has ambiguous merge bases: 2',
+    );
+  });
 });

@@ -153,8 +153,8 @@ jobs:
   no-committed-build-artifacts:
     name: No Committed Build Artifacts
     runs-on: ubuntu-latest
-    # Contributor PRs remain artifact-free. Generated changes are accepted only
-    # for the active owner’s signed same-repository PR after exact closure validation.
+    # This candidate-side classifier is credential-free containment only; it
+    # never authorizes generated artifacts or supplies merge approval.
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -167,65 +167,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
-      - name: Install dependencies without lifecycle mutation
-        run: npm ci --ignore-scripts
-
-      - name: Reject unverified generated changes
+      - name: Hold candidate generated changes
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
-          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          : "${BASE_SHA:?Missing pull-request base SHA}"
-
-          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD -- dist/ bridge/)
-          if [ -z "$CHANGED" ]; then
-            echo "✅ No committed dist/ or bridge/ changes."
-            exit 0
-          fi
-
-          : "${HEAD_SHA:?Missing pull-request head SHA}"
-          : "${HEAD_REPOSITORY:?Missing pull-request head repository}"
-          : "${PR_AUTHOR_ASSOCIATION:?Missing pull-request author association}"
-          : "${PR_AUTHOR_LOGIN:?Missing pull-request author login}"
-          : "${REPOSITORY:?Missing repository name}"
-          : "${GH_TOKEN:?Missing GitHub token}"
-          : "${PR_NUMBER:?Missing pull-request number}"
-
-          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid pull-request base SHA."; exit 1; }
-          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid pull-request head SHA."; exit 1; }
-          [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || { echo "::error::Generated artifacts are not accepted from fork PRs."; exit 1; }
-          [[ "$PR_AUTHOR_ASSOCIATION" == "OWNER" ]] || { echo "::error::Generated artifacts require the repository owner."; exit 1; }
-          [[ "$PR_AUTHOR_LOGIN" == "Yeachan-Heo" ]] || { echo "::error::Generated artifacts require the active owner login."; exit 1; }
-          [[ "$(git rev-parse HEAD)" == "$HEAD_SHA" ]] || { echo "::error::Checked-out commit does not match the pull-request head."; exit 1; }
-
-          LIVE_PR=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '[.base.sha, .head.sha, .head.repo.full_name, .user.login, .author_association] | @tsv')
-          IFS=$'\t' read -r LIVE_BASE_SHA LIVE_HEAD_SHA LIVE_HEAD_REPOSITORY LIVE_AUTHOR_LOGIN LIVE_AUTHOR_ASSOCIATION <<< "$LIVE_PR"
-          [[ "$LIVE_BASE_SHA" == "$BASE_SHA" && "$LIVE_HEAD_SHA" == "$HEAD_SHA" ]] || { echo "::error::Pull-request base or head changed during authorization."; exit 1; }
-          [[ "$LIVE_HEAD_REPOSITORY" == "$REPOSITORY" && "$LIVE_AUTHOR_LOGIN" == "$PR_AUTHOR_LOGIN" && "$LIVE_AUTHOR_ASSOCIATION" == "$PR_AUTHOR_ASSOCIATION" ]] || { echo "::error::Live pull-request identity does not match the checked event."; exit 1; }
-
-          REPOSITORY_OWNER="${REPOSITORY%%/*}"
-          REPOSITORY_NAME="${REPOSITORY#*/}"
-          COMMIT_SIGNATURE=$(gh api graphql \
-            -f query='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{oid signature{isValid signer{login}}}}}}' \
-            -F owner="$REPOSITORY_OWNER" -F name="$REPOSITORY_NAME" -F oid="$HEAD_SHA" \
-            --jq '[.data.repository.object.oid, .data.repository.object.signature.isValid, .data.repository.object.signature.signer.login] | @tsv')
-          IFS=$'\t' read -r API_SHA SIGNATURE_VERIFIED SIGNER_LOGIN <<< "$COMMIT_SIGNATURE"
-          [[ "$API_SHA" == "$HEAD_SHA" && "$SIGNATURE_VERIFIED" == "true" && "$SIGNER_LOGIN" == "Yeachan-Heo" ]] || {
-            echo "::error::Generated artifacts require an exact-head signature by the active repository owner."
-            exit 1
-          }
-
-          npm run plugin:shipping:check-pr -- --base "$BASE_SHA"
-          echo "✅ Verified maintainer-owned generated runtime closure."
+        run: node scripts/ci/check-no-committed-build-artifacts.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
 
   multirepo-paths-gate:
     name: Multi-repo Path Gate (AST-grep)

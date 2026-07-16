@@ -24,38 +24,30 @@ describe('plugin shipping release guidance', () => {
     );
   });
 
-  it('keeps contributor artifact denial fail closed and limits the exception to a signed maintainer closure', () => {
+  it('keeps candidate artifact containment non-authoritative and credential-free', () => {
     expect(PACKAGE_JSON.scripts?.['plugin:shipping:check-pr']).toBe(
       'node scripts/plugin-shipping-surface.mjs check-pr',
     );
     expect(CI_WORKFLOW).toMatch(/permissions:\n\s+contents: read/);
     expect(CI_WORKFLOW).not.toMatch(/pull-requests:\s*write/);
     expect(CI_WORKFLOW).toContain('ref: ${{ github.event.pull_request.head.sha }}');
-    expect(CI_WORKFLOW).toContain('run: npm ci --ignore-scripts');
-    expect(CI_WORKFLOW).toContain('set -euo pipefail');
     expect(CI_WORKFLOW).toContain(
-      'CHANGED=$(git diff --name-only "$BASE_SHA" HEAD -- dist/ bridge/)',
+      'node scripts/ci/check-no-committed-build-artifacts.mjs --base "$BASE_SHA" --head "$HEAD_SHA"',
     );
-    expect(CI_WORKFLOW).not.toContain(
-      'git diff --name-only "$BASE_SHA" HEAD -- dist/ bridge/ || true',
-    );
-    expect(CI_WORKFLOW).toMatch(
-      /if \[ -z "\$CHANGED" \]; then[\s\S]*?exit 0[\s\S]*?\[\[ "\$HEAD_REPOSITORY" == "\$REPOSITORY" \]\]/,
-    );
-    expect(CI_WORKFLOW).toContain('[[ "$PR_AUTHOR_ASSOCIATION" == "OWNER" ]]');
-    expect(CI_WORKFLOW).toContain('[[ "$PR_AUTHOR_LOGIN" == "Yeachan-Heo" ]]');
-    expect(CI_WORKFLOW).toContain('[[ "$(git rev-parse HEAD)" == "$HEAD_SHA" ]]');
-    expect(CI_WORKFLOW).toContain('gh api "repos/$REPOSITORY/pulls/$PR_NUMBER"');
-    expect(CI_WORKFLOW).toContain('Pull-request base or head changed during authorization.');
-    expect(CI_WORKFLOW).toContain('gh api graphql');
-    expect(CI_WORKFLOW).toContain('signature{isValid signer{login}}');
-    expect(CI_WORKFLOW).toContain('"$SIGNER_LOGIN" == "Yeachan-Heo"');
-    expect(CI_WORKFLOW).toContain('[[ "$API_SHA" == "$HEAD_SHA" && "$SIGNATURE_VERIFIED" == "true" && "$SIGNER_LOGIN" == "Yeachan-Heo" ]]');
-    expect(CI_WORKFLOW).toContain('npm run plugin:shipping:check-pr -- --base "$BASE_SHA"');
-    expect(CONTRIBUTING).toContain('### Do NOT commit `dist/` or `bridge/` in contributor PRs');
-    expect(CONTRIBUTING).toContain('fails every contributor PR whose diff touches `dist/` or `bridge/`');
-    expect(CONTRIBUTING).toContain('cryptographically signed by that owner');
-    expect(CONTRIBUTING).toContain('This is not available to contributors.');
+    expect(CI_WORKFLOW).not.toContain('npm ci --ignore-scripts');
+    expect(CI_WORKFLOW).not.toContain('GH_TOKEN');
+    expect(CI_WORKFLOW).not.toContain('gh api');
+    expect(CI_WORKFLOW).not.toContain('PR_AUTHOR_ASSOCIATION');
+    expect(CI_WORKFLOW).not.toContain('plugin:shipping:check-pr');
+    expect(CI_WORKFLOW).not.toContain('claude-md-coordinator');
+    expect(CONTRIBUTING).toContain('credential-free, candidate-side classifier');
+    expect(CONTRIBUTING).toContain('non-authoritative for every contributor and maintainer');
+    expect(CONTRIBUTING).toContain('workflow root **W**');
+    expect(CONTRIBUTING).toContain('verifier/manifest root **B**');
+    expect(CONTRIBUTING).toContain('final PR head **H**');
+    expect(CONTRIBUTING).toContain('fresh eligible event');
+    expect(CONTRIBUTING).toContain('remove this ordinary candidate check from required checks or supersede it');
+    expect(CONTRIBUTING).not.toContain('cryptographically signed by that owner');
     expect(CONTRIBUTING).not.toContain('plugin:shipping:stage');
   });
 

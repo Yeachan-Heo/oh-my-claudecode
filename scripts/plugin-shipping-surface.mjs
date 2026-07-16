@@ -471,18 +471,29 @@ export function buildStageArguments(paths) {
   return ['add', '-f', '--', ...normalized];
 }
 
+// This local maintainer diagnostic executes candidate runtime/coordinator content.
+// It is never an authorization check for pull requests.
 function requireCheckPrBase(root, base) {
   if (typeof base !== 'string' || !/^[0-9a-f]{40}$/i.test(base)) {
     fail('check-pr base must be a 40-character hexadecimal commit SHA');
   }
-  const result = git(root, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { allowFailure: true });
-  if (result.status !== 0) fail(`check-pr base commit is not available: ${base}`);
+  const baseCommit = git(root, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { allowFailure: true });
+  if (baseCommit.status !== 0) fail(`check-pr base commit is not available: ${base}`);
   const head = git(root, ['rev-parse', 'HEAD']).stdout.trim().toLowerCase();
-  const normalized = base.toLowerCase();
-  if (normalized === head) fail('check-pr base must differ from HEAD');
-  const ancestor = git(root, ['merge-base', '--is-ancestor', normalized, head], { allowFailure: true });
-  if (ancestor.status !== 0) fail(`check-pr base is not an ancestor of HEAD: ${base}`);
-  return normalized;
+  const mergeBaseResult = git(root, ['merge-base', '--all', baseCommit.stdout.trim(), head], { allowFailure: true });
+  const mergeBases = mergeBaseResult.status === 0
+    ? mergeBaseResult.stdout.trim().split(/\s+/).filter(Boolean)
+    : [];
+  if (mergeBases.length === 0) fail('check-pr has no common merge base with HEAD');
+  if (mergeBases.length !== 1) fail(`check-pr has ambiguous merge bases: ${mergeBases.length}`);
+  const mergeBase = git(root, ['rev-parse', '--verify', '--quiet', `${mergeBases[0]}^{commit}`], { allowFailure: true });
+  if (mergeBase.status !== 0) fail('check-pr merge base commit is not available');
+  const canonicalMergeBase = mergeBase.stdout.trim().toLowerCase();
+  const baseAncestor = git(root, ['merge-base', '--is-ancestor', canonicalMergeBase, baseCommit.stdout.trim()], { allowFailure: true });
+  if (baseAncestor.status !== 0) fail('check-pr merge base is not an ancestor of the supplied base');
+  const headAncestor = git(root, ['merge-base', '--is-ancestor', canonicalMergeBase, head], { allowFailure: true });
+  if (headAncestor.status !== 0) fail('check-pr merge base is not an ancestor of HEAD');
+  return canonicalMergeBase;
 }
 
 function requiredGeneratedPaths(surface) {
