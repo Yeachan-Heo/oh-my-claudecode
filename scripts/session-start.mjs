@@ -522,9 +522,11 @@ function compactBudgetedText(text, maxChars) {
 function formatUpdateNoticeForUser(updateInfo, options = {}) {
   const latestVersion = updateInfo?.latestVersion || 'latest';
   const currentVersion = updateInfo?.currentVersion || 'unknown';
-  const action = options.autoUpgradePrompt === false
-    ? 'To update later, run: omc update'
-    : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode';
+  const action = updateInfo?.source === 'marketplace'
+    ? 'To update the plugin channel, run: /plugin marketplace update omc && /omc-setup'
+    : (options.autoUpgradePrompt === false
+      ? 'To update later, run: omc update'
+      : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode');
   return `[OMC UPDATE AVAILABLE] oh-my-claudecode v${latestVersion} is available (current: v${currentVersion}). ${action}`;
 }
 
@@ -685,13 +687,16 @@ function detectVersionDrift() {
   const pluginVersion = getPluginVersion();
   const npmVersion = getNpmVersion();
   const claudeMdVersion = getClaudeMdVersion();
+  const marketplaceChannel = getPluginUpdateChannelVersion();
 
   // Need at least plugin version to detect drift
   if (!pluginVersion) return null;
 
   const drift = [];
 
-  if (npmVersion && npmVersion !== pluginVersion) {
+  // Managed plugin installs are intentionally governed by the marketplace clone,
+  // so a newer npm CLI/cache version is not proof that the plugin channel can act.
+  if (!marketplaceChannel.managed && npmVersion && npmVersion !== pluginVersion) {
     drift.push({ component: 'npm package (omc CLI)', current: npmVersion, expected: pluginVersion });
   }
 
@@ -711,7 +716,13 @@ function detectVersionDrift() {
 
   if (drift.length === 0) return null;
 
-  return { pluginVersion, npmVersion, claudeMdVersion, drift };
+  return {
+    pluginVersion,
+    npmVersion,
+    claudeMdVersion,
+    drift,
+    source: marketplaceChannel.managed ? 'marketplace' : 'npm',
+  };
 }
 
 // Check if we should notify (once per unique drift combination)
@@ -753,7 +764,7 @@ async function checkNpmUpdate(currentVersion) {
     }
     const updateAvailable = semverCompare(marketplaceVersion, currentVersion) > 0;
     writeUpdateCheckCache(marketplaceVersion, currentVersion, updateAvailable, 'marketplace');
-    return updateAvailable ? { currentVersion, latestVersion: marketplaceVersion } : null;
+    return updateAvailable ? { currentVersion, latestVersion: marketplaceVersion, source: 'marketplace' } : null;
   }
 
   const cacheFile = getUpdateCheckCachePath();
@@ -766,7 +777,7 @@ async function checkNpmUpdate(currentVersion) {
       const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
       if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION && (!cached.source || cached.source === 'npm')) {
         return (cached.updateAvailable && semverCompare(cached.latestVersion, currentVersion) > 0)
-          ? { currentVersion, latestVersion: cached.latestVersion }
+          ? { currentVersion, latestVersion: cached.latestVersion, source: 'npm' }
           : null;
       }
     }
@@ -787,7 +798,7 @@ async function checkNpmUpdate(currentVersion) {
 
     writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, 'npm');
 
-    return updateAvailable ? { currentVersion, latestVersion } : null;
+    return updateAvailable ? { currentVersion, latestVersion, source: 'npm' } : null;
   } catch { return null; } finally { clearTimeout(timeoutId); }
 }
 
@@ -917,7 +928,9 @@ async function main() {
       for (const d of driftInfo.drift) {
         driftMsg += `${d.component}: ${d.current} (expected ${d.expected})\n`;
       }
-      driftMsg += `\nRun 'omc update' to sync all components.`;
+      driftMsg += driftInfo.source === 'marketplace'
+        ? `\nRun '/plugin marketplace update omc && /omc-setup' to sync plugin-managed components.`
+        : `\nRun 'omc update' to sync all components.`;
 
       messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
     }

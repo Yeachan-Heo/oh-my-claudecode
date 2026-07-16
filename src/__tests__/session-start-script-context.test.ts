@@ -501,6 +501,63 @@ ${'- oversized startup guidance\n'.repeat(700)}
     expect(output.systemMessage).toContain('[OMC UPDATE AVAILABLE]');
     expect(output.systemMessage).toContain('v4.15.4');
     expect(output.systemMessage).not.toContain('4.15.5');
+    expect(output.systemMessage).toContain('/plugin marketplace update omc && /omc-setup');
+    expect(output.systemMessage).not.toContain('/update');
+  });
+
+  it('does not emit npm-channel drift guidance when managed marketplace plugin is current', () => {
+    const claudeDir = join(fakeHome, '.claude');
+    const pluginRoot = join(claudeDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.15.4');
+    const marketplaceRoot = join(claudeDir, 'plugins', 'marketplaces', 'omc');
+    mkdirSync(join(claudeDir, '.omc'), { recursive: true });
+    mkdirSync(join(claudeDir, 'hud'), { recursive: true });
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(join(marketplaceRoot, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '4.15.4', type: 'module' }));
+    writeFileSync(join(marketplaceRoot, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+      plugins: [{ name: 'oh-my-claudecode', version: '4.15.4' }],
+    }));
+    writeFileSync(join(claudeDir, '.omc-version.json'), JSON.stringify({ version: '4.15.5' }));
+    writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
+    writeFileSync(
+      join(claudeDir, '.omc', 'update-check.json'),
+      JSON.stringify({
+        timestamp: Date.now(),
+        latestVersion: '4.15.5',
+        currentVersion: '4.15.4',
+        updateAvailable: true,
+        source: 'npm',
+      }),
+    );
+
+    const result = spawnSync(NODE, [SCRIPT_PATH], {
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: 'session-marketplace-current-npm-newer',
+        cwd: fakeProject,
+      }),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        OMC_NOTIFY: '0',
+      },
+      timeout: 15000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const output = JSON.parse(result.stdout) as {
+      systemMessage?: string;
+      hookSpecificOutput?: { additionalContext?: string };
+    };
+    const combined = `${output.systemMessage ?? ''}\n${output.hookSpecificOutput?.additionalContext ?? ''}`;
+    expect(combined).not.toContain('[OMC VERSION DRIFT DETECTED]');
+    expect(combined).not.toContain("Run 'omc update'");
+    expect(combined).not.toContain('4.15.5');
   });
 
 });
