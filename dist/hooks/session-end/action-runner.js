@@ -14,6 +14,7 @@ function runnerEnvironment(actionName) {
     const keys = actionName === 'callback' || actionName === 'notification' ? [...baseKeys, ...notificationKeys] : actionName === 'openclaw' ? [...baseKeys, 'OMC_OPENCLAW'] : baseKeys;
     return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
+const POST_KILL_SETTLE_MS = 250;
 /** Each deferred action runs in its own detached process group. The manifest remains the only authority for claim/result transitions. */
 export async function runSessionEndAction(context, _execute) {
     const runPath = runDirectory(context);
@@ -38,11 +39,19 @@ export async function runSessionEndAction(context, _execute) {
             child.once('error', () => settleChild(null));
         });
         let deadlineTermination;
+        let resolveTermination;
+        const terminationFinished = new Promise((resolve) => { resolveTermination = resolve; });
         const terminate = async () => {
-            await killProcessTree(child.pid, 'SIGKILL');
-            await childExit;
+            const postKillWait = new Promise((resolve) => {
+                const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+                timer.unref();
+            });
+            await Promise.race([Promise.resolve(killProcessTree(child.pid, 'SIGKILL')).catch(() => false), postKillWait]);
+            await Promise.race([childExit, postKillWait]);
         };
-        const timeout = setTimeout(() => { deadlineTermination ??= terminate(); }, Math.max(1, context.deadlineAt - Date.now()));
+        const timeout = setTimeout(() => {
+            deadlineTermination ??= terminate().finally(resolveTermination);
+        }, Math.max(1, context.deadlineAt - Date.now()));
         const identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
         if (!identity) {
             clearTimeout(timeout);
@@ -60,12 +69,16 @@ export async function runSessionEndAction(context, _execute) {
             await terminate();
             return { code: 'runner-claim-lost', completed: false };
         }
-        const code = await childExit;
+        const terminal = await Promise.race([
+            childExit.then(code => ({ code, terminated: false })),
+            terminationFinished.then(() => ({ code: null, terminated: true })),
+        ]);
         clearTimeout(timeout);
         await deadlineTermination;
-        const completed = code === 0 && !deadlineTermination;
-        atomicWriteJsonSync(path.join(runPath, 'result.json'), { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completedAt: new Date().toISOString() });
-        return { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completed };
+        const completed = terminal.code === 0 && !terminal.terminated && !deadlineTermination;
+        const code = completed ? 'completed' : deadlineTermination || terminal.terminated || terminal.code === null ? 'runner-deadline' : `runner-exit-${terminal.code}`;
+        atomicWriteJsonSync(path.join(runPath, 'result.json'), { code, completedAt: new Date().toISOString() });
+        return { code, completed };
     }
     catch (error) {
         const code = error instanceof Error ? error.name || 'action-failed' : 'action-failed';

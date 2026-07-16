@@ -26795,6 +26795,18 @@ function recoverPreparedCoreProducer(directory, sessionId) {
     if (job.phase === "collecting") job.phase = "ready";
   });
 }
+function failClosedMissingCoreProducer(directory, sessionId) {
+  return mutateLatest(directory, sessionId, (job) => {
+    if (job.producers.core.state !== "absent" || !["sealed", "no-op"].includes(job.producers.wiki.state) || Date.now() < Date.parse(job.producerGraceExpiresAt)) return;
+    job.producers.core = { state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== "pending" && action.status !== "retryable") continue;
+      action.status = "expired";
+      action.lastOutcomeCode = action.class === "required" ? "required-core-producer-absent" : "best-effort-core-producer-absent";
+    }
+    if (job.phase === "collecting") job.phase = "ready";
+  });
+}
 var fs11, path16, import_crypto17, ACTIONS, TEST_PRODUCER_GRACE_ENV, PRODUCER_GRACE_MS, REQUIRED_ACTION_EXECUTION_MS, BEST_EFFORT_ACTION_EXECUTION_MS, REQUIRED_ACTION_MAX_ATTEMPTS, LOCK_WAIT, DISCOVERY_FILE;
 var init_cleanup_manifest = __esm({
   "src/hooks/session-end/cleanup-manifest.ts"() {
@@ -26855,12 +26867,20 @@ async function runSessionEndAction(context, _execute) {
       child.once("error", () => settleChild(null));
     });
     let deadlineTermination;
+    let resolveTermination;
+    const terminationFinished = new Promise((resolve32) => {
+      resolveTermination = resolve32;
+    });
     const terminate = async () => {
-      await killProcessTree(child.pid, "SIGKILL");
-      await childExit;
+      const postKillWait = new Promise((resolve32) => {
+        const timer = setTimeout(resolve32, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+        timer.unref();
+      });
+      await Promise.race([Promise.resolve(killProcessTree(child.pid, "SIGKILL")).catch(() => false), postKillWait]);
+      await Promise.race([childExit, postKillWait]);
     };
     const timeout = setTimeout(() => {
-      deadlineTermination ??= terminate();
+      deadlineTermination ??= terminate().finally(resolveTermination);
     }, Math.max(1, context.deadlineAt - Date.now()));
     const identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
     if (!identity) {
@@ -26879,12 +26899,16 @@ async function runSessionEndAction(context, _execute) {
       await terminate();
       return { code: "runner-claim-lost", completed: false };
     }
-    const code = await childExit;
+    const terminal = await Promise.race([
+      childExit.then((code2) => ({ code: code2, terminated: false })),
+      terminationFinished.then(() => ({ code: null, terminated: true }))
+    ]);
     clearTimeout(timeout);
     await deadlineTermination;
-    const completed = code === 0 && !deadlineTermination;
-    atomicWriteJsonSync(path17.join(runPath, "result.json"), { code: completed ? "completed" : deadlineTermination ? "runner-deadline" : code === null ? "runner-deadline" : `runner-exit-${code}`, completedAt: (/* @__PURE__ */ new Date()).toISOString() });
-    return { code: completed ? "completed" : deadlineTermination ? "runner-deadline" : code === null ? "runner-deadline" : `runner-exit-${code}`, completed };
+    const completed = terminal.code === 0 && !terminal.terminated && !deadlineTermination;
+    const code = completed ? "completed" : deadlineTermination || terminal.terminated || terminal.code === null ? "runner-deadline" : `runner-exit-${terminal.code}`;
+    atomicWriteJsonSync(path17.join(runPath, "result.json"), { code, completedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    return { code, completed };
   } catch (error2) {
     const code = error2 instanceof Error ? error2.name || "action-failed" : "action-failed";
     try {
@@ -26925,7 +26949,7 @@ async function runActionRunnerEntrypoint() {
     process.exitCode = 1;
   }
 }
-var fs12, path17, import_child_process21, import_url11, RUNNER_ARG;
+var fs12, path17, import_child_process21, import_url11, RUNNER_ARG, POST_KILL_SETTLE_MS;
 var init_action_runner = __esm({
   "src/hooks/session-end/action-runner.ts"() {
     "use strict";
@@ -26938,6 +26962,7 @@ var init_action_runner = __esm({
     init_cleanup_manifest();
     init_worktree_paths();
     RUNNER_ARG = "--omc-session-end-action-runner";
+    POST_KILL_SETTLE_MS = 250;
     void runActionRunnerEntrypoint();
   }
 });
@@ -46088,7 +46113,7 @@ async function reapIfProvenStale(payload, deadlineAt) {
 function reschedulePendingWorker(payload, job) {
   if (!job || job.phase === "complete") return;
   const retryableAttempts = Object.values(job.actions).filter((action) => action.status === "retryable").map((action) => action.attempts);
-  const awaitingProducerGrace = job.producers.core.state === "prepared" && job.producers.wiki.state === "absent";
+  const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt) && (job.producers.core.state === "prepared" && job.producers.wiki.state === "absent" || job.producers.core.state === "absent" && ["sealed", "no-op"].includes(job.producers.wiki.state));
   const delay = awaitingProducerGrace ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now()) : retryableAttempts.length > 0 ? Math.min(3e4, 250 * 2 ** Math.min(Math.max(...retryableAttempts), 7)) : 250;
   setTimeout(() => {
     void processSessionEndWorker(payload);
@@ -46109,6 +46134,7 @@ async function processSessionEndWorker(payload) {
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {
     recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+    failClosedMissingCoreProducer(payload.directory, payload.sessionId);
     admitted = readSessionEndJob(payload.directory, payload.sessionId);
   }
   let producerReady = Boolean(admitted && ["sealed", "no-op"].includes(admitted.producers.core.state) && ["sealed", "no-op"].includes(admitted.producers.wiki.state));

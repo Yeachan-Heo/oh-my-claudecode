@@ -27,7 +27,7 @@ vi.mock('../index.js', () => actions);
 vi.mock('../../../platform/process-utils.js', () => processIdentity);
 vi.mock('../action-runner.js', () => actionRunner);
 
-import { mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest } from '../cleanup-manifest.js';
+import { isManifestTerminal, mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
 import { processSessionEndWorker, reconcileSessionEndJobs } from '../worker.js';
 
 const directories: string[] = [];
@@ -135,6 +135,42 @@ describe('SessionEnd durable worker', () => {
     expect(Date.parse(manifest.bestEffortDeadlineAt)).toBeGreaterThan(Date.parse(manifest.producerGraceExpiresAt));
     expect(actions.runSessionEndCallbacks).toHaveBeenCalledTimes(1);
     expect(actions.runSessionEndNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed after grace when a wiki-first manifest never receives core, without a 250ms recovery loop', async () => {
+    vi.useFakeTimers();
+    const directory = project();
+    const sessionId = 'wiki-first-core-missing';
+    expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
+    const initial = readSessionEndJob(directory, sessionId)!;
+    expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
+      job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    })).not.toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      phase: 'recoverable-failure',
+      producers: { core: { state: 'absent' }, wiki: { state: 'no-op' } },
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.runAllTimersAsync();
+
+    const manifest = readSessionEndJob(directory, sessionId)!;
+    expect(manifest).toMatchObject({
+      phase: 'complete',
+      owner: null,
+      producers: { core: { state: 'no-op', sealedBy: 'recovery' }, wiki: { state: 'no-op' } },
+      actions: {
+        'foreground-cleanup': { status: 'expired', lastOutcomeCode: 'required-core-producer-absent' },
+        'team-cleanup': { status: 'expired', lastOutcomeCode: 'required-core-producer-absent' },
+        callback: { status: 'expired', lastOutcomeCode: 'best-effort-core-producer-absent' },
+        notification: { status: 'expired', lastOutcomeCode: 'best-effort-core-producer-absent' },
+      },
+    });
+    expect(isManifestTerminal(manifest)).toBe(true);
+    expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([]);
   });
 
 });

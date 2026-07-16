@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease } from './cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease } from './cleanup-manifest.js';
 import { runSessionEndAction } from './action-runner.js';
 import { armSessionEndActionWatchdog } from './action-watchdog.js';
 import { getProcessStartIdentity, isProcessIdentityLive } from '../../platform/process-utils.js';
@@ -68,7 +68,9 @@ function reschedulePendingWorker(payload, job) {
     if (!job || job.phase === 'complete')
         return;
     const retryableAttempts = Object.values(job.actions).filter(action => action.status === 'retryable').map(action => action.attempts);
-    const awaitingProducerGrace = job.producers.core.state === 'prepared' && job.producers.wiki.state === 'absent';
+    const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt)
+        && ((job.producers.core.state === 'prepared' && job.producers.wiki.state === 'absent')
+            || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state)));
     const delay = awaitingProducerGrace
         ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now())
         : retryableAttempts.length > 0
@@ -93,6 +95,7 @@ export async function processSessionEndWorker(payload) {
     const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
     if (admitted && graceExpired) {
         recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+        failClosedMissingCoreProducer(payload.directory, payload.sessionId);
         admitted = readSessionEndJob(payload.directory, payload.sessionId);
     }
     let producerReady = Boolean(admitted && ['sealed', 'no-op'].includes(admitted.producers.core.state) && ['sealed', 'no-op'].includes(admitted.producers.wiki.state));

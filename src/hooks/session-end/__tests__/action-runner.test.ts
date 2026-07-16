@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 const processUtils = vi.hoisted(() => ({
   getProcessStartIdentity: vi.fn(),
-  killProcessTree: vi.fn(async () => undefined),
+  killProcessTree: vi.fn(async () => true),
 }));
 const manifest = vi.hoisted(() => ({ markSessionEndActionRunner: vi.fn(() => ({})) }));
 
@@ -69,7 +69,7 @@ describe('SessionEnd action runner', () => {
     childProcess.spawn.mockReturnValue(child);
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
     let finishKill!: () => void;
-    processUtils.killProcessTree.mockImplementation(() => new Promise<undefined>((resolve) => { finishKill = () => resolve(undefined); }));
+    processUtils.killProcessTree.mockImplementation(() => new Promise<boolean>((resolve) => { finishKill = () => resolve(true); }));
     const result = runSessionEndAction({ ...context(directory), deadlineAt: Date.now() + 10 }, async () => undefined);
 
     await vi.advanceTimersByTimeAsync(10);
@@ -82,6 +82,22 @@ describe('SessionEnd action runner', () => {
 
     finishKill();
     await expect(result).resolves.toEqual({ code: 'runner-deadline', completed: false });
+  });
+
+  it('returns after the post-kill deadline when Windows-style tree termination fails and the child never exits', async () => {
+    vi.useFakeTimers();
+    const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+    directories.push(directory);
+    const child = Object.assign(new EventEmitter(), { pid: 12348 });
+    childProcess.spawn.mockReturnValue(child);
+    processUtils.getProcessStartIdentity.mockResolvedValue('identity');
+    processUtils.killProcessTree.mockResolvedValue(false);
+
+    const result = runSessionEndAction({ ...context(directory), deadlineAt: Date.now() + 10 }, async () => undefined);
+    await vi.advanceTimersByTimeAsync(10 + 250);
+
+    await expect(result).resolves.toEqual({ code: 'runner-deadline', completed: false });
+    expect(processUtils.killProcessTree).toHaveBeenCalledWith(12348, 'SIGKILL');
   });
 
   it('passes notification credentials only to notification action children', async () => {

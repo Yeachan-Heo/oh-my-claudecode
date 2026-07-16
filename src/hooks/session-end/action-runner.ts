@@ -19,6 +19,8 @@ function runnerEnvironment(actionName: SessionEndActionName): NodeJS.ProcessEnv 
   return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 
+const POST_KILL_SETTLE_MS = 250;
+
 
 /** Each deferred action runs in its own detached process group. The manifest remains the only authority for claim/result transitions. */
 export async function runSessionEndAction(context: ActionRunContext, _execute: () => Promise<void>): Promise<ActionRunResult> {
@@ -42,23 +44,35 @@ export async function runSessionEndAction(context: ActionRunContext, _execute: (
       child.once('error', () => settleChild(null));
     });
     let deadlineTermination: Promise<void> | undefined;
+    let resolveTermination!: () => void;
+    const terminationFinished = new Promise<void>((resolve) => { resolveTermination = resolve; });
     const terminate = async (): Promise<void> => {
-      await killProcessTree(child.pid!, 'SIGKILL');
-      await childExit;
+      const postKillWait = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+        timer.unref();
+      });
+      await Promise.race([Promise.resolve(killProcessTree(child.pid!, 'SIGKILL')).catch(() => false), postKillWait]);
+      await Promise.race([childExit, postKillWait]);
     };
-    const timeout = setTimeout(() => { deadlineTermination ??= terminate(); }, Math.max(1, context.deadlineAt - Date.now()));
+    const timeout = setTimeout(() => {
+      deadlineTermination ??= terminate().finally(resolveTermination);
+    }, Math.max(1, context.deadlineAt - Date.now()));
     const identity = await getProcessStartIdentity(child.pid!, context.deadlineAt);
     if (!identity) { clearTimeout(timeout); await terminate(); return { code: 'runner-identity-unavailable', completed: false }; }
     if (settled) { clearTimeout(timeout); return { code: exitCode === null ? 'runner-deadline' : `runner-exit-${exitCode}`, completed: false }; }
     atomicWriteJsonSync(path.join(runPath, 'control.json'), { jobId: context.job.jobId, action: context.actionName, attempt: context.action.attempts, runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, runner: { pid: child.pid, processStartIdentity: identity }, deadlineAt: new Date(context.deadlineAt).toISOString(), idempotencyKey: context.action.idempotencyKey });
     atomicWriteJsonSync(path.join(runPath, 'arm.json'), { runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, armedAt: new Date().toISOString() });
     if (!markSessionEndActionRunner(context.directory, context.sessionId, context.ownerNonce, context.actionName, context.runnerNonce, 'armed')) { clearTimeout(timeout); await terminate(); return { code: 'runner-claim-lost', completed: false }; }
-    const code = await childExit;
+    const terminal = await Promise.race([
+      childExit.then(code => ({ code, terminated: false })),
+      terminationFinished.then(() => ({ code: null, terminated: true })),
+    ]);
     clearTimeout(timeout);
     await deadlineTermination;
-    const completed = code === 0 && !deadlineTermination;
-    atomicWriteJsonSync(path.join(runPath, 'result.json'), { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completedAt: new Date().toISOString() });
-    return { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completed };
+    const completed = terminal.code === 0 && !terminal.terminated && !deadlineTermination;
+    const code = completed ? 'completed' : deadlineTermination || terminal.terminated || terminal.code === null ? 'runner-deadline' : `runner-exit-${terminal.code}`;
+    atomicWriteJsonSync(path.join(runPath, 'result.json'), { code, completedAt: new Date().toISOString() });
+    return { code, completed };
   } catch (error) {
     const code = error instanceof Error ? error.name || 'action-failed' : 'action-failed';
     try { atomicWriteJsonSync(path.join(runPath, 'result.json'), { code, retryable: true, recordedAt: new Date().toISOString() }); } catch { /* manifest retains retry authority */ }

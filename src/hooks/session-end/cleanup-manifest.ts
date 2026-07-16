@@ -267,3 +267,17 @@ export function recoverPreparedCoreProducer(directory: string, sessionId: string
     if (job.phase === 'collecting') job.phase = 'ready';
   });
 }
+
+/** A wiki-only handoff cannot safely infer the missing core cleanup intent. */
+export function failClosedMissingCoreProducer(directory: string, sessionId: string): SessionEndJobV1 | null {
+  return mutateLatest(directory, sessionId, job => {
+    if (job.producers.core.state !== 'absent' || !['sealed', 'no-op'].includes(job.producers.wiki.state) || Date.now() < Date.parse(job.producerGraceExpiresAt)) return;
+    job.producers.core = { state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
+    for (const action of Object.values(job.actions)) {
+      if (action.status !== 'pending' && action.status !== 'retryable') continue;
+      action.status = 'expired';
+      action.lastOutcomeCode = action.class === 'required' ? 'required-core-producer-absent' : 'best-effort-core-producer-absent';
+    }
+    if (job.phase === 'collecting') job.phase = 'ready';
+  });
+}
