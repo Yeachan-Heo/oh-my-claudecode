@@ -17998,7 +17998,7 @@ function resolveSuperprojectRoot(cwd) {
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
-      superRoot = (0, import_child_process.execSync)("git rev-parse --show-superproject-working-tree", {
+      superRoot = (0, import_child_process.execFileSync)("git", ["rev-parse", "--show-superproject-working-tree"], {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -18038,7 +18038,7 @@ function getGitTopLevel(cwd) {
     return root || null;
   }
   try {
-    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -18093,7 +18093,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let source;
   try {
-    const remoteUrl = (0, import_child_process.execSync)("git remote get-url origin", {
+    const remoteUrl = (0, import_child_process.execFileSync)("git", ["remote", "get-url", "origin"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -18105,7 +18105,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let primaryRoot = root;
   try {
-    const commonDir = (0, import_child_process.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -19479,7 +19479,7 @@ function getBranchName(teamName, workerName) {
   return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
 }
 function git(repoRoot, args, cwd = repoRoot) {
-  return (0, import_node_child_process.execFileSync)("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
+  return (0, import_node_child_process.execFileSync)("git", args, { cwd, encoding: "utf-8", stdio: "pipe", windowsHide: true }).trim();
 }
 function canonicalPathForComparison(path4) {
   try {
@@ -19517,7 +19517,7 @@ function statusEntryPath(line) {
 function isWorktreeDirtyExcept(wtPath, ignoredRootPaths = []) {
   try {
     const ignored = new Set(ignoredRootPaths);
-    const entries = (0, import_node_child_process.execFileSync)("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).split("\n").filter((line) => line.trim().length > 0);
+    const entries = (0, import_node_child_process.execFileSync)("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }).split("\n").filter((line) => line.trim().length > 0);
     const relevantEntries = entries.filter((line) => !ignored.has(statusEntryPath(line)));
     return { dirty: relevantEntries.length > 0, entries: relevantEntries };
   } catch {
@@ -19685,7 +19685,7 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
-      (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch (err) {
       if (wasRegisteredWorktree) {
         const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
@@ -19695,11 +19695,11 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
       }
     }
     try {
-      (0, import_node_child_process.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     try {
-      (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     if ((0, import_node_fs2.existsSync)(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {

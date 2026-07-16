@@ -18275,10 +18275,22 @@ async function atomicWriteJson(filePath, data) {
   let success = false;
   try {
     ensureDirSync(dir);
-    const jsonContent = JSON.stringify(data, null, 2);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
     const fd = await fs2.open(tempPath, "wx", 384);
     try {
-      await fd.write(jsonContent, 0, "utf-8");
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
       await fd.sync();
     } finally {
       await fd.close();
@@ -21177,7 +21189,7 @@ function resolveSuperprojectRoot(cwd) {
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
-      superRoot = (0, import_child_process8.execSync)("git rev-parse --show-superproject-working-tree", {
+      superRoot = (0, import_child_process8.execFileSync)("git", ["rev-parse", "--show-superproject-working-tree"], {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -21217,7 +21229,7 @@ function getGitTopLevel(cwd) {
     return root || null;
   }
   try {
-    const root = (0, import_child_process8.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process8.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -21280,7 +21292,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let source;
   try {
-    const remoteUrl = (0, import_child_process8.execSync)("git remote get-url origin", {
+    const remoteUrl = (0, import_child_process8.execFileSync)("git", ["remote", "get-url", "origin"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -21292,7 +21304,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let primaryRoot = root;
   try {
-    const commonDir = (0, import_child_process8.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process8.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -21467,7 +21479,7 @@ function validateWorkingDirectory(workingDirectory) {
 }
 function getGitCommonDir(cwd) {
   try {
-    const commonDir = (0, import_child_process8.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process8.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -27082,10 +27094,11 @@ function parseSinceSpec(since) {
 }
 function getMainRepoRoot(projectRoot) {
   try {
-    const gitCommonDir = (0, import_child_process11.execSync)("git rev-parse --git-common-dir", {
+    const gitCommonDir = (0, import_child_process11.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectRoot,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     }).trim();
     const absoluteCommonDir = (0, import_path27.resolve)(projectRoot, gitCommonDir);
     const mainRepoRoot = (0, import_path27.dirname)(absoluteCommonDir);

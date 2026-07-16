@@ -26,7 +26,7 @@ var init_encode_project_path = __esm({
 
 // src/lib/worktree-paths.ts
 import { createHash } from "crypto";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync, unlinkSync } from "fs";
 import { homedir as homedir2, tmpdir } from "os";
 import { resolve, normalize as normalize2, relative, sep as sep2, join as join2, isAbsolute, basename, dirname } from "path";
@@ -105,7 +105,7 @@ function resolveSuperprojectRoot(cwd) {
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
-      superRoot = execSync("git rev-parse --show-superproject-working-tree", {
+      superRoot = execFileSync("git", ["rev-parse", "--show-superproject-working-tree"], {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -145,7 +145,7 @@ function getGitTopLevel(cwd) {
     return root || null;
   }
   try {
-    const root = execSync("git rev-parse --show-toplevel", {
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -199,7 +199,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let source;
   try {
-    const remoteUrl = execSync("git remote get-url origin", {
+    const remoteUrl = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -211,7 +211,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let primaryRoot = root;
   try {
-    const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -538,7 +538,7 @@ var init_types = __esm({
 import { createHash as createHash3, randomUUID } from "crypto";
 import { existsSync as existsSync2, linkSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, readdirSync as readdirSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync2 } from "fs";
 import { dirname as dirname2, join as join4 } from "path";
-import { execFileSync } from "node:child_process";
+import { execFileSync as execFileSync2 } from "node:child_process";
 function canonicalize(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
@@ -569,7 +569,7 @@ function darwinProcessStartFromKinfo(raw, nowSeconds = Math.floor(Date.now() / 1
   if (seconds < 946684800n || seconds > BigInt(nowSeconds + 86400) || micros >= 1000000n) return null;
   return `${seconds}:${micros}`;
 }
-function processStartIdentityForPlatform(pid, platform = process.platform, exec3 = execFileSync) {
+function processStartIdentityForPlatform(pid, platform = process.platform, exec3 = execFileSync2) {
   if (!Number.isSafeInteger(pid) || pid < 1) return null;
   try {
     if (platform === "linux") {
@@ -589,9 +589,22 @@ function processStartIdentityForPlatform(pid, platform = process.platform, exec3
       return /^\d+$/.test(ticks) ? `win32:${ticks}` : null;
     }
     if (platform === "darwin") {
-      const raw = exec3("/usr/sbin/sysctl", ["-b", `kern.proc.pid.${pid}`], { encoding: null, maxBuffer: 1024 * 1024 });
-      const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
-      return birth ? `darwin:${birth}` : null;
+      try {
+        const raw = exec3("/usr/sbin/sysctl", ["-b", `kern.proc.pid.${pid}`], {
+          encoding: null,
+          maxBuffer: 1024 * 1024,
+          stdio: ["ignore", "pipe", "ignore"]
+        });
+        const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+        if (birth) return `darwin:${birth}`;
+      } catch {
+      }
+      const started2 = exec3("ps", ["-o", "lstart=", "-p", String(pid)], {
+        encoding: "utf8",
+        env: { ...process.env, LC_ALL: "C", LANG: "C" }
+      }).trim();
+      const startedAtMs = Date.parse(started2);
+      return started2 && Number.isFinite(startedAtMs) ? `darwin:${Math.floor(startedAtMs / 1e3)}:0` : null;
     }
     const started = exec3("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
     return started ? `${platform}:${started}` : null;
@@ -613,6 +626,12 @@ function isValidProcessStartIdentity(value, platform = process.platform) {
 function currentProcessStartIdentity(pid = process.pid) {
   return processStartIdentityForPlatform(pid);
 }
+function processStartIdentitiesMayMatch(recorded, observed) {
+  if (recorded === observed) return true;
+  const recordedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(recorded);
+  const observedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(observed);
+  return recordedDarwin !== null && observedDarwin !== null && recordedDarwin[1] === observedDarwin[1] && (recordedDarwin[2] === "0" || observedDarwin[2] === "0");
+}
 function isProcessIdentityDead(record) {
   if (!Number.isSafeInteger(record.pid) || record.pid < 1 || !isValidProcessStartIdentity(record.process_started_at)) return false;
   try {
@@ -621,7 +640,7 @@ function isProcessIdentityDead(record) {
     return error.code === "ESRCH";
   }
   const observed = currentProcessStartIdentity(record.pid);
-  return isValidProcessStartIdentity(observed) && observed !== record.process_started_at;
+  return isValidProcessStartIdentity(observed) && !processStartIdentitiesMayMatch(record.process_started_at, observed);
 }
 function readLatestOwnerEpoch(cwd, teamName) {
   const directory = absPath(cwd, TeamPaths.ownerEpochs(teamName));
@@ -3220,8 +3239,8 @@ var init_team_name = __esm({
 import {
   exec,
   execFile,
-  execFileSync as execFileSync2,
-  execSync as execSync2,
+  execFileSync as execFileSync3,
+  execSync,
   spawnSync
 } from "child_process";
 import { basename as basename4, isAbsolute as isAbsolute3, win32 as win32Path } from "path";
@@ -3262,7 +3281,7 @@ function resolveTmuxInvocation(args) {
 function tmuxExec(args, opts) {
   const { stripTmux: _, ...execOpts } = opts ?? {};
   const invocation = resolveTmuxInvocation(args);
-  return execFileSync2(invocation.command, invocation.args, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
+  return execFileSync3(invocation.command, invocation.args, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
 }
 async function tmuxExecAsync(args, opts) {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
@@ -3276,7 +3295,7 @@ async function tmuxExecAsync(args, opts) {
 }
 function tmuxShell(command, opts) {
   const { stripTmux: _, ...execOpts } = opts ?? {};
-  return execSync2(`tmux ${command}`, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
+  return execSync(`tmux ${command}`, { encoding: "utf-8", ...execOpts, env: resolveEnv(opts) });
 }
 async function tmuxShellAsync(command, opts) {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
@@ -7916,6 +7935,51 @@ function ensureDirSync(dir) {
     throw err;
   }
 }
+async function atomicWriteJson2(filePath, data) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
+  let success = false;
+  try {
+    ensureDirSync(dir);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
+    const fd = await fs2.open(tempPath, "wx", 384);
+    try {
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    await fs2.rename(tempPath, filePath);
+    success = true;
+    try {
+      const dirFd = await fs2.open(dir, "r");
+      try {
+        await dirFd.sync();
+      } finally {
+        await dirFd.close();
+      }
+    } catch {
+    }
+  } finally {
+    if (!success) {
+      await fs2.unlink(tempPath).catch(() => {
+      });
+    }
+  }
+}
 var ATOMIC_BATCH_MAX_CONTENT_BYTES;
 var init_atomic_write = __esm({
   "src/lib/atomic-write.ts"() {
@@ -7925,7 +7989,7 @@ var init_atomic_write = __esm({
 });
 
 // src/platform/process-utils.ts
-import { execFileSync as execFileSync3, execFile as execFile3 } from "child_process";
+import { execFileSync as execFileSync4, execFile as execFile3 } from "child_process";
 import { promisify as promisify3 } from "util";
 import * as fsPromises from "fs/promises";
 function isProcessAlive(pid) {
@@ -8149,7 +8213,7 @@ var init_file_lock = __esm({
 // src/team/git-worktree.ts
 import { existsSync as existsSync15, realpathSync as realpathSync5, readFileSync as readFileSync10, readdirSync as readdirSync5, rmSync as rmSync2, unlinkSync as unlinkSync7, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join19, resolve as resolve5 } from "node:path";
-import { execFileSync as execFileSync4 } from "node:child_process";
+import { execFileSync as execFileSync5 } from "node:child_process";
 function getWorktreePath(repoRoot, teamName, workerName) {
   return join19(getOmcRoot(repoRoot), "team", sanitizeName(teamName), "worktrees", sanitizeName(workerName));
 }
@@ -8157,7 +8221,7 @@ function getBranchName(teamName, workerName) {
   return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
 }
 function git(repoRoot, args, cwd = repoRoot) {
-  return execFileSync4("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
+  return execFileSync5("git", args, { cwd, encoding: "utf-8", stdio: "pipe", windowsHide: true }).trim();
 }
 function isInsideGitRepo(repoRoot) {
   try {
@@ -8211,7 +8275,7 @@ function isRegisteredWorktreePath(repoRoot, wtPath) {
 }
 function isDetached(wtPath) {
   try {
-    const branch = execFileSync4("git", ["branch", "--show-current"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).trim();
+    const branch = execFileSync5("git", ["branch", "--show-current"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }).trim();
     return branch.length === 0;
   } catch {
     return false;
@@ -8240,7 +8304,7 @@ function statusEntryPath(line) {
 function isWorktreeDirtyExcept(wtPath, ignoredRootPaths = []) {
   try {
     const ignored = new Set(ignoredRootPaths);
-    const entries = execFileSync4("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).split("\n").filter((line) => line.trim().length > 0);
+    const entries = execFileSync5("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }).split("\n").filter((line) => line.trim().length > 0);
     const relevantEntries = entries.filter((line) => !ignored.has(statusEntryPath(line)));
     return { dirty: relevantEntries.length > 0, entries: relevantEntries };
   } catch {
@@ -8436,7 +8500,7 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
   const branch = mode === "named" ? getBranchName(teamName, workerName) : "HEAD";
   validateResolvedPath(wtPath, join19(getOmcRoot(repoRoot), "team"));
   try {
-    execFileSync4("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+    execFileSync5("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
   } catch {
   }
   if (existsSync15(wtPath)) {
@@ -8459,7 +8523,7 @@ function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {}) {
   const wtDir = join19(getOmcRoot(repoRoot), "team", sanitizeName(teamName), "worktrees");
   ensureDirWithMode(wtDir);
   const args = mode === "named" ? ["worktree", "add", "-b", branch, wtPath, options.baseRef ?? "HEAD"] : ["worktree", "add", "--detach", wtPath, options.baseRef ?? "HEAD"];
-  execFileSync4("git", args, { cwd: repoRoot, stdio: "pipe" });
+  execFileSync5("git", args, { cwd: repoRoot, stdio: "pipe", windowsHide: true });
   const info = {
     path: wtPath,
     branch,
@@ -8522,7 +8586,7 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
     prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
-      execFileSync4("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync5("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch (err) {
       if (wasRegisteredWorktree) {
         const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
@@ -8532,11 +8596,11 @@ function removeWorkerWorktree(teamName, workerName, repoRoot) {
       }
     }
     try {
-      execFileSync4("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync5("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     try {
-      execFileSync4("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync5("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     if (existsSync15(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
@@ -9232,7 +9296,7 @@ var init_runtime_flags = __esm({
 });
 
 // src/team/merge-coordinator.ts
-import { execFileSync as execFileSync5 } from "node:child_process";
+import { execFileSync as execFileSync6 } from "node:child_process";
 import { appendFileSync, mkdirSync as mkdirSync6, readFileSync as readFileSync12 } from "node:fs";
 import { isAbsolute as isAbsolute8, join as join22 } from "node:path";
 function validateBranchName(branch) {
@@ -9241,14 +9305,16 @@ function validateBranchName(branch) {
   }
 }
 function configureHarnessMergeAttributes(repoRoot) {
-  execFileSync5("git", ["config", "merge.ours.driver", "true"], {
+  execFileSync6("git", ["config", "merge.ours.driver", "true"], {
     cwd: repoRoot,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
-  const commonDir = execFileSync5("git", ["rev-parse", "--git-common-dir"], {
+  const commonDir = execFileSync6("git", ["rev-parse", "--git-common-dir"], {
     cwd: repoRoot,
     encoding: "utf-8",
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   }).trim();
   const resolvedCommonDir = isAbsolute8(commonDir) ? commonDir : join22(repoRoot, commonDir);
   const infoDir = join22(resolvedCommonDir, "info");
@@ -9272,10 +9338,10 @@ function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
   validateBranchName(workerBranch);
   validateBranchName(baseBranch);
   try {
-    execFileSync5(
+    execFileSync6(
       "git",
       ["merge-tree", "--write-tree", baseBranch, workerBranch],
-      { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+      { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
     );
     return [];
   } catch (err) {
@@ -9292,20 +9358,20 @@ function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
       return conflicts.length > 0 ? conflicts : ["(merge-tree reported conflicts)"];
     }
   }
-  const mergeBase = execFileSync5(
+  const mergeBase = execFileSync6(
     "git",
     ["merge-base", baseBranch, workerBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
-  const baseDiff = execFileSync5(
+  const baseDiff = execFileSync6(
     "git",
     ["diff", "--name-only", mergeBase, baseBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
-  const workerDiff = execFileSync5(
+  const workerDiff = execFileSync6(
     "git",
     ["diff", "--name-only", mergeBase, workerBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
   if (!baseDiff || !workerDiff) {
     return [];
@@ -9320,25 +9386,29 @@ function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
   const workerName = workerBranch.split("/").pop() || workerBranch;
   try {
     try {
-      execFileSync5("git", ["diff-index", "--quiet", "HEAD", "--"], {
+      execFileSync6("git", ["diff-index", "--quiet", "HEAD", "--"], {
         cwd: repoRoot,
-        stdio: "pipe"
+        stdio: "pipe",
+        windowsHide: true
       });
     } catch {
       throw new Error("Working tree has uncommitted changes \u2014 commit or stash before merging");
     }
-    execFileSync5("git", ["checkout", baseBranch], {
+    execFileSync6("git", ["checkout", baseBranch], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
-    execFileSync5("git", ["merge", "--no-ff", "-m", `Merge ${workerBranch} into ${baseBranch}`, workerBranch], {
+    execFileSync6("git", ["merge", "--no-ff", "-m", `Merge ${workerBranch} into ${baseBranch}`, workerBranch], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
-    const mergeCommit = execFileSync5("git", ["rev-parse", "HEAD"], {
+    const mergeCommit = execFileSync6("git", ["rev-parse", "HEAD"], {
       cwd: repoRoot,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     }).trim();
     return {
       workerName,
@@ -9349,7 +9419,7 @@ function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
     };
   } catch (_err) {
     try {
-      execFileSync5("git", ["merge", "--abort"], { cwd: repoRoot, stdio: "pipe" });
+      execFileSync6("git", ["merge", "--abort"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     const conflicts = checkMergeConflicts(workerBranch, baseBranch, repoRoot);
@@ -9655,7 +9725,7 @@ var init_worker_commit_cadence = __esm({
 });
 
 // src/team/merge-orchestrator.ts
-import { execFileSync as execFileSync6 } from "node:child_process";
+import { execFileSync as execFileSync7 } from "node:child_process";
 import { existsSync as existsSync21 } from "node:fs";
 import { mkdir as mkdir10, appendFile as appendFile5 } from "node:fs/promises";
 import { dirname as dirname19, join as join25 } from "node:path";
@@ -9720,18 +9790,20 @@ function createMutex() {
   };
 }
 function gitRevParseHead(repoRoot, branch) {
-  return execFileSync6("git", ["rev-parse", `refs/heads/${branch}`], {
+  return execFileSync7("git", ["rev-parse", `refs/heads/${branch}`], {
     cwd: repoRoot,
     encoding: "utf-8",
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   }).trim();
 }
 function gitPath(worktreePath, gitPathName) {
   try {
-    const resolved = execFileSync6("git", ["rev-parse", "--git-path", gitPathName], {
+    const resolved = execFileSync7("git", ["rev-parse", "--git-path", gitPathName], {
       cwd: worktreePath,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     }).trim();
     if (resolved) return resolved;
   } catch {
@@ -9743,10 +9815,11 @@ function isRebaseInProgress(worktreePath) {
 }
 function isWorktreeRegistered(repoRoot, wtPath) {
   try {
-    const out = execFileSync6("git", ["worktree", "list", "--porcelain"], {
+    const out = execFileSync7("git", ["worktree", "list", "--porcelain"], {
       cwd: repoRoot,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     for (const line of out.split("\n")) {
       if (line.startsWith("worktree ")) {
@@ -9762,22 +9835,25 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
   if (existsSync21(mergerPath) && isWorktreeRegistered(repoRoot, mergerPath)) {
     return;
   }
-  execFileSync6("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
+  execFileSync7("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
     cwd: repoRoot,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
 }
 function preflightMergerWorktree(mergerPath, leaderBranch) {
   try {
-    execFileSync6("git", ["fetch", "--no-tags", "origin", leaderBranch], {
+    execFileSync7("git", ["fetch", "--no-tags", "origin", leaderBranch], {
       cwd: mergerPath,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
   } catch {
   }
-  execFileSync6("git", ["reset", "--hard", leaderBranch], {
+  execFileSync7("git", ["reset", "--hard", leaderBranch], {
     cwd: mergerPath,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
 }
 function parseUUFiles(porcelainOutput) {
@@ -9851,16 +9927,18 @@ async function startMergeOrchestrator(config) {
       await pauseHookViaSentinel(wtPath);
       pausedWorkers.add(other.workerName);
       try {
-        execFileSync6("git", ["fetch", "--no-tags", "origin", config.leaderBranch], {
+        execFileSync7("git", ["fetch", "--no-tags", "origin", config.leaderBranch], {
           cwd: wtPath,
-          stdio: "pipe"
+          stdio: "pipe",
+          windowsHide: true
         });
       } catch {
       }
       try {
-        execFileSync6("git", ["rebase", config.leaderBranch], {
+        execFileSync7("git", ["rebase", config.leaderBranch], {
           cwd: wtPath,
-          stdio: "pipe"
+          stdio: "pipe",
+          windowsHide: true
         });
         await resumeHookViaSentinel(wtPath);
         pausedWorkers.delete(other.workerName);
@@ -9871,10 +9949,11 @@ async function startMergeOrchestrator(config) {
       } catch {
         let conflictingFiles = [];
         try {
-          const status = execFileSync6("git", ["status", "--porcelain"], {
+          const status = execFileSync7("git", ["status", "--porcelain"], {
             cwd: wtPath,
             encoding: "utf-8",
-            stdio: "pipe"
+            stdio: "pipe",
+            windowsHide: true
           });
           conflictingFiles = parseUUFiles(status);
         } catch {
@@ -9882,10 +9961,11 @@ async function startMergeOrchestrator(config) {
         }
         const baseSha = (() => {
           try {
-            return execFileSync6("git", ["rev-parse", `refs/heads/${config.leaderBranch}`], {
+            return execFileSync7("git", ["rev-parse", `refs/heads/${config.leaderBranch}`], {
               cwd: config.repoRoot,
               encoding: "utf-8",
-              stdio: "pipe"
+              stdio: "pipe",
+              windowsHide: true
             }).trim();
           } catch {
             return "unknown";
@@ -9940,10 +10020,10 @@ async function startMergeOrchestrator(config) {
       if (conflicts.length > 0) {
         let mergeBaseSha = "unknown";
         try {
-          mergeBaseSha = execFileSync6(
+          mergeBaseSha = execFileSync7(
             "git",
             ["merge-base", config.leaderBranch, entry.workerBranch],
-            { cwd: mergerPath, encoding: "utf-8", stdio: "pipe" }
+            { cwd: mergerPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }
           ).trim();
         } catch {
         }
@@ -10059,10 +10139,11 @@ async function startMergeOrchestrator(config) {
   async function handleRebaseResolution(entry) {
     pausedWorkers.delete(entry.workerName);
     try {
-      const status = execFileSync6("git", ["status", "--porcelain"], {
+      const status = execFileSync7("git", ["status", "--porcelain"], {
         cwd: entry.workerWorktreePath,
         encoding: "utf-8",
-        stdio: "pipe"
+        stdio: "pipe",
+        windowsHide: true
       }).trim();
       if (status.length > 0) {
         const dirtyFiles = status.split("\n").map((l) => l.trim().replace(/^\S+\s+/, "")).filter((s) => s.length > 0);
@@ -11260,7 +11341,7 @@ import { join as join28, resolve as resolve6 } from "path";
 import { existsSync as existsSync24 } from "fs";
 import { link as link3, mkdir as mkdir13, open as open4, readdir as readdir3, readFile as readFile13, rm as rm4, unlink as unlink5, writeFile as writeFile8 } from "fs/promises";
 import { performance } from "perf_hooks";
-import { execFileSync as execFileSync7 } from "node:child_process";
+import { execFileSync as execFileSync8 } from "node:child_process";
 import { createHash as createHash10, randomUUID as randomUUID10 } from "node:crypto";
 function setRuntimeOwnerRecoveryClient(client) {
   runtimeOwnerRecoveryClient = client;
@@ -11509,10 +11590,11 @@ async function reconcileCommittedTeamServices(config, cwd) {
   }
 }
 function resolveLeaderBranch(cwd) {
-  const out = execFileSync7("git", ["branch", "--show-current"], {
+  const out = execFileSync8("git", ["branch", "--show-current"], {
     cwd,
     encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
   }).trim();
   if (!out) {
     throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
@@ -14133,7 +14215,8 @@ init_team_name();
 init_tmux_session();
 init_worker_bootstrap();
 init_git_worktree();
-import { mkdir as mkdir6, writeFile as writeFile4, readFile as readFile8, rm as rm3, rename as rename3 } from "fs/promises";
+init_atomic_write();
+import { mkdir as mkdir6, readFile as readFile8, rm as rm3, rename as rename3, writeFile as writeFile4 } from "fs/promises";
 import { join as join21 } from "path";
 import { existsSync as existsSync17 } from "fs";
 
@@ -14153,8 +14236,7 @@ function stateRoot(cwd, teamName) {
   return join21(cwd, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-  await mkdir6(join21(filePath, ".."), { recursive: true });
-  await writeFile4(filePath, JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteJson2(filePath, data);
 }
 async function readJsonSafe3(filePath) {
   const isDoneSignalPath = filePath.endsWith("done.json");

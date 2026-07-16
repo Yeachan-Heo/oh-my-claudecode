@@ -129,6 +129,7 @@ function gitRevParseHead(repoRoot, branch) {
         cwd: repoRoot,
         encoding: 'utf-8',
         stdio: 'pipe',
+        windowsHide: true,
     }).trim();
 }
 function gitPath(worktreePath, gitPathName) {
@@ -137,6 +138,7 @@ function gitPath(worktreePath, gitPathName) {
             cwd: worktreePath,
             encoding: 'utf-8',
             stdio: 'pipe',
+            windowsHide: true,
         }).trim();
         if (resolved)
             return resolved;
@@ -157,6 +159,7 @@ function isWorktreeRegistered(repoRoot, wtPath) {
             cwd: repoRoot,
             encoding: 'utf-8',
             stdio: 'pipe',
+            windowsHide: true,
         });
         for (const line of out.split('\n')) {
             if (line.startsWith('worktree ')) {
@@ -180,6 +183,7 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
     execFileSync('git', ['worktree', 'add', '--force', mergerPath, leaderBranch], {
         cwd: repoRoot,
         stdio: 'pipe',
+        windowsHide: true,
     });
 }
 function preflightMergerWorktree(mergerPath, leaderBranch) {
@@ -188,6 +192,7 @@ function preflightMergerWorktree(mergerPath, leaderBranch) {
         execFileSync('git', ['fetch', '--no-tags', 'origin', leaderBranch], {
             cwd: mergerPath,
             stdio: 'pipe',
+            windowsHide: true,
         });
     }
     catch {
@@ -196,6 +201,7 @@ function preflightMergerWorktree(mergerPath, leaderBranch) {
     execFileSync('git', ['reset', '--hard', leaderBranch], {
         cwd: mergerPath,
         stdio: 'pipe',
+        windowsHide: true,
     });
 }
 function parseUUFiles(porcelainOutput) {
@@ -294,6 +300,7 @@ export async function startMergeOrchestrator(config) {
                 execFileSync('git', ['fetch', '--no-tags', 'origin', config.leaderBranch], {
                     cwd: wtPath,
                     stdio: 'pipe',
+                    windowsHide: true,
                 });
             }
             catch {
@@ -303,6 +310,7 @@ export async function startMergeOrchestrator(config) {
                 execFileSync('git', ['rebase', config.leaderBranch], {
                     cwd: wtPath,
                     stdio: 'pipe',
+                    windowsHide: true,
                 });
                 // Clean rebase — resume immediately.
                 await resumeHookViaSentinel(wtPath);
@@ -320,6 +328,7 @@ export async function startMergeOrchestrator(config) {
                         cwd: wtPath,
                         encoding: 'utf-8',
                         stdio: 'pipe',
+                        windowsHide: true,
                     });
                     conflictingFiles = parseUUFiles(status);
                 }
@@ -332,6 +341,7 @@ export async function startMergeOrchestrator(config) {
                             cwd: config.repoRoot,
                             encoding: 'utf-8',
                             stdio: 'pipe',
+                            windowsHide: true,
                         }).trim();
                     }
                     catch {
@@ -390,7 +400,7 @@ export async function startMergeOrchestrator(config) {
                 // Deliver merge-conflict mailbox to leader.
                 let mergeBaseSha = 'unknown';
                 try {
-                    mergeBaseSha = execFileSync('git', ['merge-base', config.leaderBranch, entry.workerBranch], { cwd: mergerPath, encoding: 'utf-8', stdio: 'pipe' }).trim();
+                    mergeBaseSha = execFileSync('git', ['merge-base', config.leaderBranch, entry.workerBranch], { cwd: mergerPath, encoding: 'utf-8', stdio: 'pipe', windowsHide: true }).trim();
                 }
                 catch {
                     // best-effort
@@ -533,6 +543,7 @@ export async function startMergeOrchestrator(config) {
                 cwd: entry.workerWorktreePath,
                 encoding: 'utf-8',
                 stdio: 'pipe',
+                windowsHide: true,
             }).trim();
             if (status.length > 0) {
                 const dirtyFiles = status

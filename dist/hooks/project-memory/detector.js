@@ -492,6 +492,7 @@ async function detectGitBranch(projectRoot) {
         // Get default branch
         const { stdout } = await execFileAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
             cwd: projectRoot,
+            windowsHide: true,
         });
         const match = stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
         if (match) {

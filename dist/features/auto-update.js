@@ -187,8 +187,8 @@ function syncMarketplaceClone(verbose = false) {
         return { ok: true, message: 'Marketplace clone not found; skipping' };
     }
     const stdio = verbose ? 'inherit' : 'pipe';
-    const execOpts = { encoding: 'utf-8', stdio: stdio, timeout: 60000 };
-    const queryExecOpts = { encoding: 'utf-8', stdio: 'pipe', timeout: 60000 };
+    const execOpts = { encoding: 'utf-8', stdio: stdio, timeout: 60000, windowsHide: true };
+    const queryExecOpts = { encoding: 'utf-8', stdio: 'pipe', timeout: 60000, windowsHide: true };
     try {
         execFileSync('git', ['-C', marketplacePath, 'fetch', '--all', '--prune'], execOpts);
     }

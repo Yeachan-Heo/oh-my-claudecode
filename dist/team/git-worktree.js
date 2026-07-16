@@ -28,7 +28,7 @@ export function getBranchName(teamName, workerName) {
     return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName)}`;
 }
 function git(repoRoot, args, cwd = repoRoot) {
-    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe', windowsHide: true }).trim();
 }
 function isInsideGitRepo(repoRoot) {
     try {
@@ -94,7 +94,7 @@ function isRegisteredWorktreePath(repoRoot, wtPath) {
 }
 function isDetached(wtPath) {
     try {
-        const branch = execFileSync('git', ['branch', '--show-current'], { cwd: wtPath, encoding: 'utf-8', stdio: 'pipe' }).trim();
+        const branch = execFileSync('git', ['branch', '--show-current'], { cwd: wtPath, encoding: 'utf-8', stdio: 'pipe', windowsHide: true }).trim();
         return branch.length === 0;
     }
     catch {
@@ -125,7 +125,7 @@ function statusEntryPath(line) {
 function isWorktreeDirtyExcept(wtPath, ignoredRootPaths = []) {
     try {
         const ignored = new Set(ignoredRootPaths);
-        const entries = execFileSync('git', ['status', '--porcelain'], { cwd: wtPath, encoding: 'utf-8', stdio: 'pipe' })
+        const entries = execFileSync('git', ['status', '--porcelain'], { cwd: wtPath, encoding: 'utf-8', stdio: 'pipe', windowsHide: true })
             .split('\n')
             .filter(line => line.trim().length > 0);
         const relevantEntries = entries.filter(line => !ignored.has(statusEntryPath(line)));
@@ -362,7 +362,7 @@ export function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {
     const branch = mode === 'named' ? getBranchName(teamName, workerName) : 'HEAD';
     validateResolvedPath(wtPath, join(getOmcRoot(repoRoot), 'team'));
     try {
-        execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
+        execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe', windowsHide: true });
     }
     catch { /* ignore */ }
     if (existsSync(wtPath)) {
@@ -387,7 +387,7 @@ export function ensureWorkerWorktree(teamName, workerName, repoRoot, options = {
     const args = mode === 'named'
         ? ['worktree', 'add', '-b', branch, wtPath, options.baseRef ?? 'HEAD']
         : ['worktree', 'add', '--detach', wtPath, options.baseRef ?? 'HEAD'];
-    execFileSync('git', args, { cwd: repoRoot, stdio: 'pipe' });
+    execFileSync('git', args, { cwd: repoRoot, stdio: 'pipe', windowsHide: true });
     const info = {
         path: wtPath,
         branch,
@@ -476,7 +476,7 @@ export function removeWorkerWorktree(teamName, workerName, repoRoot) {
         prepareWorkerWorktreeForRemoval(teamName, workerName, repoRoot, wtPath);
         const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
         try {
-            execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe' });
+            execFileSync('git', ['worktree', 'remove', wtPath], { cwd: repoRoot, stdio: 'pipe', windowsHide: true });
         }
         catch (err) {
             if (wasRegisteredWorktree) {
@@ -488,11 +488,11 @@ export function removeWorkerWorktree(teamName, workerName, repoRoot) {
             // Unregistered/absent stale paths are best-effort cleanup only.
         }
         try {
-            execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe' });
+            execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot, stdio: 'pipe', windowsHide: true });
         }
         catch { /* ignore */ }
         try {
-            execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe' });
+            execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'pipe', windowsHide: true });
         }
         catch { /* branch may not exist */ }
         // If a stale plain directory remains and it is not a registered worktree, remove it

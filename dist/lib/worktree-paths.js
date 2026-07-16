@@ -9,7 +9,7 @@
  * of {worktree}/.omc/. This preserves state across worktree deletions.
  */
 import { createHash } from 'crypto';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync, unlinkSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { resolve, normalize, relative, sep, join, isAbsolute, basename, dirname } from 'path';
@@ -171,7 +171,7 @@ function resolveSuperprojectRoot(cwd) {
     for (let depth = 0; depth < 32; depth++) {
         let superRoot;
         try {
-            superRoot = execSync('git rev-parse --show-superproject-working-tree', {
+            superRoot = execFileSync('git', ['rev-parse', '--show-superproject-working-tree'], {
                 cwd: probeCwd,
                 encoding: 'utf-8',
                 stdio: ['pipe', 'pipe', 'pipe'],
@@ -241,7 +241,7 @@ export function getGitTopLevel(cwd) {
         return root || null;
     }
     try {
-        const root = execSync('git rev-parse --show-toplevel', {
+        const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -463,7 +463,7 @@ export function getProjectIdentifier(worktreeRoot) {
     }
     let source;
     try {
-        const remoteUrl = execSync('git remote get-url origin', {
+        const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
             cwd: root,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -482,7 +482,7 @@ export function getProjectIdentifier(worktreeRoot) {
     // directories despite sharing the same remote URL hash.
     let primaryRoot = root;
     try {
-        const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+        const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
             cwd: root,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -1021,7 +1021,7 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
     // the main repo's encoded path. Use `git rev-parse --git-common-dir`
     // to find the main repo root and re-encode.
     try {
-        const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+        const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -1040,7 +1040,7 @@ export function resolveTranscriptPath(transcriptPath, cwd) {
             mainRepoRoot = realpathSync(mainRepoRoot);
         }
         catch { /* keep as-is */ }
-        const worktreeTop = execSync('git rev-parse --show-toplevel', {
+        const worktreeTop = execFileSync('git', ['rev-parse', '--show-toplevel'], {
             cwd: effectiveCwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -1134,7 +1134,7 @@ export function validateWorkingDirectory(workingDirectory) {
 }
 function getGitCommonDir(cwd) {
     try {
-        const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+        const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
             cwd,
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],

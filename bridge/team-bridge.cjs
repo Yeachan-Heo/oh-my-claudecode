@@ -237,7 +237,7 @@ function resolveSuperprojectRoot(cwd) {
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
-      superRoot = (0, import_child_process.execSync)("git rev-parse --show-superproject-working-tree", {
+      superRoot = (0, import_child_process.execFileSync)("git", ["rev-parse", "--show-superproject-working-tree"], {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -277,7 +277,7 @@ function getGitTopLevel(cwd) {
     return root || null;
   }
   try {
-    const root = (0, import_child_process.execSync)("git rev-parse --show-toplevel", {
+    const root = (0, import_child_process.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -332,7 +332,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let source;
   try {
-    const remoteUrl = (0, import_child_process.execSync)("git remote get-url origin", {
+    const remoteUrl = (0, import_child_process.execFileSync)("git", ["remote", "get-url", "origin"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -344,7 +344,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let primaryRoot = root;
   try {
-    const commonDir = (0, import_child_process.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -1686,10 +1686,11 @@ function sleep(ms) {
 function captureFileSnapshot(cwd) {
   const files = /* @__PURE__ */ new Set();
   try {
-    const statusOutput = (0, import_child_process5.execSync)("git status --porcelain", {
+    const statusOutput = (0, import_child_process5.execFileSync)("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf-8",
-      timeout: 1e4
+      timeout: 1e4,
+      windowsHide: true
     });
     for (const line of statusOutput.split("\n")) {
       if (!line.trim()) continue;
@@ -1698,9 +1699,10 @@ function captureFileSnapshot(cwd) {
       const fileName = arrowIdx !== -1 ? filePart.slice(arrowIdx + 4) : filePart;
       files.add(fileName.trim());
     }
-    const untrackedOutput = (0, import_child_process5.execSync)(
-      "git ls-files --others --exclude-standard",
-      { cwd, encoding: "utf-8", timeout: 1e4 }
+    const untrackedOutput = (0, import_child_process5.execFileSync)(
+      "git",
+      ["ls-files", "--others", "--exclude-standard"],
+      { cwd, encoding: "utf-8", timeout: 1e4, windowsHide: true }
     );
     for (const line of untrackedOutput.split("\n")) {
       if (line.trim()) files.add(line.trim());

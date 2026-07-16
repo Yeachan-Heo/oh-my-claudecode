@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
+import { mkdir, readFile, rm, rename, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
@@ -7,6 +7,7 @@ import { validateTeamName } from './team-name.js';
 import { createTeamSession, spawnWorkerInPane, sendToWorker, isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane, splitTeamWorkerPane, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, } from './worker-bootstrap.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
+import { atomicWriteJson } from '../lib/atomic-write.js';
 import { withTaskLock, writeTaskFailure, DEFAULT_MAX_TASK_RETRIES, } from './task-file-ops.js';
 function workerName(index) {
     return `worker-${index + 1}`;
@@ -16,8 +17,7 @@ function stateRoot(cwd, teamName) {
     return join(cwd, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-    await mkdir(join(filePath, '..'), { recursive: true });
-    await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    await atomicWriteJson(filePath, data);
 }
 async function readJsonSafe(filePath) {
     const isDoneSignalPath = filePath.endsWith('done.json');
@@ -384,16 +384,14 @@ export async function monitorTeam(teamName, cwd, workerPaneIds) {
  * Handles done.json completion, dead pane failures, and next-task spawning.
  */
 export function watchdogCliWorkers(runtime, intervalMs) {
-    let tickInFlight = false;
+    let activeTick = null;
+    let stopped = false;
     let consecutiveFailures = 0;
     const MAX_CONSECUTIVE_FAILURES = 3;
     // Track consecutive unresponsive ticks per worker
     const unresponsiveCounts = new Map();
     const UNRESPONSIVE_KILL_THRESHOLD = 3;
     const tick = async () => {
-        if (tickInFlight)
-            return;
-        tickInFlight = true;
         try {
             const workers = [...runtime.activeWorkers.entries()];
             if (workers.length === 0)
@@ -504,12 +502,23 @@ export function watchdogCliWorkers(runtime, intervalMs) {
                 clearInterval(intervalId);
             }
         }
-        finally {
-            tickInFlight = false;
-        }
     };
-    const intervalId = setInterval(() => { tick(); }, intervalMs);
-    return () => clearInterval(intervalId);
+    const startTick = () => {
+        if (stopped || activeTick)
+            return;
+        const tickPromise = tick();
+        activeTick = tickPromise;
+        void tickPromise.finally(() => {
+            if (activeTick === tickPromise)
+                activeTick = null;
+        });
+    };
+    const intervalId = setInterval(startTick, intervalMs);
+    return async () => {
+        stopped = true;
+        clearInterval(intervalId);
+        await activeTick;
+    };
 }
 /**
  * Spawn a worker pane for an explicit task assignment.

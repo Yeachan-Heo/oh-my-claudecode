@@ -61,9 +61,22 @@ export function processStartIdentityForPlatform(pid, platform = process.platform
             return /^\d+$/.test(ticks) ? `win32:${ticks}` : null;
         }
         if (platform === 'darwin') {
-            const raw = exec('/usr/sbin/sysctl', ['-b', `kern.proc.pid.${pid}`], { encoding: null, maxBuffer: 1024 * 1024 });
-            const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
-            return birth ? `darwin:${birth}` : null;
+            try {
+                const raw = exec('/usr/sbin/sysctl', ['-b', `kern.proc.pid.${pid}`], {
+                    encoding: null, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+                });
+                const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+                if (birth)
+                    return `darwin:${birth}`;
+            }
+            catch {
+                // Fall through to the portable process listing when the native kinfo layout is unavailable.
+            }
+            const started = exec('ps', ['-o', 'lstart=', '-p', String(pid)], {
+                encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+            }).trim();
+            const startedAtMs = Date.parse(started);
+            return started && Number.isFinite(startedAtMs) ? `darwin:${Math.floor(startedAtMs / 1000)}:0` : null;
         }
         const started = exec('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }).trim();
         return started ? `${platform}:${started}` : null;
@@ -90,6 +103,15 @@ export function isValidProcessStartIdentity(value, platform = process.platform) 
 export function currentProcessStartIdentity(pid = process.pid) {
     return processStartIdentityForPlatform(pid);
 }
+function processStartIdentitiesMayMatch(recorded, observed) {
+    if (recorded === observed)
+        return true;
+    const recordedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(recorded);
+    const observedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(observed);
+    return recordedDarwin !== null && observedDarwin !== null
+        && recordedDarwin[1] === observedDarwin[1]
+        && (recordedDarwin[2] === '0' || observedDarwin[2] === '0');
+}
 export function isProcessIdentityDead(record) {
     if (!Number.isSafeInteger(record.pid) || record.pid < 1 || !isValidProcessStartIdentity(record.process_started_at))
         return false;
@@ -101,7 +123,7 @@ export function isProcessIdentityDead(record) {
     }
     const observed = currentProcessStartIdentity(record.pid);
     // Unknown or malformed identity is never positive proof of death.
-    return isValidProcessStartIdentity(observed) && observed !== record.process_started_at;
+    return isValidProcessStartIdentity(observed) && !processStartIdentitiesMayMatch(record.process_started_at, observed);
 }
 export function readLatestOwnerEpoch(cwd, teamName) {
     const directory = absPath(cwd, TeamPaths.ownerEpochs(teamName));

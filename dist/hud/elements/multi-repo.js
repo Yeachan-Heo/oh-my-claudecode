@@ -13,7 +13,7 @@
  * When the cwd IS itself a git repo (single-repo case) this element
  * returns null and the normal repo/branch/status elements take over.
  */
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { cyan, dim, green, yellow } from '../colors.js';
@@ -49,12 +49,11 @@ export function resetMultiRepoCache() {
 }
 function isGitRepo(dir) {
     try {
-        execSync('git rev-parse --show-toplevel', {
+        execFileSync('git', ['rev-parse', '--show-toplevel'], {
             cwd: dir,
             encoding: 'utf-8',
             timeout: 1000,
             stdio: ['pipe', 'pipe', 'pipe'],
-            shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
             windowsHide: true,
         });
         return true;

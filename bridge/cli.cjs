@@ -5607,7 +5607,7 @@ function resolveSuperprojectRoot(cwd2) {
   for (let depth = 0; depth < 32; depth++) {
     let superRoot;
     try {
-      superRoot = (0, import_child_process6.execSync)("git rev-parse --show-superproject-working-tree", {
+      superRoot = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--show-superproject-working-tree"], {
         cwd: probeCwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -5647,7 +5647,7 @@ function getGitTopLevel(cwd2) {
     return root2 || null;
   }
   try {
-    const root2 = (0, import_child_process6.execSync)("git rev-parse --show-toplevel", {
+    const root2 = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -5709,7 +5709,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let source;
   try {
-    const remoteUrl = (0, import_child_process6.execSync)("git remote get-url origin", {
+    const remoteUrl = (0, import_child_process6.execFileSync)("git", ["remote", "get-url", "origin"], {
       cwd: root2,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -5721,7 +5721,7 @@ function getProjectIdentifier(worktreeRoot) {
   }
   let primaryRoot = root2;
   try {
-    const commonDir = (0, import_child_process6.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root2,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -5938,7 +5938,7 @@ function resolveTranscriptPath(transcriptPath, cwd2) {
     }
   }
   try {
-    const gitCommonDir = (0, import_child_process6.execSync)("git rev-parse --git-common-dir", {
+    const gitCommonDir = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -5953,7 +5953,7 @@ function resolveTranscriptPath(transcriptPath, cwd2) {
       mainRepoRoot = (0, import_fs12.realpathSync)(mainRepoRoot);
     } catch {
     }
-    const worktreeTop = (0, import_child_process6.execSync)("git rev-parse --show-toplevel", {
+    const worktreeTop = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: effectiveCwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -6018,7 +6018,7 @@ function validateWorkingDirectory(workingDirectory) {
 }
 function getGitCommonDir(cwd2) {
   try {
-    const commonDir = (0, import_child_process6.execSync)("git rev-parse --path-format=absolute --git-common-dir", {
+    const commonDir = (0, import_child_process6.execFileSync)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: cwd2,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -6341,10 +6341,22 @@ async function atomicWriteJson(filePath, data) {
   let success = false;
   try {
     ensureDirSync(dir);
-    const jsonContent = JSON.stringify(data, null, 2);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
     const fd = await fs3.open(tempPath, "wx", 384);
     try {
-      await fd.write(jsonContent, 0, "utf-8");
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
       await fd.sync();
     } finally {
       await fd.close();
@@ -13073,8 +13085,8 @@ function syncMarketplaceClone(verbose = false) {
     return { ok: true, message: "Marketplace clone not found; skipping" };
   }
   const stdio = verbose ? "inherit" : "pipe";
-  const execOpts = { encoding: "utf-8", stdio, timeout: 6e4 };
-  const queryExecOpts = { encoding: "utf-8", stdio: "pipe", timeout: 6e4 };
+  const execOpts = { encoding: "utf-8", stdio, timeout: 6e4, windowsHide: true };
+  const queryExecOpts = { encoding: "utf-8", stdio: "pipe", timeout: 6e4, windowsHide: true };
   try {
     (0, import_child_process15.execFileSync)("git", ["-C", marketplacePath, "fetch", "--all", "--prune"], execOpts);
   } catch (err) {
@@ -15064,10 +15076,11 @@ function createRalphLoopHook(directory) {
     const normalizedPrompt = stripCriticModeFlag(stripNoPrdFlag(prompt));
     let branchName = "ralph/task";
     try {
-      branchName = (0, import_child_process16.execSync)("git rev-parse --abbrev-ref HEAD", {
+      branchName = (0, import_child_process16.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: directory,
         encoding: "utf-8",
-        timeout: 5e3
+        timeout: 5e3,
+        windowsHide: true
       }).trim();
     } catch {
     }
@@ -24175,7 +24188,8 @@ function runCommand(command, args, cwd2) {
       cwd: cwd2,
       encoding: "utf-8",
       timeout: COMMAND_TIMEOUT_MS,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      ...command === "git" ? { windowsHide: true } : {}
     }).trim();
   } catch {
     return null;
@@ -26984,7 +26998,8 @@ function buildTmuxSessionName(cwd2) {
     const branch = (0, import_child_process22.execFileSync)("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: cwd2,
       encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"]
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true
     }).trim();
     if (branch) {
       branchToken = sanitizeTmuxToken(branch);
@@ -30168,9 +30183,22 @@ function processStartIdentityForPlatform(pid, platform = process.platform, exec4
       return /^\d+$/.test(ticks) ? `win32:${ticks}` : null;
     }
     if (platform === "darwin") {
-      const raw = exec4("/usr/sbin/sysctl", ["-b", `kern.proc.pid.${pid}`], { encoding: null, maxBuffer: 1024 * 1024 });
-      const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
-      return birth ? `darwin:${birth}` : null;
+      try {
+        const raw = exec4("/usr/sbin/sysctl", ["-b", `kern.proc.pid.${pid}`], {
+          encoding: null,
+          maxBuffer: 1024 * 1024,
+          stdio: ["ignore", "pipe", "ignore"]
+        });
+        const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+        if (birth) return `darwin:${birth}`;
+      } catch {
+      }
+      const started2 = exec4("ps", ["-o", "lstart=", "-p", String(pid)], {
+        encoding: "utf8",
+        env: { ...process.env, LC_ALL: "C", LANG: "C" }
+      }).trim();
+      const startedAtMs = Date.parse(started2);
+      return started2 && Number.isFinite(startedAtMs) ? `darwin:${Math.floor(startedAtMs / 1e3)}:0` : null;
     }
     const started = exec4("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
     return started ? `${platform}:${started}` : null;
@@ -30192,6 +30220,12 @@ function isValidProcessStartIdentity(value, platform = process.platform) {
 function currentProcessStartIdentity(pid = process.pid) {
   return processStartIdentityForPlatform(pid);
 }
+function processStartIdentitiesMayMatch(recorded, observed) {
+  if (recorded === observed) return true;
+  const recordedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(recorded);
+  const observedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(observed);
+  return recordedDarwin !== null && observedDarwin !== null && recordedDarwin[1] === observedDarwin[1] && (recordedDarwin[2] === "0" || observedDarwin[2] === "0");
+}
 function isProcessIdentityDead(record2) {
   if (!Number.isSafeInteger(record2.pid) || record2.pid < 1 || !isValidProcessStartIdentity(record2.process_started_at)) return false;
   try {
@@ -30200,7 +30234,7 @@ function isProcessIdentityDead(record2) {
     return error2.code === "ESRCH";
   }
   const observed = currentProcessStartIdentity(record2.pid);
-  return isValidProcessStartIdentity(observed) && observed !== record2.process_started_at;
+  return isValidProcessStartIdentity(observed) && !processStartIdentitiesMayMatch(record2.process_started_at, observed);
 }
 function readLatestOwnerEpoch(cwd2, teamName) {
   const directory = absPath(cwd2, TeamPaths.ownerEpochs(teamName));
@@ -35740,7 +35774,7 @@ function getBranchName(teamName, workerName2) {
   return `omc-team/${sanitizeName(teamName)}/${sanitizeName(workerName2)}`;
 }
 function git(repoRoot, args, cwd2 = repoRoot) {
-  return (0, import_node_child_process7.execFileSync)("git", args, { cwd: cwd2, encoding: "utf-8", stdio: "pipe" }).trim();
+  return (0, import_node_child_process7.execFileSync)("git", args, { cwd: cwd2, encoding: "utf-8", stdio: "pipe", windowsHide: true }).trim();
 }
 function isInsideGitRepo(repoRoot) {
   try {
@@ -35794,7 +35828,7 @@ function isRegisteredWorktreePath(repoRoot, wtPath) {
 }
 function isDetached(wtPath) {
   try {
-    const branch = (0, import_node_child_process7.execFileSync)("git", ["branch", "--show-current"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).trim();
+    const branch = (0, import_node_child_process7.execFileSync)("git", ["branch", "--show-current"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }).trim();
     return branch.length === 0;
   } catch {
     return false;
@@ -35823,7 +35857,7 @@ function statusEntryPath(line) {
 function isWorktreeDirtyExcept(wtPath, ignoredRootPaths = []) {
   try {
     const ignored = new Set(ignoredRootPaths);
-    const entries = (0, import_node_child_process7.execFileSync)("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe" }).split("\n").filter((line) => line.trim().length > 0);
+    const entries = (0, import_node_child_process7.execFileSync)("git", ["status", "--porcelain"], { cwd: wtPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }).split("\n").filter((line) => line.trim().length > 0);
     const relevantEntries = entries.filter((line) => !ignored.has(statusEntryPath(line)));
     return { dirty: relevantEntries.length > 0, entries: relevantEntries };
   } catch {
@@ -36019,7 +36053,7 @@ function ensureWorkerWorktree(teamName, workerName2, repoRoot, options = {}) {
   const branch = mode === "named" ? getBranchName(teamName, workerName2) : "HEAD";
   validateResolvedPath(wtPath, (0, import_node_path11.join)(getOmcRoot(repoRoot), "team"));
   try {
-    (0, import_node_child_process7.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+    (0, import_node_child_process7.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
   } catch {
   }
   if ((0, import_node_fs9.existsSync)(wtPath)) {
@@ -36042,7 +36076,7 @@ function ensureWorkerWorktree(teamName, workerName2, repoRoot, options = {}) {
   const wtDir = (0, import_node_path11.join)(getOmcRoot(repoRoot), "team", sanitizeName(teamName), "worktrees");
   ensureDirWithMode(wtDir);
   const args = mode === "named" ? ["worktree", "add", "-b", branch, wtPath, options.baseRef ?? "HEAD"] : ["worktree", "add", "--detach", wtPath, options.baseRef ?? "HEAD"];
-  (0, import_node_child_process7.execFileSync)("git", args, { cwd: repoRoot, stdio: "pipe" });
+  (0, import_node_child_process7.execFileSync)("git", args, { cwd: repoRoot, stdio: "pipe", windowsHide: true });
   const info = {
     path: wtPath,
     branch,
@@ -36105,7 +36139,7 @@ function removeWorkerWorktree(teamName, workerName2, repoRoot) {
     prepareWorkerWorktreeForRemoval(teamName, workerName2, repoRoot, wtPath);
     const wasRegisteredWorktree = isRegisteredWorktreePath(repoRoot, wtPath);
     try {
-      (0, import_node_child_process7.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process7.execFileSync)("git", ["worktree", "remove", wtPath], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch (err) {
       if (wasRegisteredWorktree) {
         const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
@@ -36115,11 +36149,11 @@ function removeWorkerWorktree(teamName, workerName2, repoRoot) {
       }
     }
     try {
-      (0, import_node_child_process7.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process7.execFileSync)("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     try {
-      (0, import_node_child_process7.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process7.execFileSync)("git", ["branch", "-D", branch], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     if ((0, import_node_fs9.existsSync)(wtPath) && !isRegisteredWorktreePath(repoRoot, wtPath)) {
@@ -36651,12 +36685,14 @@ function validateBranchName(branch) {
 function configureHarnessMergeAttributes(repoRoot) {
   (0, import_node_child_process8.execFileSync)("git", ["config", "merge.ours.driver", "true"], {
     cwd: repoRoot,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
   const commonDir = (0, import_node_child_process8.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
     cwd: repoRoot,
     encoding: "utf-8",
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   }).trim();
   const resolvedCommonDir = (0, import_node_path12.isAbsolute)(commonDir) ? commonDir : (0, import_node_path12.join)(repoRoot, commonDir);
   const infoDir = (0, import_node_path12.join)(resolvedCommonDir, "info");
@@ -36683,7 +36719,7 @@ function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
     (0, import_node_child_process8.execFileSync)(
       "git",
       ["merge-tree", "--write-tree", baseBranch, workerBranch],
-      { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+      { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
     );
     return [];
   } catch (err) {
@@ -36703,17 +36739,17 @@ function checkMergeConflicts(workerBranch, baseBranch, repoRoot) {
   const mergeBase = (0, import_node_child_process8.execFileSync)(
     "git",
     ["merge-base", baseBranch, workerBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
   const baseDiff = (0, import_node_child_process8.execFileSync)(
     "git",
     ["diff", "--name-only", mergeBase, baseBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
   const workerDiff = (0, import_node_child_process8.execFileSync)(
     "git",
     ["diff", "--name-only", mergeBase, workerBranch],
-    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+    { cwd: repoRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
   ).trim();
   if (!baseDiff || !workerDiff) {
     return [];
@@ -36730,23 +36766,27 @@ function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
     try {
       (0, import_node_child_process8.execFileSync)("git", ["diff-index", "--quiet", "HEAD", "--"], {
         cwd: repoRoot,
-        stdio: "pipe"
+        stdio: "pipe",
+        windowsHide: true
       });
     } catch {
       throw new Error("Working tree has uncommitted changes \u2014 commit or stash before merging");
     }
     (0, import_node_child_process8.execFileSync)("git", ["checkout", baseBranch], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     (0, import_node_child_process8.execFileSync)("git", ["merge", "--no-ff", "-m", `Merge ${workerBranch} into ${baseBranch}`, workerBranch], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     const mergeCommit = (0, import_node_child_process8.execFileSync)("git", ["rev-parse", "HEAD"], {
       cwd: repoRoot,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     }).trim();
     return {
       workerName: workerName2,
@@ -36757,7 +36797,7 @@ function mergeWorkerBranch(workerBranch, baseBranch, repoRoot) {
     };
   } catch (_err) {
     try {
-      (0, import_node_child_process8.execFileSync)("git", ["merge", "--abort"], { cwd: repoRoot, stdio: "pipe" });
+      (0, import_node_child_process8.execFileSync)("git", ["merge", "--abort"], { cwd: repoRoot, stdio: "pipe", windowsHide: true });
     } catch {
     }
     const conflicts = checkMergeConflicts(workerBranch, baseBranch, repoRoot);
@@ -37130,7 +37170,8 @@ function gitRevParseHead(repoRoot, branch) {
   return (0, import_node_child_process9.execFileSync)("git", ["rev-parse", `refs/heads/${branch}`], {
     cwd: repoRoot,
     encoding: "utf-8",
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   }).trim();
 }
 function gitPath(worktreePath, gitPathName) {
@@ -37138,7 +37179,8 @@ function gitPath(worktreePath, gitPathName) {
     const resolved = (0, import_node_child_process9.execFileSync)("git", ["rev-parse", "--git-path", gitPathName], {
       cwd: worktreePath,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     }).trim();
     if (resolved) return resolved;
   } catch {
@@ -37153,7 +37195,8 @@ function isWorktreeRegistered(repoRoot, wtPath) {
     const out = (0, import_node_child_process9.execFileSync)("git", ["worktree", "list", "--porcelain"], {
       cwd: repoRoot,
       encoding: "utf-8",
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     for (const line of out.split("\n")) {
       if (line.startsWith("worktree ")) {
@@ -37171,20 +37214,23 @@ function ensureMergerWorktree(repoRoot, mergerPath, leaderBranch) {
   }
   (0, import_node_child_process9.execFileSync)("git", ["worktree", "add", "--force", mergerPath, leaderBranch], {
     cwd: repoRoot,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
 }
 function preflightMergerWorktree(mergerPath, leaderBranch) {
   try {
     (0, import_node_child_process9.execFileSync)("git", ["fetch", "--no-tags", "origin", leaderBranch], {
       cwd: mergerPath,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
   } catch {
   }
   (0, import_node_child_process9.execFileSync)("git", ["reset", "--hard", leaderBranch], {
     cwd: mergerPath,
-    stdio: "pipe"
+    stdio: "pipe",
+    windowsHide: true
   });
 }
 function parseUUFiles(porcelainOutput) {
@@ -37260,14 +37306,16 @@ async function startMergeOrchestrator(config2) {
       try {
         (0, import_node_child_process9.execFileSync)("git", ["fetch", "--no-tags", "origin", config2.leaderBranch], {
           cwd: wtPath,
-          stdio: "pipe"
+          stdio: "pipe",
+          windowsHide: true
         });
       } catch {
       }
       try {
         (0, import_node_child_process9.execFileSync)("git", ["rebase", config2.leaderBranch], {
           cwd: wtPath,
-          stdio: "pipe"
+          stdio: "pipe",
+          windowsHide: true
         });
         await resumeHookViaSentinel(wtPath);
         pausedWorkers.delete(other.workerName);
@@ -37281,7 +37329,8 @@ async function startMergeOrchestrator(config2) {
           const status = (0, import_node_child_process9.execFileSync)("git", ["status", "--porcelain"], {
             cwd: wtPath,
             encoding: "utf-8",
-            stdio: "pipe"
+            stdio: "pipe",
+            windowsHide: true
           });
           conflictingFiles = parseUUFiles(status);
         } catch {
@@ -37292,7 +37341,8 @@ async function startMergeOrchestrator(config2) {
             return (0, import_node_child_process9.execFileSync)("git", ["rev-parse", `refs/heads/${config2.leaderBranch}`], {
               cwd: config2.repoRoot,
               encoding: "utf-8",
-              stdio: "pipe"
+              stdio: "pipe",
+              windowsHide: true
             }).trim();
           } catch {
             return "unknown";
@@ -37350,7 +37400,7 @@ async function startMergeOrchestrator(config2) {
           mergeBaseSha = (0, import_node_child_process9.execFileSync)(
             "git",
             ["merge-base", config2.leaderBranch, entry.workerBranch],
-            { cwd: mergerPath, encoding: "utf-8", stdio: "pipe" }
+            { cwd: mergerPath, encoding: "utf-8", stdio: "pipe", windowsHide: true }
           ).trim();
         } catch {
         }
@@ -37469,7 +37519,8 @@ async function startMergeOrchestrator(config2) {
       const status = (0, import_node_child_process9.execFileSync)("git", ["status", "--porcelain"], {
         cwd: entry.workerWorktreePath,
         encoding: "utf-8",
-        stdio: "pipe"
+        stdio: "pipe",
+        windowsHide: true
       }).trim();
       if (status.length > 0) {
         const dirtyFiles = status.split("\n").map((l) => l.trim().replace(/^\S+\s+/, "")).filter((s) => s.length > 0);
@@ -38919,7 +38970,8 @@ function resolveLeaderBranch(cwd2) {
   const out = (0, import_node_child_process11.execFileSync)("git", ["branch", "--show-current"], {
     cwd: cwd2,
     encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
   }).trim();
   if (!out) {
     throw new Error("auto-merge requires a non-detached leader branch (git branch --show-current returned empty)");
@@ -41660,8 +41712,7 @@ function stateRoot(cwd2, teamName) {
   return (0, import_path95.join)(cwd2, `.omc/state/team/${teamName}`);
 }
 async function writeJson(filePath, data) {
-  await (0, import_promises20.mkdir)((0, import_path95.join)(filePath, ".."), { recursive: true });
-  await (0, import_promises20.writeFile)(filePath, JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteJson(filePath, data);
 }
 async function readJsonSafe5(filePath) {
   const isDoneSignalPath = filePath.endsWith("done.json");
@@ -41984,14 +42035,13 @@ async function monitorTeam(teamName, cwd2, workerPaneIds) {
   };
 }
 function watchdogCliWorkers(runtime, intervalMs) {
-  let tickInFlight = false;
+  let activeTick = null;
+  let stopped = false;
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
   const unresponsiveCounts = /* @__PURE__ */ new Map();
   const UNRESPONSIVE_KILL_THRESHOLD = 3;
   const tick = async () => {
-    if (tickInFlight) return;
-    tickInFlight = true;
     try {
       const workers = [...runtime.activeWorkers.entries()];
       if (workers.length === 0) return;
@@ -42085,14 +42135,22 @@ function watchdogCliWorkers(runtime, intervalMs) {
         }
         clearInterval(intervalId);
       }
-    } finally {
-      tickInFlight = false;
     }
   };
-  const intervalId = setInterval(() => {
-    tick();
-  }, intervalMs);
-  return () => clearInterval(intervalId);
+  const startTick = () => {
+    if (stopped || activeTick) return;
+    const tickPromise = tick();
+    activeTick = tickPromise;
+    void tickPromise.finally(() => {
+      if (activeTick === tickPromise) activeTick = null;
+    });
+  };
+  const intervalId = setInterval(startTick, intervalMs);
+  return async () => {
+    stopped = true;
+    clearInterval(intervalId);
+    await activeTick;
+  };
 }
 async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
   const root2 = stateRoot(runtime.cwd, runtime.teamName);
@@ -42358,6 +42416,7 @@ var init_runtime = __esm({
     init_tmux_session();
     init_worker_bootstrap();
     init_git_worktree();
+    init_atomic_write();
     init_task_file_ops();
   }
 });
@@ -45264,11 +45323,12 @@ function isCodeSimplifierEnabled() {
 }
 function getModifiedFiles(cwd2, extensions = DEFAULT_EXTENSIONS, maxFiles = DEFAULT_MAX_FILES) {
   try {
-    const output = (0, import_child_process28.execSync)("git diff HEAD --name-only", {
+    const output = (0, import_child_process28.execFileSync)("git", ["diff", "HEAD", "--name-only"], {
       cwd: cwd2,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5e3
+      timeout: 5e3,
+      windowsHide: true
     });
     return output.trim().split("\n").filter((file) => file.trim().length > 0).filter((file) => extensions.some((ext) => file.endsWith(ext))).slice(0, maxFiles);
   } catch {
@@ -54374,12 +54434,11 @@ var init_git = __esm({
 // src/hud/elements/multi-repo.ts
 function isGitRepo(dir) {
   try {
-    (0, import_node_child_process13.execSync)("git rev-parse --show-toplevel", {
+    (0, import_node_child_process13.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
       cwd: dir,
       encoding: "utf-8",
       timeout: 1e3,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? "cmd.exe" : void 0,
       windowsHide: true
     });
     return true;
@@ -86866,10 +86925,11 @@ function parseSinceSpec(since) {
 }
 function getMainRepoRoot(projectRoot) {
   try {
-    const gitCommonDir = (0, import_child_process12.execSync)("git rev-parse --git-common-dir", {
+    const gitCommonDir = (0, import_child_process12.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectRoot,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     }).trim();
     const absoluteCommonDir = (0, import_path38.resolve)(projectRoot, gitCommonDir);
     const mainRepoRoot = (0, import_path38.dirname)(absoluteCommonDir);
@@ -91766,16 +91826,18 @@ function isDelegationToolName(toolName) {
 }
 function getGitDiffStats(directory) {
   try {
-    const output = (0, import_child_process19.execSync)("git diff --numstat HEAD", {
+    const output = (0, import_child_process19.execFileSync)("git", ["diff", "--numstat", "HEAD"], {
       cwd: directory,
       encoding: "utf-8",
-      timeout: 5e3
+      timeout: 5e3,
+      windowsHide: true
     }).trim();
     if (!output) return [];
-    const statusOutput = (0, import_child_process19.execSync)("git status --porcelain", {
+    const statusOutput = (0, import_child_process19.execFileSync)("git", ["status", "--porcelain"], {
       cwd: directory,
       encoding: "utf-8",
-      timeout: 5e3
+      timeout: 5e3,
+      windowsHide: true
     }).trim();
     const statusMap = /* @__PURE__ */ new Map();
     for (const line of statusOutput.split("\n")) {
@@ -96846,10 +96908,11 @@ function parseSinceSpec2(since) {
 }
 function getMainRepoRoot2(projectRoot) {
   try {
-    const gitCommonDir = (0, import_child_process33.execSync)("git rev-parse --git-common-dir", {
+    const gitCommonDir = (0, import_child_process33.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectRoot,
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     }).trim();
     const mainRepoRoot = (0, import_path127.dirname)((0, import_path127.resolve)(projectRoot, gitCommonDir));
     return mainRepoRoot === projectRoot ? null : mainRepoRoot;
@@ -102204,8 +102267,16 @@ function sanitize(str, maxLen = 30) {
 }
 function getCurrentRepo() {
   try {
-    const root2 = (0, import_child_process38.execSync)("git rev-parse --show-toplevel", { encoding: "utf-8", timeout: 5e3 }).trim();
-    const remoteUrl = (0, import_child_process38.execSync)("git remote get-url origin", { encoding: "utf-8", timeout: 5e3 }).trim();
+    const root2 = (0, import_child_process38.execFileSync)("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf-8",
+      timeout: 5e3,
+      windowsHide: true
+    }).trim();
+    const remoteUrl = (0, import_child_process38.execFileSync)("git", ["remote", "get-url", "origin"], {
+      encoding: "utf-8",
+      timeout: 5e3,
+      windowsHide: true
+    }).trim();
     const parsed = parseRemoteUrl(remoteUrl);
     if (parsed) {
       return { owner: parsed.owner, repo: parsed.repo, root: root2, provider: parsed.provider };
@@ -102233,18 +102304,21 @@ function createWorktree(repoRoot, worktreePath, branchName, baseBranch) {
     }
     (0, import_child_process38.execFileSync)("git", ["fetch", "origin", baseBranch], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     try {
       (0, import_child_process38.execFileSync)("git", ["branch", branchName, `origin/${baseBranch}`], {
         cwd: repoRoot,
-        stdio: "pipe"
+        stdio: "pipe",
+        windowsHide: true
       });
     } catch {
     }
     (0, import_child_process38.execFileSync)("git", ["worktree", "add", worktreePath, branchName], {
       cwd: repoRoot,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     return { success: true };
   } catch (err) {
@@ -102324,7 +102398,7 @@ async function teleportCommand(ref, options) {
           (0, import_child_process38.execFileSync)(
             "git",
             ["fetch", "origin", refspec],
-            { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4 }
+            { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4, windowsHide: true }
           );
         } catch {
         }
@@ -102333,7 +102407,7 @@ async function teleportCommand(ref, options) {
           (0, import_child_process38.execFileSync)(
             "git",
             ["fetch", "origin", `${info.branch}:${branchName}`],
-            { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4 }
+            { cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"], timeout: 3e4, windowsHide: true }
           );
         } catch {
         }
@@ -102433,9 +102507,10 @@ async function teleportListCommand(options) {
     const relativePath = (0, import_path135.relative)(worktreeRoot, worktreePath);
     let branch = "unknown";
     try {
-      branch = (0, import_child_process38.execSync)("git branch --show-current", {
+      branch = (0, import_child_process38.execFileSync)("git", ["branch", "--show-current"], {
         cwd: worktreePath,
-        encoding: "utf-8"
+        encoding: "utf-8",
+        windowsHide: true
       }).trim();
     } catch {
     }
@@ -102481,9 +102556,10 @@ async function teleportRemoveCommand(pathOrName, options) {
   }
   try {
     if (!options.force) {
-      const status = (0, import_child_process38.execSync)("git status --porcelain", {
+      const status = (0, import_child_process38.execFileSync)("git", ["status", "--porcelain"], {
         cwd: worktreePath,
-        encoding: "utf-8"
+        encoding: "utf-8",
+        windowsHide: true
       });
       if (status.trim()) {
         const error2 = "Worktree has uncommitted changes. Use --force to remove anyway.";
@@ -102495,9 +102571,10 @@ async function teleportRemoveCommand(pathOrName, options) {
         return 1;
       }
     }
-    const gitDir = (0, import_child_process38.execSync)("git rev-parse --git-dir", {
+    const gitDir = (0, import_child_process38.execFileSync)("git", ["rev-parse", "--git-dir"], {
       cwd: worktreePath,
-      encoding: "utf-8"
+      encoding: "utf-8",
+      windowsHide: true
     }).trim();
     const mainRepoMatch = gitDir.match(/(.+)[/\\]\.git[/\\]worktrees[/\\][^/\\]+$/);
     const mainRepo = mainRepoMatch ? mainRepoMatch[1] : null;
@@ -102514,7 +102591,8 @@ async function teleportRemoveCommand(pathOrName, options) {
     const args = options.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
     (0, import_child_process38.execFileSync)("git", args, {
       cwd: mainRepo,
-      stdio: "pipe"
+      stdio: "pipe",
+      windowsHide: true
     });
     if (options.json) {
       console.log(JSON.stringify({ success: true, removed: worktreePath }));
