@@ -1,7 +1,7 @@
 ---
 name: cancel
 aliases: [cancel-ralph]
-description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
+description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, team) and clean up legacy mode state (swarm, ultrapilot, pipeline)
 argument-hint: "[--force|--all]"
 level: 2
 ---
@@ -23,9 +23,9 @@ Automatically detects which mode is active and cancels it:
 - **Ralph**: Stops persistence loop, clears linked ultrawork if applicable
 - **Ultrawork**: Stops parallel execution (standalone or linked)
 - **UltraQA**: Stops QA cycling workflow
-- **Swarm**: Stops coordinated agent swarm, releases claimed tasks
-- **Ultrapilot**: Stops parallel autopilot workers
-- **Pipeline**: Stops sequential agent pipeline
+- **Swarm** (legacy, removed in v4.1.7): cleans up leftover swarm state and releases claimed tasks
+- **Ultrapilot** (legacy): cleans up leftover ultrapilot worker state
+- **Pipeline** (legacy): cleans up leftover pipeline state
 - **Team**: Requests shutdown from all teammates through the active team/conversation surface, waits for responses/timeouts, clears OMC team state, clears linked ralph if present. Claude Code 2.1.178+ has no TeamDelete.
 - **Team+Ralph (linked)**: Cancels team first (graceful shutdown), then clears ralph state. Cancelling ralph when linked also cancels team first.
 
