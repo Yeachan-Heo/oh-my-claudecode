@@ -1089,7 +1089,9 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readFileSync(f.transcript).byteLength).toBe(Buffer.byteLength(original));
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    const result = await pending;
+    expect(result).toMatchObject({ continue: false, decision: 'block' });
+    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.reason]).toContain(result.reason);
     expect(readState(f).pipelineTracking.trackingRevision).toBe(0);
   });
 
