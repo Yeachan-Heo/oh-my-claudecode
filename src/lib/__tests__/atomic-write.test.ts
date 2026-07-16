@@ -3,6 +3,10 @@ import type { FileHandle } from 'fs/promises';
 
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
+// @ts-expect-error Hook runtime source is intentionally JavaScript-only.
+import { withStateFileLockSync } from '../../../scripts/lib/atomic-write.mjs';
+
 import { tmpdir } from 'os';
 
 const fsPromisesControl = vi.hoisted(() => ({
@@ -46,6 +50,7 @@ describe('atomicWriteJson', () => {
     fsPromisesControl.renameHook = undefined;
     fsPromisesControl.openHook = undefined;
     fsPromisesControl.writeHook = undefined;
+    delete process.env.OMC_TEST_FLOCK_AVAILABLE;
     for (const directory of directories.splice(0)) {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -187,5 +192,31 @@ describe('atomicWriteJson', () => {
     expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(oldValue);
     expect(readdirSync(directory)).toEqual(['state.json']);
     expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('bypasses stale generic lock artifacts without flock', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-'));
+    directories.push(directory);
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+    const filePath = join(directory, 'state.json');
+    writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
+
+    expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
+    expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
+  });
+
+  it('preserves legacy unlocked behavior without flock even when a lock artifact exists', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-live-'));
+    directories.push(directory);
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+    const filePath = join(directory, 'state.json');
+    const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+    const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+    writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
+
+    expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
+    expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
   });
 });

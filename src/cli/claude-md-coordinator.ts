@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { relative, resolve, sep } from 'node:path';
+import { relative, resolve } from 'node:path';
+import { isStrictChildPath } from '../installer/claude-md-transaction.js';
 import { executeClaudeMdTransaction, type ClaudeMdTransactionResult } from '../installer/claude-md-transaction.js';
 
 export const CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
@@ -27,12 +28,12 @@ export interface ClaudeMdCoordinatorErrorResponse { ok: false; exitCode: 2 | 3; 
 function coordinatorError(exitCode: 2 | 3, error: string): ClaudeMdCoordinatorErrorResponse { return { ok: false, exitCode, error, schemaVersion: CLAUDE_MD_COORDINATOR_SCHEMA_VERSION }; }
 export type ClaudeMdCoordinatorResponse = ClaudeMdCoordinatorErrorResponse | ClaudeMdTransactionResult;
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
-function inside(root: string, candidate: string): boolean { const rel = relative(root, candidate); return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith('..\\') && !rel.startsWith('..//'); }
+
 
 /** Refuse links in every source component, then prove the resolved target remains in the resolved plugin root. */
 function verifiedSource(pluginRootInput: string, sourceInput: string): { pluginRoot: string; sourcePath: string; bytes: Buffer } {
   const pluginRoot = resolve(pluginRootInput); const sourcePath = resolve(sourceInput);
-  if (!inside(pluginRoot, sourcePath)) throw new Error('Source must be inside plugin root');
+  if (!isStrictChildPath(pluginRootInput, sourceInput)) throw new Error('Source must be inside plugin root');
   if (lstatSync(pluginRoot).isSymbolicLink()) throw new Error('Plugin root must not be a symbolic link');
   const rootReal = realpathSync(pluginRoot);
   let component = pluginRoot;
@@ -41,7 +42,7 @@ function verifiedSource(pluginRootInput: string, sourceInput: string): { pluginR
   const stat = lstatSync(sourcePath);
   if (!stat.isFile()) throw new Error('Source must be a regular file');
   const sourceReal = realpathSync(sourcePath);
-  if (!inside(rootReal, sourceReal)) throw new Error('Resolved source escapes plugin root');
+  if (!isStrictChildPath(rootReal, sourceReal)) throw new Error('Resolved source escapes plugin root');
   return { pluginRoot, sourcePath, bytes: readFileSync(sourcePath) };
 }
 

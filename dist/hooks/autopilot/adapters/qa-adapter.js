@@ -20,7 +20,7 @@ export const qaAdapter = {
 
 Run build/lint/test cycling until all checks pass.
 
-${getQAPrompt()}
+${getQAPrompt(false)}
 
 ### Completion
 

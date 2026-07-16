@@ -11,6 +11,9 @@
  * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1130
  */
 
+import { createHash } from "crypto";
+import type { AutopilotWorkflowProfileV1 } from "../../shared/types.js";
+
 import type {
   PipelineConfig,
   PipelineContext,
@@ -19,6 +22,8 @@ import type {
   PipelineTracking,
   PipelinePhase,
   PipelineStageId,
+  WorkflowProfileStages,
+  WorkflowDescriptor,
   StageStatus,
 } from "./pipeline-types.js";
 import {
@@ -37,6 +42,8 @@ import {
   resolveAutopilotPlanPath,
   resolveOpenQuestionsPlanPath,
 } from "../../config/plan-output.js";
+import { validateNamedWorkflowStateStructure } from "./named-workflow-resume-validator.js";
+
 
 // ============================================================================
 // CONFIGURATION
@@ -75,6 +82,156 @@ export function resolvePipelineConfig(
   }
 
   return config;
+}
+
+const WORKFLOW_STAGE_SEQUENCES = [
+  ["ralplan", "execution"],
+  ["ralplan", "execution", "ralph"],
+  ["ralplan", "execution", "qa"],
+  ["ralplan", "execution", "ralph", "qa"],
+] as const;
+
+function isWorkflowStageSequence(stages: string[]): boolean {
+  return WORKFLOW_STAGE_SEQUENCES.some(
+    (sequence) =>
+      stages.length === sequence.length &&
+      stages.every((stage, index) => stage === sequence[index]),
+  );
+}
+const RESERVED_WORKFLOW_NAMES = new Set([
+  "autopilot",
+  "ralplan",
+  "execution",
+  "ralph",
+  "qa",
+  "autoresearch",
+  "ultraqa",
+  "merge-readiness",
+  "self-improve",
+  "ultrawork",
+  "ultragoal",
+  "ultrapilot",
+  "swarm",
+  "pipeline",
+  "plan",
+  "team",
+  "cancel",
+  "deep-interview",
+  "deepsearch",
+  "ultrathink",
+  "tdd",
+  "code-review",
+  "security-review",
+  "analyze",
+  "search",
+  "default",
+]);
+
+/** Serialize JSON values with object keys sorted recursively in lexical order. */
+export function canonicalizeJson(value: unknown): string {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value))
+      throw new TypeError("Canonical JSON requires finite numbers");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalizeJson).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalizeJson(record[key])}`)
+      .join(",")}}`;
+  }
+  throw new TypeError("Canonical JSON requires JSON-compatible values");
+}
+
+/** Return the canonical, closed v1 shape or null for malformed profile input. */
+export function normalizeWorkflowProfile(
+  profile: unknown,
+): { version: 1; stages: WorkflowProfileStages } | null {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile))
+    return null;
+  const record = profile as Record<string, unknown>;
+  if (record.version !== 1 || !Array.isArray(record.stages)) return null;
+  if (Object.keys(record).some((key) => key !== "version" && key !== "stages"))
+    return null;
+  const stages = record.stages;
+  if (!stages.every((stage) => typeof stage === "string")) return null;
+  if (!isWorkflowStageSequence(stages as string[])) return null;
+  return {
+    version: 1,
+    stages: [...stages] as unknown as WorkflowProfileStages,
+  };
+}
+
+/** Build the deterministic SHA-256 descriptor persisted for a named workflow run. */
+export function createWorkflowDescriptor(
+  workflowName: string,
+  profile: AutopilotWorkflowProfileV1 | unknown,
+): WorkflowDescriptor | null {
+  if (
+    !/^[a-z][a-z0-9-]{0,62}$/.test(workflowName) ||
+    RESERVED_WORKFLOW_NAMES.has(workflowName)
+  )
+    return null;
+  const normalized = normalizeWorkflowProfile(profile);
+  if (!normalized) return null;
+  const canonical = canonicalizeJson({
+    descriptorVersion: 1,
+    workflowName,
+    profileVersion: 1,
+    stages: normalized.stages,
+  });
+  return {
+    descriptorVersion: 1,
+    workflowName,
+    profileVersion: 1,
+    stages: normalized.stages,
+    profileHash: createHash("sha256").update(canonical).digest("hex"),
+  };
+}
+
+/** Verify that an on-disk descriptor still matches its canonical contents. */
+export function verifyWorkflowDescriptor(
+  descriptor: unknown,
+): descriptor is WorkflowDescriptor {
+  if (
+    !descriptor ||
+    typeof descriptor !== "object" ||
+    Array.isArray(descriptor)
+  )
+    return false;
+  const record = descriptor as Record<string, unknown>;
+  const expectedKeys = [
+    "descriptorVersion",
+    "profileHash",
+    "profileVersion",
+    "stages",
+    "workflowName",
+  ];
+  if (
+    Object.keys(record).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !(key in record)) ||
+    record.descriptorVersion !== 1 ||
+    typeof record.workflowName !== "string" ||
+    typeof record.profileHash !== "string"
+  ) {
+    return false;
+  }
+  const expected = createWorkflowDescriptor(record.workflowName, {
+    version: record.profileVersion,
+    stages: record.stages,
+  });
+  return expected !== null && expected.profileHash === record.profileHash;
 }
 
 /**
@@ -118,6 +275,9 @@ export function buildPipelineTracking(
     pipelineConfig: config,
     stages,
     currentStageIndex: firstActiveIndex >= 0 ? firstActiveIndex : 0,
+    trackingRevision: 0,
+    activationBoundary: null,
+    completionObservations: [],
   };
 }
 
@@ -130,6 +290,12 @@ export function getActiveAdapters(
   return ALL_ADAPTERS.filter((adapter) => !adapter.shouldSkip(config));
 }
 
+function hasNamedWorkflowMarkers(state: AutopilotState): boolean {
+  return ["workflow", "workflowRunId", "pipelineTracking"].some((marker) =>
+    Object.prototype.hasOwnProperty.call(state, marker),
+  );
+}
+
 /**
  * Read pipeline tracking from an autopilot state.
  * Returns null if the state doesn't have pipeline tracking.
@@ -137,8 +303,7 @@ export function getActiveAdapters(
 export function readPipelineTracking(
   state: AutopilotState,
 ): PipelineTracking | null {
-  const extended = state as AutopilotState & { pipeline?: PipelineTracking };
-  return extended.pipeline ?? null;
+  return state.pipelineTracking ?? state.pipeline ?? null;
 }
 
 /**
@@ -152,8 +317,8 @@ export function writePipelineTracking(
   const state = readAutopilotState(directory, sessionId);
   if (!state) return false;
 
-  (state as AutopilotState & { pipeline: PipelineTracking }).pipeline =
-    tracking;
+  if (hasNamedWorkflowMarkers(state)) return false;
+  state.pipeline = tracking;
   return writeAutopilotState(directory, state, sessionId);
 }
 
@@ -203,9 +368,8 @@ export function initPipeline(
       new Date().toISOString();
   }
 
-  // Persist pipeline tracking alongside autopilot state
-  (state as AutopilotState & { pipeline: PipelineTracking }).pipeline =
-    tracking;
+  // Persist legacy pipeline tracking alongside autopilot state.
+  state.pipeline = tracking;
   writeAutopilotState(directory, state, sessionId);
 
   return state;
@@ -262,6 +426,11 @@ export function getNextStageAdapter(
  * and marks it as active. Returns the new current stage adapter, or null
  * if the pipeline is complete.
  */
+/**
+ * Advance one workflow stage only when the observed transition token still
+ * matches persisted progress. A repeated Stop event becomes a no-op.
+ */
+
 export function advanceStage(
   directory: string,
   sessionId?: string,
@@ -269,23 +438,34 @@ export function advanceStage(
   const state = readAutopilotState(directory, sessionId);
   if (!state) return { adapter: null, phase: "failed" };
 
+  if (hasNamedWorkflowMarkers(state)) {
+    return { adapter: null, phase: "failed" };
+  }
+
   const tracking = readPipelineTracking(state);
   if (!tracking) return { adapter: null, phase: "failed" };
 
   const { stages, currentStageIndex } = tracking;
 
-  // Mark current stage as complete
-  if (currentStageIndex >= 0 && currentStageIndex < stages.length) {
-    const currentStage = stages[currentStageIndex];
-    currentStage.status = "complete";
-    currentStage.completedAt = new Date().toISOString();
+  // A completed transition must not be repeated by a later Stop observation.
+  if (currentStageIndex < 0 || currentStageIndex >= stages.length) {
+    return { adapter: null, phase: "complete" };
+  }
+  const currentStage = stages[currentStageIndex];
+  if (currentStage.status !== "active") {
+    return {
+      adapter: getCurrentStageAdapter(tracking),
+      phase: currentStage.id,
+    };
+  }
+  currentStage.status = "complete";
+  currentStage.completedAt = new Date().toISOString();
 
-    // Call onExit if the adapter supports it
-    const currentAdapter = getAdapterById(currentStage.id);
-    if (currentAdapter?.onExit) {
-      const context = buildContext(state, tracking);
-      currentAdapter.onExit(context);
-    }
+  // Call onExit if the adapter supports it
+  const currentAdapter = getAdapterById(currentStage.id);
+  if (currentAdapter?.onExit) {
+    const context = buildContext(state, tracking);
+    currentAdapter.onExit(context);
   }
 
   // Find next non-skipped stage
@@ -300,6 +480,7 @@ export function advanceStage(
   if (nextIndex < 0) {
     // All stages complete — pipeline is done
     tracking.currentStageIndex = stages.length;
+    advanceTrackingRevision(state, tracking);
     writePipelineTracking(directory, tracking, sessionId);
     return { adapter: null, phase: "complete" };
   }
@@ -308,6 +489,8 @@ export function advanceStage(
   tracking.currentStageIndex = nextIndex;
   stages[nextIndex].status = "active";
   stages[nextIndex].startedAt = new Date().toISOString();
+  advanceTrackingRevision(state, tracking);
+
   writePipelineTracking(directory, tracking, sessionId);
 
   // Call onEnter if the adapter supports it
@@ -338,6 +521,7 @@ export function failCurrentStage(
   if (currentStageIndex >= 0 && currentStageIndex < stages.length) {
     stages[currentStageIndex].status = "failed";
     stages[currentStageIndex].error = error;
+    advanceTrackingRevision(state, tracking);
   }
 
   return writePipelineTracking(directory, tracking, sessionId);
@@ -359,6 +543,7 @@ export function incrementStageIteration(
   const { stages, currentStageIndex } = tracking;
   if (currentStageIndex >= 0 && currentStageIndex < stages.length) {
     stages[currentStageIndex].iterations++;
+    advanceTrackingRevision(state, tracking);
   }
 
   return writePipelineTracking(directory, tracking, sessionId);
@@ -406,8 +591,10 @@ export function generatePipelinePrompt(
 ): string | null {
   const state = readAutopilotState(directory, sessionId);
   if (!state) return null;
-
-  const tracking = readPipelineTracking(state);
+  const namedWorkflow = hasNamedWorkflowMarkers(state);
+  const tracking = namedWorkflow
+    ? validateNamedWorkflowStateStructure(state, sessionId)?.tracking ?? null
+    : readPipelineTracking(state);
   if (!tracking) return null;
 
   const adapter = getCurrentStageAdapter(tracking);
@@ -530,6 +717,13 @@ export function formatPipelineHUD(tracking: PipelineTracking): string {
 
 // ============================================================================
 // HELPERS
+function advanceTrackingRevision(
+  _state: AutopilotState,
+  tracking: PipelineTracking,
+): void {
+  tracking.trackingRevision += 1;
+}
+
 // ============================================================================
 
 /**
@@ -539,14 +733,21 @@ function buildContext(
   state: AutopilotState,
   tracking: PipelineTracking,
 ): PipelineContext {
+  const namedWorkflow = hasNamedWorkflowMarkers(state);
   return {
-    idea: state.originalIdea,
+    idea: namedWorkflow
+      ? state.prompt || ""
+      : state.originalIdea || state.prompt || "",
     directory: state.project_path || process.cwd(),
     sessionId: state.session_id,
-    specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
-    planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
-    openQuestionsPath: resolveOpenQuestionsPlanPath(),
-    config: tracking.pipelineConfig,
+    ...(namedWorkflow
+      ? {}
+      : {
+          specPath: state.expansion?.spec_path || ".omc/autopilot/spec.md",
+          planPath: state.planning?.plan_path || resolveAutopilotPlanPath(),
+          openQuestionsPath: resolveOpenQuestionsPlanPath(),
+        }),
+    config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
   };
 }
 

@@ -358,14 +358,38 @@ async function resolveProjectMemorySummary(directory, projectMemoryModules) {
   return formatContextSummary(memory)?.trim() || '';
 }
 
-// Semantic version comparison (for cache cleanup sorting)
+// Semantic version comparison (for cache cleanup sorting and update checks)
+function parseSemver(version) {
+  if (typeof version !== 'string') return null;
+  const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
+  if (!match) return null;
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
 function semverCompare(a, b) {
-  const pa = a.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-  const pb = b.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (!pa || !pb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  if (pa.prerelease.length === 0 || pb.prerelease.length === 0) {
+    return pb.prerelease.length - pa.prerelease.length;
+  }
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    const aPart = pa.prerelease[i];
+    const bPart = pb.prerelease[i];
+    if (aPart === undefined) return -1;
+    if (bPart === undefined) return 1;
+    if (aPart === bPart) continue;
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
+    if (aNumeric && bNumeric) return Number(aPart) - Number(bPart);
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return aPart.localeCompare(bPart);
   }
   return 0;
 }
@@ -498,9 +522,11 @@ function compactBudgetedText(text, maxChars) {
 function formatUpdateNoticeForUser(updateInfo, options = {}) {
   const latestVersion = updateInfo?.latestVersion || 'latest';
   const currentVersion = updateInfo?.currentVersion || 'unknown';
-  const action = options.autoUpgradePrompt === false
-    ? 'To update later, run: omc update'
-    : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode';
+  const action = updateInfo?.source === 'marketplace'
+    ? 'To update the plugin channel, run: /plugin marketplace update omc && /omc-setup'
+    : (options.autoUpgradePrompt === false
+      ? 'To update later, run: omc update'
+      : 'Run /update to upgrade now, or use /plugin install oh-my-claudecode');
   return `[OMC UPDATE AVAILABLE] oh-my-claudecode v${latestVersion} is available (current: v${currentVersion}). ${action}`;
 }
 
@@ -588,6 +614,40 @@ function getLatestPluginCacheVersion() {
   } catch { return null; }
 }
 
+function getMarketplaceCloneVersion() {
+  try {
+    const marketplaceRoot = join(configDir, 'plugins', 'marketplaces', 'omc');
+    if (!existsSync(marketplaceRoot)) return null;
+
+    const marketplaceManifest = readJsonFile(join(marketplaceRoot, '.claude-plugin', 'marketplace.json'));
+    const pluginEntry = Array.isArray(marketplaceManifest?.plugins)
+      ? marketplaceManifest.plugins.find(plugin => plugin?.name === 'oh-my-claudecode')
+      : null;
+    const version = typeof pluginEntry?.version === 'string' ? pluginEntry.version.trim() : '';
+    return parseSemver(version) ? version : null;
+  } catch { return null; }
+}
+
+function writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, source) {
+  try {
+    const dir = join(configDir, '.omc');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(getUpdateCheckCachePath(), JSON.stringify({
+      timestamp: Date.now(),
+      latestVersion,
+      currentVersion,
+      updateAvailable,
+      source,
+    }));
+  } catch {}
+}
+
+function getPluginUpdateChannelVersion() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot || !isManagedPluginCacheRoot(pluginRoot)) return { managed: false, version: null };
+  return { managed: true, version: getMarketplaceCloneVersion() };
+}
+
 // Get plugin version from CLAUDE_PLUGIN_ROOT
 function getPluginVersion() {
   try {
@@ -627,13 +687,16 @@ function detectVersionDrift() {
   const pluginVersion = getPluginVersion();
   const npmVersion = getNpmVersion();
   const claudeMdVersion = getClaudeMdVersion();
+  const marketplaceChannel = getPluginUpdateChannelVersion();
 
   // Need at least plugin version to detect drift
   if (!pluginVersion) return null;
 
   const drift = [];
 
-  if (npmVersion && npmVersion !== pluginVersion) {
+  // Managed plugin installs are intentionally governed by the marketplace clone,
+  // so a newer npm CLI/cache version is not proof that the plugin channel can act.
+  if (!marketplaceChannel.managed && npmVersion && npmVersion !== pluginVersion) {
     drift.push({ component: 'npm package (omc CLI)', current: npmVersion, expected: pluginVersion });
   }
 
@@ -653,7 +716,13 @@ function detectVersionDrift() {
 
   if (drift.length === 0) return null;
 
-  return { pluginVersion, npmVersion, claudeMdVersion, drift };
+  return {
+    pluginVersion,
+    npmVersion,
+    claudeMdVersion,
+    drift,
+    source: marketplaceChannel.managed ? 'marketplace' : 'npm',
+  };
 }
 
 // Check if we should notify (once per unique drift combination)
@@ -681,8 +750,23 @@ function shouldNotifyDrift(driftInfo) {
   return true;
 }
 
-// Check npm registry for available update (with 24h cache)
+// Check the actionable update channel for the active install (with 24h npm cache).
+// Plugin marketplace installs update from the marketplace clone (usually origin/main),
+// not from the npm package. Keep those channels separate so HUD/session notices do
+// not advertise npm-only releases that `/plugin marketplace update` cannot install.
 async function checkNpmUpdate(currentVersion) {
+  const marketplaceChannel = getPluginUpdateChannelVersion();
+  if (marketplaceChannel.managed) {
+    const marketplaceVersion = marketplaceChannel.version;
+    if (!marketplaceVersion) {
+      writeUpdateCheckCache(currentVersion, currentVersion, false, 'marketplace-unavailable');
+      return null;
+    }
+    const updateAvailable = semverCompare(marketplaceVersion, currentVersion) > 0;
+    writeUpdateCheckCache(marketplaceVersion, currentVersion, updateAvailable, 'marketplace');
+    return updateAvailable ? { currentVersion, latestVersion: marketplaceVersion, source: 'marketplace' } : null;
+  }
+
   const cacheFile = getUpdateCheckCachePath();
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
   const now = Date.now();
@@ -691,9 +775,9 @@ async function checkNpmUpdate(currentVersion) {
   try {
     if (existsSync(cacheFile)) {
       const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
-      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION) {
+      if (cached.timestamp && (now - cached.timestamp) < CACHE_DURATION && (!cached.source || cached.source === 'npm')) {
         return (cached.updateAvailable && semverCompare(cached.latestVersion, currentVersion) > 0)
-          ? { currentVersion, latestVersion: cached.latestVersion }
+          ? { currentVersion, latestVersion: cached.latestVersion, source: 'npm' }
           : null;
       }
     }
@@ -712,14 +796,9 @@ async function checkNpmUpdate(currentVersion) {
     const latestVersion = data.version;
     const updateAvailable = semverCompare(latestVersion, currentVersion) > 0;
 
-    // Update cache
-    try {
-      const dir = join(configDir, '.omc');
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(cacheFile, JSON.stringify({ timestamp: now, latestVersion, currentVersion, updateAvailable }));
-    } catch {}
+    writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, 'npm');
 
-    return updateAvailable ? { currentVersion, latestVersion } : null;
+    return updateAvailable ? { currentVersion, latestVersion, source: 'npm' } : null;
   } catch { return null; } finally { clearTimeout(timeoutId); }
 }
 
@@ -849,7 +928,9 @@ async function main() {
       for (const d of driftInfo.drift) {
         driftMsg += `${d.component}: ${d.current} (expected ${d.expected})\n`;
       }
-      driftMsg += `\nRun 'omc update' to sync all components.`;
+      driftMsg += driftInfo.source === 'marketplace'
+        ? `\nRun '/plugin marketplace update omc && /omc-setup' to sync plugin-managed components.`
+        : `\nRun 'omc update' to sync all components.`;
 
       messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
     }

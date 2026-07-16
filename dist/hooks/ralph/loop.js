@@ -9,7 +9,7 @@
  *
  * Ported from oh-my-opencode's ralph hook.
  */
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { basename, join } from "path";
 import { writeModeState, readModeState, clearModeStateFile, } from "../../lib/mode-state-io.js";
@@ -165,10 +165,11 @@ export function createRalphLoopHook(directory) {
         const normalizedPrompt = stripCriticModeFlag(stripNoPrdFlag(prompt));
         let branchName = "ralph/task";
         try {
-            branchName = execSync("git rev-parse --abbrev-ref HEAD", {
+            branchName = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
                 cwd: directory,
                 encoding: "utf-8",
                 timeout: 5000,
+                windowsHide: true,
             }).trim();
         }
         catch {

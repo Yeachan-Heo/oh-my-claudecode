@@ -762,6 +762,44 @@ When multiple loops could apply, use this deterministic policy:
 
 For the shorter user-facing chooser, see [Mode Selection Guide](./shared/mode-selection-guide.md#goal-oriented-workflow-selection).
 
+## Named autopilot stage profiles (v1)
+
+A named profile is selected only by `/autopilot --workflow <name> <task>`; it is not a dynamic slash command, prompt alias, mode, plugin, filename, or independent state identity. Existing `/autopilot <task>` behavior remains the legacy no-profile path.
+
+Named profiles require Linux with the `flock` utility in v1. Their authenticated transcript boundary depends on Linux no-follow file-descriptor traversal and their recoverable mutation lock depends on kernel advisory locking; unsupported environments reject explicit `--workflow` activation before state mutation while legacy autopilot remains supported.
+
+Configure profiles only in the user or project JSONC configuration under `autopilot.workflows`:
+
+```jsonc
+{
+  "autopilot": {
+    "workflows": {
+      "plan-build-qa": {
+        "version": 1,
+        "stages": ["ralplan", "execution", "qa"]
+      }
+    }
+  }
+}
+```
+
+A v1 profile has exactly the required `version` (the number `1`) and `stages` keys. The name must match `^[a-z][a-z0-9-]{0,62}$`, must not collide with reserved stage/mode/legacy-alias names, and is metadata only. The only legal stage lists are:
+
+```text
+[ralplan, execution]
+[ralplan, execution, ralph]
+[ralplan, execution, qa]
+[ralplan, execution, ralph, qa]
+```
+
+`ralplan` creates the canonical plan required by `execution`; `execution` creates the implemented workspace required by `ralph` and `qa`. Other lists, reordering, duplicates, and non-built-in stages are rejected. Each user and project source is validated before composition. Different names coexist; a same-name project profile replaces the entire user profile rather than deep-merging it. Environment configuration cannot define or replace a profile.
+
+A successful selected run atomically initializes the existing session-scoped autopilot state with an immutable descriptor and selected-only pipeline tracking. The descriptor records the workflow name, profile version, canonical stages, and a deterministic lowercase SHA-256 hash of canonical JSON for `{descriptorVersion:1, workflowName, profileVersion:1, stages}`. It excludes task text, full config, model settings, and mutable progress. Resume and Stop recheck the hash; an invalid descriptor fails as `workflow_descriptor_integrity_failed`, without reloading live config or emitting a stage prompt.
+
+Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and Stop continuation. Plugin and standalone-installed Stop hooks accept only an owner-session assistant completion record for the current stage after its persisted activation transcript boundary. Bounded, regular, session-bound transcript handling rejects stale, pre-activation, user, tool, local-command output, malformed, wrong-stage, wrong-session, and symlink evidence. A compare-before-write tracking revision guard makes duplicate or concurrent Stop handling advance exactly once. Public state, HUD, and Stop output expose only safe workflow metadata and progress; they do not disclose task text, private descriptor data, transcript paths, offsets, or evidence hashes.
+
+V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
+
 ## Skills (38 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.

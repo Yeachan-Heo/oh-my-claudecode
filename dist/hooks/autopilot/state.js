@@ -8,7 +8,7 @@
  */
 import { mkdirSync, statSync } from "fs";
 import { join } from "path";
-import { writeModeState, readModeState, clearModeStateFile, } from "../../lib/mode-state-io.js";
+import { writeModeState, readModeState, clearModeStateFile, emergencyMutateStateFileIf, recoverEmergencyStateFile, writeStateFileLockedIf, } from "../../lib/mode-state-io.js";
 import { resolveStatePath, resolveSessionStatePath, getOmcRoot, } from "../../lib/worktree-paths.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { loadConfig } from "../../config/loader.js";
@@ -16,6 +16,7 @@ import { resolvePlanOutputAbsolutePath } from "../../config/plan-output.js";
 import { readRalphState, writeRalphState, clearRalphState, clearLinkedUltraworkState, } from "../ralph/index.js";
 import { startUltraQA, clearUltraQAState, readUltraQAState, } from "../ultraqa/index.js";
 import { canStartMode } from "../mode-registry/index.js";
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure, } from "./named-workflow-resume-validator.js";
 const SPEC_DIR = "autopilot";
 // ============================================================================
 // STATE MANAGEMENT
@@ -32,6 +33,12 @@ export function ensureAutopilotDir(directory) {
  * Read autopilot state from disk
  */
 export function readAutopilotState(directory, sessionId) {
+    const stateFile = sessionId
+        ? resolveSessionStatePath("autopilot", sessionId, directory)
+        : resolveStatePath("autopilot", directory);
+    if (!recoverEmergencyStateFile(stateFile)) {
+        return null;
+    }
     const state = readModeState("autopilot", directory, sessionId);
     if (state && !state.phase && state.current_phase) {
         state.phase = state.current_phase;
@@ -60,11 +67,99 @@ export function writeAutopilotState(directory, state, sessionId) {
         : stateRecord;
     return writeModeState("autopilot", normalizedState, directory, sessionId);
 }
+function hasNamedWorkflowMarkers(state) {
+    return Boolean(state &&
+        typeof state === "object" &&
+        ["workflow", "workflowRunId", "pipelineTracking"].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)));
+}
 /**
  * Clear autopilot state
  */
-export function clearAutopilotState(directory, sessionId) {
-    return clearModeStateFile("autopilot", directory, sessionId);
+export function clearAutopilotState(directory, sessionId, expectedState) {
+    if (hasNamedWorkflowMarkers(expectedState)) {
+        const valid = namedWorkflowRuntimeSupported()
+            ? validateNamedWorkflowState(expectedState, sessionId)
+            : validateNamedWorkflowStateStructure(expectedState, sessionId);
+        if (!valid)
+            return false;
+        if (!namedWorkflowRuntimeSupported()) {
+            const stateFile = sessionId
+                ? resolveSessionStatePath("autopilot", sessionId, directory)
+                : resolveStatePath("autopilot", directory);
+            const expectedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(expectedState).filter(([key]) => key !== "_meta")));
+            return emergencyMutateStateFileIf(stateFile, (current) => canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === expectedSnapshot, null);
+        }
+    }
+    return clearModeStateFile("autopilot", directory, sessionId, expectedState);
+}
+function sameAutopilotRun(current, observed) {
+    const currentWorkflow = current.workflow;
+    const observedWorkflow = observed.workflow;
+    return current.session_id === observed.session_id &&
+        current.started_at === observed.started_at &&
+        current.workflowRunId === observed.workflowRunId &&
+        currentWorkflow?.profileHash === observedWorkflow?.profileHash;
+}
+export function updateAutopilotStateIfCurrent(directory, observed, update, sessionId) {
+    const stateFile = sessionId
+        ? resolveSessionStatePath("autopilot", sessionId, directory)
+        : resolveStatePath("autopilot", directory);
+    if (hasNamedWorkflowMarkers(observed)) {
+        const valid = namedWorkflowRuntimeSupported()
+            ? validateNamedWorkflowState(observed, sessionId)
+            : validateNamedWorkflowStateStructure(observed, sessionId);
+        if (!valid)
+            return null;
+        if (!namedWorkflowRuntimeSupported()) {
+            const observedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(observed).filter(([key]) => key !== "_meta")));
+            return emergencyMutateStateFileIf(stateFile, (current) => canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === observedSnapshot, (current) => ({ ...current, ...update })) ? readAutopilotState(directory, sessionId) : null;
+        }
+    }
+    let updated = null;
+    const result = writeStateFileLockedIf(stateFile, (current) => sameAutopilotRun(current, observed) && (!hasNamedWorkflowMarkers(observed) || Boolean(validateNamedWorkflowState(current, sessionId))), (current) => {
+        const next = { ...current, ...update };
+        updated = next;
+        return next;
+    });
+    return result === 'written' ? updated : null;
+}
+function canonicalStateJson(value) {
+    if (Array.isArray(value))
+        return `[${value.map(canonicalStateJson).join(",")}]`;
+    if (value && typeof value === "object") {
+        const record = value;
+        return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStateJson(record[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+}
+function namedResumeIdentity(state) {
+    return canonicalStateJson({
+        active: state.active,
+        session_id: state.session_id,
+        workflowRunId: state.workflowRunId,
+        phase: state.phase,
+        prompt: state.prompt,
+        workflow: state.workflow,
+        pipelineTracking: state.pipelineTracking,
+    });
+}
+export function updateAutopilotStateIfExact(directory, observed, update, sessionId, validateCurrent) {
+    const stateFile = sessionId
+        ? resolveSessionStatePath("autopilot", sessionId, directory)
+        : resolveStatePath("autopilot", directory);
+    const observedSnapshot = canonicalStateJson(Object.fromEntries(Object.entries(observed).filter(([key]) => key !== "_meta")));
+    if (!namedWorkflowRuntimeSupported()) {
+        return emergencyMutateStateFileIf(stateFile, (current) => current.workflowRunId === observed.workflowRunId &&
+            canonicalStateJson(Object.fromEntries(Object.entries(current).filter(([key]) => key !== "_meta"))) === observedSnapshot &&
+            validateCurrent(current), (current) => ({ ...current, ...update })) ? readAutopilotState(directory, sessionId) : null;
+    }
+    let updated = null;
+    const result = writeStateFileLockedIf(stateFile, (current) => namedResumeIdentity(current) === namedResumeIdentity(observed) && validateCurrent(current), (current) => {
+        const next = { ...current, ...update };
+        updated = next;
+        return next;
+    });
+    return result === "written" ? updated : null;
 }
 /**
  * Get the age of the autopilot state file in milliseconds.
@@ -74,6 +169,8 @@ export function getAutopilotStateAge(directory, sessionId) {
     const stateFile = sessionId
         ? resolveSessionStatePath("autopilot", sessionId, directory)
         : resolveStatePath("autopilot", directory);
+    if (!recoverEmergencyStateFile(stateFile))
+        return null;
     try {
         const stats = statSync(stateFile);
         return Date.now() - stats.mtimeMs;

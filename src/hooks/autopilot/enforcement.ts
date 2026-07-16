@@ -18,6 +18,7 @@ import {
 import {
   readAutopilotState,
   writeAutopilotState,
+  updateAutopilotStateIfExact,
   transitionPhase,
   transitionRalphToUltraQA,
   transitionUltraQAToValidation,
@@ -44,7 +45,16 @@ import {
   generateTransitionPrompt,
   formatPipelineHUD,
 } from "./pipeline.js";
+import { DEFAULT_PIPELINE_CONFIG } from "./pipeline-types.js";
 import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
+import {
+  namedWorkflowRuntimeSupported,
+  prepareNamedWorkflowAdvance,
+  refreshNamedWorkflowBoundaryForCommit,
+  takeNamedWorkflowTranscriptFailure,
+  validateNamedWorkflowState,
+  validateNamedWorkflowStateStructure,
+} from "./named-workflow-resume-validator.js";
 
 export interface AutopilotEnforcementResult {
   /** Whether to block the stop event */
@@ -151,10 +161,20 @@ export function detectAnySignal(sessionId: string): AutopilotSignal | null {
 // ENFORCEMENT
 // ============================================================================
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+      typeof state === "object" &&
+      ["workflow", "workflowRunId", "pipelineTracking"].some((marker) =>
+        Object.prototype.hasOwnProperty.call(state, marker),
+      ),
+  );
+}
+
 const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 
 function isAwaitingConfirmation(state: unknown): boolean {
-  if (!state || typeof state !== 'object') {
+  if (!state || typeof state !== "object") {
     return false;
   }
 
@@ -164,8 +184,9 @@ function isAwaitingConfirmation(state: unknown): boolean {
   }
 
   const setAt =
-    (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
-    (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+    (typeof stateRecord.awaiting_confirmation_set_at === "string" &&
+      stateRecord.awaiting_confirmation_set_at) ||
+    (typeof stateRecord.started_at === "string" && stateRecord.started_at) ||
     null;
 
   if (!setAt) {
@@ -181,7 +202,8 @@ function isAwaitingConfirmation(state: unknown): boolean {
 }
 
 function isOrphanedRoutingEchoState(state: AutopilotState): boolean {
-  const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
+  const phase =
+    typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
   if (phase && phase !== "unspecified") return false;
 
   const stateRecord = state as unknown as Record<string, unknown>;
@@ -195,7 +217,9 @@ function isOrphanedRoutingEchoState(state: AutopilotState): boolean {
     .join("\n")
     .trim();
 
-  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(
+    promptText,
+  );
 }
 
 /**
@@ -229,13 +253,116 @@ export async function checkAutopilot(
   const workingDir = directory || process.cwd();
   const state = readAutopilotState(workingDir, sessionId);
 
-  if (!state || !state.active) {
+  if (!state) {
     return null;
   }
 
   // Strict session isolation: only process state for matching session
   if (state.session_id !== sessionId) {
     return null;
+  }
+
+  const hasNamedMarkers = hasNamedWorkflowMarkers(state);
+
+  if (hasNamedMarkers && !validateNamedWorkflowStateStructure(state, sessionId)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
+
+  if (!state.active) {
+    return null;
+  }
+
+  if (hasNamedMarkers && !namedWorkflowRuntimeSupported()) {
+    return {
+      shouldBlock: false,
+      message:
+        "[AUTOPILOT NAMED WORKFLOW UNSUPPORTED] Named workflow enforcement requires Linux with flock. State was left unchanged; use /cancel to safely stop this workflow.",
+      phase: state.phase,
+    };
+  }
+
+  if (hasNamedMarkers) {
+    const validated = validateNamedWorkflowState(state, sessionId);
+    if (!validated) {
+      const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
+      return {
+        shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+        message: transcriptFailure === "workflow_transcript_record_too_large"
+          ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+          : "workflow_descriptor_integrity_failed",
+        phase: state.phase,
+      };
+    }
+    const advanced = prepareNamedWorkflowAdvance(state, sessionId);
+    if (advanced) {
+      const committed = updateAutopilotStateIfExact(
+        workingDir,
+        state,
+        advanced.updated,
+        sessionId,
+        (current) =>
+          Boolean(validateNamedWorkflowState(current, sessionId)) &&
+          refreshNamedWorkflowBoundaryForCommit(advanced),
+      );
+      if (!committed) {
+        const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
+        return {
+          shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+          message: transcriptFailure === "workflow_transcript_record_too_large"
+            ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+            : "workflow_descriptor_integrity_failed",
+          phase: state.phase,
+        };
+      }
+      if (!committed.active || committed.phase === "complete") {
+        return {
+          shouldBlock: false,
+          message:
+            "[AUTOPILOT COMPLETE] All pipeline stages finished successfully!",
+          phase: "complete",
+        };
+      }
+      return generateNamedWorkflowPrompt(committed, workingDir, sessionId);
+    }
+    if (takeNamedWorkflowTranscriptFailure(sessionId) === "workflow_transcript_record_too_large") {
+      return {
+        shouldBlock: true,
+        message:
+          "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.",
+        phase: state.phase,
+      };
+    }
+    return generateNamedWorkflowPrompt(state, workingDir, sessionId);
+  }
+
+  function generateNamedWorkflowPrompt(
+    state: AutopilotState,
+    directory: string,
+    sessionId?: string,
+  ): AutopilotEnforcementResult {
+    const validated = validateNamedWorkflowState(state, sessionId);
+    const adapter = validated && getCurrentStageAdapter(validated.tracking);
+    if (!validated || !adapter) {
+      return {
+        shouldBlock: false,
+        message: "workflow_descriptor_integrity_failed",
+        phase: state.phase,
+      };
+    }
+    return {
+      shouldBlock: true,
+      message: adapter.getPrompt({
+        idea: validated.task,
+        directory: state.project_path || directory,
+        sessionId,
+        config: DEFAULT_PIPELINE_CONFIG,
+      }),
+      phase: state.phase,
+    };
   }
 
   if (isAwaitingConfirmation(state)) {
@@ -346,6 +473,13 @@ function generateContinuationPrompt(
   directory: string,
   sessionId?: string,
 ): AutopilotEnforcementResult {
+  if (hasNamedWorkflowMarkers(state)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
   // Read tool error before generating message
   const toolError = readLastToolError(directory);
   const errorGuidance = getToolErrorRetryGuidance(toolError);
@@ -356,7 +490,7 @@ function generateContinuationPrompt(
   writeAutopilotState(directory, state, sessionId);
 
   const phasePrompt = getPhasePrompt(state.phase, {
-    idea: state.originalIdea,
+    idea: state.originalIdea || state.prompt || "",
     specPath: state.expansion.spec_path || `.omc/autopilot/spec.md`,
     planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
     openQuestionsPath: resolveOpenQuestionsPlanPath(),
@@ -411,6 +545,13 @@ function checkPipelineAutopilot(
   sessionId: string | undefined,
   directory: string,
 ): AutopilotEnforcementResult | null {
+  if (hasNamedWorkflowMarkers(state)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
   const tracking = readPipelineTracking(state);
   if (!tracking) return null;
 
@@ -428,6 +569,7 @@ function checkPipelineAutopilot(
   // Check if the current stage's completion signal has been emitted
   const completionSignal = getCurrentCompletionSignal(tracking);
   if (
+    !hasNamedWorkflowMarkers(state) &&
     completionSignal &&
     sessionId &&
     detectPipelineSignal(sessionId, completionSignal)
@@ -471,13 +613,13 @@ function checkPipelineAutopilot(
     const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
 
     const context = {
-      idea: state.originalIdea,
+      idea: state.originalIdea || state.prompt || "",
       directory: state.project_path || directory,
       sessionId,
       specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
       planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
       openQuestionsPath: resolveOpenQuestionsPlanPath(),
-      config: tracking.pipelineConfig,
+      config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
     };
 
     const stagePrompt = nextAdapter.getPrompt(context);
@@ -520,13 +662,13 @@ ${stagePrompt}
   const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
 
   const context = {
-    idea: state.originalIdea,
+    idea: state.originalIdea || state.prompt || "",
     directory: state.project_path || directory,
     sessionId,
     specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
     planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
     openQuestionsPath: resolveOpenQuestionsPlanPath(),
-    config: tracking.pipelineConfig,
+    config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
   };
 
   const stagePrompt = currentAdapter.getPrompt(context);
@@ -575,7 +717,7 @@ function detectPipelineSignal(sessionId: string, signal: string): boolean {
     join(claudeDir, "transcripts", `${sessionId}.md`),
   ];
 
-  const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(escaped, "i");
 
   for (const transcriptPath of possiblePaths) {

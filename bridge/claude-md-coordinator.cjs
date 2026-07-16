@@ -42,6 +42,7 @@ var import_node_path2 = require("node:path");
 // src/installer/claude-md-transaction.ts
 var import_node_crypto = require("node:crypto");
 var nodeFs = __toESM(require("node:fs"), 1);
+var nativePath = __toESM(require("node:path"), 1);
 var import_node_path = require("node:path");
 
 // src/installer/claude-md-analysis.ts
@@ -612,12 +613,18 @@ function failure(request, code, error, phase, path) {
 function decodeClaudeMdUtf82(bytes, path) {
   return decodeClaudeMdUtf8(bytes, path);
 }
+function isStrictChildPath(root, candidate, path = nativePath) {
+  if (/^(?:\\\\|\/\/)[?.](?:\\|\/)/.test(root) || /^(?:\\\\|\/\/)[?.](?:\\|\/)/.test(candidate)) return false;
+  const normalizedRoot = path.resolve(root);
+  const normalizedCandidate = path.resolve(candidate);
+  const rel = path.relative(normalizedRoot, normalizedCandidate);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${nativePath.sep}`) && !rel.startsWith("../") && !rel.startsWith("..\\") && !path.isAbsolute(rel);
+}
 function validateRootedRegularFile(root, path, allowAbsent = true, fs = defaultFs) {
-  const normalizedRoot = (0, import_node_path.resolve)(root);
-  const normalizedPath = (0, import_node_path.resolve)(path);
-  const rel = (0, import_node_path.relative)(normalizedRoot, normalizedPath);
-  if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || rel === "") {
-    if (rel === "") throw new Error(`Not a regular file: ${normalizedPath}`);
+  const normalizedRoot = nativePath.resolve(root);
+  const normalizedPath = nativePath.resolve(path);
+  if (!isStrictChildPath(root, path)) {
+    if (normalizedRoot === normalizedPath) throw new Error(`Not a regular file: ${normalizedPath}`);
     throw new Error(`Path escapes root: ${path}`);
   }
   if (!fs.existsSync(normalizedPath)) {
@@ -841,14 +848,10 @@ function coordinatorError(exitCode, error) {
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function inside(root, candidate) {
-  const rel = (0, import_node_path2.relative)(root, candidate);
-  return rel !== "" && rel !== ".." && !rel.startsWith(`..${import_node_path2.sep}`) && !rel.startsWith("..\\") && !rel.startsWith("..//");
-}
 function verifiedSource(pluginRootInput, sourceInput) {
   const pluginRoot = (0, import_node_path2.resolve)(pluginRootInput);
   const sourcePath = (0, import_node_path2.resolve)(sourceInput);
-  if (!inside(pluginRoot, sourcePath)) throw new Error("Source must be inside plugin root");
+  if (!isStrictChildPath(pluginRootInput, sourceInput)) throw new Error("Source must be inside plugin root");
   if ((0, import_node_fs.lstatSync)(pluginRoot).isSymbolicLink()) throw new Error("Plugin root must not be a symbolic link");
   const rootReal = (0, import_node_fs.realpathSync)(pluginRoot);
   let component = pluginRoot;
@@ -860,7 +863,7 @@ function verifiedSource(pluginRootInput, sourceInput) {
   const stat = (0, import_node_fs.lstatSync)(sourcePath);
   if (!stat.isFile()) throw new Error("Source must be a regular file");
   const sourceReal = (0, import_node_fs.realpathSync)(sourcePath);
-  if (!inside(rootReal, sourceReal)) throw new Error("Resolved source escapes plugin root");
+  if (!isStrictChildPath(rootReal, sourceReal)) throw new Error("Resolved source escapes plugin root");
   return { pluginRoot, sourcePath, bytes: (0, import_node_fs.readFileSync)(sourcePath) };
 }
 function runClaudeMdCoordinator(input) {

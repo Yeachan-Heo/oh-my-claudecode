@@ -274,15 +274,19 @@ Team "{team_name}" cancelled:
 
 #### If Autopilot Active
 
-Autopilot handles its own cleanup including linked ralph and ultraqa.
+Autopilot handles its own primary-first cleanup: named workflows additionally remove only their session-owned nested ralplan enforcement state before linked ralph and ultraqa cleanup.
 
-1. Read autopilot state via `state_read(mode="autopilot", session_id)` to get current phase
-2. Check for linked ralph via `state_read(mode="ralph", session_id)`:
-   - If ralph is active and has `linked_ultrawork: true`, clear ultrawork first: `state_clear(mode="ultrawork", session_id)`
-   - Clear ralph: `state_clear(mode="ralph", session_id)`
-3. Check for linked ultraqa via `state_read(mode="ultraqa", session_id)`:
-   - If active, clear it: `state_clear(mode="ultraqa", session_id)`
-4. Mark autopilot inactive (preserve state for resume) via `state_write(mode="autopilot", session_id, state={active: false, ...existing})`
+1. Read autopilot state via `state_read(mode="autopilot", session_id)` to capture the exact current run, including `workflowRunId` when present.
+2. Pause that exact run with the narrow mutation `state_write(mode="autopilot", session_id, active=false, state={workflowRunId: "<exact run id>"})`. Do **not** replay or copy the state readback. On Linux with `flock`, the tool revalidates the held run and workflow integrity under its mutation lock before changing only `active` to `false`; it preserves workflow, pipeline tracking, and task identity. `target_state_sha256` may be included only when it is the exact SHA-256 of the current serialized state.
+   - If this write fails, stop immediately. Do not clear nested ralplan, linked state, cancel signals, or runtime artifacts.
+3. For a named workflow, clear only `ralplan` state owned by the same `session_id`; never clear another session's standalone ralplan state. Record a failure but keep the paused primary resumable.
+4. Only after the primary pause commits, check linked ralph via `state_read(mode="ralph", session_id)`:
+   - If ralph is active and has `linked_ultrawork: true`, clear ultrawork first and require success.
+   - Clear ralph and require success.
+5. Check linked ultraqa via `state_read(mode="ultraqa", session_id)` and clear it if active.
+6. Report every dependent clear failure explicitly; the already-paused autopilot state remains resumable and cleanup may be retried.
+
+Force cancellation follows the same primary-first rule for every autopilot group: clear the exact autopilot primary first, abort its dependent cleanup if the primary clear fails, and never continue as though that group succeeded.
 
 #### If Ralph Active (but not Autopilot)
 

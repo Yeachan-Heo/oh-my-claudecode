@@ -342,6 +342,20 @@ describe('install() standalone hook reconciliation', () => {
       `${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`,
     );
   });
+  it('reconciles the workflow profile runtime helper before persistent-mode is used', async () => {
+    const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    writeFileSync(join(hooksLibDir, 'workflow-profile-runtime.mjs'), 'export const stale = true;\n');
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const shipped = shippedStandaloneHookPayload('workflow-profile-runtime.mjs', 'hooks/lib');
+
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(hooksLibDir, 'workflow-profile-runtime.mjs'), 'utf-8')).toBe(shipped);
+    expect(readFileSync(join(testClaudeDir, 'hooks', 'persistent-mode.mjs'), 'utf-8')).toContain('workflow-profile-runtime.mjs');
+  });
+
 });
 
 // ── Plugin-provided hooks: duplicate prevention (#2252) ─────────────────────

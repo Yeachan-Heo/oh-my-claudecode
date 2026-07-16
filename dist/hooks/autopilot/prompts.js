@@ -13,7 +13,7 @@ function resolvePromptOpenQuestionsPath(openQuestionsPathOrConfig) {
  * Generate the expansion phase prompt (Phase 0)
  * Analyst extracts requirements, Architect creates technical spec
  */
-export function getExpansionPrompt(idea, openQuestionsPathOrConfig) {
+export function getExpansionPrompt(idea, openQuestionsPathOrConfig, includeLegacyCompletion = true) {
     const openQuestionsPath = resolvePromptOpenQuestionsPath(openQuestionsPathOrConfig);
     return `## AUTOPILOT PHASE 0: IDEA EXPANSION
 
@@ -78,9 +78,9 @@ The Analyst is read-only and cannot write files, so you must persist its open qu
 Combine Analyst requirements + Architect technical spec into a single document.
 Save to: \`.omc/autopilot/spec.md\`
 
-### Step 4: Signal Completion
+${includeLegacyCompletion ? `### Step 4: Signal Completion
 
-When the spec is saved, signal: EXPANSION_COMPLETE
+When the spec is saved, signal: EXPANSION_COMPLETE` : ''}
 `;
 }
 /**
@@ -215,7 +215,7 @@ When all tasks from the plan are complete: EXECUTION_COMPLETE
 /**
  * Generate the QA phase prompt (Phase 3)
  */
-export function getQAPrompt() {
+export function getQAPrompt(includeLegacyCompletion = true) {
     return `## AUTOPILOT PHASE 3: QUALITY ASSURANCE
 
 Run UltraQA cycles until build/lint/tests pass.
@@ -267,11 +267,11 @@ Task(
 
 ### Exit Conditions
 
-- All checks pass → QA_COMPLETE
+- All checks pass${includeLegacyCompletion ? ' → QA_COMPLETE' : ''}
 - Max cycles reached → Report failures
 - Same error 3 times → Escalate to user
 
-When all checks pass: QA_COMPLETE
+${includeLegacyCompletion ? 'When all checks pass: QA_COMPLETE' : ''}
 `;
 }
 /**

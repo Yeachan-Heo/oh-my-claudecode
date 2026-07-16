@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as nodeFs from 'node:fs';
-import { basename, dirname, relative, resolve } from 'node:path';
+import * as nativePath from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { analyzeLegacyClaudeMd, decodeClaudeMdUtf8 as decodeClaudeMdUtf8PreservingBom, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 
 export const CLAUDE_MD_IMPORT_START = '<!-- OMC:IMPORT:START -->';
@@ -51,12 +52,23 @@ export function decodeClaudeMdUtf8(bytes: Buffer, path: string): string {
   return decodeClaudeMdUtf8PreservingBom(bytes, path);
 }
 
+/**
+ * Returns whether candidate is a strict lexical child of root using the supplied host path implementation.
+ * The injectable path implementation exists solely for platform-independent lexical tests.
+ */
+export function isStrictChildPath(root: string, candidate: string, path: Pick<typeof nativePath, 'isAbsolute' | 'relative' | 'resolve'> = nativePath): boolean {
+  if (/^(?:\\\\|\/\/)[?.](?:\\|\/)/.test(root) || /^(?:\\\\|\/\/)[?.](?:\\|\/)/.test(candidate)) return false;
+  const normalizedRoot = path.resolve(root);
+  const normalizedCandidate = path.resolve(candidate);
+  const rel = path.relative(normalizedRoot, normalizedCandidate);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${nativePath.sep}`) && !rel.startsWith('../') && !rel.startsWith('..\\') && !path.isAbsolute(rel);
+}
+
 export function validateRootedRegularFile(root: string, path: string, allowAbsent = true, fs: ClaudeMdTransactionFs = defaultFs): string {
-  const normalizedRoot = resolve(root);
-  const normalizedPath = resolve(path);
-  const rel = relative(normalizedRoot, normalizedPath);
-  if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || rel === '') {
-    if (rel === '') throw new Error(`Not a regular file: ${normalizedPath}`);
+  const normalizedRoot = nativePath.resolve(root);
+  const normalizedPath = nativePath.resolve(path);
+  if (!isStrictChildPath(root, path)) {
+    if (normalizedRoot === normalizedPath) throw new Error(`Not a regular file: ${normalizedPath}`);
     throw new Error(`Path escapes root: ${path}`);
   }
   if (!fs.existsSync(normalizedPath)) { if (allowAbsent) return normalizedPath; throw new Error(`Missing path: ${normalizedPath}`); }

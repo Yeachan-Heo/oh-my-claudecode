@@ -67,3 +67,51 @@ user `~/.config/claude-omc/config.jsonc` (project takes precedence).
 - A listed skill is dropped before conflict resolution, so neither its magic-keyword invocation nor its mode-injection context is emitted.
 - `cancel` is never disableable, even if listed: it is the emergency stop for active modes.
 - To disable all keyword routing at once instead, set `OMC_SKIP_HOOKS=keyword-detector`.
+
+## `autopilot.workflows`
+
+Define reusable, named fixed-stage profiles for `/autopilot`. A profile is selected
+only with `/autopilot --workflow <name> <task>`; names do not create commands,
+modes, state files, or plugins.
+
+Runtime support for named profiles requires Linux with the `flock` utility in v1. Unsupported environments reject explicit `--workflow` activation before creating or changing autopilot state; this does not affect legacy autopilot invocations.
+
+```jsonc
+{
+  "autopilot": {
+    "workflows": {
+      "plan-build-qa": {
+        "version": 1,
+        "stages": ["ralplan", "execution", "qa"]
+      }
+    }
+  }
+}
+```
+
+### Profile contract
+
+- `workflows` is an object map. Names must match `^[a-z][a-z0-9-]{0,62}$` and
+  cannot use built-in stage, autopilot, mode, or deprecated alias names (including
+  `autopilot`, `ralplan`, `execution`, `ralph`, `qa`, `ultrawork`, and
+  `ultrapilot`).
+- Each profile has exactly two required fields: `version`, which must be the number
+  `1`, and `stages`.
+- `stages` must be exactly one of these sequences:
+  - `["ralplan", "execution"]`
+  - `["ralplan", "execution", "ralph"]`
+  - `["ralplan", "execution", "qa"]`
+  - `["ralplan", "execution", "ralph", "qa"]`
+- Unknown profile fields are rejected. In particular, `stageModels` is not
+  supported in v1; workflow-specific model routing, inline execution, arbitrary
+  stages, and dynamic commands/modes are intentionally deferred.
+
+### Source and merge behavior
+
+User and project workflow blocks are independently validated before configuration
+merge. Errors identify the source (`user` or `project`) and the failing profile
+path. Different names compose. When project and user configuration define the same
+name, the project profile replaces the entire user profile rather than merging its
+fields. Environment variables do not define or replace workflow profiles.
+
+When no profiles are configured, `/autopilot` keeps its existing behavior.

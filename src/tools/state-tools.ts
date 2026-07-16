@@ -6,9 +6,10 @@
  */
 
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import {
   resolveStatePath,
   ensureOmcDir,
@@ -21,13 +22,21 @@ import {
   OmcPaths,
 } from '../lib/worktree-paths.js';
 import { resolveSessionId } from '../lib/session-id.js';
-import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { validatePayload } from '../lib/payload-limits.js';
 import {
   canClearStateForSession,
   findCompletedSessionStateFiles,
+  findCompletedSessionStateCandidates,
+  findSessionOwnedStateCandidates,
+  type StateFileDiscovery,
   findSessionOwnedStateFiles,
   getStateSessionOwner,
+  writeStateFileLocked,
+  writeStateFileLockedIf,
+  writeStateFileLockedCreateIf,
+  clearStateFileLockedIf,
+  emergencyMutateStateFileIf,
+  recoverEmergencyStateFile,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -40,8 +49,10 @@ import {
   type ExecutionMode
 } from '../hooks/mode-registry/index.js';
 import { ToolDefinition } from './types.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
 import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
+import type { AutopilotState } from '../hooks/autopilot/types.js';
 
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
@@ -83,6 +94,58 @@ function readJsonRecord(filePath: string): Record<string, unknown> | null {
     return null;
   }
 }
+
+const NAMED_WORKFLOW_MARKERS = ['workflow', 'workflowRunId', 'pipelineTracking'] as const;
+
+function hasOwnProperty(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** Any own named-workflow marker, including a falsy value, makes the record runtime-owned. */
+function hasNamedWorkflowMarker(record: Record<string, unknown> | null | undefined): boolean {
+  if (!record) return false;
+  return NAMED_WORKFLOW_MARKERS.some((marker) => hasOwnProperty(record, marker));
+}
+
+function hasValidatedNamedWorkflowTuple(record: Record<string, unknown>): boolean {
+  if (!NAMED_WORKFLOW_MARKERS.every((marker) => hasOwnProperty(record, marker))) return false;
+  const sessionId = getStateSessionOwner(record);
+  return typeof sessionId === 'string' && validateNamedWorkflowStateStructure(record as unknown as AutopilotState, sessionId) !== null;
+}
+
+/** The portable emergency path may only pause or clear an exact discovered run. */
+function isExactEmergencyNamedMutation(
+  record: Record<string, unknown>,
+  requestedRunId: string | undefined,
+): boolean {
+  return hasValidatedNamedWorkflowTuple(record) &&
+    typeof requestedRunId === 'string' &&
+    record.workflowRunId === requestedRunId;
+}
+
+/** A named pause request is an exact capability, not a state replay payload. */
+function isExactNamedPauseRequest(record: Record<string, unknown>): boolean {
+  const allowed = new Set(['active', 'workflowRunId', 'target_state_sha256']);
+  return record.active === false &&
+    typeof record.workflowRunId === 'string' &&
+    Object.keys(record).every((key) => allowed.has(key)) &&
+    (!hasOwnProperty(record, 'target_state_sha256') ||
+      (typeof record.target_state_sha256 === 'string' && /^[a-f0-9]{64}$/.test(record.target_state_sha256)));
+}
+
+function matchesNamedPauseTarget(
+  current: Record<string, unknown>,
+  sessionId: string | undefined,
+  workflowRunId: string,
+  stateDigest: string | undefined,
+): boolean {
+  return current.active === true &&
+    current.workflowRunId === workflowRunId &&
+    hasValidatedNamedWorkflowTuple(current) &&
+    getStateSessionOwner(current) === sessionId &&
+    (stateDigest === undefined || createHash('sha256').update(JSON.stringify(current)).digest('hex') === stateDigest);
+}
+
 
 function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
   const sessionsDir = join(omcRoot, 'state', 'sessions');
@@ -154,35 +217,81 @@ function isConvergedCandidateActiveForSession(statePath: string, sessionId?: str
   return canClearStateForSession(raw, sessionId);
 }
 
+
+function emergencyRecoveryOptionsForProject(mode: StateToolMode, path: string, root: string): { authorizeState: (state: Record<string, unknown>) => boolean } | undefined {
+  if (mode !== 'autopilot' || !isSharedHomeAutopilotCandidate(path, root)) return undefined;
+  return { authorizeState: (state) => isStateCandidateForProject(mode, path, state, root) };
+}
+
+function clearDiscoveredStateCandidate(
+  candidate: StateFileDiscovery,
+  predicate: (state: Record<string, unknown>) => boolean,
+  recoveryOptions?: { authorizeState: (state: Record<string, unknown>) => boolean },
+): 'cleared' | 'skipped' | 'failed' {
+  return clearStateFileLockedIf(
+    candidate.path,
+    (current) => predicate(current) && JSON.stringify(current) === candidate.snapshot,
+    recoveryOptions,
+  );
+}
+
+function clearAutopilotMarkerCandidate(candidate: StateFileDiscovery, root: string): boolean {
+  // A marker-bearing record may be malformed, but a clear is an exact deletion
+  // capability over the discovered bytes after ownership/project filtering.
+  // It must never become a pause, resume, or replacement write.
+  const predicate = (current: Record<string, unknown>) =>
+    isStateCandidateForProject('autopilot', candidate.path, current, root) &&
+    JSON.stringify(current) === candidate.snapshot;
+
+  if (!namedWorkflowRuntimeSupported()) {
+    return emergencyMutateStateFileIf(
+      candidate.path,
+      predicate,
+      null,
+      emergencyRecoveryOptionsForProject('autopilot', candidate.path, root),
+    );
+  }
+
+  return clearStateFileLockedIf(
+    candidate.path,
+    predicate,
+    emergencyRecoveryOptionsForProject('autopilot', candidate.path, root),
+  ) === 'cleared';
+}
+
+function discoverStatePaths(paths: string[]): StateFileDiscovery[] {
+  const discovered: StateFileDiscovery[] = [];
+  for (const path of paths) {
+    const state = readJsonRecord(path);
+    if (!state) continue;
+    discovered.push({
+      path,
+      state,
+      snapshot: JSON.stringify(state),
+      ownerSessionId: getStateSessionOwner(state),
+      workflowRunId: typeof state.workflowRunId === 'string' ? state.workflowRunId : undefined,
+    });
+  }
+  return discovered;
+}
+
 function clearConvergedStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId)),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = getConvergedStateCandidates(mode, root, sessionId);
-
-  for (const statePath of paths) {
-    if (!existsSync(statePath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId) {
-        const raw = readJsonRecord(statePath);
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && (!sessionId || canClearStateForSession(current, sessionId)),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function hasActiveConvergedState(mode: StateToolMode, root: string, sessionId?: string): boolean {
@@ -296,8 +405,48 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
     getStatePath(mode, root),
     join(getOmcRoot(root), `${normalizedName}.json`),
   ];
+  if (mode === 'autopilot') candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
 
   return [...new Set(candidates)];
+}
+
+function isSharedHomeAutopilotCandidate(path: string, root: string): boolean {
+  const sharedHomeStateRoot = resolve(homedir(), '.omc', 'state');
+  const candidatePath = resolve(path);
+  const canonicalStateRoot = resolve(getOmcRoot(root), 'state');
+  const isDescendant = (ancestor: string, descendant: string): boolean => {
+    const fromAncestor = relative(ancestor, descendant);
+    return fromAncestor === '' || (!fromAncestor.startsWith(`..${sep}`) && fromAncestor !== '..' && !isAbsolute(fromAncestor));
+  };
+  return !isDescendant(canonicalStateRoot, candidatePath) && isDescendant(sharedHomeStateRoot, candidatePath);
+}
+
+function isStateCandidateForProject(mode: StateToolMode, path: string, state: Record<string, unknown>, root: string): boolean {
+  if (mode !== 'autopilot' || !isSharedHomeAutopilotCandidate(path, root)) return true;
+  return typeof state.project_path === 'string' && resolve(state.project_path) === resolve(root);
+}
+
+function isAutopilotRecoveryCandidateForProject(path: string, root: string): boolean {
+  if (!isSharedHomeAutopilotCandidate(path, root)) return true;
+
+  const primary = readJsonRecord(path);
+  if (primary) return isStateCandidateForProject('autopilot', path, primary, root);
+
+  const artifactPrefix = `${basename(path)}.emergency-quarantine.`;
+  let artifacts: string[];
+  try {
+    artifacts = readdirSync(dirname(path)).filter((name) =>
+      name.startsWith(artifactPrefix) && (name.endsWith('.payload') || /^[0-9a-f-]{36}$/i.test(name.slice(artifactPrefix.length))),
+    );
+  } catch {
+    return false;
+  }
+  if (artifacts.length === 0) return false;
+
+  return artifacts.every((name) => {
+    const state = readJsonRecord(join(dirname(path), name));
+    return state !== null && isStateCandidateForProject('autopilot', path, state, root);
+  });
 }
 
 function getWorkingDirectoryLocalOmcRoot(root: string): string {
@@ -346,63 +495,39 @@ function clearWorkingDirectoryLocalStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId);
   const localLegacyPaths = new Set(getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root));
-
-  for (const statePath of paths) {
-    if (!existsSync(statePath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId && localLegacyPaths.has(statePath)) {
-        const raw = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => !sessionId || !localLegacyPaths.has(candidate.path) || canClearStateForSession(current, sessionId),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function clearLegacyStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId?: string,
+  discovered = discoverStatePaths(getLegacyStateFileCandidates(mode, root)),
 ): { cleared: number; hadFailure: boolean } {
   let cleared = 0;
   let hadFailure = false;
-
-  for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
-    if (!existsSync(legacyPath)) {
-      continue;
-    }
-
-    try {
-      if (sessionId) {
-        const raw = JSON.parse(readFileSync(legacyPath, 'utf-8')) as Record<string, unknown>;
-        if (!canClearStateForSession(raw, sessionId)) {
-          continue;
-        }
-      }
-
-      unlinkSync(legacyPath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && (!sessionId || canClearStateForSession(current, sessionId)),
+      emergencyRecoveryOptionsForProject(mode, candidate.path, root),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
   return { cleared, hadFailure };
 }
 
@@ -410,42 +535,40 @@ function clearSessionOwnedStateCandidates(
   mode: StateToolMode,
   root: string,
   sessionId: string,
+  discovered = findSessionOwnedStateCandidates(mode, sessionId, root),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = findSessionOwnedStateFiles(mode, sessionId, root);
-
-  for (const statePath of paths) {
-    try {
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => isStateCandidateForProject(mode, candidate.path, current, root) && canClearStateForSession(current, sessionId),
+      emergencyRecoveryOptionsForProject(mode, candidate.path, root),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 function clearCompletedSessionStateCandidates(
   mode: StateToolMode,
   root: string,
   requesterSessionId?: string,
+  discovered = findCompletedSessionStateCandidates(mode, root, requesterSessionId),
 ): { cleared: number; hadFailure: boolean; paths: string[] } {
   let cleared = 0;
   let hadFailure = false;
-  const paths = findCompletedSessionStateFiles(mode, root, requesterSessionId);
-
-  for (const statePath of paths) {
-    try {
-      unlinkSync(statePath);
-      cleared++;
-    } catch {
-      hadFailure = true;
-    }
+  for (const candidate of discovered) {
+    const result = clearDiscoveredStateCandidate(
+      candidate,
+      (current) => current.active === true && Boolean(candidate.completionEvidencePath && existsSync(candidate.completionEvidencePath)),
+      emergencyRecoveryOptionsForProject(mode, candidate.path, root),
+    );
+    if (result === 'cleared') cleared++;
+    else if (result === 'failed') hadFailure = true;
   }
-
-  return { cleared, hadFailure, paths };
+  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
 }
 
 
@@ -545,16 +668,23 @@ function writeSessionCancelSignal(
   root: string,
   sessionId: string,
   mode: StateToolMode,
+  candidate?: StateFileDiscovery,
 ): void {
+  ensureSessionStateDir(sessionId, root);
   const now = Date.now();
   const cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, root);
-  atomicWriteJsonSync(cancelSignalPath, {
+  const payload = {
     active: true,
     requested_at: new Date(now).toISOString(),
     expires_at: new Date(now + CANCEL_SIGNAL_TTL_MS).toISOString(),
     mode,
-    source: 'state_clear'
-  });
+    source: 'state_clear',
+    ...(candidate?.workflowRunId ? { target_workflow_run_id: candidate.workflowRunId } : {}),
+    ...(candidate ? { target_state_sha256: createHash('sha256').update(candidate.snapshot).digest('hex') } : {}),
+  };
+  if (!writeStateFileLocked(cancelSignalPath, payload)) {
+    throw new Error(`state mutation lock unavailable for cancel signal: ${cancelSignalPath}`);
+  }
 }
 
 function isSessionModeActive(
@@ -591,7 +721,87 @@ function findSingleOwningSessionForMode(
   return owningSessions.length === 1 ? owningSessions[0] : undefined;
 }
 
+interface WorkflowPublicState {
+  name: string;
+  workflowRunId?: string;
+  version: number;
+  shortHash: string;
+  stages: string[];
+  currentStage: string | null;
+  status: string | null;
+  progress: string;
+}
+
+function canonicalWorkflowJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkflowJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalWorkflowJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isValidPublicWorkflowDescriptor(descriptor: Record<string, unknown>): boolean {
+  const stages = descriptor.stages;
+  if (descriptor.descriptorVersion !== 1 || descriptor.profileVersion !== 1 || typeof descriptor.workflowName !== 'string' || !Array.isArray(stages) || !stages.every(stage => typeof stage === 'string') || typeof descriptor.profileHash !== 'string') return false;
+  const allowed = new Set(['ralplan,execution', 'ralplan,execution,ralph', 'ralplan,execution,qa', 'ralplan,execution,ralph,qa']);
+  if (!allowed.has(stages.join(','))) return false;
+  const canonical = canonicalWorkflowJson({ descriptorVersion: 1, workflowName: descriptor.workflowName, profileVersion: 1, stages });
+  return createHash('sha256').update(canonical).digest('hex') === descriptor.profileHash;
+}
+export function redactAutopilotPublicState(state: unknown): unknown {
+  if (!state || typeof state !== 'object') {
+    return state;
+  }
+  const record = state as Record<string, unknown>;
+  if (!hasNamedWorkflowMarker(record)) {
+    return state;
+  }
+  const workflow = record.workflow;
+  if (!hasValidatedNamedWorkflowTuple(record) || !workflow || typeof workflow !== 'object') {
+    return { name: 'invalid', version: 1, shortHash: 'invalid', stages: [], currentStage: null, status: 'workflow_descriptor_integrity_failed', progress: '0/0' } satisfies WorkflowPublicState;
+  }
+  const descriptor = workflow as Record<string, unknown>;
+  if (!isValidPublicWorkflowDescriptor(descriptor)) {
+    return { name: 'invalid', version: 1, shortHash: 'invalid', stages: [], currentStage: null, status: 'workflow_descriptor_integrity_failed', progress: '0/0' } satisfies WorkflowPublicState;
+  }
+  const stages = Array.isArray(descriptor.stages) && descriptor.stages.every((stage) => typeof stage === 'string')
+    ? descriptor.stages as string[]
+    : [];
+  const pipelineTracking = record.pipelineTracking && typeof record.pipelineTracking === 'object'
+    ? record.pipelineTracking as Record<string, unknown>
+    : undefined;
+  const currentStageIndex = typeof pipelineTracking?.currentStageIndex === 'number'
+    ? pipelineTracking.currentStageIndex
+    : -1;
+  const pipelineStages = Array.isArray(pipelineTracking?.stages) ? pipelineTracking.stages : [];
+  const terminal = record.active === false && record.phase === 'complete' && currentStageIndex === stages.length;
+  const currentPipelineStage = terminal ? undefined : pipelineStages[currentStageIndex];
+  const currentStage = currentPipelineStage && typeof currentPipelineStage === 'object'
+    && typeof (currentPipelineStage as Record<string, unknown>).id === 'string'
+    ? (currentPipelineStage as Record<string, unknown>).id as string
+    : null;
+  const currentStageStatus = currentPipelineStage && typeof currentPipelineStage === 'object'
+    && typeof (currentPipelineStage as Record<string, unknown>).status === 'string'
+    ? (currentPipelineStage as Record<string, unknown>).status as string
+    : null;
+  const safeState: WorkflowPublicState = {
+    name: typeof descriptor.workflowName === 'string' ? descriptor.workflowName.slice(0, 32) : 'invalid',
+    workflowRunId: record.workflowRunId as string,
+    version: typeof descriptor.profileVersion === 'number' ? descriptor.profileVersion : 1,
+    shortHash: typeof descriptor.profileHash === 'string' ? descriptor.profileHash.slice(0, 12) : 'invalid',
+    stages,
+    currentStage,
+    status: terminal ? 'complete' : currentStageStatus,
+    progress: currentStageIndex >= 0 ? `${Math.min(currentStageIndex + 1, stages.length)}/${stages.length}` : `0/${stages.length}`,
+  };
+  return safeState;
+}
+
 function publicStateForMode(mode: StateToolMode, state: unknown): unknown {
+  if (mode === 'autopilot') {
+    return redactAutopilotPublicState(state);
+  }
   return mode === 'merge-readiness'
     ? redactMergeReadinessState(state as Parameters<typeof redactMergeReadinessState>[0])
     : state;
@@ -850,6 +1060,13 @@ export const stateWriteTool: ToolDefinition<{
         }
       }
 
+      const requestedRunId = typeof builtState.workflowRunId === 'string' ? builtState.workflowRunId : undefined;
+      const requestedStateDigest = typeof builtState.target_state_sha256 === 'string' ? builtState.target_state_sha256 : undefined;
+      const isExactNamedPause = isExactNamedPauseRequest(builtState);
+      if (mode === 'autopilot' && (hasNamedWorkflowMarker(builtState) || hasOwnProperty(builtState, 'target_state_sha256')) && !isExactNamedPause) {
+        throw new Error('named autopilot workflow markers are runtime-owned; only active:false with an exact workflowRunId and optional state digest may pause a run');
+      }
+
       // Add metadata
       const stateWithMeta = {
         ...builtState,
@@ -860,15 +1077,81 @@ export const stateWriteTool: ToolDefinition<{
           updatedBy: 'state_write_tool'
         }
       };
+      let writtenState: Record<string, unknown> = stateWithMeta;
+      let namedPauseCommitted = false;
+      if (mode === 'autopilot' && builtState.active === false) {
+        let currentState: Record<string, unknown> | null = null;
+        try { currentState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>; } catch { /* missing or malformed state is handled below */ }
+        if (hasNamedWorkflowMarker(currentState ?? {})) {
+          if (!isExactNamedPause || !requestedRunId) {
+            throw new Error('named autopilot workflow state requires active:false with its exact workflowRunId');
+          }
+          if (namedWorkflowRuntimeSupported()) {
+            const result = writeStateFileLockedIf(
+              statePath,
+              (current) => matchesNamedPauseTarget(current, sessionId, requestedRunId, requestedStateDigest),
+              (current) => ({ ...current, active: false }),
+            );
+            if (result !== 'written') {
+              throw new Error(result === 'failed'
+                ? 'state mutation lock unavailable'
+                : 'named autopilot run changed, is stale, or failed integrity validation');
+            }
+            namedPauseCommitted = true;
+          } else {
+            const snapshot = JSON.stringify(currentState);
+            const written = emergencyMutateStateFileIf(
+              statePath,
+              (current) => JSON.stringify(current) === snapshot &&
+                isExactEmergencyNamedMutation(current, requestedRunId) &&
+                (requestedStateDigest === undefined || createHash('sha256').update(JSON.stringify(current)).digest('hex') === requestedStateDigest),
+              (current) => ({ ...current, active: false }),
+            );
+            if (!written) throw new Error('autopilot run changed before deactivation');
+            namedPauseCommitted = true;
+          }
+        } else {
+          const result = writeStateFileLockedCreateIf(
+            statePath,
+            (current) => !hasNamedWorkflowMarker(current),
+            (current) => {
+              writtenState = { ...(current ?? {}), ...stateWithMeta };
+              return writtenState;
+            },
+          );
+          if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
+        }
+      } else if (mode === 'autopilot') {
+        let namedWorkflowExists = false;
+        const result = writeStateFileLockedCreateIf(
+          statePath,
+          (current) => {
+            if (!hasNamedWorkflowMarker(current)) return true;
+            namedWorkflowExists = true;
+            return false;
+          },
+          (current) => {
+            writtenState = { ...(current ?? {}), ...stateWithMeta };
+            return writtenState;
+          },
+        );
+        if (result !== 'written') {
+          if (namedWorkflowExists) throw new Error('named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed');
+          throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot state changed before write');
+        }
+      } else if (!writeStateFileLocked(statePath, stateWithMeta)) {
+        throw new Error('state mutation lock unavailable');
+      }
 
-      atomicWriteJsonSync(statePath, stateWithMeta);
 
       const sessionInfo = sessionId ? ` (session: ${sessionId})` : ' (legacy path)';
       const warningMessage = sessionId ? '' : '\n\nWARNING: No session_id provided. State written to legacy shared path which may leak across parallel sessions. Pass session_id for session-scoped isolation.';
       return {
         content: [{
           type: 'text' as const,
-          text: `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(stateWithMeta, null, 2)}\n\`\`\`${warningMessage}`
+          text: namedPauseCommitted
+            ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.`
+            : `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}`
         }]
       };
     } catch (error) {
@@ -886,6 +1169,60 @@ export const stateWriteTool: ToolDefinition<{
 // ============================================================================
 // state_clear - Clear state for a mode
 // ============================================================================
+
+function discoverAllRootSessionStateCandidates(mode: StateToolMode, root: string): StateFileDiscovery[] {
+  const paths = new Set<string>();
+  const roots = new Set([...getConvergedOmcRoots(root), getWorkingDirectoryLocalOmcRoot(root), getOmcRoot(root)]);
+  for (const omcRoot of roots) {
+    for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+      paths.add(join(omcRoot, 'state', 'sessions', sid, getStateFileName(mode)));
+    }
+  }
+  return discoverStatePaths([...paths]);
+}
+
+function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string): void {
+  const broadPaths = new Set<string>([
+    ...getLegacyStateFileCandidates('autopilot', root),
+    ...getWorkingDirectoryLocalStateClearCandidates('autopilot', root),
+    ...getConvergedStateCandidates('autopilot', root),
+  ]);
+  const localOmcRoot = getWorkingDirectoryLocalOmcRoot(root);
+  for (const sid of listSessionIdsUnderOmcRoot(localOmcRoot)) {
+    broadPaths.add(join(localOmcRoot, 'state', 'sessions', sid, getStateFileName('autopilot')));
+  }
+  for (const omcRoot of getConvergedOmcRoots(root)) {
+    for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
+      broadPaths.add(join(omcRoot, 'state', 'sessions', sid, getStateFileName('autopilot')));
+    }
+  }
+  const directSessionPaths = new Set<string>();
+  if (sessionId) {
+    directSessionPaths.add(resolveSessionStatePath('autopilot', sessionId, root));
+    directSessionPaths.add(getWorkingDirectoryLocalSessionStatePath('autopilot', root, sessionId));
+    for (const omcRoot of getConvergedOmcRoots(root)) {
+      directSessionPaths.add(join(omcRoot, 'state', 'sessions', sessionId, getStateFileName('autopilot')));
+    }
+    for (const path of directSessionPaths) broadPaths.add(path);
+  }
+  for (const path of broadPaths) {
+    const recoveryOptions = emergencyRecoveryOptionsForProject('autopilot', path, root);
+    if (!isAutopilotRecoveryCandidateForProject(path, root)) continue;
+    if (sessionId && !directSessionPaths.has(path)) {
+      const visibleOwner = getStateSessionOwner(readJsonRecord(path) ?? {});
+      const journal = readJsonRecord(`${path}.emergency-journal.json`);
+      const journalOwner = typeof journal?.sessionOwner === 'string' ? journal.sessionOwner : undefined;
+      if (visibleOwner !== sessionId && journalOwner !== sessionId) continue;
+    }
+    if (!recoverEmergencyStateFile(path, recoveryOptions)) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
+    if (recoveryOptions && !isAutopilotRecoveryCandidateForProject(path, root)) continue;
+    const artifactPrefix = `${basename(path)}.emergency-`;
+    let artifacts: string[];
+    try { artifacts = readdirSync(dirname(path)).filter((name) => name.startsWith(artifactPrefix) && !name.endsWith('.recovery.guard')); }
+    catch { artifacts = []; }
+    if (artifacts.length > 0) throw new Error(`workflow_emergency_recovery_failed: ${path}`);
+  }
+}
 
 export const stateClearTool: ToolDefinition<{
   mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
@@ -946,6 +1283,7 @@ export const stateClearTool: ToolDefinition<{
           ...(blocked ? { isError: true } : {}),
         };
       }
+      if (mode === 'autopilot') recoverAutopilotEmergencyTransactions(root, sessionId);
       const cleanedTeamNames = new Set<string>();
 
       const collectTeamNamesForCleanup = (statePath: string): void => {
@@ -958,7 +1296,9 @@ export const stateClearTool: ToolDefinition<{
       // If session_id provided, clear only session-specific state
       if (sessionId) {
         validateSessionId(sessionId);
-        const requestedSessionOwnedPaths = findSessionOwnedStateFiles(mode, sessionId, root);
+        const requestedSessionCandidates = findSessionOwnedStateCandidates(mode, sessionId, root)
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const requestedSessionOwnedPaths = requestedSessionCandidates.map((candidate) => candidate.path);
         for (const teamStatePath of findSessionOwnedStateFiles('team', sessionId, root)) {
           collectTeamNamesForCleanup(teamStatePath);
         }
@@ -967,23 +1307,67 @@ export const stateClearTool: ToolDefinition<{
             collectTeamNamesForCleanup(teamStatePath);
           }
         }
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId);
+        const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId)
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId))
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId))
+          .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+        const operationCandidates = [...new Map([
+          ...requestedSessionCandidates,
+          ...completedCandidates,
+          ...legacyCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+          ...localCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+          ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
+        ].map((candidate) => [candidate.path, candidate])).values()];
+        const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
+        const namedPrimaries = mode === 'autopilot' ? operationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
+        const namedPrimaryPaths = new Set(namedPrimaries.map((candidate) => candidate.path));
+        let directCleared = 0;
+        for (const candidate of namedPrimaries) {
+          const success = clearAutopilotMarkerCandidate(candidate, root);
+          if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+          directCleared += 1;
+        }
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => !namedPrimaryPaths.has(candidate.path)));
         const runtimeCleanup = clearModeRuntimeArtifacts(mode, root, sessionId);
         let convergedCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
-        writeSessionCancelSignal(root, sessionId, mode);
+        const sessionSignalCandidates = operationCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+        const signaledCandidateDirs = new Set<string>();
+        for (const candidate of sessionSignalCandidates) {
+          const signalDir = dirname(candidate.path);
+          if (signaledCandidateDirs.has(signalDir)) continue;
+          signaledCandidateDirs.add(signalDir);
+          const now = Date.now();
+          const signalPath = join(signalDir, 'cancel-signal-state.json');
+          const payload = {
+            active: true,
+            requested_at: new Date(now).toISOString(),
+            expires_at: new Date(now + CANCEL_SIGNAL_TTL_MS).toISOString(),
+            mode,
+            source: 'state_clear' as const,
+            ...(candidate.workflowRunId ? { target_workflow_run_id: candidate.workflowRunId } : {}),
+            target_state_sha256: createHash('sha256').update(candidate.snapshot).digest('hex'),
+          };
+          try { writeStateFileLocked(signalPath, payload); } catch { /* best-effort */ }
+        }
+        if (sessionSignalCandidates.length === 0 && namedPrimaries.length === 0) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
-          const success = clearModeState(mode as ExecutionMode, root, sessionId);
-          const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
-          const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+          const expectedDirectState = directCandidate?.state;
+          const success = clearModeState(mode as ExecutionMode, root, sessionId, expectedDirectState);
+          if (directCandidate && !existsSync(directCandidate.path)) directCleared = 1;
+          const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
+          const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
           const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
             legacyCleanup.cleared === 0;
           const workingDirectoryLocalCleanup = shouldUseLocalFallback
-            ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+            ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates)
             : { cleared: 0, hadFailure: false, paths: [] as string[] };
-          convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
+          convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
           let ownerSessionId: string | undefined;
           let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
           let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -991,6 +1375,8 @@ export const stateClearTool: ToolDefinition<{
           if (
             OWNER_SESSION_FALLBACK_MODES.has(mode) &&
             requestedSessionOwnedPaths.length === 0 &&
+            completedCandidates.length === 0 &&
+            legacyCandidates.length === 0 &&
             completedSessionCleanup.cleared === 0 &&
             sessionCleanup.cleared === 0 &&
             legacyCleanup.cleared === 0 &&
@@ -1004,12 +1390,20 @@ export const stateClearTool: ToolDefinition<{
                   collectTeamNamesForCleanup(teamStatePath);
                 }
               }
-              writeSessionCancelSignal(root, ownerSessionId, mode);
+              const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
+              const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
+              const ownerNamedPrimary = mode === 'autopilot' && ownerDirectCandidate && hasNamedWorkflowMarker(ownerDirectCandidate.state) ? ownerDirectCandidate : undefined;
+              if (ownerNamedPrimary) {
+                const success = clearAutopilotMarkerCandidate(ownerNamedPrimary, root);
+                if (!success || existsSync(ownerNamedPrimary.path)) throw new Error('primary state mutation failed; dependent state preserved');
+              } else {
+                writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
+                clearModeState(mode as ExecutionMode, root, ownerSessionId, ownerDirectCandidate?.state);
+              }
               const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
               runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
               runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-              clearModeState(mode as ExecutionMode, root, ownerSessionId);
-              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
+              ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates.filter((candidate) => candidate.path !== ownerNamedPrimary?.path));
               ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
             }
           }
@@ -1047,8 +1441,7 @@ export const stateClearTool: ToolDefinition<{
             if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(', ')})` : '';
           })();
-          const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
-            completedSessionCleanup.cleared +
+          const clearedStateOrArtifacts = directCleared + completedSessionCleanup.cleared +
             sessionCleanup.cleared +
             legacyCleanup.cleared +
             convergedCleanup.cleared +
@@ -1056,7 +1449,9 @@ export const stateClearTool: ToolDefinition<{
             ownerSessionCleanup.cleared +
             ownerLegacyCleanup.cleared +
             runtimeCleanup.cleared;
+          const capturedCleanupIncomplete = operationCandidates.some((candidate) => existsSync(candidate.path));
           if (!ownerSessionId && clearedStateOrArtifacts === 0 && success &&
+            !capturedCleanupIncomplete &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
             !workingDirectoryLocalCleanup.hadFailure &&
@@ -1074,6 +1469,7 @@ export const stateClearTool: ToolDefinition<{
             };
           }
           if (
+            !capturedCleanupIncomplete &&
             success &&
             !legacyCleanup.hadFailure &&
             !sessionCleanup.hadFailure &&
@@ -1095,22 +1491,23 @@ export const stateClearTool: ToolDefinition<{
               content: [{
                 type: 'text' as const,
                 text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
-              }]
+              }],
+              isError: true,
             };
           }
         }
 
         // Fallback for modes not in registry (e.g., ralplan)
-        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId);
-        const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId);
+        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
+        const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
         const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 &&
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
           legacyCleanup.cleared === 0;
         const workingDirectoryLocalCleanup = shouldUseLocalFallback
-          ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId)
+          ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates)
           : { cleared: 0, hadFailure: false, paths: [] as string[] };
-        convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId);
+        convergedCleanup = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
         let ownerSessionId: string | undefined;
         let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] as string[] };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
@@ -1118,6 +1515,8 @@ export const stateClearTool: ToolDefinition<{
         if (
           OWNER_SESSION_FALLBACK_MODES.has(mode) &&
           requestedSessionOwnedPaths.length === 0 &&
+          completedCandidates.length === 0 &&
+          legacyCandidates.length === 0 &&
           completedSessionCleanup.cleared === 0 &&
           sessionCleanup.cleared === 0 &&
           legacyCleanup.cleared === 0 &&
@@ -1131,11 +1530,16 @@ export const stateClearTool: ToolDefinition<{
                 collectTeamNamesForCleanup(teamStatePath);
               }
             }
-            writeSessionCancelSignal(root, ownerSessionId, mode);
+            const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
+            if (mode === 'autopilot' && ownerCandidates.some((candidate) => hasNamedWorkflowMarker(candidate.state)) && !namedWorkflowRuntimeSupported()) {
+              throw new Error('unsupported-runtime');
+            }
+            const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId!, root)) ?? ownerCandidates[0];
+            writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
             const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
             runtimeCleanup.cleared += ownerRuntimeCleanup.cleared;
             runtimeCleanup.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-            ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId);
+            ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates);
             ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
           }
         }
@@ -1173,8 +1577,7 @@ export const stateClearTool: ToolDefinition<{
           if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(', ')})` : '';
         })();
-        const clearedStateOrArtifacts = requestedSessionOwnedPaths.length +
-          completedSessionCleanup.cleared +
+        const clearedStateOrArtifacts = completedSessionCleanup.cleared +
           sessionCleanup.cleared +
           legacyCleanup.cleared +
           convergedCleanup.cleared +
@@ -1182,7 +1585,8 @@ export const stateClearTool: ToolDefinition<{
           ownerSessionCleanup.cleared +
           ownerLegacyCleanup.cleared +
           runtimeCleanup.cleared;
-        const hadFailure = legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
+        const capturedCleanupIncomplete = operationCandidates.some((candidate) => existsSync(candidate.path));
+        const hadFailure = capturedCleanupIncomplete || legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
           workingDirectoryLocalCleanup.hadFailure || convergedCleanup.hadFailure ||
           completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure ||
           ownerLegacyCleanup.hadFailure || runtimeCleanup.hadFailure;
@@ -1198,7 +1602,8 @@ export const stateClearTool: ToolDefinition<{
           content: [{
             type: 'text' as const,
             text: `${hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
-          }]
+          }],
+          ...(hadFailure ? { isError: true } : {}),
         };
       }
 
@@ -1206,7 +1611,27 @@ export const stateClearTool: ToolDefinition<{
       // Write cancel signals FIRST (before deleting files) so the stop hook's
       // isSessionCancelInProgress check sees the signal during the deletion window.
       // Mirrors the session_id path at line ~403. (patch: fix missing cancel signal)
-      {
+      const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+      const broadSessionCandidates = [...new Map([
+        ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root)),
+        ...discoverAllRootSessionStateCandidates(mode, root),
+      ].map((candidate) => [candidate.path, candidate])).values()]
+        .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+      const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root))
+        .filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
+      const broadOperationCandidates = [...new Map([
+        ...broadLegacyCandidates,
+        ...broadSessionCandidates,
+        ...broadConvergedCandidates,
+      ].map((candidate) => [candidate.path, candidate])).values()];
+      const broadNamedPrimaries = mode === 'autopilot' ? broadOperationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
+      for (const candidate of broadNamedPrimaries) {
+        const success = clearAutopilotMarkerCandidate(candidate, root);
+        if (!success || existsSync(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+      }
+      const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+      const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+      if (broadLegacySignalCandidates.length > 0 || broadSessionSignalCandidates.length > 0) {
         const now = Date.now();
         const cancelSignalPayload = {
           active: true,
@@ -1215,15 +1640,25 @@ export const stateClearTool: ToolDefinition<{
           mode,
           source: 'state_clear' as const,
         };
-        // Write to legacy path (checked by stop hook fallback)
-        const legacySignalPath = join(getOmcRoot(root), 'state', 'cancel-signal-state.json');
-        try { atomicWriteJsonSync(legacySignalPath, cancelSignalPayload); } catch { /* best-effort */ }
-        // Write to each session path (checked by stop hook primary check)
-        for (const sid of listSessionIds(root)) {
-          try {
-            const sessionSignalPath = resolveSessionStatePath('cancel-signal', sid, root);
-            atomicWriteJsonSync(sessionSignalPath, cancelSignalPayload);
-          } catch { /* best-effort */ }
+        const signaledLegacyDirs = new Set<string>();
+        for (const legacyCandidate of broadLegacySignalCandidates) {
+          const signalDir = dirname(legacyCandidate.path);
+          if (signaledLegacyDirs.has(signalDir)) continue;
+          signaledLegacyDirs.add(signalDir);
+          const legacySignalPath = join(signalDir, 'cancel-signal-state.json');
+          const legacyPayload = {
+            ...cancelSignalPayload,
+            ...(legacyCandidate.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {}),
+            target_state_sha256: createHash('sha256').update(legacyCandidate.snapshot).digest('hex'),
+          };
+          try { writeStateFileLocked(legacySignalPath, legacyPayload); } catch { /* best-effort */ }
+        }
+        const signaledOwners = new Set<string>();
+        for (const candidate of broadSessionSignalCandidates) {
+          const owner = candidate.ownerSessionId;
+          if (!owner || signaledOwners.has(owner)) continue;
+          signaledOwners.add(owner);
+          try { writeSessionCancelSignal(root, owner, mode, candidate); } catch { /* best-effort */ }
         }
       }
       const runtimeCleanup = clearModeRuntimeArtifacts(mode, root);
@@ -1236,21 +1671,25 @@ export const stateClearTool: ToolDefinition<{
       // Clear legacy path
       if (MODE_CONFIGS[mode as ExecutionMode]) {
         const primaryLegacyStatePath = getStateFilePath(root, mode as ExecutionMode);
-        if (existsSync(primaryLegacyStatePath)) {
-          if (clearModeState(mode as ExecutionMode, root)) {
+        const primaryCandidate = broadLegacyCandidates.find((candidate) => candidate.path === primaryLegacyStatePath);
+        if (primaryCandidate) {
+          const success = clearModeState(mode as ExecutionMode, root, undefined, primaryCandidate.state);
+          if (success && !existsSync(primaryCandidate.path)) {
             clearedCount++;
-          } else {
+          } else if (existsSync(primaryCandidate.path)) {
+            errors.push('legacy path skipped');
+          } else if (!success) {
             errors.push('legacy path');
           }
         }
       }
 
-      const extraLegacyCleanup = clearLegacyStateCandidates(mode, root);
+      const extraLegacyCleanup = clearLegacyStateCandidates(mode, root, undefined, broadLegacyCandidates);
       clearedCount += extraLegacyCleanup.cleared;
       if (extraLegacyCleanup.hadFailure) {
         errors.push('legacy path');
       }
-      const convergedCleanup = clearConvergedStateCandidates(mode, root);
+      const convergedCleanup = clearConvergedStateCandidates(mode, root, undefined, broadConvergedCandidates);
       clearedCount += convergedCleanup.cleared;
       if (convergedCleanup.hadFailure) {
         errors.push('converged paths');
@@ -1259,35 +1698,34 @@ export const stateClearTool: ToolDefinition<{
       if (runtimeCleanup.hadFailure) {
         errors.push('runtime artifacts');
       }
+      const processedBroadPaths = new Set([
+        ...broadLegacyCandidates.map((candidate) => candidate.path),
+        ...broadConvergedCandidates.map((candidate) => candidate.path),
+      ]);
 
-      // Clear all session-scoped state files
-      const sessionIds = listSessionIds(root);
-      for (const sid of sessionIds) {
-        if (mode === 'team') {
-          collectTeamNamesForCleanup(resolveSessionStatePath('team', sid, root));
-        }
-        if (MODE_CONFIGS[mode as ExecutionMode]) {
-          // Only clear if state file exists - avoid false counts for missing files
-          const sessionStatePath = getStateFilePath(root, mode as ExecutionMode, sid);
-          if (existsSync(sessionStatePath)) {
-            if (clearModeState(mode as ExecutionMode, root, sid)) {
-              clearedCount++;
-            } else {
-              errors.push(`session: ${sid}`);
-            }
-          }
-        } else {
-          const statePath = resolveSessionStatePath(mode, sid, root);
-          if (existsSync(statePath)) {
-            try {
-              unlinkSync(statePath);
-              clearedCount++;
-            } catch {
-              errors.push(`session: ${sid}`);
-            }
-          }
+      // Clear each captured session candidate by its exact discovered path.
+      for (const candidate of broadSessionCandidates) {
+        if (processedBroadPaths.has(candidate.path)) continue;
+        processedBroadPaths.add(candidate.path);
+        if (mode === 'team') collectTeamNamesForCleanup(candidate.path);
+        const result = clearDiscoveredStateCandidate(candidate, (current) => isStateCandidateForProject(mode, candidate.path, current, root), emergencyRecoveryOptionsForProject(mode, candidate.path, root));
+        if (result === 'cleared') {
+          clearedCount++;
+        } else if (result === 'failed' || existsSync(candidate.path)) {
+          errors.push(`session candidate: ${candidate.path}`);
         }
       }
+      const broadCapturedCandidates = [...new Map([
+        ...broadLegacyCandidates,
+        ...broadConvergedCandidates,
+        ...broadSessionCandidates,
+      ].map((candidate) => [candidate.path, candidate])).values()];
+      for (const candidate of broadCapturedCandidates) {
+        if (existsSync(candidate.path) && !errors.some((error) => error.includes(candidate.path))) {
+          errors.push(`captured candidate survived: ${candidate.path}`);
+        }
+      }
+      clearedCount = broadCapturedCandidates.filter((candidate) => !existsSync(candidate.path)).length + runtimeCleanup.cleared;
 
       let removedTeamRoots = 0;
       let prunedMissionEntries = 0;
@@ -1325,7 +1763,8 @@ export const stateClearTool: ToolDefinition<{
         content: [{
           type: 'text' as const,
           text: message
-        }]
+        }],
+        ...(errors.length > 0 ? { isError: true } : {})
       };
     } catch (error) {
       return {

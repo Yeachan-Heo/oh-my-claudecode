@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
+import { validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
 /**
  * Maximum age for state files to be considered "active".
  * Files older than this are treated as stale/abandoned.
@@ -193,6 +194,34 @@ export function readPrdStateForHud(directory) {
         return null;
     }
 }
+function hasNamedWorkflowMarker(state) {
+    const record = state;
+    return ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => (Object.prototype.hasOwnProperty.call(record, marker)));
+}
+function getWorkflowHudState(state) {
+    if (!hasNamedWorkflowMarker(state)) {
+        return undefined;
+    }
+    const record = state;
+    const sessionId = typeof record.session_id === 'string'
+        ? record.session_id
+        : undefined;
+    if (!sessionId || !validateNamedWorkflowStateStructure(state, sessionId)) {
+        return { invalid: true };
+    }
+    const workflow = state.workflow;
+    const pipelineTracking = state.pipelineTracking;
+    const currentStageIndex = pipelineTracking.currentStageIndex;
+    const currentStage = pipelineTracking.stages[currentStageIndex]?.id;
+    return {
+        name: workflow.workflowName,
+        version: workflow.profileVersion,
+        shortHash: workflow.profileHash.slice(0, 12),
+        currentStage: currentStage ?? 'complete',
+        currentStageIndex: Math.min(currentStageIndex + 1, workflow.stages.length),
+        stagesTotal: workflow.stages.length,
+    };
+}
 /**
  * Read Autopilot state for HUD display.
  * Returns shape matching AutopilotStateForHud from elements/autopilot.ts.
@@ -223,7 +252,8 @@ export function readAutopilotStateForHud(directory, sessionId) {
             maxIterations: state.max_iterations,
             tasksCompleted: state.execution?.tasks_completed,
             tasksTotal: state.execution?.tasks_total,
-            filesCreated: state.execution?.files_created?.length
+            filesCreated: state.execution?.files_created?.length,
+            workflow: getWorkflowHudState(state),
         };
     }
     catch {

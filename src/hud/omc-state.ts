@@ -5,6 +5,7 @@
  * These are read-only functions that don't modify the state files.
  */
 
+
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
@@ -14,6 +15,8 @@ import type {
   PrdStateForHud,
 } from './types.js';
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import { validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import type { AutopilotState } from '../hooks/autopilot/types.js';
 
 /**
  * Maximum age for state files to be considered "active".
@@ -260,18 +263,69 @@ export function readPrdStateForHud(directory: string): PrdStateForHud | null {
 // Autopilot State
 // ============================================================================
 
+interface WorkflowDescriptor {
+  descriptorVersion: number;
+  workflowName: string;
+  profileVersion: number;
+  stages: string[];
+  profileHash: string;
+}
+
 interface AutopilotStateFile {
   active: boolean;
   phase?: string;
   current_phase?: string;
   iteration: number;
   max_iterations: number;
+  workflow?: WorkflowDescriptor;
+  pipelineTracking?: {
+    stages?: Array<{ id?: string; status?: string }>;
+    currentStageIndex?: number;
+    trackingRevision?: number;
+    activationBoundary?: { transcriptPath?: string; byteOffset?: number } | null;
+    completionObservations?: unknown[];
+  };
   execution?: {
     tasks_completed?: number;
     tasks_total?: number;
     files_created?: string[];
   };
 }
+
+
+function hasNamedWorkflowMarker(state: AutopilotStateFile): boolean {
+  const record = state as unknown as Record<string, unknown>;
+  return ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) => (
+    Object.prototype.hasOwnProperty.call(record, marker)
+  ));
+}
+
+function getWorkflowHudState(state: AutopilotStateFile): AutopilotStateForHud['workflow'] | undefined {
+  if (!hasNamedWorkflowMarker(state)) {
+    return undefined;
+  }
+  const record = state as unknown as Record<string, unknown>;
+  const sessionId = typeof record.session_id === 'string'
+    ? record.session_id
+    : undefined;
+  if (!sessionId || !validateNamedWorkflowStateStructure(state as unknown as AutopilotState, sessionId)) {
+    return { invalid: true };
+  }
+
+  const workflow = state.workflow!;
+  const pipelineTracking = state.pipelineTracking!;
+  const currentStageIndex = pipelineTracking.currentStageIndex!;
+  const currentStage = pipelineTracking.stages![currentStageIndex]?.id;
+  return {
+    name: workflow.workflowName,
+    version: workflow.profileVersion,
+    shortHash: workflow.profileHash.slice(0, 12),
+    currentStage: currentStage ?? 'complete',
+    currentStageIndex: Math.min(currentStageIndex + 1, workflow.stages.length),
+    stagesTotal: workflow.stages.length,
+  };
+}
+
 
 /**
  * Read Autopilot state for HUD display.
@@ -309,7 +363,8 @@ export function readAutopilotStateForHud(directory: string, sessionId?: string):
       maxIterations: state.max_iterations,
       tasksCompleted: state.execution?.tasks_completed,
       tasksTotal: state.execution?.tasks_total,
-      filesCreated: state.execution?.files_created?.length
+      filesCreated: state.execution?.files_created?.length,
+      workflow: getWorkflowHudState(state),
     };
   } catch {
     return null;

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { createHash } from "node:crypto";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 import {
   resolvePipelineConfig,
@@ -19,14 +20,18 @@ import {
   getPipelineStatus,
   formatPipelineHUD,
   hasPipelineTracking,
-} from '../pipeline.js';
+  generatePipelinePrompt,
+  createWorkflowDescriptor,
+  verifyWorkflowDescriptor,
+  canonicalizeJson,
+} from "../pipeline.js";
 
 import {
   DEFAULT_PIPELINE_CONFIG,
   STAGE_ORDER,
   DEPRECATED_MODE_ALIASES,
-} from '../pipeline-types.js';
-import type { PipelineConfig } from '../pipeline-types.js';
+} from "../pipeline-types.js";
+import type { PipelineConfig } from "../pipeline-types.js";
 
 import {
   ralplanAdapter,
@@ -39,312 +44,346 @@ import {
   QA_COMPLETION_SIGNAL,
   ALL_ADAPTERS,
   getAdapterById,
-} from '../adapters/index.js';
+} from "../adapters/index.js";
 
-import { readAutopilotState } from '../state.js';
+import { readAutopilotState, writeAutopilotState } from "../state.js";
 
-describe('Pipeline Types', () => {
-  it('should have 4 stages in canonical order', () => {
-    expect(STAGE_ORDER).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+describe("Pipeline Types", () => {
+  it("should have 4 stages in canonical order", () => {
+    expect(STAGE_ORDER).toEqual(["ralplan", "execution", "ralph", "qa"]);
   });
 
-  it('should define default pipeline config', () => {
+  it("should define default pipeline config", () => {
     expect(DEFAULT_PIPELINE_CONFIG).toEqual({
-      planning: 'ralplan',
-      execution: 'solo',
-      verification: { engine: 'ralph', maxIterations: 100 },
+      planning: "ralplan",
+      execution: "solo",
+      verification: { engine: "ralph", maxIterations: 100 },
       qa: true,
     });
   });
 
-  it('should define deprecation aliases for ultrawork and ultrapilot', () => {
-    expect(DEPRECATED_MODE_ALIASES).toHaveProperty('ultrawork');
-    expect(DEPRECATED_MODE_ALIASES).toHaveProperty('ultrapilot');
-    expect(DEPRECATED_MODE_ALIASES.ultrawork.config.execution).toBe('team');
-    expect(DEPRECATED_MODE_ALIASES.ultrapilot.config.execution).toBe('team');
+  it("should define deprecation aliases for ultrawork and ultrapilot", () => {
+    expect(DEPRECATED_MODE_ALIASES).toHaveProperty("ultrawork");
+    expect(DEPRECATED_MODE_ALIASES).toHaveProperty("ultrapilot");
+    expect(DEPRECATED_MODE_ALIASES.ultrawork.config.execution).toBe("team");
+    expect(DEPRECATED_MODE_ALIASES.ultrapilot.config.execution).toBe("team");
   });
 });
 
-describe('Stage Adapters', () => {
-  it('should have 4 adapters in order', () => {
+describe("Stage Adapters", () => {
+  it("should have 4 adapters in order", () => {
     expect(ALL_ADAPTERS).toHaveLength(4);
-    expect(ALL_ADAPTERS.map(a => a.id)).toEqual(['ralplan', 'execution', 'ralph', 'qa']);
+    expect(ALL_ADAPTERS.map((a) => a.id)).toEqual([
+      "ralplan",
+      "execution",
+      "ralph",
+      "qa",
+    ]);
   });
 
-  it('should look up adapters by id', () => {
-    expect(getAdapterById('ralplan')).toBe(ralplanAdapter);
-    expect(getAdapterById('execution')).toBe(executionAdapter);
-    expect(getAdapterById('ralph')).toBe(ralphAdapter);
-    expect(getAdapterById('qa')).toBe(qaAdapter);
-    expect(getAdapterById('nonexistent')).toBeUndefined();
+  it("should look up adapters by id", () => {
+    expect(getAdapterById("ralplan")).toBe(ralplanAdapter);
+    expect(getAdapterById("execution")).toBe(executionAdapter);
+    expect(getAdapterById("ralph")).toBe(ralphAdapter);
+    expect(getAdapterById("qa")).toBe(qaAdapter);
+    expect(getAdapterById("nonexistent")).toBeUndefined();
   });
 
-  describe('ralplanAdapter', () => {
-    it('should skip when planning is false', () => {
-      expect(ralplanAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, planning: false })).toBe(true);
+  describe("ralplanAdapter", () => {
+    it("should skip when planning is false", () => {
+      expect(
+        ralplanAdapter.shouldSkip({
+          ...DEFAULT_PIPELINE_CONFIG,
+          planning: false,
+        }),
+      ).toBe(true);
     });
 
-    it('should not skip when planning is ralplan', () => {
+    it("should not skip when planning is ralplan", () => {
       expect(ralplanAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(false);
     });
 
-    it('should not skip when planning is direct', () => {
-      expect(ralplanAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, planning: 'direct' })).toBe(false);
+    it("should not skip when planning is direct", () => {
+      expect(
+        ralplanAdapter.shouldSkip({
+          ...DEFAULT_PIPELINE_CONFIG,
+          planning: "direct",
+        }),
+      ).toBe(false);
     });
 
-    it('should have correct completion signal', () => {
+    it("should have correct completion signal", () => {
       expect(ralplanAdapter.completionSignal).toBe(RALPLAN_COMPLETION_SIGNAL);
     });
 
-    it('should generate ralplan prompt when planning is ralplan', () => {
+    it("should generate ralplan prompt when planning is ralplan", () => {
       const prompt = ralplanAdapter.getPrompt({
-        idea: 'build a CLI tool',
-        directory: '/tmp/test',
+        idea: "build a CLI tool",
+        directory: "/tmp/test",
         config: DEFAULT_PIPELINE_CONFIG,
       });
-      expect(prompt).toContain('RALPLAN');
-      expect(prompt).toContain('Consensus Planning');
+      expect(prompt).toContain("RALPLAN");
+      expect(prompt).toContain("Consensus Planning");
       expect(prompt).toContain(RALPLAN_COMPLETION_SIGNAL);
     });
 
-    it('should generate direct prompt when planning is direct', () => {
+    it("should generate direct prompt when planning is direct", () => {
       const prompt = ralplanAdapter.getPrompt({
-        idea: 'build a CLI tool',
-        directory: '/tmp/test',
-        config: { ...DEFAULT_PIPELINE_CONFIG, planning: 'direct' },
+        idea: "build a CLI tool",
+        directory: "/tmp/test",
+        config: { ...DEFAULT_PIPELINE_CONFIG, planning: "direct" },
       });
-      expect(prompt).toContain('PLANNING (Direct)');
+      expect(prompt).toContain("PLANNING (Direct)");
       expect(prompt).toContain(RALPLAN_COMPLETION_SIGNAL);
     });
   });
 
-  describe('executionAdapter', () => {
-    it('should never skip', () => {
+  describe("executionAdapter", () => {
+    it("should never skip", () => {
       expect(executionAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(false);
-      expect(executionAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, execution: 'team' })).toBe(false);
+      expect(
+        executionAdapter.shouldSkip({
+          ...DEFAULT_PIPELINE_CONFIG,
+          execution: "team",
+        }),
+      ).toBe(false);
     });
 
-    it('should generate team prompt for team mode', () => {
+    it("should generate team prompt for team mode", () => {
       const prompt = executionAdapter.getPrompt({
-        idea: 'test',
-        directory: '/tmp',
-        config: { ...DEFAULT_PIPELINE_CONFIG, execution: 'team' },
+        idea: "test",
+        directory: "/tmp",
+        config: { ...DEFAULT_PIPELINE_CONFIG, execution: "team" },
       });
-      expect(prompt).toContain('Team Mode');
-      expect(prompt).toContain('implicit agent team');
+      expect(prompt).toContain("Team Mode");
+      expect(prompt).toContain("implicit agent team");
       expect(prompt).toContain('name="worker-1"');
-      expect(prompt).not.toContain('with TeamCreate');
-      expect(prompt).not.toContain('TaskCreate');
-      expect(prompt).not.toContain('Task with `team_name`');
+      expect(prompt).not.toContain("with TeamCreate");
+      expect(prompt).not.toContain("TaskCreate");
+      expect(prompt).not.toContain("Task with `team_name`");
       expect(prompt).toContain(EXECUTION_COMPLETION_SIGNAL);
-      expect(prompt).toContain('short execution summary under 100 words');
+      expect(prompt).toContain("short execution summary under 100 words");
     });
 
-    it('should generate solo prompt for solo mode', () => {
+    it("should generate solo prompt for solo mode", () => {
       const prompt = executionAdapter.getPrompt({
-        idea: 'test',
-        directory: '/tmp',
+        idea: "test",
+        directory: "/tmp",
         config: DEFAULT_PIPELINE_CONFIG,
       });
-      expect(prompt).toContain('Solo Mode');
+      expect(prompt).toContain("Solo Mode");
       expect(prompt).toContain(EXECUTION_COMPLETION_SIGNAL);
-      expect(prompt).toContain('short execution summary under 100 words');
+      expect(prompt).toContain("short execution summary under 100 words");
     });
   });
 
-  describe('ralphAdapter', () => {
-    it('should skip when verification is false', () => {
-      expect(ralphAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, verification: false })).toBe(true);
+  describe("ralphAdapter", () => {
+    it("should skip when verification is false", () => {
+      expect(
+        ralphAdapter.shouldSkip({
+          ...DEFAULT_PIPELINE_CONFIG,
+          verification: false,
+        }),
+      ).toBe(true);
     });
 
-    it('should not skip when verification is configured', () => {
+    it("should not skip when verification is configured", () => {
       expect(ralphAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(false);
     });
 
-    it('should include maxIterations in prompt', () => {
+    it("should include maxIterations in prompt", () => {
       const prompt = ralphAdapter.getPrompt({
-        idea: 'test',
-        directory: '/tmp',
+        idea: "test",
+        directory: "/tmp",
         config: {
           ...DEFAULT_PIPELINE_CONFIG,
-          verification: { engine: 'ralph', maxIterations: 50 },
+          verification: { engine: "ralph", maxIterations: 50 },
         },
       });
-      expect(prompt).toContain('50');
+      expect(prompt).toContain("50");
       expect(prompt).toContain(RALPH_COMPLETION_SIGNAL);
-      expect(prompt).toContain('concise review summary under 100 words');
+      expect(prompt).toContain("concise review summary under 100 words");
     });
   });
 
-  describe('qaAdapter', () => {
-    it('should skip when qa is false', () => {
-      expect(qaAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, qa: false })).toBe(true);
+  describe("qaAdapter", () => {
+    it("should skip when qa is false", () => {
+      expect(
+        qaAdapter.shouldSkip({ ...DEFAULT_PIPELINE_CONFIG, qa: false }),
+      ).toBe(true);
     });
 
-    it('should not skip when qa is true', () => {
+    it("should not skip when qa is true", () => {
       expect(qaAdapter.shouldSkip(DEFAULT_PIPELINE_CONFIG)).toBe(false);
     });
   });
 });
 
-describe('resolvePipelineConfig', () => {
-  it('should return defaults when no overrides', () => {
+describe("resolvePipelineConfig", () => {
+  it("should return defaults when no overrides", () => {
     expect(resolvePipelineConfig()).toEqual(DEFAULT_PIPELINE_CONFIG);
   });
 
-  it('should apply user overrides', () => {
-    const config = resolvePipelineConfig({ execution: 'team', qa: false });
-    expect(config.execution).toBe('team');
+  it("should apply user overrides", () => {
+    const config = resolvePipelineConfig({ execution: "team", qa: false });
+    expect(config.execution).toBe("team");
     expect(config.qa).toBe(false);
-    expect(config.planning).toBe('ralplan'); // unchanged
+    expect(config.planning).toBe("ralplan"); // unchanged
   });
 
-  it('should apply deprecated mode aliases', () => {
-    const config = resolvePipelineConfig(undefined, 'ultrawork');
-    expect(config.execution).toBe('team');
+  it("should apply deprecated mode aliases", () => {
+    const config = resolvePipelineConfig(undefined, "ultrawork");
+    expect(config.execution).toBe("team");
   });
 
-  it('should let user overrides win over deprecated aliases', () => {
-    const config = resolvePipelineConfig({ execution: 'solo' }, 'ultrawork');
-    expect(config.execution).toBe('solo');
+  it("should let user overrides win over deprecated aliases", () => {
+    const config = resolvePipelineConfig({ execution: "solo" }, "ultrawork");
+    expect(config.execution).toBe("solo");
   });
 
-  it('should return defaults for unknown deprecated modes', () => {
-    const config = resolvePipelineConfig(undefined, 'unknown');
+  it("should return defaults for unknown deprecated modes", () => {
+    const config = resolvePipelineConfig(undefined, "unknown");
     expect(config).toEqual(DEFAULT_PIPELINE_CONFIG);
   });
 });
 
-describe('getDeprecationWarning', () => {
-  it('should return warning for ultrawork', () => {
-    const warning = getDeprecationWarning('ultrawork');
-    expect(warning).toContain('deprecated');
+describe("getDeprecationWarning", () => {
+  it("should return warning for ultrawork", () => {
+    const warning = getDeprecationWarning("ultrawork");
+    expect(warning).toContain("deprecated");
   });
 
-  it('should return warning for ultrapilot', () => {
-    const warning = getDeprecationWarning('ultrapilot');
-    expect(warning).toContain('deprecated');
+  it("should return warning for ultrapilot", () => {
+    const warning = getDeprecationWarning("ultrapilot");
+    expect(warning).toContain("deprecated");
   });
 
-  it('should return null for non-deprecated modes', () => {
-    expect(getDeprecationWarning('autopilot')).toBeNull();
-    expect(getDeprecationWarning('team')).toBeNull();
+  it("should return null for non-deprecated modes", () => {
+    expect(getDeprecationWarning("autopilot")).toBeNull();
+    expect(getDeprecationWarning("team")).toBeNull();
   });
 });
 
-describe('buildPipelineTracking', () => {
-  it('should create stages for all 4 stages with default config', () => {
+describe("buildPipelineTracking", () => {
+  it("should create stages for all 4 stages with default config", () => {
     const tracking = buildPipelineTracking(DEFAULT_PIPELINE_CONFIG);
     expect(tracking.stages).toHaveLength(4);
-    expect(tracking.stages.map(s => s.id)).toEqual(STAGE_ORDER);
-    expect(tracking.stages.every(s => s.status === 'pending')).toBe(true);
+    expect(tracking.stages.map((s) => s.id)).toEqual(STAGE_ORDER);
+    expect(tracking.stages.every((s) => s.status === "pending")).toBe(true);
     expect(tracking.currentStageIndex).toBe(0);
   });
 
-  it('should mark skipped stages', () => {
+  it("should mark skipped stages", () => {
     const config: PipelineConfig = {
       planning: false,
-      execution: 'solo',
+      execution: "solo",
       verification: false,
       qa: false,
     };
     const tracking = buildPipelineTracking(config);
-    expect(tracking.stages[0].status).toBe('skipped'); // ralplan
-    expect(tracking.stages[1].status).toBe('pending'); // execution
-    expect(tracking.stages[2].status).toBe('skipped'); // ralph
-    expect(tracking.stages[3].status).toBe('skipped'); // qa
+    expect(tracking.stages[0].status).toBe("skipped"); // ralplan
+    expect(tracking.stages[1].status).toBe("pending"); // execution
+    expect(tracking.stages[2].status).toBe("skipped"); // ralph
+    expect(tracking.stages[3].status).toBe("skipped"); // qa
     expect(tracking.currentStageIndex).toBe(1); // first non-skipped
   });
 
-  it('should store the config', () => {
+  it("should store the config", () => {
     const tracking = buildPipelineTracking(DEFAULT_PIPELINE_CONFIG);
     expect(tracking.pipelineConfig).toEqual(DEFAULT_PIPELINE_CONFIG);
   });
 });
 
-describe('getActiveAdapters', () => {
-  it('should return all adapters with default config', () => {
+describe("getActiveAdapters", () => {
+  it("should return all adapters with default config", () => {
     const adapters = getActiveAdapters(DEFAULT_PIPELINE_CONFIG);
     expect(adapters).toHaveLength(4);
   });
 
-  it('should exclude skipped adapters', () => {
+  it("should exclude skipped adapters", () => {
     const config: PipelineConfig = {
       planning: false,
-      execution: 'solo',
+      execution: "solo",
       verification: false,
       qa: true,
     };
     const adapters = getActiveAdapters(config);
     expect(adapters).toHaveLength(2);
-    expect(adapters.map(a => a.id)).toEqual(['execution', 'qa']);
+    expect(adapters.map((a) => a.id)).toEqual(["execution", "qa"]);
   });
 });
 
-describe('Signal mapping', () => {
-  it('should map all completion signals to stage IDs', () => {
+describe("Signal mapping", () => {
+  it("should map all completion signals to stage IDs", () => {
     const map = getSignalToStageMap();
-    expect(map.get(RALPLAN_COMPLETION_SIGNAL)).toBe('ralplan');
-    expect(map.get(EXECUTION_COMPLETION_SIGNAL)).toBe('execution');
-    expect(map.get(RALPH_COMPLETION_SIGNAL)).toBe('ralph');
-    expect(map.get(QA_COMPLETION_SIGNAL)).toBe('qa');
+    expect(map.get(RALPLAN_COMPLETION_SIGNAL)).toBe("ralplan");
+    expect(map.get(EXECUTION_COMPLETION_SIGNAL)).toBe("execution");
+    expect(map.get(RALPH_COMPLETION_SIGNAL)).toBe("ralph");
+    expect(map.get(QA_COMPLETION_SIGNAL)).toBe("qa");
   });
 });
 
-describe('Pipeline Orchestrator (with state)', () => {
+describe("Pipeline Orchestrator (with state)", () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = mkdtempSync(join(tmpdir(), 'pipeline-test-'));
+    testDir = mkdtempSync(join(tmpdir(), "pipeline-test-"));
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  describe('initPipeline', () => {
-    it('should initialize autopilot state with pipeline tracking', () => {
-      const state = initPipeline(testDir, 'build a CLI');
+  describe("initPipeline", () => {
+    it("should initialize autopilot state with pipeline tracking", () => {
+      const state = initPipeline(testDir, "build a CLI");
       expect(state).not.toBeNull();
       expect(state!.active).toBe(true);
-      expect(state!.originalIdea).toBe('build a CLI');
+      expect(state!.originalIdea).toBe("build a CLI");
       expect(hasPipelineTracking(state!)).toBe(true);
 
       const tracking = readPipelineTracking(state!);
       expect(tracking).not.toBeNull();
       expect(tracking!.stages).toHaveLength(4);
-      expect(tracking!.stages[0].status).toBe('active'); // first stage activated
+      expect(tracking!.stages[0].status).toBe("active"); // first stage activated
       expect(tracking!.stages[0].startedAt).toBeTruthy();
     });
 
-    it('should apply pipeline config overrides', () => {
-      const state = initPipeline(testDir, 'test', undefined, undefined, {
-        execution: 'team',
+    it("should apply pipeline config overrides", () => {
+      const state = initPipeline(testDir, "test", undefined, undefined, {
+        execution: "team",
         verification: false,
       });
       const tracking = readPipelineTracking(state!);
-      expect(tracking!.pipelineConfig.execution).toBe('team');
-      expect(tracking!.pipelineConfig.verification).toBe(false);
-      expect(tracking!.stages[2].status).toBe('skipped'); // ralph skipped
+      expect(tracking!.pipelineConfig!.execution).toBe("team");
+      expect(tracking!.pipelineConfig!.verification).toBe(false);
+      expect(tracking!.stages[2].status).toBe("skipped"); // ralph skipped
     });
 
-    it('should handle deprecated mode names', () => {
-      const state = initPipeline(testDir, 'test', undefined, undefined, undefined, 'ultrawork');
+    it("should handle deprecated mode names", () => {
+      const state = initPipeline(
+        testDir,
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        "ultrawork",
+      );
       const tracking = readPipelineTracking(state!);
-      expect(tracking!.pipelineConfig.execution).toBe('team');
+      expect(tracking!.pipelineConfig!.execution).toBe("team");
     });
   });
 
-  describe('getCurrentStageAdapter', () => {
-    it('should return the first adapter', () => {
-      const state = initPipeline(testDir, 'test');
+  describe("getCurrentStageAdapter", () => {
+    it("should return the first adapter", () => {
+      const state = initPipeline(testDir, "test");
       const tracking = readPipelineTracking(state!);
       const adapter = getCurrentStageAdapter(tracking!);
       expect(adapter).toBe(ralplanAdapter);
     });
 
-    it('should skip to first active stage', () => {
-      const state = initPipeline(testDir, 'test', undefined, undefined, {
+    it("should skip to first active stage", () => {
+      const state = initPipeline(testDir, "test", undefined, undefined, {
         planning: false,
       });
       const tracking = readPipelineTracking(state!);
@@ -353,31 +392,153 @@ describe('Pipeline Orchestrator (with state)', () => {
     });
   });
 
-  describe('getCurrentCompletionSignal', () => {
-    it('should return the current stage completion signal', () => {
-      const state = initPipeline(testDir, 'test');
-      const tracking = readPipelineTracking(state!);
-      expect(getCurrentCompletionSignal(tracking!)).toBe(RALPLAN_COMPLETION_SIGNAL);
+  it("generates prompts only for structurally valid named workflow state", () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const base = initPipeline(testDir, "legacy task", sessionId)!;
+    const named = {
+      ...base,
+      phase: "ralplan",
+      prompt: "named task",
+      workflow: createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages: ["ralplan", "execution"],
+      })!,
+      workflowRunId: "22222222-2222-4222-8222-222222222222",
+      pipelineTracking: {
+        stages: [
+          {
+            id: "ralplan" as const,
+            status: "active" as const,
+            iterations: 0,
+            startedAt: new Date().toISOString(),
+          },
+          { id: "execution" as const, status: "pending" as const, iterations: 0 },
+        ],
+        currentStageIndex: 0,
+        trackingRevision: 0,
+        activationBoundary: {
+          transcriptPath: join(testDir, `${sessionId}.jsonl`),
+          transcriptRoot: testDir,
+          transcriptBasename: `${sessionId}.jsonl`,
+          sessionId,
+          byteOffset: 0,
+          fileIdentity: {
+            device: 0,
+            inode: 0,
+            size: 0,
+            mtimeNs: "0",
+            ctimeNs: "0",
+            contentSha256: "0".repeat(64),
+          },
+        },
+        completionObservations: [],
+      },
+    } as typeof base;
+    delete (named as Partial<typeof named>).pipeline;
+    delete (named as Partial<typeof named>).expansion;
+    delete (named as Partial<typeof named>).planning;
+    writeAutopilotState(testDir, named, sessionId);
+
+    expect(generatePipelinePrompt(testDir, sessionId)).toContain(
+      "## PIPELINE STAGE: RALPLAN",
+    );
+    expect(generatePipelinePrompt(testDir)).toBeNull();
+
+    expect(advanceStage(testDir, sessionId)).toEqual({
+      adapter: null,
+      phase: "failed",
     });
   });
 
-  describe('advanceStage', () => {
-    it('should advance from ralplan to execution', () => {
-      initPipeline(testDir, 'test');
+  it.each([
+    ["partial", (state: Record<string, unknown>) => delete state.workflowRunId],
+    ["tampered descriptor", (state: Record<string, unknown>) => {
+      (state.workflow as Record<string, unknown>).profileHash = "0".repeat(64);
+    }],
+    ["mismatched session", (state: Record<string, unknown>) => {
+      state.session_id = "other-session";
+    }],
+    ["corrupt tracking", (state: Record<string, unknown>) => {
+      (state.pipelineTracking as Record<string, unknown>).trackingRevision = 1;
+    }],
+  ])("fails closed for %s named workflow markers", (_kind, corrupt) => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const base = initPipeline(testDir, "legacy task", sessionId)!;
+    const state = {
+      ...base,
+      phase: "ralplan",
+      prompt: "named task",
+      workflow: createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages: ["ralplan", "execution"],
+      })!,
+      workflowRunId: "22222222-2222-4222-8222-222222222222",
+      pipelineTracking: {
+        stages: [
+          {
+            id: "ralplan",
+            status: "active",
+            iterations: 0,
+            startedAt: new Date().toISOString(),
+          },
+          { id: "execution", status: "pending", iterations: 0 },
+        ],
+        currentStageIndex: 0,
+        trackingRevision: 0,
+        activationBoundary: {
+          transcriptPath: join(testDir, `${sessionId}.jsonl`),
+          transcriptRoot: testDir,
+          transcriptBasename: `${sessionId}.jsonl`,
+          sessionId,
+          byteOffset: 0,
+          fileIdentity: {
+            device: 0,
+            inode: 0,
+            size: 0,
+            mtimeNs: "0",
+            ctimeNs: "0",
+            contentSha256: "0".repeat(64),
+          },
+        },
+        completionObservations: [],
+      },
+    } as Record<string, unknown>;
+    delete state.pipeline;
+    delete state.expansion;
+    delete state.planning;
+    corrupt(state);
+    writeAutopilotState(testDir, state as unknown as typeof base, sessionId);
+
+    expect(generatePipelinePrompt(testDir, sessionId)).toBeNull();
+  });
+
+  describe("getCurrentCompletionSignal", () => {
+    it("should return the current stage completion signal", () => {
+      const state = initPipeline(testDir, "test");
+      const tracking = readPipelineTracking(state!);
+      expect(getCurrentCompletionSignal(tracking!)).toBe(
+        RALPLAN_COMPLETION_SIGNAL,
+      );
+    });
+  });
+
+  describe("advanceStage", () => {
+    it("should advance from ralplan to execution", () => {
+      initPipeline(testDir, "test");
       const { adapter, phase } = advanceStage(testDir);
       expect(adapter).toBe(executionAdapter);
-      expect(phase).toBe('execution');
+      expect(phase).toBe("execution");
 
       // Verify state persisted
       const state = readAutopilotState(testDir);
       const tracking = readPipelineTracking(state!);
-      expect(tracking!.stages[0].status).toBe('complete');
-      expect(tracking!.stages[1].status).toBe('active');
+      expect(tracking!.stages[0].status).toBe("complete");
+      expect(tracking!.stages[1].status).toBe("active");
       expect(tracking!.currentStageIndex).toBe(1);
     });
 
-    it('should skip disabled stages during advance', () => {
-      initPipeline(testDir, 'test', undefined, undefined, {
+    it("should skip disabled stages during advance", () => {
+      initPipeline(testDir, "test", undefined, undefined, {
         verification: false, // skip ralph
       });
 
@@ -386,11 +547,11 @@ describe('Pipeline Orchestrator (with state)', () => {
       // Advance past execution — should skip ralph and go to qa
       const { adapter, phase } = advanceStage(testDir);
       expect(adapter).toBe(qaAdapter);
-      expect(phase).toBe('qa');
+      expect(phase).toBe("qa");
     });
 
-    it('should return complete when all stages done', () => {
-      initPipeline(testDir, 'test', undefined, undefined, {
+    it("should return complete when all stages done", () => {
+      initPipeline(testDir, "test", undefined, undefined, {
         planning: false,
         verification: false,
         qa: false,
@@ -399,25 +560,25 @@ describe('Pipeline Orchestrator (with state)', () => {
       // Only execution is active — advance completes pipeline
       const { adapter, phase } = advanceStage(testDir);
       expect(adapter).toBeNull();
-      expect(phase).toBe('complete');
+      expect(phase).toBe("complete");
     });
   });
 
-  describe('failCurrentStage', () => {
-    it('should mark current stage as failed', () => {
-      initPipeline(testDir, 'test');
-      failCurrentStage(testDir, 'Something went wrong');
+  describe("failCurrentStage", () => {
+    it("should mark current stage as failed", () => {
+      initPipeline(testDir, "test");
+      failCurrentStage(testDir, "Something went wrong");
 
       const state = readAutopilotState(testDir);
       const tracking = readPipelineTracking(state!);
-      expect(tracking!.stages[0].status).toBe('failed');
-      expect(tracking!.stages[0].error).toBe('Something went wrong');
+      expect(tracking!.stages[0].status).toBe("failed");
+      expect(tracking!.stages[0].error).toBe("Something went wrong");
     });
   });
 
-  describe('incrementStageIteration', () => {
-    it('should increment the current stage iteration counter', () => {
-      initPipeline(testDir, 'test');
+  describe("incrementStageIteration", () => {
+    it("should increment the current stage iteration counter", () => {
+      initPipeline(testDir, "test");
       incrementStageIteration(testDir);
       incrementStageIteration(testDir);
 
@@ -427,119 +588,217 @@ describe('Pipeline Orchestrator (with state)', () => {
     });
   });
 
-  describe('getPipelineStatus', () => {
-    it('should report initial status', () => {
-      const state = initPipeline(testDir, 'test');
+  describe("getPipelineStatus", () => {
+    it("should report initial status", () => {
+      const state = initPipeline(testDir, "test");
       const tracking = readPipelineTracking(state!);
       const status = getPipelineStatus(tracking!);
 
-      expect(status.currentStage).toBe('ralplan');
+      expect(status.currentStage).toBe("ralplan");
       expect(status.completedStages).toEqual([]);
-      expect(status.pendingStages).toEqual(['execution', 'ralph', 'qa']);
+      expect(status.pendingStages).toEqual(["execution", "ralph", "qa"]);
       expect(status.skippedStages).toEqual([]);
       expect(status.isComplete).toBe(false);
-      expect(status.progress).toBe('0/4 stages');
+      expect(status.progress).toBe("0/4 stages");
     });
 
-    it('should show progress after advancing', () => {
-      initPipeline(testDir, 'test');
+    it("should show progress after advancing", () => {
+      initPipeline(testDir, "test");
       advanceStage(testDir);
 
       const state = readAutopilotState(testDir);
       const tracking = readPipelineTracking(state!);
       const status = getPipelineStatus(tracking!);
 
-      expect(status.currentStage).toBe('execution');
-      expect(status.completedStages).toEqual(['ralplan']);
-      expect(status.progress).toBe('1/4 stages');
+      expect(status.currentStage).toBe("execution");
+      expect(status.completedStages).toEqual(["ralplan"]);
+      expect(status.progress).toBe("1/4 stages");
     });
   });
 
-  describe('formatPipelineHUD', () => {
-    it('should format initial HUD', () => {
-      const state = initPipeline(testDir, 'test');
+  describe("formatPipelineHUD", () => {
+    it("should format initial HUD", () => {
+      const state = initPipeline(testDir, "test");
       const tracking = readPipelineTracking(state!);
       const hud = formatPipelineHUD(tracking!);
 
-      expect(hud).toContain('[>>]'); // active stage
-      expect(hud).toContain('[..]'); // pending stages
-      expect(hud).toContain('0/4 stages');
+      expect(hud).toContain("[>>]"); // active stage
+      expect(hud).toContain("[..]"); // pending stages
+      expect(hud).toContain("0/4 stages");
     });
 
-    it('should show skipped stages', () => {
-      const state = initPipeline(testDir, 'test', undefined, undefined, {
+    it("should show skipped stages", () => {
+      const state = initPipeline(testDir, "test", undefined, undefined, {
         verification: false,
       });
       const tracking = readPipelineTracking(state!);
       const hud = formatPipelineHUD(tracking!);
 
-      expect(hud).toContain('[--]'); // skipped
+      expect(hud).toContain("[--]"); // skipped
     });
   });
 });
 
-describe('autopilot team CLI worker configuration', () => {
-  it('preserves requested Cursor worker types in pipeline config', () => {
+describe("autopilot team CLI worker configuration", () => {
+  it("preserves requested Cursor worker types in pipeline config", () => {
     const config = resolvePipelineConfig({
-      execution: 'team',
-      team: { agentTypes: ['cursor'] },
+      execution: "team",
+      team: { agentTypes: ["cursor"] },
     });
 
-    expect(config.execution).toBe('team');
-    expect(config.team?.agentTypes).toEqual(['cursor']);
+    expect(config.execution).toBe("team");
+    expect(config.team?.agentTypes).toEqual(["cursor"]);
   });
 
-  it('does not imply team execution from team agentTypes alone', () => {
+  it("does not imply team execution from team agentTypes alone", () => {
     const config = resolvePipelineConfig({
-      team: { agentTypes: ['cursor'] },
+      team: { agentTypes: ["cursor"] },
     });
 
-    expect(config.execution).toBe('solo');
-    expect(config.team?.agentTypes).toEqual(['cursor']);
+    expect(config.execution).toBe("solo");
+    expect(config.team?.agentTypes).toEqual(["cursor"]);
   });
 
-  it('instructs team execution to use omc team for Cursor executor workers', () => {
+  it("instructs team execution to use omc team for Cursor executor workers", () => {
     const prompt = executionAdapter.getPrompt({
-      idea: 'test',
-      directory: '/tmp',
-      planPath: '.omc/plans/autopilot-impl.md',
+      idea: "test",
+      directory: "/tmp",
+      planPath: ".omc/plans/autopilot-impl.md",
       config: {
         ...DEFAULT_PIPELINE_CONFIG,
-        execution: 'team',
-        team: { agentTypes: ['cursor'] },
+        execution: "team",
+        team: { agentTypes: ["cursor"] },
       },
     });
 
-    expect(prompt).toContain('CLI Team Runtime Required');
-    expect(prompt).toContain('omc team 1:cursor');
-    expect(prompt).toContain('/omc-teams 1:cursor');
-    expect(prompt).toContain('executor-style only');
-    expect(prompt).toContain('reviewer, critic, security-review, validation verdict');
-    expect(prompt).toContain('cursor-agent');
-    expect(prompt).toContain('installed and authenticated');
-    expect(prompt).not.toContain('TeamCreate');
-    expect(prompt).not.toContain('team_name');
-    expect(prompt).not.toContain('debugger` with');
-    expect(prompt).not.toContain('test-engineer` with');
+    expect(prompt).toContain("CLI Team Runtime Required");
+    expect(prompt).toContain("omc team 1:cursor");
+    expect(prompt).toContain("/omc-teams 1:cursor");
+    expect(prompt).toContain("executor-style only");
+    expect(prompt).toContain(
+      "reviewer, critic, security-review, validation verdict",
+    );
+    expect(prompt).toContain("cursor-agent");
+    expect(prompt).toContain("installed and authenticated");
+    expect(prompt).not.toContain("TeamCreate");
+    expect(prompt).not.toContain("team_name");
+    expect(prompt).not.toContain("debugger` with");
+    expect(prompt).not.toContain("test-engineer` with");
   });
 
-  it('uses implicit-team guidance for Claude-only team execution', () => {
+  it("uses implicit-team guidance for Claude-only team execution", () => {
     const prompt = executionAdapter.getPrompt({
-      idea: 'test',
-      directory: '/tmp',
+      idea: "test",
+      directory: "/tmp",
       config: {
         ...DEFAULT_PIPELINE_CONFIG,
-        execution: 'team',
-        team: { agentTypes: ['claude'] },
+        execution: "team",
+        team: { agentTypes: ["claude"] },
       },
     });
 
-    expect(prompt).toContain('implicit team');
+    expect(prompt).toContain("implicit team");
     expect(prompt).toContain('name="worker-1"');
-    expect(prompt).toContain('ignored legacy metadata');
-    expect(prompt).not.toContain('with TeamCreate');
-    expect(prompt).not.toContain('TaskCreate');
-    expect(prompt).not.toContain('Task with `team_name`');
-    expect(prompt).not.toContain('CLI Team Runtime Required');
+    expect(prompt).toContain("ignored legacy metadata");
+    expect(prompt).not.toContain("with TeamCreate");
+    expect(prompt).not.toContain("TaskCreate");
+    expect(prompt).not.toContain("Task with `team_name`");
+    expect(prompt).not.toContain("CLI Team Runtime Required");
   });
+});
+
+describe("workflow profile descriptor contract (#3487)", () => {
+  const profile = {
+    version: 1,
+    stages: ["ralplan", "execution", "qa"],
+  } as const;
+
+  it("uses recursively lexicographically sorted compact JSON for the descriptor hash", () => {
+    const descriptor = createWorkflowDescriptor("release-flow", profile);
+
+    expect(
+      canonicalizeJson({
+        workflowName: "release-flow",
+        stages: profile.stages,
+        profileVersion: 1,
+        descriptorVersion: 1,
+      }),
+    ).toBe(
+      '{"descriptorVersion":1,"profileVersion":1,"stages":["ralplan","execution","qa"],"workflowName":"release-flow"}',
+    );
+    expect(canonicalizeJson({ z: { y: 1, a: 2 }, a: [{ b: 1, a: 2 }] })).toBe(
+      '{"a":[{"a":2,"b":1}],"z":{"a":2,"y":1}}',
+    );
+    expect(descriptor?.profileHash).toBe(
+      "e602fea6c1edb149161950e94145182b017ea964499b06a5a45adcb1eac5c351",
+    );
+  });
+
+  it("hashes canonical descriptors deterministically and rejects tampering", () => {
+    const first = createWorkflowDescriptor("release-flow", profile);
+    const second = createWorkflowDescriptor("release-flow", profile);
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({
+      descriptorVersion: 1,
+      workflowName: "release-flow",
+      profileVersion: 1,
+      stages: ["ralplan", "execution", "qa"],
+    });
+    expect(verifyWorkflowDescriptor(first)).toBe(true);
+    expect(
+      verifyWorkflowDescriptor({ ...first!, stages: ["ralplan", "execution"] }),
+    ).toBe(false);
+    expect(
+      verifyWorkflowDescriptor({ ...first!, profileHash: "0".repeat(64) }),
+    ).toBe(false);
+    expect(verifyWorkflowDescriptor({ ...first!, extra: true })).toBe(false);
+  });
+
+  it("rejects reserved workflow identities even with a recomputed canonical hash", () => {
+    expect(createWorkflowDescriptor("autopilot", profile)).toBeNull();
+    const descriptor = {
+      descriptorVersion: 1,
+      workflowName: "autopilot",
+      profileVersion: 1,
+      stages: profile.stages,
+    };
+    const recomputed = {
+      ...descriptor,
+      profileHash: createHash("sha256")
+        .update(canonicalizeJson(descriptor))
+        .digest("hex"),
+    };
+    expect(verifyWorkflowDescriptor(recomputed)).toBe(false);
+  });
+
+  it("rejects comma-collapsed and nested stage structures before descriptor creation", () => {
+    expect(
+      createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages: ["ralplan", "execution,qa"],
+      }),
+    ).toBeNull();
+    expect(
+      createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages: [["ralplan", "execution"]],
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["ralplan,execution", ["ralplan", "execution"]],
+    ["ralplan,execution,ralph", ["ralplan", "execution", "ralph"]],
+    ["ralplan,execution,qa", ["ralplan", "execution", "qa"]],
+    ["ralplan,execution,ralph,qa", ["ralplan", "execution", "ralph", "qa"]],
+  ] as const)(
+    "creates descriptors only for selected stages in %s",
+    (_name, stages) => {
+      const descriptor = createWorkflowDescriptor("release-flow", {
+        version: 1,
+        stages,
+      });
+      expect(descriptor?.stages).toEqual(stages);
+    },
+  );
 });

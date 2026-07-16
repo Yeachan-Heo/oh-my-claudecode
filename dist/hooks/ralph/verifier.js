@@ -12,9 +12,10 @@
  * 5. If architect finds flaws -> continue ralph with architect feedback
  */
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveSessionStatePath, ensureSessionStateDir, getOmcRoot } from '../../lib/worktree-paths.js';
+import { clearStateFileLocked, writeStateFileLocked } from '../../lib/mode-state-io.js';
 import { formatOmcCliInvocation } from '../../utils/omc-cli-rendering.js';
 const DEFAULT_MAX_VERIFICATION_ATTEMPTS = 3;
 const DEFAULT_RALPH_CRITIC_MODE = 'architect';
@@ -104,13 +105,7 @@ export function writeVerificationState(directory, state, sessionId) {
             }
         }
     }
-    try {
-        writeFileSync(statePath, JSON.stringify(state, null, 2));
-        return true;
-    }
-    catch {
-        return false;
-    }
+    return writeStateFileLocked(statePath, state);
 }
 /**
  * Clear verification state
@@ -118,16 +113,7 @@ export function writeVerificationState(directory, state, sessionId) {
  */
 export function clearVerificationState(directory, sessionId) {
     const statePath = getVerificationStatePath(directory, sessionId);
-    if (existsSync(statePath)) {
-        try {
-            unlinkSync(statePath);
-            return true;
-        }
-        catch {
-            return false;
-        }
-    }
-    return true;
+    return clearStateFileLocked(statePath);
 }
 /**
  * Start verification process

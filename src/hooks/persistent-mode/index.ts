@@ -10,6 +10,7 @@
  * Priority order: Ralph > Ultrawork > Todo Continuation
  */
 
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
@@ -25,7 +26,7 @@ import {
   type UltraworkState
 } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
-import { readModeState, writeModeState } from '../../lib/mode-state-io.js';
+import { readModeState, writeModeState, withStateFileMutationLock } from '../../lib/mode-state-io.js';
 import {
   readRalphState,
   writeRalphState,
@@ -50,7 +51,8 @@ import {
 import { checkIncompleteTodos, getNextPendingTodo, StopContext, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import {
-  isAutopilotActive
+  isAutopilotActive,
+  readAutopilotState,
 } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 import { readTeamPipelineState } from '../team-pipeline/state.js';
@@ -59,6 +61,8 @@ import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 import type { IdleNotificationRepoState } from './idle-repo-state.js';
 import { truncatePromptForEcho } from '../../lib/truncate-prompt.js';
 import { isModeActive } from '../mode-registry/index.js';
+import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from '../autopilot/named-workflow-resume-validator.js';
+import type { AutopilotState } from '../autopilot/types.js';
 
 export interface ToolErrorState {
   tool_name: string;
@@ -92,6 +96,7 @@ export interface PersistentModeResult {
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const CANCEL_SIGNAL_CLOCK_SKEW_MS = 5_000;
 const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
@@ -108,6 +113,42 @@ const TERMINAL_WORKFLOW_PHASES = new Set([
   'stopped',
 ]);
 
+function hasNamedWorkflowMarkers(state: unknown): boolean {
+  return Boolean(
+    state &&
+      typeof state === 'object' &&
+      ['workflow', 'workflowRunId', 'pipelineTracking'].some((marker) =>
+        Object.prototype.hasOwnProperty.call(state, marker),
+      ),
+  );
+}
+
+function isEnforceableNamedAutopilotState(
+  state: Record<string, unknown> | null,
+  directory: string,
+  sessionId?: string,
+): boolean {
+  if (
+    !state ||
+    !sessionId ||
+    !hasNamedWorkflowMarkers(state) ||
+    state.active !== true ||
+    state.session_id !== sessionId ||
+    isTerminalWorkflowModeState(state) ||
+    typeof state.project_path !== 'string' ||
+    !namedWorkflowRuntimeSupported()
+  ) {
+    return false;
+  }
+
+  try {
+    return resolveToWorktreeRoot(state.project_path) === resolveToWorktreeRoot(directory)
+      && Boolean(validateNamedWorkflowState(state as unknown as AutopilotState, sessionId));
+  } catch {
+    return false;
+  }
+}
+
 /** Track todo-continuation attempts per session to prevent infinite loops */
 const todoContinuationAttempts = new Map<string, number>();
 
@@ -115,51 +156,180 @@ export function shouldWriteStateBack(statePath: string | null | undefined): bool
   return Boolean(statePath && existsSync(statePath));
 }
 
-/**
- * Check whether this session is in an explicit cancel window.
- * Used to prevent stop-hook re-enforcement races during /cancel.
- */
-function isSessionCancelInProgress(directory: string, sessionId?: string): boolean {
-  let cancelSignalPath: string | undefined;
+interface LoadedAutopilotTarget {
+  path: string;
+  state: Record<string, unknown>;
+}
 
+interface SessionCancelCheck {
+  autopilotCancellation: boolean;
+  nonAutopilotCancellation: boolean;
+  enforceableAutopilot?: LoadedAutopilotTarget;
+}
+
+function resolveAutopilotTargetPath(directory: string, sessionId?: string): string {
+  return sessionId
+    ? resolveSessionStatePath('autopilot', sessionId, directory)
+    : resolveStatePath('autopilot', directory);
+}
+
+function readAutopilotTarget(directory: string, sessionId?: string): LoadedAutopilotTarget | null {
+  const path = resolveAutopilotTargetPath(directory, sessionId);
+  if (!readAutopilotState(directory, sessionId)) return null;
+  try {
+    const state = JSON.parse(readFileSync(path, 'utf-8'));
+    return state && typeof state === 'object' && !Array.isArray(state)
+      ? { path, state: state as Record<string, unknown> }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isCurrentAutopilotTarget(
+  state: Record<string, unknown>,
+  directory: string,
+  sessionId?: string,
+): boolean {
+  if (
+    state.active !== true ||
+    state.session_id !== sessionId ||
+    typeof state.project_path !== 'string' ||
+    isTerminalWorkflowModeState(state)
+  ) {
+    return false;
+  }
+  try {
+    return resolveToWorktreeRoot(state.project_path) === resolveToWorktreeRoot(directory);
+  } catch {
+    return false;
+  }
+}
+
+function isAuthenticatedAutopilotCancelSignal(
+  signal: Record<string, unknown>,
+  target: LoadedAutopilotTarget,
+): boolean {
+  if (signal.active !== true || signal.mode !== 'autopilot' || typeof signal.source !== 'string' || signal.source.length === 0) {
+    return false;
+  }
+  const now = Date.now();
+  const requestedAt = typeof signal.requested_at === 'string' ? new Date(signal.requested_at).getTime() : NaN;
+  const expiresAt = typeof signal.expires_at === 'string' ? new Date(signal.expires_at).getTime() : NaN;
+  if (
+    !Number.isFinite(requestedAt) ||
+    requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
+    now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= requestedAt ||
+    expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+    expiresAt <= now
+  ) {
+    return false;
+  }
+  const digest = createHash('sha256').update(JSON.stringify(target.state)).digest('hex');
+  if (
+    typeof signal.target_state_sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(signal.target_state_sha256) ||
+    signal.target_state_sha256 !== digest
+  ) {
+    return false;
+  }
+  const workflowRunId = target.state.workflowRunId;
+  return typeof workflowRunId === 'string'
+    ? signal.target_workflow_run_id === workflowRunId
+    : signal.target_workflow_run_id === undefined;
+}
+
+function isSessionCancelInProgress(directory: string, sessionId?: string): SessionCancelCheck {
+  const autopilotPath = resolveAutopilotTargetPath(directory, sessionId);
+  let cancelSignalPath: string | undefined;
   if (sessionId) {
     try {
       cancelSignalPath = resolveSessionStatePath('cancel-signal', sessionId, directory);
     } catch {
-      // fall through to legacy path
+      // Fall through to the legacy path.
     }
   }
-
-  // Fallback: check legacy (non-session-scoped) cancel signal
   if (!cancelSignalPath) {
     cancelSignalPath = join(getOmcRoot(directory), 'state', 'cancel-signal-state.json');
   }
 
-  if (!existsSync(cancelSignalPath)) {
-    return false;
-  }
+  const validateSignal = (target: LoadedAutopilotTarget | null): boolean => {
+    const locked = withStateFileMutationLock(cancelSignalPath, () => {
+      let raw: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(readFileSync(cancelSignalPath!, 'utf-8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+        raw = parsed as Record<string, unknown>;
+      } catch {
+        return false;
+      }
+      const now = Date.now();
+      const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
+      const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
+      if (target) {
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        return isAuthenticatedAutopilotCancelSignal(raw, target);
+      }
+      // A requested-at-only signal belongs to Ralph/Ultrawork. It must never be
+      // interpreted as an unauthenticated autopilot cancellation.
+      if (
+        raw.mode === 'autopilot' ||
+        raw.target_state_sha256 !== undefined ||
+        raw.target_workflow_run_id !== undefined
+      ) {
+        return false;
+      }
+      const effectiveExpiry = Number.isFinite(expiresAt)
+        ? expiresAt
+        : Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
+      if (
+        !Number.isFinite(requestedAt) ||
+        requestedAt > now + CANCEL_SIGNAL_CLOCK_SKEW_MS ||
+        now - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+        !Number.isFinite(effectiveExpiry) ||
+        effectiveExpiry <= requestedAt ||
+        effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
+        effectiveExpiry <= now
+      ) {
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        return false;
+      }
+      return true;
+    }, target !== null);
+    return locked.acquired && locked.value === true;
+  };
 
-  try {
-    const raw = JSON.parse(readFileSync(cancelSignalPath, 'utf-8')) as {
-      requested_at?: string;
-      expires_at?: string;
-    };
-
-    const now = Date.now();
-    const expiresAt = raw.expires_at ? new Date(raw.expires_at).getTime() : NaN;
-    const requestedAt = raw.requested_at ? new Date(raw.requested_at).getTime() : NaN;
-    const fallbackExpiry = Number.isFinite(requestedAt) ? requestedAt + CANCEL_SIGNAL_TTL_MS : NaN;
-    const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : fallbackExpiry;
-
-    if (!Number.isFinite(effectiveExpiry) || effectiveExpiry <= now) {
-      unlinkSync(cancelSignalPath);
-      return false;
+  // A target-bearing signal must hold both locks. On runtimes without flock,
+  // requested-at-only Ralph/Ultrawork cancellation may proceed only after
+  // canonical discovery proves this session has no enforceable autopilot state.
+  const locked = withStateFileMutationLock(autopilotPath, () => {
+    const current = readAutopilotTarget(directory, sessionId);
+    if (!current || !isCurrentAutopilotTarget(current.state, directory, sessionId)) {
+      return { autopilotCancellation: false, nonAutopilotCancellation: validateSignal(null) };
     }
-
-    return true;
-  } catch {
-    return false;
+    // Named integrity failures deliberately fail closed so checkAutopilot()
+    // can propagate its diagnostic instead of a forged cancel hiding it.
+    if (hasNamedWorkflowMarkers(current.state) && !isEnforceableNamedAutopilotState(current.state, directory, sessionId)) {
+      return { autopilotCancellation: false, nonAutopilotCancellation: false };
+    }
+    return {
+      autopilotCancellation: validateSignal(current),
+      nonAutopilotCancellation: false,
+      enforceableAutopilot: current,
+    };
+  }, true);
+  if (locked.acquired && locked.value) return locked.value;
+  if (namedWorkflowRuntimeSupported()) {
+    return { autopilotCancellation: false, nonAutopilotCancellation: false };
   }
+
+  const current = readAutopilotTarget(directory, sessionId);
+  if (current && isCurrentAutopilotTarget(current.state, directory, sessionId)) {
+    return { autopilotCancellation: false, nonAutopilotCancellation: false, enforceableAutopilot: current };
+  }
+  return { autopilotCancellation: false, nonAutopilotCancellation: validateSignal(null) };
 }
 
 /**
@@ -2117,10 +2287,11 @@ async function resolvePersistentModeBlock(
     };
   }
 
-  // Session-scoped cancel signal from state_clear during /cancel flow.
-  // Cache once and pass to sub-functions to avoid TOCTOU re-reads (issue #1058).
-  const cancelInProgress = isSessionCancelInProgress(workingDir, sessionId);
-  if (cancelInProgress) {
+  // Session-scoped cancel signals are authenticated against the current
+  // autopilot generation while its mutation lock is held.
+  const cancelCheck = isSessionCancelInProgress(workingDir, sessionId);
+  const cancelInProgress = cancelCheck.nonAutopilotCancellation;
+  if (cancelCheck.autopilotCancellation) {
     return {
       shouldBlock: false,
       message: '',
@@ -2251,14 +2422,18 @@ async function resolvePersistentModeBlock(
   const runAutopilotPriority = async (): Promise<PersistentModeResult | null> => {
     if (
       tombstonedWorkflowModes.has('autopilot') ||
-      !isAutopilotActive(workingDir, sessionId)
+      !(cancelCheck.enforceableAutopilot || isAutopilotActive(workingDir, sessionId))
     ) {
       return null;
     }
     const autopilotResult = await checkAutopilot(sessionId, workingDir);
-    if (!autopilotResult?.shouldBlock) return null;
+    if (!autopilotResult) return null;
+    const isNamedDiagnostic =
+      autopilotResult.message === 'workflow_descriptor_integrity_failed' ||
+      autopilotResult.message.startsWith('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+    if (!autopilotResult.shouldBlock && !isNamedDiagnostic) return null;
     return {
-      shouldBlock: true,
+      shouldBlock: autopilotResult.shouldBlock,
       message: autopilotResult.message,
       mode: 'autopilot',
       metadata: {
@@ -2280,6 +2455,20 @@ async function resolvePersistentModeBlock(
     if (tombstonedWorkflowModes.has('ralph') || !isModeActive('ralph', workingDir, sessionId)) return null;
     return checkRalphLoop(sessionId, workingDir, cancelInProgress);
   };
+
+  if (cancelInProgress) {
+    // Requested-at-only signals may cancel Ralph/Ultrawork, never autopilot.
+    // Recheck autopilot after signal consumption so an active replacement wins.
+    const autopilotResult = await runAutopilotPriority();
+    // Terminal named diagnostics are not enforceable autopilot targets and
+    // must not alter the established generic-cancellation result contract.
+    if (autopilotResult?.shouldBlock) return autopilotResult;
+    return {
+      shouldBlock: false,
+      message: '',
+      mode: 'none',
+    };
+  }
 
   if (autopilotPriorityFirst) {
     const autopilotResult = await runAutopilotPriority();
