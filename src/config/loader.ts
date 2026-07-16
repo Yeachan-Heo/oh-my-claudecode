@@ -303,7 +303,8 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     if (!isNaN(maxTasks)) {
       config.permissions = {
         ...config.permissions,
-        maxBackgroundTasks: maxTasks,
+        // Clamp to the same 1-50 range the config schema enforces
+        maxBackgroundTasks: Math.min(50, Math.max(1, maxTasks)),
       };
     }
   }
