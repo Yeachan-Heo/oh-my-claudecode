@@ -163,20 +163,7 @@ function getPackedPackage(): PackedPackage {
       .filter(Boolean)
       .map((file) => file.replace(/^package\//, ""));
 
-    execFileSync("tar", [
-      "-xzf",
-      tarballPathCache,
-      "-C",
-      packDirCache,
-      "package/package.json",
-      "package/.claude-plugin/plugin.json",
-      "package/.mcp.json",
-      "package/agents",
-      "package/dist",
-      "package/bridge/cli.cjs",
-      "package/bridge/runtime-cli.cjs",
-      "package/bridge/team.js",
-    ]);
+    execFileSync("tar", ["-xzf", tarballPathCache, "-C", packDirCache]);
 
     const extractedPackageRoot = join(packDirCache, "package");
     packedPackageCache = {
