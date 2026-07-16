@@ -65,8 +65,8 @@ async function writeToFile(config, content, sessionId, idempotencyKey) {
     writeFileSync(resolvedPath, content, { encoding: 'utf-8', mode: 0o600 });
 }
 /**
- * Remote callback delivery is explicitly at-least-once: after remote
- * acceptance but before a response, a retry may send a duplicate.
+ * Deferred remote delivery is terminal after its first manifest attempt: a lost
+ * response is indistinguishable from remote acceptance, so it is never retried.
  */
 async function sendTelegram(config, message, signal, _idempotencyKey) {
     if (!config.botToken || !config.chatId || !/^[0-9]+:[A-Za-z0-9_-]+$/.test(config.botToken))
@@ -75,7 +75,7 @@ async function sendTelegram(config, message, signal, _idempotencyKey) {
     if (!response.ok)
         throw new Error(`Telegram API error: ${response.status}`);
 }
-/** See sendTelegram: Discord webhooks have the same at-least-once boundary. */
+/** See sendTelegram: failed Discord delivery is terminal to avoid duplicate remote side effects. */
 async function sendDiscord(config, message, signal, _idempotencyKey) {
     if (!config.webhookUrl)
         return;
@@ -150,8 +150,8 @@ export async function runSessionEndDeferredAction(action, context) {
                         idempotencyKey: action.idempotencyKey,
                     }, signal);
                     return 'completed';
-                // Notification transports are at-least-once; acceptance can precede an
-                // unavailable response, so a durable retry may notify again.
+                // A notification attempt is terminal in the manifest because remote
+                // acceptance can precede an unavailable response.
                 case 'notification': {
                     const { notify } = await import('../../notifications/index.js');
                     const result = await notify('session-end', { sessionId: context.sessionId, projectPath: context.directory, durationMs: context.metrics.duration_ms, agentsSpawned: context.metrics.agents_spawned, agentsCompleted: context.metrics.agents_completed, modesUsed: context.metrics.modes_used, reason: context.metrics.reason, timestamp: context.metrics.ended_at, profileName: typeof action.payload.profileName === 'string' ? action.payload.profileName : undefined });
@@ -159,8 +159,8 @@ export async function runSessionEndDeferredAction(action, context) {
                         throw new Error('notification-not-accepted');
                     return 'completed';
                 }
-                // OpenClaw wake is at-least-once for the same acceptance-before-result
-                // ambiguity; callers must tolerate duplicate wake requests.
+                // OpenClaw wake attempts are terminal in the manifest because remote
+                // acceptance can precede an unavailable response.
                 case 'openclaw-wake': {
                     if (action.payload.enabled !== true || process.env.OMC_OPENCLAW !== '1')
                         return 'skipped';

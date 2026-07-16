@@ -14,6 +14,8 @@ const SESSION_END_SCRIPTS = [
 const COMMAND_CEILING_MS = 500;
 const SEQUENTIAL_CEILING_MS = 1_000;
 const HAS_GENERATED_DIST = existsSync(join(REPO_ROOT, 'dist', 'hooks', 'session-end', 'worker.js'));
+const TEST_PRODUCER_GRACE_MS = '25';
+const DETACHED_WORKER_CEILING_MS = 3_000;
 
 interface ExitResult {
   elapsedMs: number;
@@ -79,6 +81,20 @@ function configureDeferredAdapters(cwd: string): void {
   }));
 }
 
+async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<void> {
+  const callbackPath = join(cwd, 'callback.md');
+  const manifestPath = join(cwd, '.omc', 'state', 'session-end-jobs', `${sessionId}.json`);
+  const deadline = Date.now() + DETACHED_WORKER_CEILING_MS;
+  while (Date.now() < deadline) {
+    if (existsSync(callbackPath) && existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase: string; owner: unknown; actions: Record<string, { status: string }> };
+      if (manifest.phase === 'complete' && manifest.owner === null && manifest.actions.callback.status === 'completed') return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('detached SessionEnd worker did not complete its callback');
+}
+
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
   const tempDirs: string[] = [];
 
@@ -114,6 +130,22 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
       expect(manifest.actions.callback.phase).toBe('deferred-best-effort');
       expect(manifest.actions.notification.phase).toBe('deferred-best-effort');
     }
+  });
+
+  it.skipIf(!HAS_GENERATED_DIST)('keeps the detached worker alive through producer grace and exits terminally without SessionStart', async () => {
+    const cwd = createProject();
+    const sessionId = 'detached-worker-producer-grace';
+    configureDeferredAdapters(cwd);
+
+    expectPromptExit(await runUntilClose(
+      join(REPO_ROOT, 'scripts', 'session-end.mjs'),
+      cwd,
+      validSessionEndInput(cwd, sessionId),
+      COMMAND_CEILING_MS,
+      { NODE_ENV: 'test', OMC_SESSION_END_TEST_PRODUCER_GRACE_MS: TEST_PRODUCER_GRACE_MS },
+    ));
+
+    await waitForTerminalCallback(cwd, sessionId);
   });
 
   it.skipIf(!HAS_GENERATED_DIST)('uses the generated dist closure: the shipped worker imports and can execute', async () => {

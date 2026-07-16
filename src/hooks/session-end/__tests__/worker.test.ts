@@ -16,17 +16,18 @@ const processIdentity = vi.hoisted(() => ({
   getProcessStartIdentity: vi.fn(async () => 'test-process-start'),
   isProcessIdentityLive: vi.fn(async () => 'dead' as const),
 }));
-
-vi.mock('../index.js', () => actions);
-vi.mock('../../../platform/process-utils.js', () => processIdentity);
-vi.mock('../action-runner.js', () => ({
+const actionRunner = vi.hoisted(() => ({
   runSessionEndAction: vi.fn(async (_context: unknown, execute: () => Promise<void>) => {
     await execute();
     return { code: 'completed', completed: true };
   }),
 }));
 
-import { prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest } from '../cleanup-manifest.js';
+vi.mock('../index.js', () => actions);
+vi.mock('../../../platform/process-utils.js', () => processIdentity);
+vi.mock('../action-runner.js', () => actionRunner);
+
+import { mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest } from '../cleanup-manifest.js';
 import { processSessionEndWorker, reconcileSessionEndJobs } from '../worker.js';
 
 const directories: string[] = [];
@@ -41,6 +42,7 @@ afterEach(() => {
   vi.clearAllMocks();
   processIdentity.getProcessStartIdentity.mockResolvedValue('test-process-start');
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  vi.useRealTimers();
 });
 
 describe('SessionEnd durable worker', () => {
@@ -95,4 +97,44 @@ describe('SessionEnd durable worker', () => {
     // The no-ID entry point must discover from the durable ticket index and return immediately.
     expect(() => reconcileSessionEndJobs(directory)).not.toThrow();
   });
+  it('reschedules a core-only manifest through producer grace after slow required actions and runs deferred callbacks once', async () => {
+    vi.useFakeTimers();
+    actionRunner.runSessionEndAction
+      .mockImplementationOnce(async (_context: unknown, execute: () => Promise<void>) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 9_000));
+        await execute();
+        return { code: 'completed', completed: true };
+      })
+      .mockImplementationOnce(async (_context: unknown, execute: () => Promise<void>) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+        await execute();
+        return { code: 'completed', completed: true };
+      });
+    const directory = project();
+    const sessionId = 'core-only-producer-recovery';
+    expect(prepareCoreManifest(directory, sessionId, {})).not.toBeNull();
+    const initial = readSessionEndJob(directory, sessionId)!;
+    expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
+      job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    })).not.toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      producers: { core: { state: 'prepared' }, wiki: { state: 'absent' } },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.runAllTimersAsync();
+
+    const manifest = readSessionEndJob(directory, sessionId)!;
+    expect(manifest).toMatchObject({ phase: 'complete', owner: null });
+    expect(manifest.producers).toMatchObject({
+      core: { state: 'sealed', sealedBy: 'recovery' },
+      wiki: { state: 'no-op', sealedBy: 'recovery' },
+    });
+    expect(Date.parse(manifest.bestEffortDeadlineAt)).toBeGreaterThan(Date.parse(manifest.producerGraceExpiresAt));
+    expect(actions.runSessionEndCallbacks).toHaveBeenCalledTimes(1);
+    expect(actions.runSessionEndNotifications).toHaveBeenCalledTimes(1);
+  });
+
 });

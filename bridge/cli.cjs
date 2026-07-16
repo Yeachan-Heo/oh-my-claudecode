@@ -26349,6 +26349,13 @@ function digest(value) {
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function initialDeadlines() {
+  const startedAt = Date.now();
+  return {
+    producerGraceExpiresAt: new Date(startedAt + PRODUCER_GRACE_MS).toISOString(),
+    bestEffortDeadlineAt: new Date(startedAt + PRODUCER_GRACE_MS + REQUIRED_ACTION_EXECUTION_MS + BEST_EFFORT_ACTION_EXECUTION_MS).toISOString()
+  };
+}
 function lockPath(file) {
   return `${file}.lock`;
 }
@@ -26464,7 +26471,7 @@ function newAction(name, actionClass, payload) {
   return { class: actionClass, phase: actionClass === "required" ? "deferred-required" : "deferred-best-effort", status: "pending", attempts: 0, idempotencyKey: digest([name, payload]), payload, budgetMs: actionClass === "required" ? 9e3 : 2e3 };
 }
 function isManifestTerminal(job) {
-  return ["sealed", "no-op"].includes(job.producers.core.state) && ["sealed", "no-op"].includes(job.producers.wiki.state) && Object.values(job.actions).every((action) => action.class === "required" ? action.status === "completed" : action.status === "completed" || action.status === "expired") && job.owner === null && Object.values(job.actions).every((action) => !action.runner || action.runner.phase === "terminal");
+  return ["sealed", "no-op"].includes(job.producers.core.state) && ["sealed", "no-op"].includes(job.producers.wiki.state) && Object.values(job.actions).every((action) => action.status === "completed" || action.status === "expired") && job.owner === null && Object.values(job.actions).every((action) => !action.runner || action.runner.phase === "terminal");
 }
 function readSessionEndJob(directory, sessionId) {
   try {
@@ -26528,7 +26535,7 @@ function prepareCoreManifest(directory, sessionId, payload) {
       }
       const now = nowIso();
       const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, payload)]));
-      const job = { version: 1, jobId: (0, import_crypto17.randomUUID)(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, producerGraceExpiresAt: new Date(Date.now() + 3e4).toISOString(), bestEffortDeadlineAt: new Date(Date.now() + 1e4).toISOString(), producers: { core: { state: "prepared", intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: "absent" } }, actions, owner: null, phase: "collecting" };
+      const job = { version: 1, jobId: (0, import_crypto17.randomUUID)(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: "prepared", intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: "absent" } }, actions, owner: null, phase: "collecting" };
       atomicWriteJsonSync(jobPath, job);
       return readPath(jobPath);
     });
@@ -26584,7 +26591,7 @@ function sealWikiManifest(directory, sessionId, payload) {
           actions["wiki-capture"].status = "completed";
           actions["wiki-capture"].completedAt = now2;
         }
-        const job = { version: 1, jobId: (0, import_crypto17.randomUUID)(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now2, updatedAt: now2, producerGraceExpiresAt: new Date(Date.now() + 3e4).toISOString(), bestEffortDeadlineAt: new Date(Date.now() + 1e4).toISOString(), producers: { core: { state: "absent" }, wiki }, actions, owner: null, phase: "collecting" };
+        const job = { version: 1, jobId: (0, import_crypto17.randomUUID)(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now2, updatedAt: now2, ...initialDeadlines(), producers: { core: { state: "absent" }, wiki }, actions, owner: null, phase: "collecting" };
         atomicWriteJsonSync(jobPath, job);
         return readPath(jobPath);
       }
@@ -26637,9 +26644,9 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
     if (Object.values(job.actions).some((action) => action.status === "claimed" && action.runner && action.runner.phase !== "terminal" && Date.now() < Date.parse(action.runner.deadlineAt))) throw new Error("runner-still-bounded");
     for (const action of Object.values(job.actions)) {
       if (action.status === "claimed" && action.claimantNonce === expectedNonce) {
-        action.status = "retryable";
+        action.status = action.class === "best-effort" ? "expired" : "retryable";
         action.claimantNonce = void 0;
-        action.lastOutcomeCode = "owner-reaped";
+        action.lastOutcomeCode = action.class === "best-effort" ? "delivery-uncertain-owner-reaped" : "owner-reaped";
         if (action.runner) action.runner.phase = "terminal";
       }
     }
@@ -26668,9 +26675,14 @@ function claimSessionEndAction(directory, sessionId, ownerNonce, name, deadlineA
   return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => {
     const action = job.actions[name];
     if (!action || !["pending", "retryable"].includes(action.status) || action.claimantNonce) throw new Error("action-claim-conflict");
-    if (action.class === "best-effort" && Date.now() >= Date.parse(job.bestEffortDeadlineAt)) {
+    if (action.class === "best-effort" && action.attempts > 0) {
       action.status = "expired";
-      action.lastOutcomeCode = "deadline-expired";
+      action.lastOutcomeCode = "delivery-attempted";
+      return;
+    }
+    if (action.class === "required" && (action.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS || Date.now() >= Date.parse(job.bestEffortDeadlineAt)) || action.class === "best-effort" && Date.now() >= Date.parse(job.bestEffortDeadlineAt)) {
+      action.status = "expired";
+      action.lastOutcomeCode = action.class === "required" ? action.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS ? "required-attempt-limit" : "required-deadline-expired" : "deadline-expired";
       return;
     }
     action.status = "claimed";
@@ -26691,7 +26703,7 @@ function finishSessionEndAction(directory, sessionId, ownerNonce, name, runnerNo
   return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => {
     const action = job.actions[name];
     if (action.status !== "claimed" || action.claimantNonce !== ownerNonce || action.runner?.runnerNonce !== runnerNonce) throw new Error("action-result-conflict");
-    action.status = completed ? "completed" : "retryable";
+    action.status = completed ? "completed" : action.class === "best-effort" ? "expired" : "retryable";
     action.lastOutcomeCode = code;
     action.completedAt = completed ? nowIso() : void 0;
     action.claimantNonce = void 0;
@@ -26702,23 +26714,32 @@ function claimSessionEndDiscoveryTickets(directory, limit = 4, leaseMs = 15e3) {
   try {
     const file = discoveryPath(directory);
     if (!fs11.existsSync(file)) return [];
-    return withLock(file, () => {
+    const claimed = withLock(file, () => {
       const index = readIndex2(file);
       const now = Date.now();
-      const claimed = [];
-      for (let offset = 0; offset < index.tickets.length && claimed.length < Math.max(0, limit); offset++) {
+      const claimed2 = [];
+      for (let offset = 0; offset < index.tickets.length && claimed2.length < Math.max(0, limit); offset++) {
         const ticket = index.tickets[(index.cursor + offset) % index.tickets.length];
+        if (ticket.acknowledgedAt) continue;
+        const job = readSessionEndJob(directory, ticket.sessionId);
+        if (job?.phase === "complete" || job && isManifestTerminal(job)) {
+          ticket.acknowledgedAt = nowIso();
+          ticket.claimNonce = void 0;
+          ticket.leaseExpiresAt = void 0;
+          continue;
+        }
         const leased = ticket.leaseExpiresAt && Date.parse(ticket.leaseExpiresAt) > now;
-        if (ticket.acknowledgedAt || leased || Date.parse(ticket.retryAt) > now) continue;
+        if (leased || Date.parse(ticket.retryAt) > now) continue;
         const nonce = (0, import_crypto17.randomUUID)();
         ticket.claimNonce = nonce;
         ticket.leaseExpiresAt = new Date(now + leaseMs).toISOString();
-        claimed.push({ sessionId: ticket.sessionId, nonce });
+        claimed2.push({ sessionId: ticket.sessionId, nonce });
       }
-      index.cursor = index.tickets.length ? (index.cursor + Math.max(1, claimed.length)) % index.tickets.length : 0;
+      index.cursor = index.tickets.length ? (index.cursor + Math.max(1, claimed2.length)) % index.tickets.length : 0;
       atomicWriteJsonSync(file, index);
-      return claimed;
+      return claimed2;
     });
+    return claimed;
   } catch {
     return [];
   }
@@ -26762,11 +26783,19 @@ function recoverPreparedCoreProducer(directory, sessionId) {
     const foreground = job.actions["foreground-cleanup"];
     if (foreground?.status !== "completed") return;
     if (job.producers.core.state === "prepared") job.producers.core = { ...job.producers.core, state: "sealed", sealedAt: nowIso(), sealedBy: "recovery" };
-    if (job.producers.wiki.state === "absent") job.producers.wiki = { state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
+    if (job.producers.wiki.state === "absent") {
+      job.producers.wiki = { state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
+      const wikiCapture = job.actions["wiki-capture"];
+      if (wikiCapture.status === "pending" || wikiCapture.status === "retryable") {
+        wikiCapture.status = "completed";
+        wikiCapture.completedAt = nowIso();
+        wikiCapture.lastOutcomeCode = "producer-absent";
+      }
+    }
     if (job.phase === "collecting") job.phase = "ready";
   });
 }
-var fs11, path16, import_crypto17, ACTIONS, LOCK_WAIT, DISCOVERY_FILE;
+var fs11, path16, import_crypto17, ACTIONS, TEST_PRODUCER_GRACE_ENV, PRODUCER_GRACE_MS, REQUIRED_ACTION_EXECUTION_MS, BEST_EFFORT_ACTION_EXECUTION_MS, REQUIRED_ACTION_MAX_ATTEMPTS, LOCK_WAIT, DISCOVERY_FILE;
 var init_cleanup_manifest = __esm({
   "src/hooks/session-end/cleanup-manifest.ts"() {
     "use strict";
@@ -26785,6 +26814,11 @@ var init_cleanup_manifest = __esm({
       ["notification", "best-effort"],
       ["openclaw", "best-effort"]
     ];
+    TEST_PRODUCER_GRACE_ENV = "OMC_SESSION_END_TEST_PRODUCER_GRACE_MS";
+    PRODUCER_GRACE_MS = process.env.NODE_ENV === "test" && /^\d+$/.test(process.env[TEST_PRODUCER_GRACE_ENV] ?? "") ? Math.max(1, Number(process.env[TEST_PRODUCER_GRACE_ENV])) : 3e4;
+    REQUIRED_ACTION_EXECUTION_MS = ACTIONS.filter(([, actionClass]) => actionClass === "required").length * 9e3;
+    BEST_EFFORT_ACTION_EXECUTION_MS = ACTIONS.filter(([, actionClass]) => actionClass === "best-effort").length * 2e3;
+    REQUIRED_ACTION_MAX_ATTEMPTS = 3;
     LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
     DISCOVERY_FILE = "discovery.json";
   }
@@ -26794,41 +26828,63 @@ var init_cleanup_manifest = __esm({
 function runDirectory(context) {
   return path17.join(getOmcRoot(context.directory), "state", "session-end-jobs", "runs", context.job.jobId, context.actionName, String(context.action.attempts), context.runnerNonce);
 }
+function runnerEnvironment(actionName) {
+  const baseKeys = ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "COMSPEC", "LANG", "LC_ALL", "NODE_ENV", "CLAUDE_CONFIG_DIR", "OMC_STATE_DIR", "OMC_HOOK_CONFIG", "OMC_CONFIG_PATH", "OMC_NOTIFY", "OMC_NOTIFY_PROFILE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"];
+  const notificationKeys = ["OMC_TELEGRAM", "OMC_DISCORD", "OMC_SLACK", "OMC_WEBHOOK", "OMC_DISCORD_MENTION", "OMC_DISCORD_NOTIFIER_BOT_TOKEN", "OMC_DISCORD_NOTIFIER_CHANNEL", "OMC_DISCORD_WEBHOOK_URL", "OMC_TELEGRAM_BOT_TOKEN", "OMC_TELEGRAM_NOTIFIER_BOT_TOKEN", "OMC_TELEGRAM_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_UID", "OMC_SLACK_WEBHOOK_URL", "OMC_SLACK_MENTION", "OMC_SLACK_BOT_TOKEN", "OMC_SLACK_APP_TOKEN", "OMC_SLACK_BOT_CHANNEL"];
+  const keys = actionName === "callback" || actionName === "notification" ? [...baseKeys, ...notificationKeys] : actionName === "openclaw" ? [...baseKeys, "OMC_OPENCLAW"] : baseKeys;
+  return Object.fromEntries(keys.flatMap((key) => process.env[key] === void 0 ? [] : [[key, process.env[key]]]));
+}
 async function runSessionEndAction(context, _execute) {
   const runPath = runDirectory(context);
   try {
     fs12.mkdirSync(runPath, { recursive: true });
     if (Date.now() >= context.deadlineAt) return { code: "deadline-before-arm", completed: false };
     const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
-    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url11.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: process.env });
+    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url11.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: runnerEnvironment(context.actionName) });
+    let settled = false;
+    let exitCode = null;
+    let settleChild = () => void 0;
+    const childExit = new Promise((resolve32) => {
+      settleChild = (code2) => {
+        if (settled) return;
+        settled = true;
+        exitCode = code2;
+        resolve32(code2);
+      };
+      child.once("exit", settleChild);
+      child.once("error", () => settleChild(null));
+    });
+    let deadlineTermination;
+    const terminate = async () => {
+      await killProcessTree(child.pid, "SIGKILL");
+      await childExit;
+    };
+    const timeout = setTimeout(() => {
+      deadlineTermination ??= terminate();
+    }, Math.max(1, context.deadlineAt - Date.now()));
     const identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
     if (!identity) {
-      await killProcessTree(child.pid, "SIGKILL");
+      clearTimeout(timeout);
+      await terminate();
       return { code: "runner-identity-unavailable", completed: false };
+    }
+    if (settled) {
+      clearTimeout(timeout);
+      return { code: exitCode === null ? "runner-deadline" : `runner-exit-${exitCode}`, completed: false };
     }
     atomicWriteJsonSync(path17.join(runPath, "control.json"), { jobId: context.job.jobId, action: context.actionName, attempt: context.action.attempts, runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, runner: { pid: child.pid, processStartIdentity: identity }, deadlineAt: new Date(context.deadlineAt).toISOString(), idempotencyKey: context.action.idempotencyKey });
     atomicWriteJsonSync(path17.join(runPath, "arm.json"), { runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, armedAt: (/* @__PURE__ */ new Date()).toISOString() });
     if (!markSessionEndActionRunner(context.directory, context.sessionId, context.ownerNonce, context.actionName, context.runnerNonce, "armed")) {
-      await killProcessTree(child.pid, "SIGKILL");
+      clearTimeout(timeout);
+      await terminate();
       return { code: "runner-claim-lost", completed: false };
     }
-    const code = await new Promise((resolve32) => {
-      const timeout = setTimeout(() => {
-        void killProcessTree(child.pid, "SIGKILL");
-        resolve32(null);
-      }, Math.max(1, context.deadlineAt - Date.now()));
-      child.once("exit", (exitCode) => {
-        clearTimeout(timeout);
-        resolve32(exitCode);
-      });
-      child.once("error", () => {
-        clearTimeout(timeout);
-        resolve32(null);
-      });
-    });
-    const completed = code === 0;
-    atomicWriteJsonSync(path17.join(runPath, "result.json"), { code: completed ? "completed" : code === null ? "runner-deadline" : `runner-exit-${code}`, completedAt: (/* @__PURE__ */ new Date()).toISOString() });
-    return { code: completed ? "completed" : code === null ? "runner-deadline" : `runner-exit-${code}`, completed };
+    const code = await childExit;
+    clearTimeout(timeout);
+    await deadlineTermination;
+    const completed = code === 0 && !deadlineTermination;
+    atomicWriteJsonSync(path17.join(runPath, "result.json"), { code: completed ? "completed" : deadlineTermination ? "runner-deadline" : code === null ? "runner-deadline" : `runner-exit-${code}`, completedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    return { code: completed ? "completed" : deadlineTermination ? "runner-deadline" : code === null ? "runner-deadline" : `runner-exit-${code}`, completed };
   } catch (error2) {
     const code = error2 instanceof Error ? error2.name || "action-failed" : "action-failed";
     try {
@@ -31713,16 +31769,16 @@ async function runSessionEndDeferredAction(action, context) {
             idempotencyKey: action.idempotencyKey
           }, signal);
           return "completed";
-        // Notification transports are at-least-once; acceptance can precede an
-        // unavailable response, so a durable retry may notify again.
+        // A notification attempt is terminal in the manifest because remote
+        // acceptance can precede an unavailable response.
         case "notification": {
           const { notify: notify2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
           const result2 = await notify2("session-end", { sessionId: context.sessionId, projectPath: context.directory, durationMs: context.metrics.duration_ms, agentsSpawned: context.metrics.agents_spawned, agentsCompleted: context.metrics.agents_completed, modesUsed: context.metrics.modes_used, reason: context.metrics.reason, timestamp: context.metrics.ended_at, profileName: typeof action.payload.profileName === "string" ? action.payload.profileName : void 0 });
           if (!result2?.anySuccess) throw new Error("notification-not-accepted");
           return "completed";
         }
-        // OpenClaw wake is at-least-once for the same acceptance-before-result
-        // ambiguity; callers must tolerate duplicate wake requests.
+        // OpenClaw wake attempts are terminal in the manifest because remote
+        // acceptance can precede an unavailable response.
         case "openclaw-wake": {
           if (action.payload.enabled !== true || process.env.OMC_OPENCLAW !== "1") return "skipped";
           const { wakeOpenClaw: wakeOpenClaw2 } = await Promise.resolve().then(() => (init_openclaw(), openclaw_exports));
@@ -45986,7 +46042,7 @@ __export(worker_exports, {
   spawnSessionEndWorker: () => spawnSessionEndWorker
 });
 function workerEnvironment() {
-  const keys = ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "COMSPEC", "LANG", "LC_ALL", "NODE_ENV", "CLAUDE_CONFIG_DIR", "OMC_STATE_DIR", "OMC_HOOK_CONFIG", "OMC_CONFIG_PATH", "OMC_NOTIFY", "OMC_NOTIFY_PROFILE", "OMC_OPENCLAW", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"];
+  const keys = ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "COMSPEC", "LANG", "LC_ALL", "NODE_ENV", "CLAUDE_CONFIG_DIR", "OMC_STATE_DIR", "OMC_HOOK_CONFIG", "OMC_CONFIG_PATH", "OMC_NOTIFY", "OMC_NOTIFY_PROFILE", "OMC_OPENCLAW", "OMC_TELEGRAM", "OMC_DISCORD", "OMC_SLACK", "OMC_WEBHOOK", "OMC_DISCORD_MENTION", "OMC_DISCORD_NOTIFIER_BOT_TOKEN", "OMC_DISCORD_NOTIFIER_CHANNEL", "OMC_DISCORD_WEBHOOK_URL", "OMC_TELEGRAM_BOT_TOKEN", "OMC_TELEGRAM_NOTIFIER_BOT_TOKEN", "OMC_TELEGRAM_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_UID", "OMC_SLACK_WEBHOOK_URL", "OMC_SLACK_MENTION", "OMC_SLACK_BOT_TOKEN", "OMC_SLACK_APP_TOKEN", "OMC_SLACK_BOT_CHANNEL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", ...process.env.NODE_ENV === "test" ? ["OMC_SESSION_END_TEST_PRODUCER_GRACE_MS"] : []];
   return Object.fromEntries(keys.flatMap((key) => process.env[key] === void 0 ? [] : [[key, process.env[key]]]));
 }
 function spawnSessionEndWorker(payload) {
@@ -46028,6 +46084,15 @@ async function reapIfProvenStale(payload, deadlineAt) {
   if (!owner || Date.now() < Date.parse(owner.leaseExpiresAt)) return;
   const liveness = await isProcessIdentityLive(owner.pid, owner.processStartIdentity, Math.min(deadlineAt, Date.now() + 250));
   if (liveness === "dead" || liveness === "mismatch") reapStaleSessionEndOwner(payload.directory, payload.sessionId, owner.nonce, owner.leaseGeneration, liveness);
+}
+function reschedulePendingWorker(payload, job) {
+  if (!job || job.phase === "complete") return;
+  const retryableAttempts = Object.values(job.actions).filter((action) => action.status === "retryable").map((action) => action.attempts);
+  const awaitingProducerGrace = job.producers.core.state === "prepared" && job.producers.wiki.state === "absent";
+  const delay = awaitingProducerGrace ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now()) : retryableAttempts.length > 0 ? Math.min(3e4, 250 * 2 ** Math.min(Math.max(...retryableAttempts), 7)) : 250;
+  setTimeout(() => {
+    void processSessionEndWorker(payload);
+  }, delay);
 }
 async function processSessionEndWorker(payload) {
   const deadlineAt = Date.now() + MAX_WORKER_MS;
@@ -46086,7 +46151,8 @@ async function processSessionEndWorker(payload) {
       generation = heartbeat.owner.leaseGeneration;
     }
   } finally {
-    releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
+    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
+    reschedulePendingWorker(payload, released ?? readSessionEndJob(payload.directory, payload.sessionId));
   }
 }
 function reconcileSessionEndJobs(directory, sessionIds) {

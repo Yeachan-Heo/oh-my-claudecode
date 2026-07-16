@@ -7,12 +7,26 @@ const ACTIONS = [
     ['foreground-cleanup', 'required'], ['wiki-capture', 'required'], ['team-cleanup', 'required'], ['python-cleanup', 'required'], ['reply-cleanup', 'required'],
     ['callback', 'best-effort'], ['notification', 'best-effort'], ['openclaw', 'best-effort'],
 ];
+const TEST_PRODUCER_GRACE_ENV = 'OMC_SESSION_END_TEST_PRODUCER_GRACE_MS';
+const PRODUCER_GRACE_MS = process.env.NODE_ENV === 'test' && /^\d+$/.test(process.env[TEST_PRODUCER_GRACE_ENV] ?? '')
+    ? Math.max(1, Number(process.env[TEST_PRODUCER_GRACE_ENV]))
+    : 30_000;
+const REQUIRED_ACTION_EXECUTION_MS = ACTIONS.filter(([, actionClass]) => actionClass === 'required').length * 9_000;
+const BEST_EFFORT_ACTION_EXECUTION_MS = ACTIONS.filter(([, actionClass]) => actionClass === 'best-effort').length * 2_000;
+const REQUIRED_ACTION_MAX_ATTEMPTS = 3;
 const LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
 const DISCOVERY_FILE = 'discovery.json';
 export function sessionEndJobPath(directory, sessionId) { validateSessionId(sessionId); return path.join(getOmcRoot(directory), 'state', 'session-end-jobs', `${sessionId}.json`); }
 export function sessionEndJobsDirectory(directory) { return path.join(getOmcRoot(directory), 'state', 'session-end-jobs'); }
 function digest(value) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 function nowIso() { return new Date().toISOString(); }
+function initialDeadlines() {
+    const startedAt = Date.now();
+    return {
+        producerGraceExpiresAt: new Date(startedAt + PRODUCER_GRACE_MS).toISOString(),
+        bestEffortDeadlineAt: new Date(startedAt + PRODUCER_GRACE_MS + REQUIRED_ACTION_EXECUTION_MS + BEST_EFFORT_ACTION_EXECUTION_MS).toISOString(),
+    };
+}
 function lockPath(file) { return `${file}.lock`; }
 function lockIsReclaimable(lock) {
     try {
@@ -137,7 +151,7 @@ function updateTicket(directory, sessionId, present) {
 }
 function newAction(name, actionClass, payload) { return { class: actionClass, phase: actionClass === 'required' ? 'deferred-required' : 'deferred-best-effort', status: 'pending', attempts: 0, idempotencyKey: digest([name, payload]), payload, budgetMs: actionClass === 'required' ? 9_000 : 2_000 }; }
 /** Terminality is solely a manifest property. Discovery tickets are deliberately excluded. */
-export function isManifestTerminal(job) { return ['sealed', 'no-op'].includes(job.producers.core.state) && ['sealed', 'no-op'].includes(job.producers.wiki.state) && Object.values(job.actions).every((action) => action.class === 'required' ? action.status === 'completed' : action.status === 'completed' || action.status === 'expired') && job.owner === null && Object.values(job.actions).every((action) => !action.runner || action.runner.phase === 'terminal'); }
+export function isManifestTerminal(job) { return ['sealed', 'no-op'].includes(job.producers.core.state) && ['sealed', 'no-op'].includes(job.producers.wiki.state) && Object.values(job.actions).every((action) => action.status === 'completed' || action.status === 'expired') && job.owner === null && Object.values(job.actions).every((action) => !action.runner || action.runner.phase === 'terminal'); }
 export function readSessionEndJob(directory, sessionId) { try {
     return readPath(sessionEndJobPath(directory, sessionId));
 }
@@ -208,7 +222,7 @@ export function prepareCoreManifest(directory, sessionId, payload) {
             }
             const now = nowIso();
             const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, payload)]));
-            const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, producerGraceExpiresAt: new Date(Date.now() + 30_000).toISOString(), bestEffortDeadlineAt: new Date(Date.now() + 10_000).toISOString(), producers: { core: { state: 'prepared', intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
+            const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'prepared', intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
             atomicWriteJsonSync(jobPath, job);
             return readPath(jobPath);
         });
@@ -278,7 +292,7 @@ export function sealWikiManifest(directory, sessionId, payload) {
                     actions['wiki-capture'].status = 'completed';
                     actions['wiki-capture'].completedAt = now;
                 }
-                const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, producerGraceExpiresAt: new Date(Date.now() + 30_000).toISOString(), bestEffortDeadlineAt: new Date(Date.now() + 10_000).toISOString(), producers: { core: { state: 'absent' }, wiki }, actions, owner: null, phase: 'collecting' };
+                const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'absent' }, wiki }, actions, owner: null, phase: 'collecting' };
                 atomicWriteJsonSync(jobPath, job);
                 return readPath(jobPath);
             }
@@ -318,9 +332,9 @@ export function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, ex
     throw new Error('reap-conflict'); if (Object.values(job.actions).some(action => action.status === 'claimed' && action.runner && action.runner.phase !== 'terminal' && Date.now() < Date.parse(action.runner.deadlineAt)))
     throw new Error('runner-still-bounded'); for (const action of Object.values(job.actions)) {
     if (action.status === 'claimed' && action.claimantNonce === expectedNonce) {
-        action.status = 'retryable';
+        action.status = action.class === 'best-effort' ? 'expired' : 'retryable';
         action.claimantNonce = undefined;
-        action.lastOutcomeCode = 'owner-reaped';
+        action.lastOutcomeCode = action.class === 'best-effort' ? 'delivery-uncertain-owner-reaped' : 'owner-reaped';
         if (action.runner)
             action.runner.phase = 'terminal';
     }
@@ -333,29 +347,42 @@ export function updateSessionEndJob(directory, sessionId, expectedOwner, mutate)
     return null; return mutateSessionEndJob(directory, sessionId, current.revision, (job) => { if (job.owner?.nonce !== expectedOwner || job.phase === 'complete')
     throw new Error('owner-conflict'); mutate(job); }); }
 export function claimSessionEndAction(directory, sessionId, ownerNonce, name, deadlineAt) { return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => { const action = job.actions[name]; if (!action || !['pending', 'retryable'].includes(action.status) || action.claimantNonce)
-    throw new Error('action-claim-conflict'); if (action.class === 'best-effort' && Date.now() >= Date.parse(job.bestEffortDeadlineAt)) {
+    throw new Error('action-claim-conflict'); if (action.class === 'best-effort' && action.attempts > 0) {
     action.status = 'expired';
-    action.lastOutcomeCode = 'deadline-expired';
+    action.lastOutcomeCode = 'delivery-attempted';
+    return;
+} if ((action.class === 'required' && (action.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS || Date.now() >= Date.parse(job.bestEffortDeadlineAt))) || (action.class === 'best-effort' && Date.now() >= Date.parse(job.bestEffortDeadlineAt))) {
+    action.status = 'expired';
+    action.lastOutcomeCode = action.class === 'required' ? action.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS ? 'required-attempt-limit' : 'required-deadline-expired' : 'deadline-expired';
     return;
 } action.status = 'claimed'; action.attempts++; action.claimantNonce = ownerNonce; action.claimedAt = nowIso(); action.runner = { attempt: action.attempts, runnerNonce: randomUUID(), phase: 'reserved', deadlineAt: new Date(deadlineAt).toISOString() }; }); }
 export function markSessionEndActionRunner(directory, sessionId, ownerNonce, name, runnerNonce, phase) { return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => { const action = job.actions[name]; if (action.status !== 'claimed' || action.runner?.runnerNonce !== runnerNonce)
     throw new Error('runner-phase-conflict'); action.runner.phase = phase; }); }
 export function finishSessionEndAction(directory, sessionId, ownerNonce, name, runnerNonce, completed, code) { return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => { const action = job.actions[name]; if (action.status !== 'claimed' || action.claimantNonce !== ownerNonce || action.runner?.runnerNonce !== runnerNonce)
-    throw new Error('action-result-conflict'); action.status = completed ? 'completed' : 'retryable'; action.lastOutcomeCode = code; action.completedAt = completed ? nowIso() : undefined; action.claimantNonce = undefined; action.runner.phase = 'terminal'; }); }
-/** Claims fair durable discovery tickets. Completion acknowledgement is independent from manifest terminality. */
+    throw new Error('action-result-conflict'); action.status = completed ? 'completed' : action.class === 'best-effort' ? 'expired' : 'retryable'; action.lastOutcomeCode = code; action.completedAt = completed ? nowIso() : undefined; action.claimantNonce = undefined; action.runner.phase = 'terminal'; }); }
+/** Claims fair durable discovery tickets and retires tickets whose manifests are terminal. */
 export function claimSessionEndDiscoveryTickets(directory, limit = 4, leaseMs = 15_000) {
     try {
         const file = discoveryPath(directory);
         if (!fs.existsSync(file))
             return [];
-        return withLock(file, () => {
+        const claimed = withLock(file, () => {
             const index = readIndex(file);
             const now = Date.now();
             const claimed = [];
             for (let offset = 0; offset < index.tickets.length && claimed.length < Math.max(0, limit); offset++) {
                 const ticket = index.tickets[(index.cursor + offset) % index.tickets.length];
+                if (ticket.acknowledgedAt)
+                    continue;
+                const job = readSessionEndJob(directory, ticket.sessionId);
+                if (job?.phase === 'complete' || (job && isManifestTerminal(job))) {
+                    ticket.acknowledgedAt = nowIso();
+                    ticket.claimNonce = undefined;
+                    ticket.leaseExpiresAt = undefined;
+                    continue;
+                }
                 const leased = ticket.leaseExpiresAt && Date.parse(ticket.leaseExpiresAt) > now;
-                if (ticket.acknowledgedAt || leased || Date.parse(ticket.retryAt) > now)
+                if (leased || Date.parse(ticket.retryAt) > now)
                     continue;
                 const nonce = randomUUID();
                 ticket.claimNonce = nonce;
@@ -366,6 +393,7 @@ export function claimSessionEndDiscoveryTickets(directory, limit = 4, leaseMs = 
             atomicWriteJsonSync(file, index);
             return claimed;
         });
+        return claimed;
     }
     catch {
         return [];
@@ -402,8 +430,15 @@ export function recoverPreparedCoreProducer(directory, sessionId) {
             return;
         if (job.producers.core.state === 'prepared')
             job.producers.core = { ...job.producers.core, state: 'sealed', sealedAt: nowIso(), sealedBy: 'recovery' };
-        if (job.producers.wiki.state === 'absent')
+        if (job.producers.wiki.state === 'absent') {
             job.producers.wiki = { state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
+            const wikiCapture = job.actions['wiki-capture'];
+            if (wikiCapture.status === 'pending' || wikiCapture.status === 'retryable') {
+                wikiCapture.status = 'completed';
+                wikiCapture.completedAt = nowIso();
+                wikiCapture.lastOutcomeCode = 'producer-absent';
+            }
+        }
         if (job.phase === 'collecting')
             job.phase = 'ready';
     });

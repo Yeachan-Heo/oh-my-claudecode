@@ -8,6 +8,12 @@ import { markSessionEndActionRunner, readSessionEndJob } from './cleanup-manifes
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 const RUNNER_ARG = '--omc-session-end-action-runner';
 function runDirectory(context) { return path.join(getOmcRoot(context.directory), 'state', 'session-end-jobs', 'runs', context.job.jobId, context.actionName, String(context.action.attempts), context.runnerNonce); }
+function runnerEnvironment(actionName) {
+    const baseKeys = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'];
+    const notificationKeys = ['OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_DISCORD_NOTIFIER_CHANNEL', 'OMC_DISCORD_WEBHOOK_URL', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL'];
+    const keys = actionName === 'callback' || actionName === 'notification' ? [...baseKeys, ...notificationKeys] : actionName === 'openclaw' ? [...baseKeys, 'OMC_OPENCLAW'] : baseKeys;
+    return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+}
 /** Each deferred action runs in its own detached process group. The manifest remains the only authority for claim/result transitions. */
 export async function runSessionEndAction(context, _execute) {
     const runPath = runDirectory(context);
@@ -16,26 +22,50 @@ export async function runSessionEndAction(context, _execute) {
         if (Date.now() >= context.deadlineAt)
             return { code: 'deadline-before-arm', completed: false };
         const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
-        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: runnerEnvironment(context.actionName) });
+        let settled = false;
+        let exitCode = null;
+        let settleChild = () => undefined;
+        const childExit = new Promise((resolve) => {
+            settleChild = (code) => {
+                if (settled)
+                    return;
+                settled = true;
+                exitCode = code;
+                resolve(code);
+            };
+            child.once('exit', settleChild);
+            child.once('error', () => settleChild(null));
+        });
+        let deadlineTermination;
+        const terminate = async () => {
+            await killProcessTree(child.pid, 'SIGKILL');
+            await childExit;
+        };
+        const timeout = setTimeout(() => { deadlineTermination ??= terminate(); }, Math.max(1, context.deadlineAt - Date.now()));
         const identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
         if (!identity) {
-            await killProcessTree(child.pid, 'SIGKILL');
+            clearTimeout(timeout);
+            await terminate();
             return { code: 'runner-identity-unavailable', completed: false };
+        }
+        if (settled) {
+            clearTimeout(timeout);
+            return { code: exitCode === null ? 'runner-deadline' : `runner-exit-${exitCode}`, completed: false };
         }
         atomicWriteJsonSync(path.join(runPath, 'control.json'), { jobId: context.job.jobId, action: context.actionName, attempt: context.action.attempts, runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, runner: { pid: child.pid, processStartIdentity: identity }, deadlineAt: new Date(context.deadlineAt).toISOString(), idempotencyKey: context.action.idempotencyKey });
         atomicWriteJsonSync(path.join(runPath, 'arm.json'), { runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, armedAt: new Date().toISOString() });
         if (!markSessionEndActionRunner(context.directory, context.sessionId, context.ownerNonce, context.actionName, context.runnerNonce, 'armed')) {
-            await killProcessTree(child.pid, 'SIGKILL');
+            clearTimeout(timeout);
+            await terminate();
             return { code: 'runner-claim-lost', completed: false };
         }
-        const code = await new Promise((resolve) => {
-            const timeout = setTimeout(() => { void killProcessTree(child.pid, 'SIGKILL'); resolve(null); }, Math.max(1, context.deadlineAt - Date.now()));
-            child.once('exit', (exitCode) => { clearTimeout(timeout); resolve(exitCode); });
-            child.once('error', () => { clearTimeout(timeout); resolve(null); });
-        });
-        const completed = code === 0;
-        atomicWriteJsonSync(path.join(runPath, 'result.json'), { code: completed ? 'completed' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completedAt: new Date().toISOString() });
-        return { code: completed ? 'completed' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completed };
+        const code = await childExit;
+        clearTimeout(timeout);
+        await deadlineTermination;
+        const completed = code === 0 && !deadlineTermination;
+        atomicWriteJsonSync(path.join(runPath, 'result.json'), { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completedAt: new Date().toISOString() });
+        return { code: completed ? 'completed' : deadlineTermination ? 'runner-deadline' : code === null ? 'runner-deadline' : `runner-exit-${code}`, completed };
     }
     catch (error) {
         const code = error instanceof Error ? error.name || 'action-failed' : 'action-failed';

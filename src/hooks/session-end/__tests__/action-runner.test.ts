@@ -1,0 +1,111 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
+const processUtils = vi.hoisted(() => ({
+  getProcessStartIdentity: vi.fn(),
+  killProcessTree: vi.fn(async () => undefined),
+}));
+const manifest = vi.hoisted(() => ({ markSessionEndActionRunner: vi.fn(() => ({})) }));
+
+vi.mock('child_process', () => childProcess);
+vi.mock('../../../platform/process-utils.js', () => processUtils);
+vi.mock('../cleanup-manifest.js', async () => {
+  const actual = await vi.importActual<typeof import('../cleanup-manifest.js')>('../cleanup-manifest.js');
+  return { ...actual, markSessionEndActionRunner: manifest.markSessionEndActionRunner };
+});
+
+import { runSessionEndAction } from '../action-runner.js';
+
+const directories: string[] = [];
+
+function context(directory: string, actionName: 'foreground-cleanup' | 'notification' = 'foreground-cleanup') {
+  return {
+    directory,
+    sessionId: 'fast-exit',
+    job: { jobId: 'job-id' },
+    actionName,
+    action: { attempts: 1, idempotencyKey: 'action-key' },
+    ownerNonce: 'owner',
+    runnerNonce: 'runner',
+    deadlineAt: Date.now() + 5_000,
+  } as Parameters<typeof runSessionEndAction>[0];
+}
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe('SessionEnd action runner', () => {
+  it('observes a fast child exit before publishing an arm or duplicate action', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+    directories.push(directory);
+    const child = Object.assign(new EventEmitter(), { pid: 12345 });
+    childProcess.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('exit', 7));
+      return child;
+    });
+    processUtils.getProcessStartIdentity.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve('identity'), 0)));
+
+    await expect(runSessionEndAction(context(directory), async () => undefined)).resolves.toEqual({
+      code: 'runner-exit-7',
+      completed: false,
+    });
+
+    expect(manifest.markSessionEndActionRunner).not.toHaveBeenCalled();
+    expect(existsSync(join(directory, '.omc', 'state', 'session-end-jobs', 'runs', 'job-id', 'foreground-cleanup', '1', 'runner', 'arm.json'))).toBe(false);
+  });
+
+  it('waits for a delayed process-tree kill after a deadline even when the child exits immediately', async () => {
+    vi.useFakeTimers();
+    const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+    directories.push(directory);
+    const child = Object.assign(new EventEmitter(), { pid: 12347 });
+    childProcess.spawn.mockReturnValue(child);
+    processUtils.getProcessStartIdentity.mockResolvedValue('identity');
+    let finishKill!: () => void;
+    processUtils.killProcessTree.mockImplementation(() => new Promise<undefined>((resolve) => { finishKill = () => resolve(undefined); }));
+    const result = runSessionEndAction({ ...context(directory), deadlineAt: Date.now() + 10 }, async () => undefined);
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processUtils.killProcessTree).toHaveBeenCalledWith(12347, 'SIGKILL');
+    child.emit('exit', 0);
+    let settled = false;
+    void result.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finishKill();
+    await expect(result).resolves.toEqual({ code: 'runner-deadline', completed: false });
+  });
+
+  it('passes notification credentials only to notification action children', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+    directories.push(directory);
+    const child = Object.assign(new EventEmitter(), { pid: 12346 });
+    childProcess.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('exit', 0));
+      return child;
+    });
+    processUtils.getProcessStartIdentity.mockResolvedValue('identity');
+    vi.stubEnv('OMC_DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/secret');
+    vi.stubEnv('OMC_DISCORD', '1');
+
+    await runSessionEndAction(context(directory, 'notification'), async () => undefined);
+    const notificationEnvironment = childProcess.spawn.mock.calls[0][2].env as NodeJS.ProcessEnv;
+    expect(notificationEnvironment).toMatchObject({
+      OMC_DISCORD: '1',
+      OMC_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/secret',
+    });
+
+    await runSessionEndAction(context(directory, 'foreground-cleanup'), async () => undefined);
+    const cleanupEnvironment = childProcess.spawn.mock.calls[1][2].env as NodeJS.ProcessEnv;
+    expect(cleanupEnvironment).not.toHaveProperty('OMC_DISCORD');
+    expect(cleanupEnvironment).not.toHaveProperty('OMC_DISCORD_WEBHOOK_URL');
+  });
+});

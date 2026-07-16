@@ -140,7 +140,7 @@ describe('durable SessionEnd cleanup manifest', () => {
       cursor: 0,
       tickets: [{ sessionId, attempts: 0, retryAt: new Date(0).toISOString() }],
     }));
-    expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([sessionId]);
+    expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([]);
     expect(isManifestTerminal(readSessionEndJob(directory, sessionId)!)).toBe(true);
   });
 
@@ -172,5 +172,46 @@ describe('durable SessionEnd cleanup manifest', () => {
     expect(releaseSessionEndJob(directory, sessionId, 'crashed-owner', owner.owner!.leaseGeneration)).not.toBeNull();
     expect(readSessionEndJob(directory, sessionId)).toMatchObject({ owner: null, phase: 'recoverable-failure' });
     expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([sessionId]);
+  });
+
+  it('bounds required failures and never retries a failed remote delivery attempt', () => {
+    const directory = project();
+    const sessionId = preparedAndSealed(directory, 'bounded-failures');
+    let owner = claimSessionEndJob(directory, sessionId, 'owner-1', 'identity', Date.now() + 5_000)!;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const claimed = claimSessionEndAction(directory, sessionId, owner.owner!.nonce, 'team-cleanup', Date.now() + 5_000)!;
+      const runner = claimed.actions['team-cleanup'].runner!;
+      expect(finishSessionEndAction(directory, sessionId, owner.owner!.nonce, 'team-cleanup', runner.runnerNonce, false, `failure-${attempt}`)).not.toBeNull();
+      expect(releaseSessionEndJob(directory, sessionId, owner.owner!.nonce, owner.owner!.leaseGeneration)).not.toBeNull();
+      owner = claimSessionEndJob(directory, sessionId, `owner-${attempt + 1}`, 'identity', Date.now() + 5_000)!;
+    }
+    expect(claimSessionEndAction(directory, sessionId, owner.owner!.nonce, 'team-cleanup', Date.now() + 5_000)?.actions['team-cleanup']).toMatchObject({
+      status: 'expired', attempts: 3, lastOutcomeCode: 'required-attempt-limit',
+    });
+
+    for (const name of ['callback', 'notification', 'openclaw'] as const) {
+      const claimed = claimSessionEndAction(directory, sessionId, owner.owner!.nonce, name, Date.now() + 5_000)!;
+      const runner = claimed.actions[name].runner!;
+      expect(finishSessionEndAction(directory, sessionId, owner.owner!.nonce, name, runner.runnerNonce, false, 'response-lost')).not.toBeNull();
+      expect(readSessionEndJob(directory, sessionId)?.actions[name]).toMatchObject({ status: 'expired', attempts: 1, lastOutcomeCode: 'response-lost' });
+      expect(claimSessionEndAction(directory, sessionId, owner.owner!.nonce, name, Date.now() + 5_000)).toBeNull();
+    }
+  });
+
+  it('does not requeue a best-effort action after its owner dies with delivery uncertain', () => {
+    const directory = project();
+    const sessionId = preparedAndSealed(directory, 'reaped-delivery');
+    const owner = claimSessionEndJob(directory, sessionId, 'owner', 'identity', Date.now() + 5_000)!;
+    expect(claimSessionEndAction(directory, sessionId, 'owner', 'callback', Date.now() - 1)).not.toBeNull();
+    const manifestPath = join(sessionEndJobsDirectory(directory), `${sessionId}.json`);
+    const expired = JSON.parse(readFileSync(manifestPath, 'utf8')) as { owner: { leaseExpiresAt: string } };
+    expired.owner.leaseExpiresAt = new Date(Date.now() - 1_000).toISOString();
+    writeFileSync(manifestPath, JSON.stringify(expired));
+
+    expect(reapStaleSessionEndOwner(directory, sessionId, 'owner', owner.owner!.leaseGeneration, 'dead')?.actions.callback).toMatchObject({
+      status: 'expired', lastOutcomeCode: 'delivery-uncertain-owner-reaped', runner: { phase: 'terminal' },
+    });
+    const replacement = claimSessionEndJob(directory, sessionId, 'replacement', 'identity', Date.now() + 5_000)!;
+    expect(claimSessionEndAction(directory, sessionId, replacement.owner!.nonce, 'callback', Date.now() + 5_000)).toBeNull();
   });
 });
