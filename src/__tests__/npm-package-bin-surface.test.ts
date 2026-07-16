@@ -11,7 +11,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   PLUGIN_JSON_PATH,
