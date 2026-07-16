@@ -97,7 +97,7 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
-const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
+const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
 const { acquireStateFileLockSync, atomicWriteFileSync, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 function readJsonFile(path) {
@@ -1094,7 +1094,11 @@ async function main() {
       ? autopilot.state
       : null;
     if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isValidNamedWorkflowState(currentAutopilot, sessionId)) {
-      console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+      const transcriptFailure = takeWorkflowTranscriptFailure();
+      const reason = transcriptFailure === "workflow_transcript_record_too_large"
+        ? `[AUTOPILOT WORKFLOW] ${transcriptFailure}. Run /cancel and re-invoke the workflow.`
+        : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.";
+      console.log(JSON.stringify({ continue: false, decision: "block", reason }));
       return;
     }
     if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
@@ -1200,6 +1204,10 @@ async function main() {
           } else {
             console.log(JSON.stringify(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE));
           }
+          return;
+        }
+        if (takeWorkflowTranscriptFailure() === 'workflow_transcript_record_too_large') {
+          console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state) && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {

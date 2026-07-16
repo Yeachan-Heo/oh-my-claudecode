@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { getAdapterById } from '../../src/hooks/autopilot/adapters/index.js';
-import { DEFAULT_PIPELINE_CONFIG } from '../../src/hooks/autopilot/pipeline-types.js';
+import { resolveCanonicalWorkflowStagePrompt } from '../../scripts/lib/workflow-stage-prompts.mjs';
 
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -23,11 +22,7 @@ function canonicalJson(value: unknown): string {
 
 const workflowTask = 'ship the release';
 function expectedStagePrompt(stage) {
-  return getAdapterById(stage).getPrompt({
-    idea: workflowTask,
-    directory: '.',
-    config: DEFAULT_PIPELINE_CONFIG,
-  });
+  return resolveCanonicalWorkflowStagePrompt(stage, workflowTask);
 }
 
 function liveLockOwner() {
@@ -205,6 +200,29 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
         expect(state.phase).toBe('complete');
       }
     }
+  });
+  it('fails closed without mutating state when a JSONL record exceeds 8 MiB', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const before = readFileSync(f.statePath);
+    appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(8 * 1024 * 1024 + 1) }] } });
+
+    expect(invoke(f)).toMatchObject({
+      continue: false,
+      decision: 'block',
+      reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
+    });
+    expect(readFileSync(f.statePath)).toEqual(before);
+  });
+  it('accepts a valid transcript larger than 16 MiB when every JSONL record is bounded', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const filler = JSON.stringify({ sessionId: f.sessionId, type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'x'.repeat(64 * 1024 - 256) }] } }) + '\n';
+    writeFileSync(f.transcript, filler.repeat(Math.ceil((16 * 1024 * 1024 + 1) / Buffer.byteLength(filler))));
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+
+    expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+    expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
   });
   it('advances on a post-activation assistant signal, records redacted observation metadata, and emits the next prompt', () => {
     const f = fixture(kind);

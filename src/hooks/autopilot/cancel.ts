@@ -16,6 +16,7 @@ import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../r
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import type { AutopilotState } from './types.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure } from './named-workflow-resume-validator.js';
+import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
 
 export interface CancelResult {
   success: boolean;
@@ -43,6 +44,21 @@ function validNamedWorkflowForResume(state: AutopilotState, sessionId?: string):
       ? validateNamedWorkflowState(state, sessionId)
       : validateNamedWorkflowStateStructure(state, sessionId),
   );
+}
+
+function clearSessionOwnedNestedRalplanState(directory: string, sessionId?: string): boolean | null {
+  if (!sessionId) return null;
+
+  const state = readModeState<Record<string, unknown>>('ralplan', directory, sessionId);
+  if (!state || state.session_id !== sessionId) return null;
+
+  return clearModeStateFile('ralplan', directory, sessionId, state);
+}
+
+function safePhase(phase: unknown): string {
+  return typeof phase === 'string' && phase.length > 0 && phase.length <= 128
+    ? phase
+    : 'unknown';
 }
 
 /**
@@ -88,6 +104,15 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
 
   const cleanedUp: string[] = [];
   const failedCleanup: string[] = [];
+
+  // Named workflows can leave a session-owned ralplan enforcement state behind.
+  // Remove it only after the exact primary run has been paused.
+  if (hasNamedWorkflowMarkers(cancelledState)) {
+    const cleared = clearSessionOwnedNestedRalplanState(directory, sessionId);
+    if (cleared === true) cleanedUp.push('ralplan');
+    else if (cleared === false) failedCleanup.push('ralplan');
+  }
+
   const ralphState = sessionId ? readRalphState(directory, sessionId) : readRalphState(directory);
   if (ralphState?.active) {
     let mayClearRalph = true;
@@ -116,13 +141,13 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
   if (failedCleanup.length > 0) {
     return {
       success: false,
-      message: `Autopilot paused at phase: ${cancelledState.phase}, but linked cleanup failed for: ${failedCleanup.join(', ')}. Retry /cancel.`,
+      message: `Autopilot paused at phase: ${safePhase(cancelledState.phase)}, but linked cleanup failed for: ${failedCleanup.join(', ')}. Retry /cancel.`,
       preservedState: cancelledState,
     };
   }
   return {
     success: true,
-    message: `Autopilot cancelled at phase: ${cancelledState.phase}.${cleanupMsg} Progress preserved for resume.`,
+    message: `Autopilot cancelled at phase: ${safePhase(cancelledState.phase)}.${cleanupMsg} Progress preserved for resume.`,
     preservedState: cancelledState
   };
 }
@@ -151,6 +176,11 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
   }
 
   const failedCleanup: string[] = [];
+
+  if (hasNamedWorkflowMarkers(state)) {
+    const cleared = clearSessionOwnedNestedRalplanState(directory, sessionId);
+    if (cleared === false) failedCleanup.push('ralplan');
+  }
   const ralphState = sessionId ? readRalphState(directory, sessionId) : readRalphState(directory);
   if (ralphState) {
     let mayClearRalph = true;
@@ -315,7 +345,7 @@ export function formatCancelMessage(result: CancelResult): string {
       lines.push('Run /autopilot to resume from where you left off.');
     } else {
       lines.push('Progress Summary:');
-      lines.push(`- Phase reached: ${state.phase}`);
+      lines.push(`- Phase reached: ${safePhase(state.phase)}`);
       lines.push(`- Files created: ${state.execution?.files_created?.length ?? 0}`);
       lines.push(`- Files modified: ${state.execution?.files_modified?.length ?? 0}`);
       lines.push(`- Agents used: ${state.total_agents_spawned ?? 0}`);

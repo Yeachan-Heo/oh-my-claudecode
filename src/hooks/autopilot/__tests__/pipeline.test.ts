@@ -411,6 +411,12 @@ describe("Pipeline Orchestrator (with state)", () => {
     expect(generatePipelinePrompt(testDir)).toContain(
       "## PIPELINE STAGE: RALPLAN",
     );
+
+    expect(advanceStage(testDir)).toEqual({ adapter: null, phase: "failed" });
+    expect(readPipelineTracking(readAutopilotState(testDir)!)).toMatchObject({
+      currentStageIndex: 0,
+      stages: expect.arrayContaining([expect.objectContaining({ id: "ralplan", status: "active" })]),
+    });
   });
 
   describe("getCurrentCompletionSignal", () => {

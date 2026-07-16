@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
-import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, join, parse, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.mjs';
@@ -10,7 +10,17 @@ const SEQUENCES = Object.freeze([Object.freeze(['ralplan', 'execution']), Object
 const SIGNALS = { ralplan: 'PIPELINE_RALPLAN_COMPLETE', execution: 'PIPELINE_EXECUTION_COMPLETE', ralph: 'PIPELINE_RALPH_COMPLETE', qa: 'PIPELINE_QA_COMPLETE' };
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const RESERVED_WORKFLOW_NAMES = new Set(['autopilot', 'ralplan', 'execution', 'ralph', 'qa', 'autoresearch', 'ultraqa', 'merge-readiness', 'self-improve', 'ultrawork', 'ultragoal', 'ultrapilot', 'swarm', 'pipeline', 'plan', 'team', 'cancel', 'deep-interview', 'deepsearch', 'ultrathink', 'tdd', 'code-review', 'security-review', 'analyze', 'search', 'default']);
-const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+const TRANSCRIPT_CHUNK_BYTES = 64 * 1024;
+const MAX_JSONL_RECORD_BYTES = 8 * 1024 * 1024;
+export const WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE = 'workflow_transcript_record_too_large';
+let workflowTranscriptFailure = null;
+export function takeWorkflowTranscriptFailure() {
+  const failure = workflowTranscriptFailure;
+  workflowTranscriptFailure = null;
+  return failure;
+}
+
+
 function workflowPlatform() { return process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_PLATFORM ? process.env.OMC_WORKFLOW_TEST_PLATFORM : process.platform; }
 export function isWorkflowRuntimeSupported() { return workflowPlatform() === 'linux' && process.env.OMC_WORKFLOW_TEST_FLOCK_AVAILABLE !== '0' && (existsSync('/usr/bin/flock') || existsSync('/bin/flock')); }
 function assertWorkflowRuntimeSupported() { if (!isWorkflowRuntimeSupported()) throw new Error('named autopilot workflow profiles require Linux with flock'); }
@@ -43,42 +53,28 @@ export function resolveWorkflowStagePrompt(state, stageId) {
   return resolveCanonicalWorkflowStagePrompt(stageId, task);
 }
 function transcriptRoot() { return realpathSync(resolve(getClaudeConfigDir(), 'projects')); }
-function fileIdentity(stat, content) { return { device: Number(stat.dev), inode: Number(stat.ino), size: Number(stat.size), mtimeNs: stat.mtimeNs.toString(), ctimeNs: stat.ctimeNs.toString(), contentSha256: createHash('sha256').update(content).digest('hex') }; }
-function readStableTranscript(path, sessionId, maximumSize = MAX_TRANSCRIPT_BYTES) {
+function fileIdentity(stat, contentSha256) { return { device: Number(stat.dev), inode: Number(stat.ino), size: Number(stat.size), mtimeNs: stat.mtimeNs.toString(), ctimeNs: stat.ctimeNs.toString(), contentSha256 }; }
+function hashRange(fd, start, end) { const hash = createHash('sha256'); const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES); for (let offset = start; offset < end;) { const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset), offset); if (count <= 0) return null; hash.update(chunk.subarray(0, count)); offset += count; } return hash.digest('hex'); }
+function scanJsonl(fd, start, end, callback) { const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES); let record = Buffer.allocUnsafe(MAX_JSONL_RECORD_BYTES + 1); let recordBytes = 0; let byteOffset = start; let lineNumber = 0; for (let offset = start; offset < end;) { const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset), offset); if (count <= 0) return false; for (let index = 0; index < count; index += 1) { const byte = chunk[index]; if (byte === 0x0a) { const length = recordBytes - (recordBytes > 0 && record[recordBytes - 1] === 0x0d ? 1 : 0); if (length > MAX_JSONL_RECORD_BYTES) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } if (callback && callback(record.subarray(0, length).toString('utf8'), byteOffset, lineNumber) === false) return false; byteOffset += recordBytes + 1; recordBytes = 0; lineNumber += 1; } else { if (recordBytes >= MAX_JSONL_RECORD_BYTES + 1) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } record[recordBytes++] = byte; } } offset += count; } if (recordBytes > 0) { const length = recordBytes - (record[recordBytes - 1] === 0x0d ? 1 : 0); if (length > MAX_JSONL_RECORD_BYTES) { workflowTranscriptFailure = WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE; return false; } if (callback && callback(record.subarray(0, length).toString('utf8'), byteOffset, lineNumber) === false) return false; } return true; }
+function readStableTranscript(path, sessionId) {
   if (!isWorkflowRuntimeSupported() || !existsSync('/proc/self/fd') || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') return null;
-  const absolute = resolve(path);
-  const pathRoot = parse(absolute).root;
-  const components = absolute.slice(pathRoot.length).split(sep).filter(Boolean);
-  if (components.length === 0) return null;
+  const absolute = resolve(path); const pathRoot = parse(absolute).root; const components = absolute.slice(pathRoot.length).split(sep).filter(Boolean); if (components.length === 0) return null;
   let fd;
   try {
-    fd = openSync(pathRoot, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
-    const pathIdentity = [];
-    for (let index = 0; index < components.length; index += 1) {
-      const isFinal = index === components.length - 1;
-      const nextFd = openSync(`/proc/self/fd/${fd}/${components[index]}`, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (isFinal ? 0 : fsConstants.O_DIRECTORY));
-      const nextStat = fstatSync(nextFd);
-      pathIdentity.push({ device: Number(nextStat.dev), inode: Number(nextStat.ino) });
-      if ((isFinal && !nextStat.isFile()) || (!isFinal && !nextStat.isDirectory())) { closeSync(nextFd); return null; }
-      closeSync(fd);
-      fd = nextFd;
-    }
-    const before = fstatSync(fd, { bigint: true });
-    const canonicalPath = realpathSync(`/proc/self/fd/${fd}`);
-    const root = transcriptRoot();
-    if (before.size > BigInt(maximumSize) || !canonicalPath.startsWith(root + sep) || basename(canonicalPath) !== `${sessionId}.jsonl`) return null;
-    const content = readFileSync(fd);
-    if (process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64) {
-      writeFileSync(canonicalPath, Buffer.from(process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64, 'base64'));
-    }
-    const after = fstatSync(fd, { bigint: true });
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs || after.size > BigInt(maximumSize) || content.byteLength !== Number(after.size)) return null;
-    return { content, identity: fileIdentity(after, content), canonicalPath, pathIdentity, root };
+    fd = openSync(pathRoot, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY); const pathIdentity = [];
+    for (let index = 0; index < components.length; index += 1) { const isFinal = index === components.length - 1; const nextFd = openSync(`/proc/self/fd/${fd}/${components[index]}`, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (isFinal ? 0 : fsConstants.O_DIRECTORY)); const nextStat = fstatSync(nextFd); pathIdentity.push({ device: Number(nextStat.dev), inode: Number(nextStat.ino) }); if ((isFinal && !nextStat.isFile()) || (!isFinal && !nextStat.isDirectory())) { closeSync(nextFd); return null; } closeSync(fd); fd = nextFd; }
+    const before = fstatSync(fd, { bigint: true }); const size = Number(before.size); const canonicalPath = realpathSync(`/proc/self/fd/${fd}`); const root = transcriptRoot(); if (!canonicalPath.startsWith(root + sep) || basename(canonicalPath) !== `${sessionId}.jsonl`) return null;
+    const contentSha256 = hashRange(fd, 0, size); if (!contentSha256 || !scanJsonl(fd, 0, size)) return null;
+    if (process.env.NODE_ENV === 'test' && process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64) writeFileSync(canonicalPath, Buffer.from(process.env.OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64, 'base64'));
+    const after = fstatSync(fd, { bigint: true }); if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) return null;
+    const stableFd = fd; const identity = fileIdentity(after, contentSha256); const stable = { fd: stableFd, identity, canonicalPath, pathIdentity, root, hashRange: (start, end) => start >= 0 && end >= start && end <= size ? hashRange(stableFd, start, end) : null, scanJsonl: (start, end, callback) => start >= 0 && end >= start && end <= size ? scanJsonl(stableFd, start, end, callback) : false };
+    fd = undefined; return stable;
   } catch { return null; } finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
 }
+function closeStableTranscript(transcript) { try { closeSync(transcript?.fd); } catch {} }
 function activationBoundary(transcriptPath, sessionId) {
   const transcript = readStableTranscript(transcriptPath, sessionId);
-  return transcript ? Object.freeze({ transcriptPath: transcript.canonicalPath, transcriptRoot: transcript.root, transcriptBasename: basename(transcript.canonicalPath), sessionId, byteOffset: transcript.content.byteLength, fileIdentity: transcript.identity }) : null;
+  return transcript ? (() => { try { return Object.freeze({ transcriptPath: transcript.canonicalPath, transcriptRoot: transcript.root, transcriptBasename: basename(transcript.canonicalPath), sessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity }); } finally { closeStableTranscript(transcript); } })() : null;
 }
 export function createWorkflowState({ directory, sessionId, task, workflow, transcriptPath }) { const boundary = typeof transcriptPath === 'string' && transcriptPath ? activationBoundary(transcriptPath, sessionId) : null; if (!boundary) return null; const now = new Date().toISOString(); const stages = workflow.stages.map((id, index) => ({ id, status: index === 0 ? 'active' : 'pending', iterations: 0, ...(index === 0 ? { startedAt: now } : {}) })); return { active: true, mode: 'autopilot', prompt: task, directory, project_dir: directory, project_path: directory, session_id: sessionId, workflowRunId: randomUUID(), started_at: now, updated_at: now, last_checked_at: now, phase: workflow.stages[0], workflow, pipelineTracking: { stages, currentStageIndex: 0, trackingRevision: 0, activationBoundary: boundary, completionObservations: [] } }; }
 function isFiniteInteger(value) { return Number.isSafeInteger(value) && value >= 0; }
@@ -90,30 +86,18 @@ function hasAuthenticatedBoundary(value, sessionId, root) {
   if (!isBoundary(value, sessionId, root)) return false;
   const transcript = readStableTranscript(value.transcriptPath, sessionId);
   if (!transcript || transcript.root !== root || transcript.canonicalPath !== value.transcriptPath || basename(transcript.canonicalPath) !== `${sessionId}.jsonl`) return false;
-  if (transcript.identity.device !== value.fileIdentity.device || transcript.identity.inode !== value.fileIdentity.inode || transcript.identity.size < value.byteOffset) return false;
-  return createHash('sha256').update(transcript.content.subarray(0, value.byteOffset)).digest('hex') === value.fileIdentity.contentSha256;
+  try { return transcript.identity.device === value.fileIdentity.device && transcript.identity.inode === value.fileIdentity.inode && transcript.identity.size >= value.byteOffset && transcript.hashRange(0, value.byteOffset) === value.fileIdentity.contentSha256; } finally { closeStableTranscript(transcript); }
 }
 function hasAuthenticatedObservation(observation, sessionId, root) {
   if (!hasAuthenticatedBoundary(observation.activationBoundary, sessionId, root)) return false;
   const transcript = readStableTranscript(observation.activationBoundary.transcriptPath, sessionId);
-  if (!transcript || transcript.root !== root || transcript.canonicalPath !== observation.activationBoundary.transcriptPath || transcript.identity.device !== observation.stableFile.device || transcript.identity.inode !== observation.stableFile.inode || transcript.identity.size < observation.stableFile.size || createHash('sha256').update(transcript.content.subarray(0, observation.stableFile.size)).digest('hex') !== observation.stableFile.contentSha256) return false;
-  const boundary = observation.activationBoundary;
-  if (observation.byteOffset < boundary.byteOffset || observation.byteOffset >= observation.stableFile.size) return false;
-  const content = transcript.content.subarray(boundary.byteOffset, observation.stableFile.size).toString('utf8');
-  let byteOffset = boundary.byteOffset;
-  const lines = content.split(/\n/);
-  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
-    const rawLine = lines[lineNumber];
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-    if (byteOffset === observation.byteOffset && lineNumber === observation.lineNumber) {
-      let record;
-      try { record = JSON.parse(line); } catch { return false; }
-      const text = assistantText(record);
-      return createHash('sha256').update(line).digest('hex') === observation.recordContentSha256 && recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${SIGNALS[observation.stageId]}`;
-    }
-    byteOffset += Buffer.byteLength(rawLine) + 1;
-  }
-  return false;
+  try {
+    if (transcript.root !== root || transcript.canonicalPath !== observation.activationBoundary.transcriptPath || transcript.identity.device !== observation.stableFile.device || transcript.identity.inode !== observation.stableFile.inode || transcript.identity.size < observation.stableFile.size || transcript.hashRange(0, observation.stableFile.size) !== observation.stableFile.contentSha256) return false;
+    const boundary = observation.activationBoundary; if (observation.byteOffset < boundary.byteOffset || observation.byteOffset >= observation.stableFile.size) return false;
+    let authenticated = false;
+    if (!transcript.scanJsonl(boundary.byteOffset, observation.stableFile.size, (line, byteOffset, lineNumber) => { if (byteOffset !== observation.byteOffset || lineNumber !== observation.lineNumber) return true; let record; try { record = JSON.parse(line); } catch { return false; } const text = assistantText(record); authenticated = createHash('sha256').update(line).digest('hex') === observation.recordContentSha256 && recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${SIGNALS[observation.stageId]}`; return true; })) return false;
+    return authenticated;
+  } finally { closeStableTranscript(transcript); }
 }
 
 export function isValidWorkflowTrackingState(state, sessionId = state?.session_id) {
@@ -161,28 +145,7 @@ function assistantText(record) {
   }
   return text.length > 0 ? text.join('') : null;
 }
-function completionEvidence(content, signal, sessionId, boundary) {
-  let byteOffset = boundary.byteOffset;
-  let lineNumber = 0;
-  let evidence = null;
-  const lines = content.split(/\n/);
-  for (let index = 0; index < lines.length; index += 1) {
-    const rawLine = lines[index];
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-    if (line.trim().length === 0) {
-      if (index === lines.length - 1 && line === '') continue;
-      return null;
-    }
-    let record;
-    try { record = JSON.parse(line); } catch { return null; }
-    const text = assistantText(record);
-    const isAssistant = recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null;
-    if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${signal}`) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') };
-    byteOffset += Buffer.byteLength(rawLine) + 1;
-    lineNumber += 1;
-  }
-  return evidence;
-}
+function completionEvidence(transcript, start, end, signal, sessionId) { let evidence = null; const valid = transcript.scanJsonl(start, end, (line, byteOffset, lineNumber) => { if (line.trim().length === 0) return false; let record; try { record = JSON.parse(line); } catch { return false; } const text = assistantText(record); const isAssistant = recordSessionId(record) === sessionId && record?.type === 'assistant' && record?.message?.role === 'assistant' && !record?.isMeta && !record?.isReplay && !record?.replay && !record?.meta && text !== null; if (!evidence && isAssistant && !text.includes('<local-command-stdout>') && text.trim() === `Signal: ${signal}`) evidence = { byteOffset, lineNumber, recordContentSha256: createHash('sha256').update(line).digest('hex') }; return true; }); return valid ? evidence : null; }
 export function advanceWorkflowOnStop(state, input, sessionId) {
   const workflow = state?.workflow; const tracking = state?.pipelineTracking;
   if (!isValidWorkflowTrackingState(state, sessionId)) return null;
@@ -190,24 +153,14 @@ export function advanceWorkflowOnStop(state, input, sessionId) {
   const suppliedPath = input.transcript_path || input.transcriptPath; const boundary = tracking.activationBoundary;
   const transcript = typeof suppliedPath === 'string' ? readStableTranscript(suppliedPath, sessionId) : null;
   const absolute = transcript?.canonicalPath;
-  if (!boundary || !transcript || absolute !== boundary.transcriptPath || boundary.transcriptRoot !== transcript.root || boundary.transcriptBasename !== `${sessionId}.jsonl` || boundary.sessionId !== sessionId || !Number.isSafeInteger(boundary.byteOffset) || boundary.byteOffset < 0) return null;
-  if (transcript.identity.size < boundary.byteOffset || boundary.fileIdentity.device !== transcript.identity.device || boundary.fileIdentity.inode !== transcript.identity.inode || createHash('sha256').update(transcript.content.subarray(0, boundary.byteOffset)).digest('hex') !== boundary.fileIdentity.contentSha256) return null;
-  const evidence = completionEvidence(transcript.content.subarray(boundary.byteOffset).toString('utf8'), SIGNALS[stageId], sessionId, boundary);
-  if (!evidence) return null;
-  const revision = Number.isSafeInteger(tracking.trackingRevision) ? tracking.trackingRevision : 0; const observedAt = new Date().toISOString(); const nextIndex = index + 1; const nextStage = workflow.stages[nextIndex] || null;
-  const nextStagePrompt = nextStage ? resolveWorkflowStagePrompt(state, nextStage) : null;
-  if (nextStage && !nextStagePrompt) return null;
+  if (!boundary || !transcript || absolute !== boundary.transcriptPath || boundary.transcriptRoot !== transcript.root || boundary.transcriptBasename !== `${sessionId}.jsonl` || boundary.sessionId !== sessionId || !Number.isSafeInteger(boundary.byteOffset) || boundary.byteOffset < 0) { closeStableTranscript(transcript); return null; }
+  if (transcript.identity.size < boundary.byteOffset || boundary.fileIdentity.device !== transcript.identity.device || boundary.fileIdentity.inode !== transcript.identity.inode || transcript.hashRange(0, boundary.byteOffset) !== boundary.fileIdentity.contentSha256) { closeStableTranscript(transcript); return null; }
+  const evidence = completionEvidence(transcript, boundary.byteOffset, transcript.identity.size, SIGNALS[stageId], sessionId); if (!evidence) { closeStableTranscript(transcript); return null; }
+  const revision = Number.isSafeInteger(tracking.trackingRevision) ? tracking.trackingRevision : 0; const observedAt = new Date().toISOString(); const nextIndex = index + 1; const nextStage = workflow.stages[nextIndex] || null; const nextStagePrompt = nextStage ? resolveWorkflowStagePrompt(state, nextStage) : null; if (nextStage && !nextStagePrompt) { closeStableTranscript(transcript); return null; }
   const updated = JSON.parse(JSON.stringify(state)); updated.pipelineTracking.stages[index].status = 'complete'; updated.pipelineTracking.stages[index].completedAt = observedAt;
-  if (nextStage) {
-    updated.pipelineTracking.stages[nextIndex].status = 'active';
-    updated.pipelineTracking.stages[nextIndex].startedAt = observedAt;
-    updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity });
-    updated.phase = nextStage;
-  } else { updated.active = false; updated.phase = 'complete'; }
-  updated.pipelineTracking.currentStageIndex = nextIndex; updated.pipelineTracking.trackingRevision = revision + 1;
-  updated.pipelineTracking.completionObservations = [...(Array.isArray(tracking.completionObservations) ? tracking.completionObservations : []), Object.freeze({ stageId, sessionId, signalId: SIGNALS[stageId], lineNumber: evidence.lineNumber, byteOffset: evidence.byteOffset, recordContentSha256: evidence.recordContentSha256, stableFile: Object.freeze(transcript.identity), activationBoundary: Object.freeze({ transcriptPath: boundary.transcriptPath, transcriptRoot: boundary.transcriptRoot, transcriptBasename: boundary.transcriptBasename, sessionId: boundary.sessionId, byteOffset: boundary.byteOffset, fileIdentity: boundary.fileIdentity }), observedAt })];
-  updated.updated_at = observedAt; updated.last_checked_at = observedAt;
-  return { updated, nextStage, nextStagePrompt, expectedRevision: revision, expectedProfileHash: workflow.profileHash, expectedWorkflowRunId: state.workflowRunId, expectedSessionId: sessionId, expectedStageId: stageId, expectedStageIndex: index, expectedTranscriptPath: absolute, expectedTranscriptIdentity: transcript.identity, expectedTranscriptPathIdentity: transcript.pathIdentity, expectedEvidenceHash: evidence.recordContentSha256 };
+  if (nextStage) { updated.pipelineTracking.stages[nextIndex].status = 'active'; updated.pipelineTracking.stages[nextIndex].startedAt = observedAt; updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity }); updated.phase = nextStage; } else { updated.active = false; updated.phase = 'complete'; }
+  updated.pipelineTracking.currentStageIndex = nextIndex; updated.pipelineTracking.trackingRevision = revision + 1; updated.pipelineTracking.completionObservations = [...(Array.isArray(tracking.completionObservations) ? tracking.completionObservations : []), Object.freeze({ stageId, sessionId, signalId: SIGNALS[stageId], lineNumber: evidence.lineNumber, byteOffset: evidence.byteOffset, recordContentSha256: evidence.recordContentSha256, stableFile: Object.freeze(transcript.identity), activationBoundary: Object.freeze({ transcriptPath: boundary.transcriptPath, transcriptRoot: boundary.transcriptRoot, transcriptBasename: boundary.transcriptBasename, sessionId: boundary.sessionId, byteOffset: boundary.byteOffset, fileIdentity: boundary.fileIdentity }), observedAt })]; updated.updated_at = observedAt; updated.last_checked_at = observedAt;
+  const result = { updated, nextStage, nextStagePrompt, expectedRevision: revision, expectedProfileHash: workflow.profileHash, expectedWorkflowRunId: state.workflowRunId, expectedSessionId: sessionId, expectedStageId: stageId, expectedStageIndex: index, expectedTranscriptPath: absolute, expectedTranscriptIdentity: transcript.identity, expectedTranscriptPathIdentity: transcript.pathIdentity, expectedEvidenceHash: evidence.recordContentSha256 }; closeStableTranscript(transcript); return result;
 }
 export function refreshWorkflowBoundaryForCommit(advance) {
   const transcript = readStableTranscript(advance.expectedTranscriptPath, advance.expectedSessionId);
@@ -215,9 +168,8 @@ export function refreshWorkflowBoundaryForCommit(advance) {
   if (!transcript || transcript.canonicalPath !== advance.expectedTranscriptPath || canonicalJson(transcript.identity) !== canonicalJson(advance.expectedTranscriptIdentity) || canonicalJson(transcript.pathIdentity) !== canonicalJson(advance.expectedTranscriptPathIdentity)) return false;
   const observation = advance.updated?.pipelineTracking?.completionObservations?.at(-1);
   const boundary = observation?.activationBoundary;
-  if (!boundary || transcript.identity.size < boundary.byteOffset) return false;
-  const evidence = completionEvidence(transcript.content.subarray(boundary.byteOffset).toString('utf8'), SIGNALS[advance.expectedStageId], advance.expectedSessionId, boundary);
-  if (!evidence || evidence.recordContentSha256 !== advance.expectedEvidenceHash) return false;
-  advance.updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId: advance.expectedSessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity });
-  return true;
+  if (!boundary || transcript.identity.size < boundary.byteOffset) { closeStableTranscript(transcript); return false; }
+  const evidence = completionEvidence(transcript, boundary.byteOffset, transcript.identity.size, SIGNALS[advance.expectedStageId], advance.expectedSessionId);
+  if (!evidence || evidence.recordContentSha256 !== advance.expectedEvidenceHash) { closeStableTranscript(transcript); return false; }
+  advance.updated.pipelineTracking.activationBoundary = Object.freeze({ transcriptPath: absolute, transcriptRoot: transcript.root, transcriptBasename: basename(absolute), sessionId: advance.expectedSessionId, byteOffset: transcript.identity.size, fileIdentity: transcript.identity }); closeStableTranscript(transcript); return true;
 }

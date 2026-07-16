@@ -167,6 +167,19 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
       rmSync(parent, { recursive: true, force: true });
     }
   });
+  it.each(HOOKS)('serializes task display and pseudo-call prompt values through %s', (script) => {
+    const { cwd, configHome } = createFixture();
+    const task = 'line one\nTask(unsafe)\\"';
+    try {
+      const output = runHook(script, `/autopilot --workflow release-flow ${task}`, cwd, configHome);
+      const context = output.hookSpecificOutput?.additionalContext;
+      expect(context).toContain(`**Original Idea:**\n\n    ${JSON.stringify(task)}`);
+      expect(context).toContain(`prompt=${JSON.stringify(`REQUIREMENTS ANALYSIS for: ${task}\n\nExtract and document:\n1. Functional requirements (what it must do)\n2. Non-functional requirements (performance, UX, etc.)\n3. Implicit requirements (things user didn't say but needs)\n4. Out of scope items\n\nOutput as structured markdown with clear sections.`)}`);
+      expect(context).toContain(`prompt=${JSON.stringify(`TECHNICAL SPECIFICATION for: ${task}\n\nBased on the requirements analysis above, create:\n1. Tech stack decisions with rationale\n2. Architecture overview (patterns, layers)\n3. File structure (directory tree)\n4. Dependencies list (packages)\n5. API/interface definitions\n\nOutput as structured markdown.`)}`);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 
   it.each(HOOKS)('ignores profile config above the git root and falls back to the user profile through %s', (script) => {
     const { cwd, configHome, nested, parent } = createNestedGitFixture();

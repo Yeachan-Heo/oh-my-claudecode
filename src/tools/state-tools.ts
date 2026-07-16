@@ -1111,10 +1111,13 @@ export const stateWriteTool: ToolDefinition<{
             namedPauseCommitted = true;
           }
         } else {
-          const result = writeStateFileLockedIf(
+          const result = writeStateFileLockedCreateIf(
             statePath,
             (current) => !hasNamedWorkflowMarker(current),
-            () => stateWithMeta,
+            (current) => {
+              writtenState = { ...(current ?? {}), ...stateWithMeta };
+              return writtenState;
+            },
           );
           if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
         }
@@ -1127,7 +1130,10 @@ export const stateWriteTool: ToolDefinition<{
             namedWorkflowExists = true;
             return false;
           },
-          () => stateWithMeta,
+          (current) => {
+            writtenState = { ...(current ?? {}), ...stateWithMeta };
+            return writtenState;
+          },
         );
         if (result !== 'written') {
           if (namedWorkflowExists) throw new Error('named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed');

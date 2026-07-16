@@ -51,6 +51,7 @@ import {
   namedWorkflowRuntimeSupported,
   prepareNamedWorkflowAdvance,
   refreshNamedWorkflowBoundaryForCommit,
+  takeNamedWorkflowTranscriptFailure,
   validateNamedWorkflowState,
   validateNamedWorkflowStateStructure,
 } from "./named-workflow-resume-validator.js";
@@ -287,9 +288,12 @@ export async function checkAutopilot(
   if (hasNamedMarkers) {
     const validated = validateNamedWorkflowState(state, sessionId);
     if (!validated) {
+      const transcriptFailure = takeNamedWorkflowTranscriptFailure();
       return {
-        shouldBlock: false,
-        message: "workflow_descriptor_integrity_failed",
+        shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+        message: transcriptFailure === "workflow_transcript_record_too_large"
+          ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+          : "workflow_descriptor_integrity_failed",
         phase: state.phase,
       };
     }
@@ -320,6 +324,14 @@ export async function checkAutopilot(
         };
       }
       return generateNamedWorkflowPrompt(committed, workingDir, sessionId);
+    }
+    if (takeNamedWorkflowTranscriptFailure() === "workflow_transcript_record_too_large") {
+      return {
+        shouldBlock: true,
+        message:
+          "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.",
+        phase: state.phase,
+      };
     }
     return generateNamedWorkflowPrompt(state, workingDir, sessionId);
   }
@@ -458,6 +470,13 @@ function generateContinuationPrompt(
   directory: string,
   sessionId?: string,
 ): AutopilotEnforcementResult {
+  if (hasNamedWorkflowMarkers(state)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
   // Read tool error before generating message
   const toolError = readLastToolError(directory);
   const errorGuidance = getToolErrorRetryGuidance(toolError);
@@ -523,6 +542,13 @@ function checkPipelineAutopilot(
   sessionId: string | undefined,
   directory: string,
 ): AutopilotEnforcementResult | null {
+  if (hasNamedWorkflowMarkers(state)) {
+    return {
+      shouldBlock: false,
+      message: "workflow_descriptor_integrity_failed",
+      phase: state.phase,
+    };
+  }
   const tracking = readPipelineTracking(state);
   if (!tracking) return null;
 

@@ -268,6 +268,52 @@ describe('state-tools', () => {
 
       expect(result.content[0].text).toContain(`"sessionId": "${sessionId}"`);
     });
+    it('creates a missing generic autopilot pause state', async () => {
+      const sessionId = 'missing-generic-pause';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+
+      const result = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: false,
+        state: { prompt: 'legacy pause request' },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+        active: false,
+        prompt: 'legacy pause request',
+      });
+    });
+
+    it('merges a generic legacy autopilot pause without discarding tracking', async () => {
+      const sessionId = 'legacy-pause-preserves-state';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        prompt: 'preserved legacy task',
+        pipeline: { currentStageIndex: 0, stages: [{ id: 'ralplan', status: 'active' }] },
+      }));
+
+      const result = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: false,
+        iteration: 4,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+        active: false,
+        iteration: 4,
+        prompt: 'preserved legacy task',
+        pipeline: { currentStageIndex: 0, stages: [{ id: 'ralplan', status: 'active' }] },
+      });
+    });
     it('does not let a lock-held Stop be overwritten by state_write cancellation', async () => {
       const sessionId = 'stop-cancel-race';
       const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
@@ -361,6 +407,29 @@ describe('state-tools', () => {
       expect(firstWriter.isError).toBeUndefined();
       expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ active: true, prompt: 'legacy task' });
     });
+    it('does not overwrite a concurrent named replacement while creating a generic pause state', async () => {
+      const sessionId = 'named-pause-create-race';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      const namedWinner = {
+        active: true,
+        session_id: sessionId,
+        workflowRunId: '99999999-9999-4999-8999-999999999999',
+        workflow: { profileHash: 'f'.repeat(64), stages: ['ralplan'] },
+        pipelineTracking: { currentStageIndex: 0, trackingRevision: 0, stages: [{ id: 'ralplan', status: 'active' }] },
+      };
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH = statePath;
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(namedWinner)).toString('base64');
+
+      const result = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: false,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(readFileSync(statePath, 'utf8'))).toEqual(namedWinner);
+    });
 
     it('rejects active named workflow identity and tracking mutations without changing bytes', async () => {
       const sessionId = 'named-immutable-write';
@@ -432,6 +501,29 @@ describe('state-tools', () => {
       });
       expect(markerCreation.isError).toBe(true);
       expect(existsSync(statePath)).toBe(false);
+    });
+    it('fails closed when a malformed named marker receives an exact pause request', async () => {
+      const sessionId = 'malformed-named-pause';
+      const statePath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+      mkdirSync(dirname(statePath), { recursive: true });
+      writeFileSync(statePath, JSON.stringify({
+        active: true,
+        session_id: sessionId,
+        workflowRunId: '11111111-1111-4111-8111-111111111111',
+        workflow: false,
+      }));
+      const before = readFileSync(statePath);
+
+      const result = await stateWriteTool.handler({
+        mode: 'autopilot',
+        active: false,
+        state: { workflowRunId: '11111111-1111-4111-8111-111111111111' },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(readFileSync(statePath)).toEqual(before);
     });
     it('pauses only an authenticated exact named run without flock and preserves every resume field', async () => {
       if (process.platform !== 'linux' || (!existsSync('/usr/bin/flock') && !existsSync('/bin/flock'))) return;
