@@ -84,8 +84,11 @@ function isBoundary(value, sessionId, root) { return hasExactKeys(value, ['trans
 function hasAuthenticatedBoundary(value, sessionId, root) {
   if (!isBoundary(value, sessionId, root)) return false;
   const transcript = readStableTranscript(value.transcriptPath, sessionId);
-  if (!transcript || transcript.root !== root || transcript.canonicalPath !== value.transcriptPath || basename(transcript.canonicalPath) !== `${sessionId}.jsonl`) return false;
-  try { return transcript.identity.device === value.fileIdentity.device && transcript.identity.inode === value.fileIdentity.inode && transcript.identity.size >= value.byteOffset && transcript.hashRange(0, value.byteOffset) === value.fileIdentity.contentSha256; } finally { closeStableTranscript(transcript); }
+  if (!transcript) return false;
+  try {
+    if (transcript.root !== root || transcript.canonicalPath !== value.transcriptPath || basename(transcript.canonicalPath) !== `${sessionId}.jsonl`) return false;
+    return transcript.identity.device === value.fileIdentity.device && transcript.identity.inode === value.fileIdentity.inode && transcript.identity.size >= value.byteOffset && transcript.hashRange(0, value.byteOffset) === value.fileIdentity.contentSha256;
+  } finally { closeStableTranscript(transcript); }
 }
 function hasAuthenticatedObservation(observation, sessionId, root) {
   if (!hasAuthenticatedBoundary(observation.activationBoundary, sessionId, root)) return false;
