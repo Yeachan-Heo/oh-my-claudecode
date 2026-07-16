@@ -667,6 +667,8 @@ Bounded handoff policy:
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
+Lane groupings (Build & Analysis / Review / Domain / Coordination) live in [Agent Lanes](./shared/agent-lanes.md); cost guidance lives in [Model Cost Optimization](./MODEL-COST-OPTIMIZATION.md).
+
 ### By Domain and Tier
 
 | Domain             | LOW (Haiku)             | MEDIUM (Sonnet)       | HIGH (Opus)         |
