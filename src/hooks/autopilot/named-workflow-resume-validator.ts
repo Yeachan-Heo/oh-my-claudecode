@@ -223,7 +223,7 @@ function hashTranscriptRange(fd: number, start: number, end: number): string | n
   for (let offset = start; offset < end;) { const count = readSync(fd, chunk, 0, Math.min(chunk.length, end - offset), offset); if (count <= 0) return null; hash.update(chunk.subarray(0, count)); offset += count; }
   return hash.digest("hex");
 }
-function scanTranscriptJsonl(fd: number, start: number, end: number, sessionId: string, callback?: (line: string, byteOffset: number, lineNumber: number) => boolean, hash?: ReturnType<typeof createHash>): boolean {
+function scanTranscriptJsonl(fd: number, start: number, end: number, sessionId: string, callback?: (line: string, byteOffset: number, lineNumber: number, recordContentSha256: string) => boolean, hash?: ReturnType<typeof createHash>): boolean {
   const chunk = Buffer.allocUnsafe(TRANSCRIPT_CHUNK_BYTES);
   const record = Buffer.allocUnsafe(MAX_JSONL_RECORD_BYTES + 1);
   let recordBytes = 0;
@@ -236,10 +236,11 @@ function scanTranscriptJsonl(fd: number, start: number, end: number, sessionId: 
       return null;
     }
   };
-  const emitRecord = (): boolean => {
-    const length = recordBytes - (recordBytes > 0 && record[recordBytes - 1] === 0x0d ? 1 : 0);
+  const emitRecord = (crlf: boolean): boolean => {
+    const length = recordBytes - (crlf && recordBytes > 0 && record[recordBytes - 1] === 0x0d ? 1 : 0);
     const line = decodeRecord(length);
-    return line !== null && (!callback || callback(line, byteOffset, lineNumber));
+    if (line === null) return false;
+    return !callback || callback(line, byteOffset, lineNumber, createHash("sha256").update(record.subarray(0, length)).digest("hex"));
   };
   for (let offset = start; offset < end;) {
     const maxRead = recordBytes >= MAX_JSONL_RECORD_BYTES ? 1 : MAX_JSONL_RECORD_BYTES + 1 - recordBytes;
@@ -249,7 +250,7 @@ function scanTranscriptJsonl(fd: number, start: number, end: number, sessionId: 
     for (let index = 0; index < count; index += 1) {
       const byte = chunk[index];
       if (byte === 0x0a) {
-        if (!emitRecord()) return false;
+        if (!emitRecord(true)) return false;
         byteOffset += recordBytes + 1;
         recordBytes = 0;
         lineNumber += 1;
@@ -262,9 +263,13 @@ function scanTranscriptJsonl(fd: number, start: number, end: number, sessionId: 
     }
     offset += count;
   }
-  return recordBytes === 0 || emitRecord();
+  if (recordBytes > MAX_JSONL_RECORD_BYTES) {
+    namedWorkflowTranscriptFailures.set(sessionId, WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE);
+    return false;
+  }
+  return recordBytes === 0 || emitRecord(false);
 }
-type StableTranscript = { fd: number; path: string; identity: RecordValue; hashRange: (start: number, end: number) => string | null; scanJsonl: (start: number, end: number, callback?: (line: string, byteOffset: number, lineNumber: number) => boolean) => boolean };
+type StableTranscript = { fd: number; path: string; identity: RecordValue; hashRange: (start: number, end: number) => string | null; scanJsonl: (start: number, end: number, callback?: (line: string, byteOffset: number, lineNumber: number, recordContentSha256: string) => boolean) => boolean };
 function closeStableTranscript(transcript: StableTranscript | null): void { if (transcript) closeSync(transcript.fd); }
 function readStableTranscript(path: string, sessionId: string, root: string): StableTranscript | null {
   const opened = noFollowCanonicalFile(path, root); if (!opened || opened.path !== path || basename(opened.path) !== `${sessionId}.jsonl`) return null;
@@ -343,7 +348,7 @@ function authenticatedObservation(
     const scanned = transcript.scanJsonl(
       Number(boundary.byteOffset),
       Number(stable.size),
-      (line, byteOffset, lineNumber) => {
+      (line, byteOffset, lineNumber, recordContentSha256) => {
         if (byteOffset !== observation.byteOffset || lineNumber !== observation.lineNumber)
           return true;
         let record: unknown;
@@ -356,7 +361,7 @@ function authenticatedObservation(
         const message = record.message;
         const text = assistantText(record);
         matched =
-          createHash("sha256").update(line).digest("hex") === observation.recordContentSha256 &&
+          recordContentSha256 === observation.recordContentSha256 &&
           record.sessionId === sessionId &&
           record.type === "assistant" &&
           isRecord(message) &&
@@ -707,7 +712,7 @@ function findCompletionEvidence(
 ): { byteOffset: number; lineNumber: number; hash: string } | null {
   if (!signal) return null;
   let evidence: { byteOffset: number; lineNumber: number; hash: string } | null = null;
-  const valid = transcript.scanJsonl(boundaryOffset, endOffset, (line, byteOffset, lineNumber) => {
+  const valid = transcript.scanJsonl(boundaryOffset, endOffset, (line, byteOffset, lineNumber, hash) => {
     if (line.trim().length === 0) return false;
     let record: unknown;
     try {
@@ -735,7 +740,7 @@ function findCompletionEvidence(
       evidence = {
         byteOffset,
         lineNumber,
-        hash: createHash("sha256").update(line).digest("hex"),
+        hash,
       };
     }
     return true;

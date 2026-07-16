@@ -243,6 +243,57 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f)).toEqual(workflowIntegrityFailure);
     expect(readFileSync(f.statePath)).toEqual(before);
   });
+  it('hashes the exact BOM-prefixed completion payload bytes', () => {
+    const f = fixture(kind);
+    const record = { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: completion('ralplan') }] } };
+    const payload = Buffer.from(JSON.stringify(record));
+    const bomPayload = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), payload]);
+    writeState(f, workflowState(f));
+    writeFileSync(f.transcript, Buffer.concat([bomPayload, Buffer.from('\n')]));
+
+    expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+    const observedHash = readState(f).pipelineTracking.completionObservations[0].recordContentSha256;
+    expect(observedHash).toBe(createHash('sha256').update(bomPayload).digest('hex'));
+    expect(observedHash).not.toBe(createHash('sha256').update(payload).digest('hex'));
+    expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+  });
+  it('accepts a valid multibyte UTF-8 sequence split across 64 KiB read chunks', () => {
+    const f = fixture(kind);
+    const prefix = Buffer.from(`{"sessionId":"${f.sessionId}","type":"user","message":{"role":"user","content":[{"type":"text","text":"`);
+    const suffix = Buffer.from('"}]}}\n');
+    const padding = Buffer.alloc(64 * 1024 - 1 - prefix.length, 0x78);
+    const multibyte = Buffer.from('é');
+    writeState(f, workflowState(f));
+    writeFileSync(f.transcript, Buffer.concat([prefix, padding, multibyte, suffix]));
+    appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: completion('ralplan') }] } });
+
+    expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
+    expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
+  });
+  it.each([
+    ['LF', Buffer.from('\n')],
+    ['CRLF', Buffer.from('\r\n')],
+    ['EOF', Buffer.alloc(0)],
+  ])('accepts an exact 8 MiB payload terminated by %s', (_termination, delimiter) => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    writeFileSync(f.transcript, Buffer.concat([Buffer.alloc(8 * 1024 * 1024, 0x20), delimiter]));
+
+    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+  });
+  it('rejects an oversized lone terminal CR at EOF', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const before = readFileSync(f.statePath);
+    writeFileSync(f.transcript, Buffer.concat([Buffer.alloc(8 * 1024 * 1024, 0x20), Buffer.from('\r')]));
+
+    expect(invoke(f)).toMatchObject({
+      continue: false,
+      decision: 'block',
+      reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
+    });
+    expect(readFileSync(f.statePath)).toEqual(before);
+  });
 
   it('accepts a valid transcript larger than 16 MiB when every JSONL record is bounded', () => {
     const f = fixture(kind);
