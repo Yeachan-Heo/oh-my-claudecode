@@ -12,6 +12,7 @@ import { teamCreateTask, teamReadConfig, teamReadManifest, withTaskClaimLock } f
 
 let cwd: string;
 const teamName = 'config-lock-team';
+const deadProcessStart = process.platform === 'darwin' ? 'darwin:1:0' : process.platform === 'win32' ? 'win32:1' : 'linux:1';
 
 function initialConfig(): TeamConfig {
   return {
@@ -161,7 +162,7 @@ describe('team config revision transaction', () => {
   it('reclaims a config lock only after its persisted process identity is dead', async () => {
     const lockPath = absPath(cwd, TeamPaths.configMutationLock(teamName));
     writeFileSync(lockPath, JSON.stringify({ schema_version: 1, pid: 2_147_483_647,
-      process_started_at: 'linux:1', nonce: 'dead-lock', created_at: new Date().toISOString() }));
+      process_started_at: deadProcessStart, nonce: 'dead-lock', created_at: new Date().toISOString() }));
     const config = initialConfig();
     config.next_task_id = 3;
 
@@ -427,7 +428,7 @@ describe('team config revision transaction', () => {
   it('reclaims a crashed scaling lock only after positive process death', async () => {
     const lockPath = absPath(cwd, TeamPaths.scalingLock(teamName));
     writeFileSync(lockPath, JSON.stringify({ schema_version: 1, pid: 2_147_483_647,
-      process_started_at: 'linux:1', nonce: 'dead-scaling-lock', created_at: new Date().toISOString() }));
+      process_started_at: deadProcessStart, nonce: 'dead-scaling-lock', created_at: new Date().toISOString() }));
     const effect = vi.fn(async () => 'resumed');
 
     await expect(withScalingLock(teamName, cwd, effect, 100)).resolves.toBe('resumed');

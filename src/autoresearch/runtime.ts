@@ -199,6 +199,7 @@ function readGit(repoPath: string, args: string[]): string {
       cwd: repoPath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { stderr?: string | Buffer };
@@ -215,6 +216,7 @@ function tryResolveGitCommit(worktreePath: string, ref: string): string | null {
   const result = spawnSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
     cwd: worktreePath,
     encoding: 'utf-8',
+    windowsHide: true,
   });
   if (result.status !== 0) return null;
   const resolved = (result.stdout || '').trim();
@@ -301,6 +303,7 @@ function requireGitSuccess(worktreePath: string, args: string[]): void {
   const result = spawnSync('git', args, {
     cwd: worktreePath,
     encoding: 'utf-8',
+    windowsHide: true,
   });
   if (result.status === 0) return;
   throw new Error((result.stderr || '').trim() || `git ${args.join(' ')} failed`);
@@ -310,6 +313,7 @@ function gitStatusLines(worktreePath: string): string[] {
   const result = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], {
     cwd: worktreePath,
     encoding: 'utf-8',
+    windowsHide: true,
   });
   if (result.status !== 0) {
     throw new Error((result.stderr || '').trim() || `git status failed for ${worktreePath}`);

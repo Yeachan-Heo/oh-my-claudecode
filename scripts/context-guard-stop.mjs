@@ -22,7 +22,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { readStdin } from './lib/stdin.mjs';
@@ -79,7 +79,7 @@ function hasLocalGitMarker(startDir) {
 }
 
 function runGitRevParse(args, cwd) {
-  return execSync(`git rev-parse ${args.join(' ')}`, {
+  return execFileSync('git', ['rev-parse', ...args], {
     cwd,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],

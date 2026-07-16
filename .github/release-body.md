@@ -1,32 +1,34 @@
-# oh-my-claudecode v4.15.4: Bug Fixes
+# oh-my-claudecode v4.15.5: Reliability Fixes
 
 ## Release Notes
 
-Release with **7 bug fixes**, **1 other change** across **8 merged PRs**.
+Release with **8 bug fixes** and **2 other changes** across **9 merged PRs**, plus one release-gate fix found during local macOS verification.
 
 ### Highlights
 
-- **fix(team): recover confirmed-dead runtime-v2 workers** (#3462)
-- **fix(merge-readiness): close red-team proof and authority gaps** (#3467)
-- **fix(ultragoal): recover the active /goal from the transcript on Claude Code** (#3468)
+- **fix(ci): bind artifact authorizer to dev event base** (#3486)
+- **fix(team): make watchdog task publication atomic** (#3488)
+- **fix(windows): avoid Git console flashes in hooks and HUD** (#3484)
 
 ### Bug Fixes
 
-- **fix(team): recover confirmed-dead runtime-v2 workers** (#3462)
-- **fix(merge-readiness): close red-team proof and authority gaps** (#3467)
-- **fix(ultragoal): recover the active /goal from the transcript on Claude Code** (#3468)
-- **fix(ci): isolate subagent lock benchmark** (#3459)
-- **fix(resolve-node): add windowsHide to node binary resolution execSync** (#3455)
-- **fix(installer): remove legacy pre-marker OMC guides** (#3450)
-- **fix(windows): hide console window for git execSync calls** (#3445)
+- **fix(ci): bind artifact authorizer to dev event base** (#3486)
+- **fix(windows): keep prompt hook timeout ownership in runner** (#3490)
+- **fix(team): make watchdog task publication atomic** (#3488)
+- **fix(windows): avoid Git console flashes in hooks and HUD** (#3484)
+- **fix(hooks): make SessionEnd shutdown durable and bounded** (#3478)
+- **fix: narrow workflow drift decision detection** (#3475)
+- **fix: validate direct team mailbox targets** (#3473)
+- **fix(team): fall back to locale-stable process start detection on macOS**
 
 ### Other Changes
 
-- **Add deterministic capabilities lockfile preflight** (#3440)
+- **test(project-memory): guard packed learner against command harvesting** (#3495)
+- **ci: add base-owned generated artifact authorizer** (#3480)
 
 ### Stats
 
-- **8 PRs merged** | **0 new features** | **7 bug fixes** | **0 security/hardening improvements** | **1 other change**
+- **9 PRs merged** | **0 new features** | **8 bug fixes** | **0 security/hardening improvements** | **2 other changes**
 
 ### Install / Update
 
@@ -35,7 +37,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@4.15.4
+npm install -g oh-my-claude-sisyphus@4.15.5
 ```
 
 **Claude Code plugin:**
@@ -44,10 +46,10 @@ npm install -g oh-my-claude-sisyphus@4.15.4
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.3...v4.15.4
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.4...v4.15.5
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@geneccx @LukeTheoJohnson @pangpang778 @pgagarinov @Yeachan-Heo
+@Yeachan-Heo

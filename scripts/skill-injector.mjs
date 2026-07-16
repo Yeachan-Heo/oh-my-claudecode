@@ -18,14 +18,20 @@ import { readStdin } from './lib/stdin.mjs';
 import { createRequire } from 'module';
 import { atomicWriteFileSync, ensureDirSync } from './lib/atomic-write.mjs';
 
-// Try to load the compiled bridge bundle
-const require = createRequire(import.meta.url);
+const skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(token => token.trim());
+const isDisabled = process.env.DISABLE_OMC === '1' ||
+  process.env.DISABLE_OMC === 'true' ||
+  skipHooks.includes('skill-injector');
+
 let bridge = null;
-try {
-  bridge = require('../dist/hooks/skill-bridge.cjs');
-} catch {
-  // Bridge not available - use fallback (first run before build, or dist/ missing)
-}
+let USER_SKILLS_DIR;
+let GLOBAL_SKILLS_DIR;
+let PROJECT_SKILLS_SUBDIR;
+let SKILL_EXTENSION;
+let MAX_SKILLS_PER_SESSION;
+let MAX_LEARNED_SKILL_DESCRIPTOR_CHARS;
+let MAX_LEARNED_SKILLS_CONTEXT_CHARS;
+
 
 // ============================================================================
 // Session ID resolution (mirrors src/lib/session-id.ts — inlined for .mjs)
@@ -267,14 +273,7 @@ function withFileLockSync(lockPath, fn) {
 }
 
 // Constants (used by fallback)
-const cfgDir = getClaudeConfigDir();
-const USER_SKILLS_DIR = join(cfgDir, 'skills', 'omc-learned');
-const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
-const PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
-const SKILL_EXTENSION = '.md';
-const MAX_SKILLS_PER_SESSION = 5;
-const MAX_LEARNED_SKILL_DESCRIPTOR_CHARS = 1000;
-const MAX_LEARNED_SKILLS_CONTEXT_CHARS = 3000;
+// Initialized only after the early disable decision.
 
 // =============================================================================
 // Fallback Implementation (used when bridge bundle not available)
@@ -621,4 +620,23 @@ async function main() {
   }
 }
 
-main();
+if (isDisabled) {
+  console.log(JSON.stringify({ continue: true }));
+} else {
+  const require = createRequire(import.meta.url);
+  try {
+    bridge = require('../dist/hooks/skill-bridge.cjs');
+  } catch {
+    // Bridge not available - use fallback (first run before build, or dist/ missing)
+  }
+
+  const cfgDir = getClaudeConfigDir();
+  USER_SKILLS_DIR = join(cfgDir, 'skills', 'omc-learned');
+  GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
+  PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
+  SKILL_EXTENSION = '.md';
+  MAX_SKILLS_PER_SESSION = 5;
+  MAX_LEARNED_SKILL_DESCRIPTOR_CHARS = 1000;
+  MAX_LEARNED_SKILLS_CONTEXT_CHARS = 3000;
+  main();
+}

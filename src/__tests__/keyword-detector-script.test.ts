@@ -7,7 +7,12 @@ import { describe, expect, it } from 'vitest';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
 const NODE = process.execPath;
 
-function runKeywordDetector(prompt: string, cwd = process.cwd(), sessionId = 'session-2053') {
+function runKeywordDetector(
+  prompt: string,
+  cwd = process.cwd(),
+  sessionId = 'session-2053',
+  env: NodeJS.ProcessEnv = {},
+) {
   const raw = execFileSync(NODE, [SCRIPT_PATH], {
     input: JSON.stringify({
       hook_event_name: 'UserPromptSubmit',
@@ -20,6 +25,7 @@ function runKeywordDetector(prompt: string, cwd = process.cwd(), sessionId = 'se
       ...process.env,
       NODE_ENV: 'test',
       OMC_SKIP_HOOKS: '',
+      ...env,
     },
     timeout: 15000,
   }).trim();
@@ -1180,5 +1186,23 @@ describe('keyword-detector.mjs keywordDetector.disabled opt-out', () => {
     const context = output.hookSpecificOutput?.additionalContext ?? '';
 
     expect(context).toContain('[MAGIC KEYWORD: CANCEL]');
+  });
+});
+
+describe('keyword-detector.mjs global disable values', () => {
+  it.each(['1', 'true'])('short-circuits only for DISABLE_OMC=%s', (value) => {
+    const output = runKeywordDetector('deepsearch this codebase', process.cwd(), 'keyword-disable', {
+      DISABLE_OMC: value,
+    });
+
+    expect(output).toEqual({ continue: true });
+  });
+
+  it.each(['', '0', 'false', 'TRUE', 'yes'])('does not treat DISABLE_OMC=%s as a global disable', (value) => {
+    const output = runKeywordDetector('deepsearch this codebase', process.cwd(), 'keyword-not-disabled', {
+      DISABLE_OMC: value,
+    });
+
+    expect(output.hookSpecificOutput?.additionalContext).toContain('<search-mode>');
   });
 });

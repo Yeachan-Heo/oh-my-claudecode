@@ -739,6 +739,33 @@ function collectTaskResults(stateRoot: string): TaskResult[] {
   }
 }
 
+async function stopLegacyWatchdog(
+  runtime: Pick<TeamRuntime, 'stopWatchdog'> | null,
+  useV2: boolean,
+): Promise<void> {
+  if (!useV2 && runtime?.stopWatchdog) {
+    await runtime.stopWatchdog();
+  }
+}
+
+/**
+ * Preserve watchdog quiescence before capturing terminal output, then tear down
+ * the team and publish that immutable snapshot. Shutdown may remove v1 state.
+ */
+export async function finalizeRuntimeShutdown<T>(
+  runtime: Pick<TeamRuntime, 'stopWatchdog'> | null,
+  useV2: boolean,
+  collectOutput: () => Promise<T>,
+  shutdown: () => Promise<void>,
+  publishOutput: (output: T) => Promise<void>,
+): Promise<T> {
+  await stopLegacyWatchdog(runtime, useV2);
+  const output = await collectOutput();
+  await shutdown();
+  await publishOutput(output);
+  return output;
+}
+
 async function main(): Promise<void> {
   const startTime = Date.now();
   const logLeaderNudgeEventFailure = createSwallowedErrorLogger(
@@ -810,40 +837,40 @@ async function main(): Promise<void> {
     pollActive = false;
     finalStatus = status;
 
-    // 1. Stop watchdog first (v1 only) — prevents late tick from racing with result collection
-    if (!useV2 && runtime?.stopWatchdog) {
-      runtime.stopWatchdog();
-    }
 
-    // 2. Shutdown team
-    if (runtime) {
-      try {
-        if (useV2) {
-          await shutdownTeamV2(runtime.teamName, runtime.cwd, { force: true });
-        } else {
-          await shutdownTeam(
-            runtime.teamName,
-            runtime.sessionName,
-            runtime.cwd,
-            2_000,
-            runtime.workerPaneIds,
-            runtime.leaderPaneId,
-            runtime.ownsWindow,
-          );
+    const output = await finalizeRuntimeShutdown(
+      runtime,
+      useV2,
+      async () => buildCliOutput(stateRoot, teamName, finalStatus, workerCount, startTime),
+      async () => {
+        if (!runtime) return;
+        try {
+          if (useV2) {
+            await shutdownTeamV2(runtime.teamName, runtime.cwd, { force: true });
+          } else {
+            await shutdownTeam(
+              runtime.teamName,
+              runtime.sessionName,
+              runtime.cwd,
+              2_000,
+              runtime.workerPaneIds,
+              runtime.leaderPaneId,
+              runtime.ownsWindow,
+            );
+          }
+        } catch (err) {
+          process.stderr.write(`[runtime-cli] shutdown error: ${err}\n`);
         }
-      } catch (err) {
-        process.stderr.write(`[runtime-cli] shutdown error: ${err}\n`);
-      }
-    }
-
-    const output = buildCliOutput(stateRoot, teamName, finalStatus, workerCount, startTime);
-    const finishedAt = new Date().toISOString();
-
-    try {
-      await writeResultArtifact(output, finishedAt);
-    } catch (err) {
-      process.stderr.write(`[runtime-cli] Failed to persist result artifact: ${err}\n`);
-    }
+      },
+      async publishedOutput => {
+        const finishedAt = new Date().toISOString();
+        try {
+          await writeResultArtifact(publishedOutput, finishedAt);
+        } catch (err) {
+          process.stderr.write(`[runtime-cli] Failed to persist result artifact: ${err}\n`);
+        }
+      },
+    );
 
     // 3. Write result to stdout
     process.stdout.write(JSON.stringify(output) + '\n');

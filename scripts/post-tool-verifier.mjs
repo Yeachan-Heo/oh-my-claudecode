@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, renameSync, unlinkSync } from 'fs';
 import { closeSync, openSync, readSync, statSync } from 'fs';
@@ -17,6 +17,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
+import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
 const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
@@ -79,11 +80,11 @@ function resolveOmcRoot(startDir) {
 
   // 3) git rev-parse --show-toplevel
   try {
-    const top = execSync('git rev-parse --show-toplevel', {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: dir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
     if (top) return join(top, '.omc');
@@ -381,18 +382,20 @@ function resolveTranscriptPath(transcriptPath, cwd) {
 
   const effectiveCwd = cwd || process.cwd();
   try {
-    const gitCommonDir = execSync('git rev-parse --git-common-dir', {
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 
     const mainRepoRoot = dirname(resolve(effectiveCwd, gitCommonDir));
-    const worktreeTop = execSync('git rev-parse --show-toplevel', {
+    const worktreeTop = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: effectiveCwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: BOUNDED_GIT_TIMEOUT_MS,
       windowsHide: true,
     }).trim();
 

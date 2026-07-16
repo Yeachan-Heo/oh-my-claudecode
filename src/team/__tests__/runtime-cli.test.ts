@@ -22,9 +22,74 @@ import {
   readTaskOutputFallback,
   writeResultArtifact,
   runPersistentRecoveryOwnerLoop,
+  finalizeRuntimeShutdown,
 } from '../runtime-cli.js';
 import { aliasActiveRecoveryRequest, canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest, writeRecoveryFinal } from '../recovery-request-store.js';
 import { absPath, TeamPaths } from '../state-paths.js';
+
+describe('runtime-cli legacy watchdog shutdown', () => {
+  it('quiesces v1 before snapshotting, shutdown, and publication', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-shutdown-order-'));
+    try {
+      const teamName = 'shutdown-order';
+      const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
+      const tasksDir = join(stateRoot, 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+      writeFileSync(join(tasksDir, '1.json'), JSON.stringify({
+        id: '1',
+        status: 'completed',
+        result: 'pre-shutdown task result',
+      }), 'utf-8');
+
+      let releaseStop!: () => void;
+      const stopPending = new Promise<void>(resolve => { releaseStop = resolve; });
+      const phases: string[] = [];
+      let published: { taskResults: Array<{ taskId: string; status: string; summary: string }> } | undefined;
+      const completing = finalizeRuntimeShutdown(
+        { stopWatchdog: () => stopPending },
+        false,
+        async () => {
+          phases.push('collect');
+          return buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+        },
+        async () => {
+          phases.push('shutdown');
+          rmSync(stateRoot, { recursive: true, force: true });
+        },
+        async output => {
+          phases.push('publish');
+          published = output;
+        },
+      );
+
+      await Promise.resolve();
+      expect(phases).toEqual([]);
+      releaseStop();
+
+      const output = await completing;
+      expect(phases).toEqual(['collect', 'shutdown', 'publish']);
+      expect(existsSync(stateRoot)).toBe(false);
+      expect(output.taskResults).toEqual([
+        { taskId: '1', status: 'completed', summary: 'pre-shutdown task result' },
+      ]);
+      expect(published?.taskResults).toEqual(output.taskResults);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('does not stop the v1 watchdog seam for runtime v2', async () => {
+    const stopWatchdog = vi.fn(async () => undefined);
+    await finalizeRuntimeShutdown(
+      { stopWatchdog },
+      true,
+      async () => undefined,
+      async () => undefined,
+      async () => undefined,
+    );
+    expect(stopWatchdog).not.toHaveBeenCalled();
+  });
+});
 
 describe('runtime-cli auto-merge compatibility', () => {
   it('rejects explicit auto-merge when runtime v2 is disabled', () => {

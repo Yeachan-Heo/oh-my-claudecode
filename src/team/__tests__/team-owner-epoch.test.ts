@@ -25,6 +25,7 @@ import type { TeamConfig } from '../types.js';
 let cwd: string;
 const teamName = 'owner-team';
 const start = currentProcessStartIdentity();
+const otherStart = process.platform === 'darwin' ? 'darwin:1:0' : process.platform === 'win32' ? 'win32:1' : 'linux:1';
 const baseConfig = (overrides: Record<string, unknown> = {}) => ({ state_revision: 7, lifecycle_state: 'active', runtime_owner_epoch: { epoch: 1, nonce: 'one' }, ...overrides }) as TeamConfig;
 
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'omc-owner-epoch-')); });
@@ -47,7 +48,7 @@ describe('runtime owner epochs', () => {
   });
 
   it('rejects a successor-election loser that observes another process identity as winner', () => {
-    const winner = publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: 'linux:1', nonce: 'winner' });
+    const winner = publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: otherStart, nonce: 'winner' });
     const loserObserved = publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: start!, nonce: 'loser' });
     expect(loserObserved).toEqual(winner);
     expect(() => requireOwnerProcessIdentity(loserObserved, process.pid, start)).toThrow('runtime_owner_fence_lost');
@@ -66,21 +67,35 @@ describe('runtime owner epochs', () => {
     expect(processStartIdentityForPlatform(42, 'darwin', exec)).toBe('darwin:1783701296:123456');
     expect(processStartIdentityForPlatform(42, 'win32', exec)).toBe('win32:638878752000000000');
     expect(exec).toHaveBeenCalledWith('/usr/sbin/sysctl', ['-b', 'kern.proc.pid.42'],
-      { encoding: null, maxBuffer: 1024 * 1024 });
+      { encoding: null, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     expect(exec).toHaveBeenCalledWith('powershell.exe', expect.arrayContaining(['-NoProfile', '-NonInteractive']),
       { encoding: 'utf8', windowsHide: true });
     const reusedKinfo = Buffer.from(kinfo);
     reusedKinfo.writeBigUInt64LE(654_321n, 8);
     const reused = vi.fn(() => reusedKinfo) as unknown as typeof import('node:child_process').execFileSync;
     expect(processStartIdentityForPlatform(42, 'darwin', reused)).toBe('darwin:1783701296:654321');
-    const missingNativeHelper = vi.fn(() => { throw new Error('sysctl missing'); }) as unknown as typeof import('node:child_process').execFileSync;
-    expect(processStartIdentityForPlatform(42, 'darwin', missingNativeHelper)).toBeNull();
+    const fallback = vi.fn((file: string) => {
+      if (file === '/usr/sbin/sysctl') throw new Error('sysctl missing');
+      return 'Wed Jul 15 23:00:00 2026\n';
+    }) as unknown as typeof import('node:child_process').execFileSync;
+    expect(processStartIdentityForPlatform(42, 'darwin', fallback)).toBe(`darwin:${Math.floor(Date.parse('Wed Jul 15 23:00:00 2026') / 1000)}:0`);
+    expect(fallback).toHaveBeenCalledWith('ps', ['-o', 'lstart=', '-p', '42'], {
+      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+    });
+    const missingHelpers = vi.fn(() => { throw new Error('missing'); }) as unknown as typeof import('node:child_process').execFileSync;
+    expect(processStartIdentityForPlatform(42, 'darwin', missingHelpers)).toBeNull();
+  });
+  it('does not declare a live Darwin process dead when precision falls back to seconds', () => {
+    if (process.platform !== 'darwin') return;
+    expect(start).toMatch(/^darwin:[1-9]\d*:0$/);
+    const nativePrecisionIdentity = start!.replace(/:0$/, ':123456');
+    expect(isProcessIdentityDead({ pid: process.pid, process_started_at: nativePrecisionIdentity })).toBe(false);
   });
   it('refuses a successor while a process remains live even when its heartbeat is stale, but allows confirmed-dead takeover', () => {
     publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: start!, nonce: 'live', heartbeat: { observed_at: '2000-01-01T00:00:00.000Z' } });
     expect(() => acquireSuccessorOwnerEpoch(cwd, teamName, { pid: process.pid, processStartedAt: start!, nonce: 'blocked' })).toThrow('runtime_owner_not_confirmed_dead');
     rmSync(absPath(cwd, TeamPaths.ownerEpochs(teamName)), { recursive: true });
-    publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: 'linux:1', nonce: 'dead' });
+    publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: otherStart, nonce: 'dead' });
     expect(acquireSuccessorOwnerEpoch(cwd, teamName, { pid: process.pid, processStartedAt: start!, nonce: 'successor' })).toMatchObject({ epoch: 2, nonce: 'successor' });
   });
 
@@ -90,7 +105,7 @@ describe('runtime owner epochs', () => {
     expect(checkOwnerFence(cwd, teamName, { epoch: 1, nonce: 'one' })).toEqual({ ok: false, reason: 'superseded' });
     expect(() => requireOwnerFence(cwd, teamName, { epoch: 1, nonce: 'one' })).toThrow('runtime_owner_fence_lost');
     expect(isFreshRecoveryElection(baseConfig(), { epoch: 1, nonce: 'one' }, 7)).toBe(true);
-    const prior = { epoch: 1, nonce: 'one', pid: process.pid, process_started_at: 'linux:1', created_at: '2026-01-01T00:00:00.000Z' };
+    const prior = { epoch: 1, nonce: 'one', pid: process.pid, process_started_at: otherStart, created_at: '2026-01-01T00:00:00.000Z' };
     const attempt = { request_id: 'request', recovery_id: 'recovery', owner_epoch: 1, owner_nonce: 'one' };
     expect(isSameAttemptSuccessorRebind(baseConfig({ active_recovery: attempt }), prior, { epoch: 2, nonce: 'two' }, 'request', 'recovery')).toBe(true);
     expect(isActiveRecoveryEffect(baseConfig({ runtime_owner_epoch: { epoch: 2, nonce: 'two' }, active_recovery: { ...attempt, owner_epoch: 2, owner_nonce: 'two' } }), { epoch: 2, nonce: 'two' }, 'request', 'recovery')).toBe(true);

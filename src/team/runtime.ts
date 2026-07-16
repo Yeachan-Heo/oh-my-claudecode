@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, rm, rename } from 'fs/promises';
+import { mkdir, readFile, rm, rename, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
@@ -14,6 +14,7 @@ import {
   composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage,
 } from './worker-bootstrap.js';
 import { cleanupTeamWorktrees } from './git-worktree.js';
+import { atomicWriteJson } from '../lib/atomic-write.js';
 import {
   withTaskLock,
   writeTaskFailure,
@@ -50,7 +51,7 @@ export interface TeamRuntime {
   cwd: string;
   /** Preflight-validated absolute binary paths, keyed by agent type */
   resolvedBinaryPaths?: Partial<Record<CliAgentType, string>>;
-  stopWatchdog?: () => void;
+  stopWatchdog?: () => Promise<void>;
 }
 
 export interface WorkerStatus {
@@ -118,8 +119,7 @@ function stateRoot(cwd: string, teamName: string): string {
 }
 
 async function writeJson(filePath: string, data: unknown): Promise<void> {
-  await mkdir(join(filePath, '..'), { recursive: true });
-  await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  await atomicWriteJson(filePath, data);
 }
 
 async function readJsonSafe<T>(filePath: string): Promise<T | null> {
@@ -542,8 +542,9 @@ export async function monitorTeam(teamName: string, cwd: string, workerPaneIds: 
  * Runtime-owned worker watchdog/orchestrator loop.
  * Handles done.json completion, dead pane failures, and next-task spawning.
  */
-export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => void {
-  let tickInFlight = false;
+export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => Promise<void> {
+  let activeTick: Promise<void> | null = null;
+  let stopped = false;
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
   // Track consecutive unresponsive ticks per worker
@@ -551,8 +552,6 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
   const UNRESPONSIVE_KILL_THRESHOLD = 3;
 
   const tick = async () => {
-    if (tickInFlight) return;
-    tickInFlight = true;
     try {
       const workers = [...runtime.activeWorkers.entries()];
       if (workers.length === 0) return;
@@ -663,14 +662,24 @@ export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): ()
         }
         clearInterval(intervalId);
       }
-    } finally {
-      tickInFlight = false;
     }
   };
 
-  const intervalId = setInterval(() => { tick(); }, intervalMs);
+  const startTick = () => {
+    if (stopped || activeTick) return;
+    const tickPromise = tick();
+    activeTick = tickPromise;
+    void tickPromise.finally(() => {
+      if (activeTick === tickPromise) activeTick = null;
+    });
+  };
+  const intervalId = setInterval(startTick, intervalMs);
 
-  return () => clearInterval(intervalId);
+  return async () => {
+    stopped = true;
+    clearInterval(intervalId);
+    await activeTick;
+  };
 }
 
 /**

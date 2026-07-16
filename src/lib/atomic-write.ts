@@ -54,12 +54,24 @@ export async function atomicWriteJson(
     ensureDirSync(dir);
 
     // Serialize data to JSON
-    const jsonContent = JSON.stringify(data, null, 2);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
 
     // Write to temp file with exclusive creation (wx = O_CREAT | O_EXCL | O_WRONLY)
     const fd = await fs.open(tempPath, "wx", 0o600);
     try {
-      await fd.write(jsonContent, 0, "utf-8");
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset,
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
       // Sync file data to disk before rename
       await fd.sync();
     } finally {

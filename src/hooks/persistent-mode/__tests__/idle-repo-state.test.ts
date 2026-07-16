@@ -13,6 +13,7 @@ describe('getIdleNotificationRepoState', () => {
   });
 
   it('builds a stable zero-backlog signature from git and GitHub state', () => {
+    const directory = 'C:\\repo folder; & echo owned\\worktree';
     vi.mocked(execFileSync)
       .mockReturnValueOnce('git@github.com:Yeachan-Heo/oh-my-claudecode.git\n')
       .mockReturnValueOnce('abc123\n')
@@ -21,7 +22,7 @@ describe('getIdleNotificationRepoState', () => {
       .mockReturnValueOnce('[]')
       .mockReturnValueOnce('[]');
 
-    const result = getIdleNotificationRepoState('/repo');
+    const result = getIdleNotificationRepoState(directory);
 
     expect(result).toEqual({
       signature: JSON.stringify({
@@ -34,6 +35,16 @@ describe('getIdleNotificationRepoState', () => {
       }),
       backlogZero: true,
     });
+    const gitOptions = {
+      cwd: directory,
+      encoding: 'utf-8',
+      timeout: 10_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    };
+    expect(execFileSync).toHaveBeenNthCalledWith(1, 'git', ['remote', 'get-url', 'origin'], gitOptions);
+    expect(execFileSync).toHaveBeenNthCalledWith(2, 'git', ['rev-parse', 'HEAD'], gitOptions);
+    expect(execFileSync).toHaveBeenNthCalledWith(3, 'git', ['status', '--porcelain'], gitOptions);
   });
 
   it('returns non-zero backlog when PRs, issues, or failing runs exist', () => {
