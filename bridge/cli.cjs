@@ -26875,6 +26875,7 @@ async function runSessionEndAction(context, _execute) {
     if (Date.now() >= context.deadlineAt) return { code: "deadline-before-arm", completed: false };
     const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
     const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url11.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: runnerEnvironment(context.actionName) });
+    child.unref();
     let settled = false;
     let exitCode = null;
     let settleChild = () => void 0;

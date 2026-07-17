@@ -45,7 +45,7 @@ describe('SessionEnd action runner', () => {
   it('observes a fast child exit before publishing an arm or duplicate action', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
-    const child = Object.assign(new EventEmitter(), { pid: 12345 });
+    const child = Object.assign(new EventEmitter(), { pid: 12345, unref: vi.fn() });
     childProcess.spawn.mockImplementation(() => {
       queueMicrotask(() => child.emit('exit', 7));
       return child;
@@ -65,7 +65,7 @@ describe('SessionEnd action runner', () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
-    const child = Object.assign(new EventEmitter(), { pid: 12347 });
+    const child = Object.assign(new EventEmitter(), { pid: 12347, unref: vi.fn() });
     childProcess.spawn.mockReturnValue(child);
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
     let finishKill!: () => void;
@@ -88,7 +88,7 @@ describe('SessionEnd action runner', () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
-    const child = Object.assign(new EventEmitter(), { pid: 12348 });
+    const child = Object.assign(new EventEmitter(), { pid: 12348, unref: vi.fn() });
     childProcess.spawn.mockReturnValue(child);
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
     processUtils.killProcessTree.mockResolvedValue(false);
@@ -98,12 +98,13 @@ describe('SessionEnd action runner', () => {
 
     await expect(result).resolves.toEqual({ code: 'runner-deadline', completed: false });
     expect(processUtils.killProcessTree).toHaveBeenCalledWith(12348, 'SIGKILL');
+    expect(child.unref).toHaveBeenCalledOnce();
   });
 
   it('passes notification credentials only to notification action children', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
-    const child = Object.assign(new EventEmitter(), { pid: 12346 });
+    const child = Object.assign(new EventEmitter(), { pid: 12346, unref: vi.fn() });
     childProcess.spawn.mockImplementation(() => {
       queueMicrotask(() => child.emit('exit', 0));
       return child;
