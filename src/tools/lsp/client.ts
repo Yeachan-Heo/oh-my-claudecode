@@ -120,6 +120,9 @@ export interface CodeAction {
 /**
  * JSON-RPC Request/Response types
  */
+/** Inbound server request IDs may be strings or integer numbers. */
+type JsonRpcServerRequestId = number | string;
+
 interface JsonRpcRequest {
   jsonrpc: '2.0';
   id: number;
@@ -132,6 +135,19 @@ interface JsonRpcResponse {
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+}
+
+interface JsonRpcServerRequest {
+  jsonrpc: '2.0';
+  id: JsonRpcServerRequestId;
+  method: string;
+  params?: unknown;
+}
+
+interface JsonRpcErrorResponse {
+  jsonrpc: '2.0';
+  id: JsonRpcServerRequestId;
+  error: { code: number; message: string };
 }
 
 interface JsonRpcNotification {
@@ -349,24 +365,49 @@ export class LspClient {
   /**
    * Handle a parsed JSON-RPC message
    */
-  private handleMessage(message: JsonRpcResponse | JsonRpcNotification): void {
-    if ('id' in message && message.id !== undefined) {
+  private handleMessage(message: JsonRpcResponse | JsonRpcNotification | JsonRpcServerRequest): void {
+    const record = message as unknown as Record<string, unknown>;
+    const hasOwnMethod = Object.prototype.hasOwnProperty.call(message, 'method');
+    const hasOwnId = Object.prototype.hasOwnProperty.call(message, 'id');
+
+    if (hasOwnMethod && typeof record.method === 'string') {
+      const id = record.id;
+      if (hasOwnId) {
+        if (typeof id === 'string' || (typeof id === 'number' && Number.isInteger(id))) {
+          this.handleServerRequest(message as JsonRpcServerRequest);
+        }
+        return;
+      }
+
+      this.handleNotification(message as JsonRpcNotification);
+      return;
+    }
+
+    if (!hasOwnMethod && hasOwnId && typeof record.id === 'number') {
       // Response to a request
-      const pending = this.pendingRequests.get(message.id);
+      const response = message as JsonRpcResponse;
+      const pending = this.pendingRequests.get(response.id);
       if (pending) {
         clearTimeout(pending.timeout);
-        this.pendingRequests.delete(message.id);
+        this.pendingRequests.delete(response.id);
 
-        if (message.error) {
-          pending.reject(new Error(message.error.message));
+        if (response.error) {
+          pending.reject(new Error(response.error.message));
         } else {
-          pending.resolve(message.result);
+          pending.resolve(response.result);
         }
       }
-    } else if ('method' in message) {
-      // Notification from server
-      this.handleNotification(message as JsonRpcNotification);
     }
+  }
+
+  /** Reply to unsupported server requests without claiming they succeeded. */
+  private handleServerRequest(request: JsonRpcServerRequest): void {
+    const error = request.method === 'client/registerCapability'
+      ? { code: -32803, message: 'Dynamic capability registration is not supported' }
+      : { code: -32601, message: 'Method not found' };
+    const response: JsonRpcErrorResponse = { jsonrpc: '2.0', id: request.id, error };
+    const content = JSON.stringify(response);
+    this.process?.stdin?.write(`Content-Length: ${Buffer.byteLength(content)}\r\n\r\n${content}`);
   }
 
   /**

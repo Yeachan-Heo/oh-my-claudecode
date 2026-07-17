@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { spawn } from 'child_process';
 
 // Mock servers module
 vi.mock('../servers.js', () => ({
@@ -35,6 +36,21 @@ function buildLspMessage(body: string): Buffer {
 
 function jsonRpcResponse(id: number, result: unknown): string {
   return JSON.stringify({ jsonrpc: '2.0', id, result });
+}
+
+function decodeLspMessage(message: string): Record<string, unknown> {
+  const bodyStart = message.indexOf('\r\n\r\n') + 4;
+  return JSON.parse(message.slice(bodyStart));
+}
+
+function setupWritableClient(client: LspClient) {
+  const writes: string[] = [];
+  (client as any).process = {
+    stdin: {
+      write: vi.fn((message: string) => writes.push(message)),
+    },
+  };
+  return writes;
 }
 
 function setupPendingRequest(client: LspClient, id: number) {
@@ -174,5 +190,196 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
     (client as any).handleData(Buffer.concat([bad, good]));
 
     expect(resolve).toHaveBeenCalledWith('recovered');
+  });
+
+  it('replies to registration requests with the exact error and preserves string, zero, and empty IDs', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+
+    for (const id of ['ts1', 0, '']) {
+      (client as any).handleData(buildLspMessage(JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'client/registerCapability',
+      })));
+    }
+
+    expect(writes.map(decodeLspMessage)).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 'ts1',
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+      {
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+      {
+        jsonrpc: '2.0',
+        id: '',
+        error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+      },
+    ]);
+  });
+
+  it('replies to unknown server requests with Method not found', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'window/showMessageRequest',
+    })));
+
+    expect(writes).toHaveLength(1);
+    expect(decodeLspMessage(writes[0])).toEqual({
+      jsonrpc: '2.0',
+      id: 7,
+      error: { code: -32601, message: 'Method not found' },
+    });
+  });
+
+  it('does not reply to fractional-ID requests or route them to pending responses', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+    const { resolve } = setupPendingRequest(client, 1.5);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1.5,
+      method: 'client/registerCapability',
+    })));
+
+    expect(writes).toHaveLength(0);
+    expect(resolve).not.toHaveBeenCalled();
+    expect((client as any).pendingRequests.has(1.5)).toBe(true);
+    clearTimeout((client as any).pendingRequests.get(1.5).timeout);
+    (client as any).pendingRequests.delete(1.5);
+  });
+
+  it('preserves numeric response resolution and rejection without string-ID coercion', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const resolved = setupPendingRequest(client, 1);
+    const rejected = setupPendingRequest(client, 2);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({ jsonrpc: '2.0', id: '1', result: 'wrong' })));
+    (client as any).handleData(buildLspMessage(jsonRpcResponse(1, 'right')));
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 2,
+      error: { code: -32000, message: 'rejected' },
+    })));
+
+    expect(resolved.resolve).toHaveBeenCalledWith('right');
+    expect(rejected.reject).toHaveBeenCalledWith(new Error('rejected'));
+    expect((client as any).pendingRequests.has(1)).toBe(false);
+    expect((client as any).pendingRequests.has(2)).toBe(false);
+  });
+
+  it('does not correlate method-bearing frames as responses', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const pending = setupPendingRequest(client, 3);
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: null,
+      result: 'spoofed',
+    })));
+
+    expect(pending.resolve).not.toHaveBeenCalled();
+    expect((client as any).pendingRequests.has(3)).toBe(true);
+    clearTimeout((client as any).pendingRequests.get(3).timeout);
+    (client as any).pendingRequests.delete(3);
+  });
+
+  it('keeps method-only messages as notifications without writing a response', () => {
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    const writes = setupWritableClient(client);
+    const uri = 'file:///tmp/ws/test.ts';
+    const diagnostics = [{ message: 'problem', severity: 1 }];
+
+    (client as any).handleData(buildLspMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'textDocument/publishDiagnostics',
+      params: { uri, diagnostics },
+    })));
+
+    expect(writes).toHaveLength(0);
+    expect((client as any).diagnostics.get(uri)).toEqual(diagnostics);
+  });
+
+  it('releases a queued public request only after its registration error reply is pumped', async () => {
+    const writes: string[] = [];
+    let stdoutData: ((data: Buffer) => void) | undefined;
+    let pumpRegistrationReply: (() => void) | undefined;
+    let pumpQueuedWorkspaceResult: (() => void) | undefined;
+    let registrationReplyObserved = false;
+    const stdin = {
+      write: vi.fn((message: string) => {
+        writes.push(message);
+        const outgoing = decodeLspMessage(message);
+        if (outgoing.method === 'initialize') {
+          stdoutData!(buildLspMessage(jsonRpcResponse(outgoing.id as number, { capabilities: {} })));
+        } else if (outgoing.method === 'initialized') {
+          stdoutData!(buildLspMessage(JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'ts1',
+            method: 'client/registerCapability',
+          })));
+        } else if (outgoing.id === 'ts1' && (outgoing.error as { code?: number } | undefined)?.code === -32803) {
+          pumpRegistrationReply = () => {
+            expect(outgoing).toEqual({
+              jsonrpc: '2.0',
+              id: 'ts1',
+              error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+            });
+            registrationReplyObserved = true;
+          };
+        } else if (outgoing.method === 'workspace/symbol') {
+          pumpQueuedWorkspaceResult = () => {
+            expect(registrationReplyObserved).toBe(true);
+            stdoutData!(buildLspMessage(jsonRpcResponse(outgoing.id as number, [])));
+          };
+        }
+      }),
+    };
+    vi.mocked(spawn).mockReturnValueOnce({
+      stdin,
+      stdout: { on: vi.fn((event: string, listener: (data: Buffer) => void) => {
+        if (event === 'data') stdoutData = listener;
+      }) },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      kill: vi.fn(),
+      pid: 12345,
+    } as any);
+
+    const client = new LspClient('/tmp/ws', SERVER_CONFIG);
+    await client.connect();
+    const request = client.workspaceSymbols('queued');
+    let resolved = false;
+    request.then(() => { resolved = true; });
+
+    expect(writes).toHaveLength(4);
+    expect(decodeLspMessage(writes[2])).toEqual({
+      jsonrpc: '2.0',
+      id: 'ts1',
+      error: { code: -32803, message: 'Dynamic capability registration is not supported' },
+    });
+    expect(decodeLspMessage(writes[3])).toMatchObject({ id: 2, method: 'workspace/symbol' });
+    expect(pumpRegistrationReply).toBeDefined();
+    expect(pumpQueuedWorkspaceResult).toBeDefined();
+    expect(registrationReplyObserved).toBe(false);
+    expect(resolved).toBe(false);
+
+    pumpRegistrationReply!();
+    expect(registrationReplyObserved).toBe(true);
+    pumpQueuedWorkspaceResult!();
+
+    await expect(request).resolves.toEqual([]);
+    expect(resolved).toBe(true);
   });
 });
