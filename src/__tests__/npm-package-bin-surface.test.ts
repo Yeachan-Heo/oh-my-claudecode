@@ -33,6 +33,7 @@ type PackageJson = {
 };
 
 type PackedPackage = {
+  extractedPackageRoot: string;
   files: Set<string>;
   packageJson: PackageJson;
   pluginJson: PluginJson;
@@ -178,6 +179,7 @@ function getPackedPackage(): PackedPackage {
 
     const extractedPackageRoot = join(packDirCache, 'package');
     packedPackageCache = {
+      extractedPackageRoot,
       files: new Set(files),
       packageJson: JSON.parse(
         readFileSync(join(extractedPackageRoot, 'package.json'), 'utf-8'),
@@ -261,6 +263,19 @@ describe('npm package bin surface regression', () => {
     );
     expect(resultHelp).toContain('team_name');
     expect(resultHelp).toContain('request_id');
+  });
+
+  it('packs the fixed worktree-paths dist with hidden Windows git subprocesses', () => {
+    const source = readFileSync(join(PACKAGE_ROOT, 'src', 'lib', 'worktree-paths.ts'), 'utf-8');
+    const packedDist = readFileSync(
+      join(packedPackageFixture.extractedPackageRoot, 'dist', 'lib', 'worktree-paths.js'),
+      'utf-8',
+    );
+
+    expect(packedPackageFixture.files.has('dist/lib/worktree-paths.js')).toBe(true);
+    expect(source.match(/windowsHide/g)).toHaveLength(7);
+    expect(packedDist).not.toContain('execSync(');
+    expect(packedDist.match(/windowsHide: true/g)).toHaveLength(7);
   });
 
   it('packs the complete source-controlled plugin and hook payload', () => {
