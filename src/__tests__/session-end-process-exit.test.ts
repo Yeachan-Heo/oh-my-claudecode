@@ -100,7 +100,7 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
 
   afterEach(() => {
     for (const directory of tempDirs.splice(0)) {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 40, retryDelay: 25 });
     }
   });
 
