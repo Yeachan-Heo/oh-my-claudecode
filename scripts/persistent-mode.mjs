@@ -508,21 +508,19 @@ function isAwaitingConfirmation(state) {
     return false;
   }
 
-  const setAt =
-    state.awaiting_confirmation_set_at ||
-    state.started_at ||
-    null;
-
-  if (!setAt) {
+  const preferred = state.awaiting_confirmation_set_at;
+  const timestamp = typeof preferred === "string" && preferred.trim()
+    ? preferred
+    : typeof state.started_at === "string" && state.started_at.trim()
+      ? state.started_at
+      : null;
+  if (!timestamp) {
     return false;
   }
 
-  const setAtMs = new Date(setAt).getTime();
-  if (!Number.isFinite(setAtMs)) {
-    return false;
-  }
-
-  return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
+  const timestampMs = new Date(timestamp).getTime();
+  const ageMs = Date.now() - timestampMs;
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
 function getAutopilotPhase(state) {
