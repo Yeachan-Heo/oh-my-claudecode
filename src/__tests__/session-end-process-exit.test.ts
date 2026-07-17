@@ -88,7 +88,10 @@ async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<
   while (Date.now() < deadline) {
     if (existsSync(callbackPath) && existsSync(manifestPath)) {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase: string; owner: unknown; actions: Record<string, { status: string }> };
-      if (manifest.phase === 'complete' && manifest.owner === null && manifest.actions.callback.status === 'completed') return;
+      if (manifest.phase === 'complete' && manifest.owner === null && manifest.actions.callback.status === 'completed') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        return;
+      }
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
