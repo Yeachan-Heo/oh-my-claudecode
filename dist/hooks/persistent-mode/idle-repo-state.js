@@ -16,6 +16,7 @@ function runCommand(command, args, cwd) {
             encoding: 'utf-8',
             timeout: COMMAND_TIMEOUT_MS,
             stdio: ['pipe', 'pipe', 'pipe'],
+            ...(command === 'git' ? { windowsHide: true } : {}),
         }).trim();
     }
     catch {

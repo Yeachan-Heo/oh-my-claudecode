@@ -49,6 +49,7 @@ function readGit(repoPath, args) {
             cwd: repoPath,
             encoding: 'utf-8',
             stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
         }).trim();
     }
     catch (error) {
@@ -65,6 +66,7 @@ function tryResolveGitCommit(worktreePath, ref) {
     const result = spawnSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
         cwd: worktreePath,
         encoding: 'utf-8',
+        windowsHide: true,
     });
     if (result.status !== 0)
         return null;
@@ -129,6 +131,7 @@ function requireGitSuccess(worktreePath, args) {
     const result = spawnSync('git', args, {
         cwd: worktreePath,
         encoding: 'utf-8',
+        windowsHide: true,
     });
     if (result.status === 0)
         return;
@@ -138,6 +141,7 @@ function gitStatusLines(worktreePath) {
     const result = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], {
         cwd: worktreePath,
         encoding: 'utf-8',
+        windowsHide: true,
     });
     if (result.status !== 0) {
         throw new Error((result.stderr || '').trim() || `git status failed for ${worktreePath}`);

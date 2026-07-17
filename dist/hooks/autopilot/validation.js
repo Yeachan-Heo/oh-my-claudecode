@@ -231,7 +231,7 @@ export function generateSummary(directory, sessionId) {
         testsStatus = 'Skipped';
     }
     return {
-        originalIdea: state.originalIdea,
+        originalIdea: state.originalIdea || state.prompt || "",
         filesCreated: state.execution.files_created,
         filesModified: state.execution.files_modified,
         testsStatus,

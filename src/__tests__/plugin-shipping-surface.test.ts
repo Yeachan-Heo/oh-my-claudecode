@@ -55,7 +55,7 @@ function createFixture(options: FixtureOptions = {}): Fixture {
     type: 'module',
     main: './dist/index.js',
     bin: { fixture: './bridge/cli.cjs' },
-    files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
+    files: ['dist/index.js', 'bridge/claude-md-coordinator.cjs'],
   });
   writeJson(join(root, '.claude-plugin', 'plugin.json'), {
     name: 'fixture-plugin',
@@ -156,6 +156,34 @@ describe('plugin shipping surface transaction', () => {
     expect(surface.stagePaths).toEqual(['bridge/cli.cjs']);
   });
 
+  it('expands declared generated directories into exact runtime payload files only', async () => {
+    const fixture = createFixture();
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin', version: '1.0.0', type: 'module', main: './dist/index.js',
+      bin: { fixture: './bridge/cli.cjs' },
+      files: ['dist', 'bridge/claude-md-coordinator.cjs'],
+    });
+    mkdirSync(join(fixture.root, 'dist', 'fixtures'), { recursive: true });
+    writeFileSync(join(fixture.root, 'dist', 'stale.js'), 'export default true;\n');
+    writeFileSync(join(fixture.root, 'dist', 'stale.js.map'), '{}\n');
+    writeFileSync(join(fixture.root, 'dist', 'fixtures', 'ignored.js'), 'export default true;\n');
+    writeFileSync(join(fixture.root, 'dist', 'README.txt'), 'not runtime\n');
+    const module = await shippingSurface;
+
+    const surface = module.inspectPluginShippingSurface(fixture.root);
+
+    expect(surface.requiredPaths).toContain('dist/stale.js');
+    expect(surface.requiredPaths).not.toContain('dist/stale.js.map');
+    expect(surface.requiredPaths).not.toContain('dist/fixtures/ignored.js');
+    expect(surface.ignoredUntrackedRequiredPaths).toEqual(['dist/stale.js']);
+    expect(surface.stagePaths).toEqual(['dist/stale.js']);
+
+    const result = run(fixture.root, 'stage');
+
+    expect(result.status).toBe(0);
+    expect(git(fixture.root, ['diff', '--cached', '--name-only']).trim()).toBe('dist/stale.js');
+  });
+
   it('excludes tracked generated test and fixture paths from the runtime baseline', async () => {
     const fixture = createFixture({
       trackedGeneratedTestPaths: [
@@ -169,6 +197,58 @@ describe('plugin shipping surface transaction', () => {
 
     expect(surface.requiredPaths).not.toContain('dist/__tests__/generated.test.js');
     expect(surface.requiredPaths).not.toContain('bridge/fixtures/non-runtime.cjs');
+  });
+
+  it('discovers helper-computed generated runtime children from local constant strings and arrays', () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.root, 'bridge', 'cli.cjs'),
+      "const root = 'bridge'; const child = ['daemon.js']; const daemon = join(root, ...child); module.exports = require(daemon);\n",
+    );
+    writeFileSync(join(fixture.root, 'bridge', 'daemon.js'), 'module.exports = true;\n');
+
+    const result = run(fixture.root, 'verify');
+
+    expect(result.status).toBe(0);
+  });
+
+  it('fails closed when a helper-computed generated runtime child is missing', () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.root, 'bridge', 'cli.cjs'),
+      "const root = 'bridge'; const child = ['daemon.js']; const daemon = join(root, ...child); module.exports = require(daemon);\n",
+    );
+
+    const result = run(fixture.root, 'verify');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('required generated runtime file is missing: bridge/daemon.js');
+  });
+
+  it('unwraps safe URL path wrappers around static generated joins', () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.root, 'bridge', 'cli.cjs'),
+      "const child = 'daemon.js'; module.exports = require(pathToFileURL(join('bridge', child)).href);\n",
+    );
+    writeFileSync(join(fixture.root, 'bridge', 'daemon.js'), 'module.exports = true;\n');
+
+    const result = run(fixture.root, 'verify');
+
+    expect(result.status).toBe(0);
+  });
+
+  it('resolves static new URL local runtime loads relative to import metadata', () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.root, 'bridge', 'cli.cjs'),
+      "module.exports = require(new URL('./daemon.cjs', import.meta.url));\n",
+    );
+    writeFileSync(join(fixture.root, 'bridge', 'daemon.cjs'), 'module.exports = true;\n');
+
+    const result = run(fixture.root, 'verify');
+
+    expect(result.status).toBe(0);
   });
 
   it('constructs and executes an exact forced staging command for closure paths only', async () => {
@@ -197,6 +277,17 @@ describe('plugin shipping surface transaction', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('refusing to stage unrelated generated artifacts: bridge/unrelated.cjs');
+    expect(git(fixture.root, ['diff', '--cached', '--name-only'])).toBe('');
+  });
+
+  it('refuses ignored untracked dist runtime extras without broad staging', () => {
+    const fixture = createFixture({ trackCli: false });
+    writeFileSync(join(fixture.root, 'dist', 'unrelated.js'), 'export default true;\n');
+
+    const result = run(fixture.root, 'stage');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('refusing to stage unrelated generated artifacts: dist/unrelated.js');
     expect(git(fixture.root, ['diff', '--cached', '--name-only'])).toBe('');
   });
 
@@ -245,6 +336,48 @@ describe('plugin shipping surface transaction', () => {
     expect(git(fixture.root, ['status', '--porcelain'])).toBe('');
   });
 
+  it('seeds the closure from recursive public package entrypoints and stages only those untracked artifacts', async () => {
+    const fixture = createFixture();
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin',
+      version: '1.0.0',
+      type: 'module',
+      main: './dist/index.js',
+      types: './dist/public.d.ts',
+      exports: {
+        '.': { import: './dist/index.js', types: './dist/public.d.ts' },
+        './public': ['./dist/public.js'],
+      },
+      bin: { fixture: './bridge/cli.cjs' },
+      files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
+    });
+    writeFileSync(join(fixture.root, 'dist', 'public.js'), 'export default true;\n');
+    writeFileSync(join(fixture.root, 'dist', 'public.d.ts'), 'declare const value: true; export default value;\n');
+    const module = await shippingSurface;
+
+    const surface = module.inspectPluginShippingSurface(fixture.root);
+
+    expect(surface.ignoredUntrackedRequiredPaths).toEqual(['dist/public.d.ts', 'dist/public.js']);
+    expect(surface.stagePaths).toEqual(['dist/public.d.ts', 'dist/public.js']);
+  });
+
+  it('rejects missing and escaping public package entrypoints', () => {
+    const fixture = createFixture();
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin', version: '1.0.0', type: 'module', main: './dist/missing.js',
+      bin: { fixture: './bridge/cli.cjs' }, files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
+    });
+
+    expect(run(fixture.root, 'verify').stderr).toContain('required generated runtime file is missing: dist/missing.js');
+
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin', version: '1.0.0', type: 'module', main: '../outside.js',
+      bin: { fixture: './bridge/cli.cjs' }, files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
+    });
+
+    expect(run(fixture.root, 'verify').stderr).toContain('package.json main must stay within the package root');
+  });
+
   it('accepts a PR diff that changes only computed runtime closure artifacts', () => {
     const fixture = createFixture();
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
@@ -274,17 +407,17 @@ describe('plugin shipping surface transaction', () => {
   });
 
   it('rejects changes to a base-tracked generated module that is unreachable from plugin entrypoints', () => {
-    const fixture = createFixture();
+    const fixture = createFixture({ trackedGeneratedTestPaths: ['dist/unreachable.js'] });
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
-    writeFileSync(join(fixture.root, 'dist', 'runtime.js'), 'export const fixture = "unreachable change";\n');
-    git(fixture.root, ['add', '-f', '--', 'dist/runtime.js']);
+    writeFileSync(join(fixture.root, 'dist', 'unreachable.js'), 'export const fixture = "unreachable change";\n');
+    git(fixture.root, ['add', '-f', '--', 'dist/unreachable.js']);
     git(fixture.root, ['commit', '--quiet', '-m', 'change unreachable generated module']);
 
     const result = run(fixture.root, 'check-pr', '--base', base);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      'pull request changes generated artifacts outside the runtime closure: dist/runtime.js',
+      'pull request changes generated artifacts outside the runtime closure: dist/unreachable.js',
     );
   });
 
@@ -312,6 +445,47 @@ describe('plugin shipping surface transaction', () => {
     );
   });
 
+  it('does not let a PR-controlled generated directory bless new runtime candidates', () => {
+    const fixture = createFixture();
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    writeFileSync(join(fixture.root, 'dist', 'unrelated.js'), 'export default true;\n');
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin', version: '1.0.0', type: 'module', main: './dist/index.js',
+      bin: { fixture: './bridge/cli.cjs' }, files: ['dist', 'bridge/claude-md-coordinator.cjs'],
+    });
+    git(fixture.root, ['add', 'package.json']);
+    git(fixture.root, ['add', '-f', '--', 'dist/unrelated.js']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'attempt generated directory blessing']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: dist/unrelated.js',
+    );
+  });
+
+  it('does not let a PR-controlled package exports target bless an unrelated artifact', () => {
+    const fixture = createFixture();
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    writeFileSync(join(fixture.root, 'dist', 'unrelated.js'), 'export default true;\n');
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin', version: '1.0.0', type: 'module', main: './dist/index.js',
+      exports: { '.': './dist/index.js', './unrelated': './dist/unrelated.js' },
+      bin: { fixture: './bridge/cli.cjs' }, files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
+    });
+    git(fixture.root, ['add', 'package.json']);
+    git(fixture.root, ['add', '-f', '--', 'dist/unrelated.js']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'attempt exports target blessing']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: dist/unrelated.js',
+    );
+  });
+
   it('does not bless an artifact mentioned only in a required-file comment', () => {
     const fixture = createFixture();
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
@@ -328,11 +502,11 @@ describe('plugin shipping surface transaction', () => {
     );
   });
 
-  it('rejects ambiguous computed local runtime loads', () => {
+  it('rejects ambiguous computed local generated runtime loads', () => {
     const fixture = createFixture();
     writeFileSync(
       join(fixture.root, 'bridge', 'cli.cjs'),
-      "const name = 'mcp-server.cjs'; module.exports = require('./' + name);\n",
+      "const name = process.argv[2]; module.exports = require(join('bridge', name));\n",
     );
 
     const result = run(fixture.root, 'verify');

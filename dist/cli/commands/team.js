@@ -95,6 +95,9 @@ const TEAM_API_OPERATION_REQUIRED_FIELDS = {
     'write-monitor-snapshot': ['team_name', 'snapshot'],
     'read-task-approval': ['team_name', 'task_id'],
     'write-task-approval': ['team_name', 'task_id', 'status', 'reviewer', 'decision_reason'],
+    'recover-worker': ['team_name', 'worker'],
+    'write-task-checkpoint': ['team_name', 'task_id', 'worker', 'claim_token', 'task_version', 'sequence', 'resume_payload'],
+    'read-recovery-result': ['team_name', 'request_id'],
 };
 const TEAM_API_OPERATION_OPTIONAL_FIELDS = {
     'create-task': ['owner', 'blocked_by', 'requires_code_change', 'delegation'],
@@ -107,11 +110,15 @@ const TEAM_API_OPERATION_OPTIONAL_FIELDS = {
     ],
     'append-event': ['task_id', 'message_id', 'reason'],
     'write-task-approval': ['required'],
+    'recover-worker': ['request_id', 'timeout_ms'],
 };
 const TEAM_API_OPERATION_NOTES = {
     'update-task': 'Only non-lifecycle task metadata can be updated.',
     'release-task-claim': 'Use this only for rollback/requeue to pending (not for completion).',
     'transition-task-status': 'Lifecycle flow is claim-safe and typically transitions in_progress -> completed|failed.',
+    'recover-worker': 'v2 live-session recovery only: it proceeds only after confirmed worker death, refuses unknown liveness, and replays idempotently by request_id. A timeout may return before the durable result is final; use read-recovery-result to look it up. In-progress tasks require a checkpoint; idle dead workers recover without one.',
+    'write-task-checkpoint': 'Authenticated worker checkpoint producer. The resume_payload must be JSON and no larger than 64 KiB; repeat the same sequence and payload to replay safely.',
+    'read-recovery-result': 'Looks up the durable pending, succeeded, failed, or commit_unknown recovery outcome by request_id in the canonical team workspace state.',
 };
 function shouldPrintTeamHelpForError(error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -506,6 +513,11 @@ function sampleValueForField(field) {
         case 'reviewer': return 'leader-fixed';
         case 'decision_reason': return 'approved in demo';
         case 'required': return true;
+        case 'task_version': return 1;
+        case 'sequence': return 1;
+        case 'resume_payload': return { cursor: 'safe-boundary' };
+        case 'request_id': return 'recovery-request-123';
+        case 'timeout_ms': return 30000;
         default: return `<${field}>`;
     }
 }

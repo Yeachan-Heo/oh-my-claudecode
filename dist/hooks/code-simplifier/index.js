@@ -9,7 +9,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
@@ -48,11 +48,12 @@ export function isCodeSimplifierEnabled() {
  */
 export function getModifiedFiles(cwd, extensions = DEFAULT_EXTENSIONS, maxFiles = DEFAULT_MAX_FILES) {
     try {
-        const output = execSync('git diff HEAD --name-only', {
+        const output = execFileSync('git', ['diff', 'HEAD', '--name-only'], {
             cwd,
             encoding: 'utf-8',
             stdio: ['ignore', 'pipe', 'ignore'],
             timeout: 5000,
+            windowsHide: true,
         });
         return output
             .trim()

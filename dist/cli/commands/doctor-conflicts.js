@@ -2,10 +2,11 @@
  * Conflict diagnostic command
  * Scans for and reports plugin coexistence issues.
  */
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { isOmcHook } from '../../installer/index.js';
+import { analyzeLegacyClaudeMd, decodeClaudeMdUtf8 } from '../../installer/claude-md-analysis.js';
 import { colors } from '../utils/formatting.js';
 import { getSkillsDir, listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
 import { inspectUnifiedMcpRegistrySync } from '../../installer/mcp-registry.js';
@@ -119,108 +120,151 @@ export function checkWindowsUnsafePluginHooks() {
     }
     return unsafe;
 }
-/**
- * Check a single file for OMC markers.
- * Returns { hasMarkers, hasUserContent } or null on error.
- */
-function checkFileForOmcMarkers(filePath) {
-    if (!existsSync(filePath))
-        return null;
+function hasOutsideUserContent(content, outsideRanges, excludedRanges = []) {
+    for (const outside of outsideRanges) {
+        let remaining = [outside];
+        for (const excluded of excludedRanges) {
+            const next = [];
+            for (const range of remaining) {
+                if (excluded.end <= range.start || excluded.start >= range.end) {
+                    next.push(range);
+                    continue;
+                }
+                if (range.start < excluded.start)
+                    next.push({ start: range.start, end: excluded.start });
+                if (excluded.end < range.end)
+                    next.push({ start: excluded.end, end: range.end });
+            }
+            remaining = next;
+        }
+        if (remaining.some(range => content.slice(range.start, range.end).trim().length > 0))
+            return true;
+    }
+    return false;
+}
+function directClaudeMdReferences(content, configDir) {
+    const references = new Set();
+    for (const line of content.split(/\r?\n/)) {
+        if (/^@CLAUDE-[A-Za-z0-9][A-Za-z0-9_-]*\.md$/i.test(line)) {
+            references.add(join(configDir, line.slice(1)));
+        }
+    }
+    return [...references].sort();
+}
+function pathExistsWithoutFollowingSymlinks(filePath) {
     try {
-        const content = readFileSync(filePath, 'utf-8');
-        const hasStartMarker = content.includes('<!-- OMC:START -->');
-        const hasEndMarker = content.includes('<!-- OMC:END -->');
-        const hasMarkers = hasStartMarker && hasEndMarker;
-        let hasUserContent = false;
-        if (hasMarkers) {
-            const startIdx = content.indexOf('<!-- OMC:START -->');
-            const endIdx = content.indexOf('<!-- OMC:END -->');
-            const beforeMarker = content.substring(0, startIdx).trim();
-            const afterMarker = content.substring(endIdx + '<!-- OMC:END -->'.length).trim();
-            hasUserContent = beforeMarker.length > 0 || afterMarker.length > 0;
-        }
-        else {
-            hasUserContent = content.trim().length > 0;
-        }
-        return { hasMarkers, hasUserContent };
+        lstatSync(filePath);
+        return true;
     }
     catch {
-        return null;
+        return false;
     }
 }
-/**
- * Find companion CLAUDE-*.md files in the config directory.
- * These are files like CLAUDE-omc.md that users create as part of a
- * file-split pattern to keep OMC config separate from their own CLAUDE.md.
- */
-function findCompanionClaudeMdFiles(configDir) {
+function inspectClaudeMdFile(filePath, configDir, isMain) {
+    let stats;
+    try {
+        stats = lstatSync(filePath);
+    }
+    catch {
+        return {
+            status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: 'unreadable', exactLegacy: false, manualReview: false },
+            references: []
+        };
+    }
+    if (stats.isSymbolicLink()) {
+        return {
+            status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: 'symlink', exactLegacy: false, manualReview: false },
+            references: []
+        };
+    }
+    if (!stats.isFile()) {
+        return {
+            status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: 'unreadable', exactLegacy: false, manualReview: false },
+            references: []
+        };
+    }
+    let bytes;
+    try {
+        bytes = readFileSync(filePath);
+    }
+    catch {
+        return {
+            status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: 'unreadable', exactLegacy: false, manualReview: false },
+            references: []
+        };
+    }
+    let content;
+    try {
+        content = decodeClaudeMdUtf8(bytes, filePath);
+    }
+    catch {
+        return {
+            status: { path: filePath, hasMarkers: false, hasUserContent: false, markerState: 'invalid-utf8', exactLegacy: false, manualReview: false },
+            references: []
+        };
+    }
+    const analysis = analyzeLegacyClaudeMd(content);
+    const corrupt = analysis.markers.state === 'corrupt';
+    return {
+        status: {
+            path: filePath,
+            hasMarkers: analysis.markers.state === 'complete',
+            hasUserContent: corrupt
+                ? content.trim().length > 0
+                : hasOutsideUserContent(content, analysis.markers.outsideRanges, analysis.exactMatches),
+            markerState: analysis.markers.state,
+            exactLegacy: analysis.exactMatches.length > 0,
+            manualReview: corrupt || analysis.manualFindings.length > 0
+        },
+        references: isMain ? directClaudeMdReferences(content, configDir) : []
+    };
+}
+function genericClaudeMdFiles(configDir) {
     try {
         return readdirSync(configDir)
-            .filter(f => /^CLAUDE-.+\.md$/i.test(f))
-            .map(f => join(configDir, f));
+            .filter(name => /^CLAUDE-.+\.md$/i.test(name) && name.toLowerCase() !== 'claude-omc.md')
+            .sort()
+            .map(name => join(configDir, name));
     }
     catch {
         return [];
     }
 }
-/**
- * Check CLAUDE.md for OMC markers and user content.
- * Also checks companion files (CLAUDE-omc.md, etc.) for the file-split pattern
- * where users keep OMC config in a separate file.
- */
+/** Analyze main and companion CLAUDE files without following symlinks. */
 export function checkClaudeMdStatus() {
     const configDir = getClaudeConfigDir();
     const claudeMdPath = join(configDir, 'CLAUDE.md');
-    if (!existsSync(claudeMdPath)) {
+    const activePath = join(configDir, 'CLAUDE-omc.md');
+    const genericPaths = genericClaudeMdFiles(configDir);
+    const mainExists = pathExistsWithoutFollowingSymlinks(claudeMdPath);
+    if (!mainExists && !pathExistsWithoutFollowingSymlinks(activePath) && genericPaths.length === 0)
         return null;
+    const main = mainExists ? inspectClaudeMdFile(claudeMdPath, configDir, true) : null;
+    const candidatePaths = [...(mainExists ? [claudeMdPath] : []), activePath, ...(main?.references ?? []), ...genericPaths];
+    const seen = new Set();
+    const files = [];
+    for (const filePath of candidatePaths) {
+        if (seen.has(filePath))
+            continue;
+        seen.add(filePath);
+        if (filePath !== claudeMdPath && !pathExistsWithoutFollowingSymlinks(filePath))
+            continue;
+        files.push(filePath === claudeMdPath ? main.status : inspectClaudeMdFile(filePath, configDir, false).status);
     }
-    try {
-        // Check the main CLAUDE.md first
-        const mainResult = checkFileForOmcMarkers(claudeMdPath);
-        if (!mainResult)
-            return null;
-        if (mainResult.hasMarkers) {
-            return {
-                hasMarkers: true,
-                hasUserContent: mainResult.hasUserContent,
-                path: claudeMdPath
-            };
-        }
-        // No markers in main file - check companion files (file-split pattern)
-        const companions = findCompanionClaudeMdFiles(configDir);
-        for (const companionPath of companions) {
-            const companionResult = checkFileForOmcMarkers(companionPath);
-            if (companionResult?.hasMarkers) {
-                return {
-                    hasMarkers: true,
-                    hasUserContent: mainResult.hasUserContent,
-                    path: claudeMdPath,
-                    companionFile: companionPath
-                };
-            }
-        }
-        // No markers in main or companions - check if CLAUDE.md references a companion
-        const content = readFileSync(claudeMdPath, 'utf-8');
-        const companionRefPattern = /CLAUDE-[^\s)]+\.md/i;
-        const refMatch = content.match(companionRefPattern);
-        if (refMatch) {
-            // CLAUDE.md references a companion file but it doesn't have markers yet
-            return {
-                hasMarkers: false,
-                hasUserContent: mainResult.hasUserContent,
-                path: claudeMdPath,
-                companionFile: join(configDir, refMatch[0])
-            };
-        }
-        return {
-            hasMarkers: false,
-            hasUserContent: mainResult.hasUserContent,
-            path: claudeMdPath
-        };
-    }
-    catch (_error) {
-        return null;
-    }
+    const markerFile = files.find(file => file.hasMarkers);
+    const companionFile = markerFile
+        ? markerFile.path === claudeMdPath ? undefined : markerFile.path
+        : main?.references[0];
+    return {
+        hasMarkers: markerFile !== undefined,
+        hasUserContent: files.some(file => file.hasUserContent),
+        path: claudeMdPath,
+        companionFile,
+        files,
+        dirtyFiles: files.filter(file => file.hasUserContent).map(file => file.path),
+        exactLegacyPaths: files.filter(file => file.exactLegacy).map(file => file.path),
+        manualReviewPaths: files.filter(file => file.manualReview || file.markerState === 'symlink' || file.markerState === 'unreadable' || file.markerState === 'invalid-utf8').map(file => file.path)
+    };
 }
 /**
  * Check environment flags that affect OMC behavior
@@ -481,7 +525,8 @@ export function runConflictCheck() {
         mcpRegistrySync.claudeMissing.length > 0 ||
         mcpRegistrySync.claudeMismatched.length > 0 ||
         mcpRegistrySync.codexMissing.length > 0 ||
-        mcpRegistrySync.codexMismatched.length > 0;
+        mcpRegistrySync.codexMismatched.length > 0 ||
+        (claudeMdStatus !== null && (claudeMdStatus.exactLegacyPaths.length > 0 || claudeMdStatus.manualReviewPaths.length > 0));
     // Note: Missing OMC markers is informational (normal for fresh install), not a conflict
     // Note: workspaceMarker.precedenceConflict is a WARN, not a hard conflict
     return {
@@ -537,18 +582,26 @@ export function formatReport(report, json) {
             else {
                 lines.push(`  ${colors.green('✓')} OMC markers present`);
             }
-            if (report.claudeMdStatus.hasUserContent) {
-                lines.push(`  ${colors.green('✓')} User content preserved outside markers`);
+            if (report.claudeMdStatus.dirtyFiles.length > 0) {
+                lines.push(`  ${colors.green('✓')} User content outside managed ranges: ${report.claudeMdStatus.dirtyFiles.join(', ')}`);
             }
         }
         else {
             lines.push(`  ${colors.yellow('⚠')} No OMC markers found`);
-            lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup to add markers')}`);
-            if (report.claudeMdStatus.hasUserContent) {
-                lines.push(`  ${colors.blue('ℹ')} User content present - will be preserved`);
+            lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup to add markers to the selected guide')}`);
+            if (report.claudeMdStatus.dirtyFiles.length > 0) {
+                lines.push(`  ${colors.blue('ℹ')} User content present: ${report.claudeMdStatus.dirtyFiles.join(', ')}`);
             }
         }
         lines.push(`  ${colors.gray(`Path: ${report.claudeMdStatus.path}`)}`);
+        if (report.claudeMdStatus.exactLegacyPaths.length > 0) {
+            lines.push(`  ${colors.yellow('⚠')} Exact legacy guide content: ${report.claudeMdStatus.exactLegacyPaths.join(', ')}`);
+            lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup for coordinator-backed cleanup with a verified backup.')}`);
+        }
+        if (report.claudeMdStatus.manualReviewPaths.length > 0) {
+            lines.push(`  ${colors.yellow('⚠')} Inspection-only review required: ${report.claudeMdStatus.manualReviewPaths.join(', ')}`);
+            lines.push(`    ${colors.gray('Manual, corrupt, symlinked, unreadable, or invalid UTF-8 files are never deleted automatically.')}`);
+        }
         lines.push('');
     }
     else {

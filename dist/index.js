@@ -34,6 +34,8 @@ getInstalledVersion, saveVersionMetadata, checkForUpdates, performUpdate, format
 export * from './shared/index.js';
 // Hooks module exports
 export * from './hooks/index.js';
+// Team recovery and worker checkpoint public clients.
+export { recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome, readRecoverDeadWorkerV2Result, teamPublishTaskRecoveryCheckpoint, } from './team/index.js';
 // Features module exports (boulder-state, context-injector)
 export { BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH, PLANNER_PLANS_DIR, PLAN_EXTENSION, getBoulderFilePath, readBoulderState, writeBoulderState, appendSessionId, clearBoulderState, findPlannerPlans, getPlanProgress, getPlanName, createBoulderState, getPlanSummaries, hasBoulder, getActivePlanPath, 
 // Context Injector

@@ -221,6 +221,7 @@ function resolveMissionRepoRoot(missionDir) {
         cwd: missionDir,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
     }).trim();
 }
 function assertTmuxSessionAvailable(sessionName) {

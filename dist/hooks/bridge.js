@@ -1073,6 +1073,17 @@ async function processKeywordDetector(input) {
     // ralplan path additionally returns the legacy [RALPLAN INIT] context
     // injection so existing routing tests remain green.
     const explicitSlash = parseExplicitWorkflowSlashInvocation(promptText);
+    // Named autopilot workflows are activated atomically by the installed
+    // plugin/template hook runtime. This bridge has no equivalent authenticated
+    // activation API, so reject every explicit --workflow form before the
+    // generic slash and keyword paths can seed legacy autopilot state.
+    if (explicitSlash?.skill === "autopilot" &&
+        /^--workflow(?:\s|$|=)/.test(explicitSlash.args)) {
+        return {
+            continue: true,
+            message: "[AUTOPILOT NAMED WORKFLOW UNSUPPORTED] Named workflow activation is unavailable through the TypeScript bridge. State was left unchanged; use the installed keyword-detector hook.",
+        };
+    }
     if (explicitSlash) {
         seedWorkflowSlotForSkill(directory, explicitSlash.skill, sessionId, "prompt-submit:explicit-slash");
         await seedModeStateForExplicitWorkflowSlash(explicitSlash.skill, directory, promptText, sessionId);
@@ -1409,6 +1420,9 @@ async function processSessionStart(input) {
     const directory = resolveToWorktreeRoot(input.directory);
     writeSessionStartedMarker(directory, sessionId);
     await reconcileAbandonedSessionStarts(directory, sessionId);
+    void import('./session-end/worker.js')
+        .then(({ reconcileSessionEndJobs }) => reconcileSessionEndJobs(directory))
+        .catch(() => undefined);
     // Lazy-load session-start dependencies
     const { initSilentAutoUpdate } = await import("../features/auto-update.js");
     const { readAutopilotState } = await import("./autopilot/index.js");
@@ -2323,11 +2337,6 @@ export async function processHook(hookType, rawInput) {
                     reason: rawSE.reason ?? "other",
                 };
                 const result = await handleSessionEnd(sessionEndInput);
-                _openclaw.wake("session-end", {
-                    sessionId: sessionEndInput.session_id,
-                    projectPath: sessionEndInput.cwd,
-                    reason: sessionEndInput.reason,
-                });
                 return result;
             }
             case "subagent-start": {

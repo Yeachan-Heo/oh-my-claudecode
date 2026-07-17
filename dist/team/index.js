@@ -36,6 +36,8 @@ export { sendTmuxTrigger, queueInboxInstruction, queueDirectMessage, queueBroadc
 export { LayoutStabilizer } from './layout-stabilizer.js';
 export { inferPhase, getPhaseTransitionLog, isTerminalPhase } from './phase-controller.js';
 export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
+export { setRuntimeOwnerRecoveryClient, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome, readRecoverDeadWorkerV2Result, } from './runtime-v2.js';
+export { teamPublishTaskRecoveryCheckpoint } from './team-ops.js';
 export { injectToLeaderPane } from './tmux-session.js';
 // api-interop (CLI API for workers)
 export { TEAM_API_OPERATIONS, LEGACY_TEAM_MCP_TOOLS, resolveTeamApiOperation, executeTeamApiOperation, buildLegacyTeamDeprecationHint, } from './api-interop.js';

@@ -11,11 +11,13 @@ import { join } from "path";
 import { getClaudeConfigDir } from "../../utils/config-dir.js";
 import { getHardMaxIterations } from "../../lib/security-config.js";
 import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../../config/plan-output.js";
-import { readAutopilotState, writeAutopilotState, transitionPhase, transitionRalphToUltraQA, transitionUltraQAToValidation, transitionToComplete, } from "./state.js";
+import { readAutopilotState, writeAutopilotState, updateAutopilotStateIfExact, transitionPhase, transitionRalphToUltraQA, transitionUltraQAToValidation, transitionToComplete, } from "./state.js";
 import { getPhasePrompt } from "./prompts.js";
 import { readLastToolError, getToolErrorRetryGuidance, } from "../persistent-mode/index.js";
 import { readPipelineTracking, hasPipelineTracking, getCurrentStageAdapter, getCurrentCompletionSignal, advanceStage, incrementStageIteration, generateTransitionPrompt, formatPipelineHUD, } from "./pipeline.js";
+import { DEFAULT_PIPELINE_CONFIG } from "./pipeline-types.js";
 import { formatAutopilotRuntimeInsight } from "./runtime-insight.js";
+import { namedWorkflowRuntimeSupported, prepareNamedWorkflowAdvance, refreshNamedWorkflowBoundaryForCommit, takeNamedWorkflowTranscriptFailure, validateNamedWorkflowState, validateNamedWorkflowStateStructure, } from "./named-workflow-resume-validator.js";
 // ============================================================================
 // SIGNAL DETECTION
 // ============================================================================
@@ -93,17 +95,23 @@ export function detectAnySignal(sessionId) {
 // ============================================================================
 // ENFORCEMENT
 // ============================================================================
+function hasNamedWorkflowMarkers(state) {
+    return Boolean(state &&
+        typeof state === "object" &&
+        ["workflow", "workflowRunId", "pipelineTracking"].some((marker) => Object.prototype.hasOwnProperty.call(state, marker)));
+}
 const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
 function isAwaitingConfirmation(state) {
-    if (!state || typeof state !== 'object') {
+    if (!state || typeof state !== "object") {
         return false;
     }
     const stateRecord = state;
     if (stateRecord.awaiting_confirmation !== true) {
         return false;
     }
-    const setAt = (typeof stateRecord.awaiting_confirmation_set_at === 'string' && stateRecord.awaiting_confirmation_set_at) ||
-        (typeof stateRecord.started_at === 'string' && stateRecord.started_at) ||
+    const setAt = (typeof stateRecord.awaiting_confirmation_set_at === "string" &&
+        stateRecord.awaiting_confirmation_set_at) ||
+        (typeof stateRecord.started_at === "string" && stateRecord.started_at) ||
         null;
     if (!setAt) {
         return false;
@@ -156,12 +164,95 @@ function getNextPhase(current) {
 export async function checkAutopilot(sessionId, directory) {
     const workingDir = directory || process.cwd();
     const state = readAutopilotState(workingDir, sessionId);
-    if (!state || !state.active) {
+    if (!state) {
         return null;
     }
     // Strict session isolation: only process state for matching session
     if (state.session_id !== sessionId) {
         return null;
+    }
+    const hasNamedMarkers = hasNamedWorkflowMarkers(state);
+    if (hasNamedMarkers && !validateNamedWorkflowStateStructure(state, sessionId)) {
+        return {
+            shouldBlock: false,
+            message: "workflow_descriptor_integrity_failed",
+            phase: state.phase,
+        };
+    }
+    if (!state.active) {
+        return null;
+    }
+    if (hasNamedMarkers && !namedWorkflowRuntimeSupported()) {
+        return {
+            shouldBlock: false,
+            message: "[AUTOPILOT NAMED WORKFLOW UNSUPPORTED] Named workflow enforcement requires Linux with flock. State was left unchanged; use /cancel to safely stop this workflow.",
+            phase: state.phase,
+        };
+    }
+    if (hasNamedMarkers) {
+        const validated = validateNamedWorkflowState(state, sessionId);
+        if (!validated) {
+            const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
+            return {
+                shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+                message: transcriptFailure === "workflow_transcript_record_too_large"
+                    ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+                    : "workflow_descriptor_integrity_failed",
+                phase: state.phase,
+            };
+        }
+        const advanced = prepareNamedWorkflowAdvance(state, sessionId);
+        if (advanced) {
+            const committed = updateAutopilotStateIfExact(workingDir, state, advanced.updated, sessionId, (current) => Boolean(validateNamedWorkflowState(current, sessionId)) &&
+                refreshNamedWorkflowBoundaryForCommit(advanced));
+            if (!committed) {
+                const transcriptFailure = takeNamedWorkflowTranscriptFailure(sessionId);
+                return {
+                    shouldBlock: transcriptFailure === "workflow_transcript_record_too_large",
+                    message: transcriptFailure === "workflow_transcript_record_too_large"
+                        ? "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow."
+                        : "workflow_descriptor_integrity_failed",
+                    phase: state.phase,
+                };
+            }
+            if (!committed.active || committed.phase === "complete") {
+                return {
+                    shouldBlock: false,
+                    message: "[AUTOPILOT COMPLETE] All pipeline stages finished successfully!",
+                    phase: "complete",
+                };
+            }
+            return generateNamedWorkflowPrompt(committed, workingDir, sessionId);
+        }
+        if (takeNamedWorkflowTranscriptFailure(sessionId) === "workflow_transcript_record_too_large") {
+            return {
+                shouldBlock: true,
+                message: "[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.",
+                phase: state.phase,
+            };
+        }
+        return generateNamedWorkflowPrompt(state, workingDir, sessionId);
+    }
+    function generateNamedWorkflowPrompt(state, directory, sessionId) {
+        const validated = validateNamedWorkflowState(state, sessionId);
+        const adapter = validated && getCurrentStageAdapter(validated.tracking);
+        if (!validated || !adapter) {
+            return {
+                shouldBlock: false,
+                message: "workflow_descriptor_integrity_failed",
+                phase: state.phase,
+            };
+        }
+        return {
+            shouldBlock: true,
+            message: adapter.getPrompt({
+                idea: validated.task,
+                directory: state.project_path || directory,
+                sessionId,
+                config: DEFAULT_PIPELINE_CONFIG,
+            }),
+            phase: state.phase,
+        };
     }
     if (isAwaitingConfirmation(state)) {
         return null;
@@ -259,6 +350,13 @@ export async function checkAutopilot(sessionId, directory) {
  * Generate continuation prompt for current phase
  */
 function generateContinuationPrompt(state, directory, sessionId) {
+    if (hasNamedWorkflowMarkers(state)) {
+        return {
+            shouldBlock: false,
+            message: "workflow_descriptor_integrity_failed",
+            phase: state.phase,
+        };
+    }
     // Read tool error before generating message
     const toolError = readLastToolError(directory);
     const errorGuidance = getToolErrorRetryGuidance(toolError);
@@ -267,7 +365,7 @@ function generateContinuationPrompt(state, directory, sessionId) {
     state.iteration += 1;
     writeAutopilotState(directory, state, sessionId);
     const phasePrompt = getPhasePrompt(state.phase, {
-        idea: state.originalIdea,
+        idea: state.originalIdea || state.prompt || "",
         specPath: state.expansion.spec_path || `.omc/autopilot/spec.md`,
         planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
         openQuestionsPath: resolveOpenQuestionsPlanPath(),
@@ -314,6 +412,13 @@ IMPORTANT: When the phase is complete, output the appropriate signal:
  * Uses the pipeline orchestrator for signal detection and stage transitions.
  */
 function checkPipelineAutopilot(state, sessionId, directory) {
+    if (hasNamedWorkflowMarkers(state)) {
+        return {
+            shouldBlock: false,
+            message: "workflow_descriptor_integrity_failed",
+            phase: state.phase,
+        };
+    }
     const tracking = readPipelineTracking(state);
     if (!tracking)
         return null;
@@ -328,7 +433,8 @@ function checkPipelineAutopilot(state, sessionId, directory) {
     }
     // Check if the current stage's completion signal has been emitted
     const completionSignal = getCurrentCompletionSignal(tracking);
-    if (completionSignal &&
+    if (!hasNamedWorkflowMarkers(state) &&
+        completionSignal &&
         sessionId &&
         detectPipelineSignal(sessionId, completionSignal)) {
         // Current stage complete — advance to next stage
@@ -358,13 +464,13 @@ function checkPipelineAutopilot(state, sessionId, directory) {
             : null;
         const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
         const context = {
-            idea: state.originalIdea,
+            idea: state.originalIdea || state.prompt || "",
             directory: state.project_path || directory,
             sessionId,
             specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
             planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
             openQuestionsPath: resolveOpenQuestionsPlanPath(),
-            config: tracking.pipelineConfig,
+            config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
         };
         const stagePrompt = nextAdapter.getPrompt(context);
         return {
@@ -398,13 +504,13 @@ ${stagePrompt}
     const updatedTracking = readPipelineTracking(readAutopilotState(directory, sessionId));
     const hudLine = updatedTracking ? formatPipelineHUD(updatedTracking) : "";
     const context = {
-        idea: state.originalIdea,
+        idea: state.originalIdea || state.prompt || "",
         directory: state.project_path || directory,
         sessionId,
         specPath: state.expansion.spec_path || ".omc/autopilot/spec.md",
         planPath: state.planning.plan_path || resolveAutopilotPlanPath(),
         openQuestionsPath: resolveOpenQuestionsPlanPath(),
-        config: tracking.pipelineConfig,
+        config: tracking.pipelineConfig ?? DEFAULT_PIPELINE_CONFIG,
     };
     const stagePrompt = currentAdapter.getPrompt(context);
     const continuationPrompt = `<autopilot-pipeline-continuation>
@@ -448,7 +554,7 @@ function detectPipelineSignal(sessionId, signal) {
         join(claudeDir, "sessions", sessionId, "messages.json"),
         join(claudeDir, "transcripts", `${sessionId}.md`),
     ];
-    const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(escaped, "i");
     for (const transcriptPath of possiblePaths) {
         if (existsSync(transcriptPath)) {

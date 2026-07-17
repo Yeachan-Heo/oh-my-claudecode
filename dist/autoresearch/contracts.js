@@ -11,6 +11,7 @@ function readGit(repoPath, args) {
             cwd: repoPath,
             encoding: 'utf-8',
             stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
         }).trim();
     }
     catch (error) {

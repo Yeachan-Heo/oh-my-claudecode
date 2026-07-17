@@ -22,6 +22,7 @@ import { install as installOmc, isInstalled, getInstallInfo } from '../installer
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
 import { doctorTeamRoutingCommand } from './commands/doctor-team-routing.js';
+import { capabilitiesCheckCommand, capabilitiesLockCommand } from './commands/capabilities.js';
 import { sessionSearchCommand } from './commands/session-search.js';
 import { sessionFrictionReportCommand } from './commands/session-friction-report.js';
 import { teamCommand } from './commands/team.js';
@@ -1079,6 +1080,35 @@ sessionCmd
         json: options.json,
         workingDirectory: process.cwd(),
     });
+});
+/**
+ * Capabilities command - deterministic tool/skill/capability lockfile preflight
+ */
+const capabilitiesCmd = program
+    .command('capabilities')
+    .description('Create or verify deterministic tool/skill/capability lockfiles')
+    .addHelpText('after', `
+Examples:
+  $ omc capabilities lock
+  $ omc capabilities lock --json --lockfile .omc/capabilities.lock.json
+  $ omc capabilities check --json`);
+capabilitiesCmd
+    .command('lock')
+    .description('Write the current deterministic tool/skill/capability lockfile')
+    .option('--json', 'Output as JSON')
+    .option('--lockfile <path>', 'Lockfile path (default: omc-capabilities.lock.json)')
+    .action(async (options) => {
+    const exitCode = await capabilitiesLockCommand(options);
+    process.exit(exitCode);
+});
+capabilitiesCmd
+    .command('check')
+    .description('Check current deterministic tool/skill/capability surface against a lockfile')
+    .option('--json', 'Output as JSON')
+    .option('--lockfile <path>', 'Lockfile path (default: omc-capabilities.lock.json)')
+    .action(async (options) => {
+    const exitCode = await capabilitiesCheckCommand(options);
+    process.exit(exitCode);
 });
 /**
  * Doctor command - Diagnostic tools

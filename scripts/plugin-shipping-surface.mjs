@@ -8,7 +8,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -140,15 +140,49 @@ function collectPackageBinEntrypoints(packageJson) {
   return paths;
 }
 
-function collectDeclaredGeneratedPayloads(packageJson) {
+function collectPackagePublicEntrypoints(packageJson) {
+  const paths = collectPackageBinEntrypoints(packageJson);
+  addPackagePath(paths, packageJson.main, 'package.json main');
+  addPackagePath(paths, packageJson.types, 'package.json types');
+  const collectExports = (value, label) => {
+    if (typeof value === 'string') addPackagePath(paths, value, label);
+    else if (Array.isArray(value)) value.forEach((target, index) => collectExports(target, `${label}[${index}]`));
+    else if (value && typeof value === 'object') {
+      for (const [condition, target] of Object.entries(value)) collectExports(target, `${label}.${condition}`);
+    }
+  };
+  collectExports(packageJson.exports, 'package.json exports');
+  return paths;
+}
+
+function collectDeclaredGeneratedPayloads(root, packageJson) {
   if (!Array.isArray(packageJson.files)) fail('package.json files must be an array');
   const paths = new Set();
+  const standaloneBundles = new Set();
+  const collectDirectory = repoPath => {
+    const absolutePath = join(root, repoPath);
+    if (!existsSync(absolutePath)) fail(`required generated runtime directory is missing: ${repoPath}`);
+    const stat = lstatSync(absolutePath);
+    if (stat.isSymbolicLink()) fail(`package.json files entry must not traverse a symbolic link: ${repoPath}`);
+    if (!stat.isDirectory()) fail(`package.json files entry must be a directory: ${repoPath}`);
+    for (const entry of readdirSync(absolutePath, { withFileTypes: true })) {
+      const child = `${repoPath}/${entry.name}`;
+      if (entry.isSymbolicLink()) fail(`package.json files entry must not traverse a symbolic link: ${child}`);
+      if (entry.isDirectory()) collectDirectory(child);
+      else if (entry.isFile() && isRuntimeArtifactCandidate(child)) paths.add(child);
+    }
+  };
   for (const value of packageJson.files) {
     if (typeof value !== 'string') fail('package.json files entries must be strings');
     const repoPath = normalizeRepoPath(value, 'package.json files entry');
-    if (isGeneratedPath(repoPath) && extname(repoPath)) paths.add(repoPath);
+    if (!isGeneratedPath(repoPath)) continue;
+    if (extname(repoPath)) {
+      paths.add(repoPath);
+      if (isWithin(repoPath, 'bridge') && isModulePath(repoPath)) standaloneBundles.add(repoPath);
+    }
+    else collectDirectory(repoPath);
   }
-  return paths;
+  return { paths, standaloneBundles };
 }
 
 function pluginRootPaths(value, label) {
@@ -196,7 +230,7 @@ function collectManifestEntrypoints(root) {
   return { paths, pluginJson };
 }
 
-function generatedJoinPath(node) {
+function pathJoinName(node) {
   if (!ts.isCallExpression(node)) return null;
   const expression = node.expression;
   const name = ts.isIdentifier(expression)
@@ -204,58 +238,107 @@ function generatedJoinPath(node) {
     : ts.isPropertyAccessExpression(expression)
       ? expression.name.text
       : '';
-  if (name !== 'join' && name !== 'resolve') return null;
-  const parts = node.arguments.map(argument =>
-    ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument) ? argument.text : null,
-  );
+  return name === 'join' || name === 'resolve' ? name : null;
+}
+
+function unwrapPathWrapper(node) {
+  if (ts.isPropertyAccessExpression(node) && node.name.text === 'href') return unwrapPathWrapper(node.expression);
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+    && (node.expression.text === 'pathToFileURL' || node.expression.text === 'fileURLToPath')
+    && node.arguments.length === 1) return unwrapPathWrapper(node.arguments[0]);
+  return node;
+}
+
+function isImportMetaUrl(node) {
+  return ts.isPropertyAccessExpression(node) && node.name.text === 'url'
+    && ts.isMetaProperty(node.expression) && node.expression.keywordToken === ts.SyntaxKind.ImportKeyword
+    && node.expression.name.text === 'meta';
+}
+
+function collectConstantBindings(sourceFile) {
+  const bindings = new Map();
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+      && ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const)) {
+      bindings.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return bindings;
+}
+
+function staticValue(node, bindings, resolving = new Set()) {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isIdentifier(node) && bindings.has(node.text) && !resolving.has(node.text)) {
+    const next = new Set(resolving);
+    next.add(node.text);
+    return staticValue(bindings.get(node.text), bindings, next);
+  }
+  if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'URL'
+    && node.arguments?.length === 2 && isImportMetaUrl(node.arguments[1])) return staticValue(node.arguments[0], bindings, resolving);
+  if (ts.isArrayLiteralExpression(node)) {
+    const values = [];
+    for (const element of node.elements) {
+      const value = staticValue(ts.isSpreadElement(element) ? element.expression : element, bindings, resolving);
+      if (typeof value === 'string') values.push(value);
+      else if (Array.isArray(value)) values.push(...value);
+      else return null;
+    }
+    return values;
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticValue(node.left, bindings, resolving);
+    const right = staticValue(node.right, bindings, resolving);
+    return typeof left === 'string' && typeof right === 'string' ? left + right : null;
+  }
+  if (pathJoinName(node)) {
+    const parts = [];
+    for (const argument of node.arguments) {
+      const value = staticValue(ts.isSpreadElement(argument) ? argument.expression : argument, bindings, resolving);
+      if (typeof value === 'string') parts.push(value);
+      else if (ts.isSpreadElement(argument) && Array.isArray(value)) parts.push(...value);
+      else return null;
+    }
+    return parts.join('/');
+  }
+  return null;
+}
+
+
+function generatedJoinPath(node, bindings) {
+  const pathNode = unwrapPathWrapper(node);
+  if (!pathJoinName(pathNode)) return null;
+  const parts = [];
+  for (const argument of pathNode.arguments) {
+    const value = staticValue(ts.isSpreadElement(argument) ? argument.expression : argument, bindings);
+    if (typeof value === 'string') parts.push(...value.split('/'));
+    else if (ts.isSpreadElement(argument) && Array.isArray(value)) {
+      for (const part of value) parts.push(...part.split('/'));
+    } else parts.push(null);
+  }
   const rootIndex = parts.findIndex(part => part === 'dist' || part === 'bridge');
-  if (rootIndex < 0 || parts.slice(rootIndex).some(part => part === null)) return null;
-  const repoPath = parts.slice(rootIndex).join('/');
-  return extname(repoPath) ? normalizeRepoPath(repoPath, 'computed generated runtime path') : null;
+  if (rootIndex < 0) return null;
+  if (parts.slice(rootIndex).some(part => part === null)) return null;
+  const generatedPath = parts.slice(rootIndex).join('/');
+  if (!extname(generatedPath)) return null;
+  return normalizeRepoPath(generatedPath, 'computed generated runtime path');
 }
 
-function containsGeneratedJoin(node) {
+function containsPotentialLocalReference(node, bindings) {
+  const value = staticValue(node, bindings);
+  if (typeof value === 'string') {
+    return value.startsWith('./') || value.startsWith('../') || value === 'dist' || value === 'bridge';
+  }
   let found = false;
-  const visit = current => {
-    if (generatedJoinPath(current)) found = true;
-    else if (!found) ts.forEachChild(current, visit);
-  };
-  visit(node);
-  return found;
-}
-
-function containsStaticLocalUrl(node) {
-  let found = false;
-  const visit = current => {
-    if (ts.isNewExpression(current)
-      && ts.isIdentifier(current.expression)
-      && current.expression.text === 'URL'
-      && current.arguments?.length
-      && (ts.isStringLiteral(current.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(current.arguments[0]))
-      && (current.arguments[0].text.startsWith('./') || current.arguments[0].text.startsWith('../'))) {
-      found = true;
-    } else if (!found) {
-      ts.forEachChild(current, visit);
-    }
-  };
-  visit(node);
-  return found;
-}
-
-function containsPotentialLocalReference(node) {
-  let found = false;
-  const visit = current => {
-    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) {
-      if (current.text.startsWith('./') || current.text.startsWith('../') || current.text === 'dist' || current.text === 'bridge') found = true;
-    }
-    if (!found) ts.forEachChild(current, visit);
-  };
-  visit(node);
+  ts.forEachChild(node, current => {
+    if (!found) found = containsPotentialLocalReference(current, bindings);
+  });
   return found;
 }
 
 function moduleReferences(source, repoPath) {
-  const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+  const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   if (sourceFile.parseDiagnostics.length > 0) {
     const diagnostic = sourceFile.parseDiagnostics[0];
     fail(`cannot parse runtime module ${repoPath}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`);
@@ -263,34 +346,18 @@ function moduleReferences(source, repoPath) {
 
   const local = new Set();
   const generated = new Set();
-  const aliases = new Map();
-  const collectAliases = node => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
-      && (ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer))
-      && (node.initializer.text.startsWith('./') || node.initializer.text.startsWith('../'))) {
-      aliases.set(node.name.text, node.initializer.text);
-    }
-    ts.forEachChild(node, collectAliases);
-  };
-  collectAliases(sourceFile);
-
+  const bindings = collectConstantBindings(sourceFile);
   const addLocal = node => {
     if (!node) return false;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      if (node.text.startsWith('./') || node.text.startsWith('../')) {
-        local.add(node.text);
-        return true;
-      }
-      return false;
-    }
-    if (ts.isIdentifier(node) && aliases.has(node.text)) {
-      local.add(aliases.get(node.text));
+    const value = staticValue(node, bindings);
+    if (typeof value === 'string' && (value.startsWith('./') || value.startsWith('../'))) {
+      local.add(value);
       return true;
     }
     return false;
   };
   const visit = node => {
-    const generatedPath = generatedJoinPath(node);
+    const generatedPath = generatedJoinPath(node, bindings);
     if (generatedPath) generated.add(generatedPath);
 
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) addLocal(node.moduleSpecifier);
@@ -305,8 +372,8 @@ function moduleReferences(source, repoPath) {
       const moduleRequire = ts.isPropertyAccessExpression(expression) && expression.name.text === 'require';
       if (directRequire || dynamicImport || requireResolve || moduleRequire) {
         const argument = node.arguments[0];
-        if (!addLocal(argument) && argument && containsPotentialLocalReference(argument)
-          && !containsGeneratedJoin(argument) && !containsStaticLocalUrl(argument)) {
+        if (!addLocal(argument) && argument && containsPotentialLocalReference(argument, bindings)
+          && !generatedJoinPath(argument, bindings)) {
           fail(`ambiguous local runtime load in ${repoPath}: ${argument.getText(sourceFile)}`);
         }
       }
@@ -414,15 +481,12 @@ export function collectPluginRuntimeClosure(root = process.cwd(), { trustedPacka
   const packageJson = readJson(root, 'package.json');
   const { paths: manifestEntrypoints, pluginJson } = collectManifestEntrypoints(root);
   const declaredPackage = trustedPackageJson ?? packageJson;
-  const declaredGeneratedPayloads = collectDeclaredGeneratedPayloads(declaredPackage);
+  const { paths: declaredGeneratedPayloads, standaloneBundles } = collectDeclaredGeneratedPayloads(root, declaredPackage);
   const initialPaths = new Set([
     ...manifestEntrypoints,
-    ...collectPackageBinEntrypoints(declaredPackage),
+    ...collectPackagePublicEntrypoints(declaredPackage),
     ...declaredGeneratedPayloads,
   ]);
-  const standaloneBundles = new Set(
-    [...declaredGeneratedPayloads].filter(path => isWithin(path, 'bridge') && isModulePath(path)),
-  );
   const requiredPaths = collectRuntimeClosure(root, initialPaths, standaloneBundles);
   validateCoordinatorHandshake(root, requiredPaths, packageJson, pluginJson);
   return {
@@ -545,7 +609,7 @@ export function inspectPluginShippingSurface(root = process.cwd()) {
   const stagePaths = [...required].filter(path => isGeneratedPath(path) && allChanged.has(path));
   const unrelatedGeneratedExtras = new Set([
     ...[...status.staged, ...status.worktree].filter(path => isGeneratedPath(path) && isRuntimeArtifactCandidate(path) && !required.has(path)),
-    ...[...new Set([...status.untracked, ...ignoredUntracked])].filter(path => isWithin(path, 'bridge') && isRuntimeArtifactCandidate(path) && !required.has(path)),
+    ...[...new Set([...status.untracked, ...ignoredUntracked])].filter(path => isGeneratedPath(path) && isRuntimeArtifactCandidate(path) && !required.has(path)),
   ]);
   return {
     ...surface,
