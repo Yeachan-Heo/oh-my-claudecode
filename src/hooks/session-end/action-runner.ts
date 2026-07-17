@@ -15,7 +15,8 @@ function runDirectory(context: ActionRunContext): string { return path.join(getO
 function runnerEnvironment(actionName: SessionEndActionName): NodeJS.ProcessEnv {
   const baseKeys = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'];
   const notificationKeys = ['OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_DISCORD_NOTIFIER_CHANNEL', 'OMC_DISCORD_WEBHOOK_URL', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL'];
-  const keys = actionName === 'callback' || actionName === 'notification' ? [...baseKeys, ...notificationKeys] : actionName === 'openclaw' ? [...baseKeys, 'OMC_OPENCLAW'] : baseKeys;
+  const openClawKeys = ['OMC_OPENCLAW', 'OMC_OPENCLAW_CONFIG', 'TMUX', 'TMUX_PANE', ...Object.keys(process.env).filter((key) => key.startsWith('OPENCLAW_REPLY_'))];
+  const keys = actionName === 'callback' || actionName === 'notification' ? [...baseKeys, ...notificationKeys] : actionName === 'openclaw' ? [...baseKeys, ...openClawKeys] : baseKeys;
   return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 

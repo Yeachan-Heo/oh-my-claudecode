@@ -22,7 +22,7 @@ import { runSessionEndAction } from '../action-runner.js';
 
 const directories: string[] = [];
 
-function context(directory: string, actionName: 'foreground-cleanup' | 'notification' = 'foreground-cleanup') {
+function context(directory: string, actionName: 'foreground-cleanup' | 'notification' | 'openclaw' = 'foreground-cleanup') {
   return {
     directory,
     sessionId: 'fast-exit',
@@ -124,5 +124,33 @@ describe('SessionEnd action runner', () => {
     const cleanupEnvironment = childProcess.spawn.mock.calls[1][2].env as NodeJS.ProcessEnv;
     expect(cleanupEnvironment).not.toHaveProperty('OMC_DISCORD');
     expect(cleanupEnvironment).not.toHaveProperty('OMC_DISCORD_WEBHOOK_URL');
+  });
+
+  it('passes only bounded routing context to OpenClaw action children', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+    directories.push(directory);
+    const child = Object.assign(new EventEmitter(), { pid: 12349, unref: vi.fn() });
+    childProcess.spawn.mockImplementation(() => {
+      queueMicrotask(() => child.emit('exit', 0));
+      return child;
+    });
+    processUtils.getProcessStartIdentity.mockResolvedValue('identity');
+    vi.stubEnv('OMC_OPENCLAW', '1');
+    vi.stubEnv('OMC_OPENCLAW_CONFIG', '/tmp/openclaw.json');
+    vi.stubEnv('OPENCLAW_REPLY_THREAD', 'thread-1');
+    vi.stubEnv('TMUX', '/tmp/tmux');
+    vi.stubEnv('TMUX_PANE', '%7');
+    vi.stubEnv('OMC_DISCORD_WEBHOOK_URL', 'not-for-openclaw');
+
+    await runSessionEndAction(context(directory, 'openclaw'), async () => undefined);
+    const environment = childProcess.spawn.mock.calls[0][2].env as NodeJS.ProcessEnv;
+    expect(environment).toMatchObject({
+      OMC_OPENCLAW: '1',
+      OMC_OPENCLAW_CONFIG: '/tmp/openclaw.json',
+      OPENCLAW_REPLY_THREAD: 'thread-1',
+      TMUX: '/tmp/tmux',
+      TMUX_PANE: '%7',
+    });
+    expect(environment).not.toHaveProperty('OMC_DISCORD_WEBHOOK_URL');
   });
 });
