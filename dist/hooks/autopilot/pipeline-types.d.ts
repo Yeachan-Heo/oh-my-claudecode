@@ -20,6 +20,62 @@ export type PipelinePhase = PipelineStageId | PipelineTerminalState;
 export type StageStatus = "pending" | "active" | "complete" | "failed" | "skipped";
 /** The canonical stage execution order */
 export declare const STAGE_ORDER: readonly PipelineStageId[];
+/** Closed version 1 profile sequence admitted by the workflow contract. */
+export type WorkflowProfileStages = readonly [
+    "ralplan",
+    "execution"
+] | readonly [
+    "ralplan",
+    "execution",
+    "ralph"
+] | readonly [
+    "ralplan",
+    "execution",
+    "qa"
+] | readonly [
+    "ralplan",
+    "execution",
+    "ralph",
+    "qa"
+];
+/** Immutable, normalized descriptor persisted for a named workflow run. */
+export interface WorkflowDescriptor {
+    readonly descriptorVersion: 1;
+    readonly workflowName: string;
+    readonly profileVersion: 1;
+    readonly stages: WorkflowProfileStages;
+    readonly profileHash: string;
+}
+/** Stable identity of transcript bytes accepted by a named workflow run. */
+export interface PipelineTranscriptFileIdentity {
+    device: number;
+    inode: number;
+    size: number;
+    mtimeNs: string;
+    ctimeNs: string;
+    contentSha256: string;
+}
+/** Transcript boundary captured at workflow activation. */
+export interface PipelineActivationBoundary {
+    transcriptPath: string;
+    transcriptRoot: string;
+    transcriptBasename: string;
+    sessionId: string;
+    byteOffset: number;
+    fileIdentity: PipelineTranscriptFileIdentity;
+}
+/** Evidence captured when a selected workflow stage completes. */
+export interface PipelineCompletionObservation {
+    stageId: PipelineStageId;
+    sessionId: string;
+    signalId: string;
+    lineNumber: number;
+    byteOffset: number;
+    recordContentSha256: string;
+    stableFile: PipelineTranscriptFileIdentity;
+    activationBoundary: PipelineActivationBoundary;
+    observedAt: string;
+}
 /** Execution backend for the execution stage */
 export type ExecutionBackend = "team" | "solo";
 /** CLI-backed worker types supported by the tmux team runtime. */
@@ -126,12 +182,18 @@ export interface PipelineStageState {
  * Stored alongside existing autopilot state fields.
  */
 export interface PipelineTracking {
-    /** Pipeline configuration used for this run */
-    pipelineConfig: PipelineConfig;
-    /** Ordered list of stages and their current status */
+    /** Pipeline configuration used by legacy pipeline runs. */
+    pipelineConfig?: PipelineConfig;
+    /** Ordered list of selected stages and their current status. */
     stages: PipelineStageState[];
-    /** Index of the currently active stage in the stages array */
+    /** Index of the currently active stage in the stages array. */
     currentStageIndex: number;
+    /** Monotonic mutable progress revision. */
+    trackingRevision: number;
+    /** Transcript boundary captured when the workflow was activated. */
+    activationBoundary: PipelineActivationBoundary | null;
+    /** Evidence collected for each completed workflow stage. */
+    completionObservations: PipelineCompletionObservation[];
 }
 /**
  * Maps deprecated mode names to their pipeline configuration equivalents.

@@ -8,7 +8,7 @@ import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js
 import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
-import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, sealWikiManifest } from './cleanup-manifest.js';
+import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob, sealWikiManifest } from './cleanup-manifest.js';
 import { spawnSessionEndWorker } from './worker.js';
 import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
 const SESSION_STARTED_MARKER_FILE = 'session-started.json';
@@ -677,12 +677,24 @@ export async function cleanupSessionReplies(sessionId) {
             throw new Error('reply-listener-stop-failed');
     }
 }
+function deferredSessionEndSnapshot(directory, sessionId) {
+    const payload = readSessionEndJob(directory, sessionId)?.actions.callback.payload;
+    const metrics = payload?.metrics;
+    const input = payload?.input;
+    if (metrics && input?.session_id === sessionId && typeof input.cwd === 'string') {
+        return { metrics, input: input };
+    }
+    return {
+        metrics: recordSessionMetrics(directory, { session_id: sessionId, transcript_path: '', cwd: directory, permission_mode: '', hook_event_name: 'SessionEnd', reason: 'other' }),
+        input: { session_id: sessionId, cwd: directory },
+    };
+}
 export async function runSessionEndCallbacks(directory, sessionId, idempotencyKey, strict = false) {
-    const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: '', cwd: directory, permission_mode: '', hook_event_name: 'SessionEnd', reason: 'other' });
+    const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
     const profileName = process.env.OMC_NOTIFY_PROFILE;
     const config = getNotificationConfig(profileName);
     const platforms = config && hasExplicitNotificationConfig(profileName) ? getEnabledPlatforms(config, 'session-end') : [];
-    const outcome = await runSessionEndDeferredAction({ name: 'legacy-callback', class: 'best-effort', idempotencyKey, payload: { skipPlatforms: platforms.length > 0 ? getLegacyPlatformsCoveredByNotifications(platforms) : [], idempotencyKey }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: '', metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'legacy-callback', class: 'best-effort', idempotencyKey, payload: { idempotencyKey }, budgetMs: 2_000 } });
+    const outcome = await runSessionEndDeferredAction({ name: 'legacy-callback', class: 'best-effort', idempotencyKey, payload: { skipPlatforms: platforms.length > 0 ? getLegacyPlatformsCoveredByNotifications(platforms) : [], idempotencyKey }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: input.transcript_path ?? '', metrics, input, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'legacy-callback', class: 'best-effort', idempotencyKey, payload: { idempotencyKey }, budgetMs: 2_000 } });
     if (strict && outcome.status !== 'completed' && outcome.status !== 'skipped')
         throw new Error(`legacy-callback-${outcome.status}`);
 }
@@ -691,14 +703,14 @@ export async function runSessionEndNotifications(directory, sessionId, strict = 
     const config = getNotificationConfig(profileName);
     if (!config || !hasExplicitNotificationConfig(profileName))
         return;
-    const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: '', cwd: directory, permission_mode: '', hook_event_name: 'SessionEnd', reason: 'other' });
-    const outcome = await runSessionEndDeferredAction({ name: 'notification', class: 'best-effort', payload: { profileName }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: '', metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'notification', class: 'best-effort', payload: { profileName }, budgetMs: 2_000 } });
+    const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
+    const outcome = await runSessionEndDeferredAction({ name: 'notification', class: 'best-effort', payload: { profileName }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: input.transcript_path ?? '', metrics, input, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'notification', class: 'best-effort', payload: { profileName }, budgetMs: 2_000 } });
     if (strict && outcome.status !== 'completed' && outcome.status !== 'skipped')
         throw new Error(`notification-${outcome.status}`);
 }
 export async function runSessionEndOpenClaw(directory, sessionId, strict = false) {
-    const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: '', cwd: directory, permission_mode: '', hook_event_name: 'SessionEnd', reason: 'other' });
-    const outcome = await runSessionEndDeferredAction({ name: 'openclaw-wake', class: 'best-effort', payload: { enabled: process.env.OMC_OPENCLAW === '1', reason: metrics.reason, sessionId }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: '', metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'openclaw-wake', class: 'best-effort', payload: {}, budgetMs: 2_000 } });
+    const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
+    const outcome = await runSessionEndDeferredAction({ name: 'openclaw-wake', class: 'best-effort', payload: { enabled: process.env.OMC_OPENCLAW === '1', reason: metrics.reason, sessionId }, budgetMs: 2_000 }, { directory, sessionId, transcriptPath: input.transcript_path ?? '', metrics, input, deadlineAt: new Date(Date.now() + 2_000).toISOString(), action: { name: 'openclaw-wake', class: 'best-effort', payload: {}, budgetMs: 2_000 } });
     if (strict && outcome.status !== 'completed' && outcome.status !== 'skipped')
         throw new Error(`openclaw-wake-${outcome.status}`);
 }
@@ -717,7 +729,7 @@ export async function runForegroundSessionEndCleanup(directory, sessionId, persi
     return outcome;
 }
 /** Foreground path: only durable local state and worker launch; deferred adapters are worker-owned. */
-function buildDurableSessionEndPayload(directory, input) {
+function buildDurableSessionEndPayload(directory, input, metrics) {
     const teamState = readModeState('team', directory, input.session_id);
     const teamName = extractTeamNameFromState(teamState);
     // Keep only routing identifiers and booleans: credentials remain in the inherited worker environment.
@@ -725,6 +737,8 @@ function buildDurableSessionEndPayload(directory, input) {
         transcriptPath: input.transcript_path,
         cwd: input.cwd,
         reason: input.reason,
+        input,
+        metrics,
         initialTeamNames: teamName ? [teamName] : [],
         notificationProfile: typeof process.env.OMC_NOTIFY_PROFILE === 'string' ? process.env.OMC_NOTIFY_PROFILE : undefined,
         openClawEnabled: process.env.OMC_OPENCLAW === '1',
@@ -732,11 +746,11 @@ function buildDurableSessionEndPayload(directory, input) {
 }
 export async function processSessionEnd(input) {
     const directory = resolveToWorktreeRoot(input.cwd);
-    const payload = buildDurableSessionEndPayload(directory, input);
+    const metrics = recordSessionMetrics(directory, input);
+    const payload = buildDurableSessionEndPayload(directory, input, metrics);
     const manifest = prepareCoreManifest(directory, input.session_id, payload);
     if (!manifest)
         return { continue: true };
-    const metrics = recordSessionMetrics(directory, input);
     exportSessionSummary(directory, metrics);
     let foregroundOutcome;
     try {

@@ -7,6 +7,9 @@ export interface OrchestratorConfig {
     pollIntervalMs?: number;
     /** Bound on `drainAndStop`. Defaults to 10000ms. */
     drainTimeoutMs?: number;
+    /** Persistent owner generation; stale attempts must not tear down its services. */
+    serviceGeneration?: number;
+    serviceAttemptId?: string;
 }
 export interface OrchestratorHandle {
     /** Seed lastSha from the current branch HEAD (no fan-out on first observation). */

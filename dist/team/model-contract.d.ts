@@ -1,3 +1,4 @@
+import type { WorkerLaunchDescriptor } from './types.js';
 export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
 export interface CliAgentContract {
     agentType: CliAgentType;
@@ -64,6 +65,8 @@ export declare function validateCliAvailable(agentType: CliAgentType): void;
 export declare function resolveValidatedBinaryPath(agentType: CliAgentType): string;
 export declare function buildLaunchArgs(agentType: CliAgentType, config: WorkerLaunchConfig): string[];
 export declare function buildWorkerArgv(agentType: CliAgentType, config: WorkerLaunchConfig): string[];
+export declare function validateWorkerLaunchDescriptor(value: unknown): WorkerLaunchDescriptor;
+export declare function buildValidatedWorkerLaunchDescriptor(agentType: CliAgentType, config: WorkerLaunchConfig, appendedArgs?: readonly string[]): WorkerLaunchDescriptor;
 export declare function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunchConfig): string;
 export declare function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType, env?: NodeJS.ProcessEnv): Record<string, string>;
 export declare function parseCliOutput(agentType: CliAgentType, rawOutput: string): string;

@@ -10,10 +10,11 @@
  * 4. QA: UltraQA ensures build/lint/tests pass
  * 5. Validation: Multiple specialized architects verify the implementation
  */
+import type { PipelineTracking, WorkflowDescriptor } from "./pipeline-types.js";
 /**
  * Represents the current phase of autopilot execution
  */
-export type AutopilotPhase = 'expansion' | 'planning' | 'execution' | 'qa' | 'validation' | 'complete' | 'failed';
+export type AutopilotPhase = 'expansion' | 'planning' | 'execution' | 'ralplan' | 'ralph' | 'qa' | 'validation' | 'complete' | 'failed';
 /**
  * QA test status for build, lint, and test phases
  */
@@ -125,7 +126,9 @@ export interface AutopilotState {
     /** Maximum iterations before giving up */
     max_iterations: number;
     /** Original user input that started autopilot */
-    originalIdea: string;
+    originalIdea?: string;
+    /** Canonical named-workflow task persisted by installed hooks. */
+    prompt?: string;
     /** State for each phase */
     expansion: AutopilotExpansion;
     planning: AutopilotPlanning;
@@ -142,6 +145,14 @@ export interface AutopilotState {
     session_id?: string;
     /** Project path for isolation */
     project_path?: string;
+    /** Immutable descriptor for a named workflow run. */
+    workflow?: WorkflowDescriptor;
+    /** UUID binding mutable tracking to one named workflow activation. */
+    workflowRunId?: string;
+    /** Mutable profile progress; profile runs use this instead of legacy `pipeline`. */
+    pipelineTracking?: PipelineTracking;
+    /** Legacy no-profile pipeline progress. */
+    pipeline?: PipelineTracking;
 }
 /**
  * Configuration options for autopilot behavior

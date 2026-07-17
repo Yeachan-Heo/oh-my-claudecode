@@ -28,7 +28,7 @@ vi.mock('../../../platform/process-utils.js', () => processIdentity);
 vi.mock('../action-runner.js', () => actionRunner);
 
 import { isManifestTerminal, mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, sealCoreManifest, sealWikiManifest, takeSessionEndDiscoveryPage } from '../cleanup-manifest.js';
-import { processSessionEndWorker, reconcileSessionEndJobs } from '../worker.js';
+import { processSessionEndWorker, reconcileSessionEndJobs, workerEnvironment } from '../worker.js';
 
 const directories: string[] = [];
 
@@ -168,7 +168,7 @@ describe('SessionEnd durable worker', () => {
     vi.useFakeTimers();
     const directory = project();
     const sessionId = 'wiki-first-core-missing';
-    expect(sealWikiManifest(directory, sessionId)).not.toBeNull();
+    expect(sealWikiManifest(directory, sessionId, { capture: 'sealed-wiki-payload' })).not.toBeNull();
     const initial = readSessionEndJob(directory, sessionId)!;
     expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
       job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
@@ -178,7 +178,7 @@ describe('SessionEnd durable worker', () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(readSessionEndJob(directory, sessionId)).toMatchObject({
       phase: 'recoverable-failure',
-      producers: { core: { state: 'absent' }, wiki: { state: 'no-op' } },
+      producers: { core: { state: 'absent' }, wiki: { state: 'sealed' } },
     });
 
     await vi.advanceTimersByTimeAsync(1);
@@ -188,7 +188,7 @@ describe('SessionEnd durable worker', () => {
     expect(manifest).toMatchObject({
       phase: 'complete',
       owner: null,
-      producers: { core: { state: 'no-op', sealedBy: 'recovery' }, wiki: { state: 'no-op' } },
+      producers: { core: { state: 'no-op', sealedBy: 'recovery' }, wiki: { state: 'sealed' } },
       actions: {
         'foreground-cleanup': { status: 'expired', lastOutcomeCode: 'required-core-producer-absent' },
         'team-cleanup': { status: 'expired', lastOutcomeCode: 'required-core-producer-absent' },
@@ -196,8 +196,25 @@ describe('SessionEnd durable worker', () => {
         notification: { status: 'expired', lastOutcomeCode: 'best-effort-core-producer-absent' },
       },
     });
+    expect(manifest.actions['wiki-capture']).toMatchObject({ status: 'completed', attempts: 1 });
     expect(isManifestTerminal(manifest)).toBe(true);
     expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([]);
+  });
+
+  it('forwards OpenClaw reply and tmux routing only to the detached worker environment', () => {
+    const saved = { config: process.env.OMC_OPENCLAW_CONFIG, reply: process.env.OPENCLAW_REPLY_TOKEN, tmux: process.env.TMUX, pane: process.env.TMUX_PANE, unrelated: process.env.UNRELATED_SESSION_END_SECRET };
+    process.env.OMC_OPENCLAW_CONFIG = '/tmp/openclaw.json';
+    process.env.OPENCLAW_REPLY_TOKEN = 'reply-token';
+    process.env.TMUX = '/tmp/tmux-100/default,123,0';
+    process.env.TMUX_PANE = '%42';
+    process.env.UNRELATED_SESSION_END_SECRET = 'not-forwarded';
+    expect(workerEnvironment()).toMatchObject({
+      OMC_OPENCLAW_CONFIG: '/tmp/openclaw.json', OPENCLAW_REPLY_TOKEN: 'reply-token', TMUX: '/tmp/tmux-100/default,123,0', TMUX_PANE: '%42',
+    });
+    expect(workerEnvironment().UNRELATED_SESSION_END_SECRET).toBeUndefined();
+    for (const [key, value] of Object.entries({ OMC_OPENCLAW_CONFIG: saved.config, OPENCLAW_REPLY_TOKEN: saved.reply, TMUX: saved.tmux, TMUX_PANE: saved.pane, UNRELATED_SESSION_END_SECRET: saved.unrelated })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   });
 
   it('terminalizes a core-only manifest after three failed foreground cleanups without timer churn', async () => {

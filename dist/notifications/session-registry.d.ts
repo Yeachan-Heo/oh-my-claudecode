@@ -22,12 +22,18 @@ export interface SessionMapping {
     askUserQuestionAllowOther?: boolean;
 }
 /**
+ * Reserve an empty registry while the exact listener generation is stopped.
+ * Holding this lock prevents a concurrent notification registration from being
+ * lost between its empty check and process termination.
+ */
+export declare function lockRegistryIfEmpty(): (() => void) | 'active' | null;
+/**
  * Register a message mapping (atomic JSONL append).
  *
  * Uses O_WRONLY | O_APPEND | O_CREAT for atomic appends (up to PIPE_BUF bytes on Linux).
  * Each mapping serializes to well under 4096 bytes, making this operation atomic.
  */
-export declare function registerMessage(mapping: SessionMapping): void;
+export declare function registerMessage(mapping: SessionMapping): boolean;
 /**
  * Load all mappings from the JSONL file
  */
@@ -41,15 +47,15 @@ export declare function lookupByMessageId(platform: string, messageId: string): 
  * Remove all entries for a given session ID.
  * This is a rewrite operation (infrequent - only on session-end).
  */
-export declare function removeSession(sessionId: string): void;
+export declare function removeSession(sessionId: string): boolean;
 /**
  * Remove all entries for a given pane ID.
  * Called by reply listener when pane verification fails (stale pane cleanup).
  */
-export declare function removeMessagesByPane(paneId: string): void;
+export declare function removeMessagesByPane(paneId: string): boolean;
 /**
  * Remove entries older than MAX_AGE_MS (24 hours).
  * This is a rewrite operation (infrequent - called periodically by daemon).
  */
-export declare function pruneStale(): void;
+export declare function pruneStale(): boolean;
 //# sourceMappingURL=session-registry.d.ts.map

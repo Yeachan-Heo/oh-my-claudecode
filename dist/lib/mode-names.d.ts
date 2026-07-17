@@ -15,6 +15,7 @@ export declare const MODE_NAMES: {
     readonly ULTRAQA: "ultraqa";
     readonly RALPLAN: "ralplan";
     readonly DEEP_INTERVIEW: "deep-interview";
+    readonly MERGE_READINESS: "merge-readiness";
     readonly SELF_IMPROVE: "self-improve";
 };
 /**

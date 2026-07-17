@@ -16,6 +16,7 @@ export interface ScaleUpResult {
     addedWorkers: WorkerInfo[];
     newWorkerCount: number;
     nextWorkerIndex: number;
+    servicesSync: 'synced' | 'repair_required';
 }
 export interface ScaleDownResult {
     ok: true;
@@ -32,7 +33,7 @@ export interface ScaleError {
  * Acquires the file-based scaling lock, reads the current config,
  * validates capacity, creates new tmux panes, and bootstraps workers.
  */
-export declare function scaleUp(teamName: string, count: number, agentType: string, tasks: Array<{
+export declare function scaleUpOwned(teamName: string, count: number, agentType: string, tasks: Array<{
     subject: string;
     description: string;
     owner?: string;
@@ -55,5 +56,15 @@ export interface ScaleDownOptions {
  * Sets targeted workers to 'draining' status, waits for them to finish
  * current work (or force kills), then removes tmux panes and updates config.
  */
+export declare function scaleDownOwned(teamName: string, cwd: string, options?: ScaleDownOptions, env?: NodeJS.ProcessEnv): Promise<ScaleDownResult | ScaleError>;
+/** Public scale facade; the owned algorithm applies the recovery exclusion under its existing lock. */
+export declare function scaleUp(teamName: string, count: number, agentType: string, tasks: Array<{
+    subject: string;
+    description: string;
+    owner?: string;
+    blocked_by?: string[];
+    role?: string;
+}>, cwd: string, env?: NodeJS.ProcessEnv): Promise<ScaleUpResult | ScaleError>;
+/** Public scale-down facade; force and drain behavior are delegated unchanged. */
 export declare function scaleDown(teamName: string, cwd: string, options?: ScaleDownOptions, env?: NodeJS.ProcessEnv): Promise<ScaleDownResult | ScaleError>;
 //# sourceMappingURL=scaling.d.ts.map

@@ -12,6 +12,15 @@ export interface AutopilotStateForHud {
     tasksCompleted?: number;
     tasksTotal?: number;
     filesCreated?: number;
+    workflow?: {
+        invalid?: boolean;
+        name?: string;
+        version?: number;
+        shortHash?: string;
+        currentStage?: string;
+        currentStageIndex?: number;
+        stagesTotal?: number;
+    };
 }
 /**
  * Render autopilot state.

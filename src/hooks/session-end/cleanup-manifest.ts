@@ -303,8 +303,8 @@ export function failClosedMissingCoreProducer(directory: string, sessionId: stri
   return mutateLatest(directory, sessionId, job => {
     if (job.producers.core.state !== 'absent' || !['sealed', 'no-op'].includes(job.producers.wiki.state) || Date.now() < Date.parse(job.producerGraceExpiresAt)) return;
     job.producers.core = { state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
-    for (const action of Object.values(job.actions)) {
-      if (action.status !== 'pending' && action.status !== 'retryable') continue;
+    for (const [name, action] of Object.entries(job.actions) as Array<[SessionEndActionName, SessionEndActionState]>) {
+      if (name === 'wiki-capture' || (action.status !== 'pending' && action.status !== 'retryable')) continue;
       action.status = 'expired';
       action.lastOutcomeCode = action.class === 'required' ? 'required-core-producer-absent' : 'best-effort-core-producer-absent';
     }

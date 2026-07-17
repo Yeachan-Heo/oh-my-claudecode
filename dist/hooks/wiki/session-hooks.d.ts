@@ -6,6 +6,34 @@
  * SessionEnd: bounded append-only capture of session metadata
  * PreCompact: inject wiki summary for compaction survival
  */
+export interface WikiSessionEndCaptureIntent {
+    kind: 'wiki-session-end-capture';
+    root: string;
+    sessionId: string;
+    filename: string;
+    capturedAt: string;
+    /** Durable intent identity; safe to persist because it is a one-way digest. */
+    captureKey?: string;
+}
+export interface WikiSessionEndCommitOptions {
+    /** Absolute deadline in epoch milliseconds for a worker-owned commit. */
+    deadlineAt?: number;
+    /** Maximum time to wait for the existing wiki lock. */
+    lockTimeoutMs?: number;
+}
+/**
+ * Build a JSON-safe SessionEnd capture intent without taking the wiki lock or
+ * mutating the filesystem. The manifest worker durably owns and commits it.
+ */
+export declare function buildWikiSessionEndCaptureIntent(data: {
+    cwd?: string;
+    session_id?: string;
+}): WikiSessionEndCaptureIntent | null;
+/**
+ * Commit a capture intent under the existing wiki lock. Replaying the same
+ * intent never duplicates its page or its log entry.
+ */
+export declare function commitWikiSessionEndCaptureIntent(intent: WikiSessionEndCaptureIntent, options?: WikiSessionEndCommitOptions): boolean;
 /**
  * SessionStart hook: inject wiki context into session.
  *
@@ -19,13 +47,11 @@ export declare function onSessionStart(data: {
     additionalContext?: string;
 };
 /**
- * SessionEnd hook: bounded append-only capture of session metadata.
- *
- * Captures raw session data as a session-log page.
- * Does NOT do LLM-judged curation — that happens via skill on next session.
- * Hard timeout: 3s via Promise.race pattern (sync version uses try/catch + time check).
+ * SessionEnd foreground compatibility hook. It deliberately constructs no
+ * writes and never acquires the wiki lock; the session wrapper enqueues the
+ * intent for the manifest worker to commit.
  */
-export declare function onSessionEnd(data: {
+export declare function onSessionEnd(_data: {
     cwd?: string;
     session_id?: string;
 }): {

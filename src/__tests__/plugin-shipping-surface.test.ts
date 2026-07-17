@@ -352,13 +352,15 @@ describe('plugin shipping surface transaction', () => {
       files: ['dist', 'bridge', 'bridge/claude-md-coordinator.cjs'],
     });
     writeFileSync(join(fixture.root, 'dist', 'public.js'), 'export default true;\n');
-    writeFileSync(join(fixture.root, 'dist', 'public.d.ts'), 'declare const value: true; export default value;\n');
+    writeFileSync(join(fixture.root, 'dist', 'public.d.ts'), "export * from './auxiliary.js';\n");
+    writeFileSync(join(fixture.root, 'dist', 'auxiliary.d.ts'), "export * from './nested.js';\n");
+    writeFileSync(join(fixture.root, 'dist', 'nested.d.ts'), 'export declare const nested: true;\n');
     const module = await shippingSurface;
 
     const surface = module.inspectPluginShippingSurface(fixture.root);
 
-    expect(surface.ignoredUntrackedRequiredPaths).toEqual(['dist/public.d.ts', 'dist/public.js']);
-    expect(surface.stagePaths).toEqual(['dist/public.d.ts', 'dist/public.js']);
+    expect(surface.ignoredUntrackedRequiredPaths).toEqual(['dist/auxiliary.d.ts', 'dist/nested.d.ts', 'dist/public.d.ts', 'dist/public.js']);
+    expect(surface.stagePaths).toEqual(['dist/auxiliary.d.ts', 'dist/nested.d.ts', 'dist/public.d.ts', 'dist/public.js']);
   });
 
   it('rejects missing and escaping public package entrypoints', () => {

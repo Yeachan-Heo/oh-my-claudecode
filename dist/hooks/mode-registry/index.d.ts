@@ -99,7 +99,7 @@ export declare function getAllModeStatuses(cwd: string, sessionId?: string): Mod
  *
  * @returns true if all files were deleted successfully (or didn't exist)
  */
-export declare function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: string): boolean;
+export declare function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: string, expectedState?: Record<string, unknown>): boolean;
 /**
  * Clear all mode states (force clear)
  */

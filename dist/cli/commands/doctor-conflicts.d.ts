@@ -24,6 +24,10 @@ export interface ConflictReport {
         hasUserContent: boolean;
         path: string;
         companionFile?: string;
+        files: ClaudeMdFileStatus[];
+        dirtyFiles: string[];
+        exactLegacyPaths: string[];
+        manualReviewPaths: string[];
     } | null;
     legacySkills: {
         name: string;
@@ -45,6 +49,14 @@ export interface ConflictReport {
     workspaceMarker: WorkspaceMarkerStatus;
     hasConflicts: boolean;
 }
+export interface ClaudeMdFileStatus {
+    path: string;
+    hasMarkers: boolean;
+    hasUserContent: boolean;
+    markerState: 'none' | 'complete' | 'corrupt' | 'symlink' | 'unreadable' | 'invalid-utf8';
+    exactLegacy: boolean;
+    manualReview: boolean;
+}
 /**
  * Check for hook conflicts in both profile-level (~/.claude/settings.json)
  * and project-level (./.claude/settings.json).
@@ -59,11 +71,7 @@ export declare function checkHookConflicts(): ConflictReport['hookConflicts'];
  * instead of reporting a generic hook conflict.
  */
 export declare function checkWindowsUnsafePluginHooks(): ConflictReport['windowsUnsafePluginHooks'];
-/**
- * Check CLAUDE.md for OMC markers and user content.
- * Also checks companion files (CLAUDE-omc.md, etc.) for the file-split pattern
- * where users keep OMC config in a separate file.
- */
+/** Analyze main and companion CLAUDE files without following symlinks. */
 export declare function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'];
 /**
  * Check environment flags that affect OMC behavior

@@ -7,13 +7,15 @@
 import { z } from 'zod';
 import { ToolDefinition } from './types.js';
 declare const STATE_TOOL_MODES: [string, ...string[]];
+declare const STATE_WRITE_MODES: [string, ...string[]];
+export declare function redactAutopilotPublicState(state: unknown): unknown;
 export declare const stateReadTool: ToolDefinition<{
     mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
 }>;
 export declare const stateWriteTool: ToolDefinition<{
-    mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
+    mode: z.ZodEnum<typeof STATE_WRITE_MODES>;
     active: z.ZodOptional<z.ZodBoolean>;
     iteration: z.ZodOptional<z.ZodNumber>;
     max_iterations: z.ZodOptional<z.ZodNumber>;
@@ -50,7 +52,7 @@ export declare const stateTools: (ToolDefinition<{
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
 }> | ToolDefinition<{
-    mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
+    mode: z.ZodEnum<typeof STATE_WRITE_MODES>;
     active: z.ZodOptional<z.ZodBoolean>;
     iteration: z.ZodOptional<z.ZodNumber>;
     max_iterations: z.ZodOptional<z.ZodNumber>;
@@ -71,6 +73,6 @@ export declare const stateTools: (ToolDefinition<{
     mode: z.ZodOptional<z.ZodEnum<typeof STATE_TOOL_MODES>>;
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
-}>)[];
+}> | ToolDefinition<any>)[];
 export {};
 //# sourceMappingURL=state-tools.d.ts.map

@@ -52,5 +52,16 @@ export declare function atomicWriteFileSync(filePath: string, content: string): 
  * @throws Error if JSON serialization fails or write operation fails
  */
 export declare function atomicWriteJsonSync(filePath: string, data: unknown): void;
+/**
+ * Bounded set of independently atomic writes. This is not a multi-file
+ * transaction: a crash between renames can expose a prefix of the batch.
+ * Every visible file, however, is fully written and durable before return.
+ */
+export interface AtomicBatchWrite {
+    path: string;
+    content: string;
+    mode?: number;
+}
+export declare function atomicWriteBatchSync(writes: AtomicBatchWrite[]): void;
 export declare function safeReadJson<T>(filePath: string): Promise<T | null>;
 //# sourceMappingURL=atomic-write.d.ts.map

@@ -15,7 +15,8 @@ import ts from 'typescript';
 
 const GENERATED_ROOTS = Object.freeze(['dist', 'bridge']);
 const MODULE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs']);
-const RESOLVABLE_EXTENSIONS = ['.js', '.cjs', '.mjs', '.json'];
+const DECLARATION_EXTENSION = '.d.ts';
+const RESOLVABLE_EXTENSIONS = ['.js', '.cjs', '.mjs', '.json', '.d.ts'];
 const OPTIONAL_BRIDGE_PAYLOADS = Object.freeze([
   'bridge/gyoshu_bridge.py',
   'bridge/run-mcp-server.sh',
@@ -110,6 +111,10 @@ function isModulePath(repoPath) {
   return MODULE_EXTENSIONS.has(extname(repoPath));
 }
 
+function isDeclarationPath(repoPath) {
+  return repoPath.endsWith(DECLARATION_EXTENSION);
+}
+
 function isTestOrFixturePath(repoPath) {
   const segments = repoPath.split('/');
   const fileName = segments.at(-1) ?? '';
@@ -118,7 +123,7 @@ function isTestOrFixturePath(repoPath) {
 }
 
 function isRuntimeArtifactCandidate(repoPath) {
-  return (isModulePath(repoPath) || repoPath.endsWith('.py') || repoPath.endsWith('.sh'))
+  return (isModulePath(repoPath) || isDeclarationPath(repoPath) || repoPath.endsWith('.py') || repoPath.endsWith('.sh'))
     && !isTestOrFixturePath(repoPath);
 }
 
@@ -338,13 +343,18 @@ function containsPotentialLocalReference(node, bindings) {
 }
 
 function moduleReferences(source, repoPath) {
-  const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, isDeclarationPath(repoPath) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
   if (sourceFile.parseDiagnostics.length > 0) {
     const diagnostic = sourceFile.parseDiagnostics[0];
     fail(`cannot parse runtime module ${repoPath}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`);
   }
 
   const local = new Set();
+  if (isDeclarationPath(repoPath)) {
+    for (const reference of ts.preProcessFile(source, true, true).referencedFiles) {
+      if (reference.fileName.startsWith('./') || reference.fileName.startsWith('../')) local.add(reference.fileName);
+    }
+  }
   const generated = new Set();
   const bindings = collectConstantBindings(sourceFile);
   const addLocal = node => {
@@ -396,6 +406,9 @@ function resolveLocalReference(root, importer, specifier) {
   const base = resolve(dirname(join(root, importer)), specifier);
   if (!isInside(realpathSync(root), base)) fail(`runtime import escapes package root: ${importer} -> ${specifier}`);
   const candidates = [base];
+  if (isDeclarationPath(importer) && MODULE_EXTENSIONS.has(extname(base))) {
+    candidates.push(`${base.slice(0, -extname(base).length)}${DECLARATION_EXTENSION}`);
+  }
   if (!extname(base)) {
     for (const extension of RESOLVABLE_EXTENSIONS) candidates.push(`${base}${extension}`);
     for (const extension of RESOLVABLE_EXTENSIONS) candidates.push(join(base, `index${extension}`));
@@ -422,7 +435,7 @@ function collectRuntimeClosure(root, initialPaths, standaloneBundles) {
     requiredPaths.add(repoPath);
     const source = readFileSync(file.absolutePath, 'utf8');
 
-    if (isModulePath(repoPath)) {
+    if (isModulePath(repoPath) || isDeclarationPath(repoPath)) {
       const references = moduleReferences(source, repoPath);
       for (const generatedPath of references.generated) {
         if (!requiredPaths.has(generatedPath)) queue.push(generatedPath);

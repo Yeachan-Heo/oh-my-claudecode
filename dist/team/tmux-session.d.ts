@@ -1,3 +1,4 @@
+import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbox-notification-guard.js';
 export type TeamMultiplexerContext = 'tmux' | 'cmux' | 'none';
 export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): TeamMultiplexerContext;
 /**
@@ -6,6 +7,42 @@ export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): T
  */
 export declare function isUnixLikeOnWindows(): boolean;
 export declare function applyMainVerticalLayout(teamTarget: string): Promise<void>;
+type MailboxOwnershipCommand = (args: string[]) => Promise<{
+    stdout: string;
+    stderr: string;
+}>;
+export interface MailboxTargetOwnershipDependencies {
+    tmuxExec: MailboxOwnershipCommand;
+    cmuxExec: MailboxOwnershipCommand;
+}
+/**
+ * Proves that a configured direct-mailbox target still belongs to its exact
+ * provider target. This performs read-only provider queries and never touches
+ * a candidate pane/surface.
+ */
+export declare function verifyTeamTargetOwnership(target: MailboxNotificationTarget, dependencies?: MailboxTargetOwnershipDependencies): Promise<MailboxTargetOwnership>;
+export type DirectMailboxEffectResult = {
+    kind: 'not_attempted';
+    reason: string;
+} | {
+    kind: 'confirmed';
+    transport: 'tmux_send_keys';
+    reason: 'worker_pane_notified' | 'leader_pane_notified';
+} | {
+    kind: 'attempted_unconfirmed';
+    transport: 'tmux_send_keys';
+    reason: 'notification_delivery_uncertain';
+    cause: 'returned_false' | 'threw';
+};
+export interface DirectMailboxEffectDependencies {
+    sendWorker: typeof sendToWorker;
+    sendLeader: typeof injectToLeaderPane;
+}
+/**
+ * Direct-mailbox-only adapter. Once the public boolean transport has been
+ * called, a false result or exception is conservatively treated as uncertain.
+ */
+export declare function invokeDirectMailboxEffect(target: MailboxNotificationTarget, message: string, dependencies?: DirectMailboxEffectDependencies): Promise<DirectMailboxEffectResult>;
 export type TeamSessionMode = 'split-pane' | 'dedicated-window' | 'detached-session';
 export interface TeamSession {
     sessionName: string;
@@ -96,6 +133,16 @@ export declare function spawnBridgeInSession(tmuxSession: string, bridgeScriptPa
  * createTeamSession() already branches this way for panes created up front; the
  * on-demand worker spawns in both team runtimes must do the same. (#3267)
  */
+export interface WorkerPaneSplitEvidence {
+    commandSucceeded: boolean;
+    provider: 'tmux' | 'cmux';
+    splitTarget: string;
+    direction: 'right' | 'down';
+    rawOutput: string;
+    stderr: string;
+    paneId: string | null;
+}
+export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<WorkerPaneSplitEvidence>;
 export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;
 /**
@@ -168,4 +215,5 @@ export declare function resolveSplitPaneWorkerPaneIds(sessionName: string, recor
 export declare function killTeamSession(sessionName: string, workerPaneIds?: string[], leaderPaneId?: string, options?: {
     sessionMode?: TeamSessionMode;
 }): Promise<void>;
+export {};
 //# sourceMappingURL=tmux-session.d.ts.map

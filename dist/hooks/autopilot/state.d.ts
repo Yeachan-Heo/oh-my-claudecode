@@ -22,7 +22,9 @@ export declare function writeAutopilotState(directory: string, state: AutopilotS
 /**
  * Clear autopilot state
  */
-export declare function clearAutopilotState(directory: string, sessionId?: string): boolean;
+export declare function clearAutopilotState(directory: string, sessionId?: string, expectedState?: AutopilotState): boolean;
+export declare function updateAutopilotStateIfCurrent(directory: string, observed: AutopilotState, update: Partial<AutopilotState>, sessionId?: string): AutopilotState | null;
+export declare function updateAutopilotStateIfExact(directory: string, observed: AutopilotState, update: Partial<AutopilotState>, sessionId: string | undefined, validateCurrent: (current: AutopilotState) => boolean): AutopilotState | null;
 /**
  * Get the age of the autopilot state file in milliseconds.
  * Returns null if no state file exists.

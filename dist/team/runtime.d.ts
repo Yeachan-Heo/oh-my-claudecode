@@ -30,7 +30,7 @@ export interface TeamRuntime {
     cwd: string;
     /** Preflight-validated absolute binary paths, keyed by agent type */
     resolvedBinaryPaths?: Partial<Record<CliAgentType, string>>;
-    stopWatchdog?: () => void;
+    stopWatchdog?: () => Promise<void>;
 }
 export interface WorkerStatus {
     workerName: string;
@@ -76,7 +76,7 @@ export declare function monitorTeam(teamName: string, cwd: string, workerPaneIds
  * Runtime-owned worker watchdog/orchestrator loop.
  * Handles done.json completion, dead pane failures, and next-task spawning.
  */
-export declare function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => void;
+export declare function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => Promise<void>;
 /**
  * Spawn a worker pane for an explicit task assignment.
  */

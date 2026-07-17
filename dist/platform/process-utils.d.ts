@@ -19,9 +19,24 @@ export declare function isProcessAlive(pid: number): boolean;
  * Get process start time for PID reuse detection.
  * Returns milliseconds timestamp on macOS/Windows, jiffies on Linux.
  */
-export declare function getProcessStartTime(pid: number): Promise<number | undefined>;
+export declare function getProcessStartTime(pid: number, deadlineAt?: number): Promise<number | undefined>;
 /**
  * Gracefully terminate a process with escalation.
  */
 export declare function gracefulKill(pid: number, gracePeriodMs?: number): Promise<'graceful' | 'forced' | 'failed'>;
+/** Stable PID-reuse identity suitable for a durable worker manifest. */
+export declare function getProcessStartIdentity(pid: number, deadlineAt?: number): Promise<string | null>;
+export declare function isProcessIdentityLive(pid: number, expectedStartIdentity: string, deadlineAt?: number): Promise<'live' | 'dead' | 'mismatch' | 'unknown'>;
+export interface TerminateOwnedProcessTreeOptions {
+    pid: number;
+    expectedStartIdentity: string;
+    deadlineAt: string;
+    force?: boolean;
+}
+/**
+ * Terminate only a process whose durable start identity still matches. The
+ * Windows path is asynchronous and receives the worker's remaining deadline,
+ * preventing taskkill from holding SessionEnd for its legacy five seconds.
+ */
+export declare function terminateOwnedProcessTree(options: TerminateOwnedProcessTreeOptions): Promise<'terminated' | 'already-dead' | 'identity-mismatch' | 'unknown' | 'deadline-exceeded'>;
 //# sourceMappingURL=process-utils.d.ts.map

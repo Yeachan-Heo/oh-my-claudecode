@@ -1,9 +1,15 @@
+import { readFile, writeFile } from 'fs/promises';
 export interface WorkerCadenceContext {
     teamName: string;
     workerName: string;
     worktreePath: string;
     agentType: 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
     enabled: boolean;
+}
+/** Service ownership fence supplied by the persistent runtime owner. */
+export interface CadenceOwnership {
+    serviceGeneration: number;
+    attemptId: string;
 }
 export type CadenceMethod = 'hook' | 'fallback-poll' | 'none';
 /**
@@ -49,14 +55,17 @@ export declare function startFallbackPoller(worktreePath: string, workerName: st
  * Returns the chosen method. The fallback-poll handle is NOT started here;
  * callers that need the poller should call startFallbackPoller directly.
  */
-export declare function installCommitCadence(ctx: WorkerCadenceContext): Promise<{
+export declare function installCommitCadence(ctx: WorkerCadenceContext & Partial<CadenceOwnership>): Promise<{
     method: CadenceMethod;
 }>;
 /**
  * Removes the auto-commit PostToolUse hook from .claude/settings.json.
  * For fallback-poll workers the caller is responsible for stopping the poller handle.
  */
-export declare function uninstallCommitCadence(ctx: WorkerCadenceContext): Promise<void>;
+export declare function uninstallCommitCadence(ctx: WorkerCadenceContext & Partial<CadenceOwnership>, io?: {
+    readFile: typeof readFile;
+    writeFile: typeof writeFile;
+}): Promise<void>;
 /**
  * Pauses commit cadence by touching the sentinel file.
  * Used by the orchestrator before fanning out a rebase.

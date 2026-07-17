@@ -1,16 +1,14 @@
 /**
  * MCP Communication Layer - High-level dispatch functions.
  *
- * Coordinates inbox writes, mailbox messages, and dispatch requests
- * with notification callbacks. Mirrors OMX src/team/mcp-comm.ts exactly.
- *
- * Functions:
- * - queueInboxInstruction: write inbox + enqueue dispatch + notify
- * - queueDirectMailboxMessage: send message + enqueue dispatch + notify
- * - queueBroadcastMailboxMessage: broadcast to all recipients
- * - waitForDispatchReceipt: poll with exponential backoff
+ * Coordinates inbox writes, mailbox messages, and dispatch requests with
+ * notification callbacks. Direct mailbox notifications are authorized against
+ * current strict durable state before any pane effect.
  */
-import { type TeamDispatchRequest, type TeamDispatchRequestInput } from './dispatch-queue.js';
+import { type StrictDispatchReadResult, type TeamDispatchRequest, type TeamDispatchRequestInput } from './dispatch-queue.js';
+import { type StrictCanonicalMailboxMessageReadResult } from './team-ops.js';
+import { type MailboxNotificationGuardInput, type MailboxNotificationGuardResult, type MailboxNotificationTarget } from './mailbox-notification-guard.js';
+import { type DirectMailboxEffectResult } from './tmux-session.js';
 export interface TeamNotifierTarget {
     workerName: string;
     workerIndex?: number;
@@ -24,6 +22,8 @@ export interface DispatchOutcome {
     request_id?: string;
     message_id?: string;
     to_worker?: string;
+    /** Internal handoff marker; removed before queue functions return. */
+    notification_managed?: true;
 }
 export type TeamNotifier = (target: TeamNotifierTarget, message: string, context: {
     request: TeamDispatchRequest;
@@ -39,12 +39,39 @@ export interface MailboxSender {
         message_id: string;
         to_worker: string;
     }>;
+    /** Retained for callers that provide the historical mailbox sender shape. */
     broadcastMessage(teamName: string, fromWorker: string, body: string, cwd: string): Promise<Array<{
         message_id: string;
         to_worker: string;
     }>>;
-    markMessageNotified(teamName: string, workerName: string, messageId: string, cwd: string): Promise<void>;
+    markMessageNotified(teamName: string, workerName: string, messageId: string, cwd: string): Promise<void | boolean>;
 }
+export interface MailboxNotificationAttemptParams {
+    teamName: string;
+    recipient: string;
+    requestId: string;
+    messageId: string;
+    triggerMessage: string;
+    cwd: string;
+}
+export interface MailboxNotificationAttemptDependencies {
+    readGuard: (input: MailboxNotificationGuardInput, cwd: string) => Promise<MailboxNotificationGuardResult>;
+    readStrictDispatch: (teamName: string, requestId: string, cwd: string) => Promise<StrictDispatchReadResult>;
+    readStrictMailbox: (teamName: string, workerName: string, messageId: string, cwd: string) => Promise<StrictCanonicalMailboxMessageReadResult>;
+    invokeEffect: (target: MailboxNotificationTarget, message: string) => Promise<DirectMailboxEffectResult>;
+    markMailbox: (teamName: string, workerName: string, messageId: string, cwd: string) => Promise<boolean>;
+    markDispatch: (teamName: string, requestId: string, cwd: string) => Promise<TeamDispatchRequest | null>;
+    patchPendingReason: (teamName: string, requestId: string, reason: string, cwd: string) => Promise<{
+        kind: string;
+    }>;
+    withRequestLock: <T>(lockPath: string, fn: () => Promise<T>) => Promise<T>;
+}
+/**
+ * Runs one direct mailbox notification attempt. The process-identity lock and
+ * tombstone are deliberately outside the dispatch lock so checked marker and
+ * reason writes can use their existing dispatch serialization without nesting it.
+ */
+export declare function runMailboxNotificationAttempt(params: MailboxNotificationAttemptParams, overrides?: Partial<MailboxNotificationAttemptDependencies>): Promise<DispatchOutcome>;
 export interface QueueInboxParams {
     teamName: string;
     workerName: string;

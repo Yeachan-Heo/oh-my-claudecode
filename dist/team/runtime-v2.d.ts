@@ -15,12 +15,38 @@
  * Architecture mirrors runtime.ts: startTeam, monitorTeam, shutdownTeam,
  * assignTask, resumeTeam as discrete operations driven by the caller.
  */
-import type { TeamConfig, TeamTask, TeamTaskDelegationPlan, WorkerStatus, WorkerHeartbeat } from './types.js';
+import type { TeamConfig, TeamManifestV2, TeamTask, TeamTaskDelegationPlan, WorkerInfo, WorkerStatus, WorkerHeartbeat } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
 import type { CliAgentType } from './model-contract.js';
 import { type WorkerPaneLiveness } from './tmux-session.js';
 import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
 import { type CliWorkerOutputPayload } from './cli-worker-contract.js';
+import { type RecoveryDurableOutcome } from './recovery-request-store.js';
+import { type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
+import type { RecoverDeadWorkerV2Result } from './types.js';
+export interface RecoverDeadWorkerV2Options {
+    workerName: string;
+    requestId?: string;
+    timeoutMs?: number;
+}
+export interface RuntimeOwnerRecoveryClient {
+    requestRuntimeOwnerRecovery(input: {
+        requestId: string;
+        cwd: string;
+        teamName: string;
+        workerName: string;
+        timeoutMs?: number;
+    }): Promise<RecoverDeadWorkerV2Result>;
+}
+/** Runtime integration point; production may bind its owner client after startup. */
+export declare function setRuntimeOwnerRecoveryClient(client: RuntimeOwnerRecoveryClient | undefined): void;
+/** Queue recovery with the runtime owner; this process never runs the owner saga. */
+export declare function recoverDeadWorkerV2(teamName: string, cwd: string, { workerName, requestId, timeoutMs }: RecoverDeadWorkerV2Options): Promise<RecoverDeadWorkerV2Result>;
+/** Reads only the canonical durable terminal result for a request. */
+export declare function readRecoverDeadWorkerV2Result(requestId: string, cwd?: string): Promise<RecoverDeadWorkerV2Result | null>;
+/** Compatibility/internal reader that may return an in-progress durable outcome. */
+export declare function readRecoverDeadWorkerV2Outcome(cwd: string, requestId: string): RecoveryDurableOutcome | null;
+export declare function reconcileCommittedTeamServices(config: TeamConfig, cwd: string): Promise<'synced' | 'repair_required'>;
 export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamRuntimeV2 {
     teamName: string;
@@ -131,6 +157,39 @@ export interface StartTeamV2Config {
      */
     autoMerge?: boolean;
 }
+interface RecoveryOwnerFinalizationDeps {
+    readRevisionedConfig: (teamName: string, cwd: string) => Promise<{
+        config: TeamConfig;
+        stateRevision: number;
+    } | null>;
+    saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void) => Promise<boolean>;
+    withConfigLock?: <T>(teamName: string, cwd: string, fn: () => Promise<T> | T) => Promise<T>;
+    publishFinal: (input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result) => RecoverDeadWorkerV2Result;
+    readDurableContinuation?: (cwd: string, requestId: string, recoveryId: string) => 'none' | 'selected' | 'reserved' | 'adopted';
+}
+export declare function finalizeRecoveryOwnerResult(input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result, deps?: RecoveryOwnerFinalizationDeps): Promise<RecoverDeadWorkerV2Result>;
+export declare function selectRecoveryReplayTasks(tasks: TeamTask[], workerName: string, recoveryId: string, committedPaneLiveness: WorkerPaneLiveness | null): TeamTask[];
+export declare function resolveCommittedRecoveryManifestSync(readManifest: () => Promise<TeamManifestV2 | null>, expected: {
+    workerName: string;
+    paneId: string;
+    paneAttemptId: string;
+    recoveryId: string;
+    replacementGeneration: number;
+}): Promise<'synced' | 'repair_required'>;
+export declare function resolveCommittedRecoveryPaneAttempt(activeRecovery: TeamConfig['active_recovery'], recoveryId: string, replacementGeneration: number, worker: WorkerInfo): {
+    paneId: string;
+    paneAttemptId: string;
+} | null;
+interface BootstrapRecoveryEvidenceWaitOptions {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    now?: () => number;
+    sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+}
+/** Establish the exact successor/config binding before a detached owner may execute or maintain. */
+export declare function prepareRecoveryOwnerBootstrap(input: RecoverDeadWorkerOwnerInput, waitOptions?: BootstrapRecoveryEvidenceWaitOptions): Promise<void>;
+/** Private runtime-owner executor. It never calls the public recovery facade. */
+export declare function executeRecoverDeadWorkerV2Owner(input: RecoverDeadWorkerOwnerInput): Promise<RecoverDeadWorkerV2Result>;
 /**
  * Start a team with the v2 event-driven runtime.
  * Creates state directories, writes config + task files, spawns workers via
@@ -157,8 +216,8 @@ export declare class CircuitBreakerV2 {
     isTripped(): boolean;
 }
 /**
- * Requeue tasks from dead workers by writing failure sidecars and resetting
- * task status back to pending so they can be claimed by other workers.
+ * Compatibility wrapper that routes legacy dead-worker requeue requests through
+ * the strict runtime-owner recovery transaction.
  */
 export declare function requeueDeadWorkerTasks(teamName: string, deadWorkerNames: string[], cwd: string): Promise<string[]>;
 export type CliWorkerVerdictStatus = 'completed' | 'failed' | 'file_missing' | 'parse_failed' | 'no_in_progress_task' | 'already_terminal' | 'skipped';

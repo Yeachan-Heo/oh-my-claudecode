@@ -21,6 +21,17 @@ export interface WorkerBootstrapParams {
 export declare function generateTriggerMessage(teamName: string, workerName: string, teamStateRoot?: string): string;
 export declare function generatePromptModeStartupPrompt(teamName: string, workerName: string, teamStateRoot?: string, cliOutputContract?: string): string;
 export declare function generateMailboxTriggerMessage(teamName: string, workerName: string, count?: number, teamStateRoot?: string): string;
+export interface RecoveryContinuationInstruction {
+    teamName: string;
+    workerName: string;
+    taskId: string;
+    claimToken: string;
+    taskVersion: number;
+    sequence: number;
+    resumePayload: unknown;
+}
+/** Render owner-adopted continuation data only after the activation gate opens. */
+export declare function renderRecoveryContinuationInstruction(instruction: RecoveryContinuationInstruction): string;
 /**
  * Generate the worker overlay markdown.
  * This is injected as AGENTS.md content for the worker agent.

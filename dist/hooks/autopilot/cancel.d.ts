@@ -34,6 +34,8 @@ export declare function canResumeAutopilot(directory: string, sessionId?: string
     canResume: boolean;
     state?: AutopilotState;
     resumePhase?: string;
+    integrityFailed?: boolean;
+    unsupportedRuntime?: boolean;
 };
 /**
  * Resume a paused autopilot session

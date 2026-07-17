@@ -19,6 +19,14 @@ export interface SessionMetrics {
 export interface HookOutput {
     continue: boolean;
 }
+interface SessionOwnedTeamCleanupResult {
+    attempted: string[];
+    cleaned: string[];
+    failed: Array<{
+        teamName: string;
+        error: string;
+    }>;
+}
 export interface SessionEndCleanupWorkerPayload {
     directory: string;
     sessionId: string;
@@ -87,14 +95,23 @@ export declare function cleanupModeStates(directory: string, sessionId?: string)
  * session-sourced missions.
  */
 export declare function cleanupMissionState(directory: string, sessionId?: string): number;
+export declare function cleanupSessionOwnedTeams(directory: string, sessionId: string, initialTeamNames?: string[]): Promise<SessionOwnedTeamCleanupResult>;
 /**
  * Export session summary to .omc/sessions/
  */
 export declare function exportSessionSummary(directory: string, metrics: SessionMetrics): void;
+export declare function cleanupSessionPython(directory: string, sessionId: string): Promise<void>;
+/** Compatibility export; durable ownership is handled by the manifest worker. */
 export declare function processSessionEndCleanupWorker(payload: SessionEndCleanupWorkerPayload): Promise<void>;
-/**
- * Process session end
- */
+export declare function cleanupSessionReplies(sessionId: string): Promise<void>;
+export declare function runSessionEndCallbacks(directory: string, sessionId: string, idempotencyKey?: string, strict?: boolean): Promise<void>;
+export declare function runSessionEndNotifications(directory: string, sessionId: string, strict?: boolean): Promise<void>;
+export declare function runSessionEndOpenClaw(directory: string, sessionId: string, strict?: boolean): Promise<void>;
+/** Foreground cleanup has no network/process waits and records its result before the core producer is sealed. */
+export declare function runForegroundSessionEndCleanup(directory: string, sessionId: string, persistResult?: boolean): Promise<Record<string, unknown>>;
 export declare function processSessionEnd(input: SessionEndInput): Promise<HookOutput>;
+/** Wiki producer has no foreground lock or write; it only seals a durable capture/no-op intent. */
+export declare function processWikiSessionEnd(input: SessionEndInput): Promise<HookOutput>;
 export declare function handleSessionEnd(input: SessionEndInput): Promise<HookOutput>;
+export {};
 //# sourceMappingURL=index.d.ts.map

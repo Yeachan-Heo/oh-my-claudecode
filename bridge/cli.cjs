@@ -26821,8 +26821,8 @@ function failClosedMissingCoreProducer(directory, sessionId) {
   return mutateLatest(directory, sessionId, (job) => {
     if (job.producers.core.state !== "absent" || !["sealed", "no-op"].includes(job.producers.wiki.state) || Date.now() < Date.parse(job.producerGraceExpiresAt)) return;
     job.producers.core = { state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
-    for (const action of Object.values(job.actions)) {
-      if (action.status !== "pending" && action.status !== "retryable") continue;
+    for (const [name, action] of Object.entries(job.actions)) {
+      if (name === "wiki-capture" || action.status !== "pending" && action.status !== "retryable") continue;
       action.status = "expired";
       action.lastOutcomeCode = action.class === "required" ? "required-core-producer-absent" : "best-effort-core-producer-absent";
     }
@@ -45983,25 +45983,37 @@ async function cleanupSessionReplies(sessionId) {
     if (!result.success) throw new Error("reply-listener-stop-failed");
   }
 }
+function deferredSessionEndSnapshot(directory, sessionId) {
+  const payload = readSessionEndJob(directory, sessionId)?.actions.callback.payload;
+  const metrics = payload?.metrics;
+  const input = payload?.input;
+  if (metrics && input?.session_id === sessionId && typeof input.cwd === "string") {
+    return { metrics, input };
+  }
+  return {
+    metrics: recordSessionMetrics(directory, { session_id: sessionId, transcript_path: "", cwd: directory, permission_mode: "", hook_event_name: "SessionEnd", reason: "other" }),
+    input: { session_id: sessionId, cwd: directory }
+  };
+}
 async function runSessionEndCallbacks(directory, sessionId, idempotencyKey, strict = false) {
-  const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: "", cwd: directory, permission_mode: "", hook_event_name: "SessionEnd", reason: "other" });
+  const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
   const profileName = process.env.OMC_NOTIFY_PROFILE;
   const config2 = getNotificationConfig(profileName);
   const platforms = config2 && hasExplicitNotificationConfig(profileName) ? getEnabledPlatforms(config2, "session-end") : [];
-  const outcome = await runSessionEndDeferredAction({ name: "legacy-callback", class: "best-effort", idempotencyKey, payload: { skipPlatforms: platforms.length > 0 ? getLegacyPlatformsCoveredByNotifications(platforms) : [], idempotencyKey }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: "", metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "legacy-callback", class: "best-effort", idempotencyKey, payload: { idempotencyKey }, budgetMs: 2e3 } });
+  const outcome = await runSessionEndDeferredAction({ name: "legacy-callback", class: "best-effort", idempotencyKey, payload: { skipPlatforms: platforms.length > 0 ? getLegacyPlatformsCoveredByNotifications(platforms) : [], idempotencyKey }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: input.transcript_path ?? "", metrics, input, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "legacy-callback", class: "best-effort", idempotencyKey, payload: { idempotencyKey }, budgetMs: 2e3 } });
   if (strict && outcome.status !== "completed" && outcome.status !== "skipped") throw new Error(`legacy-callback-${outcome.status}`);
 }
 async function runSessionEndNotifications(directory, sessionId, strict = false) {
   const profileName = process.env.OMC_NOTIFY_PROFILE;
   const config2 = getNotificationConfig(profileName);
   if (!config2 || !hasExplicitNotificationConfig(profileName)) return;
-  const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: "", cwd: directory, permission_mode: "", hook_event_name: "SessionEnd", reason: "other" });
-  const outcome = await runSessionEndDeferredAction({ name: "notification", class: "best-effort", payload: { profileName }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: "", metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "notification", class: "best-effort", payload: { profileName }, budgetMs: 2e3 } });
+  const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
+  const outcome = await runSessionEndDeferredAction({ name: "notification", class: "best-effort", payload: { profileName }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: input.transcript_path ?? "", metrics, input, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "notification", class: "best-effort", payload: { profileName }, budgetMs: 2e3 } });
   if (strict && outcome.status !== "completed" && outcome.status !== "skipped") throw new Error(`notification-${outcome.status}`);
 }
 async function runSessionEndOpenClaw(directory, sessionId, strict = false) {
-  const metrics = recordSessionMetrics(directory, { session_id: sessionId, transcript_path: "", cwd: directory, permission_mode: "", hook_event_name: "SessionEnd", reason: "other" });
-  const outcome = await runSessionEndDeferredAction({ name: "openclaw-wake", class: "best-effort", payload: { enabled: process.env.OMC_OPENCLAW === "1", reason: metrics.reason, sessionId }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: "", metrics, input: { session_id: sessionId, cwd: directory }, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "openclaw-wake", class: "best-effort", payload: {}, budgetMs: 2e3 } });
+  const { metrics, input } = deferredSessionEndSnapshot(directory, sessionId);
+  const outcome = await runSessionEndDeferredAction({ name: "openclaw-wake", class: "best-effort", payload: { enabled: process.env.OMC_OPENCLAW === "1", reason: metrics.reason, sessionId }, budgetMs: 2e3 }, { directory, sessionId, transcriptPath: input.transcript_path ?? "", metrics, input, deadlineAt: new Date(Date.now() + 2e3).toISOString(), action: { name: "openclaw-wake", class: "best-effort", payload: {}, budgetMs: 2e3 } });
   if (strict && outcome.status !== "completed" && outcome.status !== "skipped") throw new Error(`openclaw-wake-${outcome.status}`);
 }
 async function runForegroundSessionEndCleanup(directory, sessionId, persistResult = true) {
@@ -46016,13 +46028,15 @@ async function runForegroundSessionEndCleanup(directory, sessionId, persistResul
   }
   return outcome;
 }
-function buildDurableSessionEndPayload(directory, input) {
+function buildDurableSessionEndPayload(directory, input, metrics) {
   const teamState = readModeState("team", directory, input.session_id);
   const teamName = extractTeamNameFromState(teamState);
   return {
     transcriptPath: input.transcript_path,
     cwd: input.cwd,
     reason: input.reason,
+    input,
+    metrics,
     initialTeamNames: teamName ? [teamName] : [],
     notificationProfile: typeof process.env.OMC_NOTIFY_PROFILE === "string" ? process.env.OMC_NOTIFY_PROFILE : void 0,
     openClawEnabled: process.env.OMC_OPENCLAW === "1"
@@ -46030,10 +46044,10 @@ function buildDurableSessionEndPayload(directory, input) {
 }
 async function processSessionEnd(input) {
   const directory = resolveToWorktreeRoot(input.cwd);
-  const payload = buildDurableSessionEndPayload(directory, input);
+  const metrics = recordSessionMetrics(directory, input);
+  const payload = buildDurableSessionEndPayload(directory, input, metrics);
   const manifest = prepareCoreManifest(directory, input.session_id, payload);
   if (!manifest) return { continue: true };
-  const metrics = recordSessionMetrics(directory, input);
   exportSessionSummary(directory, metrics);
   let foregroundOutcome;
   try {
@@ -46087,11 +46101,14 @@ __export(worker_exports, {
   executeSessionEndAction: () => executeSessionEndAction,
   processSessionEndWorker: () => processSessionEndWorker,
   reconcileSessionEndJobs: () => reconcileSessionEndJobs,
-  spawnSessionEndWorker: () => spawnSessionEndWorker
+  spawnSessionEndWorker: () => spawnSessionEndWorker,
+  workerEnvironment: () => workerEnvironment
 });
 function workerEnvironment() {
-  const keys = ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "COMSPEC", "LANG", "LC_ALL", "NODE_ENV", "CLAUDE_CONFIG_DIR", "OMC_STATE_DIR", "OMC_HOOK_CONFIG", "OMC_CONFIG_PATH", "OMC_NOTIFY", "OMC_NOTIFY_PROFILE", "OMC_OPENCLAW", "OMC_TELEGRAM", "OMC_DISCORD", "OMC_SLACK", "OMC_WEBHOOK", "OMC_DISCORD_MENTION", "OMC_DISCORD_NOTIFIER_BOT_TOKEN", "OMC_DISCORD_NOTIFIER_CHANNEL", "OMC_DISCORD_WEBHOOK_URL", "OMC_TELEGRAM_BOT_TOKEN", "OMC_TELEGRAM_NOTIFIER_BOT_TOKEN", "OMC_TELEGRAM_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_UID", "OMC_SLACK_WEBHOOK_URL", "OMC_SLACK_MENTION", "OMC_SLACK_BOT_TOKEN", "OMC_SLACK_APP_TOKEN", "OMC_SLACK_BOT_CHANNEL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", ...process.env.NODE_ENV === "test" ? ["OMC_SESSION_END_TEST_PRODUCER_GRACE_MS"] : []];
-  return Object.fromEntries(keys.flatMap((key) => process.env[key] === void 0 ? [] : [[key, process.env[key]]]));
+  const keys = ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "SystemRoot", "COMSPEC", "LANG", "LC_ALL", "NODE_ENV", "CLAUDE_CONFIG_DIR", "OMC_STATE_DIR", "OMC_HOOK_CONFIG", "OMC_CONFIG_PATH", "OMC_NOTIFY", "OMC_NOTIFY_PROFILE", "OMC_OPENCLAW", "OMC_OPENCLAW_CONFIG", "OPENCLAW_REPLY_*", "TMUX", "TMUX_PANE", "OMC_TELEGRAM", "OMC_DISCORD", "OMC_SLACK", "OMC_WEBHOOK", "OMC_DISCORD_MENTION", "OMC_DISCORD_NOTIFIER_BOT_TOKEN", "OMC_DISCORD_NOTIFIER_CHANNEL", "OMC_DISCORD_WEBHOOK_URL", "OMC_TELEGRAM_BOT_TOKEN", "OMC_TELEGRAM_NOTIFIER_BOT_TOKEN", "OMC_TELEGRAM_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_CHAT_ID", "OMC_TELEGRAM_NOTIFIER_UID", "OMC_SLACK_WEBHOOK_URL", "OMC_SLACK_MENTION", "OMC_SLACK_BOT_TOKEN", "OMC_SLACK_APP_TOKEN", "OMC_SLACK_BOT_CHANNEL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", ...process.env.NODE_ENV === "test" ? ["OMC_SESSION_END_TEST_PRODUCER_GRACE_MS"] : []];
+  const exact = Object.fromEntries(keys.filter((key) => !key.endsWith("*")).flatMap((key) => process.env[key] === void 0 ? [] : [[key, process.env[key]]]));
+  const replies = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key.startsWith("OPENCLAW_REPLY_") && value !== void 0));
+  return { ...exact, ...replies };
 }
 function spawnSessionEndWorker(payload) {
   try {

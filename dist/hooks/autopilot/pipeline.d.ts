@@ -10,7 +10,8 @@
  *
  * @see https://github.com/Yeachan-Heo/oh-my-claudecode/issues/1130
  */
-import type { PipelineConfig, PipelineStageAdapter, PipelineTracking, PipelinePhase, PipelineStageId } from "./pipeline-types.js";
+import type { AutopilotWorkflowProfileV1 } from "../../shared/types.js";
+import type { PipelineConfig, PipelineStageAdapter, PipelineTracking, PipelinePhase, PipelineStageId, WorkflowProfileStages, WorkflowDescriptor } from "./pipeline-types.js";
 import type { AutopilotState, AutopilotConfig } from "./types.js";
 /**
  * Resolve a PipelineConfig from user-provided partial config, merging with defaults.
@@ -19,6 +20,17 @@ import type { AutopilotState, AutopilotConfig } from "./types.js";
  * the corresponding config overrides are applied.
  */
 export declare function resolvePipelineConfig(userConfig?: Partial<PipelineConfig>, deprecatedMode?: string): PipelineConfig;
+/** Serialize JSON values with object keys sorted recursively in lexical order. */
+export declare function canonicalizeJson(value: unknown): string;
+/** Return the canonical, closed v1 shape or null for malformed profile input. */
+export declare function normalizeWorkflowProfile(profile: unknown): {
+    version: 1;
+    stages: WorkflowProfileStages;
+} | null;
+/** Build the deterministic SHA-256 descriptor persisted for a named workflow run. */
+export declare function createWorkflowDescriptor(workflowName: string, profile: AutopilotWorkflowProfileV1 | unknown): WorkflowDescriptor | null;
+/** Verify that an on-disk descriptor still matches its canonical contents. */
+export declare function verifyWorkflowDescriptor(descriptor: unknown): descriptor is WorkflowDescriptor;
 /**
  * Check if the invocation is from a deprecated mode and return the deprecation warning.
  */
@@ -72,6 +84,10 @@ export declare function getNextStageAdapter(tracking: PipelineTracking): Pipelin
  * Marks the current stage as complete, finds the next non-skipped stage,
  * and marks it as active. Returns the new current stage adapter, or null
  * if the pipeline is complete.
+ */
+/**
+ * Advance one workflow stage only when the observed transition token still
+ * matches persisted progress. A repeated Stop event becomes a no-op.
  */
 export declare function advanceStage(directory: string, sessionId?: string): {
     adapter: PipelineStageAdapter | null;

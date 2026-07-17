@@ -98,6 +98,10 @@ describe("session-end OpenClaw behavior (issue #1456)", () => {
       status: 'pending',
       payload: expect.objectContaining({ transcriptPath, reason: 'clear' }),
     }));
+    expect(manifest?.actions.callback.payload).toEqual(expect.objectContaining({
+      input: expect.objectContaining({ reason: 'clear', transcript_path: transcriptPath, cwd: tmpDir }),
+      metrics: expect.objectContaining({ session_id: 'session-claw-1', reason: 'clear' }),
+    }));
     expect(workerMocks.spawnSessionEndWorker).toHaveBeenCalledWith({
       directory: tmpDir,
       sessionId: 'session-claw-1',

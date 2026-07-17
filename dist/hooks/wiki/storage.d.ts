@@ -17,6 +17,12 @@ import { type WikiPage, type WikiPageFrontmatter, type WikiLogEntry } from './ty
 export declare function getWikiDir(root: string): string;
 /** Ensure wiki directory exists and is git-ignored. */
 export declare function ensureWikiDir(root: string): string;
+export interface WikiLockOptions {
+    /** Maximum time to wait for the wiki lock. Ordinary callers retain the existing 5s default. */
+    timeoutMs?: number;
+    /** Optional absolute deadline for worker-owned work. */
+    deadlineAt?: number;
+}
 /**
  * Execute a function under the wiki-wide file lock.
  * All write operations MUST go through this boundary.
@@ -24,7 +30,7 @@ export declare function ensureWikiDir(root: string): string;
  * Uses synchronous file lock (withFileLockSync) because wiki operations
  * are called from sync hook contexts (notepad pattern).
  */
-export declare function withWikiLock<T>(root: string, fn: () => T): T;
+export declare function withWikiLock<T>(root: string, fn: () => T, options?: WikiLockOptions): T;
 /**
  * Parse YAML frontmatter from markdown content.
  * Expects content starting with `---\n...\n---\n`.

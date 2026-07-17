@@ -25,6 +25,9 @@ export interface SubagentInfo {
     tool_usage?: ToolUsageEntry[];
     token_usage?: TokenUsage;
     model?: string;
+    synthetic?: boolean;
+    telemetry_status?: "unmatched_stop";
+    telemetry_note?: string;
 }
 export interface ToolUsageEntry {
     tool_name: string;
