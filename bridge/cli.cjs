@@ -46138,7 +46138,7 @@ function reschedulePendingWorker(payload, job) {
   const retryableAttempts = Object.values(job.actions).filter((action) => action.status === "retryable").map((action) => action.attempts);
   const producersReady = ["sealed", "no-op"].includes(job.producers.core.state) && ["sealed", "no-op"].includes(job.producers.wiki.state);
   const hasPendingAction = producersReady && Object.values(job.actions).some((action) => action.status === "pending");
-  const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt) && (job.producers.core.state === "prepared" && job.producers.wiki.state === "absent" || job.producers.core.state === "absent" && ["sealed", "no-op"].includes(job.producers.wiki.state));
+  const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt) && (job.producers.core.state === "prepared" || job.producers.core.state === "absent" && ["sealed", "no-op"].includes(job.producers.wiki.state));
   if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
   const delay = awaitingProducerGrace ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now()) : retryableAttempts.length > 0 ? Math.min(3e4, 250 * 2 ** Math.min(Math.max(...retryableAttempts), 7)) : 250;
   setTimeout(() => {

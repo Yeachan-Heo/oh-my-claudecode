@@ -137,6 +137,33 @@ describe('SessionEnd durable worker', () => {
     expect(actions.runSessionEndNotifications).toHaveBeenCalledTimes(1);
   });
 
+  it('reschedules prepared core through grace when wiki already sealed', async () => {
+    vi.useFakeTimers();
+    actionRunner.runSessionEndAction.mockResolvedValue({ code: 'completed', completed: true });
+    const directory = project();
+    const sessionId = 'prepared-core-sealed-wiki';
+    expect(prepareCoreManifest(directory, sessionId, {})).not.toBeNull();
+    expect(sealWikiManifest(directory, sessionId, { captured: true })).not.toBeNull();
+    const initial = readSessionEndJob(directory, sessionId)!;
+    expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
+      job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    })).not.toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      producers: { core: { state: 'prepared' }, wiki: { state: 'sealed' } },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.runAllTimersAsync();
+
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      phase: 'complete',
+      producers: { core: { state: 'sealed', sealedBy: 'recovery' }, wiki: { state: 'sealed' } },
+    });
+  });
+
   it('fails closed after grace when a wiki-first manifest never receives core, without a 250ms recovery loop', async () => {
     vi.useFakeTimers();
     const directory = project();

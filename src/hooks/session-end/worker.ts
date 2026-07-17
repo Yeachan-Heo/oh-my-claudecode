@@ -45,7 +45,7 @@ function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnTy
     && ['sealed', 'no-op'].includes(job.producers.wiki.state);
   const hasPendingAction = producersReady && Object.values(job.actions).some(action => action.status === 'pending');
   const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt)
-    && ((job.producers.core.state === 'prepared' && job.producers.wiki.state === 'absent')
+    && (job.producers.core.state === 'prepared'
       || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state)));
   if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
   const delay = awaitingProducerGrace
