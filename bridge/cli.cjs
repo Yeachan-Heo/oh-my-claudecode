@@ -26795,6 +26795,28 @@ function recoverPreparedCoreProducer(directory, sessionId) {
     if (job.phase === "collecting") job.phase = "ready";
   });
 }
+function failClosedExhaustedForegroundCleanup(directory, sessionId) {
+  return mutateLatest(directory, sessionId, (job) => {
+    const foreground = job.actions["foreground-cleanup"];
+    const exhausted = foreground.status === "expired" || foreground.status === "retryable" && foreground.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS;
+    if (job.producers.core.state !== "prepared" || Date.now() < Date.parse(job.producerGraceExpiresAt) || !exhausted) return;
+    const evidence = {
+      reason: "foreground-cleanup-exhausted",
+      attempts: foreground.attempts,
+      outcomeCode: foreground.lastOutcomeCode
+    };
+    job.producers.core = { ...job.producers.core, state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
+    if (job.producers.wiki.state === "absent") job.producers.wiki = { state: "no-op", sealedAt: nowIso(), sealedBy: "recovery" };
+    for (const [name, action] of Object.entries(job.actions)) {
+      if (action.status !== "pending" && action.status !== "retryable") continue;
+      action.status = "expired";
+      action.lastOutcomeCode = name === "foreground-cleanup" ? "required-foreground-cleanup-exhausted" : action.class === "required" ? "required-core-producer-unavailable" : "best-effort-core-producer-unavailable";
+      action.payload = { ...action.payload, terminalization: evidence };
+      if (action.runner) action.runner.phase = "terminal";
+    }
+    if (job.phase === "collecting") job.phase = "ready";
+  });
+}
 function failClosedMissingCoreProducer(directory, sessionId) {
   return mutateLatest(directory, sessionId, (job) => {
     if (job.producers.core.state !== "absent" || !["sealed", "no-op"].includes(job.producers.wiki.state) || Date.now() < Date.parse(job.producerGraceExpiresAt)) return;
@@ -46113,7 +46135,10 @@ async function reapIfProvenStale(payload, deadlineAt) {
 function reschedulePendingWorker(payload, job) {
   if (!job || job.phase === "complete") return;
   const retryableAttempts = Object.values(job.actions).filter((action) => action.status === "retryable").map((action) => action.attempts);
+  const producersReady = ["sealed", "no-op"].includes(job.producers.core.state) && ["sealed", "no-op"].includes(job.producers.wiki.state);
+  const hasPendingAction = producersReady && Object.values(job.actions).some((action) => action.status === "pending");
   const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt) && (job.producers.core.state === "prepared" && job.producers.wiki.state === "absent" || job.producers.core.state === "absent" && ["sealed", "no-op"].includes(job.producers.wiki.state));
+  if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
   const delay = awaitingProducerGrace ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now()) : retryableAttempts.length > 0 ? Math.min(3e4, 250 * 2 ** Math.min(Math.max(...retryableAttempts), 7)) : 250;
   setTimeout(() => {
     void processSessionEndWorker(payload);
@@ -46134,6 +46159,7 @@ async function processSessionEndWorker(payload) {
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {
     recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+    failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
     failClosedMissingCoreProducer(payload.directory, payload.sessionId);
     admitted = readSessionEndJob(payload.directory, payload.sessionId);
   }
@@ -46178,7 +46204,8 @@ async function processSessionEndWorker(payload) {
     }
   } finally {
     const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
-    reschedulePendingWorker(payload, released ?? readSessionEndJob(payload.directory, payload.sessionId));
+    const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
+    reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
   }
 }
 function reconcileSessionEndJobs(directory, sessionIds) {

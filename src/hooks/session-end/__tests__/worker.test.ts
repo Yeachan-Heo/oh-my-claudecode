@@ -173,4 +173,44 @@ describe('SessionEnd durable worker', () => {
     expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([]);
   });
 
+  it('terminalizes a core-only manifest after three failed foreground cleanups without timer churn', async () => {
+    vi.useFakeTimers();
+    actionRunner.runSessionEndAction.mockResolvedValue({ code: 'foreground-cleanup-failed', completed: false });
+    const directory = project();
+    const sessionId = 'core-only-foreground-exhausted';
+    expect(prepareCoreManifest(directory, sessionId, {})).not.toBeNull();
+    const initial = readSessionEndJob(directory, sessionId)!;
+    expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
+      job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    })).not.toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const manifest = readSessionEndJob(directory, sessionId)!;
+    expect(actionRunner.runSessionEndAction).toHaveBeenCalledTimes(3);
+    expect(manifest).toMatchObject({
+      phase: 'complete',
+      owner: null,
+      producers: { core: { state: 'no-op', sealedBy: 'recovery' }, wiki: { state: 'no-op', sealedBy: 'recovery' } },
+      actions: {
+        'foreground-cleanup': { status: 'expired', attempts: 3, lastOutcomeCode: 'required-foreground-cleanup-exhausted' },
+        'team-cleanup': { status: 'expired', lastOutcomeCode: 'required-core-producer-unavailable' },
+        callback: { status: 'expired', lastOutcomeCode: 'best-effort-core-producer-unavailable' },
+      },
+    });
+    expect(manifest.actions['team-cleanup'].payload.terminalization).toMatchObject({
+      reason: 'foreground-cleanup-exhausted',
+      attempts: 3,
+      outcomeCode: 'foreground-cleanup-failed',
+    });
+    expect(Object.values(manifest.actions).every(action => action.status === 'expired')).toBe(true);
+    expect(isManifestTerminal(manifest)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(actionRunner.runSessionEndAction).toHaveBeenCalledTimes(3);
+  });
+
 });

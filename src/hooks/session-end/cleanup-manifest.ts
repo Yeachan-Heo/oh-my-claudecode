@@ -268,6 +268,36 @@ export function recoverPreparedCoreProducer(directory: string, sessionId: string
   });
 }
 
+/** A prepared core cannot be recovered once its foreground prerequisite is exhausted after grace. */
+export function failClosedExhaustedForegroundCleanup(directory: string, sessionId: string): SessionEndJobV1 | null {
+  return mutateLatest(directory, sessionId, job => {
+    const foreground = job.actions['foreground-cleanup'];
+    const exhausted = foreground.status === 'expired'
+      || (foreground.status === 'retryable' && foreground.attempts >= REQUIRED_ACTION_MAX_ATTEMPTS);
+    if (job.producers.core.state !== 'prepared' || Date.now() < Date.parse(job.producerGraceExpiresAt) || !exhausted) return;
+
+    const evidence = {
+      reason: 'foreground-cleanup-exhausted',
+      attempts: foreground.attempts,
+      outcomeCode: foreground.lastOutcomeCode,
+    };
+    job.producers.core = { ...job.producers.core, state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
+    if (job.producers.wiki.state === 'absent') job.producers.wiki = { state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
+    for (const [name, action] of Object.entries(job.actions) as Array<[SessionEndActionName, SessionEndActionState]>) {
+      if (action.status !== 'pending' && action.status !== 'retryable') continue;
+      action.status = 'expired';
+      action.lastOutcomeCode = name === 'foreground-cleanup'
+        ? 'required-foreground-cleanup-exhausted'
+        : action.class === 'required'
+          ? 'required-core-producer-unavailable'
+          : 'best-effort-core-producer-unavailable';
+      action.payload = { ...action.payload, terminalization: evidence };
+      if (action.runner) action.runner.phase = 'terminal';
+    }
+    if (job.phase === 'collecting') job.phase = 'ready';
+  });
+}
+
 /** A wiki-only handoff cannot safely infer the missing core cleanup intent. */
 export function failClosedMissingCoreProducer(directory: string, sessionId: string): SessionEndJobV1 | null {
   return mutateLatest(directory, sessionId, job => {

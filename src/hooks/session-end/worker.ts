@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease, type SessionEndActionName } from './cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedExhaustedForegroundCleanup, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease, type SessionEndActionName } from './cleanup-manifest.js';
 import { runSessionEndAction } from './action-runner.js';
 import { armSessionEndActionWatchdog } from './action-watchdog.js';
 import { getProcessStartIdentity, isProcessIdentityLive } from '../../platform/process-utils.js';
@@ -41,9 +41,13 @@ async function reapIfProvenStale(payload: SessionEndWorkerPayload, deadlineAt: n
 function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnType<typeof readSessionEndJob>): void {
   if (!job || job.phase === 'complete') return;
   const retryableAttempts = Object.values(job.actions).filter(action => action.status === 'retryable').map(action => action.attempts);
+  const producersReady = ['sealed', 'no-op'].includes(job.producers.core.state)
+    && ['sealed', 'no-op'].includes(job.producers.wiki.state);
+  const hasPendingAction = producersReady && Object.values(job.actions).some(action => action.status === 'pending');
   const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt)
     && ((job.producers.core.state === 'prepared' && job.producers.wiki.state === 'absent')
       || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state)));
+  if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
   const delay = awaitingProducerGrace
     ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now())
     : retryableAttempts.length > 0
@@ -62,6 +66,7 @@ export async function processSessionEndWorker(payload: SessionEndWorkerPayload):
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {
     recoverPreparedCoreProducer(payload.directory, payload.sessionId);
+    failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
     failClosedMissingCoreProducer(payload.directory, payload.sessionId);
     admitted = readSessionEndJob(payload.directory, payload.sessionId);
   }
@@ -102,7 +107,8 @@ export async function processSessionEndWorker(payload: SessionEndWorkerPayload):
     }
   } finally {
     const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
-    reschedulePendingWorker(payload, released ?? readSessionEndJob(payload.directory, payload.sessionId));
+    const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
+    reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
   }
 }
 /** Bounded fair SessionStart recovery based on durable tickets, not a directory page. */
