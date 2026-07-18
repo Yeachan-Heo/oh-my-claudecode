@@ -833,7 +833,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     showSessionDuration: true,
     showHealthIndicator: true,
     showTokens: false,
-    useBars: true,
+    useBars: false, // Percentages by default (leaner); opt into bars via config or the full/dense presets
     showCallCounts: true,
     showLastTool: false,
     sessionSummary: false, // Opt-in: sends transcript to claude -p
