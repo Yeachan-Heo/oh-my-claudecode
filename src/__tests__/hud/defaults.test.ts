@@ -80,6 +80,12 @@ describe('HUD Default Configuration', () => {
       expect(PRESET_CONFIGS.minimal.gitBranch).toBe(false);
     });
 
+    it('should default focused to percentages (bars opt-in) and keep bars in full/dense', () => {
+      expect(PRESET_CONFIGS.focused.useBars).toBe(false);
+      expect(PRESET_CONFIGS.full.useBars).toBe(true);
+      expect(PRESET_CONFIGS.dense.useBars).toBe(true);
+    });
+
     it('should keep token usage display disabled in all presets', () => {
       presets.forEach(preset => {
         expect(PRESET_CONFIGS[preset].showTokens).toBe(false);

@@ -113,7 +113,7 @@ Shows only the essentials:
 ```
 
 ### Focused (Default)
-Shows all relevant elements:
+Shows all relevant elements as compact percentages (rate-limit/context progress bars are opt-in via `useBars`, or use the `full`/`dense` presets):
 ```
 [OMC] branch:main | ralph:3/10 | US-002 | ultrawork skill:planner | ctx:67% | agents:2 | bg:3/5 | todos:2/5
 ```
@@ -190,7 +190,7 @@ You can manually edit the config file. Each option can be set individually - any
     "profile": true,
     "promptTime": true,
     "sessionHealth": true,
-    "useBars": true,
+    "useBars": false,
     "showCallCounts": true,
     "callCountsFormat": "auto",
     "safeMode": true,

@@ -177,8 +177,8 @@ describe('renderRateLimits — extra usage', () => {
     const result = renderRateLimits(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('18%');
-    expect(result).toContain('$3.10');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('($3.10/$17)'); // real cents kept, whole limit drops .00
+    expect(result).not.toContain('$17.00');
   });
 
   it('renders 0% extra usage with correct dollar amounts', () => {
@@ -191,19 +191,77 @@ describe('renderRateLimits — extra usage', () => {
     const result = renderRateLimits(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('0%');
-    expect(result).toContain('$0.00');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('($0/$17)');
+    expect(result).not.toContain('.00');
   });
 
-  it('defaults spent to $0.00 when extraUsageSpentUsd is absent', () => {
+  it('defaults spent to $0 when extraUsageSpentUsd is absent', () => {
     const limits: RateLimits = {
       ...base,
       extraUsagePercent: 5,
       extraUsageLimitUsd: 10,
     };
     const result = renderRateLimits(limits);
-    expect(result).toContain('$0.00');
-    expect(result).toContain('$10.00');
+    expect(result).toContain('($0/$10)');
+    expect(result).not.toContain('.00');
+  });
+
+  it('keeps real cents but drops a trailing .00', () => {
+    const limits: RateLimits = {
+      ...base,
+      extraUsagePercent: 100,
+      extraUsageSpentUsd: 15.62,
+      extraUsageLimitUsd: 14,
+    };
+    const result = renderRateLimits(limits);
+    expect(result).toContain('($15.62/$14)'); // cents preserved, whole limit drops .00
+    expect(result).not.toContain('$16');       // real spend is not rounded away
+    expect(result).not.toContain('$14.00');
+  });
+
+  it('shows sub-dollar spend instead of masquerading as $0', () => {
+    const limits: RateLimits = {
+      ...base,
+      extraUsagePercent: 42,
+      extraUsageSpentUsd: 0.42,
+      extraUsageLimitUsd: 1,
+    };
+    const result = renderRateLimits(limits);
+    expect(result).toContain('($0.42/$1)');
+    expect(result).not.toContain('($0/');
+  });
+
+  it('omits the dollar part when spend or limit is non-finite', () => {
+    for (const bad of [Infinity, NaN, -Infinity]) {
+      const limits: RateLimits = {
+        ...base,
+        extraUsagePercent: 50,
+        extraUsageSpentUsd: bad,
+        extraUsageLimitUsd: 1,
+      };
+      const result = renderRateLimits(limits);
+      expect(result).toContain('extra:');
+      expect(result).not.toContain('$NaN');
+      expect(result).not.toContain('$Infinity');
+      expect(result).not.toContain('($'); // dollar part omitted entirely
+    }
+  });
+
+  it('renders very large finite spend/limit without $Infinity (no overflow)', () => {
+    const limits: RateLimits = {
+      ...base,
+      extraUsagePercent: 50,
+      extraUsageSpentUsd: Number.MAX_VALUE,
+      extraUsageLimitUsd: Number.MAX_VALUE,
+    };
+    const plain = renderRateLimits(limits);
+    expect(plain).toContain('extra:');
+    expect(plain).not.toContain('$Infinity');
+    expect(plain).not.toContain('$NaN');
+    const bar = renderRateLimitsWithBar(limits);
+    expect(bar).toContain('extra:');
+    expect(bar).not.toContain('$Infinity');
+    expect(bar).not.toContain('$NaN');
   });
 
   it('uses red color at >= 90%', () => {
@@ -291,8 +349,8 @@ describe('renderRateLimitsWithBar — extra usage', () => {
     const result = renderRateLimitsWithBar(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('18%');
-    expect(result).toContain('$3.10');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('($3.10/$17)'); // real cents kept, whole limit drops .00
+    expect(result).not.toContain('$17.00');
     // Bar characters present
     expect(result).toMatch(/[█░]/);
   });

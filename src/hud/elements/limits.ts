@@ -57,6 +57,19 @@ function formatResetTime(date: Date | null | undefined): string | null {
 }
 
 /**
+ * Format a USD amount for the HUD: drop a trailing ".00" so whole values read
+ * "$14" while real cents are preserved ("$15.62"). Uses toFixed(2), which is
+ * finite-safe (no overflow-prone `* 100` multiply — Number.MAX_VALUE * 100 is
+ * Infinity), then strips a trailing ".00". Callers must guard against
+ * non-finite input (NaN/Infinity) before calling.
+ * e.g. 14 → "$14", 15.62 → "$15.62", 0.4 → "$0.40", 0 → "$0".
+ */
+function formatUsd(amount: number): string {
+  const fixed = amount.toFixed(2);
+  return fixed.endsWith('.00') ? `$${fixed.slice(0, -3)}` : `$${fixed}`;
+}
+
+/**
  * Render rate limits display.
  *
  * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
@@ -129,7 +142,10 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
     const extraColor = getColor(extra);
     const extraReset = formatResetTime(limits.extraUsageResetsAt);
-    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+    const spentUsd = limits.extraUsageSpentUsd ?? 0;
+    const dollarPart = Number.isFinite(spentUsd) && Number.isFinite(limits.extraUsageLimitUsd)
+      ? `${DIM}(${formatUsd(spentUsd)}/${formatUsd(limits.extraUsageLimitUsd)})${RESET}`
+      : '';
 
     const extraPart = extraReset
       ? `${DIM}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`
@@ -283,7 +299,10 @@ export function renderRateLimitsWithBar(
     const extraEmpty = barWidth - extraFilled;
     const extraBar = `${extraColor}${'█'.repeat(extraFilled)}${DIM}${'░'.repeat(extraEmpty)}${RESET}`;
     const extraReset = formatResetTime(limits.extraUsageResetsAt);
-    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+    const spentUsd = limits.extraUsageSpentUsd ?? 0;
+    const dollarPart = Number.isFinite(spentUsd) && Number.isFinite(limits.extraUsageLimitUsd)
+      ? `${DIM}(${formatUsd(spentUsd)}/${formatUsd(limits.extraUsageLimitUsd)})${RESET}`
+      : '';
 
     const extraPart = extraReset
       ? `${DIM}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`
