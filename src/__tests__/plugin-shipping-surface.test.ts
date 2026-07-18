@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -269,6 +269,31 @@ describe('plugin shipping surface transaction', () => {
     expect(git(fixture.root, ['diff', '--cached', '--name-only']).trim()).toBe('bridge/cli.cjs');
   });
 
+  it('stages a deletion from the prior runtime closure with its desired replacement', () => {
+    const fixture = createFixture();
+    writeFileSync(join(fixture.root, 'bridge', 'mcp-server.cjs'), 'module.exports = true;\n');
+    unlinkSync(join(fixture.root, 'bridge', 'mcp-helper.cjs'));
+
+    const result = run(fixture.root, 'stage');
+
+    expect(result.status).toBe(0);
+    expect(git(fixture.root, ['diff', '--cached', '--name-only']).trim().split(/\n/)).toEqual([
+      'bridge/mcp-helper.cjs',
+      'bridge/mcp-server.cjs',
+    ]);
+  });
+
+  it('refuses deletion of an unrelated generated artifact', () => {
+    const fixture = createFixture({ trackedGeneratedTestPaths: ['bridge/unrelated.cjs'] });
+    unlinkSync(join(fixture.root, 'bridge', 'unrelated.cjs'));
+
+    const result = run(fixture.root, 'stage');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('refusing to stage unrelated generated artifacts: bridge/unrelated.cjs');
+    expect(git(fixture.root, ['diff', '--cached', '--name-only'])).toBe('');
+  });
+
   it('refuses unrelated ignored generated extras instead of broad staging', () => {
     const fixture = createFixture();
     writeFileSync(join(fixture.root, 'bridge', 'unrelated.cjs'), 'module.exports = true;\n');
@@ -386,6 +411,20 @@ describe('plugin shipping surface transaction', () => {
     writeFileSync(join(fixture.root, 'bridge', 'mcp-helper.cjs'), 'module.exports = { changed: true };\n');
     git(fixture.root, ['add', '-f', '--', 'bridge/mcp-helper.cjs']);
     git(fixture.root, ['commit', '--quiet', '-m', 'update generated runtime helper']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('plugin shipping surface PR check verified');
+  });
+
+  it('accepts a PR deletion from the previous runtime closure', () => {
+    const fixture = createFixture();
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    writeFileSync(join(fixture.root, 'bridge', 'mcp-server.cjs'), 'module.exports = true;\n');
+    git(fixture.root, ['add', '-f', '--', 'bridge/mcp-server.cjs']);
+    git(fixture.root, ['rm', '--quiet', '--', 'bridge/mcp-helper.cjs']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'remove obsolete generated runtime helper']);
 
     const result = run(fixture.root, 'check-pr', '--base', base);
 

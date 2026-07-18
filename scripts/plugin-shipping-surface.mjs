@@ -8,9 +8,10 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import ts from 'typescript';
 
 const GENERATED_ROOTS = Object.freeze(['dist', 'bridge']);
@@ -160,14 +161,14 @@ function collectPackagePublicEntrypoints(packageJson) {
   return paths;
 }
 
-function collectDeclaredGeneratedPayloads(root, packageJson, { directoryCommit = null } = {}) {
+function collectDeclaredGeneratedPayloads(root, packageJson, { directoryCommit = null, presentAtRoot = false } = {}) {
   if (!Array.isArray(packageJson.files)) fail('package.json files must be an array');
   const paths = new Set();
   const standaloneBundles = new Set();
   const collectDirectory = repoPath => {
     if (directoryCommit) {
       for (const child of gitNullPaths(root, ['ls-tree', '-r', '--name-only', '-z', directoryCommit, '--', repoPath])) {
-        if (isRuntimeArtifactCandidate(child)) paths.add(child);
+        if (isRuntimeArtifactCandidate(child) && (!presentAtRoot || existsSync(join(root, child)))) paths.add(child);
       }
       return;
     }
@@ -499,12 +500,14 @@ function validateCoordinatorHandshake(root, requiredPaths, packageJson, pluginJs
 export function collectPluginRuntimeClosure(root = process.cwd(), {
   trustedPackageJson = null,
   trustedDirectoryCommit = null,
+  presentTrustedDirectoryPayloads = false,
 } = {}) {
   const packageJson = readJson(root, 'package.json');
   const { paths: manifestEntrypoints, pluginJson } = collectManifestEntrypoints(root);
   const declaredPackage = trustedPackageJson ?? packageJson;
   const { paths: declaredGeneratedPayloads, standaloneBundles } = collectDeclaredGeneratedPayloads(root, declaredPackage, {
     directoryCommit: trustedDirectoryCommit,
+    presentAtRoot: presentTrustedDirectoryPayloads,
   });
   const initialPaths = new Set([
     ...manifestEntrypoints,
@@ -593,8 +596,24 @@ function trackedPathsAtHead(root, paths) {
   return new Set(gitNullPaths(root, ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...paths]));
 }
 
+function collectRuntimeClosureAtCommit(root, commit) {
+  const snapshot = mkdtempSync(join(tmpdir(), 'omc-plugin-shipping-surface-'));
+  rmSync(snapshot, { recursive: true, force: true });
+  try {
+    git(root, ['worktree', 'add', '--detach', snapshot, commit]);
+    return collectPluginRuntimeClosure(snapshot);
+  } finally {
+    git(root, ['worktree', 'remove', '--force', snapshot], { allowFailure: true });
+    rmSync(snapshot, { recursive: true, force: true });
+  }
+}
+
 function changedGeneratedPathsSince(root, base) {
   return gitNullPaths(root, ['diff', '--name-only', '-z', '--no-renames', base, 'HEAD', '--', ...GENERATED_ROOTS]);
+}
+
+function deletedGeneratedPathsSince(root, base) {
+  return gitNullPaths(root, ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=D', base, 'HEAD', '--', ...GENERATED_ROOTS]);
 }
 
 function cachedGeneratedPaths(root) {
@@ -610,6 +629,7 @@ export function inspectPullRequestShippingSurface(root, base) {
   const surface = collectPluginRuntimeClosure(root, {
     trustedPackageJson,
     trustedDirectoryCommit: verifiedBase,
+    presentTrustedDirectoryPayloads: true,
   });
   const requiredGenerated = requiredGeneratedPaths(surface);
   const trackedAtHead = trackedPathsAtHead(root, requiredGenerated);
@@ -618,8 +638,13 @@ export function inspectPullRequestShippingSurface(root, base) {
     fail(`required generated runtime artifacts are not tracked at HEAD: ${formatPaths(missingTrackedPaths)}`);
   }
   const changedGeneratedPaths = changedGeneratedPathsSince(root, verifiedBase);
+  const deletedGeneratedPaths = deletedGeneratedPathsSince(root, verifiedBase);
   const required = new Set(requiredGenerated);
-  const outOfClosurePaths = changedGeneratedPaths.filter(path => !required.has(path));
+  const previousGenerated = deletedGeneratedPaths.length > 0
+    ? new Set(requiredGeneratedPaths(collectRuntimeClosureAtCommit(root, verifiedBase)))
+    : new Set();
+  const outOfClosurePaths = changedGeneratedPaths.filter(path => !required.has(path)
+    && !(previousGenerated.has(path) && !trackedPathsAtHead(root, [path]).has(path)));
   if (outOfClosurePaths.length > 0) {
     fail(`pull request changes generated artifacts outside the runtime closure: ${formatPaths(outOfClosurePaths)}`);
   }
@@ -642,6 +667,7 @@ export function inspectPluginShippingSurface(root = process.cwd()) {
     ...surface,
     ignoredUntrackedRequiredPaths: ignoredUntrackedRequiredPaths.sort(comparePaths),
     stagePaths: stagePaths.sort(comparePaths),
+    changedGeneratedPaths: [...allChanged].filter(path => isGeneratedPath(path) && isRuntimeArtifactCandidate(path)).sort(comparePaths),
     unrelatedGeneratedExtras: [...unrelatedGeneratedExtras].sort(comparePaths),
   };
 }
@@ -661,16 +687,24 @@ function checkPullRequest(root, base) {
 
 function stage(root) {
   const surface = verify(root);
-  if (surface.unrelatedGeneratedExtras.length > 0) {
-    fail(`refusing to stage unrelated generated artifacts: ${formatPaths(surface.unrelatedGeneratedExtras)}`);
+  const deletedGeneratedPaths = surface.changedGeneratedPaths.filter(path => !existsSync(join(root, path)));
+  const previousGenerated = deletedGeneratedPaths.length > 0
+    ? new Set(requiredGeneratedPaths(collectRuntimeClosureAtCommit(root, 'HEAD')))
+    : new Set();
+  const deletedPreviousClosurePaths = deletedGeneratedPaths.filter(path => previousGenerated.has(path));
+  const allowedDeleted = new Set(deletedPreviousClosurePaths);
+  const unrelatedGeneratedExtras = surface.unrelatedGeneratedExtras.filter(path => !allowedDeleted.has(path));
+  if (unrelatedGeneratedExtras.length > 0) {
+    fail(`refusing to stage unrelated generated artifacts: ${formatPaths(unrelatedGeneratedExtras)}`);
   }
-  const args = buildStageArguments(surface.stagePaths);
+  const stagePaths = [...new Set([...surface.stagePaths, ...deletedPreviousClosurePaths])].sort(comparePaths);
+  const args = buildStageArguments(stagePaths);
   if (args) {
     const result = spawnSync('git', args, { cwd: root, stdio: 'inherit' });
     if (result.error) fail(`git ${args.join(' ')} could not start: ${result.error.message}`);
     if (result.status !== 0) fail(`git ${args.join(' ')} failed with exit ${result.status}`);
   }
-  const expected = new Set(surface.stagePaths);
+  const expected = new Set(stagePaths);
   const cached = cachedGeneratedPaths(root);
   const unexpected = cached.filter(path => !expected.has(path));
   const missing = [...expected].filter(path => !cached.includes(path));
@@ -678,7 +712,7 @@ function stage(root) {
     fail(`staged generated delta is not exact; unexpected: ${formatPaths(unexpected) || 'none'}; missing: ${formatPaths(missing) || 'none'}`);
   }
   if (!args) console.log('plugin shipping surface: no generated runtime artifacts need staging.');
-  else console.log(`plugin shipping surface staged: ${surface.stagePaths.join(', ')}`);
+  else console.log(`plugin shipping surface staged: ${stagePaths.join(', ')}`);
 }
 
 function main() {
