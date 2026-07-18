@@ -63,6 +63,9 @@ jobs:
           test -s .github/release-body.md
           cp .github/release-body.md release-notes.md
 
+      - name: Verify plugin shipping surface
+        run: npm run plugin:shipping:verify
+
       - name: Build
         run: npm run build
 
@@ -94,19 +97,36 @@ jobs:
           node scripts/release-boundary.mjs prepare-stage --seed-tarball "$SEED_TARBALL" --stage "$STAGE" --git-head "$GITHUB_SHA"
           FINAL_NAME=$(npm pack "$STAGE/package" --ignore-scripts --pack-destination "$FINAL_DIR" --silent)
           FINAL_TARBALL="$FINAL_DIR/$FINAL_NAME"
+          FINAL_TARBALL_SHA256=$(sha256sum "$FINAL_TARBALL" | cut -d ' ' -f 1)
           node scripts/release-boundary.mjs assert-archive --tarball "$FINAL_TARBALL" --version "$VERSION" --git-head "$GITHUB_SHA"
           node scripts/release-boundary.mjs write-evidence --tarball "$FINAL_TARBALL" --output "$EVIDENCE_JSON"
           printf 'FINAL_TARBALL=%s\n' "$FINAL_TARBALL" >> "$GITHUB_ENV"
           printf 'EVIDENCE_JSON=%s\n' "$EVIDENCE_JSON" >> "$GITHUB_ENV"
+          printf 'FINAL_TARBALL_SHA256=%s\n' "$FINAL_TARBALL_SHA256" >> "$GITHUB_ENV"
 
       - name: Smoke test staged archive
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          SMOKE_PREFIX="$RUNNER_TEMP/release-smoke"
+          SMOKE_ROOT="$RUNNER_TEMP/release-smoke"
+          SMOKE_PREFIX="$SMOKE_ROOT/package"
+          SMOKE_HOME="$SMOKE_ROOT/home"
+          SMOKE_CLAUDE_CONFIG_DIR="$SMOKE_HOME/.claude"
+          SMOKE_GJC_CONFIG_DIR="$SMOKE_HOME/.gjc"
+          SMOKE_PROJECT="$SMOKE_ROOT/project"
+          rm -rf "$SMOKE_ROOT"
+          mkdir -p "$SMOKE_HOME" "$SMOKE_PROJECT" "$SMOKE_CLAUDE_CONFIG_DIR" "$SMOKE_GJC_CONFIG_DIR"
           npm install --ignore-scripts --prefix "$SMOKE_PREFIX" "$FINAL_TARBALL"
-          test "$("$SMOKE_PREFIX/node_modules/.bin/omc" --version)" = "$VERSION"
-          "$SMOKE_PREFIX/node_modules/.bin/omc" --help
-          API_HELP=$("$SMOKE_PREFIX/node_modules/.bin/omc-cli" team api --help)
+          SMOKE_PACKAGE_ROOT="$SMOKE_PREFIX/node_modules/oh-my-claude-sisyphus"
+          test -f "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs"
+          test -f "$SMOKE_PACKAGE_ROOT/scripts/setup-claude-md.sh"
+          test -f "$SMOKE_PACKAGE_ROOT/scripts/lib/config-dir.sh"
+          test -s "$SMOKE_PACKAGE_ROOT/skills/omc-reference/SKILL.md"
+          test -f "$SMOKE_PACKAGE_ROOT/skills/setup/SKILL.md"
+          test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/SKILL.md"
+          test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/phases/01-install-claude-md.md"
+          test "$(env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc" --version)" = "$VERSION"
+          env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc" --help
+          API_HELP=$(env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc-cli" team api --help)
           case "$API_HELP" in
             *recover-worker*write-task-checkpoint*read-recovery-result*) ;;
             *)
@@ -114,6 +134,17 @@ jobs:
               exit 1
               ;;
           esac
+          cd "$SMOKE_PROJECT"
+          env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" bash -c 'bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" local'
+          cmp "$SMOKE_PACKAGE_ROOT/docs/CLAUDE.md" "$SMOKE_PROJECT/.claude/CLAUDE.md"
+          cmp "$SMOKE_PACKAGE_ROOT/skills/omc-reference/SKILL.md" "$SMOKE_PROJECT/.claude/skills/omc-reference/SKILL.md"
+          COORDINATOR_SHA256=$(sha256sum "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs" | cut -d ' ' -f 1)
+          test "$FINAL_TARBALL_SHA256" = "$(sha256sum "$FINAL_TARBALL" | cut -d ' ' -f 1)"
+          test "$COORDINATOR_SHA256" = "$(node -e 'const fs = require("node:fs"); const crypto = require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$SMOKE_PACKAGE_ROOT/bridge/claude-md-coordinator.cjs")"
+          test "$COORDINATOR_SHA256" = "$(node -e 'const evidence = require(process.argv[1]); const file = evidence.archiveManifest.files.find(({ path }) => path === "package/bridge/claude-md-coordinator.cjs"); process.stdout.write(file?.sha256 ?? "");' "$EVIDENCE_JSON")"
+          test "$(node -p 'require(process.argv[1]).gitHead' "$SMOKE_PACKAGE_ROOT/package.json")" = "$GITHUB_SHA"
+          test "$(node -p 'require(process.argv[1]).sourceSha' "$EVIDENCE_JSON")" = "$GITHUB_SHA"
+          test "$(node -p 'require(process.argv[1]).sha256' "$EVIDENCE_JSON")" = "$FINAL_TARBALL_SHA256"
 
       - name: Upload release archive evidence
         uses: actions/upload-artifact@v4

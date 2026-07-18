@@ -162,6 +162,7 @@ describe('release generation', () => {
     const install = stepIndex('Install dependencies');
     const trigger = stepIndex('Assert release trigger and npm availability');
     const notes = stepIndex('Validate release notes');
+    const pluginShipping = stepIndex('Verify plugin shipping surface');
     const build = stepIndex('Build');
     const functional = stepIndex('Run functional tests');
     const performance = stepIndex('Run subagent-lock performance test');
@@ -178,6 +179,8 @@ describe('release generation', () => {
     expect(install).toBeLessThan(trigger);
     expect(trigger).toBeLessThan(notes);
     expect(notes).toBeLessThan(build);
+    expect(notes).toBeLessThan(pluginShipping);
+    expect(pluginShipping).toBeLessThan(build);
     expect(build).toBeLessThan(functional);
     expect(functional).toBeLessThan(performance);
     expect(performance).toBeLessThan(hooks);
@@ -235,6 +238,10 @@ describe('release generation', () => {
     expect(workflow).not.toContain('npm view');
     expect(workflow).not.toContain('skipping publish');
     expect(workflow).toContain('npm run build');
+    expect(workflow).toContain('npm run plugin:shipping:verify');
+    expect(workflow).toContain(
+      '- name: Verify plugin shipping surface\n        run: npm run plugin:shipping:verify\n\n      - name: Build',
+    );
     expect(workflow).toContain('npm test -- --run');
     expect(workflow).toContain(
       'npm exec vitest -- run tests/perf/subagent-lock.bench.ts --fileParallelism=false --maxWorkers=1',
@@ -256,6 +263,8 @@ describe('release generation', () => {
     expect(workflow).toContain(
       'node scripts/release-boundary.mjs write-evidence --tarball "$FINAL_TARBALL" --output "$EVIDENCE_JSON"',
     );
+    expect(workflow).toContain('FINAL_TARBALL_SHA256=$(sha256sum "$FINAL_TARBALL" | cut -d \' \' -f 1)');
+    expect(workflow).toContain("printf 'FINAL_TARBALL_SHA256=%s\\n' \"$FINAL_TARBALL_SHA256\" >> \"$GITHUB_ENV\"");
     expect(workflow).toContain(
       'npm install --ignore-scripts --prefix "$SMOKE_PREFIX" "$FINAL_TARBALL"',
     );
@@ -264,6 +273,27 @@ describe('release generation', () => {
       '"$SMOKE_PREFIX/node_modules/.bin/omc-cli" team api --help',
     );
     expect(workflow).toContain('*recover-worker*write-task-checkpoint*read-recovery-result*');
+    expect(workflow).toContain('SMOKE_HOME="$SMOKE_ROOT/home"');
+    expect(workflow).toContain('SMOKE_CLAUDE_CONFIG_DIR="$SMOKE_HOME/.claude"');
+    expect(workflow).toContain('SMOKE_GJC_CONFIG_DIR="$SMOKE_HOME/.gjc"');
+    expect(workflow).toContain('SMOKE_PACKAGE_ROOT="$SMOKE_PREFIX/node_modules/oh-my-claude-sisyphus"');
+    expect(workflow).toContain('OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT"');
+    expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/setup/SKILL.md"');
+    expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/SKILL.md"');
+    expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/phases/01-install-claude-md.md"');
+    expect(workflow).toContain('cd "$SMOKE_PROJECT"');
+    expect(workflow).not.toContain('working-directory: "$SMOKE_PROJECT"');
+    expect(workflow).toContain('bash -c \'bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" local\'');
+    expect(workflow).toContain('cmp "$SMOKE_PACKAGE_ROOT/docs/CLAUDE.md" "$SMOKE_PROJECT/.claude/CLAUDE.md"');
+    expect(workflow).toContain('cmp "$SMOKE_PACKAGE_ROOT/skills/omc-reference/SKILL.md" "$SMOKE_PROJECT/.claude/skills/omc-reference/SKILL.md"');
+    expect(workflow).toContain('test "$FINAL_TARBALL_SHA256" = "$(sha256sum "$FINAL_TARBALL" | cut -d \' \' -f 1)"');
+    expect(workflow).toContain('package/bridge/claude-md-coordinator.cjs');
+    expect(workflow).toContain('require(process.argv[1]).gitHead');
+    expect(workflow).toContain('require(process.argv[1]).sourceSha');
+    expect(workflow).toContain('require(process.argv[1]).sha256');
+    expect(workflow).toContain('archiveManifest.files.find(({ path }) => path === "package/bridge/claude-md-coordinator.cjs")');
+    expect(workflow).toContain('env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR"');
+    expect(workflow).toContain('env -i PATH="$PATH" HOME="$SMOKE_HOME" CLAUDE_CONFIG_DIR="$SMOKE_CLAUDE_CONFIG_DIR" GJC_CONFIG_DIR="$SMOKE_GJC_CONFIG_DIR" OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" "$SMOKE_PREFIX/node_modules/.bin/omc" --version');
     expect(workflow).toContain('uses: actions/upload-artifact@v4');
     expect(workflow).toContain('${{ runner.temp }}/final/*.tgz');
     expect(workflow).toContain('${{ runner.temp }}/release-evidence.json');
