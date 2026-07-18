@@ -7,12 +7,10 @@ import { armSessionEndActionWatchdog } from './action-watchdog.js';
 import { getProcessStartIdentity, isProcessIdentityLive } from '../../platform/process-utils.js';
 const WORKER_ARG = '--omc-session-end-worker';
 const MAX_WORKER_MS = 10_000;
-/** Routing and CA paths are passed to the child, but never copied into a durable manifest. */
+/** Durable OpenClaw routing is supplied from the manifest to the action runner, never from worker ambient state. */
 export function workerEnvironment() {
-    const keys = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'OMC_OPENCLAW', 'OMC_OPENCLAW_CONFIG', 'OPENCLAW_REPLY_*', 'TMUX', 'TMUX_PANE', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_DISCORD_NOTIFIER_CHANNEL', 'OMC_DISCORD_WEBHOOK_URL', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', ...(process.env.NODE_ENV === 'test' ? ['OMC_SESSION_END_TEST_PRODUCER_GRACE_MS'] : [])];
-    const exact = Object.fromEntries(keys.filter(key => !key.endsWith('*')).flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
-    const replies = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key.startsWith('OPENCLAW_REPLY_') && value !== undefined));
-    return { ...exact, ...replies };
+    const keys = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_DISCORD_NOTIFIER_CHANNEL', 'OMC_DISCORD_WEBHOOK_URL', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', ...(process.env.NODE_ENV === 'test' ? ['OMC_SESSION_END_TEST_PRODUCER_GRACE_MS'] : [])];
+    return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 export function spawnSessionEndWorker(payload) {
     try {

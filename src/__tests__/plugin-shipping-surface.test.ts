@@ -408,6 +408,32 @@ describe('plugin shipping surface transaction', () => {
     );
   });
 
+  it('does not let a base-owned generated directory bless a candidate-only runtime artifact', () => {
+    const fixture = createFixture();
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin',
+      version: '1.0.0',
+      type: 'module',
+      main: './dist/index.js',
+      bin: { fixture: './bridge/cli.cjs' },
+      files: ['dist', 'bridge'],
+    });
+    git(fixture.root, ['add', 'package.json']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'declare generated directories']);
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+
+    writeFileSync(join(fixture.root, 'bridge', 'unrelated.cjs'), 'module.exports = true;\n');
+    git(fixture.root, ['add', '-f', '--', 'bridge/unrelated.cjs']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'add candidate-only generated artifact']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: bridge/unrelated.cjs',
+    );
+  });
+
   it('rejects changes to a base-tracked generated module that is unreachable from plugin entrypoints', () => {
     const fixture = createFixture({ trackedGeneratedTestPaths: ['dist/unreachable.js'] });
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();

@@ -160,11 +160,17 @@ function collectPackagePublicEntrypoints(packageJson) {
   return paths;
 }
 
-function collectDeclaredGeneratedPayloads(root, packageJson) {
+function collectDeclaredGeneratedPayloads(root, packageJson, { directoryCommit = null } = {}) {
   if (!Array.isArray(packageJson.files)) fail('package.json files must be an array');
   const paths = new Set();
   const standaloneBundles = new Set();
   const collectDirectory = repoPath => {
+    if (directoryCommit) {
+      for (const child of gitNullPaths(root, ['ls-tree', '-r', '--name-only', '-z', directoryCommit, '--', repoPath])) {
+        if (isRuntimeArtifactCandidate(child)) paths.add(child);
+      }
+      return;
+    }
     const absolutePath = join(root, repoPath);
     if (!existsSync(absolutePath)) fail(`required generated runtime directory is missing: ${repoPath}`);
     const stat = lstatSync(absolutePath);
@@ -490,11 +496,16 @@ function validateCoordinatorHandshake(root, requiredPaths, packageJson, pluginJs
   }
 }
 
-export function collectPluginRuntimeClosure(root = process.cwd(), { trustedPackageJson = null } = {}) {
+export function collectPluginRuntimeClosure(root = process.cwd(), {
+  trustedPackageJson = null,
+  trustedDirectoryCommit = null,
+} = {}) {
   const packageJson = readJson(root, 'package.json');
   const { paths: manifestEntrypoints, pluginJson } = collectManifestEntrypoints(root);
   const declaredPackage = trustedPackageJson ?? packageJson;
-  const { paths: declaredGeneratedPayloads, standaloneBundles } = collectDeclaredGeneratedPayloads(root, declaredPackage);
+  const { paths: declaredGeneratedPayloads, standaloneBundles } = collectDeclaredGeneratedPayloads(root, declaredPackage, {
+    directoryCommit: trustedDirectoryCommit,
+  });
   const initialPaths = new Set([
     ...manifestEntrypoints,
     ...collectPackagePublicEntrypoints(declaredPackage),
@@ -596,7 +607,10 @@ export function inspectPullRequestShippingSurface(root, base) {
     fail('check-pr requires a clean checkout of the exact HEAD commit');
   }
   const trustedPackageJson = readJsonAtCommit(root, verifiedBase, 'package.json');
-  const surface = collectPluginRuntimeClosure(root, { trustedPackageJson });
+  const surface = collectPluginRuntimeClosure(root, {
+    trustedPackageJson,
+    trustedDirectoryCommit: verifiedBase,
+  });
   const requiredGenerated = requiredGeneratedPaths(surface);
   const trackedAtHead = trackedPathsAtHead(root, requiredGenerated);
   const missingTrackedPaths = requiredGenerated.filter(path => !trackedAtHead.has(path));

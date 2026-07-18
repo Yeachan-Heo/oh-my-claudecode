@@ -24,6 +24,31 @@ export interface SessionEndJobV1 {
   completion?: { completedAt: string; terminalDigest: string; terminalRevision: number };
 }
 
+export interface OpenClawRoutingSnapshot {
+  openClawConfig?: string;
+  replyChannel?: string;
+  replyTarget?: string;
+  replyThread?: string;
+  tmux?: string;
+  tmuxPane?: string;
+}
+
+function openClawRoutingSnapshot(): OpenClawRoutingSnapshot {
+  const values: Array<[keyof OpenClawRoutingSnapshot, string]> = [
+    ['openClawConfig', 'OMC_OPENCLAW_CONFIG'],
+    ['replyChannel', 'OPENCLAW_REPLY_CHANNEL'],
+    ['replyTarget', 'OPENCLAW_REPLY_TARGET'],
+    ['replyThread', 'OPENCLAW_REPLY_THREAD'],
+    ['tmux', 'TMUX'],
+    ['tmuxPane', 'TMUX_PANE'],
+  ];
+  return Object.fromEntries(values.flatMap(([property, environment]) => process.env[environment] === undefined ? [] : [[property, process.env[environment]]])) as OpenClawRoutingSnapshot;
+}
+
+function withOpenClawRouting(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, openClawRouting: openClawRoutingSnapshot() };
+}
+
 const ACTIONS: Array<[SessionEndActionName, 'required' | 'best-effort']> = [
   ['foreground-cleanup', 'required'], ['wiki-capture', 'required'], ['team-cleanup', 'required'], ['python-cleanup', 'required'], ['reply-cleanup', 'required'],
   ['callback', 'best-effort'], ['notification', 'best-effort'], ['openclaw', 'best-effort'],
@@ -142,18 +167,19 @@ export function mutateSessionEndJob(directory: string, sessionId: string, expect
 function mutateLatest(directory: string, sessionId: string, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null { for (let i = 0; i < 8; i++) { const current = readSessionEndJob(directory, sessionId); if (!current) return null; const result = mutateSessionEndJob(directory, sessionId, current.revision, mutate); if (result) return result; } return null; }
 
 export function prepareCoreManifest(directory: string, sessionId: string, payload: Record<string, unknown>): SessionEndJobV1 | null {
+  const durablePayload = withOpenClawRouting(payload);
   let jobPath: string; try { jobPath = sessionEndJobPath(directory, sessionId); } catch { return null; }
   try {
     const result = withLock(jobPath, () => {
       const existing = readPath(jobPath);
       if (existing) {
         if (existing.phase === 'complete' || existing.producers.core.state !== 'absent') return existing;
-        const next = { ...existing, producers: { ...existing.producers, core: { state: 'prepared' as const, intentKey: digest(payload), payloadDigest: digest(payload) } }, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
-        for (const [name, action] of Object.entries(next.actions)) if (name !== 'wiki-capture') action.payload = payload;
+        const next = { ...existing, producers: { ...existing.producers, core: { state: 'prepared' as const, intentKey: digest(durablePayload), payloadDigest: digest(durablePayload) } }, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
+        for (const [name, action] of Object.entries(next.actions)) if (name !== 'wiki-capture') action.payload = durablePayload;
         atomicWriteJsonSync(jobPath, next); const reread = readPath(jobPath); if (!reread || reread.revision !== next.revision) throw new Error('session-end-manifest-reread-mismatch'); return reread;
       }
-      const now = nowIso(); const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, payload)])) as SessionEndJobV1['actions'];
-      const job: SessionEndJobV1 = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'prepared', intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
+      const now = nowIso(); const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, durablePayload)])) as SessionEndJobV1['actions'];
+      const job: SessionEndJobV1 = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'prepared', intentKey: digest(durablePayload), payloadDigest: digest(durablePayload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
       atomicWriteJsonSync(jobPath, job); return readPath(jobPath);
     });
     if (result) updateTicket(directory, sessionId, true);

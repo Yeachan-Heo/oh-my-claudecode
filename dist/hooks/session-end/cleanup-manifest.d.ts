@@ -60,6 +60,14 @@ export interface SessionEndJobV1 {
         terminalRevision: number;
     };
 }
+export interface OpenClawRoutingSnapshot {
+    openClawConfig?: string;
+    replyChannel?: string;
+    replyTarget?: string;
+    replyThread?: string;
+    tmux?: string;
+    tmuxPane?: string;
+}
 export interface DiscoveryTicket {
     sessionId: string;
     claimNonce?: string;

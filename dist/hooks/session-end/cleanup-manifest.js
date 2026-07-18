@@ -3,6 +3,20 @@ import * as path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
+function openClawRoutingSnapshot() {
+    const values = [
+        ['openClawConfig', 'OMC_OPENCLAW_CONFIG'],
+        ['replyChannel', 'OPENCLAW_REPLY_CHANNEL'],
+        ['replyTarget', 'OPENCLAW_REPLY_TARGET'],
+        ['replyThread', 'OPENCLAW_REPLY_THREAD'],
+        ['tmux', 'TMUX'],
+        ['tmuxPane', 'TMUX_PANE'],
+    ];
+    return Object.fromEntries(values.flatMap(([property, environment]) => process.env[environment] === undefined ? [] : [[property, process.env[environment]]]));
+}
+function withOpenClawRouting(payload) {
+    return { ...payload, openClawRouting: openClawRoutingSnapshot() };
+}
 const ACTIONS = [
     ['foreground-cleanup', 'required'], ['wiki-capture', 'required'], ['team-cleanup', 'required'], ['python-cleanup', 'required'], ['reply-cleanup', 'required'],
     ['callback', 'best-effort'], ['notification', 'best-effort'], ['openclaw', 'best-effort'],
@@ -197,6 +211,7 @@ function mutateLatest(directory, sessionId, mutate) { for (let i = 0; i < 8; i++
         return result;
 } return null; }
 export function prepareCoreManifest(directory, sessionId, payload) {
+    const durablePayload = withOpenClawRouting(payload);
     let jobPath;
     try {
         jobPath = sessionEndJobPath(directory, sessionId);
@@ -210,10 +225,10 @@ export function prepareCoreManifest(directory, sessionId, payload) {
             if (existing) {
                 if (existing.phase === 'complete' || existing.producers.core.state !== 'absent')
                     return existing;
-                const next = { ...existing, producers: { ...existing.producers, core: { state: 'prepared', intentKey: digest(payload), payloadDigest: digest(payload) } }, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
+                const next = { ...existing, producers: { ...existing.producers, core: { state: 'prepared', intentKey: digest(durablePayload), payloadDigest: digest(durablePayload) } }, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
                 for (const [name, action] of Object.entries(next.actions))
                     if (name !== 'wiki-capture')
-                        action.payload = payload;
+                        action.payload = durablePayload;
                 atomicWriteJsonSync(jobPath, next);
                 const reread = readPath(jobPath);
                 if (!reread || reread.revision !== next.revision)
@@ -221,8 +236,8 @@ export function prepareCoreManifest(directory, sessionId, payload) {
                 return reread;
             }
             const now = nowIso();
-            const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, payload)]));
-            const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'prepared', intentKey: digest(payload), payloadDigest: digest(payload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
+            const actions = Object.fromEntries(ACTIONS.map(([name, klass]) => [name, newAction(name, klass, durablePayload)]));
+            const job = { version: 1, jobId: randomUUID(), sessionId, scopeKey: digest(directory), revision: 0, createdAt: now, updatedAt: now, ...initialDeadlines(), producers: { core: { state: 'prepared', intentKey: digest(durablePayload), payloadDigest: digest(durablePayload) }, wiki: { state: 'absent' } }, actions, owner: null, phase: 'collecting' };
             atomicWriteJsonSync(jobPath, job);
             return readPath(jobPath);
         });

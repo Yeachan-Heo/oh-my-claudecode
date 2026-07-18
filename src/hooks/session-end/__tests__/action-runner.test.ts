@@ -126,7 +126,7 @@ describe('SessionEnd action runner', () => {
     expect(cleanupEnvironment).not.toHaveProperty('OMC_DISCORD_WEBHOOK_URL');
   });
 
-  it('passes only bounded routing context to OpenClaw action children', async () => {
+  it('uses original bounded OpenClaw routing instead of a recovering session ambient environment', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
     const child = Object.assign(new EventEmitter(), { pid: 12349, unref: vi.fn() });
@@ -136,21 +136,39 @@ describe('SessionEnd action runner', () => {
     });
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
     vi.stubEnv('OMC_OPENCLAW', '1');
-    vi.stubEnv('OMC_OPENCLAW_CONFIG', '/tmp/openclaw.json');
-    vi.stubEnv('OPENCLAW_REPLY_THREAD', 'thread-1');
-    vi.stubEnv('TMUX', '/tmp/tmux');
-    vi.stubEnv('TMUX_PANE', '%7');
+    vi.stubEnv('OMC_OPENCLAW_CONFIG', '/tmp/recovering-session.json');
+    vi.stubEnv('OPENCLAW_REPLY_CHANNEL', '#new-session');
+    vi.stubEnv('OPENCLAW_REPLY_TARGET', '@new-session');
+    vi.stubEnv('OPENCLAW_REPLY_THREAD', 'new-thread');
+    vi.stubEnv('OPENCLAW_REPLY_TOKEN', 'new-session-secret');
+    vi.stubEnv('TMUX', '/tmp/tmux-new');
+    vi.stubEnv('TMUX_PANE', '%99');
     vi.stubEnv('OMC_DISCORD_WEBHOOK_URL', 'not-for-openclaw');
 
-    await runSessionEndAction(context(directory, 'openclaw'), async () => undefined);
+    const runContext = context(directory, 'openclaw');
+    runContext.action.payload = {
+      openClawEnabled: true,
+      openClawRouting: {
+        openClawConfig: '/tmp/original-session.json',
+        replyChannel: '#original-session',
+        replyTarget: '@original-session',
+        replyThread: 'original-thread',
+        tmux: '/tmp/tmux-original',
+        tmuxPane: '%7',
+      },
+    };
+    await runSessionEndAction(runContext, async () => undefined);
     const environment = childProcess.spawn.mock.calls[0][2].env as NodeJS.ProcessEnv;
     expect(environment).toMatchObject({
       OMC_OPENCLAW: '1',
-      OMC_OPENCLAW_CONFIG: '/tmp/openclaw.json',
-      OPENCLAW_REPLY_THREAD: 'thread-1',
-      TMUX: '/tmp/tmux',
+      OMC_OPENCLAW_CONFIG: '/tmp/original-session.json',
+      OPENCLAW_REPLY_CHANNEL: '#original-session',
+      OPENCLAW_REPLY_TARGET: '@original-session',
+      OPENCLAW_REPLY_THREAD: 'original-thread',
+      TMUX: '/tmp/tmux-original',
       TMUX_PANE: '%7',
     });
+    expect(environment).not.toHaveProperty('OPENCLAW_REPLY_TOKEN');
     expect(environment).not.toHaveProperty('OMC_DISCORD_WEBHOOK_URL');
   });
 });

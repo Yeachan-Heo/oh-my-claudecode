@@ -43,6 +43,7 @@ afterEach(() => {
   processIdentity.getProcessStartIdentity.mockResolvedValue('test-process-start');
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe('SessionEnd durable worker', () => {
@@ -201,20 +202,33 @@ describe('SessionEnd durable worker', () => {
     expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([]);
   });
 
-  it('forwards OpenClaw reply and tmux routing only to the detached worker environment', () => {
-    const saved = { config: process.env.OMC_OPENCLAW_CONFIG, reply: process.env.OPENCLAW_REPLY_TOKEN, tmux: process.env.TMUX, pane: process.env.TMUX_PANE, unrelated: process.env.UNRELATED_SESSION_END_SECRET };
-    process.env.OMC_OPENCLAW_CONFIG = '/tmp/openclaw.json';
-    process.env.OPENCLAW_REPLY_TOKEN = 'reply-token';
-    process.env.TMUX = '/tmp/tmux-100/default,123,0';
-    process.env.TMUX_PANE = '%42';
-    process.env.UNRELATED_SESSION_END_SECRET = 'not-forwarded';
-    expect(workerEnvironment()).toMatchObject({
-      OMC_OPENCLAW_CONFIG: '/tmp/openclaw.json', OPENCLAW_REPLY_TOKEN: 'reply-token', TMUX: '/tmp/tmux-100/default,123,0', TMUX_PANE: '%42',
+  it('persists only bounded original OpenClaw routing and clears it from worker ambient environments', () => {
+    const directory = project();
+    vi.stubEnv('OMC_OPENCLAW_CONFIG', '/tmp/original-session.json');
+    vi.stubEnv('OPENCLAW_REPLY_CHANNEL', '#original-session');
+    vi.stubEnv('OPENCLAW_REPLY_TARGET', '@original-session');
+    vi.stubEnv('OPENCLAW_REPLY_THREAD', 'original-thread');
+    vi.stubEnv('OPENCLAW_REPLY_TOKEN', 'original-secret');
+    vi.stubEnv('TMUX', '/tmp/tmux-original');
+    vi.stubEnv('TMUX_PANE', '%42');
+    vi.stubEnv('UNRELATED_SESSION_END_SECRET', 'not-forwarded');
+    expect(prepareCoreManifest(directory, 'routing-snapshot', {})).not.toBeNull();
+
+    const routing = readSessionEndJob(directory, 'routing-snapshot')!.actions.openclaw.payload.openClawRouting;
+    expect(routing).toEqual({
+      openClawConfig: '/tmp/original-session.json',
+      replyChannel: '#original-session',
+      replyTarget: '@original-session',
+      replyThread: 'original-thread',
+      tmux: '/tmp/tmux-original',
+      tmuxPane: '%42',
     });
-    expect(workerEnvironment().UNRELATED_SESSION_END_SECRET).toBeUndefined();
-    for (const [key, value] of Object.entries({ OMC_OPENCLAW_CONFIG: saved.config, OPENCLAW_REPLY_TOKEN: saved.reply, TMUX: saved.tmux, TMUX_PANE: saved.pane, UNRELATED_SESSION_END_SECRET: saved.unrelated })) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
+    expect(JSON.stringify(routing)).not.toContain('original-secret');
+    expect(workerEnvironment()).not.toHaveProperty('OMC_OPENCLAW_CONFIG');
+    expect(workerEnvironment()).not.toHaveProperty('OPENCLAW_REPLY_THREAD');
+    expect(workerEnvironment()).not.toHaveProperty('TMUX');
+    expect(workerEnvironment()).not.toHaveProperty('TMUX_PANE');
+    expect(workerEnvironment()).not.toHaveProperty('UNRELATED_SESSION_END_SECRET');
   });
 
   it('terminalizes a core-only manifest after three failed foreground cleanups without timer churn', async () => {

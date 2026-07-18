@@ -3,7 +3,7 @@ export interface SessionEndWorkerPayload {
     directory: string;
     sessionId: string;
 }
-/** Routing and CA paths are passed to the child, but never copied into a durable manifest. */
+/** Durable OpenClaw routing is supplied from the manifest to the action runner, never from worker ambient state. */
 export declare function workerEnvironment(): NodeJS.ProcessEnv;
 export declare function spawnSessionEndWorker(payload: SessionEndWorkerPayload): boolean;
 export declare function executeSessionEndAction(name: SessionEndActionName, payload: SessionEndWorkerPayload, deadlineAt: number): Promise<void>;
