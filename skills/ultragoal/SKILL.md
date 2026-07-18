@@ -56,7 +56,10 @@ Claude Code `/goal` is a session-scoped Stop hook: it blocks the session from st
    omc ultragoal complete-goals
    ```
    This prints a model-facing handoff. The active Claude agent must read it and:
-   - Confirm/Set the active `/goal` condition in this session.
+   - Set the native Claude `/goal` for this session — in standalone Claude Code neither the
+     shell nor the agent can do it, so ask the user to type `/goal <aggregate objective>` and
+     wait. `--claude-goal-json` (below) reconciles the ledger only and does not satisfy the
+     PreToolUse `/goal` guard, which blocks tool calls until it observes an active `/goal`.
    - Work the story.
    - When the story is complete (and for the final story, after the full quality gate), share back a snapshot of the active `/goal` state and call `checkpoint`.
 
@@ -88,6 +91,6 @@ Claude Code `/goal` is a session-scoped Stop hook: it blocks the session from st
 
 <Important_Limitations>
 - The shell cannot invoke or mutate Claude Code `/goal` state. `omc ultragoal` only persists durable artifacts and prints instructions that the active Claude agent reads and acts on in-session.
-- Snapshots passed via `--claude-goal-json` are model-supplied proof of the active `/goal` state; OMC validates them for textual consistency with the plan's expected objective and ledger event, but it cannot independently observe Claude `/goal` state.
+- Snapshots passed via `--claude-goal-json` are model-supplied proof of the active `/goal` state; OMC validates them for textual consistency with the plan's expected objective and ledger event, but it cannot independently observe Claude `/goal` state. They do not satisfy the PreToolUse `/goal` guard, which requires an actual active `/goal` — a host-injected snapshot or the native `/goal` the user set in-session.
 - If the Claude `/goal` slash command is renamed or restructured, only the handoff wording needs to change; the reconciliation logic is name-agnostic.
 </Important_Limitations>

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -41,6 +41,28 @@ function writeUltragoalState(cwd: string, overrides: Record<string, unknown> = {
     `${JSON.stringify(state, null, 2)}\n`,
   );
   return state;
+}
+
+function ultragoalStatePath(cwd: string) {
+  return join(cwd, '.omc', 'state', 'sessions', 'session-a', 'ultragoal-state.json');
+}
+
+function readUltragoalState(cwd: string) {
+  return JSON.parse(readFileSync(ultragoalStatePath(cwd), 'utf-8'));
+}
+
+function expectUltragoalEnforcement(cwd: string) {
+  const preTool = runHook(preToolScript, { cwd, session_id: 'session-a', tool_name: 'Bash', tool_input: {} });
+  const stop = runHook(persistentModeScript, { cwd, session_id: 'session-a' });
+  expect(preTool.hookSpecificOutput?.permissionDecision).toBe('deny');
+  expect(stop.decision).toBe('block');
+}
+
+function expectAwaitingConfirmationRelease(cwd: string) {
+  const preTool = runHook(preToolScript, { cwd, session_id: 'session-a', tool_name: 'Bash', tool_input: {} });
+  const stop = runHook(persistentModeScript, { cwd, session_id: 'session-a' });
+  expect(preTool.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+  expect(stop.decision).toBeUndefined();
 }
 
 describe('ultragoal persistence and Claude /goal enforcement', () => {
@@ -137,6 +159,94 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
     expect(result.hookSpecificOutput?.permissionDecision).toBe('deny');
     expect(result.hookSpecificOutput?.permissionDecisionReason).toContain('ALLOW_ULTRAGOAL_WITHOUT_GOAL=1');
   });
+
+  it('releases both hooks only for a fresh awaiting-confirmation timestamp', () => {
+    const fresh = new Date().toISOString();
+    const preferred = makeTempProject('omc-ultragoal-awaiting-preferred-');
+    writeUltragoalState(preferred, { awaiting_confirmation: true, awaiting_confirmation_set_at: fresh });
+    expectAwaitingConfirmationRelease(preferred);
+
+    const insideTtl = makeTempProject('omc-ultragoal-awaiting-inside-ttl-');
+    writeUltragoalState(insideTtl, {
+      awaiting_confirmation: true,
+      awaiting_confirmation_set_at: new Date(Date.now() - 110_000).toISOString(),
+    });
+    expectAwaitingConfirmationRelease(insideTtl);
+
+    for (const [name, overrides] of [
+      ['false', { awaiting_confirmation: false, awaiting_confirmation_set_at: fresh }],
+      ['missing', {}],
+      ['stale', { awaiting_confirmation: true, awaiting_confirmation_set_at: new Date(Date.now() - 120_001).toISOString() }],
+      ['at or beyond TTL', { awaiting_confirmation: true, awaiting_confirmation_set_at: new Date(Date.now() - 120_000).toISOString() }],
+      ['future', { awaiting_confirmation: true, awaiting_confirmation_set_at: new Date(Date.now() + 60_000).toISOString() }],
+      ['invalid preferred', { awaiting_confirmation: true, awaiting_confirmation_set_at: 'invalid', started_at: fresh }],
+    ] as const) {
+      const cwd = makeTempProject(`omc-ultragoal-awaiting-${name.replace(/\s/g, '-')}-`);
+      writeUltragoalState(cwd, overrides);
+      expectUltragoalEnforcement(cwd);
+    }
+
+    for (const preferred of [undefined, '   '] as const) {
+      const cwd = makeTempProject('omc-ultragoal-awaiting-started-at-');
+      writeUltragoalState(cwd, { awaiting_confirmation: true, awaiting_confirmation_set_at: preferred, started_at: fresh });
+      expectAwaitingConfirmationRelease(cwd);
+    }
+  });
+
+  it('requires /goal after confirmation and allows the matching goal', () => {
+    const cwd = makeTempProject('omc-ultragoal-confirmation-transition-');
+    runHook(keywordScript, { cwd, session_id: 'session-a', prompt: '$ultragoal fix issue #3506' });
+    expectAwaitingConfirmationRelease(cwd);
+
+    runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Skill',
+      tool_input: { skill: 'oh-my-claudecode:ultragoal' },
+    });
+    expect(readUltragoalState(cwd).awaiting_confirmation).not.toBe(true);
+    expectUltragoalEnforcement(cwd);
+
+    const confirmedState = readUltragoalState(cwd);
+    confirmedState.claude_goal_objective = 'Complete issue #3506 ultragoal confirmation parity.';
+    writeFileSync(ultragoalStatePath(cwd), `${JSON.stringify(confirmedState, null, 2)}\n`);
+    const matchingGoal = runHook(preToolScript, {
+      cwd,
+      session_id: 'session-a',
+      tool_name: 'Bash',
+      tool_input: {},
+      goal: { objective: confirmedState.claude_goal_objective, status: 'active' },
+    });
+    expect(matchingGoal.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+  });
+
+  it('releases two keyword-detector activation and confirmation cycles in one session and project', () => {
+    const cwd = makeTempProject('omc-ultragoal-two-cycles-');
+    for (const prompt of ['$ultragoal fix issue #3506', 'run ultragoal for issue #3506 again']) {
+      runHook(keywordScript, { cwd, session_id: 'session-a', prompt });
+      expectAwaitingConfirmationRelease(cwd);
+      runHook(preToolScript, {
+        cwd,
+        session_id: 'session-a',
+        tool_name: 'Skill',
+        tool_input: { skill: 'oh-my-claudecode:ultragoal' },
+      });
+      expect(readUltragoalState(cwd).awaiting_confirmation).not.toBe(true);
+      expectUltragoalEnforcement(cwd);
+      const confirmedState = readUltragoalState(cwd);
+      confirmedState.claude_goal_objective = 'Complete issue #3506 recurring ultragoal run.';
+      writeFileSync(ultragoalStatePath(cwd), `${JSON.stringify(confirmedState, null, 2)}\n`);
+      const matchingGoal = runHook(preToolScript, {
+        cwd,
+        session_id: 'session-a',
+        tool_name: 'Bash',
+        tool_input: {},
+        goal: { objective: confirmedState.claude_goal_objective, status: 'active' },
+      });
+      expect(matchingGoal.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    }
+  });
+
 
   // Write a session-bound transcript (`<sessionId>.jsonl`) with the given record
   // contents, mirroring how Claude Code records `/goal` local-command output.
@@ -415,13 +525,25 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
     expect(existsSync(statePath)).toBe(false);
   });
 
+  it('does not activate or deny for quoted reported speech and pasted bug-report keyword mentions', () => {
+    for (const prompt of [
+      'The reporter said “please run ultragoal” during triage.',
+      'Pasted bug report: log line `[MAGIC KEYWORD DETECTED: ULTRAGOAL]` caused a prior failure.',
+    ]) {
+      const cwd = makeTempProject('omc-ultragoal-keyword-negative-');
+      runHook(keywordScript, { cwd, session_id: 'session-a', prompt });
+      expect(existsSync(ultragoalStatePath(cwd))).toBe(false);
+      const preTool = runHook(preToolScript, { cwd, session_id: 'session-a', tool_name: 'Bash', tool_input: {} });
+      expect(preTool.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    }
+  });
+
   it('activates ultragoal session state from explicit natural-language invocation', () => {
     const cwd = makeTempProject('omc-ultragoal-keyword-natural-');
 
     runHook(keywordScript, { cwd, session_id: 'session-a', prompt: 'run ultragoal for issue #3098' });
 
-    const statePath = join(cwd, '.omc', 'state', 'sessions', 'session-a', 'ultragoal-state.json');
-    const state = JSON.parse(execFileSync('cat', [statePath], { encoding: 'utf-8' }));
+    const state = readUltragoalState(cwd);
     expect(state.active).toBe(true);
   });
 
@@ -430,8 +552,7 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
 
     runHook(keywordScript, { cwd, session_id: 'session-a', prompt: '$ultragoal fix issue #3098' });
 
-    const statePath = join(cwd, '.omc', 'state', 'sessions', 'session-a', 'ultragoal-state.json');
-    const state = JSON.parse(execFileSync('cat', [statePath], { encoding: 'utf-8' }));
+    const state = readUltragoalState(cwd);
     expect(state.active).toBe(true);
     expect(state.session_id).toBe('session-a');
     expect(state.current_phase).toBe('executing');

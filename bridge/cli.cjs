@@ -82879,20 +82879,42 @@ Install with: ${this.serverConfig.installHint}`
    * Handle a parsed JSON-RPC message
    */
   handleMessage(message2) {
-    if ("id" in message2 && message2.id !== void 0) {
-      const pending = this.pendingRequests.get(message2.id);
+    const record2 = message2;
+    const hasOwnMethod = Object.prototype.hasOwnProperty.call(message2, "method");
+    const hasOwnId = Object.prototype.hasOwnProperty.call(message2, "id");
+    if (hasOwnMethod && typeof record2.method === "string") {
+      const id = record2.id;
+      if (hasOwnId) {
+        if (typeof id === "string" || typeof id === "number" && Number.isInteger(id)) {
+          this.handleServerRequest(message2);
+        }
+        return;
+      }
+      this.handleNotification(message2);
+      return;
+    }
+    if (!hasOwnMethod && hasOwnId && typeof record2.id === "number") {
+      const response = message2;
+      const pending = this.pendingRequests.get(response.id);
       if (pending) {
         clearTimeout(pending.timeout);
-        this.pendingRequests.delete(message2.id);
-        if (message2.error) {
-          pending.reject(new Error(message2.error.message));
+        this.pendingRequests.delete(response.id);
+        if (response.error) {
+          pending.reject(new Error(response.error.message));
         } else {
-          pending.resolve(message2.result);
+          pending.resolve(response.result);
         }
       }
-    } else if ("method" in message2) {
-      this.handleNotification(message2);
     }
+  }
+  /** Reply to unsupported server requests without claiming they succeeded. */
+  handleServerRequest(request) {
+    const error2 = request.method === "client/registerCapability" ? { code: -32803, message: "Dynamic capability registration is not supported" } : { code: -32601, message: "Method not found" };
+    const response = { jsonrpc: "2.0", id: request.id, error: error2 };
+    const content = JSON.stringify(response);
+    this.process?.stdin?.write(`Content-Length: ${Buffer.byteLength(content)}\r
+\r
+${content}`);
   }
   /**
    * Handle server notifications
@@ -104311,7 +104333,7 @@ function buildPerStoryClaudeGoalInstruction(goal, plan) {
     `Goal: ${goal.id} \u2014 ${goal.title}`,
     "",
     "Claude /goal integration constraints (model-facing \u2014 OMC cannot mutate Claude /goal state from a shell):",
-    "- First confirm the active Claude /goal condition for this session. If none is active, invoke /goal <condition> with the payload below.",
+    "- First confirm the active Claude /goal for this session; if none is active, invoke /goal <condition> with the payload below. If you cannot invoke /goal in this session (e.g. standalone Claude Code), ask the user to type it and wait; --claude-goal-json reconciles the ledger only and does not satisfy the PreToolUse /goal guard.",
     "- If a different active Claude /goal exists, finish or clear that /goal before starting this ultragoal.",
     "- If the active /goal is a different completed legacy goal and the Claude session refuses to set a new /goal, continue this ultragoal in a fresh Claude Code session (same repo/worktree) and invoke /goal there.",
     `- To preserve the durable ledger before switching sessions, record the non-terminal blocker without failing this goal: omc ultragoal checkpoint --goal-id ${goal.id} --status blocked --evidence "<completed legacy Claude goal blocks new /goal in this session>" --claude-goal-json "<goal snapshot JSON or path>"`,
@@ -104324,7 +104346,7 @@ function buildPerStoryClaudeGoalInstruction(goal, plan) {
     finalStory ? `  omc ultragoal checkpoint --goal-id ${goal.id} --status complete --evidence "<tests/files/PR evidence>" --claude-goal-json "<fresh complete /goal snapshot JSON or path>" --quality-gate-json "<quality gate JSON or path>"` : null,
     "- If blocked or failed, checkpoint with --status failed and the failure evidence; rerun complete-goals --retry-failed to resume.",
     "",
-    "Suggested /goal payload (model-facing \u2014 invoke /goal yourself in-session):",
+    "Suggested /goal payload (model-facing \u2014 invoke /goal in-session; if you cannot, e.g. standalone Claude Code, ask the user to):",
     JSON.stringify(createPayload, null, 2),
     "",
     "Objective (use as the /goal condition):",
@@ -104344,7 +104366,7 @@ function buildAggregateClaudeGoalInstruction(goal, plan) {
     "",
     "Claude /goal integration constraints (model-facing \u2014 OMC cannot mutate Claude /goal state from a shell):",
     "- Claude /goal = the whole ultragoal run; OMC G001/G002/etc. = ledger stories.",
-    "- First confirm the active Claude /goal condition for this session. If none is active, invoke /goal <condition> with the aggregate payload below.",
+    "- First confirm the active Claude /goal for this session; if none is active, invoke /goal <condition> with the aggregate payload below. If you cannot invoke /goal in this session (e.g. standalone Claude Code), ask the user to type it and wait; --claude-goal-json reconciles the ledger only and does not satisfy the PreToolUse /goal guard.",
     "- If the active /goal already reports the same aggregate objective as active, continue this OMC story without setting a new /goal.",
     "- If a different active or incomplete Claude /goal exists, finish or clear that /goal before starting this ultragoal; do not claim a shell command can replace Claude /goal state.",
     finalStory ? "- This is the final pending story: run the mandatory final ai-slop-cleaner pass, rerun verification, and run $code-review before any /goal clear." : "- This is not the final story: do not clear the /goal yet; the aggregate Claude /goal must remain active while later OMC stories remain.",
@@ -104355,7 +104377,7 @@ function buildAggregateClaudeGoalInstruction(goal, plan) {
     finalStory ? `  omc ultragoal checkpoint --goal-id ${goal.id} --status complete --evidence "<tests/files/PR evidence>" --claude-goal-json "<fresh complete /goal snapshot JSON or path>" --quality-gate-json "<quality gate JSON or path>"` : `  omc ultragoal checkpoint --goal-id ${goal.id} --status complete --evidence "<tests/files/PR evidence>" --claude-goal-json "<fresh /goal snapshot JSON or path>"`,
     "- If blocked or failed, checkpoint with --status failed and the failure evidence; rerun complete-goals --retry-failed to resume.",
     "",
-    "Suggested /goal payload (model-facing \u2014 invoke /goal yourself in-session):",
+    "Suggested /goal payload (model-facing \u2014 invoke /goal in-session; if you cannot, e.g. standalone Claude Code, ask the user to):",
     JSON.stringify(createPayload, null, 2),
     "",
     "Aggregate /goal condition:",

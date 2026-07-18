@@ -128,6 +128,8 @@ export declare class LspClient {
      * Handle a parsed JSON-RPC message
      */
     private handleMessage;
+    /** Reply to unsupported server requests without claiming they succeeded. */
+    private handleServerRequest;
     /**
      * Handle server notifications
      */

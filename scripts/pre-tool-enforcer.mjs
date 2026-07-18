@@ -643,6 +643,25 @@ const ULTRAGOAL_TERMINAL_PHASES = new Set([
   'aborted',
 ]);
 
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
+function isAwaitingConfirmation(state) {
+  if (!state || state.awaiting_confirmation !== true) return false;
+
+  const preferred = state.awaiting_confirmation_set_at;
+  const timestamp = typeof preferred === 'string' && preferred.trim()
+    ? preferred
+    : typeof state.started_at === 'string' && state.started_at.trim()
+      ? state.started_at
+      : null;
+  if (!timestamp) return false;
+
+  const timestampMs = new Date(timestamp).getTime();
+  const ageMs = Date.now() - timestampMs;
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < AWAITING_CONFIRMATION_TTL_MS;
+}
+
+
 function isStaleModeState(state) {
   if (!state || typeof state !== 'object') return true;
   const timestamps = [state.last_checked_at, state.updated_at, state.started_at]
@@ -900,6 +919,7 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   if (isStaleModeState(state)) return null;
   if (state.project_path && resolve(String(state.project_path)) !== resolve(directory)) return null;
   if (isUltragoalTerminalState(state, directory)) return null;
+  if (isAwaitingConfirmation(state)) return null;
 
   const expected = getExpectedUltragoalObjective(state, directory);
   const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
