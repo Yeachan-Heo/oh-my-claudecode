@@ -57,6 +57,14 @@ function formatResetTime(date: Date | null | undefined): string | null {
 }
 
 /**
+ * Format a USD amount as whole dollars (no cents), keeping the HUD compact.
+ * e.g. 15.62 → "$16", 14 → "$14", 0 → "$0".
+ */
+function formatUsdWhole(amount: number): string {
+  return `$${Math.round(amount)}`;
+}
+
+/**
  * Render rate limits display.
  *
  * Format: 5h:45%(3h42m) wk:12%(2d5h) mo:8%(15d3h) sn:20%(1d2h) op:5%(1d2h)
@@ -129,7 +137,7 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
     const extraColor = getColor(extra);
     const extraReset = formatResetTime(limits.extraUsageResetsAt);
-    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+    const dollarPart = `${DIM}(${formatUsdWhole(limits.extraUsageSpentUsd ?? 0)}/${formatUsdWhole(limits.extraUsageLimitUsd)})${RESET}`;
 
     const extraPart = extraReset
       ? `${DIM}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`
@@ -283,7 +291,7 @@ export function renderRateLimitsWithBar(
     const extraEmpty = barWidth - extraFilled;
     const extraBar = `${extraColor}${'█'.repeat(extraFilled)}${DIM}${'░'.repeat(extraEmpty)}${RESET}`;
     const extraReset = formatResetTime(limits.extraUsageResetsAt);
-    const dollarPart = `${DIM}($${(limits.extraUsageSpentUsd ?? 0).toFixed(2)}/$${limits.extraUsageLimitUsd.toFixed(2)})${RESET}`;
+    const dollarPart = `${DIM}(${formatUsdWhole(limits.extraUsageSpentUsd ?? 0)}/${formatUsdWhole(limits.extraUsageLimitUsd)})${RESET}`;
 
     const extraPart = extraReset
       ? `${DIM}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM}(${resetPrefix}${extraReset})${RESET}`

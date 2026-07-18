@@ -1192,6 +1192,7 @@ Configure HUD elements in `~/.claude/settings.json`:
 | `ralph`      | Show ralph loop status                                                                                               | `true`  |
 | `autopilot`  | Show autopilot status                                                                                                | `true`  |
 | `showTokens` | Show transcript-derived token usage (`tok:i1.2k/o340`, plus `r...` reasoning and `s...` session total when reliable) | `false` |
+| `useBars`    | Render rate-limit and context usage as `[████░░]` progress bars instead of plain percentages (the `full`/`dense` presets enable it)  | `false` |
 
 Additional `omcHud` layout and label options (top-level):
 

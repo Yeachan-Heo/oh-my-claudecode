@@ -177,8 +177,10 @@ describe('renderRateLimits — extra usage', () => {
     const result = renderRateLimits(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('18%');
-    expect(result).toContain('$3.10');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('$3');
+    expect(result).toContain('$17');
+    expect(result).not.toContain('.00');
+    expect(result).not.toContain('$3.10');
   });
 
   it('renders 0% extra usage with correct dollar amounts', () => {
@@ -191,19 +193,34 @@ describe('renderRateLimits — extra usage', () => {
     const result = renderRateLimits(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('0%');
-    expect(result).toContain('$0.00');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('$0');
+    expect(result).toContain('$17');
+    expect(result).not.toContain('.00');
   });
 
-  it('defaults spent to $0.00 when extraUsageSpentUsd is absent', () => {
+  it('defaults spent to $0 when extraUsageSpentUsd is absent', () => {
     const limits: RateLimits = {
       ...base,
       extraUsagePercent: 5,
       extraUsageLimitUsd: 10,
     };
     const result = renderRateLimits(limits);
-    expect(result).toContain('$0.00');
-    expect(result).toContain('$10.00');
+    expect(result).toContain('$0');
+    expect(result).toContain('$10');
+    expect(result).not.toContain('.00');
+  });
+
+  it('rounds extra-usage dollars to whole values', () => {
+    const limits: RateLimits = {
+      ...base,
+      extraUsagePercent: 100,
+      extraUsageSpentUsd: 15.62,
+      extraUsageLimitUsd: 14,
+    };
+    const result = renderRateLimits(limits);
+    expect(result).toContain('($16/$14)');
+    expect(result).not.toContain('.62');
+    expect(result).not.toContain('.00');
   });
 
   it('uses red color at >= 90%', () => {
@@ -291,8 +308,9 @@ describe('renderRateLimitsWithBar — extra usage', () => {
     const result = renderRateLimitsWithBar(limits);
     expect(result).toContain('extra:');
     expect(result).toContain('18%');
-    expect(result).toContain('$3.10');
-    expect(result).toContain('$17.00');
+    expect(result).toContain('$3');
+    expect(result).toContain('$17');
+    expect(result).not.toContain('.00');
     // Bar characters present
     expect(result).toMatch(/[█░]/);
   });
