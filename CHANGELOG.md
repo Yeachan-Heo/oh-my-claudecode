@@ -1,31 +1,30 @@
-# oh-my-claudecode v4.15.5: Reliability Fixes
+# oh-my-claudecode v4.15.6: Named Stage Profiles & Reliability Fixes
 
 ## Release Notes
 
-Release with **8 bug fixes** and **2 other changes** across **9 merged PRs**, plus one release-gate fix found during local macOS verification.
+Release with **1 new feature**, **10 bug fixes** across **11 merged PRs**.
 
 ### Highlights
 
-- **fix(ci): bind artifact authorizer to dev event base** (#3486)
-- **fix(team): make watchdog task publication atomic** (#3488)
-- **fix(windows): avoid Git console flashes in hooks and HUD** (#3484)
+- **feat(autopilot): add named stage profiles** (#3492)
+
+### New Features
+
+- **feat(autopilot): add named stage profiles** (#3492)
 
 ### Bug Fixes
 
-- **fix(ci): bind artifact authorizer to dev event base** (#3486)
-- **fix(windows): keep prompt hook timeout ownership in runner** (#3490)
-- **fix(team): make watchdog task publication atomic** (#3488)
-- **fix(windows): avoid Git console flashes in hooks and HUD** (#3484)
-- **fix(hooks): make SessionEnd shutdown durable and bounded** (#3478)
-- **fix: narrow workflow drift decision detection** (#3475)
-- **fix: validate direct team mailbox targets** (#3473)
-- **fix(team): fall back to locale-stable process start detection on macOS**
-
-### Other Changes
-
-- **test(project-memory): guard packed learner against command harvesting** (#3495)
-- **ci: add base-owned generated artifact authorizer** (#3480)
+- **fix(release): guard coordinator across shipped surfaces** (#3516)
+- **fix: ship complete plugin runtime closure** (#3479)
+- **fix(windows): ship hidden worktree git subprocesses** (#3501)
+- **fix(ultragoal): make the /goal handoff satisfy the guard, not just the ledger** (#3514)
+- **fix(lsp): handle server-to-client requests** (#3511)
+- **fix(ultragoal): defer /goal guard until confirmation** (#3510)
+- **fix(beads): correct CLI instruction syntax** (#3505)
+- **fix(session-start): keep plugin drift guidance on marketplace channel** (#3500)
+- **fix(session-start): align update notices with plugin channel** (#3499)
+- **fix(windows): bound generic-hook runner timeout ownership and nested git** (#3496)
 
 ### Stats
 
-- **9 PRs merged** | **0 new features** | **8 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+- **11 PRs merged** | **1 new feature** | **10 bug fixes** | **0 security/hardening improvements** | **0 other changes**
