@@ -62,10 +62,18 @@ describe('isZaiHost', () => {
     expect(isZaiHost('https://foo.bar.z.ai')).toBe(true);
   });
 
-  it('rejects hosts that merely contain z.ai as substring', () => {
+  it('accepts 智谱 BigModel domestic host (shares the z.ai quota API)', () => {
+    expect(isZaiHost('https://open.bigmodel.cn/api/anthropic')).toBe(true);
+    expect(isZaiHost('https://bigmodel.cn')).toBe(true);
+    expect(isZaiHost('https://api.bigmodel.cn/v1')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain z.ai or bigmodel.cn as substring', () => {
     expect(isZaiHost('https://z.ai.evil.tld')).toBe(false);
     expect(isZaiHost('https://notz.ai')).toBe(false);
     expect(isZaiHost('https://z.ai.example.com')).toBe(false);
+    expect(isZaiHost('https://bigmodel.cn.evil.tld')).toBe(false);
+    expect(isZaiHost('https://notbigmodel.cn')).toBe(false);
   });
 
   it('rejects unrelated hosts', () => {
@@ -792,6 +800,22 @@ describe('getUsage routing', () => {
     expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
     const callArgs = httpsModule.default.request.mock.calls[0][0];
     expect(callArgs.hostname).toBe('api.z.ai');
+    expect(callArgs.path).toBe('/api/monitor/usage/quota/limit');
+  });
+
+  it('routes 智谱 BigModel (open.bigmodel.cn) to the shared z.ai quota API', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+
+    // https.request mock not wired, so fetchUsageFromZai resolves to null (network error)
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+
+    // Verify the bigmodel.cn quota endpoint was called (same path as z.ai)
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('open.bigmodel.cn');
     expect(callArgs.path).toBe('/api/monitor/usage/quota/limit');
   });
 

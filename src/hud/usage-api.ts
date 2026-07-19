@@ -138,13 +138,23 @@ interface ZaiQuotaResponse {
 const ZAI_UNIT_WEEK = 6;
 
 /**
- * Check if a URL points to z.ai (exact hostname match)
+ * Check if a URL points to z.ai or 智谱 BigModel (domestic).
+ *
+ * z.ai is 智谱's international brand and shares the same
+ * /api/monitor/usage/quota/limit endpoint and bearer-token auth as the
+ * domestic open.bigmodel.cn host, so both are routed through the z.ai
+ * usage path.
  */
 export function isZaiHost(urlString: string): boolean {
   try {
     const url = new URL(urlString);
     const hostname = url.hostname.toLowerCase();
-    return hostname === 'z.ai' || hostname.endsWith('.z.ai');
+    return (
+      hostname === 'z.ai' ||
+      hostname.endsWith('.z.ai') ||
+      hostname === 'bigmodel.cn' ||
+      hostname.endsWith('.bigmodel.cn')
+    );
   } catch {
     return false;
   }
