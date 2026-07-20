@@ -36,6 +36,36 @@ function run(target: string, root: string, env: NodeJS.ProcessEnv = {}, args: st
   return { status: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || '' };
 }
 
+function runDelayedPromptRunner(root: string, target: string) {
+  const launcher = `
+    const { spawnSync } = require('node:child_process');
+    const [node, runner, root, target, delayMs, outerTimeoutMs] = process.argv.slice(1);
+    const startedAt = Date.now();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(delayMs));
+    const runnerStartedAt = Date.now();
+    const result = spawnSync(node, [runner, target], {
+      encoding: 'utf8',
+      input: '{}',
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: root },
+      timeout: Number(outerTimeoutMs) - (runnerStartedAt - startedAt),
+    });
+    process.stdout.write(JSON.stringify({
+      evidence: 'argv-based delayed-launch model; not a native Windows reproduction',
+      startedAt,
+      runnerStartedAt,
+      finishedAt: Date.now(),
+      status: result.status,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    }));
+  `;
+  const result = spawnSync(NODE, ['-e', launcher, NODE, RUN_CJS_PATH, root, target, '11000', '30000'], {
+    encoding: 'utf-8',
+    timeout: 35000,
+  });
+  return JSON.parse(result.stdout || '{}');
+}
+
 afterEach(() => {
   for (const directory of tempDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -75,6 +105,25 @@ describe('Windows-safe prompt hook runner paths', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('Hook keyword-detector.mjs timed out after 1ms; exiting fail-open.');
+  });
+
+  it('models an argv-delayed launch crossing 10s and failing open before the 30s host fuse', () => {
+    const cacheBase = mkdtempSync(join(tmpdir(), 'omc delayed prompt launch-'));
+    tempDirs.push(cacheBase);
+    const root = join(cacheBase, '4.7.0');
+    const target = join(root, 'scripts', 'keyword-detector.mjs');
+    makePlugin(root, "setInterval(() => {}, 1000); setTimeout(() => process.stdout.write('late'), 20);", 30);
+
+    const model = runDelayedPromptRunner(root, target);
+
+    expect(model.evidence).toContain('model; not a native Windows reproduction');
+    expect(model.runnerStartedAt - model.startedAt).toBeGreaterThan(10000);
+    expect(model.finishedAt - model.startedAt).toBeLessThan(30000);
+    expect(model.status).toBe(0);
+    expect(model.finishedAt - model.runnerStartedAt).toBeGreaterThanOrEqual(7500);
+    expect(model.finishedAt - model.runnerStartedAt).toBeLessThan(10000);
+    expect(model.stdout).toBe('');
+    expect(model.stderr).toBe('');
   });
 
   it('reaps a timed-out generic hook process tree', async () => {

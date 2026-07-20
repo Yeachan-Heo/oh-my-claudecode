@@ -62,16 +62,41 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
     const keywordDetector = promptHooks.find((hook: any) => hook.command.includes('keyword-detector.mjs'));
     const skillInjector = promptHooks.find((hook: any) => hook.command.includes('skill-injector.mjs'));
 
-    expect(keywordDetector?.timeout).toBe(10);
-    expect(skillInjector?.timeout).toBe(15);
+    expect(keywordDetector?.timeout).toBe(30);
+    expect(skillInjector?.timeout).toBe(30);
 
     const hooksDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'HOOKS.md'), 'utf-8');
     const referenceDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'REFERENCE.md'), 'utf-8');
 
-    expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 10s |');
-    expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 15s |');
+    expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 30s outer host fuse; 8s trusted Worker limit |');
+    expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 30s outer host fuse; 12s trusted Worker limit |');
+    expect(hooksDoc).toContain('A command that never reaches `run.cjs` can consume its full 30s outer fuse.');
     expect(referenceDoc).toContain('| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`');
-    expect(referenceDoc).toContain('| 10s, 15s');
+    expect(referenceDoc).toContain('30s outer fuse per command; 8s, 12s trusted Worker limits');
+    expect(referenceDoc).toContain('A command that never starts the runner can take the entire 30s per-command fuse');
+  });
+
+  it('caps only trusted prompt Worker execution without extending lower manifest limits', () => {
+    const trustedPluginRoot = join(__dirname, '..', '..');
+    const policyProbe = `
+      const runner = require(process.argv[1]);
+      const root = process.argv[2];
+      const keyword = require('node:path').join(root, 'scripts', 'keyword-detector.mjs');
+      const skill = require('node:path').join(root, 'scripts', 'skill-injector.mjs');
+      const outer = { event: 'UserPromptSubmit', timeoutMs: 30000 };
+      const lower = { event: 'UserPromptSubmit', timeoutMs: 5000 };
+      process.stdout.write(JSON.stringify([
+        runner.resolveTrustedPromptWorkerTimeoutMs(keyword, outer, root),
+        runner.resolveTrustedPromptWorkerTimeoutMs(skill, outer, root),
+        runner.resolveTrustedPromptWorkerTimeoutMs(keyword, lower, root),
+        runner.resolveGenericTimeoutMs(outer),
+      ]));
+    `;
+    const values = JSON.parse(execFileSync(NODE, ['-e', policyProbe, RUN_CJS_PATH, trustedPluginRoot], {
+      encoding: 'utf-8',
+    }));
+
+    expect(values).toEqual([8000, 12000, 4000, 27000]);
   });
 
   it('exits 0 when no target argument is provided', () => {

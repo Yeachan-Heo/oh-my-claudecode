@@ -123,6 +123,18 @@ function resolveInnerTimeoutMs(manifestHook) {
   return Math.max(1, manifestHook.timeoutMs - resolveTimeoutCushionMs(manifestHook.timeoutMs, manifestHook.event));
 }
 
+// Call only after resolveWorkerTarget has verified an exact canonical trusted prompt target.
+function resolveTrustedPromptWorkerTimeoutMs(targetPath, manifestHook, trustedPluginRoot) {
+  const calculatedTimeoutMs = resolveInnerTimeoutMs(manifestHook);
+  const canonicalTarget = normalizedComparisonPath(targetPath);
+  const capsByCanonicalTarget = new Map([
+    [normalizedComparisonPath(join(trustedPluginRoot, 'scripts', 'keyword-detector.mjs')), 8000],
+    [normalizedComparisonPath(join(trustedPluginRoot, 'scripts', 'skill-injector.mjs')), 12000],
+  ]);
+  const capMs = capsByCanonicalTarget.get(canonicalTarget);
+  return capMs ? Math.min(calculatedTimeoutMs, capMs) : calculatedTimeoutMs;
+}
+
 function resolveGenericTimeoutMs(manifestHook) {
   return manifestHook ? resolveInnerTimeoutMs(manifestHook) : DEFAULT_GENERIC_TIMEOUT_MS;
 }
@@ -393,7 +405,7 @@ if (require.main === module) {
     const extraArgs = process.argv.slice(3);
     const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
     if (workerManifestHook) {
-      const workerTimeoutMs = resolveInnerTimeoutMs(workerManifestHook);
+      const workerTimeoutMs = resolveTrustedPromptWorkerTimeoutMs(resolution.targetPath, workerManifestHook, resolution.trustedPluginRoot);
       runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
         process.exitCode = status;
       });
@@ -409,6 +421,7 @@ if (require.main === module) {
 
 module.exports = {
   resolveInnerTimeoutMs,
+  resolveTrustedPromptWorkerTimeoutMs,
   resolveWorkerTarget,
   resolveHookTimeoutMs,
   resolveGenericTimeoutMs,

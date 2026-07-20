@@ -924,9 +924,9 @@ OMC registers 21 hook scripts across 11 Claude Code lifecycle events. For detail
 
 ### Hooks by Lifecycle Event
 
-| Event                  | Scripts                                                                                                           | Timeout          |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------- |
-| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`                                                                      | 10s, 15s         |
+| Event                  | Scripts                                                                                                           | Timeout                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`                                                                      | 30s outer fuse per command; 8s, 12s trusted Worker limits |
 | **SessionStart**       | `session-start.mjs`, `project-memory-session.mjs`, `setup-init.mjs` (init), `setup-maintenance.mjs` (maintenance) | 5s, 5s, 30s, 60s |
 | **PreToolUse**         | `pre-tool-enforcer.mjs`                                                                                           | 3s               |
 | **PermissionRequest**  | `permission-handler.mjs` (Bash only)                                                                              | 5s               |
@@ -937,6 +937,8 @@ OMC registers 21 hook scripts across 11 Claude Code lifecycle events. For detail
 | **PreCompact**         | `pre-compact.mjs`, `project-memory-precompact.mjs`                                                                | 10s, 5s          |
 | **Stop**               | `context-guard-stop.mjs`, `workflow-drift-guard.mjs`, `persistent-mode.mjs`, `code-simplifier.mjs`                | 5s, 3s, 10s, 5s  |
 | **SessionEnd**         | `session-end.mjs`                                                                                                 | 30s              |
+
+For each UserPromptSubmit command, 30s is the outer host fuse, including any launcher delay before `run.cjs`. Only exact canonical targets in the trusted Worker branch receive the 8s keyword-detector or 12s skill-injector execution caps; generic, untrusted, and non-prompt child paths retain their existing timeout behavior. A command that never starts the runner can take the entire 30s per-command fuse, and host scheduling does not imply an aggregate latency.
 
 The `workflow-drift-guard` blocks only supported source-associated local selection forks with a known minimum of two live alternatives—including exact binary questions and cardinality templates; explicit open input and every unsupported or ambiguous form fail open.
 
