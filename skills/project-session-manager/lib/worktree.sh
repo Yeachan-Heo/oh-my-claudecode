@@ -73,13 +73,13 @@ psm_create_pr_worktree() {
 
     # Fetch the PR branch
     cd "$local_repo" || return 1
-    git fetch origin "pull/${pr_number}/head:psm-pr-${pr_number}-review" 2>/dev/null || {
+    git fetch origin "pull/${pr_number}/head:psm-pr-${pr_number}-review" >/dev/null 2>&1 || {
         echo "error|Failed to fetch PR #${pr_number}"
         return 1
     }
 
     # Create worktree
-    git worktree add "$worktree_path" "psm-pr-${pr_number}-review" 2>/dev/null || {
+    git worktree add "$worktree_path" "psm-pr-${pr_number}-review" >/dev/null 2>&1 || {
         echo "error|Failed to create worktree"
         return 1
     }
@@ -114,19 +114,19 @@ psm_create_issue_worktree() {
     cd "$local_repo" || return 1
 
     # Fetch latest from origin
-    git fetch origin "$base_branch" 2>/dev/null || {
+    git fetch origin "$base_branch" >/dev/null 2>&1 || {
         echo "error|Failed to fetch $base_branch"
         return 1
     }
 
     # Create and checkout new branch
-    git branch "$branch_name" "origin/$base_branch" 2>/dev/null || {
+    git branch "$branch_name" "origin/$base_branch" >/dev/null 2>&1 || {
         # Branch might already exist
         true
     }
 
     # Create worktree
-    git worktree add "$worktree_path" "$branch_name" 2>/dev/null || {
+    git worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 || {
         echo "error|Failed to create worktree"
         return 1
     }
@@ -159,16 +159,16 @@ psm_create_feature_worktree() {
     cd "$local_repo" || return 1
 
     # Fetch latest
-    git fetch origin "$base_branch" 2>/dev/null || {
+    git fetch origin "$base_branch" >/dev/null 2>&1 || {
         echo "error|Failed to fetch $base_branch"
         return 1
     }
 
     # Create branch
-    git branch "$branch_name" "origin/$base_branch" 2>/dev/null || true
+    git branch "$branch_name" "origin/$base_branch" >/dev/null 2>&1 || true
 
     # Create worktree
-    git worktree add "$worktree_path" "$branch_name" 2>/dev/null || {
+    git worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 || {
         echo "error|Failed to create worktree"
         return 1
     }
