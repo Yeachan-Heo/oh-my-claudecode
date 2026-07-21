@@ -167,3 +167,20 @@ psm_get_review_sessions() {
 psm_get_fix_sessions() {
     jq -r '.sessions | to_entries[] | select(.value.type == "fix" and (.value.state // "active") == "active") | "\(.value.id)|\(.value.metadata.issue_number // empty)|\(.value.project)"' "$PSM_SESSIONS"
 }
+# Resolve a PSM public session id from an actual (tmux-safe) session name
+# (issue #3528). The current tmux session reported by tmux is always the
+# tmux-safe form, so we regenerate each registered id's canonical tmux name via
+# psm_tmux_name_from_id and return the id whose canonical name matches.
+# Usage: psm_get_session_id_for_tmux <tmux_session_name>
+psm_get_session_id_for_tmux() {
+    local target="$1"
+    local id
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        if [[ "$(psm_tmux_name_from_id "$id")" == "$target" ]]; then
+            printf '%s\n' "$id"
+            return 0
+        fi
+    done < <(jq -r '.sessions | keys[]' "$PSM_SESSIONS")
+    return 1
+}

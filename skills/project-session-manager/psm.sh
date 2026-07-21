@@ -211,8 +211,8 @@ cmd_review() {
     fi
 
     # Create tmux session
-    local session_name="psm:${alias}:pr-${pr_number}"
     local session_id="${alias}:pr-${pr_number}"
+    local session_name=$(psm_tmux_name_from_id "$session_id")
 
     if [[ "$no_tmux" != "true" ]]; then
         log_info "Creating tmux session..."
@@ -386,8 +386,8 @@ cmd_fix() {
     fi
 
     # Create tmux session
-    local session_name="psm:${alias}:issue-${issue_number}"
     local session_id="${alias}:issue-${issue_number}"
+    local session_name=$(psm_tmux_name_from_id "$session_id")
 
     log_info "Creating tmux session..."
     psm_create_tmux_session "$session_name" "$worktree_path"
@@ -459,8 +459,8 @@ cmd_feature() {
     log_success "Worktree created at $worktree_path"
 
     local safe_name=$(psm_sanitize "$feature_name")
-    local session_name="psm:${project}:feat-${safe_name}"
     local session_id="${project}:feat-${safe_name}"
+    local session_name=$(psm_tmux_name_from_id "$session_id")
 
     psm_create_tmux_session "$session_name" "$worktree_path"
     local feature_prompt="Implement feature \"${feature_name}\" for project ${project}. Working branch: ${branch_name}. Build the feature, add tests, and open a PR when ready: gh pr create --title \"feat: ${feature_name}\""
@@ -492,7 +492,7 @@ cmd_list() {
     psm_list_sessions "$project" | while IFS='|' read -r id type state worktree; do
         # Check if tmux session exists
         local tmux_state="detached"
-        if psm_tmux_session_exists "psm:${id}"; then
+        if psm_tmux_session_exists "$(psm_tmux_name_from_id "$id")"; then
             tmux_state="$state"
         else
             tmux_state="no-tmux"
@@ -507,7 +507,7 @@ cmd_list() {
 # Command: attach
 cmd_attach() {
     local session_id="$1"
-    local session_name="psm:${session_id}"
+    local session_name=$(psm_tmux_name_from_id "$session_id")
 
     if ! psm_tmux_session_exists "$session_name"; then
         log_error "Session not found: $session_name"
@@ -623,8 +623,8 @@ cmd_status() {
     # Try to detect current session
     local current_session=$(psm_current_tmux_session)
 
-    if [[ -n "$current_session" && "$current_session" == psm:* ]]; then
-        local session_id="${current_session#psm:}"
+    if [[ -n "$current_session" && "$current_session" == psm_* ]]; then
+        local session_id=$(psm_get_session_id_for_tmux "$current_session")
         local session_json=$(psm_get_session "$session_id")
 
         if [[ -n "$session_json" ]]; then

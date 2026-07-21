@@ -6,10 +6,30 @@ psm_has_tmux() {
     command -v tmux &> /dev/null
 }
 
+# Canonical tmux-safe session-name contract (issue #3528).
+# tmux reserves ':' and '.' in target names (the "session:window.pane" syntax)
+# and silently rewrites them inside session names, which orphans any PSM session
+# whose requested name still contained them. This is the single source of truth
+# for translating a PSM logical name into the name tmux will actually use; it
+# MUST be applied at every tmux boundary. Translation is idempotent, so it is
+# safe to call on names that are already tmux-safe (e.g. old registry entries).
+psm_tmux_safe_name() {
+    local name="$1"
+    printf '%s' "${name//[.:]/_}"
+}
+
+# Build the canonical tmux session name for a PSM public session id
+# (e.g. "omc:pr-123" -> "psm_omc_pr-123"). The colon-form id remains the
+# human-facing identifier in sessions.json and on the CLI.
+psm_tmux_name_from_id() {
+    psm_tmux_safe_name "psm:${1}"
+}
+
 # Create a tmux session
 # Usage: psm_create_tmux_session <session_name> <working_dir>
 psm_create_tmux_session() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
     local working_dir="$2"
 
     if ! psm_has_tmux; then
@@ -29,6 +49,14 @@ psm_create_tmux_session() {
         return 1
     }
 
+    # Fail closed: verify the session exists under the exact name PSM will use
+    # for later lookups (issue #3528). If tmux rewrote the name, every later
+    # has-session / send-keys / kill / attach would silently miss.
+    if ! tmux has-session -t "$session_name" 2>/dev/null; then
+        echo "error|tmux session not found after create: $session_name"
+        return 1
+    fi
+
     echo "created|$session_name"
     return 0
 }
@@ -44,7 +72,8 @@ psm_create_tmux_session() {
 # directory-trust or repeated tool-approval prompts (issue #2508).
 # Set PSM_CLAUDE_STARTUP_DELAY (default: 5s) to tune literal-prompt delivery.
 psm_launch_claude() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
     local initial_context="${2:-}"
 
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
@@ -116,7 +145,8 @@ _psm_pane_has_claude_prompt() {
 # Usage: psm_wait_for_claude_prompt <session_name> [max_seconds]
 # Returns 0 when prompt detected; 1 on timeout.
 psm_wait_for_claude_prompt() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
     local max_wait="${2:-30}"
     local waited=0
 
@@ -137,7 +167,8 @@ psm_wait_for_claude_prompt() {
 # Non-fatal: warns on timeout but does not fail the session creation.
 # Usage: psm_inject_prompt <session_name> <context_file_relative_path>
 psm_inject_prompt() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
     local context_file="$2"
 
     if ! psm_wait_for_claude_prompt "$session_name"; then
@@ -158,7 +189,8 @@ psm_inject_prompt() {
 # Kill a tmux session
 # Usage: psm_kill_tmux_session <session_name>
 psm_kill_tmux_session() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
 
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
         echo "not_found|$session_name"
@@ -180,13 +212,14 @@ psm_list_tmux_sessions() {
         return 0
     fi
 
-    tmux list-sessions -F "#{session_name}|#{session_created}|#{session_attached}" 2>/dev/null | grep "^psm:" || true
+    tmux list-sessions -F "#{session_name}|#{session_created}|#{session_attached}" 2>/dev/null | grep "^psm_" || true
 }
 
 # Check if a tmux session exists
 # Usage: psm_tmux_session_exists <session_name>
 psm_tmux_session_exists() {
-    local session_name="$1"
+    local session_name
+    session_name=$(psm_tmux_safe_name "$1")
     tmux has-session -t "$session_name" 2>/dev/null
 }
 
@@ -204,5 +237,5 @@ psm_tmux_session_name() {
     local type="$2"
     local id="$3"
 
-    echo "psm:${alias}:${type}-${id}"
+    psm_tmux_name_from_id "${alias}:${type}-${id}"
 }
