@@ -15,13 +15,13 @@ provider_jira_detect_ref() {
 provider_jira_fetch_issue() {
     local issue_key="$1"  # e.g., "PROJ-123"
     # Note: second arg (repo) is ignored for Jira
-    jira issue view "$issue_key" --output json 2>/dev/null
+    jira issue view "$issue_key" --raw 2>/dev/null
 }
 
 provider_jira_issue_closed() {
     local issue_key="$1"
     local status_category
-    status_category=$(jira issue view "$issue_key" --output json 2>/dev/null | jq -r '.fields.status.statusCategory.key')
+    status_category=$(jira issue view "$issue_key" --raw 2>/dev/null | jq -r '.fields.status.statusCategory.key')
     # Jira status categories: "new", "indeterminate", "done"
     [[ "$status_category" == "done" ]]
 }
