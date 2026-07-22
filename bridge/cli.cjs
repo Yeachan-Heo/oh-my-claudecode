@@ -3064,6 +3064,15 @@ var init_config_dir = __esm({
   }
 });
 
+// src/lib/env-vars.ts
+var OMC_PLUGIN_ROOT_ENV;
+var init_env_vars = __esm({
+  "src/lib/env-vars.ts"() {
+    "use strict";
+    OMC_PLUGIN_ROOT_ENV = "OMC_PLUGIN_ROOT";
+  }
+});
+
 // src/shared/types.ts
 var CANONICAL_TEAM_ROLES, CURSOR_EXECUTOR_TEAM_ROLES, KNOWN_AGENT_NAMES;
 var init_types = __esm({
@@ -16261,6 +16270,29 @@ ${CLAUDE_MD_IMPORT_END}
 });
 
 // src/installer/index.ts
+function isSafeAgentFilename(filename) {
+  return /^[a-z0-9-]+\.md$/.test(filename);
+}
+function isValidHistoricalAgent(record2) {
+  return isSafeAgentFilename(record2.filename) && (record2.lifecycle === "duplicate" || record2.lifecycle === "stale") && record2.byteLength > 0 && /^[a-f0-9]{64}$/.test(record2.sha256) && record2.packageName === "oh-my-claude-sisyphus" && record2.packageVersion === "4.4.0" && record2.registryTarball === `https://registry.npmjs.org/${record2.packageName}/-/${record2.packageName}-${record2.packageVersion}.tgz` && record2.registryIntegrity.startsWith("sha512-") && record2.tarMember === `package/agents/${record2.filename}` && record2.releaseTag === "v4.4.0" && record2.releaseCommit === "a57fc858fe84ff942167540ce5c43bfcc822dc44" && /^[a-f0-9]{40}$/.test(record2.gitBlob) && record2.packageTagMatch === "MATCH";
+}
+function hasAuthenticatedHistoricalAgentBytes(filename, lifecycle, content) {
+  const record2 = HISTORICAL_AGENT_BY_FILENAME.get(filename);
+  return record2 !== void 0 && record2.lifecycle === lifecycle && content.length === record2.byteLength && (0, import_crypto15.createHash)("sha256").update(content).digest("hex") === record2.sha256;
+}
+function readRegularAgentFile(filepath) {
+  try {
+    const stat2 = (0, import_fs47.lstatSync)(filepath);
+    if (!stat2.isFile()) return null;
+    return { content: (0, import_fs47.readFileSync)(filepath), dev: stat2.dev, ino: stat2.ino, size: stat2.size, mtimeMs: stat2.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+function hasUnchangedRegularAgentFile(filepath, previous) {
+  const current = readRegularAgentFile(filepath);
+  return current !== null && current.dev === previous.dev && current.ino === previous.ino && current.size === previous.size && current.mtimeMs === previous.mtimeMs && current.content.equals(previous.content);
+}
 function currentAgentsDir() {
   return (0, import_path58.join)(getClaudeConfigDir(), "agents");
 }
@@ -16764,25 +16796,65 @@ function mergeHookGroups(eventType, existingGroups, newOmcGroups, options, log3,
   }
   return existingGroups;
 }
+function readActiveAgentWitnesses(agentsDir) {
+  let entries;
+  try {
+    entries = (0, import_fs47.readdirSync)(agentsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const witnesses = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (!isSafeAgentFilename(entry.name)) continue;
+    if (!entry.isFile()) return null;
+    const witness = readRegularAgentFile((0, import_path58.join)(agentsDir, entry.name));
+    if (!witness || witness.content.length === 0) return null;
+    witnesses.set(entry.name, witness.content);
+  }
+  return witnesses.size > 0 ? witnesses : null;
+}
+function equalAgentWitnesses(left, right) {
+  return left.size === right.size && [...left].every(([filename, content]) => right.get(filename)?.equals(content));
+}
+function getActiveAgentFiles() {
+  const pluginRootResolution = resolveInstalledOmcPluginRoots();
+  if (pluginRootResolution.mode === "unknown") return null;
+  const roots = pluginRootResolution.mode === "legacy" ? [getPackageDir3()] : pluginRootResolution.roots;
+  let activeWitnesses = null;
+  for (const root2 of roots) {
+    if (pluginRootResolution.mode === "plugin" && !hasCompletePluginPayload(root2)) return null;
+    const witnesses = readActiveAgentWitnesses((0, import_path58.join)(root2, "agents"));
+    if (!witnesses || activeWitnesses && !equalAgentWitnesses(activeWitnesses, witnesses)) return null;
+    activeWitnesses = witnesses;
+  }
+  return activeWitnesses ? new Set(activeWitnesses.keys()) : null;
+}
+function listAgentDirectoryEntries(agentsDir) {
+  try {
+    return (0, import_fs47.readdirSync)(agentsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+}
 function cleanupStaleAgents(log3) {
   const agentsDir = currentAgentsDir();
   if (!(0, import_fs47.existsSync)(agentsDir)) return [];
-  const currentAgentFiles = new Set(
-    Object.keys(loadAgentDefinitions())
-  );
+  const activeAgentFiles = getActiveAgentFiles();
+  if (!activeAgentFiles) return [];
+  const agentEntries = listAgentDirectoryEntries(agentsDir);
+  if (!agentEntries) return [];
   const removed = [];
-  for (const file of (0, import_fs47.readdirSync)(agentsDir)) {
-    if (!file.endsWith(".md")) continue;
-    if (file === "AGENTS.md") continue;
-    if (currentAgentFiles.has(file)) continue;
+  for (const entry of agentEntries) {
+    const file = entry.name;
+    if (!entry.isFile() || file === "AGENTS.md" || !isSafeAgentFilename(file) || activeAgentFiles.has(file)) continue;
     const filepath = (0, import_path58.join)(agentsDir, file);
+    const candidate = readRegularAgentFile(filepath);
+    if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, "stale", candidate.content)) continue;
     try {
-      const content = (0, import_fs47.readFileSync)(filepath, "utf-8");
-      if (content.startsWith("---\n") && /^name:\s+\S+/m.test(content)) {
-        (0, import_fs47.unlinkSync)(filepath);
-        removed.push(file);
-        log3(`  Removed stale agent: ${file}`);
-      }
+      if (!hasUnchangedRegularAgentFile(filepath, candidate)) continue;
+      (0, import_fs47.unlinkSync)(filepath);
+      removed.push(file);
+      log3(`  Removed stale agent: ${file}`);
     } catch {
     }
   }
@@ -16791,22 +16863,22 @@ function cleanupStaleAgents(log3) {
 function prunePluginDuplicateAgents(log3) {
   const agentsDir = currentAgentsDir();
   if (!(0, import_fs47.existsSync)(agentsDir)) return [];
-  const currentAgentFiles = new Set(
-    Object.keys(loadAgentDefinitions())
-  );
+  const activeAgentFiles = getActiveAgentFiles();
+  if (!activeAgentFiles) return [];
+  const agentEntries = listAgentDirectoryEntries(agentsDir);
+  if (!agentEntries) return [];
   const removed = [];
-  for (const file of (0, import_fs47.readdirSync)(agentsDir)) {
-    if (!file.endsWith(".md")) continue;
-    if (file === "AGENTS.md") continue;
-    if (!currentAgentFiles.has(file)) continue;
+  for (const entry of agentEntries) {
+    const file = entry.name;
+    if (!entry.isFile() || file === "AGENTS.md" || !isSafeAgentFilename(file) || !activeAgentFiles.has(file)) continue;
     const filepath = (0, import_path58.join)(agentsDir, file);
+    const candidate = readRegularAgentFile(filepath);
+    if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, "duplicate", candidate.content)) continue;
     try {
-      const content = (0, import_fs47.readFileSync)(filepath, "utf-8");
-      if (content.startsWith("---\n") && /^name:\s+\S+/m.test(content)) {
-        (0, import_fs47.unlinkSync)(filepath);
-        removed.push(file);
-        log3(`  Pruned plugin-duplicate agent: ${file}`);
-      }
+      if (!hasUnchangedRegularAgentFile(filepath, candidate)) continue;
+      (0, import_fs47.unlinkSync)(filepath);
+      removed.push(file);
+      log3(`  Pruned plugin-duplicate agent: ${file}`);
     } catch {
     }
   }
@@ -16927,32 +16999,51 @@ function directoryHasSkillDefinitions(directory) {
     return false;
   }
 }
-function getInstalledOmcPluginRoots() {
-  const pluginRoots = /* @__PURE__ */ new Set();
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
-  if (pluginRoot) {
-    pluginRoots.add(pluginRoot);
+function isOfficialOmcPluginId(pluginId) {
+  return OMC_PLUGIN_IDS.has(pluginId.toLowerCase());
+}
+function isOmcPluginLookalike(pluginId) {
+  return pluginId.toLowerCase().includes(OMC_PLUGIN_MANIFEST_NAME);
+}
+function resolveInstalledOmcPluginRoots() {
+  const explicitRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim() || process.env.CLAUDE_PLUGIN_ROOT?.trim();
+  if (explicitRoot) {
+    return { mode: "plugin", roots: [explicitRoot] };
   }
+  const pluginRoots = /* @__PURE__ */ new Set();
   const installedPluginsPath = (0, import_path58.join)(CLAUDE_CONFIG_DIR, "plugins", "installed_plugins.json");
   if (!(0, import_fs47.existsSync)(installedPluginsPath)) {
-    return Array.from(pluginRoots);
+    return { mode: "legacy", roots: [] };
   }
   try {
     const raw = JSON.parse((0, import_fs47.readFileSync)(installedPluginsPath, "utf-8"));
-    const plugins = raw.plugins ?? raw;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { mode: "unknown", roots: [] };
+    const registry2 = raw;
+    const plugins = registry2.plugins ?? raw;
+    if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return { mode: "unknown", roots: [] };
     for (const [pluginId, entries] of Object.entries(plugins)) {
-      if (!pluginId.toLowerCase().includes("oh-my-claudecode") || !Array.isArray(entries)) {
+      if (!isOfficialOmcPluginId(pluginId)) {
+        if (isOmcPluginLookalike(pluginId)) return { mode: "unknown", roots: [] };
         continue;
       }
+      if (!Array.isArray(entries) || entries.length === 0) return { mode: "unknown", roots: [] };
       for (const entry of entries) {
-        if (typeof entry?.installPath === "string" && entry.installPath.trim().length > 0) {
-          pluginRoots.add(entry.installPath.trim());
+        if (!entry || typeof entry !== "object" || typeof entry.installPath !== "string") {
+          return { mode: "unknown", roots: [] };
         }
+        const installPath = entry.installPath.trim();
+        if (!installPath) return { mode: "unknown", roots: [] };
+        pluginRoots.add(installPath);
       }
     }
   } catch {
+    return { mode: "unknown", roots: [] };
   }
-  return Array.from(pluginRoots);
+  return pluginRoots.size > 0 ? { mode: "plugin", roots: [...pluginRoots] } : { mode: "legacy", roots: [] };
+}
+function getInstalledOmcPluginRoots() {
+  const resolution = resolveInstalledOmcPluginRoots();
+  return resolution.mode === "plugin" ? resolution.roots : [];
 }
 function readPluginManifest(root2) {
   const manifestPath = (0, import_path58.join)(root2, ".claude-plugin", "plugin.json");
@@ -16982,8 +17073,8 @@ function validatePluginManifestSchema(root2, manifest) {
   if (!manifest) {
     return errors;
   }
-  if (typeof manifest.name !== "string" || manifest.name.trim().length === 0) {
-    errors.push("Invalid plugin manifest: .claude-plugin/plugin.json name must be a non-empty string");
+  if (manifest.name !== OMC_PLUGIN_MANIFEST_NAME) {
+    errors.push(`Invalid plugin manifest: .claude-plugin/plugin.json name must be ${OMC_PLUGIN_MANIFEST_NAME}`);
   }
   if (typeof manifest.commands !== "string" || manifest.commands.trim().length === 0) {
     errors.push("Invalid plugin manifest: .claude-plugin/plugin.json commands must be a non-empty relative path");
@@ -17885,7 +17976,7 @@ function getInstallInfo() {
     return null;
   }
 }
-var import_fs47, import_crypto15, import_path58, import_url9, import_os12, import_child_process17, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, OMC_HOOK_FILENAMES, OMC_HOOK_EXTRA_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
+var import_fs47, import_crypto15, import_path58, import_url9, import_os12, import_child_process17, CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR, HUD_DIR, SETTINGS_FILE, VERSION_FILE, OMC_MANAGED_SKILL_MARKER, PLUGIN_FULL_SKILL_BODIES_DIR, PLUGIN_COMPACT_SKILL_SHIM_MARKER, CORE_COMMANDS, VERSION, OMC_VERSION_MARKER_PATTERN, CC_NATIVE_COMMANDS, SKININTHEGAMEBROS_ONLY_SKILLS, AUTHENTICATED_HISTORICAL_AGENTS, HISTORICAL_AGENT_BY_FILENAME, OMC_HOOK_FILENAMES, OMC_HOOK_EXTRA_FILENAMES, STANDALONE_HOOK_TEMPLATE_FILES, OMC_PLUGIN_IDS, OMC_PLUGIN_MANIFEST_NAME, PLUGIN_SYNC_PAYLOAD, REQUIRED_PLUGIN_PAYLOAD_FILES, REQUIRED_PLUGIN_COMMAND_FILES;
 var init_installer = __esm({
   "src/installer/index.ts"() {
     "use strict";
@@ -17906,6 +17997,7 @@ var init_installer = __esm({
     init_hud_wrapper_template();
     init_worktree_paths();
     init_user_skill_compat();
+    init_env_vars();
     init_claude_md_analysis();
     init_claude_md_transaction();
     CLAUDE_CONFIG_DIR = getClaudeConfigDir();
@@ -17939,6 +18031,15 @@ var init_installer = __esm({
       "verify",
       "debug"
     ]);
+    AUTHENTICATED_HISTORICAL_AGENTS = [
+      { filename: "architect.md", lifecycle: "duplicate", byteLength: 5846, sha256: "3c865d6fbf364b92ec33f3151803a4b7b9dd3a6a1a664fe599de5ef7be6fb570", packageName: "oh-my-claude-sisyphus", packageVersion: "4.4.0", registryTarball: "https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz", registryIntegrity: "sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==", tarMember: "package/agents/architect.md", releaseTag: "v4.4.0", releaseCommit: "a57fc858fe84ff942167540ce5c43bfcc822dc44", gitBlob: "377de6ae92d9a03e515d5261e12d06766d258fb2", packageTagMatch: "MATCH" },
+      { filename: "build-fixer.md", lifecycle: "stale", byteLength: 4555, sha256: "af080383b633f6871618f98b76678a8753aec11b5cb5688197495d17748a0c52", packageName: "oh-my-claude-sisyphus", packageVersion: "4.4.0", registryTarball: "https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz", registryIntegrity: "sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==", tarMember: "package/agents/build-fixer.md", releaseTag: "v4.4.0", releaseCommit: "a57fc858fe84ff942167540ce5c43bfcc822dc44", gitBlob: "f2e79fa048558cd1aefdd348c254cad299cb7981", packageTagMatch: "MATCH" },
+      { filename: "deep-executor.md", lifecycle: "stale", byteLength: 6488, sha256: "392b91cb10baacdd876953c0b95f445bd6e3379e5d190b60bcb59ede30f761ca", packageName: "oh-my-claude-sisyphus", packageVersion: "4.4.0", registryTarball: "https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz", registryIntegrity: "sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==", tarMember: "package/agents/deep-executor.md", releaseTag: "v4.4.0", releaseCommit: "a57fc858fe84ff942167540ce5c43bfcc822dc44", gitBlob: "39b0dec823c8742179407ed1e4e8356808151e15", packageTagMatch: "MATCH" },
+      { filename: "quality-reviewer.md", lifecycle: "stale", byteLength: 8535, sha256: "98f44f332f9fe951c9aac52fd34ad4e1183cf0e4fcce05c3d7493ca5919b9c14", packageName: "oh-my-claude-sisyphus", packageVersion: "4.4.0", registryTarball: "https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz", registryIntegrity: "sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==", tarMember: "package/agents/quality-reviewer.md", releaseTag: "v4.4.0", releaseCommit: "a57fc858fe84ff942167540ce5c43bfcc822dc44", gitBlob: "99812ffe67e72692aa1a6b72404945c7bd20ac53", packageTagMatch: "MATCH" }
+    ];
+    HISTORICAL_AGENT_BY_FILENAME = new Map(
+      AUTHENTICATED_HISTORICAL_AGENTS.filter(isValidHistoricalAgent).map((record2) => [record2.filename, record2])
+    );
     OMC_HOOK_FILENAMES = /* @__PURE__ */ new Set([
       "keyword-detector.mjs",
       "session-start.mjs",
@@ -17962,6 +18063,8 @@ var init_installer = __esm({
       "persistent-mode.mjs",
       "code-simplifier.mjs"
     ];
+    OMC_PLUGIN_IDS = /* @__PURE__ */ new Set(["oh-my-claudecode", "oh-my-claudecode@omc"]);
+    OMC_PLUGIN_MANIFEST_NAME = "oh-my-claudecode";
     PLUGIN_SYNC_PAYLOAD = [
       "dist",
       "bridge",
@@ -58504,11 +58607,7 @@ var source_default = chalk;
 var import_path146 = require("path");
 var import_fs127 = require("fs");
 init_config_dir();
-
-// src/lib/env-vars.ts
-var OMC_PLUGIN_ROOT_ENV = "OMC_PLUGIN_ROOT";
-
-// src/cli/index.ts
+init_env_vars();
 init_loader();
 
 // src/index.ts
@@ -105287,6 +105386,7 @@ init_mcp_registry();
 init_config_dir();
 init_tmux_utils();
 init_tmux_clipboard();
+init_env_vars();
 init_paths3();
 var MADMAX_FLAG = "--madmax";
 var YOLO_FLAG = "--yolo";
