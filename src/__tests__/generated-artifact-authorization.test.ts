@@ -246,6 +246,7 @@ describe('generated-artifact base trust root workflow', () => {
       [3537, 'main'],
       [3538, 'dev'],
       [3539, 'dev'],
+      [3541, 'dev'],
     ]);
     expect(manifest.authorizations.find(entry => entry.pullNumber === 3538)).toMatchObject({
       targetRef: 'dev',
