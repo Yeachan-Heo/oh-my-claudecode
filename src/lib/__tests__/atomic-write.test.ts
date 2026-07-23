@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileHandle } from 'fs/promises';
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 // @ts-expect-error Hook runtime source is intentionally JavaScript-only.
-import { withStateFileLockSync } from '../../../scripts/lib/atomic-write.mjs';
+import { withStateFileLockSync, releaseStateFileLockSync } from '../../../scripts/lib/atomic-write.mjs';
 
 import { tmpdir } from 'os';
 
@@ -218,5 +218,46 @@ describe('atomicWriteJson', () => {
 
     expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
     expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
+  });
+
+  it('flock-less release after steal: owner mismatch leaves the live lock in place', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'atomic-write-release-steal-'));
+    directories.push(directory);
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+    const filePath = join(directory, 'state.json');
+    const lockPath = `${filePath}.mutation.lock`;
+    // Owner A acquired the lock legitimately (processStart is an opaque token
+    // for the release-path owner comparison; any validated string suffices and
+    // avoids a /proc dependency that does not exist on macOS).
+    const ownerA = { version: 1, pid: 4242, processStart: '4242', createdAt: new Date().toISOString(), nonce: randomUUID() };
+    writeFileSync(lockPath, JSON.stringify(ownerA));
+    // While A held it, A's owner file became transiently unreadable, B stole the
+    // lock via linkSync (stale-reclaim), publishing owner B at the same path.
+    const ownerB = { version: 1, pid: 5252, processStart: '5252', createdAt: new Date().toISOString(), nonce: randomUUID() };
+    writeFileSync(lockPath, JSON.stringify(ownerB));
+    const fd = openSync(join(directory, 'a-fd'), 'w');
+    // A finishes and releases its (now-stale) handle.
+    releaseStateFileLockSync({ fd, lockPath, owner: ownerA });
+
+    // B's lock must survive: A's owner mismatched, so no unlink.
+    expect(existsSync(lockPath)).toBe(true);
+    expect(JSON.parse(readFileSync(lockPath, 'utf8')).nonce).toBe(ownerB.nonce);
+  });
+
+  it('flock-less release: owner match unlinks the lock file', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'atomic-write-release-match-'));
+    directories.push(directory);
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
+    const filePath = join(directory, 'state.json');
+    const lockPath = `${filePath}.mutation.lock`;
+    const owner = { version: 1, pid: 4242, processStart: '4242', createdAt: new Date().toISOString(), nonce: randomUUID() };
+    writeFileSync(lockPath, JSON.stringify(owner));
+    const fd = openSync(join(directory, 'a-fd'), 'w');
+
+    releaseStateFileLockSync({ fd, lockPath, owner });
+
+    expect(existsSync(lockPath)).toBe(false);
   });
 });

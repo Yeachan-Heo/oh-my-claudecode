@@ -24,6 +24,17 @@ import { atomicWriteJsonSync } from './atomic-write.js';
 type MutationLockOwner = { version: 1; pid: number; processStart: string; createdAt: string; nonce: string };
 type MutationLock = { fd: number; path: string; owner: MutationLockOwner } | { unlocked: true };
 function flockPath(): string | null { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
+/**
+ * True only when the test harness explicitly simulates a runtime with NO
+ * locking primitives whatsoever (OMC_TEST_FLOCK_AVAILABLE=0). Distinct from a
+ * real flock-less runtime (Windows/macOS): there, linkSync-based O_EXCL locking
+ * is still a valid mutual-exclusion mechanism and may be used. Under the test
+ * simulation, exclusive locks must remain unavailable (return null) so callers
+ * fail closed - the same contract the dev branch established.
+ */
+function lockingDisabledForTest(): boolean {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0';
+}
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
 const [operation, lockPath, expectedRaw] = process.argv.slice(1);
@@ -100,7 +111,12 @@ function guardedLockRemoval(path: string, operation: 'reclaim' | 'release', owne
 
 function acquireLockAt(path: string, requireExclusive = false): MutationLock | null {
   mkdirSync(dirname(path), { recursive: true });
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
+  const hasFlock = !!flockPath();
+  // Under the explicit test no-locking simulation, exclusive locks are
+  // unavailable (fail closed), matching the dev contract. On real flock-less
+  // runtimes (Windows/macOS) we still fall through to linkSync-based locking.
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
   const processStart = processStartIdentity(process.pid);
   if (!processStart || processStart === 'absent') {
     console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${path}`);
@@ -121,12 +137,25 @@ function acquireLockAt(path: string, requireExclusive = false): MutationLock | n
       if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort descriptor cleanup */ } }
       try { unlinkSync(tempPath); } catch { /* best-effort unpublished temp cleanup */ }
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
-      const disposition = guardedLockRemoval(path, 'reclaim');
-      if (disposition === 'unverifiable') {
-        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path}`);
-        return null;
+      if (hasFlock) {
+        const disposition = guardedLockRemoval(path, 'reclaim');
+        if (disposition === 'unverifiable') {
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path}`);
+          return null;
+        }
+        if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      } else {
+        try {
+          const existing = JSON.parse(readFileSync(path, 'utf8'));
+          if (typeof existing.createdAt === 'string' && Date.now() - Date.parse(existing.createdAt) > 60 * 60 * 1000) {
+            try { unlinkSync(path); } catch { /* race */ }
+          } else {
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+          }
+        } catch {
+          try { unlinkSync(path); } catch { /* race */ }
+        }
       }
-      if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
   return null;
@@ -136,10 +165,38 @@ function acquireMutationLock(filePath: string): MutationLock | null {
   return acquireLockAt(`${filePath}.mutation.lock`);
 }
 
+function sameLockOwner(left: MutationLockOwner, right: MutationLockOwner): boolean {
+  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
+}
+
+/** Reads and validates the on-disk lock owner; null if absent or unparseable. */
+function readLockOwner(path: string): MutationLockOwner | null {
+  try {
+    const owner = JSON.parse(readFileSync(path, 'utf8')) as MutationLockOwner;
+    if (owner.version !== 1 || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 ||
+      typeof owner.processStart !== 'string' || typeof owner.createdAt !== 'string' ||
+      typeof owner.nonce !== 'string') return null;
+    return owner;
+  } catch { return null; }
+}
+
 function releaseMutationLock(lock: MutationLock | null): void {
   if (!lock || 'unlocked' in lock) return;
   try { closeSync(lock.fd); } catch { /* lock metadata ownership still guards release */ }
-  guardedLockRemoval(lock.path, 'release', lock.owner);
+  if (flockPath()) {
+    guardedLockRemoval(lock.path, 'release', lock.owner);
+  } else {
+    // flock-less runtime (macOS/Windows) or the explicit test simulation: verify
+    // ownership before unlinking. The stale-reclaim path in acquireLockAt can
+    // unlink an unparseable/stale lock file, so between acquire and release the
+    // path may have been lawfully stolen by another owner. Unlinking blindly
+    // would drop a live owner's lock and break mutual exclusion. Only unlink
+    // when the on-disk owner still matches the one we acquired with.
+    try {
+      const current = readLockOwner(lock.path);
+      if (current && sameLockOwner(current, lock.owner)) unlinkSync(lock.path);
+    } catch { /* race or already removed; best-effort exact-owner release */ }
+  }
 }
 
 /** Executes a read or mutation against a state file under its mutation lock. */

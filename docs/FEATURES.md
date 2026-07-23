@@ -10,6 +10,7 @@
 5. [Agent Templates](#agent-templates)
 6. [Session Resume](#session-resume)
 7. [Autopilot](#autopilot)
+8. [Durable Orchestration Graph (v1)](#durable-orchestration-graph-v1)
 
 ---
 
@@ -571,6 +572,58 @@ All state is persisted to `.omc/state/autopilot-state.json` and includes:
 - Agent spawn count and metrics
 - Phase duration tracking
 - Session binding
+
+---
+
+## Durable Orchestration Graph (v1)
+
+Graph is a separate top-level runtime for development work whose control flow must remain explicit across parallel branches, conditional remediation, human gates, and process interruption. The public in-session entrypoint is:
+
+```text
+/oh-my-claudecode:graph <development goal>
+```
+
+The skill creates a draft and renders the exact revision for inspection. Execution is forbidden until the human approves that revision ID and descriptor hash. Bare natural-language mentions of "graph" do not activate the mode.
+
+### Runtime boundary
+
+The `src/graph/` core adds no runtime dependency and owns descriptor validation and hashing, deterministic scheduling, immutable revision handling, claim leases, Graph-wide transactions, control ownership, and bounded presentation. Skill, CLI, hook, state, and HUD integrations are adapters. They must not become alternate graph authorities.
+
+One session-scoped `graph-state.json` transaction object is authoritative for recovery. It embeds approved descriptor revisions, committed transition history, the current projection, claims, selected edges, traversal and join tokens, pending approval or reconciliation data, evidence references, and a monotonic commit sequence. Logs, HUD state, and exports can be regenerated.
+
+### Descriptor and scheduler contract
+
+- Built-in nodes are `agent`, `command`, `human-approval`, and `join`.
+- Edges support fixed continuation, declared conditional routes, parallel fan-out/fan-in, and bounded back-edges.
+- V1 fork/join regions are structured and non-overlapping; nested, overlapping, or crossing open regions fail validation.
+- Each fan-out traversal receives its own cohort and branch tokens, so a join waits only for branches selected in that traversal.
+- Terminal success requires fresh evidence from the declared verification node.
+
+An `agent` node may perform bounded local iteration, but it does not activate global Ralph mode. Graph remains the sole top-level scheduler. Ralph continues to own persistent implementation/verification loops, and Autopilot continues to own its existing staged workflow.
+
+### Durability and effects
+
+A successful mutation atomically commits the node result, selected route, traversal counters, ready nodes, and join state under revision, sequence, transition, attempt, and lease fences. Recovery reconstructs readiness from the approved descriptor and committed ledger and does not rerun committed successful work.
+
+This is an exactly-once scheduler-transition guarantee, not an exactly-once external-side-effect guarantee. Side-effect-free or durably idempotent work can be reclaimed after lease expiry. Ambiguous effects move to reconciliation, where evidence or an explicit human decision is required before progress resumes.
+
+Structural patches stop new dispatch and require approval of a new immutable revision after old claims and reconciliation have settled. Historical descriptors and evidence remain preserved.
+
+### Lifecycle and state integration
+
+- `pause` fences or drains work, preserves the resumable run, and releases root control.
+- `resume` reacquires the same session, run, and revision with a new nonce.
+- `abandon` requires exact run/revision confirmation, records terminal `cancelled`, and retains the ledger. Destructive purge is outside v1.
+- Generic state reads and bounded summaries are allowed; generic Graph writes and deletion are not.
+- `state_clear(graph)` returns `guarded_mode`; `state_clear(all)` skips Graph; force does not bypass the guard.
+
+The in-session skill owns drafting, approval questions, node dispatch, and result reporting. Guarded `omc graph` operations expose the runtime state machine for terminal automation without acting as a task executor or raw state editor; exact subcommand names remain intentionally undocumented until that surface is final.
+
+### Platform and scope
+
+Graph v1 execution requires Linux with `/proc` and owner-fenced `flock`; unsupported platforms fail before control reservation or state mutation. V1 excludes a visual editor, public stable authoring DSL, plugin-defined node kinds, arbitrary executable edge code, nested or overlapping fork regions, distributed scheduling, destructive purge, and exactly-once external side effects.
+
+See [ADR: Durable Orchestration Graph V1](./adr/v1-durable-orchestration-graph.md) for the decision record and [Reference Documentation](./REFERENCE.md#durable-orchestration-graph-v1) for the user-facing lifecycle contract.
 
 ---
 

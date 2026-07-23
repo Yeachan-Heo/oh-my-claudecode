@@ -107,6 +107,18 @@ export function atomicWriteFileSync(filePath, content) {
 
 const LOCK_SCHEMA_VERSION = 1;
 function flockPath() { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
+/**
+ * True only when the test harness explicitly simulates a runtime with NO
+ * locking primitives whatsoever (OMC_TEST_FLOCK_AVAILABLE=0). Distinct from a
+ * real flock-less runtime (Windows/macOS): there, linkSync-based O_EXCL locking
+ * is still a valid mutual-exclusion mechanism and may be used. Under the test
+ * simulation, exclusive locks must remain unavailable (return null) so callers
+ * fail closed - the same contract the dev branch established. Mirrors
+ * lockingDisabledForTest() in src/lib/mode-state-io.ts.
+ */
+function lockingDisabledForTest() {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0';
+}
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
 const [operation, lockPath, expectedRaw] = process.argv.slice(1);
@@ -164,7 +176,12 @@ function guardedLockRemoval(lockPath, operation, owner) {
 
 function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   ensureDirSync(dirname(lockPath));
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
+  const hasFlock = !!flockPath();
+  // Under the explicit test no-locking simulation, exclusive locks are
+  // unavailable (fail closed), matching the dev contract. On real flock-less
+  // runtimes (Windows/macOS) we still fall through to linkSync-based locking.
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
   const processStart = processStartIdentity(process.pid);
   if (!processStart || processStart === 'absent') {
     console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${lockPath}`);
@@ -200,10 +217,39 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
   return acquireLockAt(`${filePath}.mutation.lock`, attempts, requireExclusive);
 }
 
+function sameLockOwner(left, right) {
+  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
+}
+
+/** Reads and validates the on-disk lock owner; null if absent or unparseable. */
+function readLockOwner(path) {
+  try {
+    const owner = JSON.parse(readFileSync(path, 'utf8'));
+    if (owner.version !== 1 || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 ||
+      typeof owner.processStart !== 'string' || typeof owner.createdAt !== 'string' ||
+      typeof owner.nonce !== 'string') return null;
+    return owner;
+  } catch { return null; }
+}
+
 export function releaseStateFileLockSync(lock) {
   if (!lock || lock.unlocked) return;
   try { closeSync(lock.fd); } catch {}
-  guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+  if (flockPath()) {
+    guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+  } else {
+    // flock-less runtime (macOS/Windows) or the explicit test simulation: verify
+    // ownership before unlinking. Mirrors releaseMutationLock() in
+    // src/lib/mode-state-io.ts: the stale-reclaim path in acquireLockAt can
+    // unlink an unparseable/stale lock file, so between acquire and release the
+    // path may have been lawfully stolen by another owner. Unlinking blindly
+    // would drop a live owner's lock and break mutual exclusion. Only unlink
+    // when the on-disk owner still matches the one we acquired with.
+    try {
+      const current = readLockOwner(lock.lockPath);
+      if (current && sameLockOwner(current, lock.owner)) unlinkSync(lock.lockPath);
+    } catch { /* race or already removed; best-effort exact-owner release */ }
+  }
 }
 
 export function withStateFileLockSync(filePath, callback, requireExclusive = false) {

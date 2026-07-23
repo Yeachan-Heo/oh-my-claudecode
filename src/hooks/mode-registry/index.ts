@@ -59,6 +59,17 @@ const MODE_CONFIGS: Record<ExecutionMode, ModeConfig> = {
     activeProperty: "active",
     hasGlobalState: false,
   },
+  [MODE_NAMES.GRAPH]: {
+    name: "Graph",
+    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH],
+    activeStatuses: [
+      "running",
+      "waiting_human",
+      "waiting_patch_approval",
+      "reconciling",
+    ],
+    hasGlobalState: false,
+  },
   [MODE_NAMES.TEAM]: {
     name: "Team",
     stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.TEAM],
@@ -106,7 +117,11 @@ export { MODE_CONFIGS };
 /**
  * Modes that are mutually exclusive (cannot run concurrently)
  */
-const EXCLUSIVE_MODES: ExecutionMode[] = [MODE_NAMES.AUTOPILOT, MODE_NAMES.AUTORESEARCH];
+const EXCLUSIVE_MODES: ExecutionMode[] = [
+  MODE_NAMES.AUTOPILOT,
+  MODE_NAMES.AUTORESEARCH,
+  MODE_NAMES.GRAPH,
+];
 
 /**
  * Get the state directory path
@@ -227,10 +242,26 @@ function isJsonModeActive(
   mode: ExecutionMode,
   sessionId?: string,
 ): boolean {
+  const config = MODE_CONFIGS[mode];
+  // Workflow-slot tombstone override: when the session workflow ledger records
+  // this mode as tombstoned (soft-completed), the stale per-mode state file is
+  // ignored so a fresh invocation can proceed without clearing artifacts
+  // manually. This applies to durable-status modes (e.g. graph) too - a
+  // cancelled/finished graph whose skill slot was tombstoned must not read as
+  // active just because graph-state.json still holds an active status.
   if (isWorkflowSlotTombstonedForMode(cwd, mode, sessionId)) {
     return false;
   }
-  const config = MODE_CONFIGS[mode];
+
+  const stateIsActive = (state: Record<string, unknown>): boolean => {
+    if (config.activeStatuses) {
+      return typeof state.status === "string" && config.activeStatuses.includes(state.status);
+    }
+    if (config.activeProperty) {
+      return state[config.activeProperty] === true;
+    }
+    return true;
+  };
 
   // When sessionId is provided, ONLY check session-scoped path — no legacy fallback.
   // This prevents cross-session state leakage where one session's legacy file
@@ -246,11 +277,7 @@ function isJsonModeActive(
         return false;
       }
 
-      if (config.activeProperty) {
-        return state[config.activeProperty] === true;
-      }
-
-      return true;
+      return stateIsActive(state);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return false;
@@ -265,12 +292,7 @@ function isJsonModeActive(
     const content = readFileSync(stateFile, "utf-8");
     const state = JSON.parse(content);
 
-    if (config.activeProperty) {
-      return state[config.activeProperty] === true;
-    }
-
-    // Default: file existence means active
-    return true;
+    return stateIsActive(state);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return false;
@@ -425,6 +447,26 @@ function readJsonSnapshot(filePath: string): { state: Record<string, unknown>; s
   }
 }
 
+function hasGraphAuthorityInSessionDir(sessionDir: string): boolean {
+  if (existsSync(join(sessionDir, MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH]))) return true;
+  const skillState = readJsonSnapshot(join(sessionDir, "skill-active-state.json"))?.state;
+  if (
+    skillState?.active_skills
+    && typeof skillState.active_skills === "object"
+    && (skillState.active_skills as Record<string, unknown>).graph
+  ) {
+    return true;
+  }
+  const controlOwner = readJsonSnapshot(join(sessionDir, "control-owner-state.json"))?.state;
+  const controlRoot = controlOwner?.root;
+  return Boolean(
+    controlRoot
+    && typeof controlRoot === "object"
+    && (controlRoot as Record<string, unknown>).mode === MODE_NAMES.GRAPH
+    && (controlRoot as Record<string, unknown>).phase === "active",
+  );
+}
+
 function clearDiscoveredJsonFile(
   filePath: string,
   observed: { state: Record<string, unknown>; snapshot: string } | null,
@@ -459,6 +501,7 @@ export function clearModeState(
   sessionId?: string,
   expectedState?: Record<string, unknown>,
 ): boolean {
+  if (mode === MODE_NAMES.GRAPH) return false;
   const config = MODE_CONFIGS[mode];
   let success = true;
   const markerFile = getMarkerFilePath(cwd, mode);
@@ -558,6 +601,7 @@ export function clearAllModeStates(cwd: string): boolean {
   let success = true;
 
   for (const mode of Object.keys(MODE_CONFIGS) as ExecutionMode[]) {
+    if (mode === MODE_NAMES.GRAPH) continue;
     if (!clearModeState(mode, cwd)) {
       success = false;
     }
@@ -566,7 +610,13 @@ export function clearAllModeStates(cwd: string): boolean {
   // Clear skill-active-state.json (issue #1033)
   const skillStatePath = join(getStateDir(cwd), "skill-active-state.json");
   try {
-    if (!clearObservedJsonFile(skillStatePath)) throw new Error("state mutation lock unavailable");
+    const skillState = readJsonSnapshot(skillStatePath)?.state;
+    const graphSlot = skillState?.active_skills
+      && typeof skillState.active_skills === "object"
+      && (skillState.active_skills as Record<string, unknown>).graph;
+    if (!graphSlot && !clearObservedJsonFile(skillStatePath)) {
+      throw new Error("state mutation lock unavailable");
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       success = false;
@@ -578,6 +628,7 @@ export function clearAllModeStates(cwd: string): boolean {
     const sessionIds = listSessionIds(cwd);
     for (const sid of sessionIds) {
       const sessionDir = getSessionStateDir(sid, cwd);
+      if (hasGraphAuthorityInSessionDir(sessionDir)) continue;
       rmSync(sessionDir, { recursive: true, force: true });
     }
   } catch {
@@ -649,6 +700,10 @@ export function clearStaleSessionDirs(
     const sessionDir = getSessionStateDir(sid, cwd);
     try {
       const files = readdirSync(sessionDir);
+
+      // Graph ledgers are durable recovery authority and are never removed by
+      // generic stale-session garbage collection.
+      if (hasGraphAuthorityInSessionDir(sessionDir)) continue;
 
       // Remove empty directories
       if (files.length === 0) {
