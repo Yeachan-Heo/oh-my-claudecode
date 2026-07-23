@@ -1,7 +1,7 @@
 ---
 name: ralph
 description: Self-referential loop until task completion with configurable verification reviewer
-argument-hint: "[--no-deslop] [--critic=architect|critic|codex] <task description>"
+argument-hint: "[--no-deslop] [--critic=architect|critic|codex] [--worktree|--no-worktree] <task description>"
 level: 4
 ---
 
@@ -60,6 +60,8 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
   </Execution_Policy>
 
 <Steps>
+0. **Worktree preflight** (first iteration only, before PRD setup): resolve `--no-worktree` > `--worktree` > `sessionWorktree.mode` from `.claude/omc.jsonc` / `~/.config/claude-omc/config.jsonc` (default `off`). When disabled, skip silently. When enabled: refuse to provision if the working tree is dirty, reuse a clean matching worktree if one already exists, otherwise `git worktree add -b omc/<slug> .omc/worktrees/<slug> <base>`; enter it, copy the ignored local config the project needs, run its install step, and run the whole loop from there. If a plan handoff names an execution workspace, provision that one. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+
 1. **PRD Setup** (first iteration only):
    a. Check the active PRD file surfaced in the Ralph continuation context. In session-scoped runs this is `.omc/state/sessions/{sessionId}/prd.json`; legacy project-level `prd.json` / `.omc/prd.json` files may be copied there at startup for backward compatibility.
    b. If no legacy PRD exists, the system has auto-generated a scaffold at the active PRD path.
@@ -240,7 +242,8 @@ Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD t
 - **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
 - **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
 - **Plan id (when applicable):** Two ralph runs in the same workspace will conflict on `prd.json`. Use distinct session IDs (the hook payload session_id is already isolated per Claude Code session). For parallel ultragoal-backed ralph runs, use `--plan-id`.
-- **Parallel verdict:** supported (each session writes its own session-scoped state)
+- **Worktree isolation:** off by default. Session-scoped state keeps two ralph runs from sharing `prd.json`, but it does not keep them from sharing the repository's single working tree. With `sessionWorktree.mode` set to `ask`/`auto`, or an explicit `--worktree` flag, ralph provisions `.omc/worktrees/<slug>` on branch `omc/<slug>` at Step 0 and runs the whole loop there. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported for state (each session writes its own session-scoped state); for concurrent edits to the same files, enable worktree isolation
 
 <Advanced>
 ## Background Execution Rules

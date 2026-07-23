@@ -1041,4 +1041,5 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 - **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
 - **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
 - **Plan id (when applicable):** Team state is session-scoped. Team handoffs at `.omc/handoffs/` are shared by design (see Wave G in the workspace plan).
-- **Parallel verdict:** supported (session-scoped + shared handoffs by design)
+- **Worktree isolation:** two levels, both opt-in. *Within* a team, native team worktree mode gives each worker `<repo>/.omc/team/<team-name>/worktrees/<worker-name>` — see `docs/TEAM-WORKTREE-MODE.md`. *Between* sessions, `sessionWorktree.mode` (or `--worktree`) puts the whole team session in `.omc/worktrees/<slug>` so a second session's team never shares its working tree — see `docs/SESSION-WORKTREE-ISOLATION.md`. They compose; worker worktrees are provisioned relative to the session's repo root.
+- **Parallel verdict:** supported for state (session-scoped + shared handoffs by design); for concurrent edits to the same files, enable worktree isolation

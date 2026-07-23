@@ -34,6 +34,8 @@ Ralplan is a shorthand alias for `/oh-my-claudecode:plan --consensus`. It trigge
 
 Ralplan is a planning module. It may inspect context and draft or update plan/spec/proposal artifacts, but it MUST mark those artifacts as `pending approval` unless the user has explicitly opted into execution in the current turn or via the structured approval UI. Before explicit execution approval, it MUST NOT run mutation-oriented shell commands, edit source files, commit, push, open PRs, invoke execution skills, or delegate implementation tasks.
 
+The same boundary applies to git worktrees: when session worktree isolation is enabled, ralplan **records** the intended worktree path, branch, and base ref in the plan's `## Execution workspace` section and leaves provisioning to the execution skill. `git worktree add` mutates `.git` and creates a branch, so it is a mutation the gate above forbids before approval. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+
 This skill invokes the Plan skill in consensus mode:
 
 ```
@@ -138,3 +140,11 @@ The gate auto-passes when it detects **any** concrete signal. You do not need al
 | Want to bypass the gate | Prefix with `force:` or `!` (e.g., `force: ralph fix it`) |
 | Gate does not fire on a vague prompt | The gate only catches prompts with <=15 effective words and no concrete anchors; add more detail or use `/ralplan` explicitly |
 | Redirected to ralplan but want execution | Use the structured approval option or explicitly say which execution skill should proceed; `just do it` / `skip planning` alone only ends planning with a `pending approval` artifact |
+
+## Parallel session caveats
+
+- **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
+- **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
+- **Plan id (when applicable):** `ralplan-state.json` is session-scoped. Always pass `session_id` to `state_write`/`state_clear` so a concurrent consensus run's state is not cleared.
+- **Worktree isolation:** off by default, and never provisioned here. Ralplan is a planning module; when isolation is enabled it records the intended worktree in the plan's `## Execution workspace` section and the execution skill (`ralph`, `team`, `autopilot`) provisions it. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported (session-scoped state; no repository mutation before execution approval)

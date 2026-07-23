@@ -380,7 +380,8 @@ When the loop exits:
 - **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
 - **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
 - **Plan id (when applicable):** Self-improve artifact dirs are topic-slug-scoped; for parallel runs with the same topic in the same workspace, expect Wave B2's session-id suffix to land.
-- **Parallel verdict:** supported-with-caveats (topic-slug collision possible; see Wave B2)
+- **Worktree isolation:** off by default. Tournament variants are generated and benchmarked against the working tree, so a concurrent session editing it corrupts the comparison. Enable `sessionWorktree.mode` or pass `--worktree` to give the run `.omc/worktrees/<slug>`. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported-with-caveats (topic-slug collision possible, see Wave B2; benchmark comparisons additionally require worktree isolation to stay meaningful)
 
 ## Approach Family Taxonomy
 

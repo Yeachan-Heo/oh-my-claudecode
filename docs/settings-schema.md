@@ -41,6 +41,44 @@ This remains a prompt-level workflow contract, not runtime enforcement. For the
 full interface, trust boundary, trigger stages, and residual risk, see
 [`company-context-interface.md`](./company-context-interface.md).
 
+## `sessionWorktree`
+
+Opt into session worktree isolation: run a plan-and-execute skill inside a
+dedicated temporary git worktree so parallel Claude Code sessions never share
+one working tree. Off by default.
+
+```jsonc
+{
+  "sessionWorktree": {
+    "mode": "ask",
+    "root": ".omc/worktrees",
+    "base": "origin/main",
+    "cleanup": "on-clean-exit"
+  }
+}
+```
+
+### Fields
+
+| Field | Type | Required | Default | Meaning |
+|-------|------|----------|---------|---------|
+| `mode` | `"off" \| "ask" \| "auto"` | No | `"off"` | `off` never provisions; `ask` offers via `AskUserQuestion` at the preflight step; `auto` provisions without asking |
+| `root` | `string` | No | `".omc/worktrees"` | Worktree parent directory, relative to the repo root |
+| `base` | `string` | No | `"origin/main"` | Base ref for the new branch; falls back to `origin/master`, then the upstream of HEAD, then HEAD |
+| `cleanup` | `"on-clean-exit" \| "never"` | No | `"on-clean-exit"` | `on-clean-exit` removes the worktree only when clean and merged; a dirty worktree is always preserved |
+
+### Behavior
+
+- If `sessionWorktree` is omitted, the feature is off and workflows continue in place.
+- Per-run flags beat configuration: `--worktree` forces provisioning, `--no-worktree` skips it.
+- Planning modes (`plan`, `ralplan`) never provision — they record the intended
+  worktree in the plan and the execution skill creates it.
+
+This remains a prompt-level workflow contract, not runtime enforcement. For the
+full workspace contract, preflight steps, cleanup rules, and interaction with
+native team worktree mode and PSM, see
+[`SESSION-WORKTREE-ISOLATION.md`](./SESSION-WORKTREE-ISOLATION.md).
+
 ## `keywordDetector.disabled`
 
 Opt out of auto-routing for specific keyword-detector skills without turning the

@@ -4,7 +4,7 @@
  * Assertions per file:
  *   1. Contains the `## Parallel session caveats` heading.
  *   2. Contains the exact session-id-source sentence.
- *   3. Contains all four required bullet labels.
+ *   3. Contains all five required bullet labels.
  */
 
 import { readFileSync } from "fs";
@@ -20,6 +20,8 @@ const SKILLS: Record<string, string> = {
   team: "skills/team/SKILL.md",
   ultraqa: "skills/ultraqa/SKILL.md",
   "self-improve": "skills/self-improve/SKILL.md",
+  plan: "skills/plan/SKILL.md",
+  ralplan: "skills/ralplan/SKILL.md",
 };
 
 const REQUIRED_HEADING = "## Parallel session caveats";
@@ -31,8 +33,11 @@ const REQUIRED_BULLETS = [
   "**Multi-repo workspace anchor:**",
   "**Session id source:**",
   "**Plan id (when applicable):**",
+  "**Worktree isolation:**",
   "**Parallel verdict:**",
 ];
+
+const WORKTREE_DOC_REFERENCE = "docs/SESSION-WORKTREE-ISOLATION.md";
 
 describe("skill-parallel-caveats doc-lint", () => {
   for (const [skillName, relativePath] of Object.entries(SKILLS)) {
@@ -63,5 +68,13 @@ describe("skill-parallel-caveats doc-lint", () => {
         ).toBe(true);
       });
     }
+
+    it(`${skillName}: worktree bullet points at the session worktree doc`, () => {
+      const content = readFileSync(filePath, "utf-8");
+      expect(
+        content.includes(WORKTREE_DOC_REFERENCE),
+        `Missing "${WORKTREE_DOC_REFERENCE}" reference in ${relativePath}`
+      ).toBe(true);
+    });
   }
 });

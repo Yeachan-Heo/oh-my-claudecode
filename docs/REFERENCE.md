@@ -550,6 +550,8 @@ Supported entrypoints: direct start (`omc team [N:agent] "<task>"`), `status`, `
 
 Native team worker worktrees are an opt-in/config-gated runtime-v2 rollout. See [Native Team Worktree Mode](TEAM-WORKTREE-MODE.md) for the worktree path contract, canonical `OMC_TEAM_STATE_ROOT` behavior, status fields, and dirty-worktree cleanup policy.
 
+That mode isolates workers *within* one team session. To isolate whole sessions from each other — so two parallel Claude Code sessions running `plan`, `autopilot`, or `ralph` in the same clone never share one working tree — see [Session Worktree Isolation](SESSION-WORKTREE-ISOLATION.md). It is also opt-in (`sessionWorktree.mode`, default `off`) and provisions `.omc/worktrees/<slug>` on branch `omc/<slug>`.
+
 Topology behavior:
 
 - inside classic tmux (`$TMUX` set): reuse the current tmux surface for split-pane or `--new-window` layouts

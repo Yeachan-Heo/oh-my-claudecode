@@ -145,7 +145,8 @@ This ensures clean state for future sessions. Stale state files with `active: fa
 - **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
 - **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
 - **Plan id (when applicable):** UltraQA state is session-scoped. Mutual-exclusion with ralph applies only within the same session.
-- **Parallel verdict:** supported (session-scoped state)
+- **Worktree isolation:** off by default. UltraQA builds, lints, and tests, so a second session editing the same working tree makes its results non-reproducible. When invoked as an autopilot/ralph phase it inherits that run's session worktree; standalone, enable `sessionWorktree.mode` or pass `--worktree`. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported for state (session-scoped state); for trustworthy concurrent build/test results, enable worktree isolation
 
 ---
 

@@ -130,7 +130,8 @@ Why bad: Opus is expensive overkill for a trivial fix. Use executor with Haiku i
 - **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
 - **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
 - **Plan id (when applicable):** Ultrawork has no persistent state; two concurrent runs are independent by design. No plan-id needed.
-- **Parallel verdict:** supported (stateless component)
+- **Worktree isolation:** off by default. Ultrawork is stateless, so parallel runs never collide on state — but they do write to the same working tree. When ultrawork is driven by a skill that provisions a session worktree (ralph, autopilot), it inherits that worktree; invoked directly, it runs wherever the session is. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported for state (stateless component); for concurrent edits to the same files, run under a worktree-isolated caller
 
 <Advanced>
 ## Relationship to Other Modes

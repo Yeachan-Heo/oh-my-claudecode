@@ -238,6 +238,8 @@ This config makes the autopilot execution stage use `omc team 1:cursor "..."` or
 
 Native team worker worktrees are being added behind an opt-in/config gate. See [Native Team Worktree Mode](docs/TEAM-WORKTREE-MODE.md) for the workspace contract, canonical state-root rules, dirty-worktree preservation policy, and verification checklist.
 
+Running several Claude Code sessions on the same repository at once? Session-level worktree isolation is opt-in too. Set `sessionWorktree.mode` to `ask` or `auto` (or pass `--worktree`) and `plan`, `autopilot`, `ralph`, and friends run inside `.omc/worktrees/<slug>` on their own branch, so parallel sessions never share one working tree. See [Session Worktree Isolation](docs/SESSION-WORKTREE-ISOLATION.md).
+
 > **Note: Package naming** — The project is branded as **oh-my-claudecode** (repo, plugin, commands), but the npm package is published as [`oh-my-claude-sisyphus`](https://www.npmjs.com/package/oh-my-claude-sisyphus). If you install or upgrade the CLI tools via npm/bun, use `npm i -g oh-my-claude-sisyphus@latest`; the package installs both `oh-my-claudecode` and the short `omc` command aliases.
 
 ### Updating

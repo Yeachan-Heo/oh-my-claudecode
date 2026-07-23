@@ -43,6 +43,7 @@ Jumping into code without understanding requirements leads to rework, scope cree
 - Consensus mode uses RALPLAN-DR short mode by default; switch to deliberate mode with `--deliberate` or when the request explicitly signals high risk (auth/security, data migration, destructive/irreversible changes, production incident, compliance/PII, public API breakage)
 - **Planning/execution boundary:** planning modes inspect context and produce plans/specs/proposals only. They MUST mark artifacts as `pending approval` unless the user has explicitly opted into execution in the current turn or via the structured approval UI. Before explicit execution approval, planning modes MUST NOT run mutation-oriented shell commands, edit source files, commit, push, open PRs, invoke execution skills, or delegate implementation tasks.
 - **Goal workflow boundary:** when a plan compares Claude Code `/goal`, Ralph, Team, UltraQA, or artifact-only Ultragoal, identify exactly one primary loop authority and use the deterministic conflict policies `refuse`, `adopt_existing`, and `artifact_only` rather than non-deterministic warning handling. `/goal` facts must cite Claude Code/Anthropic sources only (Claude Code `/goal` docs: https://code.claude.com/docs/en/goal; Anthropic Claude Code changelog: https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md), and plans MUST NOT claim the `/goal` evaluator independently runs commands or reads files; require surfaced proof evidence before any completion claim.
+- **Execution workspace, recorded not provisioned:** when session worktree isolation is enabled (`sessionWorktree.mode`, or a `--worktree` flag carried in the request), the plan MUST record the intended worktree path, branch, and base ref in an `## Execution workspace` section. Planning modes MUST NOT run `git worktree add` themselves — it mutates `.git` and creates a branch, which the planning/execution boundary above forbids before approval. The execution skill that consumes the handoff provisions it. See `docs/SESSION-WORKTREE-ISOLATION.md`.
 - **Goal workflow doc target:** for user-facing comparisons, keep examples aligned with `docs/shared/mode-selection-guide.md#goal-oriented-workflow-selection` and `docs/REFERENCE.md#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal`.
   </Execution_Policy>
 
@@ -149,6 +150,22 @@ Every plan includes:
 - For deliberate consensus mode: **Pre-mortem (3 scenarios)** and **Expanded Test Plan** (unit/integration/e2e/observability)
 
 Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
+
+### Execution workspace (when session worktree isolation is enabled)
+
+Add this section to the plan artifact so the execution skill provisions a known
+workspace instead of inferring one. Record it; do not create it.
+
+```markdown
+## Execution workspace
+
+- Worktree: `.omc/worktrees/<slug>` (to be created at execution time)
+- Branch: `omc/<slug>`, cut from `origin/main`
+- Provisioned by: the execution skill's worktree preflight
+```
+
+Use the ticket key as `<slug>` when the task names one, otherwise a short
+task slug. If session worktree isolation is off, omit the section entirely.
 </Steps>
 
 <Tool_Usage>
@@ -240,6 +257,14 @@ Why bad: Decision fatigue. Present one option with trade-offs, get reaction, the
 - [ ] In consensus mode with `--interactive`: user explicitly approved before any execution; without `--interactive`: plan output marked `pending approval` only, no auto-execution
 - [ ] In consensus mode: ralplan state deactivated on every exit path — `state_write(active=false)` for handoff to execution, `state_clear` for terminal exits (rejection, error, non-interactive stop)
       </Final_Checklist>
+
+## Parallel session caveats
+
+- **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
+- **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
+- **Plan id (when applicable):** plan artifacts in `.omc/plans/` are named per run; consensus mode's `ralplan-state.json` is session-scoped, so always pass `session_id` to `state_write`/`state_clear` to avoid clearing another session's state.
+- **Worktree isolation:** off by default, and never provisioned here. Planning is read-only with respect to the repository, so two concurrent plans cannot collide on files. When isolation is enabled, this skill only records the intended worktree in the plan's `## Execution workspace` section; the execution skill provisions it. See `docs/SESSION-WORKTREE-ISOLATION.md`.
+- **Parallel verdict:** supported (session-scoped state; no repository mutation before execution approval)
 
 <Advanced>
 ## Design Option Presentation
