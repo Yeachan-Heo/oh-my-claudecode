@@ -13,9 +13,32 @@ const modules = [
   join(root, 'templates', 'hooks', 'lib', 'atomic-write.mjs'),
 ];
 
+// processStart is retained for the EMERGENCY JOURNAL / recovery-claim subsystem
+// (which is still liveness-based). The mutation lock is now LEASE-based and no
+// longer probes process liveness, so mutation-lock tests plant lease owners via
+// leaseOwner() below. On Linux we read the real /proc start time; on other
+// platforms we return a stable synthetic value so the recovery-claim tests can
+// run locally (production's processStartIdentity does the same for non-Linux).
 function processStart(pid = process.pid): string {
+  if (process.platform !== 'linux') return '1';
   const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
   return stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+}
+
+// Lease-based mutation lock owner (matches src/lib/mode-state-io.ts
+// MutationLockOwner): { version, pid, createdAt, expires_at, nonce }. The lease
+// is the SOLE reclaim key - no processStart/liveness. A future expires_at means
+// "held/live" (not reclaimable); a past expires_at means "expired" (reclaimable).
+function leaseOwner(overrides: Record<string, unknown> = {}) {
+  const now = Date.now();
+  return {
+    version: 1,
+    pid: process.pid,
+    createdAt: new Date(now).toISOString(),
+    expires_at: new Date(now + 60000).toISOString(),
+    nonce: randomUUID(),
+    ...overrides,
+  };
 }
 
 function owner(overrides: Record<string, unknown> = {}) {
@@ -46,7 +69,7 @@ afterEach(() => {
 describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) => {
   async function api() {
     return import(`${pathToFileURL(modulePath).href}?test=${randomUUID()}`) as Promise<{
-      acquireStateFileLockSync(path: string, attempts?: number): { fd: number; lockPath: string; owner: ReturnType<typeof owner> } | null;
+      acquireStateFileLockSync(path: string, attempts?: number, requireExclusive?: boolean): { fd: number; lockPath: string; owner: ReturnType<typeof leaseOwner> } | { unlocked: true } | null;
       releaseStateFileLockSync(lock: unknown): void;
       recoverEmergencyStateFile(path: string): boolean;
     }>;
@@ -66,23 +89,45 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
     lockApi.releaseStateFileLockSync(reused);
   });
 
-  it('never reclaims a verifiably live holder', async () => {
+  it('never reclaims a valid unexpired lease', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
-    const live = owner();
+    // A valid lease whose expires_at is in the future is "held" (not
+    // reclaimable). The lease is the sole reclaim key - no process liveness is
+    // probed - so a future expires_at must block reacquisition for the whole
+    // retry window and leave the holder's lock untouched.
+    const live = leaseOwner({ expires_at: new Date(Date.now() + 60000).toISOString() });
     writeFileSync(lockPath, JSON.stringify(live));
-    expect(lockApi.acquireStateFileLockSync(statePath, 2)).toBeNull();
+    // requireExclusive forces the reclaim branch to actually run on flock-less
+    // hosts (otherwise the non-exclusive flock-less path returns {unlocked:true}
+    // without inspecting the lock). On Linux (real flock) it runs the guarded
+    // flock reclaim; both paths share the same lease policy.
+    expect(lockApi.acquireStateFileLockSync(statePath, 2, true)).toBeNull();
     expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(live);
   });
 
-  it('fails closed with deterministic diagnostics for corrupt metadata', async () => {
+  it('reclaims a lock with corrupt metadata by lease policy', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
+    // The lease contract treats a readable-but-unparseable owner as having no
+    // valid lease on record, so the owner cannot be live: RECLAIM (unlink) and
+    // retry. (Fail-closed applies only to an I/O-unreadable lock, e.g. EACCES -
+    // not to corrupt JSON.) A corrupt lock is therefore reclaimed and replaced
+    // with a fresh valid lease owner.
     writeFileSync(lockPath, 'corrupt');
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(lockApi.acquireStateFileLockSync(statePath, 2)).toBeNull();
-    expect(error).toHaveBeenCalledWith(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
-    expect(readFileSync(lockPath, 'utf8')).toBe('corrupt');
+    // requireExclusive forces the reclaim branch to run on flock-less hosts so
+    // the corrupt lock is actually unlinked and reacquired (the non-exclusive
+    // flock-less path would otherwise no-op). On Linux the guarded flock reclaim
+    // runs; both paths reclaim corrupt metadata by the same lease policy.
+    const reclaimed = lockApi.acquireStateFileLockSync(statePath, 2, true);
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed).not.toHaveProperty('unlocked');
+    const next = JSON.parse(readFileSync(lockPath, 'utf8'));
+    expect(next.version).toBe(1);
+    expect(next.expires_at).toBeTypeOf('string');
+    expect(Number.isFinite(Date.parse(next.expires_at as string))).toBe(true);
+    expect(next.nonce).toMatch(/^[0-9a-f-]{36}$/i);
+    lockApi.releaseStateFileLockSync(reclaimed);
   });
 
   it('does not let an old owner release a replacement lock', async () => {

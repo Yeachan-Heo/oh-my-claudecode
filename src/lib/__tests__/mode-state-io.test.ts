@@ -113,7 +113,7 @@ describe('mode-state-io', () => {
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
       mkdirSync(dirname(statePath), { recursive: true });
-      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, createdAt: new Date().toISOString(), expires_at: new Date(Date.now() + 300000).toISOString(), nonce: randomUUID() }));
 
       expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
       expect(existsSync(`${statePath}.mutation.lock`)).toBe(true);
@@ -124,9 +124,10 @@ describe('mode-state-io', () => {
       process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
       const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
       mkdirSync(dirname(statePath), { recursive: true });
-      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
-      const owner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
+      // OMC_TEST_FLOCK_AVAILABLE=0 short-circuits acquire to { unlocked: true },
+      // so the lock artifact is never inspected; plant a valid lease-schema
+      // owner (expires_at in the future). No /proc dependency (absent on macOS).
+      const owner = { version: 1, pid: process.pid, createdAt: new Date().toISOString(), expires_at: new Date(Date.now() + 300000).toISOString(), nonce: randomUUID() };
       writeFileSync(`${statePath}.mutation.lock`, JSON.stringify(owner));
 
       expect(writeModeState('autopilot', { active: true }, tempDir)).toBe(true);
@@ -331,8 +332,8 @@ describe('mode-state-io', () => {
       writeFileSync(lockPath, JSON.stringify({
         version: 1,
         pid: 999999999,
-        processStart: '1',
         createdAt: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 300000).toISOString(),
         nonce: randomUUID(),
       }));
 
@@ -365,9 +366,10 @@ describe('mode-state-io', () => {
       writeFileSync(statePath, JSON.stringify(state));
       writeFileSync(legacyPath, JSON.stringify(state));
       writeFileSync(artifactPath, JSON.stringify({ count: 2 }));
-      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
-      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
+      // Plant a LIVE mutation lock: an unexpired lease blocks the exclusive
+      // acquire so clearModeStateFile fails (snapshots preserved). Lease-based
+      // (expires_at in the future) - no /proc liveness dependency.
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, createdAt: new Date().toISOString(), expires_at: new Date(Date.now() + 300000).toISOString(), nonce: randomUUID() }));
       const snapshots = [statePath, legacyPath, artifactPath].map((path) => readFileSync(path));
 
       expect(clearModeStateFile('autopilot', tempDir, sessionId, state)).toBe(false);
@@ -378,10 +380,10 @@ describe('mode-state-io', () => {
       const sessionId = 'in-flight-activation';
       const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
       mkdirSync(dirname(statePath), { recursive: true });
-      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+      // Plant a LIVE mutation lock (unexpired lease) held by the publisher child.
+      // clearModeStateFile waits; the child unlinks the lock after publishing.
       const lockPath = `${statePath}.mutation.lock`;
-      writeFileSync(lockPath, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
+      writeFileSync(lockPath, JSON.stringify({ version: 1, pid: process.pid, createdAt: new Date().toISOString(), expires_at: new Date(Date.now() + 300000).toISOString(), nonce: randomUUID() }));
       const childScript = String.raw`
         const fs = require('fs');
         const [statePath, lockPath] = process.argv.slice(1);

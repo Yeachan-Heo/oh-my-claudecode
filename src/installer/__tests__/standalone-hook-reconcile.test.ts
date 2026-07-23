@@ -117,6 +117,9 @@ describe('install() standalone hook reconciliation', () => {
     expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
       `node "${join(testClaudeDir, 'hooks', 'session-start.mjs').replace(/\\/g, '/')}"`,
     );
+    expect(writtenSettings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command).toBe(
+      `node "${join(testClaudeDir, 'hooks', 'session-end.mjs').replace(/\\/g, '/')}"`,
+    );
     expect((writtenSettings as { statusLine?: { command?: string } }).statusLine?.command).toContain(
       `${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`,
     );
@@ -133,6 +136,7 @@ describe('install() standalone hook reconciliation', () => {
     );
     expect(readFileSync(join(testClaudeDir, 'hooks', 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'pre-tool-use.mjs'), 'utf-8')).toContain('PreToolUse');
+    expect(readFileSync(join(testClaudeDir, 'hooks', 'session-end.mjs'), 'utf-8')).toContain('settle-session');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'code-simplifier.mjs'), 'utf-8')).toContain('Code Simplifier');
   });
 
@@ -199,6 +203,10 @@ describe('install() standalone hook reconciliation', () => {
         {
           file: 'session-start.mjs',
           input: { hook_event_name: 'SessionStart', session_id: 'ci-upgrade-test', cwd: projectDir },
+        },
+        {
+          file: 'session-end.mjs',
+          input: { hook_event_name: 'SessionEnd', session_id: 'ci-upgrade-test', cwd: projectDir },
         },
         {
           file: 'keyword-detector.mjs',
@@ -505,6 +513,7 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     const legacyFiles = [
       'keyword-detector.mjs',
       'session-start.mjs',
+      'session-end.mjs',
       'pre-tool-use.mjs',
       'post-tool-use.mjs',
       'post-tool-use-failure.mjs',

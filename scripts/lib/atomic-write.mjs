@@ -106,44 +106,117 @@ export function atomicWriteFileSync(filePath, content) {
 }
 
 const LOCK_SCHEMA_VERSION = 1;
-function flockPath() { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
+/**
+ * Lease duration (ms) for a mutation lock. Generous enough that a single
+ * acquire->mutate->release cycle (graph mutation or autopilot state write)
+ * always completes within the lease, so v1 needs NO renewal mechanism. If the
+ * holder crashes or fails to release, a later acquirer reclaims once
+ * `now >= expires_at`. Long-held locks would need renewal (out of scope for v1).
+ */
+const LOCK_LEASE_MS = 300000; // 5 minutes
+
+/**
+ * Returns the current wall-clock ms. Centralised so tests can mock time by
+ * planting `expires_at` values; production reads `Date.now()`.
+ */
+function leaseNow() {
+  return Date.now();
+}
+
+function flockPath() {
+  // B8 test seam: OMC_TEST_FORCE_FLOCKLESS=1 (NODE_ENV=test only) forces the
+  // flock-less linkSync branch on a host that actually has flock (Linux CI),
+  // so the flock-less acquire/reclaim/release code is exercised there. Unlike
+  // OMC_TEST_FLOCK_AVAILABLE=0 it does NOT trip lockingDisabledForTest(), so
+  // exclusive locking stays enabled and the real flock-less path runs.
+  if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FORCE_FLOCKLESS === '1') return null;
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null;
+}
+/**
+ * True only when the test harness explicitly simulates a runtime with NO
+ * locking primitives whatsoever (OMC_TEST_FLOCK_AVAILABLE=0). Distinct from a
+ * real flock-less runtime (Windows/macOS): there, linkSync-based O_EXCL locking
+ * is still a valid mutual-exclusion mechanism and may be used. Under the test
+ * simulation, exclusive locks must remain unavailable (return null) so callers
+ * fail closed - the same contract the dev branch established. Mirrors
+ * lockingDisabledForTest() in src/lib/mode-state-io.ts.
+ */
+function lockingDisabledForTest() {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0';
+}
+// Lease-based mutation lock reclaim script (runs under an exclusive `flock` guard
+// on `${lockPath}.reclaim.guard` so the reclaim read+unlink is atomic w.r.t.
+// other reclaimers). The script reads the on-disk owner and decides:
+//   exit 0 -> lock was reclaimable (expired lease OR corrupt) and has been
+//             unlinked; the caller should retry linkSync to acquire.
+//   exit 2 -> lock has a VALID, UNEXPIRED lease (live owner); do NOT reclaim.
+//   exit 3 -> the lock could not be read with a non-ENOENT I/O error
+//             (EACCES/EMFILE/EIO/ENOMEM): the owner MAY be alive and we just
+//             cannot read its lease. FAIL CLOSED (no steal). Operator attention.
+//   exit 4 -> owner replaced between read and unlink (TOCTOU); caller retries.
+// For `release` the script unlinks only if the on-disk owner exactly matches the
+// expected owner (pid + nonce + createdAt); a mismatched owner is left in place.
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
 const [operation, lockPath, expectedRaw] = process.argv.slice(1);
-const keys = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
+const keys = ['createdAt', 'expires_at', 'nonce', 'pid', 'version'];
 function readOwner() {
+  let raw;
   try {
-    const value = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    raw = fs.readFileSync(lockPath, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return 'absent';
+    return 'io_error';
+  }
+  try {
+    const value = JSON.parse(raw);
     const actual = Object.keys(value).sort();
-    if (actual.length !== keys.length || !actual.every((key, index) => key === keys[index]) || value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.processStart !== 'string' || !/^\d+$/.test(value.processStart) || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
+    if (actual.length !== keys.length || !actual.every((key, index) => key === keys[index]) || value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.expires_at !== 'string' || !Number.isFinite(Date.parse(value.expires_at)) || typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return 'corrupt';
     return value;
-  } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); return null; }
+  } catch (error) { return 'corrupt'; }
 }
-const owner = readOwner();
-if (!owner) process.exit(3);
 if (operation === 'release') {
   let expected;
   try { expected = JSON.parse(expectedRaw); } catch { process.exit(3); }
-  if (owner.pid !== expected.pid || owner.processStart !== expected.processStart || owner.nonce !== expected.nonce) process.exit(4);
-  try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
+  const current = readOwner();
+  if (current === 'absent') process.exit(0);
+  if (current === 'io_error') process.exit(3);
+  if (current === 'corrupt') process.exit(3);
+  if (current.pid !== expected.pid || current.nonce !== expected.nonce || current.createdAt !== expected.createdAt) process.exit(4);
+  try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); }
 }
-if (process.platform !== 'linux') process.exit(3);
-let currentStart;
-try {
-  const stat = fs.readFileSync('/proc/' + owner.pid + '/stat', 'utf8');
-  const end = stat.lastIndexOf(')');
-  const fields = end >= 0 ? stat.slice(end + 2).trim().split(/\s+/) : [];
-  currentStart = fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-} catch (error) { currentStart = error && error.code === 'ENOENT' ? 'absent' : null; }
-if (currentStart === null) process.exit(3);
-if (currentStart !== 'absent' && currentStart === owner.processStart) process.exit(2);
-try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
+const current = readOwner();
+if (current === 'absent') process.exit(0);
+if (current === 'io_error') process.exit(3);
+if (current === 'corrupt') { try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); } }
+if (Date.now() >= Date.parse(current.expires_at)) { try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); } }
+process.exit(2);
 `;
+
+// ---------------------------------------------------------------------------
+// Emergency-journal process identity (NOT used by the mutation lock).
+//
+// The mutation lock is LEASE-based (see freshLockOwner/readLockOwner above) and
+// does NOT probe process liveness. This processStartIdentity helper is retained
+// exclusively for the EMERGENCY JOURNAL subsystem (recoverEmergencyStateFile /
+// emergencyMutateStateFileIf and their recovery-claim script), which still
+// authenticates a crashed transaction's owner by process-start identity. It is
+// intentionally kept separate from the lease lock so the mutation-lock blockers
+// (B5/B6/B7/B8/B9/B10) cannot recur via the emergency path's liveness probe.
+// ---------------------------------------------------------------------------
+let cachedSelfProcessStart;
+
+function selfProcessStart() {
+  if (cachedSelfProcessStart === undefined) {
+    cachedSelfProcessStart = String(Math.max(1, Math.floor(Date.now() - process.uptime() * 1000)));
+  }
+  return cachedSelfProcessStart;
+}
 
 function processStartIdentity(pid) {
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_EMERGENCY_PROCESS_START_UNKNOWN_PID === String(pid)) return null;
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
-  if (process.platform !== 'linux') return pid === process.pid ? String(Math.max(1, Math.floor(Date.now() - process.uptime() * 1000))) : null;
+  if (process.platform !== 'linux') return pid === process.pid ? selfProcessStart() : null;
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     const end = stat.lastIndexOf(')');
@@ -152,6 +225,25 @@ function processStartIdentity(pid) {
     return fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
   } catch (error) { return error?.code === 'ENOENT' ? 'absent' : null; }
 }
+
+/**
+ * Computes the owner record written to a freshly acquired lock file. The lease
+ * expires_at = now + LOCK_LEASE_MS; it is the ONLY reclaim key (no process
+ * liveness is probed). pid + nonce + createdAt stay for debug/ownership identity
+ * (release verifies them to avoid unlinking a lock a live owner lawfully
+ * reclaimed and re-acquired).
+ */
+function freshLockOwner() {
+  const now = leaseNow();
+  return {
+    version: LOCK_SCHEMA_VERSION,
+    pid: process.pid,
+    createdAt: new Date(now).toISOString(),
+    expires_at: new Date(now + LOCK_LEASE_MS).toISOString(),
+    nonce: randomUUID(),
+  };
+}
+
 function guardedLockRemoval(lockPath, operation, owner) {
   const flock = flockPath();
   if (!flock) return 'unverifiable';
@@ -164,14 +256,15 @@ function guardedLockRemoval(lockPath, operation, owner) {
 
 function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   ensureDirSync(dirname(lockPath));
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === 'absent') {
-    console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${lockPath}`);
-    return null;
-  }
+  const hasFlock = !!flockPath();
+  // Under the explicit test no-locking simulation, exclusive locks are
+  // unavailable (fail closed), matching the dev contract. On real flock-less
+  // runtimes (Windows/macOS) we still fall through to linkSync-based locking.
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
+  // No process-liveness probe: the lease (expires_at) is the sole reclaim key.
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const owner = { version: LOCK_SCHEMA_VERSION, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
+    const owner = freshLockOwner();
     const tempPath = `${lockPath}.${process.pid}.${owner.nonce}.tmp`;
     let fd;
     try {
@@ -185,12 +278,43 @@ function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
       if (fd !== undefined) { try { closeSync(fd); } catch {} }
       try { unlinkSync(tempPath); } catch {}
       if (error?.code !== 'EEXIST') return null;
-      const disposition = guardedLockRemoval(lockPath, 'reclaim');
-      if (disposition === 'unverifiable') {
-        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
-        return null;
+      // A lock already exists. Decide reclaim by LEASE, not process liveness.
+      // Both the flock and flock-less paths use the SAME policy (B7/B10
+      // convergence): reclaim only when the lease is expired or the owner JSON
+      // is corrupt; a valid unexpired lease blocks (fail closed); an I/O-
+      // unreadable lock fails closed forever (B9: the owner MAY be alive).
+      if (hasFlock) {
+        const disposition = guardedLockRemoval(lockPath, 'reclaim');
+        if (disposition === 'unverifiable') {
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
+          return null;
+        }
+        if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        // 'retry' (reclaimed) or 'replaced' (TOCTOU): loop and re-attempt linkSync.
+      } else {
+        const current = readLockOwner(lockPath);
+        if (current === 'absent') {
+          // Lock vanished between EEXIST and read (race): retry linkSync.
+        } else if (current === null) {
+          // I/O read failure (EACCES/EMFILE/EIO/ENOMEM) on a possibly-live
+          // lock. The owner MAY be alive; we just cannot read its lease. FAIL
+          // CLOSED (B9): no steal, no bounded reclaim, no wedge-escape. Log so
+          // the event is observable for operator attention.
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        } else if (current === 'corrupt') {
+          // Readable but unparseable/invalid owner JSON: no valid lease is on
+          // record, so the owner cannot be live. RECLAIM (unlink) and retry.
+          try { unlinkSync(lockPath); } catch { /* race; retry linkSync */ }
+        } else if (leaseNow() >= Date.parse(current.expires_at)) {
+          // Valid owner whose lease has EXPIRED: the holder crashed or failed
+          // to release. RECLAIM (unlink) and retry.
+          try { unlinkSync(lockPath); } catch { /* race; retry linkSync */ }
+        } else {
+          // Valid owner with an unexpired lease: LIVE. Do NOT steal; wait.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
       }
-      if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
   return null;
@@ -200,10 +324,85 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
   return acquireLockAt(`${filePath}.mutation.lock`, attempts, requireExclusive);
 }
 
+function sameLockOwner(left, right) {
+  return left.pid === right.pid && left.nonce === right.nonce && left.createdAt === right.createdAt;
+}
+
+const LOCK_OWNER_KEYS = ['createdAt', 'expires_at', 'nonce', 'pid', 'version'];
+
+/**
+ * Validates a parsed object as a lease-based lock owner using the SAME checks
+ * the flock path's LOCK_REMOVAL_SCRIPT enforces: exact key set, version===1,
+ * positive integer pid, parseable createdAt, parseable expires_at (the lease
+ * reclaim key), and a 36-char UUID nonce. pid is kept for debug/ownership
+ * identity and is NOT probed for liveness. Single owner validator (B4: folded
+ * the two divergent validators into one).
+ */
+function validateLockOwner(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const actual = Object.keys(value).sort();
+  if (actual.length !== LOCK_OWNER_KEYS.length || !actual.every((key, index) => key === LOCK_OWNER_KEYS[index])) return null;
+  if (value.version !== 1) return null;
+  if (!Number.isSafeInteger(value.pid) || value.pid <= 0) return null;
+  if (typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))) return null;
+  if (typeof value.expires_at !== 'string' || !Number.isFinite(Date.parse(value.expires_at))) return null;
+  if (typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
+  return value;
+}
+
+/**
+ * Reads and validates the on-disk lease owner. Returns:
+ *  - the validated owner on success,
+ *  - 'absent' when the lock file does not exist (ENOENT),
+ *  - 'corrupt' when the file is readable but unparseable/invalid (no valid lease),
+ *  - null when the read itself failed with a non-ENOENT I/O error
+ *    (EACCES/EMFILE/EIO/ENOMEM) - the owner MAY be alive; callers fail closed.
+ * The 4-way result lets the caller fail closed on an unreadable lock (B9),
+ * reclaim a corrupt lock, and block on a valid unexpired lease.
+ */
+function readLockOwner(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'absent';
+    return null; // I/O failure - may be a live lock we cannot read
+  }
+  try {
+    const owner = validateLockOwner(JSON.parse(raw));
+    return owner === null ? 'corrupt' : owner;
+  } catch {
+    return 'corrupt'; // readable but unparseable JSON - no valid lease
+  }
+}
+
 export function releaseStateFileLockSync(lock) {
   if (!lock || lock.unlocked) return;
   try { closeSync(lock.fd); } catch {}
-  guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+  if (flockPath()) {
+    // Flock path: the guarded removal script unlinks only if the on-disk owner
+    // exactly matches ours (pid + nonce + createdAt); a mismatched owner is a
+    // live owner that lawfully reclaimed after our lease expired, so we leave
+    // it in place (the script exits 4 and we log).
+    const disposition = guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+    if (disposition === 'replaced') {
+      console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.lockPath}`);
+    }
+    return;
+  }
+  // flock-less runtime (macOS/Windows) or the explicit test simulation: the
+  // holder releases its OWN lock. Re-validate immediately before unlink to close
+  // the TOCTOU window between readLockOwner and unlinkSync: if the on-disk owner
+  // no longer matches (our lease expired and a later acquirer reclaimed it, or a
+  // concurrent release raced), leave the live owner's lock in place and log.
+  const current = readLockOwner(lock.lockPath);
+  if (current === 'absent') return; // already released
+  if (current === null) return; // unreadable - do not unlink what we cannot verify
+  if (current !== 'corrupt' && sameLockOwner(current, lock.owner)) {
+    try { unlinkSync(lock.lockPath); } catch { /* race or already removed */ }
+  } else {
+    console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.lockPath}`);
+  }
 }
 
 export function withStateFileLockSync(filePath, callback, requireExclusive = false) {
