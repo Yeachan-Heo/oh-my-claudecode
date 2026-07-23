@@ -53,12 +53,13 @@ import { namedWorkflowRuntimeSupported, validateNamedWorkflowStateStructure } fr
 import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
 import type { AutopilotState } from '../hooks/autopilot/types.js';
+import { parseGraphState, type GraphRunStatus } from '../graph/runtime-types.js';
 
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
 // extra state-only mode handled via the registry-fallback path).
 const EXECUTION_MODES: [string, ...string[]] = [
-  'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
+  'autopilot', 'autoresearch', 'graph', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
 ];
 
 // merge-readiness is read/clear-eligible (state_read/status/clear + /cancel work) but NOT write-eligible.
@@ -69,13 +70,22 @@ const STATE_TOOL_MODES: [string, ...string[]] = [
   'skill-active',
   'merge-readiness'
 ];
-// Modes that may be generically written via state_write. Excludes merge-readiness (runtime-owned).
+// Modes that may be generically written via state_write. Graph and
+// merge-readiness are runtime-owned and intentionally excluded.
 const STATE_WRITE_MODES: [string, ...string[]] = [
-  ...EXECUTION_MODES,
+  'autopilot',
+  'autoresearch',
+  'team',
+  'ralph',
+  'ultrawork',
+  'ultraqa',
+  'deep-interview',
+  'self-improve',
   'ralplan',
   'omc-teams',
   'skill-active'
 ];
+const STATE_CLEAR_MODES: [string, ...string[]] = [...STATE_TOOL_MODES, 'all'];
 const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active'] as const;
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
@@ -386,7 +396,7 @@ function cleanupTeamRuntimeState(root: string, teamNames?: string[]): number {
 /**
  * Get the state file path for any mode (including swarm and ralplan).
  *
- * - For registry modes (8 modes): uses getStateFilePath from mode-registry
+ * - For registry modes: uses getStateFilePath from mode-registry
  * - For ralplan (not in registry): uses resolveStatePath from worktree-paths
  *
  * This handles swarm's SQLite (.db) file transparently.
@@ -732,6 +742,79 @@ interface WorkflowPublicState {
   progress: string;
 }
 
+interface GraphPublicStateSummary {
+  type: 'graph_state_summary';
+  valid: boolean;
+  format_version?: number;
+  run_id?: string;
+  status: GraphRunStatus | 'malformed';
+  active_revision_id?: string;
+  short_revision_hash?: string;
+  dispatch_generation?: number;
+  commit_sequence?: number;
+  progress?: {
+    total: number;
+    ready: number;
+    running: number;
+    completed: number;
+    failed: number;
+  };
+  claims?: {
+    total: number;
+    live: number;
+    reconciling: number;
+    unresolved_reconciliations: number;
+  };
+  pending?: { approval: boolean; patch: boolean };
+}
+
+function malformedGraphPublicState(): GraphPublicStateSummary {
+  return { type: 'graph_state_summary', valid: false, status: 'malformed' };
+}
+
+export function redactGraphPublicState(state: unknown): GraphPublicStateSummary {
+  try {
+    const graph = parseGraphState(state);
+    const activationStatuses = Object.values(graph.projection.activations).map(
+      activation => activation.status,
+    );
+    const claims = Object.values(graph.claims);
+    const reconciliations = Object.values(graph.reconciliations);
+    return {
+      type: 'graph_state_summary',
+      valid: true,
+      format_version: graph.format_version,
+      run_id: graph.run_id.slice(0, 128),
+      status: graph.status,
+      active_revision_id: graph.active_revision_id.slice(0, 128),
+      short_revision_hash: graph.active_revision_hash.slice(0, 12),
+      dispatch_generation: graph.dispatch_generation,
+      commit_sequence: graph.commit_sequence,
+      progress: {
+        total: activationStatuses.length,
+        ready: activationStatuses.filter(status => status === 'ready').length,
+        running: activationStatuses.filter(status => status === 'running').length,
+        completed: activationStatuses.filter(status => status === 'completed').length,
+        failed: activationStatuses.filter(status => status === 'failed').length,
+      },
+      claims: {
+        total: claims.length,
+        live: claims.filter(claim => claim.status === 'live').length,
+        reconciling: claims.filter(claim => claim.status === 'reconciling').length,
+        unresolved_reconciliations: reconciliations.filter(
+          reconciliation => reconciliation.status === 'unresolved',
+        ).length,
+      },
+      pending: {
+        approval: graph.pending_approval !== undefined,
+        patch: graph.pending_patch !== undefined,
+      },
+    };
+  } catch {
+    return malformedGraphPublicState();
+  }
+}
+
 function canonicalWorkflowJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalWorkflowJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -802,9 +885,21 @@ function publicStateForMode(mode: StateToolMode, state: unknown): unknown {
   if (mode === 'autopilot') {
     return redactAutopilotPublicState(state);
   }
+  if (mode === 'graph') {
+    return redactGraphPublicState(state);
+  }
   return mode === 'merge-readiness'
     ? redactMergeReadinessState(state as Parameters<typeof redactMergeReadinessState>[0])
     : state;
+}
+
+function parsePublicStateContent(mode: StateToolMode, content: string): unknown {
+  try {
+    return publicStateForMode(mode, JSON.parse(content));
+  } catch (error) {
+    if (mode === 'graph') return malformedGraphPublicState();
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -868,12 +963,12 @@ export const stateReadTool: ToolDefinition<{
         }
 
         const content = readFileSync(statePath, 'utf-8');
-        const state = JSON.parse(content);
+        const publicState = parsePublicStateContent(mode, content);
 
         return {
           content: [{
             type: 'text' as const,
-            text: `## State for ${mode} (session: ${sessionId})\n\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\``
+            text: `## State for ${mode} (session: ${sessionId})\n\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicState, null, 2)}\n\`\`\``
           }]
         };
       }
@@ -909,8 +1004,8 @@ export const stateReadTool: ToolDefinition<{
       if (legacyExists) {
         try {
           const content = readFileSync(statePath, 'utf-8');
-          const state = JSON.parse(content);
-          output += `### Legacy Path (shared)\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\`\n\n`;
+          const publicState = parsePublicStateContent(mode, content);
+          output += `### Legacy Path (shared)\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(publicState, null, 2)}\n\`\`\`\n\n`;
         } catch {
           output += `### Legacy Path (shared)\nPath: ${statePath}\n*Error reading state file*\n\n`;
         }
@@ -926,8 +1021,8 @@ export const stateReadTool: ToolDefinition<{
 
           try {
             const content = readFileSync(sessionStatePath, 'utf-8');
-            const state = JSON.parse(content);
-            output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n\n\`\`\`json\n${JSON.stringify(publicStateForMode(mode, state), null, 2)}\n\`\`\`\n\n`;
+            const publicState = parsePublicStateContent(mode, content);
+            output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n\n\`\`\`json\n${JSON.stringify(publicState, null, 2)}\n\`\`\`\n\n`;
           } catch {
             output += `**Session: ${sid}**\nPath: ${sessionStatePath}\n*Error reading state file*\n\n`;
           }
@@ -1009,6 +1104,21 @@ export const stateWriteTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
+
+      if ((mode as string) === 'graph') {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              type: 'guarded_mode',
+              mode: 'graph',
+              operation: 'write',
+              changed: false,
+            }),
+          }],
+          isError: true,
+        };
+      }
 
       // Validate custom state payload size if provided
       if (state) {
@@ -1224,25 +1334,136 @@ function recoverAutopilotEmergencyTransactions(root: string, sessionId?: string)
   }
 }
 
+type GraphClearClassification = 'active' | 'draft' | 'paused' | 'terminal' | 'malformed' | 'missing';
+
+function classifyGraphRunStatus(status: GraphRunStatus): GraphClearClassification {
+  if (MODE_CONFIGS.graph.activeStatuses?.includes(status)) return 'active';
+  if (status === 'draft') return 'draft';
+  if (status === 'paused') return 'paused';
+  return 'terminal';
+}
+
+function classifyGraphStateForClear(
+  root: string,
+  sessionId?: string,
+): GraphClearClassification {
+  const paths = sessionId
+    ? [getStateFilePath(root, 'graph', sessionId)]
+    : [
+        getStateFilePath(root, 'graph'),
+        ...listSessionIds(root)
+          .sort()
+          .map(sid => getStateFilePath(root, 'graph', sid)),
+      ];
+  const classifications: GraphClearClassification[] = [];
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    try {
+      classifications.push(classifyGraphRunStatus(parseGraphState(JSON.parse(readFileSync(path, 'utf8'))).status));
+    } catch {
+      classifications.push('malformed');
+    }
+  }
+  if (classifications.length === 0) return 'missing';
+  for (const classification of ['active', 'paused', 'draft', 'terminal', 'malformed'] as const) {
+    if (classifications.includes(classification)) return classification;
+  }
+  return 'malformed';
+}
+
+function hasGraphWorkflowSlot(root: string, sessionId?: string): boolean {
+  const paths = [resolveStatePath('skill-active', root)];
+  const sessionIds = sessionId ? [sessionId] : listSessionIds(root);
+  for (const sid of sessionIds) paths.push(resolveSessionStatePath('skill-active', sid, root));
+  return paths.some(path => {
+    const state = readJsonRecord(path);
+    return Boolean(
+      state?.active_skills
+      && typeof state.active_skills === 'object'
+      && (state.active_skills as Record<string, unknown>).graph,
+    );
+  });
+}
+
 export const stateClearTool: ToolDefinition<{
-  mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
+  mode: z.ZodEnum<typeof STATE_CLEAR_MODES>;
+  force: z.ZodOptional<z.ZodBoolean>;
   workingDirectory: z.ZodOptional<z.ZodString>;
   session_id: z.ZodOptional<z.ZodString>;
 }> = {
   name: 'state_clear',
-  description: 'Clear/delete state for a specific mode. Removes the state file and any associated marker files. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
+  description: 'Clear/delete state for a specific mode or all generically clearable modes. Graph is guarded and is never deleted by this tool. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   schema: {
-    mode: z.enum(STATE_TOOL_MODES).describe('The mode to clear state for'),
+    mode: z.enum(STATE_CLEAR_MODES).describe('The mode to clear state for, or all'),
+    force: z.boolean().optional().describe('Request broad cleanup. This never bypasses guarded Graph state.'),
     workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
     session_id: z.string().optional().describe('Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).'),
   },
   handler: async (args) => {
-    const { mode, workingDirectory, session_id } = args;
+    const { mode, force, workingDirectory, session_id } = args;
 
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
+
+      if (sessionId) validateSessionId(sessionId);
+
+      if (mode === 'graph') {
+        const graphClassification = classifyGraphStateForClear(root, sessionId);
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              type: 'guarded_mode',
+              mode: 'graph',
+              operation: 'clear',
+              classification: graphClassification,
+              changed: false,
+              force_bypassed: false,
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      if (mode === 'all') {
+        const graphClassification = classifyGraphStateForClear(root, sessionId);
+        const clearedModes: string[] = [];
+        const failedModes: string[] = [];
+        const preserveGraphWorkflowSlot = hasGraphWorkflowSlot(root, sessionId);
+        for (const candidate of STATE_TOOL_MODES) {
+          if (candidate === 'graph' || (candidate === 'skill-active' && preserveGraphWorkflowSlot)) {
+            continue;
+          }
+          const result = await stateClearTool.handler({
+            mode: candidate,
+            force,
+            workingDirectory,
+            session_id,
+          });
+          if (result.isError) failedModes.push(candidate);
+          else clearedModes.push(candidate);
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              type: 'clear_all',
+              cleared_modes: clearedModes,
+              failed_modes: failedModes,
+              skipped: [{
+                mode: 'graph',
+                reason: 'guarded_mode',
+                classification: graphClassification,
+              }],
+              preserved_graph_workflow_slot: preserveGraphWorkflowSlot,
+              force_bypassed: false,
+            }),
+          }],
+          ...(failedModes.length > 0 ? { isError: true } : {}),
+        };
+      }
 
       // Merge-readiness is an audit gate, so clearing it must leave a durable
       // terminal result and report rather than deleting the evidence trail.
@@ -1999,8 +2220,7 @@ export const stateGetStatusTool: ToolDefinition<{
           if (existsSync(statePath)) {
             try {
               const content = readFileSync(statePath, 'utf-8');
-              const state = JSON.parse(content);
-              statePreview = JSON.stringify(publicStateForMode(mode, state), null, 2).slice(0, 500);
+              statePreview = JSON.stringify(parsePublicStateContent(mode, content), null, 2).slice(0, 500);
               if (statePreview.length >= 500) statePreview += '\n...(truncated)';
             } catch {
               statePreview = 'Error reading state file';

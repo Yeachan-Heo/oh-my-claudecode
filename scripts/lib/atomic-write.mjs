@@ -107,6 +107,18 @@ export function atomicWriteFileSync(filePath, content) {
 
 const LOCK_SCHEMA_VERSION = 1;
 function flockPath() { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
+/**
+ * True only when the test harness explicitly simulates a runtime with NO
+ * locking primitives whatsoever (OMC_TEST_FLOCK_AVAILABLE=0). Distinct from a
+ * real flock-less runtime (Windows/macOS): there, linkSync-based O_EXCL locking
+ * is still a valid mutual-exclusion mechanism and may be used. Under the test
+ * simulation, exclusive locks must remain unavailable (return null) so callers
+ * fail closed - the same contract the dev branch established. Mirrors
+ * lockingDisabledForTest() in src/lib/mode-state-io.ts.
+ */
+function lockingDisabledForTest() {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0';
+}
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
 const [operation, lockPath, expectedRaw] = process.argv.slice(1);
@@ -164,7 +176,12 @@ function guardedLockRemoval(lockPath, operation, owner) {
 
 function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   ensureDirSync(dirname(lockPath));
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
+  const hasFlock = !!flockPath();
+  // Under the explicit test no-locking simulation, exclusive locks are
+  // unavailable (fail closed), matching the dev contract. On real flock-less
+  // runtimes (Windows/macOS) we still fall through to linkSync-based locking.
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
   const processStart = processStartIdentity(process.pid);
   if (!processStart || processStart === 'absent') {
     console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${lockPath}`);
