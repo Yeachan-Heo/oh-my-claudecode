@@ -11,6 +11,9 @@ import {
   stateGetStatusTool,
 } from '../state-tools.js';
 import { emergencyMutateStateFileIf } from '../../lib/mode-state-io.js';
+import { sealGraphDescriptor } from '../../graph/descriptor.js';
+import { createInitialGraphState, type GraphRunStatus } from '../../graph/runtime-types.js';
+import { forkJoinDescriptor } from '../../graph/__tests__/fixtures.js';
 
 const TEST_DIR = '/tmp/state-tools-test';
 
@@ -26,9 +29,20 @@ vi.mock('../../lib/worktree-paths.js', async () => {
 });
 
 function liveLockOwner() {
-  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-  const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
-  return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
+  // The mutation lock is LEASE-based (no process-liveness probe): an owner is
+  // held while `now < expires_at`. Plant a lease-shaped owner with a future
+  // expires_at so production (acquireLockAt/readLockOwner) treats the lock as
+  // live/held and state_write/state_clear fail closed against it. The exact key
+  // set [createdAt, expires_at, nonce, pid, version] must match
+  // validateLockOwner, else the owner is 'corrupt' (reclaimable -> not held).
+  const now = Date.now();
+  return JSON.stringify({
+    version: 1,
+    pid: process.pid,
+    createdAt: new Date(now).toISOString(),
+    expires_at: new Date(now + 300000).toISOString(),
+    nonce: randomUUID(),
+  });
 }
 
 function portableWorkflowState(sessionId: string): Record<string, unknown> {
@@ -92,6 +106,75 @@ function completedPortableWorkflowState(sessionId: string): Record<string, unkno
   ];
   tracking.activationBoundary = { ...initialBoundary, byteOffset: 2, fileIdentity: secondStable };
   return { ...state, active: false, phase: 'complete', status: 'private-terminal-status' };
+}
+
+function graphState(sessionId: string, status: GraphRunStatus = 'running') {
+  const descriptor = sealGraphDescriptor(forkJoinDescriptor());
+  const approved = !['draft', 'awaiting_approval'].includes(status);
+  const state = createInitialGraphState({
+    session_id: sessionId,
+    control_nonce: 'test-control-nonce',
+    descriptor,
+    status,
+    created_at: '2026-07-21T00:00:00.000Z',
+    projection: {
+      activations: {},
+      cohorts: {},
+      branch_tokens: {},
+      traversal_counts: {},
+      committed_transitions: {},
+      terminal_verification_activation_ids: [],
+    },
+    ...(approved
+      ? {
+          approval: {
+            approved_at: '2026-07-21T00:00:00.000Z',
+            evidence: { kind: 'human' as const, ref: 'private-human-evidence' },
+          },
+        }
+      : {}),
+  });
+  state.diagnostics.push({
+    kind: 'operation',
+    recorded_at: '2026-07-21T00:00:01.000Z',
+    summary: 'private diagnostic detail',
+  });
+  return state;
+}
+
+function fileSha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function writeGuardedGraphArtifacts(sessionId: string, status: GraphRunStatus | 'malformed' = 'running') {
+  const stateRoot = join(TEST_DIR, '.omc', 'state');
+  const sessionDir = join(stateRoot, 'sessions', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  const paths = {
+    graph: join(sessionDir, 'graph-state.json'),
+    rootSlot: join(stateRoot, 'skill-active-state.json'),
+    sessionSlot: join(sessionDir, 'skill-active-state.json'),
+    controlOwner: join(sessionDir, 'control-owner-state.json'),
+  };
+  writeFileSync(paths.graph, status === 'malformed' ? '{not-json' : JSON.stringify(graphState(sessionId, status)));
+  const slot = JSON.stringify({
+    version: 2,
+    active_skills: {
+      graph: {
+        skill_name: 'graph',
+        session_id: sessionId,
+        completed_at: null,
+        private_slot_detail: 'must remain unchanged',
+      },
+    },
+  });
+  writeFileSync(paths.rootSlot, slot);
+  writeFileSync(paths.sessionSlot, slot);
+  writeFileSync(paths.controlOwner, JSON.stringify({
+    version: 1,
+    root: { mode: 'graph', session_id: sessionId, run_id: 'run-1', nonce: 'private-nonce' },
+  }));
+  return paths;
 }
 
 describe('state-tools', () => {
@@ -2171,6 +2254,176 @@ describe('state-tools', () => {
       });
 
       expect(result.content[0].text).toContain('Successfully wrote');
+    });
+  });
+
+  describe('Graph guarded state integration', () => {
+    it('registers Graph for read/status while rejecting generic write at the schema boundary', () => {
+      expect(stateReadTool.schema.mode.safeParse('graph').success).toBe(true);
+      expect(stateGetStatusTool.schema.mode.safeParse('graph').success).toBe(true);
+      expect(stateWriteTool.schema.mode.safeParse('graph').success).toBe(false);
+      expect(stateClearTool.schema.mode.safeParse('graph').success).toBe(true);
+      expect(stateClearTool.schema.mode.safeParse('all').success).toBe(true);
+      expect('force' in stateClearTool.schema).toBe(true);
+    });
+
+    it('returns a bounded Graph summary without descriptor, evidence, or diagnostic details', async () => {
+      const sessionId = 'graph-read-summary';
+      writeGuardedGraphArtifacts(sessionId);
+      const result = await stateReadTool.handler({
+        mode: 'graph',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      const summary = JSON.parse(result.content[0].text.match(/```json\n([\s\S]*?)\n```/)![1]);
+
+      expect(summary).toMatchObject({
+        type: 'graph_state_summary',
+        valid: true,
+        run_id: 'run-1',
+        status: 'running',
+        active_revision_id: 'revision-1',
+        commit_sequence: 0,
+      });
+      expect(Object.keys(summary)).toHaveLength(12);
+      expect(result.content[0].text).not.toMatch(
+        /private diagnostic detail|private-human-evidence|Build and verify two branches|run-branch-b/,
+      );
+    });
+
+    it('uses durable status for Graph status and active-list output', async () => {
+      const sessionId = 'graph-observational-status';
+      writeGuardedGraphArtifacts(sessionId, 'waiting_human');
+
+      const status = await stateGetStatusTool.handler({
+        mode: 'graph',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      const active = await stateListActiveTool.handler({
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(status.content[0].text).toContain('**Active:** Yes');
+      expect(status.content[0].text).toContain('graph_state_summary');
+      expect(active.content[0].text).toContain('**graph**');
+    });
+
+    it('rejects direct generic Graph writes without changing its authority artifacts', async () => {
+      const sessionId = 'graph-write-guard';
+      const paths = writeGuardedGraphArtifacts(sessionId);
+      const before = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, fileSha256(path)]));
+
+      const result = await stateWriteTool.handler({
+        mode: 'graph',
+        state: { status: 'cancelled', private_overwrite: true },
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      } as never);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('guarded_mode');
+      for (const [name, path] of Object.entries(paths)) {
+        expect(fileSha256(path), name).toBe(before[name]);
+      }
+    });
+
+    it.each([
+      ['running', 'active'],
+      ['paused', 'paused'],
+      ['succeeded', 'terminal'],
+      ['malformed', 'malformed'],
+    ] as const)('returns deterministic guarded clear classification for %s Graph state', async (status, classification) => {
+      const sessionId = `graph-clear-${status}`;
+      const paths = writeGuardedGraphArtifacts(sessionId, status);
+      const before = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, fileSha256(path)]));
+
+      const result = await stateClearTool.handler({
+        mode: 'graph',
+        force: true,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      } as never);
+      const guarded = JSON.parse(result.content[0].text);
+
+      expect(guarded).toMatchObject({
+        type: 'guarded_mode',
+        mode: 'graph',
+        operation: 'clear',
+        classification,
+        changed: false,
+      });
+      for (const [name, path] of Object.entries(paths)) {
+        expect(fileSha256(path), name).toBe(before[name]);
+      }
+    });
+
+    it('returns deterministic guarded clear classification when Graph state is missing', async () => {
+      const result = await stateClearTool.handler({
+        mode: 'graph',
+        force: true,
+        session_id: 'graph-clear-missing',
+        workingDirectory: TEST_DIR,
+      } as never);
+
+      expect(JSON.parse(result.content[0].text)).toMatchObject({
+        type: 'guarded_mode',
+        mode: 'graph',
+        classification: 'missing',
+        changed: false,
+      });
+    });
+
+    it('clear all reports Graph as skipped and preserves every Graph authority artifact', async () => {
+      const sessionId = 'graph-clear-all';
+      const paths = writeGuardedGraphArtifacts(sessionId);
+      const ordinaryPath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+      writeFileSync(ordinaryPath, JSON.stringify({ active: true, session_id: sessionId }));
+      const before = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, fileSha256(path)]));
+
+      const result = await stateClearTool.handler({
+        mode: 'all',
+        force: true,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      } as never);
+      const clearAll = JSON.parse(result.content[0].text);
+
+      expect(clearAll).toMatchObject({
+        type: 'clear_all',
+        skipped: [{ mode: 'graph', reason: 'guarded_mode', classification: 'active' }],
+      });
+      expect(existsSync(ordinaryPath)).toBe(false);
+      for (const [name, path] of Object.entries(paths)) {
+        expect(fileSha256(path), name).toBe(before[name]);
+      }
+    });
+
+    it('clear all preserves Graph slot and control ownership when the primary ledger is missing', async () => {
+      const sessionId = 'graph-clear-all-missing-ledger';
+      const paths = writeGuardedGraphArtifacts(sessionId);
+      unlinkSync(paths.graph);
+      const protectedPaths = [paths.rootSlot, paths.sessionSlot, paths.controlOwner];
+      const before = protectedPaths.map(path => fileSha256(path));
+      const ordinaryPath = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+      writeFileSync(ordinaryPath, JSON.stringify({ active: true, session_id: sessionId }));
+
+      const result = await stateClearTool.handler({
+        mode: 'all',
+        force: true,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      } as never);
+      const clearAll = JSON.parse(result.content[0].text);
+
+      expect(clearAll).toMatchObject({
+        type: 'clear_all',
+        skipped: [{ mode: 'graph', reason: 'guarded_mode', classification: 'missing' }],
+        preserved_graph_workflow_slot: true,
+      });
+      expect(existsSync(ordinaryPath)).toBe(false);
+      protectedPaths.forEach((path, index) => expect(fileSha256(path)).toBe(before[index]));
     });
   });
 });

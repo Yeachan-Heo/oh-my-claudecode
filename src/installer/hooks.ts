@@ -293,6 +293,9 @@ export const CODE_SIMPLIFIER_SCRIPT_NODE = loadTemplate("code-simplifier.mjs");
 /** Node.js session start hook script - loaded from templates/hooks/session-start.mjs */
 export const SESSION_START_SCRIPT_NODE = loadTemplate("session-start.mjs");
 
+/** Node.js session end hook script - loaded from templates/hooks/session-end.mjs */
+export const SESSION_END_SCRIPT_NODE = loadTemplate("session-end.mjs");
+
 /** Post-tool-use Node.js script - loaded from templates/hooks/post-tool-use.mjs */
 export const POST_TOOL_USE_SCRIPT_NODE = loadTemplate("post-tool-use.mjs");
 
@@ -322,6 +325,26 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
           {
             type: "command" as const,
             command: buildHookCommand('session-start.mjs'),
+          },
+        ],
+      },
+    ],
+    // Graph-scoped SessionEnd cleanup. This hook is a fast no-op for any
+    // session that never used the Graph runtime: it returns SAFE_CONTINUE
+    // without invoking the CLI when no graph-state file exists for the
+    // session (see templates/hooks/session-end.mjs `existsSync(writePath)`
+    // gate). Registration is therefore safe for all standalone installs and
+    // does not perform work or mutate state for non-graph sessions. Plugin
+    // installs receive this hook via hooks/hooks.json instead.
+    SessionEnd: [
+      {
+        matcher: "*",
+        hooks: [
+          {
+            type: "command" as const,
+            command: buildHookCommand('session-end.mjs'),
+            timeout: 30,
+            async: true,
           },
         ],
       },

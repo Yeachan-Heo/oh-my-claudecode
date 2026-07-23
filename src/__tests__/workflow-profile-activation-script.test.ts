@@ -4,6 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { acquireMutationLockAt, releaseMutationLockSync } from '../lib/mode-state-io.js';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -52,10 +53,24 @@ function processStartForTest() {
   return stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
 }
 
+// Lease-based mutation-lock owner (mirrors src/lib/mode-state-io.ts
+// MutationLockOwner / validateLockOwner). Exact key set
+// [createdAt, expires_at, nonce, pid, version], version===2 (LOCK_SCHEMA_VERSION).
+// `processStart` is GONE from the lock; `expires_at` is the sole reclaim key. A
+// future expires_at means the lease is held/live (blocks contenders); a past
+// expires_at means the lease expired (reclaimable, NOT corrupt-reclaim). A
+// version:1 lease-shaped owner would be classified corrupt (not old_version,
+// which requires the processStart key set) and reclaimed at once - the vacuous
+// pass B13 fixed here.
 function liveLockOwner() {
-  return JSON.stringify({ version: 1, pid: process.pid, processStart: processStartForTest(), createdAt: new Date().toISOString(), nonce: randomUUID() });
+  const now = Date.now();
+  return JSON.stringify({ version: 2, pid: process.pid, createdAt: new Date(now).toISOString(), expires_at: new Date(now + 60000).toISOString(), nonce: randomUUID() });
 }
 
+function abandonedMutationLockOwner() {
+  const now = Date.now();
+  return JSON.stringify({ version: 2, pid: 999999999, createdAt: new Date(now - 120000).toISOString(), expires_at: new Date(now - 60000).toISOString(), nonce: randomUUID() });
+}
 
 function abandonedLockOwner() {
   return JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() });
@@ -282,7 +297,7 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     const statePath = join(cwd, '.omc', 'state', 'sessions', 'workflow-activation-fixture', 'autopilot-state.json');
     try {
       mkdirSync(join(statePath, '..'), { recursive: true });
-      writeFileSync(`${statePath}.mutation.lock`, abandonedLockOwner());
+      writeFileSync(`${statePath}.mutation.lock`, abandonedMutationLockOwner());
       const output = runHook(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
       expect(output.hookSpecificOutput?.additionalContext).toContain('## PIPELINE STAGE: RALPLAN');
       expect(stateBytes(cwd)).not.toBeNull();
@@ -702,6 +717,19 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
     try {
       mkdirSync(join(statePath, '..'), { recursive: true });
       writeFileSync(lockPath, liveLockOwner());
+      // Prove the planted live lease ACTUALLY BLOCKS a contender rather than
+      // being corrupt-reclaimed (which would let a contender acquire at once).
+      // A direct exclusive acquire of the same mutation lock must fail (return
+      // null) while the unexpired lease is held - independent of the hook's own
+      // timing, so the assertion can no longer pass merely because the hook is
+      // slow. requireExclusive=true forces the linkSync reclaim loop even on
+      // flock-less runtimes (macOS/Windows), so the live lease is honored on
+      // every platform rather than short-circuiting to { unlocked: true }.
+      // Checked BEFORE launching the hook so there is no concurrent acquirer
+      // and no timing pressure on the hook's own retry budget.
+      const contender = acquireMutationLockAt(statePath, true);
+      expect(contender).toBeNull();
+      releaseMutationLockSync(contender);
       const pending = runHookAsync(script, '/autopilot --workflow release-flow ship it', cwd, configHome);
       await new Promise(resolve => setTimeout(resolve, 75));
       expect(stateBytes(cwd)).toBeNull();

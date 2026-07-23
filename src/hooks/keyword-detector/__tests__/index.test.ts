@@ -2685,6 +2685,28 @@ This article argues that fake popularity signals damage trust in open source.`;
   // -------------------------------------------------------------------------
 
   describe('unified prefix detector: /omc: and /oh-my-claudecode: forms (spec g)', () => {
+    it.each([
+      '/graph migrate payments',
+      '/omc:graph migrate payments',
+      '/oh-my-claudecode:graph migrate payments',
+    ])('detects explicit Graph workflow invocation %s', (prompt) => {
+      const result = detectKeywordsWithType(prompt);
+      expect(result.find((entry) => entry.type === 'graph')).toBeDefined();
+    });
+
+    it.each([
+      'graph',
+      'please build a graph for this task',
+      'the graph keeps the project overview',
+      'run `/graph migrate payments` later',
+      '```\n/graph migrate payments\n```',
+      '/graph-state/runs.json',
+      '/graphical render',
+    ])('does not activate Graph from non-command text %s', (prompt) => {
+      const result = detectKeywordsWithType(prompt);
+      expect(result.find((entry) => entry.type === 'graph')).toBeUndefined();
+    });
+
     it('/omc:ralph fix auth detects ralph', () => {
       const result = detectKeywordsWithType('/omc:ralph fix auth');
       expect(result.find((r) => r.type === 'ralph')).toBeDefined();
@@ -2741,6 +2763,19 @@ This article argues that fake popularity signals damage trust in open source.`;
   // parseExplicitWorkflowSlashInvocation — unit tests (spec g)
   // -------------------------------------------------------------------------
   describe('parseExplicitWorkflowSlashInvocation — parser unit tests (spec g)', () => {
+    it('normalizes all Graph slash prefixes and preserves arguments', () => {
+      for (const prompt of [
+        '/graph migrate payments',
+        '/omc:graph migrate payments',
+        '/oh-my-claudecode:graph migrate payments',
+      ]) {
+        expect(parseExplicitWorkflowSlashInvocation(prompt)).toMatchObject({
+          skill: 'graph',
+          args: 'migrate payments',
+        });
+      }
+    });
+
     it('returns null for empty string', () => {
       expect(parseExplicitWorkflowSlashInvocation('')).toBeNull();
     });
