@@ -13,9 +13,31 @@ const modules = [
   join(root, 'templates', 'hooks', 'lib', 'atomic-write.mjs'),
 ];
 
+// processStart is retained for the EMERGENCY JOURNAL / recovery-claim subsystem
+// (which is still liveness-based). The mutation lock is now LEASE-based and no
+// longer probes process liveness, so mutation-lock tests plant lease owners via
+// leaseOwner() below. On Linux we read the real /proc start time; on other
+// platforms we return a stable synthetic value so the recovery-claim tests can
+// run locally (production's processStartIdentity does the same for non-Linux).
 function processStart(pid = process.pid): string {
+  if (process.platform !== 'linux') return '1';
   const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
   return stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+}
+
+// The shipped hook helpers retain the deployed v1 lease wire format for
+// backward compatibility. It is distinguished from the old v1 liveness shape
+// below by `expires_at` (rather than `processStart`).
+function leaseOwner(overrides: Record<string, unknown> = {}) {
+  const now = Date.now();
+  return {
+    version: 1,
+    pid: process.pid,
+    createdAt: new Date(now).toISOString(),
+    expires_at: new Date(now + 60000).toISOString(),
+    nonce: randomUUID(),
+    ...overrides,
+  };
 }
 
 function owner(overrides: Record<string, unknown> = {}) {
@@ -46,51 +68,69 @@ afterEach(() => {
 describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) => {
   async function api() {
     return import(`${pathToFileURL(modulePath).href}?test=${randomUUID()}`) as Promise<{
-      acquireStateFileLockSync(path: string, attempts?: number): { fd: number; lockPath: string; owner: ReturnType<typeof owner> } | null;
+      acquireStateFileLockSync(path: string, attempts?: number, requireExclusive?: boolean): { fd: number; lockPath: string; owner: ReturnType<typeof leaseOwner> } | { unlocked: true } | null;
       releaseStateFileLockSync(lock: unknown): void;
       recoverEmergencyStateFile(path: string): boolean;
     }>;
   }
 
-  it('reclaims a valid abandoned owner and PID-reuse identity', async () => {
+  it('fails closed for a legacy liveness owner', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
-    writeFileSync(lockPath, JSON.stringify(owner({ pid: 999999999, processStart: '1' })));
-    const abandoned = lockApi.acquireStateFileLockSync(statePath, 2);
-    expect(abandoned).not.toBeNull();
-    lockApi.releaseStateFileLockSync(abandoned);
+    const legacy = owner({ pid: 999999999, processStart: '1' });
+    writeFileSync(lockPath, JSON.stringify(legacy));
 
-    writeFileSync(lockPath, JSON.stringify(owner({ processStart: String(Number(processStart()) + 1) })));
-    const reused = lockApi.acquireStateFileLockSync(statePath, 2);
-    expect(reused).not.toBeNull();
-    lockApi.releaseStateFileLockSync(reused);
+    expect(lockApi.acquireStateFileLockSync(statePath, 2, true)).toBeNull();
+    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(legacy);
   });
 
-  it('never reclaims a verifiably live holder', async () => {
+  it('never reclaims a valid unexpired lease', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
-    const live = owner();
+    // A valid lease whose expires_at is in the future is "held" (not
+    // reclaimable). The lease is the sole reclaim key - no process liveness is
+    // probed - so a future expires_at must block reacquisition for the whole
+    // retry window and leave the holder's lock untouched.
+    const live = leaseOwner({ expires_at: new Date(Date.now() + 60000).toISOString() });
     writeFileSync(lockPath, JSON.stringify(live));
-    expect(lockApi.acquireStateFileLockSync(statePath, 2)).toBeNull();
+    // requireExclusive forces the reclaim branch to actually run on flock-less
+    // hosts (otherwise the non-exclusive flock-less path returns {unlocked:true}
+    // without inspecting the lock). On Linux (real flock) it runs the guarded
+    // flock reclaim; both paths share the same lease policy.
+    expect(lockApi.acquireStateFileLockSync(statePath, 2, true)).toBeNull();
     expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(live);
   });
 
-  it('fails closed with deterministic diagnostics for corrupt metadata', async () => {
+  it('reclaims a lock with corrupt metadata by lease policy', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
+    // The lease contract treats a readable-but-unparseable owner as having no
+    // valid lease on record, so the owner cannot be live: RECLAIM (unlink) and
+    // retry. (Fail-closed applies only to an I/O-unreadable lock, e.g. EACCES -
+    // not to corrupt JSON.) A corrupt lock is therefore reclaimed and replaced
+    // with a fresh valid lease owner.
     writeFileSync(lockPath, 'corrupt');
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(lockApi.acquireStateFileLockSync(statePath, 2)).toBeNull();
-    expect(error).toHaveBeenCalledWith(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
-    expect(readFileSync(lockPath, 'utf8')).toBe('corrupt');
+    // requireExclusive forces the reclaim branch to run on flock-less hosts so
+    // the corrupt lock is actually unlinked and reacquired (the non-exclusive
+    // flock-less path would otherwise no-op). On Linux the guarded flock reclaim
+    // runs; both paths reclaim corrupt metadata by the same lease policy.
+    const reclaimed = lockApi.acquireStateFileLockSync(statePath, 2, true);
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed).not.toHaveProperty('unlocked');
+    const next = JSON.parse(readFileSync(lockPath, 'utf8'));
+    expect(next.version).toBe(1);
+    expect(next.expires_at).toBeTypeOf('string');
+    expect(Number.isFinite(Date.parse(next.expires_at as string))).toBe(true);
+    expect(next.nonce).toMatch(/^[0-9a-f-]{36}$/i);
+    lockApi.releaseStateFileLockSync(reclaimed);
   });
 
   it('does not let an old owner release a replacement lock', async () => {
     const { statePath, lockPath } = fixture();
     const lockApi = await api();
-    const old = lockApi.acquireStateFileLockSync(statePath, 2)!;
+    const old = lockApi.acquireStateFileLockSync(statePath, 2, true)!;
     unlinkSync(lockPath);
-    const replacement = owner();
+    const replacement = leaseOwner();
     writeFileSync(lockPath, JSON.stringify(replacement));
     lockApi.releaseStateFileLockSync(old);
     expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(replacement);
@@ -98,13 +138,16 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
 
   it('serializes concurrent reclaimers without removing a live replacement', async () => {
     const { statePath, lockPath } = fixture();
-    writeFileSync(lockPath, JSON.stringify(owner({ pid: 999999999, processStart: '1' })));
+    writeFileSync(lockPath, JSON.stringify(leaseOwner({
+      pid: 999999999,
+      expires_at: new Date(Date.now() - 1).toISOString(),
+    })));
     const logPath = `${statePath}.critical.log`;
     const childScript = String.raw`
       import { appendFileSync } from 'node:fs';
       const [modulePath, statePath, logPath, id] = process.argv.slice(1);
       const api = await import(modulePath);
-      const lock = api.acquireStateFileLockSync(statePath, 100);
+      const lock = api.acquireStateFileLockSync(statePath, 100, true);
       if (!lock) process.exit(2);
       appendFileSync(logPath, id + ':start\n');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);

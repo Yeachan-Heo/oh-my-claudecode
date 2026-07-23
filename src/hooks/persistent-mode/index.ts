@@ -256,7 +256,7 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
   }
 
   const validateSignal = (target: LoadedAutopilotTarget | null): boolean => {
-    const locked = withStateFileMutationLock(cancelSignalPath, () => {
+    const locked = withStateFileMutationLock(cancelSignalPath, (assertHeld) => {
       let raw: Record<string, unknown>;
       try {
         const parsed = JSON.parse(readFileSync(cancelSignalPath!, 'utf-8'));
@@ -269,7 +269,10 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
       const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
       const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
       if (target) {
-        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath!)) {
+          assertHeld();
+          unlinkSync(cancelSignalPath!);
+        }
         return isAuthenticatedAutopilotCancelSignal(raw, target);
       }
       // A requested-at-only signal belongs to Ralph/Ultrawork. It must never be
@@ -293,7 +296,10 @@ function isSessionCancelInProgress(directory: string, sessionId?: string): Sessi
         effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
         effectiveExpiry <= now
       ) {
-        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath!)) unlinkSync(cancelSignalPath!);
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath!)) {
+          assertHeld();
+          unlinkSync(cancelSignalPath!);
+        }
         return false;
       }
       return true;

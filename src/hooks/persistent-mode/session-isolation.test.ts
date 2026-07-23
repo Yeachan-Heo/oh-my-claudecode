@@ -195,6 +195,45 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       });
     });
 
+    it("does not honor an autopilot cancel signal without an exclusive lock even when a graph state file is present (GRAPH-in-EXCLUSIVE_MODES safety invariant)", async () => {
+      // Regression guard: GRAPH was added to EXCLUSIVE_MODES. Its presence must
+      // not weaken the cancel-safety invariant - an autopilot cancel signal that
+      // cannot acquire the exclusive state lock must still be rejected so a
+      // forged cancel cannot suppress an active autopilot.
+      const sessionId = "graph-present-autopilot-cancel-no-flock";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const state = initAutopilot(tempDir, "Finish the task", sessionId)!;
+      state.phase = "planning";
+      state.project_path = tempDir;
+      writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(state));
+      // Place a durable graph-state file alongside autopilot state. This is the
+      // artifact that GRAPH-in-EXCLUSIVE_MODES makes mode-registry aware of; it
+      // must not change the cancel verdict.
+      writeFileSync(join(sessionDir, "graph-state.json"), JSON.stringify({
+        format_version: 1,
+        session_id: sessionId,
+        run_id: "run-graph",
+        status: "running",
+      }));
+      const now = Date.now();
+      writeFileSync(join(sessionDir, "cancel-signal-state.json"), JSON.stringify({
+        active: true,
+        mode: "autopilot",
+        source: "state_clear",
+        requested_at: new Date(now).toISOString(),
+        expires_at: new Date(now + 30_000).toISOString(),
+        target_state_sha256: createHash("sha256").update(JSON.stringify(state)).digest("hex"),
+      }));
+      process.env.OMC_TEST_FLOCK_AVAILABLE = "0";
+
+      await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
+        shouldBlock: true,
+        mode: "autopilot",
+      });
+    });
+
+
     it("honors a requested-at-only Ultrawork cancellation without flock when canonical autopilot discovery finds no target", async () => {
       const sessionId = "portable-generic-cancel-no-autopilot";
       activateUltrawork("Finish the task", sessionId, tempDir);

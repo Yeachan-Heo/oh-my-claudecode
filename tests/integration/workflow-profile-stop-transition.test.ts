@@ -45,14 +45,22 @@ describe('canonical workflow stage prompt serialization', () => {
   });
 });
 
+// The mutation lock is LEASE-based (no process-liveness probe): the on-disk
+// owner is `{ version: 1, pid, createdAt, expires_at, nonce }` and the lock is
+// HELD while `now < expires_at`. A held owner must use the exact LEASE key set
+// (no `processStart`) and a future `expires_at` so production treats it as live
+// and refuses to reclaim. See src/lib/mode-state-io.ts freshLockOwner/readLockOwner.
+const LEASE_MS = 300_000;
 function liveLockOwner() {
-  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-  const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
-  return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
+  const now = Date.now();
+  return JSON.stringify({ version: 1, pid: process.pid, createdAt: new Date(now).toISOString(), expires_at: new Date(now + LEASE_MS).toISOString(), nonce: randomUUID() });
 }
 
 function abandonedLockOwner() {
-  return JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() });
+  // Expired lease: reclaimable because `now >= expires_at`, not because of a
+  // corrupt schema. Uses a valid LEASE key set with a past expires_at.
+  const now = Date.now();
+  return JSON.stringify({ version: 1, pid: 999999999, createdAt: new Date(now - LEASE_MS - 1).toISOString(), expires_at: new Date(now - 1).toISOString(), nonce: randomUUID() });
 }
 
 

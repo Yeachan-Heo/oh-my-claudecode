@@ -59,6 +59,7 @@ export const WORKFLOW_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
  */
 export const CANONICAL_WORKFLOW_SKILLS = [
   'autopilot',
+  'graph',
   'ralph',
   'team',
   'ultrawork',
@@ -106,6 +107,7 @@ const SKILL_PROTECTION: Record<string, SkillProtectionLevel> = {
   // === Canonical workflow skills — bypass support-skill protection; flow through the workflow-slot path ===
   autopilot: 'none',
   autoresearch: 'none',
+  graph: 'none',
   ralph: 'none',
   ultrawork: 'none',
   team: 'none',
@@ -342,6 +344,26 @@ export function markWorkflowSkillCompleted(
   now: string = new Date().toISOString(),
 ): SkillActiveStateV2 {
   const normalized = skillName.toLowerCase().replace(/^oh-my-claudecode:/, '');
+  if (normalized === 'graph') return state;
+  return markWorkflowSkillCompletedUnchecked(state, normalized, now);
+}
+
+/** Tombstone Graph only after its durable state is paused or terminal. */
+export function markDurableWorkflowSkillCompleted(
+  state: SkillActiveStateV2,
+  skillName: string,
+  now: string = new Date().toISOString(),
+): SkillActiveStateV2 {
+  const normalized = skillName.toLowerCase().replace(/^oh-my-claudecode:/, '');
+  if (normalized !== 'graph') return state;
+  return markWorkflowSkillCompletedUnchecked(state, normalized, now);
+}
+
+function markWorkflowSkillCompletedUnchecked(
+  state: SkillActiveStateV2,
+  normalized: string,
+  now: string,
+): SkillActiveStateV2 {
   const existing = state.active_skills[normalized];
   if (!existing) return state;
   const updated: ActiveSkillSlot = { ...existing, completed_at: now };

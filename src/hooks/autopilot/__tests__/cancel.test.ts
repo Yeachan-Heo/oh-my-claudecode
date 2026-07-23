@@ -292,9 +292,10 @@ describe('AutopilotCancel', () => {
       state.workflowRunId = '11111111-1111-4111-8111-111111111111';
       writeAutopilotState(testDir, state, sessionId);
       const statePath = resolveSessionStatePath('autopilot', sessionId, testDir);
-      const stat = require('fs').readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-      const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
-      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: '22222222-2222-4222-8222-222222222222' }));
+      // Plant a LIVE mutation lock (unexpired lease) so cancel/clear cannot
+      // acquire exclusively and must fail. Lease-based (expires_at in the
+      // future) - no /proc liveness dependency.
+      writeFileSync(`${statePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, createdAt: new Date().toISOString(), expires_at: new Date(Date.now() + 300000).toISOString(), nonce: '22222222-2222-4222-8222-222222222222' }));
 
       expect(cancelAutopilot(testDir, sessionId).success).toBe(false);
       expect(clearAutopilot(testDir, sessionId).success).toBe(false);

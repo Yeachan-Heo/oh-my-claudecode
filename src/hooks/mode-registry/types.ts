@@ -7,6 +7,7 @@
 export type ExecutionMode =
   | 'autopilot'
   | 'autoresearch'
+  | 'graph'
   | 'team'
   | 'ralph'
   | 'ultrawork'
@@ -24,6 +25,8 @@ export interface ModeConfig {
   markerFile?: string;
   /** Property to check in JSON state (if JSON-based) */
   activeProperty?: string;
+  /** Status values that mean active when durable status owns lifecycle. */
+  activeStatuses?: readonly string[];
   /** Whether state is SQLite-based (requires marker file) */
   isSqlite?: boolean;
   /** Whether mode has global state in ~/.claude/ */

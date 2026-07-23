@@ -251,6 +251,26 @@ describe('plugin shipping surface transaction', () => {
     expect(result.status).toBe(0);
   });
 
+  it('keeps a packaged bin wrapper and its bridge import inside the runtime closure', async () => {
+    const fixture = createFixture();
+    mkdirSync(join(fixture.root, 'bin'), { recursive: true });
+    writeFileSync(join(fixture.root, 'bin', 'fixture.js'), "import '../bridge/cli.cjs';\n");
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin',
+      version: '1.0.0',
+      type: 'module',
+      main: './dist/index.js',
+      bin: { fixture: './bin/fixture.js' },
+      files: ['dist/index.js', 'bridge/claude-md-coordinator.cjs'],
+    });
+    const module = await shippingSurface;
+
+    const surface = module.inspectPluginShippingSurface(fixture.root);
+
+    expect(surface.requiredPaths).toContain('bin/fixture.js');
+    expect(surface.requiredPaths).toContain('bridge/cli.cjs');
+  });
+
   it('constructs and executes an exact forced staging command for closure paths only', async () => {
     const fixture = createFixture({ trackCli: false });
     const module = await shippingSurface;

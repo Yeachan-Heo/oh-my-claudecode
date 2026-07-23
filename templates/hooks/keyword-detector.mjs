@@ -911,7 +911,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
   const writeState = (writePath, authorizeState) => {
     try {
       mkdirSync(dirname(writePath), { recursive: true });
-      withStateFileLockSync(writePath, () => {
+      withStateFileLockSync(writePath, (assertHeld) => {
         if (!recoverEmergencyStateFile(writePath, authorizeState ? { authorizeState } : undefined)) return;
         // Shared home fallbacks are project-scoped. A foreign or unverifiable
         // primary/recovery generation must win over this activation.
@@ -938,6 +938,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
             return;
           }
         }
+        assertHeld();
         atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
       });
     } catch {}
@@ -960,11 +961,14 @@ async function activateState(directory, prompt, stateName, sessionId) {
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
   const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
-  withStateFileLockSync(signalPath, () => {
+  withStateFileLockSync(signalPath, (assertHeld) => {
     if (!existsSync(signalPath)) return;
     try {
       const signal = JSON.parse(readFileSync(signalPath, 'utf8'));
-      if (signal.target_workflow_run_id !== workflowRunId) unlinkSync(signalPath);
+      if (signal.target_workflow_run_id !== workflowRunId) {
+        assertHeld();
+        unlinkSync(signalPath);
+      }
     } catch {
       // Malformed signals fail closed in Stop and are left for explicit cleanup.
     }
@@ -976,7 +980,7 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
   const { writePath } = await resolveSessionStatePathsForHook(directory, 'autopilot', safeSessionId || undefined);
   try {
     mkdirSync(dirname(writePath), { recursive: true });
-    const result = withStateFileLockSync(writePath, () => {
+    const result = withStateFileLockSync(writePath, (assertHeld) => {
       if (!recoverEmergencyStateFile(writePath)) return { error: 'workflow_recovery_failure' };
       if (!existsSync(writePath)) return null;
       const current = JSON.parse(readFileSync(writePath, 'utf8'));
@@ -990,6 +994,7 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
       const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
       const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
       if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+      assertHeld();
       atomicWriteFileSync(writePath, JSON.stringify(resumed, null, 2));
       return { stagePrompt, workflowRunId: resumed.workflowRunId };
     });
@@ -1011,7 +1016,7 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
   const { writePath } = await resolveSessionStatePathsForHook(directory, 'autopilot', safeSessionId || undefined);
   try {
     mkdirSync(dirname(writePath), { recursive: true });
-    const result = withStateFileLockSync(writePath, () => {
+    const result = withStateFileLockSync(writePath, (assertHeld) => {
       if (!recoverEmergencyStateFile(writePath)) return { error: 'workflow_recovery_failure' };
       if (existsSync(writePath)) {
         try {
@@ -1030,6 +1035,7 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
               const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
               const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
               if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+              assertHeld();
               atomicWriteFileSync(writePath, JSON.stringify(resumed, null, 2));
               return { stagePrompt, workflowRunId: resumed.workflowRunId };
             }
@@ -1043,6 +1049,7 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
       if (!state) return { error: takeWorkflowTranscriptFailure(sessionId) || 'workflow_integrity_failure' };
       const stagePrompt = resolveWorkflowStagePrompt(state, workflow.stages[0]);
       if (!stagePrompt) return null;
+      assertHeld();
       atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
       return { stagePrompt, workflowRunId: state.workflowRunId };
     });

@@ -1054,7 +1054,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
   try {
     mkdirSync(dirname(writePath), { recursive: true });
     let workflowIntegrityFailure = false;
-    withStateFileLockSync(writePath, () => {
+    withStateFileLockSync(writePath, (assertHeld) => {
       if (!recoverEmergencyStateFile(writePath)) return;
       // A legacy autopilot activation must never replace named state. Own
       // markers are authoritative even when their values are falsy.
@@ -1070,6 +1070,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
           return;
         }
       }
+      assertHeld();
       atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
     });
     return workflowIntegrityFailure ? 'workflow_descriptor_integrity_failed' : null;
@@ -1078,11 +1079,14 @@ async function activateState(directory, prompt, stateName, sessionId) {
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
   const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
-  withStateFileLockSync(signalPath, () => {
+  withStateFileLockSync(signalPath, (assertHeld) => {
     if (!existsSync(signalPath)) return;
     try {
       const signal = JSON.parse(readFileSync(signalPath, 'utf8'));
-      if (signal.target_workflow_run_id !== workflowRunId) unlinkSync(signalPath);
+      if (signal.target_workflow_run_id !== workflowRunId) {
+        assertHeld();
+        unlinkSync(signalPath);
+      }
     } catch {
       // Malformed signals fail closed in Stop and are left for explicit cleanup.
     }
@@ -1096,7 +1100,7 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
     : join(omcRoot, 'state', 'autopilot-state.json');
   try {
     mkdirSync(dirname(target), { recursive: true });
-    const result = withStateFileLockSync(target, () => {
+    const result = withStateFileLockSync(target, (assertHeld) => {
       if (!recoverEmergencyStateFile(target)) return { error: 'workflow_recovery_failure' };
       if (!existsSync(target)) return null;
       const current = JSON.parse(readFileSync(target, 'utf8'));
@@ -1110,6 +1114,7 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
       const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
       const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
       if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+      assertHeld();
       atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
       return { stagePrompt, workflowRunId: resumed.workflowRunId };
     });
@@ -1133,7 +1138,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
     : join(omcRoot, 'state', 'autopilot-state.json');
   try {
     mkdirSync(dirname(target), { recursive: true });
-    const result = withStateFileLockSync(target, () => {
+    const result = withStateFileLockSync(target, (assertHeld) => {
       if (!recoverEmergencyStateFile(target)) return { error: 'workflow_recovery_failure' };
       if (existsSync(target)) {
         try {
@@ -1152,6 +1157,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
               const stageId = resumed.workflow.stages[resumed.pipelineTracking.currentStageIndex];
               const stagePrompt = resolveWorkflowStagePrompt(resumed, stageId);
               if (!stagePrompt) return { error: 'workflow_integrity_failure' };
+              assertHeld();
               atomicWriteFileSync(target, JSON.stringify(resumed, null, 2));
               return { stagePrompt, workflowRunId: resumed.workflowRunId };
             }
@@ -1165,6 +1171,7 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
       if (!state) return { error: takeWorkflowTranscriptFailure(sessionId) || 'workflow_integrity_failure' };
       const stagePrompt = resolveWorkflowStagePrompt(state, workflow.stages[0]);
       if (!stagePrompt) return null;
+      assertHeld();
       atomicWriteFileSync(target, JSON.stringify(state, null, 2));
       return { stagePrompt, workflowRunId: state.workflowRunId };
     });

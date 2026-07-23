@@ -563,9 +563,10 @@ function clearLoadedStateFile(loaded) {
 
   let cleared = false;
   try {
-    withStateFileLockSync(statePath, () => {
+    withStateFileLockSync(statePath, (assertHeld) => {
       const current = readJsonFile(statePath);
       if (current && JSON.stringify(current) === expectedSnapshot && existsSync(statePath)) {
+        assertHeld();
         unlinkSync(statePath);
         cleared = true;
       }
@@ -755,7 +756,7 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
   let authenticatedAutopilot = null;
   const validateSignal = (signalPath, currentAutopilot) => {
     let active = false;
-    const locked = withStateFileLockSync(signalPath, () => {
+    const locked = withStateFileLockSync(signalPath, (assertHeld) => {
       const signal = readJsonFile(signalPath);
       if (!signal || typeof signal !== "object" || Array.isArray(signal) || signal.active !== true) return;
       const now = Date.now();
@@ -765,19 +766,28 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
       const isFreshRequest = requestedAt <= now + CANCEL_SIGNAL_CLOCK_SKEW_MS && now - requestedAt <= CANCEL_SIGNAL_TTL_MS;
       if (!currentAutopilot) {
         const effectiveExpiry = Number.isFinite(expiresAt) ? expiresAt : requestedAt + CANCEL_SIGNAL_TTL_MS;
-        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(signalPath)) {
+          assertHeld();
+          unlinkSync(signalPath);
+        }
         if (signal.mode === "autopilot" || Object.prototype.hasOwnProperty.call(signal, "target_state_sha256") || Object.prototype.hasOwnProperty.call(signal, "target_workflow_run_id")) return;
         if (isFreshRequest && effectiveExpiry > requestedAt && effectiveExpiry - requestedAt <= CANCEL_SIGNAL_TTL_MS && effectiveExpiry > now) active = true;
         return;
       }
       if (!isFreshRequest) {
-        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(signalPath)) unlinkSync(signalPath);
+        if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(signalPath)) {
+          assertHeld();
+          unlinkSync(signalPath);
+        }
         return;
       }
       if (signal.mode !== "autopilot" || typeof signal.source !== "string" || signal.source.length === 0) return;
       if (!Number.isFinite(expiresAt) || expiresAt <= requestedAt || expiresAt - requestedAt > CANCEL_SIGNAL_TTL_MS) return;
       if (expiresAt <= now) {
-        if (existsSync(signalPath)) unlinkSync(signalPath);
+        if (existsSync(signalPath)) {
+          assertHeld();
+          unlinkSync(signalPath);
+        }
         return;
       }
       const stateDigest = createHash("sha256").update(JSON.stringify(currentAutopilot)).digest("hex");
@@ -1545,9 +1555,10 @@ async function main() {
             const errorGuidance = getToolErrorRetryGuidance(toolError);
             const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
             let committed = false;
-            const locked = withStateFileLockSync(autopilot.path, () => {
+            const locked = withStateFileLockSync(autopilot.path, (assertHeld) => {
               const current = readJsonFile(autopilot.path);
               if (!current || JSON.stringify(current) !== loadedSnapshot) return;
+              assertHeld();
               committed = writeJsonFile(autopilot.path, reinforced);
             });
             if (!locked.acquired || !committed) {

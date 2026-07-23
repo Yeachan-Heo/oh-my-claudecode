@@ -1,0 +1,76 @@
+{
+  "descriptor_version": 1,
+  "run_id": "example-add-auth-20260722",
+  "revision_id": "rev-1",
+  "goal": "Add user authentication to the API with login, register, and token refresh",
+  "nodes": [
+    {
+      "id": "explore",
+      "kind": "agent",
+      "title": "Codebase Exploration",
+      "instructions": "Explore the codebase to understand the existing architecture, patterns, and auth-related code. Map the directory structure, find existing middleware, identify the database schema, and document the tech stack. Output a summary of findings that will inform the implementation plan.",
+      "timeout_ms": 300000,
+      "max_attempts": 2,
+      "effect_policy": { "policy": "side_effect_free" }
+    },
+    {
+      "id": "plan",
+      "kind": "agent",
+      "title": "Implementation Plan",
+      "instructions": "Based on the exploration findings, design the authentication implementation. Define the API routes (/login, /register, /refresh), middleware structure, token strategy (JWT), and database schema changes. Output a concrete plan with file paths and interfaces.",
+      "timeout_ms": 300000,
+      "max_attempts": 2,
+      "effect_policy": { "policy": "side_effect_free" }
+    },
+    {
+      "id": "implement",
+      "kind": "agent",
+      "title": "Implementation",
+      "instructions": "Implement the authentication feature according to the plan. Create the login, register, and token refresh endpoints. Add JWT middleware. Update the database schema. Write the code in the appropriate files. Ensure TypeScript compiles without errors.",
+      "timeout_ms": 1800000,
+      "max_attempts": 3,
+      "effect_policy": { "policy": "idempotent", "idempotency_key_template": "auth-impl-{iteration}" }
+    },
+    {
+      "id": "test",
+      "kind": "agent",
+      "title": "Test & Verify",
+      "instructions": "Write integration tests for all auth flows: successful login, wrong password, token refresh, expired token, register validation. Run the test suite, lint, and typecheck. All tests must pass. Output test results as evidence.",
+      "timeout_ms": 600000,
+      "max_attempts": 2,
+      "effect_policy": { "policy": "side_effect_free" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1-explore-plan",
+      "from": "explore",
+      "to": "plan",
+      "kind": "fixed"
+    },
+    {
+      "id": "e2-plan-implement",
+      "from": "plan",
+      "to": "implement",
+      "kind": "fixed"
+    },
+    {
+      "id": "e3-implement-test",
+      "from": "implement",
+      "to": "test",
+      "kind": "conditional",
+      "route": "done"
+    },
+    {
+      "id": "e4-implement-retry",
+      "from": "implement",
+      "to": "implement",
+      "kind": "back_edge",
+      "route": "retry",
+      "max_traversals": 3
+    }
+  ],
+  "entry_node_ids": ["explore"],
+  "concurrency_limit": 1,
+  "terminal_verification_node_id": "test"
+}
