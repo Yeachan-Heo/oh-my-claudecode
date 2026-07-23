@@ -13,8 +13,10 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (29 Total)](#agents-29-total)
-- [Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal)
-- [Skills (38 Total)](#skills-38-total)
+- [Goal Workflow UX: Graph, `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-graph-goal-ralph-team-ultraqa-ultragoal)
+- [Named autopilot stage profiles (v1)](#named-autopilot-stage-profiles-v1)
+- [Durable orchestration Graph (v1)](#durable-orchestration-graph-v1)
+- [Skills (39 Total)](#skills-39-total)
 - [Slash Commands](#slash-commands)
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
 - [Hooks System](#hooks-system)
@@ -729,12 +731,13 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal
+## Goal Workflow UX: Graph, `/goal`, Ralph, Team, UltraQA, Ultragoal
 
-OMC exposes several ways to pursue a goal-shaped task. They are complementary, not interchangeable. Choose one primary loop authority per session and use the others as evidence producers or handoff targets.
+OMC exposes several ways to pursue a goal-shaped task. They are complementary, not interchangeable. Choose one primary orchestration authority per session and use the others as evidence producers or handoff targets.
 
 | Surface                 | Runtime owner                                     | User-facing promise                                           | Completion evidence                                                          | Notes                                                                                                                                                           |
 | ----------------------- | ------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Graph                   | OMC approved-graph scheduler                      | Follow explicit nodes and routes with durable crash recovery  | Immutable revision, transition ledger, node evidence, and terminal verifier  | Prefer when branches, joins, human gates, and bounded returns must remain visible across interruptions.                                                        |
 | Claude Code `/goal`     | Claude Code native session loop                   | Keep working toward one stated completion condition           | Evidence surfaced in the conversation for the `/goal` evaluator              | Cite Claude Code/Anthropic docs or changelog only for `/goal` behavior. The evaluator must not be described as independently running commands or reading files. |
 | Ralph                   | OMC skill + Stop-hook enforcement                 | Persistent single-owner implementation until PRD stories pass | Tests/build/lint/typecheck plus reviewer verification                        | Prefer when correctness depends on OMC's PRD, progress, and reviewer gates.                                                                                     |
 | Team                    | OMC native/team or CLI team runtime               | Coordinated multi-agent execution over assigned tasks         | Worker task results, commits, staged `team-verify`/`team-fix` evidence       | Prefer when ownership boundaries and parallel lanes matter.                                                                                                     |
@@ -754,7 +757,7 @@ Do not cite OpenAI/Codex documentation as authority for Claude Code `/goal`. In 
 
 When multiple loops could apply, use this deterministic policy:
 
-1. **refuse**: if Ralph, Team, UltraQA, autopilot, or another Stop-hook loop is already active and a new `/goal` would compete for continuation authority.
+1. **refuse**: if Graph, Ralph, Team, UltraQA, autopilot, or another Stop-hook loop is already active and a new `/goal` would compete for continuation authority.
 2. **adopt_existing**: if Claude Code `/goal` is already active and the OMC workflow can attach evidence to that same condition without changing loop ownership.
 3. **artifact_only**: if `/goal` is unavailable because of hooks/trust/settings, or if the user only needs durable planning, checkpointing, and evidence capture.
 
@@ -800,7 +803,51 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (38 Total)
+## Durable orchestration Graph (v1)
+
+Invoke Graph explicitly inside a Claude Code / OMC session:
+
+```text
+/oh-my-claudecode:graph <development goal>
+```
+
+A bare natural-language mention of "graph" does not activate the workflow. The skill first creates and validates a draft, then renders its exact revision ID and integrity hash together with all nodes, commands, routes, joins, back-edge bounds, concurrency, and terminal verification responsibility. No node work starts until the human approves that exact revision.
+
+### Execution model
+
+| Node kind | Behavior |
+| --- | --- |
+| `agent` | Dispatches bounded development work and returns a structured result. |
+| `command` | Runs a permission-governed command or automated test and records evidence. |
+| `human-approval` | Waits durably for an explicit human decision. |
+| `join` | Reunites only the branches selected for the current fan-out traversal. |
+
+Declared edges provide fixed continuation, result-selected conditional routes, parallel fan-out/fan-in, and bounded returns to an earlier node. V1 supports structured, non-overlapping fork/join regions; nested or crossing open regions are rejected. A discovered structural change becomes a patch proposal: dispatch pauses, the human inspects a new revision, and only exact-revision approval can activate it. Earlier descriptors, results, and evidence remain in history.
+
+Graph makes cross-node control explicit. Ralph remains the persistent single-owner implementation and verification loop, while Autopilot remains its staged autonomous workflow. An `agent` node may iterate locally without activating global Ralph mode; Graph still owns readiness, routing, joins, and recovery.
+
+### Pause, resume, and abandon
+
+- Ordinary cancellation pauses the run, fences or drains active work, preserves `graph-state.json`, and releases top-level control.
+- Resume reacquires the same session, run, and revision with a new ownership nonce. It does not create a replacement run or rerun already committed successful work.
+- Abandon is an explicit permanent transition to terminal `cancelled`. It requires confirmation of the exact run and revision and retains the ledger and evidence. V1 has no destructive purge.
+- Waiting for initial approval, a human node, patch approval, or reconciliation is durable and does not busy-loop.
+
+The session-scoped `graph-state.json` is the recovery authority. It contains immutable revisions, committed transitions, the current projection, claims, selected routes, join tokens, and evidence references. HUD output, logs, and exports are bounded disposable views.
+
+Terminal automation uses guarded `omc graph` state-machine operations. Exact subcommand names are not part of this v1 documentation contract. The CLI does not execute agent, command, or human nodes itself and does not expose raw Graph state replacement.
+
+### Safety and v1 boundaries
+
+Graph guarantees exactly-once committed scheduler transitions, not exactly-once external side effects. Side-effect-free or durably idempotent work can retry after an interrupted claim. An ambiguous external effect enters visible reconciliation instead of being silently replayed.
+
+Generic state tools may read, list, report status, and show bounded Graph summaries. Generic `state_write(graph)` is unavailable. `state_clear(graph)` returns `guarded_mode`, while `state_clear(all)` skips Graph and reports the skip; force does not bypass either protection. Use Graph-specific pause or abandon operations for lifecycle changes.
+
+Graph v1 execution is Linux-only and requires owner-fenced `flock` plus `/proc` process identity. Unsupported platforms fail before control reservation or Graph state mutation. V1 does not provide a visual editor, public stable authoring DSL, plugin-defined node kinds, arbitrary executable edge expressions, distributed scheduling, nested/overlapping fork regions, or exactly-once external effects.
+
+See [ADR: Durable Orchestration Graph V1](./adr/v1-durable-orchestration-graph.md) for the architectural decision and its relationship to [Autopilot profile ADR 03487](./adr/03487-named-autopilot-stage-profiles.md).
+
+## Skills (39 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -821,6 +868,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/deep-interview`                           |
 | `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/oh-my-claudecode:deepinit`                |
 | `external-context`        | Parallel document-specialist research                            | `/oh-my-claudecode:external-context`        |
+| `graph`                   | Human-approved durable graph orchestration                       | `/oh-my-claudecode:graph <goal>`            |
 | `hud`                     | Configure HUD/statusline                                         | `/oh-my-claudecode:hud`                     |
 | `skillify`                | Extract reusable skill from session                              | `/oh-my-claudecode:skillify`                |
 | `learner`                 | **Deprecated** compatibility alias for `skillify`                | `/oh-my-claudecode:learner`                 |
@@ -864,6 +912,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Inte
 | `/oh-my-claudecode:deep-dive <problem>`                  | Run the trace → deep-interview pipeline                                                       |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
+| `/oh-my-claudecode:graph <goal>`                         | Draft, approve, and run a durable orchestration graph                                          |
 | `/oh-my-claudecode:mcp-setup`                            | Configure MCP servers                                                                         |
 | `/oh-my-claudecode:omc-doctor`                           | Diagnose and fix installation issues                                                          |
 | `/oh-my-claudecode:plan <description>`                   | Start planning session (supports consensus structured deliberation)                           |

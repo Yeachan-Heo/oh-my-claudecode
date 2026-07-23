@@ -5,6 +5,7 @@
  */
 
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import type { GraphStateForHud } from './elements/graph.js';
 import type { ApiKeySource } from './elements/api-key-source.js';
 import type { SessionSummaryState } from './elements/session-summary.js';
 import type { PayloadEstimate } from './payload-estimate.js';
@@ -12,7 +13,7 @@ import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
 import { DEFAULT_MISSION_BOARD_CONFIG } from './mission-board.js';
 
 // Re-export for convenience
-export type { AutopilotStateForHud, ApiKeySource, SessionSummaryState };
+export type { AutopilotStateForHud, GraphStateForHud, ApiKeySource, SessionSummaryState };
 
 // ============================================================================
 // HUD State
@@ -340,6 +341,9 @@ export interface HudRenderContext {
   /** Autopilot state */
   autopilot: AutopilotStateForHud | null;
 
+  /** Durable Graph state */
+  graph?: GraphStateForHud | null;
+
   /** Active subagents from transcript */
   activeAgents: ActiveAgent[];
 
@@ -575,6 +579,7 @@ export interface HudElementConfig {
   rateLimits: boolean;  // Show 5h and weekly rate limits
   ralph: boolean;
   autopilot: boolean;
+  graph: boolean;
   prdStory: boolean;
   activeSkills: boolean;
   lastSkill: boolean;
@@ -654,7 +659,7 @@ export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
   line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'profile'],
   main: [
     'omcLabel', 'model', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
-    'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
+    'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'graph', 'prd',
     'skills', 'lastSkill', 'contextBar', 'agents', 'background',
     'callCounts', 'lastTool', 'sessionSummary',
   ],
@@ -708,6 +713,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     rateLimits: true,  // Show rate limits by default
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: true,
     activeSkills: true,
     contextBar: true,
@@ -769,6 +775,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     rateLimits: true,
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: false,
     activeSkills: true,
     lastSkill: true,
@@ -812,6 +819,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     rateLimits: true,
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: true,
     activeSkills: true,
     lastSkill: true,
@@ -855,6 +863,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     rateLimits: true,
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: true,
     activeSkills: true,
     lastSkill: true,
@@ -898,6 +907,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     rateLimits: false,
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: false,
     activeSkills: true,
     lastSkill: true,
@@ -941,6 +951,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     rateLimits: true,
     ralph: true,
     autopilot: true,
+    graph: true,
     prdStory: true,
     activeSkills: true,
     lastSkill: true,

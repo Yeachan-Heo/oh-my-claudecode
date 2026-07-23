@@ -28,6 +28,7 @@
     "./skills/deep-interview/",
     "./skills/deepinit/",
     "./skills/external-context/",
+    "./skills/graph/",
     "./skills/hud/",
     "./skills/learner/",
     "./skills/local-build-reminder/",

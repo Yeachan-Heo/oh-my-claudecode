@@ -129,6 +129,18 @@ Named profiles currently require Linux with the `flock` utility because their tr
 
 V1 intentionally excludes model fields or routing (`stageModels`), inline execution, dynamic commands/modes/state, arbitrary stages or plugins, and the separate custom-skill frontmatter parser mismatch. See [Named Autopilot Stage Profiles ADR](docs/adr/03487-named-autopilot-stage-profiles.md) and [Reference](docs/REFERENCE.md#named-autopilot-stage-profiles-v1).
 
+#### Durable orchestration Graph (v1)
+
+Use Graph when a long-running task needs explicit branches, parallel work, human gates, and crash-resumable progress:
+
+```text
+/oh-my-claudecode:graph "extract payments into a separately deployable service"
+```
+
+Graph first drafts a typed execution plan, renders every node and route for inspection, and requires approval of the exact revision before any work starts. Its built-in `agent`, `command`, `human-approval`, and `join` nodes support fixed and conditional routes, parallel fan-out/fan-in, and bounded returns to earlier nodes.
+
+Graph records cross-node control flow; it does not replace Ralph's persistent implementation loop or Autopilot's staged autonomous workflow. A node may iterate locally, while Graph remains the top-level scheduler. Pause preserves the run for resume; explicit abandon is permanent and retains the ledger. Graph v1 execution requires Linux with `/proc` and `flock`, does not guarantee exactly-once external side effects, and does not include a visual editor or public authoring DSL. See the [Graph reference](docs/REFERENCE.md#durable-orchestration-graph-v1) and [decision record](docs/adr/v1-durable-orchestration-graph.md).
+
 
 That's it. Everything else is automatic.
 
@@ -144,6 +156,7 @@ OMC exposes two different surfaces:
 | Setup                                          | `omc setup`                                   | `/setup` or `/omc-setup`                                                | Both are real entrypoints. `/setup` is the easiest plugin-first path.                                                                |
 | Ask providers                                  | `omc ask codex "review this patch"`           | `/ask codex "review this patch"`                                        | Both route through the same advisor flow. Providers: `claude`, `codex`, `gemini`, `antigravity`, `grok`, `cursor`.                                            |
 | Team orchestration                             | `omc team 2:codex "review auth flow"`         | `/team 3:executor "fix all TypeScript errors"`                          | Both exist, but they are different runtimes: `omc team` launches tmux CLI workers; `/team` runs the in-session native team workflow. |
+| Durable Graph                                  | Guarded `omc graph` operations               | `/oh-my-claudecode:graph <goal>`                                        | The skill drafts, obtains exact-revision approval, and dispatches work; terminal operations guard the durable state machine.         |
 | Autopilot / Ralph / Ultrawork / Deep Interview | —                                             | `/autopilot ...`, `/ralph ...`, `/ultrawork ...`, `/deep-interview ...` | These are in-session skills. There is no `omc autopilot` / `omc ralph` / `omc ultrawork` CLI subcommand in this repo.                |
 | Autoresearch                                   | `omc autoresearch` (**hard-deprecated shim**) | `/deep-interview --autoresearch ...` + `/oh-my-claudecode:autoresearch` | Setup stays in deep-interview; execution now belongs to the stateful skill.                                                          |
 
@@ -302,6 +315,7 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 | **Team (recommended)**      | Canonical staged pipeline (`team-plan → team-prd → team-exec → team-verify → team-fix`) | Coordinated Claude agents on a shared task list                         |
 | **omc team (CLI)**          | tmux CLI workers — real `claude`/`codex`/`gemini`/`antigravity`/`grok`/`cursor-agent` processes in split-panes       | Codex/Gemini/Antigravity/Grok/Cursor CLI tasks; on-demand spawn, die when done             |
 | **ccg**                     | Tri-model advisors via `/ask codex` + `/ask antigravity`, Claude synthesizes             | Mixed backend+UI work needing both Codex and Antigravity                     |
+| **Graph**                   | Human-approved nodes, routes, and durable scheduler progress                             | Long-running work with branches, parallel joins, human gates, and resume |
 | **Autopilot**               | Autonomous execution (single lead agent)                                                | End-to-end feature work with minimal ceremony                           |
 | **Ultrawork**               | Maximum parallelism (non-team)                                                          | Burst parallel fixes/refactors where Team isn't needed                  |
 | **Ralph**                   | Persistent mode with verify/fix loops                                                   | Tasks that must complete fully (no silent partials)                     |
@@ -313,7 +327,7 @@ Multiple strategies for different use cases — from Team-backed orchestration t
 
 ### Goal Workflow Guidance
 
-Use only one primary loop authority in a session. Claude Code `/goal` is useful for a native cross-turn completion condition, while Ralph owns single-agent verified completion, Team owns parallel staged execution, and UltraQA owns repeated quality-gate cycling. Artifact-only Ultragoal is the safe fallback when you need durable goal artifacts and evidence without starting another loop.
+Use only one primary orchestration authority in a session. Graph owns explicit cross-node routing and durable recovery, Claude Code `/goal` provides a native cross-turn completion condition, Ralph owns single-agent verified completion, Team owns parallel staged execution, and UltraQA owns repeated quality-gate cycling. Artifact-only Ultragoal is the safe fallback when you need durable goal artifacts and evidence without starting another loop.
 
 For `/goal` behavior, rely on Claude Code/Anthropic sources: the [Claude Code `/goal` docs](https://code.claude.com/docs/en/goal) and [Anthropic Claude Code changelog](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md). Do **not** claim the `/goal` evaluator independently runs commands or reads files; surface test output, diffs, and review evidence in the conversation before treating a goal as proven.
 

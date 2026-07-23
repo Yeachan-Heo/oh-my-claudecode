@@ -15,6 +15,7 @@ import {
   hasModeState,
   isModeActiveInAnySession,
   getActiveSessionsForMode,
+  clearAllModeStates,
   clearStaleSessionDirs,
 } from '../index.js';
 
@@ -151,6 +152,68 @@ describe('Session-Scoped State Isolation', () => {
   });
 
   describe('Cross-session mode discovery (isModeActiveInAnySession)', () => {
+    it.each([
+      'running',
+      'waiting_human',
+      'waiting_patch_approval',
+      'reconciling',
+    ])('derives active Graph state from durable status %s', (status) => {
+      createSessionState('session-graph', 'graph', {
+        session_id: 'session-graph',
+        status,
+        active: false,
+      });
+
+      expect(isModeActive('graph', tempDir, 'session-graph')).toBe(true);
+      expect(getActiveModes(tempDir, 'session-graph')).toContain('graph');
+    });
+
+    it.each(['draft', 'awaiting_approval', 'paused', 'succeeded', 'failed', 'cancelled'])(
+      'treats Graph status %s as inactive',
+      (status) => {
+        createSessionState('session-graph', 'graph', {
+          session_id: 'session-graph',
+          status,
+          active: true,
+        });
+
+        expect(isModeActive('graph', tempDir, 'session-graph')).toBe(false);
+        expect(getActiveModes(tempDir, 'session-graph')).not.toContain('graph');
+      },
+    );
+
+    it('treats malformed, missing, and session-mismatched Graph state as inactive', () => {
+      const sessionId = 'session-graph';
+      const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const graphPath = join(sessionDir, 'graph-state.json');
+
+      expect(isModeActive('graph', tempDir, sessionId)).toBe(false);
+      writeFileSync(graphPath, '{not-json');
+      expect(isModeActive('graph', tempDir, sessionId)).toBe(false);
+      writeFileSync(graphPath, JSON.stringify({ session_id: sessionId, status: 'unknown' }));
+      expect(isModeActive('graph', tempDir, sessionId)).toBe(false);
+      writeFileSync(graphPath, JSON.stringify({ session_id: 'another-session', status: 'running' }));
+      expect(isModeActive('graph', tempDir, sessionId)).toBe(false);
+    });
+
+    it('respects a generic workflow tombstone over durable Graph status', () => {
+      const sessionId = 'session-graph';
+      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'running' });
+      createSessionState(sessionId, 'skill-active', {
+        version: 2,
+        active_skills: {
+          graph: {
+            skill_name: 'graph',
+            completed_at: new Date().toISOString(),
+          },
+        },
+      });
+
+      expect(isModeActive('graph', tempDir, sessionId)).toBe(false);
+      expect(getActiveModes(tempDir, sessionId)).not.toContain('graph');
+    });
+
     it('should find autoresearch active in any session', () => {
       createSessionState('session-A', 'autoresearch', { active: true });
       expect(isModeActiveInAnySession('autoresearch', tempDir)).toBe(true);
@@ -193,6 +256,16 @@ describe('Session-Scoped State Isolation', () => {
   });
 
   describe('clearModeState with sessionId', () => {
+    it('refuses generic Graph clear and preserves the durable ledger', () => {
+      const sessionId = 'graph-clear-guard';
+      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'running' });
+      const graphPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'graph-state.json');
+      const before = readFileSync(graphPath, 'utf8');
+
+      expect(clearModeState('graph', tempDir, sessionId)).toBe(false);
+      expect(readFileSync(graphPath, 'utf8')).toBe(before);
+    });
+
     it('should clear session-specific state', () => {
       createSessionState('session-A', 'ultrawork', { active: true });
       createSessionState('session-B', 'ultrawork', { active: true });
@@ -273,6 +346,35 @@ describe('Session-Scoped State Isolation', () => {
   });
 
   describe('Stale session cleanup', () => {
+    it('preserves Graph authority during generic clear-all and stale cleanup', () => {
+      const sessionId = 'graph-durable-session';
+      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'paused' });
+      createSessionState(sessionId, 'skill-active', {
+        version: 2,
+        active_skills: { graph: { skill_name: 'graph', completed_at: null } },
+      });
+      const stateDir = join(tempDir, '.omc', 'state');
+      const sessionDir = join(stateDir, 'sessions', sessionId);
+      const rootSlot = join(stateDir, 'skill-active-state.json');
+      writeFileSync(rootSlot, JSON.stringify({
+        version: 2,
+        active_skills: { graph: { skill_name: 'graph', completed_at: null } },
+      }));
+      const controlOwner = join(sessionDir, 'control-owner-state.json');
+      writeFileSync(controlOwner, JSON.stringify({ root: { mode: 'graph', run_id: 'run-1' } }));
+      const protectedPaths = [
+        join(sessionDir, 'graph-state.json'),
+        join(sessionDir, 'skill-active-state.json'),
+        rootSlot,
+        controlOwner,
+      ];
+      const before = protectedPaths.map(path => readFileSync(path, 'utf8'));
+
+      expect(clearAllModeStates(tempDir)).toBe(true);
+      expect(clearStaleSessionDirs(tempDir, -1)).not.toContain(sessionId);
+      protectedPaths.forEach((path, index) => expect(readFileSync(path, 'utf8')).toBe(before[index]));
+    });
+
     it('serializes marker writers on the same lock used by cleanup', () => {
       expect(createModeMarker('ralph', tempDir, { session_id: 'session-A', workflowRunId: 'old-run' })).toBe(true);
       const markerPath = join(tempDir, '.omc', 'state', 'ralph-verification.json');
