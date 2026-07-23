@@ -309,6 +309,7 @@ export function isOmcStatusLine(statusLine: unknown): boolean {
 const OMC_HOOK_FILENAMES = new Set([
   'keyword-detector.mjs',
   'session-start.mjs',
+  'session-end.mjs',
   'pre-tool-use.mjs',
   'post-tool-use.mjs',
   'post-tool-use-failure.mjs',
@@ -746,6 +747,7 @@ function configureInstallerSettings(
 const STANDALONE_HOOK_TEMPLATE_FILES = [
   'keyword-detector.mjs',
   'session-start.mjs',
+  'session-end.mjs',
   'pre-tool-use.mjs',
   'post-tool-use.mjs',
   'post-tool-use-failure.mjs',

@@ -8,6 +8,7 @@ export default defineConfig({
     testTimeout: 30000,
     include: [
       'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'scripts/**/*.{test,spec}.{js,mjs,ts}',
       'tests/**/*.bench.ts',
       'tests/**/*.{test,spec}.ts',
     ],
