@@ -107,6 +107,18 @@ export function atomicWriteFileSync(filePath, content) {
 
 const LOCK_SCHEMA_VERSION = 1;
 function flockPath() { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
+/**
+ * True only when the test harness explicitly simulates a runtime with NO
+ * locking primitives whatsoever (OMC_TEST_FLOCK_AVAILABLE=0). Distinct from a
+ * real flock-less runtime (Windows/macOS): there, linkSync-based O_EXCL locking
+ * is still a valid mutual-exclusion mechanism and may be used. Under the test
+ * simulation, exclusive locks must remain unavailable (return null) so callers
+ * fail closed - the same contract the dev branch established. Mirrors
+ * lockingDisabledForTest() in src/lib/mode-state-io.ts.
+ */
+function lockingDisabledForTest() {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0';
+}
 const LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
 const [operation, lockPath, expectedRaw] = process.argv.slice(1);
@@ -152,6 +164,33 @@ function processStartIdentity(pid) {
     return fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
   } catch (error) { return error?.code === 'ENOENT' ? 'absent' : null; }
 }
+
+/**
+ * Cross-platform process liveness probe. process.kill(pid, 0) sends no signal
+ * and throws only when the pid is unreachable; on every supported platform it
+ * is the cheapest reliable "is this pid alive" check. Mirrors
+ * src/graph/platform.ts isProcessAlive.
+ */
+function isProcessAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/**
+ * Owner-liveness for the mutation lock. A live owner is one whose pid is alive
+ * AND whose process_start still matches (no PID reuse). A dead pid is always a
+ * dead owner (reclaimable). An alive pid with an unverifiable process_start
+ * (non-linux external pid) is treated as LIVE - stealing a claim is never safe
+ * when ownership cannot be disproved. Mirrors isMutationLockOwnerLive in
+ * src/lib/mode-state-io.ts and the flock path's LOCK_REMOVAL_SCRIPT contract.
+ */
+function isLockOwnerLive(owner) {
+  if (!isProcessAlive(owner.pid)) return false;
+  const current = processStartIdentity(owner.pid);
+  if (current === 'absent') return false;
+  if (current === null) return true; // unverifiable -> never steal
+  return current === owner.processStart;
+}
 function guardedLockRemoval(lockPath, operation, owner) {
   const flock = flockPath();
   if (!flock) return 'unverifiable';
@@ -164,7 +203,12 @@ function guardedLockRemoval(lockPath, operation, owner) {
 
 function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   ensureDirSync(dirname(lockPath));
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
+  const hasFlock = !!flockPath();
+  // Under the explicit test no-locking simulation, exclusive locks are
+  // unavailable (fail closed), matching the dev contract. On real flock-less
+  // runtimes (Windows/macOS) we still fall through to linkSync-based locking.
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
   const processStart = processStartIdentity(process.pid);
   if (!processStart || processStart === 'absent') {
     console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${lockPath}`);
@@ -185,12 +229,37 @@ function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
       if (fd !== undefined) { try { closeSync(fd); } catch {} }
       try { unlinkSync(tempPath); } catch {}
       if (error?.code !== 'EEXIST') return null;
-      const disposition = guardedLockRemoval(lockPath, 'reclaim');
-      if (disposition === 'unverifiable') {
-        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
-        return null;
+      if (hasFlock) {
+        const disposition = guardedLockRemoval(lockPath, 'reclaim');
+        if (disposition === 'unverifiable') {
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
+          return null;
+        }
+        if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      } else {
+        // flock-less runtime (macOS/Windows): reclaim ONLY a demonstrably-dead
+        // owner's lock. A live owner's lock is never unlinked by a thief
+        // (B2: previously this branch had no reclaim at all - guardedLockRemoval
+        // returned 'unverifiable' immediately when flock was null, so a crashed
+        // process wedged the lock permanently). On I/O failure or a
+        // corrupt/unparseable file we fail closed (wait) because we cannot prove
+        // the owner is dead. Only after a successful read+validate do we gate the
+        // stale-reclaim on owner-liveness (isProcessAlive + process_start).
+        const current = readLockOwner(lockPath);
+        if (current && current !== 'absent') {
+          const stale = Date.now() - Date.parse(current.createdAt) > 60 * 60 * 1000;
+          if (stale && !isLockOwnerLive(current)) {
+            try { unlinkSync(lockPath); } catch { /* race; retry linkSync */ }
+          } else {
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+          }
+        } else if (current === null) {
+          // I/O or parse failure on a possibly-live lock - fail closed, do NOT unlink.
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
+          return null;
+        }
+        // 'absent': lock vanished between EEXIST and read - retry linkSync.
       }
-      if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
   return null;
@@ -200,10 +269,72 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
   return acquireLockAt(`${filePath}.mutation.lock`, attempts, requireExclusive);
 }
 
+function sameLockOwner(left, right) {
+  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
+}
+
+const LOCK_OWNER_KEYS = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
+
+/**
+ * Validates a parsed object as a lock owner using the SAME checks the flock
+ * path's LOCK_REMOVAL_SCRIPT enforces: exact key set, version===1, positive
+ * integer pid, /^\d+$/ processStart, parseable createdAt, 36-char UUID nonce.
+ * Single owner validator (B4: folded two divergent validators into one).
+ */
+function validateLockOwner(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const actual = Object.keys(value).sort();
+  if (actual.length !== LOCK_OWNER_KEYS.length || !actual.every((key, index) => key === LOCK_OWNER_KEYS[index])) return null;
+  if (value.version !== 1) return null;
+  if (!Number.isSafeInteger(value.pid) || value.pid <= 0) return null;
+  if (typeof value.processStart !== 'string' || !/^\d+$/.test(value.processStart)) return null;
+  if (typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))) return null;
+  if (typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
+  return value;
+}
+
+/**
+ * Reads and validates the on-disk lock owner. Returns the owner on success,
+ * 'absent' when the lock file does not exist (ENOENT), or null when the file
+ * is readable but unparseable/invalid OR when the read failed with a
+ * non-ENOENT I/O error. Distinguishing 'absent' from null lets the caller fail
+ * closed on a possibly-live-but-unreadable lock instead of unlinking it.
+ */
+function readLockOwner(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'absent';
+    return null; // I/O failure (EACCES/EMFILE/EIO/...) - may be a live lock we can't read
+  }
+  try {
+    return validateLockOwner(JSON.parse(raw));
+  } catch {
+    return null; // readable but corrupt JSON - cannot prove the owner is dead
+  }
+}
+
 export function releaseStateFileLockSync(lock) {
   if (!lock || lock.unlocked) return;
   try { closeSync(lock.fd); } catch {}
-  guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+  if (flockPath()) {
+    guardedLockRemoval(lock.lockPath, 'release', lock.owner);
+  } else {
+    // flock-less runtime (macOS/Windows) or the explicit test simulation: verify
+    // ownership before unlinking. With the B2 acquire-side fix a live owner's
+    // lock can no longer be stolen, so between acquire and release the path
+    // should still be ours. Re-validate immediately before unlink to close the
+    // TOCTOU window between readLockOwner and unlinkSync; on mismatch leave the
+    // live owner's lock in place and log the event so it is observable.
+    const current = readLockOwner(lock.lockPath);
+    if (current === 'absent') return; // already released
+    if (current && sameLockOwner(current, lock.owner)) {
+      try { unlinkSync(lock.lockPath); } catch { /* race or already removed */ }
+    } else {
+      console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.lockPath}`);
+    }
+  }
 }
 
 export function withStateFileLockSync(filePath, callback, requireExclusive = false) {

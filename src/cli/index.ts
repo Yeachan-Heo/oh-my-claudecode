@@ -49,6 +49,7 @@ import { capabilitiesCheckCommand, capabilitiesLockCommand } from './commands/ca
 import { sessionSearchCommand } from './commands/session-search.js';
 import { sessionFrictionReportCommand } from './commands/session-friction-report.js';
 import { teamCommand } from './commands/team.js';
+import { graphCommand } from './commands/graph.js';
 import { ralphthonCommand } from './commands/ralphthon.js';
 import { ultragoalCommand, ULTRAGOAL_HELP } from './commands/ultragoal.js';
 import {
@@ -1478,6 +1479,20 @@ program
   .argument('[args...]', 'team subcommand arguments')
   .action(async (args: string[]) => {
     await teamCommand(args);
+  });
+
+/**
+ * Graph command - guarded durable graph state transitions.
+ */
+program
+  .command('graph')
+  .description('Guarded durable orchestration graph state operations')
+  .helpOption(false)
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .argument('[args...]', 'graph operation and arguments')
+  .action(async (args: string[]) => {
+    await graphCommand(args);
   });
 
 /**
