@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -286,6 +286,87 @@ describe('HUD cached statusLine launcher', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('NEW ENV SESSION HUD\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prunes session cache files no render has touched in OMC_HUD_CACHE_MAX_AGE_DAYS days', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'CACHED HUD LINE\n');
+      mkdirSync(join(staged.cacheDir, 'render.session-123.lock'));
+
+      const deadOutput = join(staged.cacheDir, 'statusline.dead-session.txt');
+      const deadInput = join(staged.cacheDir, 'stdin.dead-session.json');
+      const liveOutput = join(staged.cacheDir, 'statusline.live-session.txt');
+      writeFileSync(deadOutput, 'DEAD SESSION\n');
+      writeFileSync(deadInput, '{}');
+      writeFileSync(liveOutput, 'LIVE SESSION\n');
+      const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+      utimesSync(deadOutput, twentyDaysAgo, twentyDaysAgo);
+      utimesSync(deadInput, twentyDaysAgo, twentyDaysAgo);
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(existsSync(deadOutput)).toBe(false);
+      expect(existsSync(deadInput)).toBe(false);
+      expect(existsSync(liveOutput)).toBe(true);
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prunes at most once a day so the hot path does not spawn find on every render', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'CACHED HUD LINE\n');
+      mkdirSync(join(staged.cacheDir, 'render.session-123.lock'));
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nexit 0\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const render = () => spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(render().status).toBe(0);
+      expect(existsSync(join(staged.cacheDir, '.last-prune'))).toBe(true);
+
+      // Age a file only after the first prune stamped the cache directory.
+      const stale = join(staged.cacheDir, 'statusline.aged-after-stamp.txt');
+      writeFileSync(stale, 'AGED AFTER STAMP\n');
+      const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+      utimesSync(stale, twentyDaysAgo, twentyDaysAgo);
+
+      expect(render().status).toBe(0);
+      expect(existsSync(stale)).toBe(true);
     } finally {
       rmSync(staged.dir, { recursive: true, force: true });
     }

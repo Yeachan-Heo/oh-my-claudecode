@@ -51,6 +51,26 @@ cleanup_empty_temp_files() {
   done
 }
 
+# Session-scoped cache files are never reclaimed otherwise: one stdin/statusline
+# pair per session, forever. Prune pairs no render has touched in N days (a live
+# session rewrites its own mtime on every frame). Stamp-gated to once a day so
+# the hot path does not spawn find on every render.
+CACHE_MAX_AGE_DAYS=${OMC_HUD_CACHE_MAX_AGE_DAYS:-14}
+cleanup_old_session_files() {
+  stamp="$CACHE_DIR/.last-prune"
+  if [ -f "$stamp" ]; then
+    now=$(date +%s 2>/dev/null || printf '0')
+    stamp_mtime=$(file_mtime "$stamp")
+    if [ -n "$stamp_mtime" ] && [ "$now" -gt 0 ] && [ $((now - stamp_mtime)) -lt 86400 ]; then
+      return
+    fi
+  fi
+  : > "$stamp" 2>/dev/null || return
+  find "$CACHE_DIR" -maxdepth 1 -type f \
+    \( -name 'stdin.*.json' -o -name 'statusline.*.txt' \) \
+    -mtime +"$CACHE_MAX_AGE_DAYS" -delete 2>/dev/null || :
+}
+
 cleanup_stale_render_locks() {
   for stale_lock_dir in "$CACHE_DIR"/render.*.lock; do
     [ -d "$stale_lock_dir" ] || continue
@@ -61,6 +81,7 @@ cleanup_stale_render_locks() {
 
 cleanup_empty_temp_files
 cleanup_stale_render_locks
+cleanup_old_session_files
 
 # Capture Claude's current statusLine stdin first so rendered output can be
 # scoped per session/worktree instead of leaking across concurrent sessions.
