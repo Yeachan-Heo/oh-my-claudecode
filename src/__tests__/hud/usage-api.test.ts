@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as childProcess from 'child_process';
 import * as os from 'os';
 import { EventEmitter } from 'events';
-import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, getUsage, parseUsageResponse } from '../../hud/usage-api.js';
+import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, isKimiHost, parseKimiResponse, getUsage, parseUsageResponse } from '../../hud/usage-api.js';
 
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
 vi.mock('../../lib/file-lock.js', () => ({
@@ -1692,5 +1692,399 @@ describe('writeBackCredentials — Keychain vs file refresh', () => {
       c => Array.isArray(c[1]) && (c[1] as string[]).includes('add-generic-password')
     );
     expect(keychainWriteCall).toBeUndefined();
+  });
+});
+
+describe('isKimiHost', () => {
+  it('accepts exact kimi.com hostname', () => {
+    expect(isKimiHost('https://kimi.com')).toBe(true);
+    expect(isKimiHost('https://kimi.com/')).toBe(true);
+    expect(isKimiHost('https://kimi.com/coding/v1')).toBe(true);
+  });
+
+  it('accepts subdomains of kimi.com', () => {
+    expect(isKimiHost('https://api.kimi.com')).toBe(true);
+    expect(isKimiHost('https://api.kimi.com/coding/')).toBe(true);
+    expect(isKimiHost('https://api.kimi.com/coding/v1')).toBe(true);
+    expect(isKimiHost('https://foo.bar.kimi.com')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain kimi as substring', () => {
+    expect(isKimiHost('https://kimi.com.evil.tld')).toBe(false);
+    expect(isKimiHost('https://notkimi.com')).toBe(false);
+    expect(isKimiHost('https://kimi-company.com')).toBe(false);
+  });
+
+  it('rejects Moonshot open-platform hosts (balance API, no /usages)', () => {
+    expect(isKimiHost('https://api.moonshot.ai/v1')).toBe(false);
+    expect(isKimiHost('https://api.moonshot.cn/anthropic')).toBe(false);
+  });
+
+  it('rejects invalid URLs', () => {
+    expect(isKimiHost('')).toBe(false);
+    expect(isKimiHost('not-a-url')).toBe(false);
+  });
+});
+
+describe('parseKimiResponse', () => {
+  // Shape captured from a live GET https://api.kimi.com/coding/v1/usages
+  // with an API key (authentication.method = METHOD_API_KEY).
+  const livePayload = {
+    user: { userId: 'u1', region: 'REGION_OVERSEA', membership: { level: 'LEVEL_STANDARD' } },
+    usage: { limit: '100', used: '45', remaining: '55', resetTime: '2026-07-31T00:54:55.628002Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', used: '2', remaining: '98', resetTime: '2026-07-25T21:54:55.628002Z' },
+      },
+    ],
+    parallel: { limit: '30' },
+    authentication: { method: 'METHOD_API_KEY', scope: 'FEATURE_CODING' },
+  };
+
+  it('parses the live payload shape (string numbers, nano resetTime)', () => {
+    const result = parseKimiResponse(livePayload);
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(2);
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result!.fiveHourResetsAt!.getTime()).toBe(new Date('2026-07-25T21:54:55.628Z').getTime());
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(new Date('2026-07-31T00:54:55.628Z').getTime());
+  });
+
+  it('tolerates numeric (non-string) quota fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: 200, used: 50 },
+      limits: [
+        { window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' }, detail: { limit: 100, used: 25 } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(25);
+    expect(result!.weeklyPercent).toBe(25);
+  });
+
+  it('derives used from limit - remaining when used is absent', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', remaining: '30' },
+      limits: [
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '90' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(70);
+    expect(result!.fiveHourPercent).toBe(10);
+  });
+
+  it('returns weekly-only data when no 5h window is present', () => {
+    const result = parseKimiResponse({ usage: { limit: '100', used: '40' } });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(40);
+    expect(result!.fiveHourPercent).toBe(0);
+  });
+
+  it('picks the shortest sub-12h window as the 5h bucket and ignores longer windows', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 1, timeUnit: 'TIME_UNIT_DAY' }, detail: { limit: '100', used: '50' } },
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '7' } },
+        { window: { duration: 60, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '3' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(3); // 60-minute window wins over 300-minute
+  });
+
+  it('returns null when no usable quota rows exist', () => {
+    expect(parseKimiResponse({})).toBeNull();
+    expect(parseKimiResponse({ limits: [] })).toBeNull();
+    expect(parseKimiResponse({ usage: { limit: '0', used: '0' } })).toBeNull();
+    expect(parseKimiResponse({ usage: { limit: 'abc', used: 'def' } })).toBeNull();
+  });
+
+  it('maps a USD booster wallet to extra usage fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBe(75);
+    expect(result!.extraUsageSpentUsd).toBe(15);
+    expect(result!.extraUsageLimitUsd).toBe(20);
+  });
+
+  it('skips non-USD booster wallets (HUD extra renderer is USD-only)', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 20000, currency: 'CNY' },
+        monthlyUsed: { priceInCents: 15000, currency: 'CNY' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.extraUsagePercent).toBeUndefined();
+    expect(result!.extraUsageLimitUsd).toBeUndefined();
+  });
+
+  it('skips booster wallet when monthly cap is disabled', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: false,
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('accepts reset_at/resetAt aliases and survives non-string reset fields', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45', reset_at: '2026-07-31T00:54:55Z' },
+      limits: [
+        {
+          window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+          detail: { limit: '100', used: '2', resetTime: 123 as unknown as string },
+        },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result!.weeklyResetsAt!.getTime()).toBe(new Date('2026-07-31T00:54:55Z').getTime());
+    expect(result!.fiveHourPercent).toBe(2);
+    expect(result!.fiveHourResetsAt).toBeNull(); // non-string resetTime → null, not a throw
+  });
+
+  it('drops the 5h bucket on unknown timeUnit but keeps weekly data', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 2, timeUnit: 'TIME_UNIT_FORTNIGHT' }, detail: { limit: '100', used: '9' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.weeklyPercent).toBe(45);
+  });
+
+  it('skips booster wallet when currency is absent (never guesses "$")', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000 },
+        monthlyUsed: { priceInCents: 1500 },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('returns a result when the booster wallet is the only usable section', () => {
+    const result = parseKimiResponse({
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'usd' },
+        monthlyUsed: { priceInCents: 500, currency: 'USD' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.extraUsagePercent).toBe(25);
+    expect(result!.extraUsageSpentUsd).toBe(5);
+    expect(result!.extraUsageLimitUsd).toBe(20);
+  });
+});
+
+describe('getUsage routing - kimi', () => {
+  const originalEnv = { ...process.env };
+  let httpsModule: { default: { request: ReturnType<typeof vi.fn> } };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('{}');
+    vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.KIMI_API_KEY;
+    httpsModule = await import('https') as unknown as typeof httpsModule;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('routes to kimi when ANTHROPIC_BASE_URL is a kimi host with KIMI_API_KEY', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-kimi-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.path).toBe('/coding/v1/usages');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-kimi-key');
+  });
+
+  it('falls back to ANTHROPIC_AUTH_TOKEN when KIMI_API_KEY is not set', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/v1';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-auth-token';
+
+    const result = await getUsage();
+    expect(result.error).toBe('network');
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.headers.Authorization).toBe('Bearer test-auth-token');
+  });
+
+  it('prefers KIMI_API_KEY over ANTHROPIC_AUTH_TOKEN', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'preferred-key';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'fallback-key';
+
+    await getUsage();
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.headers.Authorization).toBe('Bearer preferred-key');
+  });
+
+  it('returns no_credentials when kimi host detected but no API key', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    // Neither KIMI_API_KEY nor ANTHROPIC_AUTH_TOKEN set
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('does NOT route to kimi for look-alike hosts', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://kimi.com.evil.tld/coding';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('no_credentials');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('returns parsed rate limits on successful API response (E2E happy path)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          usage: { limit: '100', used: '45', remaining: '55', resetTime: '2026-07-31T00:54:55.628002Z' },
+          limits: [
+            {
+              window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+              detail: { limit: '100', used: '2', remaining: '98', resetTime: '2026-07-25T21:54:55.628002Z' },
+            },
+          ],
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    expect(result.rateLimits).not.toBeNull();
+    expect(result.rateLimits!.fiveHourPercent).toBe(2);
+    expect(result.rateLimits!.weeklyPercent).toBe(45);
+    expect(result.rateLimits!.fiveHourResetsAt).toBeInstanceOf(Date);
+    expect(result.rateLimits!.weeklyResetsAt).toBeInstanceOf(Date);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('writes cache with source kimi', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          usage: { limit: '100', used: '45', remaining: '55' },
+          limits: [
+            { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '2', remaining: '98' } },
+          ],
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    await getUsage();
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).includes('.usage-cache-kimi.json')
+    );
+    expect(writeCall).toBeTruthy();
+    const written = JSON.parse(String(writeCall![1]));
+    expect(written.source).toBe('kimi');
+    expect(written.data.fiveHourPercent).toBe(2);
+    expect(written.data.weeklyPercent).toBe(45);
+  });
+
+  it('reports rate_limited when the kimi API returns 429', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 429;
+        callback(res);
+        res.emit('data', '');
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('rate_limited');
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      c => String(c[0]).includes('.usage-cache-kimi.json')
+    );
+    expect(writeCall).toBeTruthy();
+    const written = JSON.parse(String(writeCall![1]));
+    expect(written.source).toBe('kimi');
+    expect(written.rateLimited).toBe(true);
   });
 });

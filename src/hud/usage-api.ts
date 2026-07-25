@@ -1,7 +1,8 @@
 /**
  * OMC HUD - Usage API
  *
- * Fetches rate limit usage from Anthropic's OAuth API.
+ * Fetches rate limit usage from Anthropic's OAuth API, with overrides for
+ * third-party providers (z.ai, MiniMax, Kimi) detected via ANTHROPIC_BASE_URL.
  * Based on claude-hud implementation by jarrodwatts.
  *
  * Authentication:
@@ -29,6 +30,15 @@ import {
 import { readHudConfig } from './state.js';
 import { lockPathFor, withFileLock, type FileLockOptions } from '../lib/file-lock.js';
 
+/**
+ * Usage data providers supported by the built-in usage monitor.
+ * - anthropic: Claude Code OAuth subscription (api.anthropic.com/api/oauth/usage)
+ * - zai: z.ai GLM coding plan (via ANTHROPIC_BASE_URL host detection)
+ * - minimax: MiniMax coding plan (via ANTHROPIC_BASE_URL host detection)
+ * - kimi: Kimi For Coding plan, api.kimi.com (API key or OAuth token)
+ */
+type UsageSource = 'anthropic' | 'zai' | 'minimax' | 'kimi';
+
 // Cache configuration
 const CACHE_TTL_FAILURE_MS = 15 * 1000; // 15 seconds for non-transient failures
 const CACHE_TTL_TRANSIENT_NETWORK_MS = 2 * 60 * 1000; // 2 minutes to avoid hammering transient API failures
@@ -52,7 +62,7 @@ interface UsageCache {
   /** Preserved error reason for accurate cache-hit reporting */
   errorReason?: UsageErrorReason;
   /** Provider that produced this cache entry */
-  source?: 'anthropic' | 'zai' | 'minimax';
+  source?: UsageSource;
   /** Whether this cache entry was caused by a 429 rate limit response */
   rateLimited?: boolean;
   /** Consecutive 429 count for exponential backoff */
@@ -171,6 +181,67 @@ export function isMinimaxHost(urlString: string): boolean {
   }
 }
 
+/**
+ * Check if a URL points to the Kimi For Coding platform (kimi.com).
+ * Matches kimi.com and any subdomain (e.g. api.kimi.com). The Moonshot open
+ * platform (api.moonshot.ai / api.moonshot.cn) is intentionally NOT matched:
+ * it exposes balance, not plan quota windows (no /usages endpoint).
+ */
+export function isKimiHost(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'kimi.com' || hostname.endsWith('.kimi.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kimi For Coding `/usages` payload (GET {origin}/coding/v1/usages).
+ * Reverse-engineered from the open-source kimi-code CLI
+ * (MoonshotAI/kimi-code, packages/oauth/src/managed-usage.ts) and verified
+ * against the live endpoint with an API key.
+ *
+ * Quirk: `limit`/`used`/`remaining` arrive as JSON strings ("100"), not
+ * numbers. `resetTime` is ISO 8601 with nano-precision fractional seconds.
+ *
+ * Shape (abridged live payload):
+ *   {
+ *     "usage":  { "limit": "100", "used": "45", "remaining": "55", "resetTime": "..." },  // weekly window
+ *     "limits": [
+ *       { "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },                    // 5h window
+ *         "detail": { "limit": "100", "used": "2", "remaining": "98", "resetTime": "..." } }
+ *     ],
+ *     "boosterWallet": { ... }  // optional extra (metered) monthly spend
+ *   }
+ */
+interface KimiQuotaRow {
+  /** Fields are string-typed in the wire format; numbers tolerated for robustness */
+  limit?: number | string;
+  used?: number | string;
+  remaining?: number | string;
+  /** ISO 8601, may carry nano-precision fraction (".628002Z") */
+  resetTime?: string;
+  /** Aliases observed across payload versions (per kimi-code's loose parser) */
+  reset_at?: string;
+  resetAt?: string;
+}
+
+interface KimiUsageResponse {
+  usage?: KimiQuotaRow;
+  limits?: Array<{
+    window?: { duration?: number; timeUnit?: string };
+    detail?: KimiQuotaRow;
+  } & KimiQuotaRow>;
+  boosterWallet?: {
+    balance?: { type?: string; amount?: number; amountLeft?: number };
+    monthlyChargeLimit?: { priceInCents?: number; currency?: string };
+    monthlyUsed?: { priceInCents?: number; currency?: string };
+    monthlyChargeLimitEnabled?: boolean;
+  };
+}
+
 interface MinimaxModelRemain {
   model_name: string;
   current_interval_total_count: number;
@@ -205,7 +276,7 @@ function getLegacyCachePath(): string {
 /**
  * Get the provider-specific cache file path
  */
-function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
+function getCachePath(source: UsageSource): string {
   return join(getClaudeConfigDir(), 'plugins', 'oh-my-claudecode', `.usage-cache-${source}.json`);
 }
 
@@ -215,7 +286,7 @@ function getCachePath(source: 'anthropic' | 'zai' | 'minimax'): string {
  * and the legacy cache's source matches the current provider.
  * Does NOT delete the legacy file (rolling update safety).
  */
-function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
+function migrateLegacyCache(source: UsageSource): void {
   try {
     const legacyPath = getLegacyCachePath();
     if (!existsSync(legacyPath)) return;
@@ -243,7 +314,7 @@ function migrateLegacyCache(source: 'anthropic' | 'zai' | 'minimax'): void {
 /**
  * Read cached usage data for a specific provider
  */
-function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
+function readCache(source: UsageSource): UsageCache | null {
   try {
     const cachePath = getCachePath(source);
     if (!existsSync(cachePath)) return null;
@@ -285,7 +356,7 @@ function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
 interface WriteCacheOptions {
   data: RateLimits | null;
   error?: boolean;
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: UsageSource;
   rateLimited?: boolean;
   rateLimitedCount?: number;
   rateLimitedUntil?: number;
@@ -403,7 +474,7 @@ function getCachedUsageResult(cache: UsageCache): UsageResult {
 }
 
 function createRateLimitedCacheEntry(
-  source: 'anthropic' | 'zai' | 'minimax',
+  source: UsageSource,
   data: RateLimits | null,
   pollIntervalMs: number,
   previousCount: number,
@@ -1237,12 +1308,234 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
 }
 
 /**
+ * Fetch usage from the Kimi For Coding platform.
+ *
+ * Endpoint: GET {origin}/coding/v1/usages (origin taken from ANTHROPIC_BASE_URL,
+ * whose path may be /coding, /coding/, or /coding/v1 depending on setup docs).
+ * Auth: Bearer token — accepts both Kimi API keys (METHOD_API_KEY) and OAuth
+ * access tokens from the kimi-code CLI.
+ */
+function fetchUsageFromKimi(apiKey: string): Promise<FetchResult<KimiUsageResponse>> {
+  return new Promise((resolve) => {
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+
+    if (!baseUrl) {
+      resolve({ data: null });
+      return;
+    }
+
+    // Validate baseUrl for SSRF protection
+    const validation = validateAnthropicBaseUrl(baseUrl);
+    if (!validation.allowed) {
+      console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
+      resolve({ data: null });
+      return;
+    }
+
+    try {
+      const url = new URL(baseUrl);
+      const quotaUrl = `${url.protocol}//${url.host}/coding/v1/usages`;
+      const urlObj = new URL(quotaUrl);
+
+      const req = https.request(
+        {
+          hostname: urlObj.hostname,
+          path: urlObj.pathname,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': 'application/json',
+          },
+          timeout: API_TIMEOUT_MS,
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve({ data: JSON.parse(data) });
+              } catch {
+                resolve({ data: null });
+              }
+            } else if (res.statusCode === 429) {
+              if (process.env.OMC_DEBUG) {
+                console.error(`[usage-api] Kimi API returned 429 (rate limited)`);
+              }
+              resolve({ data: null, rateLimited: true });
+            } else {
+              resolve({ data: null });
+            }
+          });
+        }
+      );
+
+      req.on('error', () => resolve({ data: null }));
+      req.on('timeout', () => { req.destroy(); resolve({ data: null }); });
+      req.end();
+    } catch {
+      resolve({ data: null });
+    }
+  });
+}
+
+/**
+ * Parse a Kimi quota row's number-ish field (wire format uses strings).
+ */
+function kimiToNumber(value: number | string | undefined): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string' && value.length > 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Parse a Kimi resetTime/reset_at/resetAt ISO string into a Date.
+ * Trims nano-precision fractions to milliseconds so Date.parse never chokes.
+ */
+function parseKimiResetTime(row: KimiQuotaRow | undefined): Date | null {
+  const raw = row?.resetTime ?? row?.reset_at ?? row?.resetAt;
+  // Runtime payloads are untrusted: a non-string reset field must not throw
+  // (parseFn exceptions would escape fetchAndCacheUsage into the HUD).
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  let normalized = raw;
+  if (normalized.includes('.') && normalized.endsWith('Z')) {
+    const [base, frac] = normalized.slice(0, -1).split('.');
+    if (base && frac) {
+      normalized = `${base}.${frac.slice(0, 3)}Z`;
+    }
+  }
+  try {
+    const date = new Date(normalized);
+    return isNaN(date.getTime()) ? null : date;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Used quota for a Kimi row: direct `used`, or `limit - remaining` fallback
+ * (mirrors kimi-code's loose parser — field spelling drifted across versions).
+ */
+function kimiUsedQuota(row: KimiQuotaRow): number | null {
+  const used = kimiToNumber(row.used);
+  if (used != null) return used;
+  const limit = kimiToNumber(row.limit);
+  const remaining = kimiToNumber(row.remaining);
+  if (limit != null && remaining != null) return limit - remaining;
+  return null;
+}
+
+/**
+ * Convert a Kimi limits[] window descriptor to total minutes, or null when
+ * the window shape is unknown (duration missing or unrecognized timeUnit).
+ */
+function kimiWindowMinutes(window: { duration?: number; timeUnit?: string } | undefined): number | null {
+  const duration = window?.duration;
+  const timeUnit = window?.timeUnit ?? '';
+  if (duration == null || !Number.isFinite(duration) || duration <= 0) return null;
+  if (timeUnit.includes('MINUTE')) return duration;
+  if (timeUnit.includes('HOUR')) return duration * 60;
+  if (timeUnit.includes('DAY')) return duration * 60 * 24;
+  return null;
+}
+
+/** Windows up to 12 hours are treated as the short ("5h") rolling bucket */
+const KIMI_SHORT_WINDOW_MAX_MINUTES = 12 * 60;
+
+/**
+ * Parse Kimi For Coding `/usages` response into RateLimits.
+ *
+ * Mapping (verified against live payload):
+ * - Top-level `usage` → weekly window (resetTime ~7 days out)
+ * - `limits[]` entry with the shortest window ≤ 12h → 5-hour window
+ *   (observed: window.duration=300, timeUnit=TIME_UNIT_MINUTE)
+ * - `boosterWallet` (optional) → extra usage, USD only: the HUD's extra-usage
+ *   renderer hard-codes "$", so CNY wallets are skipped rather than mislabeled.
+ */
+export function parseKimiResponse(response: KimiUsageResponse): RateLimits | null {
+  const result: RateLimits = { fiveHourPercent: 0 };
+  let hasAny = false;
+
+  // Weekly window: top-level usage row
+  const weekly = response.usage;
+  if (weekly) {
+    const limit = kimiToNumber(weekly.limit);
+    const used = kimiUsedQuota(weekly);
+    if (limit != null && limit > 0 && used != null) {
+      result.weeklyPercent = clamp((used / limit) * 100);
+      result.weeklyResetsAt = parseKimiResetTime(weekly);
+      hasAny = true;
+    }
+  }
+
+  // 5-hour window: shortest limits[] window at or below 12 hours
+  const limits = Array.isArray(response.limits) ? response.limits : [];
+  let shortBucket: { row: KimiQuotaRow; resetAt: Date | null; minutes: number } | null = null;
+  let skippedUnknownWindow = false;
+  for (const entry of limits) {
+    if (!entry || typeof entry !== 'object') continue;
+    const row = entry.detail ?? entry;
+    const minutes = kimiWindowMinutes(entry.window);
+    if (minutes == null) {
+      skippedUnknownWindow = true;
+      continue;
+    }
+    if (minutes > KIMI_SHORT_WINDOW_MAX_MINUTES) continue;
+    if (shortBucket == null || minutes < shortBucket.minutes) {
+      shortBucket = { row, resetAt: parseKimiResetTime(row), minutes };
+    }
+  }
+  if (skippedUnknownWindow && shortBucket == null && process.env.OMC_DEBUG) {
+    console.error(
+      '[usage-api] Kimi limits[] present but no window could be classified (unknown timeUnit?) — 5h bucket dropped',
+    );
+  }
+  if (shortBucket != null) {
+    const limit = kimiToNumber(shortBucket.row.limit);
+    const used = kimiUsedQuota(shortBucket.row);
+    if (limit != null && limit > 0 && used != null) {
+      result.fiveHourPercent = clamp((used / limit) * 100);
+      result.fiveHourResetsAt = shortBucket.resetAt;
+      hasAny = true;
+    }
+  }
+
+  // Extra (metered) usage: booster wallet monthly spend vs monthly cap.
+  // Monthly figures arrive as priceInCents. USD-only — see comment above; an
+  // absent currency is skipped too (never guess "$" for an unknown currency).
+  const wallet = response.boosterWallet;
+  if (wallet?.balance?.type === 'BOOSTER') {
+    const limitCents = kimiToNumber(wallet.monthlyChargeLimit?.priceInCents);
+    const usedCents = kimiToNumber(wallet.monthlyUsed?.priceInCents);
+    const currency = (wallet.monthlyChargeLimit?.currency ?? wallet.monthlyUsed?.currency)?.toUpperCase();
+    if (
+      wallet.monthlyChargeLimitEnabled === true &&
+      limitCents != null && limitCents > 0 &&
+      usedCents != null &&
+      currency === 'USD'
+    ) {
+      result.extraUsageSpentUsd = usedCents / 100;
+      result.extraUsageLimitUsd = limitCents / 100;
+      result.extraUsagePercent = clamp((usedCents / limitCents) * 100);
+      hasAny = true;
+    }
+  }
+
+  return hasAny ? result : null;
+}
+
+/**
  * Generic provider fetch-and-cache cycle.
  * Handles 429 backoff, stale data fallback, and cache writes.
  * Provider-specific pre-fetch logic (e.g., credential refresh) runs before calling this.
  */
 async function fetchAndCacheUsage<T>(opts: {
-  source: 'anthropic' | 'zai' | 'minimax';
+  source: UsageSource;
   fetchFn: () => Promise<FetchResult<T>>;
   parseFn: (data: T) => RateLimits | null;
   cache: UsageCache | null;
@@ -1308,10 +1601,12 @@ export async function getUsage(): Promise<UsageResult> {
   const baseUrl = process.env.ANTHROPIC_BASE_URL;
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isMinimax = baseUrl != null && isMinimaxHost(baseUrl);
+  const isKimi = baseUrl != null && isKimiHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const currentSource: 'anthropic' | 'zai' | 'minimax' =
-    isMinimax ? 'minimax' : isZai && authToken ? 'zai' : 'anthropic';
+  const kimiApiKey = process.env.KIMI_API_KEY || authToken;
+  const currentSource: UsageSource =
+    isMinimax ? 'minimax' : isKimi ? 'kimi' : isZai && authToken ? 'zai' : 'anthropic';
   const pollIntervalMs = getUsagePollIntervalMs();
 
   // Migrate legacy single-file cache to provider-specific file (one-shot, best-effort)
@@ -1339,6 +1634,21 @@ export async function getUsage(): Promise<UsageResult> {
           source: 'minimax',
           fetchFn: () => fetchUsageFromMinimax(minimaxApiKey),
           parseFn: parseMinimaxResponse,
+          cache,
+          pollIntervalMs,
+        });
+      }
+
+      // Kimi path (must precede z.ai and OAuth checks)
+      if (isKimi) {
+        if (!kimiApiKey) {
+          writeCache({ data: null, error: true, source: 'kimi', errorReason: 'no_credentials' });
+          return { rateLimits: null, error: 'no_credentials' };
+        }
+        return fetchAndCacheUsage({
+          source: 'kimi',
+          fetchFn: () => fetchUsageFromKimi(kimiApiKey),
+          parseFn: parseKimiResponse,
           cache,
           pollIntervalMs,
         });
