@@ -646,6 +646,27 @@ describe('mode-state-io', () => {
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
     });
 
+    it('retains the authenticated journal when publication crashes before its OCC fence', () => {
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+      expect(writeModeState('autopilot', { active: true, run: 'fence-retry' }, tempDir)).toBe(true);
+
+      process.env.OMC_TEST_EMERGENCY_CRASH_PHASE = 'before-occ-fence';
+      expect(emergencyMutateStateFileIf(
+        path,
+        (state) => state.run === 'fence-retry',
+        (state) => ({ ...state, active: false }),
+      )).toBe(false);
+      delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
+
+      // The canonical payload is visible, but its durable retry parent must
+      // remain until recovery has sequenced it into the OCC journal.
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ active: false, run: 'fence-retry' });
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(true);
+      expect(recoverEmergencyStateFile(path)).toBe(true);
+      expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
+      expect(writeStateFileLockedIf(path, (state) => state.active === true, (state) => ({ ...state, stale: true }))).toBe('skipped');
+    });
+
     it('preserves a foreign transaction under the recovery claim while default recovery still converges', () => {
       const path = join(tempDir, '.omc', 'state', 'shared-home-autopilot-state.json');
       mkdirSync(dirname(path), { recursive: true });

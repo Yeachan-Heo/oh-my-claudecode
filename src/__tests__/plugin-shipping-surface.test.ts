@@ -573,6 +573,73 @@ describe('plugin shipping surface transaction', () => {
     );
   });
 
+  it('does not let a PR-controlled plugin manifest bless a replacement MCP runtime artifact', () => {
+    const fixture = createFixture();
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    writeJson(join(fixture.root, '.claude-plugin', 'plugin.json'), {
+      name: 'fixture-plugin', version: '1.0.0', mcpServers: './candidate.mcp.json',
+    });
+    writeJson(join(fixture.root, 'candidate.mcp.json'), {
+      mcpServers: { fixture: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/bridge/unrelated.cjs'] } },
+    });
+    writeFileSync(join(fixture.root, 'bridge', 'unrelated.cjs'), 'module.exports = true;\n');
+    git(fixture.root, ['add', '.claude-plugin/plugin.json', 'candidate.mcp.json']);
+    git(fixture.root, ['add', '-f', '--', 'bridge/unrelated.cjs']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'attempt plugin manifest blessing']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: bridge/unrelated.cjs',
+    );
+  });
+
+  it('does not let a PR-controlled MCP manifest bless an unrelated runtime artifact', () => {
+    const fixture = createFixture();
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+    writeJson(join(fixture.root, '.mcp.json'), {
+      mcpServers: { fixture: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/bridge/unrelated.cjs'] } },
+    });
+    writeFileSync(join(fixture.root, 'bridge', 'unrelated.cjs'), 'module.exports = true;\n');
+    git(fixture.root, ['add', '.mcp.json']);
+    git(fixture.root, ['add', '-f', '--', 'bridge/unrelated.cjs']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'attempt MCP manifest blessing']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: bridge/unrelated.cjs',
+    );
+  });
+
+  it('does not let a PR-controlled hooks manifest bless an unrelated runtime artifact', () => {
+    const fixture = createFixture();
+    mkdirSync(join(fixture.root, 'hooks'), { recursive: true });
+    writeJson(join(fixture.root, 'hooks', 'hooks.json'), {
+      hooks: { SessionStart: [{ hooks: [{ command: '${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs' }] }] },
+    });
+    git(fixture.root, ['add', 'hooks/hooks.json']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'add base hooks manifest']);
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+
+    writeJson(join(fixture.root, 'hooks', 'hooks.json'), {
+      hooks: { SessionStart: [{ hooks: [{ command: '${CLAUDE_PLUGIN_ROOT}/bridge/unrelated.cjs' }] }] },
+    });
+    writeFileSync(join(fixture.root, 'bridge', 'unrelated.cjs'), 'module.exports = true;\n');
+    git(fixture.root, ['add', 'hooks/hooks.json']);
+    git(fixture.root, ['add', '-f', '--', 'bridge/unrelated.cjs']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'attempt hooks manifest blessing']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'pull request changes generated artifacts outside the runtime closure: bridge/unrelated.cjs',
+    );
+  });
+
   it('does not bless an artifact mentioned only in a required-file comment', () => {
     const fixture = createFixture();
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();

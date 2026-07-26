@@ -552,6 +552,82 @@ describe('graphCommandService runtime operations', () => {
     expect(controls.read()?.root).toMatchObject({ nonce: 'crash-before-publish-nonce', phase: 'active' });
   });
 
+  it('replays approval to promote a reservation after the durable approval commit succeeded', async () => {
+    const sessionId = 'session-approve-promote-replay';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-approve-promote-replay' }));
+    const { worktree, store } = useTempWorktree(sessionId);
+
+    await exec('create', {
+      goal: descriptor.goal, descriptor, session_id: sessionId,
+      driver_id: 'driver-create', transition_id: 't-create',
+    });
+    const promote = vi.spyOn(ControlOwnerStore.prototype, 'promoteRoot')
+      .mockImplementationOnce(() => { throw new Error('simulated promote failure'); });
+    const approval = {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, transition_id: 't-approve',
+      approval: {
+        approved_at: '2026-07-21T00:00:01.000Z',
+        evidence: { kind: 'human', ref: 'operator-approved' }, driver_id: 'driver-approve',
+      },
+    };
+    try {
+      await expect(exec('approve', approval)).rejects.toThrow(/simulated promote failure/);
+      expect(store.read()?.status).toBe('running');
+      expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toMatchObject({ phase: 'reserved' });
+
+      const replay = await exec('approve', approval);
+      expect(replay.replayed).toBe(true);
+      expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toMatchObject({ phase: 'active' });
+    } finally {
+      promote.mockRestore();
+    }
+  });
+
+  it('persists succeeded and releases exact graph control after terminal verification', async () => {
+    const sessionId = 'session-terminal-control-release';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-terminal-control-release' }));
+    const { worktree, store } = useTempWorktree(sessionId);
+    await exec('create', {
+      goal: descriptor.goal, descriptor, session_id: sessionId,
+      driver_id: 'driver-create', transition_id: 't-create',
+    });
+    await exec('approve', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, transition_id: 't-approve',
+      approval: {
+        approved_at: '2026-07-21T00:00:01.000Z',
+        evidence: { kind: 'human', ref: 'operator-approved' }, driver_id: 'driver-approve',
+      },
+    });
+    const start = await exec('claim', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 1,
+      driver_id: 'driver-approve', transition_id: 't-claim-start', limit: 1,
+    }) as { result: { claims: Array<Record<string, string>> } };
+    await exec('complete', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 2, transition_id: 't-complete-start',
+      claim: start.result.claims[0],
+      result: { outcome: 'succeeded', evidence_refs: [{ kind: 'command', ref: 'start' }] },
+    });
+    const verify = await exec('claim', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 3,
+      driver_id: 'driver-approve', transition_id: 't-claim-verify', limit: 1,
+    }) as { result: { claims: Array<Record<string, string>> } };
+    const terminal = await exec('complete', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 4, transition_id: 't-complete-verify',
+      claim: verify.result.claims[0],
+      result: { outcome: 'succeeded', evidence_refs: [{ kind: 'command', ref: 'verify' }] },
+    }) as { result: { succeeded: boolean } };
+
+    expect(terminal.result.succeeded).toBe(true);
+    expect(store.read()?.status).toBe('succeeded');
+    expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toBeNull();
+  });
+
   it('rolls back only its own reservation when the initial durable publish fails', async () => {
     const sessionId = 'session-create-publish-failure';
     const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-publish-failure' }));

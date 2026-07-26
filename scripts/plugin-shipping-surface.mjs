@@ -100,6 +100,11 @@ function readJsonAtCommit(root, commit, repoPath) {
   return parseJson(result.stdout, `${repoPath} at ${commit}`);
 }
 
+function pathExistsAtCommit(root, commit, repoPath) {
+  const result = git(root, ['cat-file', '-e', `${commit}:${repoPath}`], { allowFailure: true });
+  return result.status === 0;
+}
+
 function isWithin(repoPath, directory) {
   return repoPath === directory || repoPath.startsWith(`${directory}/`);
 }
@@ -205,15 +210,21 @@ function pluginRootPaths(value, label) {
   return paths;
 }
 
-function collectManifestEntrypoints(root) {
+function collectManifestEntrypoints(root, { trustedManifestCommit = null } = {}) {
+  const readManifest = trustedManifestCommit
+    ? repoPath => readJsonAtCommit(root, trustedManifestCommit, repoPath)
+    : repoPath => readJson(root, repoPath);
+  const manifestExists = trustedManifestCommit
+    ? repoPath => pathExistsAtCommit(root, trustedManifestCommit, repoPath)
+    : repoPath => existsSync(join(root, repoPath));
   const paths = new Set(['.claude-plugin/plugin.json']);
-  const pluginJson = readJson(root, '.claude-plugin/plugin.json');
-  if (existsSync(join(root, '.claude-plugin', 'marketplace.json'))) paths.add('.claude-plugin/marketplace.json');
+  const pluginJson = readManifest('.claude-plugin/plugin.json');
+  if (manifestExists('.claude-plugin/marketplace.json')) paths.add('.claude-plugin/marketplace.json');
 
   if (typeof pluginJson.mcpServers === 'string') {
     const mcpPath = normalizeRepoPath(pluginJson.mcpServers, '.claude-plugin/plugin.json mcpServers');
     paths.add(mcpPath);
-    const mcpJson = readJson(root, mcpPath);
+    const mcpJson = readManifest(mcpPath);
     for (const [name, server] of Object.entries(mcpJson.mcpServers ?? {})) {
       if (!server || typeof server !== 'object') fail(`${mcpPath} mcpServers.${name} must be an object`);
       for (const value of [server.command, ...(Array.isArray(server.args) ? server.args : [])]) {
@@ -222,9 +233,9 @@ function collectManifestEntrypoints(root) {
     }
   }
 
-  if (existsSync(join(root, 'hooks', 'hooks.json'))) {
+  if (manifestExists('hooks/hooks.json')) {
     paths.add('hooks/hooks.json');
-    const hooksJson = readJson(root, 'hooks/hooks.json');
+    const hooksJson = readManifest('hooks/hooks.json');
     for (const groups of Object.values(hooksJson.hooks ?? {})) {
       if (!Array.isArray(groups)) continue;
       for (const group of groups) {
@@ -503,10 +514,12 @@ function validateCoordinatorHandshake(root, requiredPaths, packageJson, pluginJs
 export function collectPluginRuntimeClosure(root = process.cwd(), {
   trustedPackageJson = null,
   trustedDirectoryCommit = null,
+  trustedManifestCommit = null,
   presentTrustedDirectoryPayloads = false,
 } = {}) {
   const packageJson = readJson(root, 'package.json');
-  const { paths: manifestEntrypoints, pluginJson } = collectManifestEntrypoints(root);
+  const { paths: manifestEntrypoints } = collectManifestEntrypoints(root, { trustedManifestCommit });
+  const pluginJson = readJson(root, '.claude-plugin/plugin.json');
   const declaredPackage = trustedPackageJson ?? packageJson;
   const { paths: declaredGeneratedPayloads, standaloneBundles } = collectDeclaredGeneratedPayloads(root, declaredPackage, {
     directoryCommit: trustedDirectoryCommit,
@@ -632,6 +645,7 @@ export function inspectPullRequestShippingSurface(root, base) {
   const surface = collectPluginRuntimeClosure(root, {
     trustedPackageJson,
     trustedDirectoryCommit: verifiedBase,
+    trustedManifestCommit: verifiedBase,
     presentTrustedDirectoryPayloads: true,
   });
   const requiredGenerated = requiredGeneratedPaths(surface);

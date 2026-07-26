@@ -357,9 +357,9 @@ describe('Session-Scoped State Isolation', () => {
   });
 
   describe('Stale session cleanup', () => {
-    it('preserves Graph authority during generic clear-all and stale cleanup', () => {
+    it('preserves live Graph authority during generic clear-all and stale cleanup', () => {
       const sessionId = 'graph-durable-session';
-      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'paused' });
+      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'running' });
       createSessionState(sessionId, 'skill-active', {
         version: 2,
         active_skills: { graph: { skill_name: 'graph', completed_at: null } },
@@ -384,6 +384,24 @@ describe('Session-Scoped State Isolation', () => {
       expect(clearAllModeStates(tempDir)).toBe(true);
       expect(clearStaleSessionDirs(tempDir, -1)).not.toContain(sessionId);
       protectedPaths.forEach((path, index) => expect(readFileSync(path, 'utf8')).toBe(before[index]));
+    });
+
+    it('reclaims a paused Graph session after its durable skill tombstone', () => {
+      const sessionId = 'graph-paused-session';
+      createSessionState(sessionId, 'graph', { session_id: sessionId, status: 'paused' });
+      createSessionState(sessionId, 'skill-active', {
+        version: 2,
+        active_skills: {
+          graph: {
+            skill_name: 'graph',
+            completed_at: new Date().toISOString(),
+          },
+        },
+      });
+
+      const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+      expect(clearStaleSessionDirs(tempDir, -1)).toContain(sessionId);
+      expect(existsSync(sessionDir)).toBe(false);
     });
 
     it('serializes marker writers on the same lock used by cleanup', () => {

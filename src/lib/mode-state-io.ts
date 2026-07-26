@@ -19,7 +19,7 @@ import {
   ensureOmcDir,
   listSessionIds,
 } from './worktree-paths.js';
-import { atomicWriteJsonSync } from './atomic-write.js';
+import { atomicWriteFileSync, atomicWriteJsonSync } from './atomic-write.js';
 
 /**
  * On-disk lock schema version.
@@ -871,8 +871,12 @@ export interface OccCommitOptions {
   assertHeld?: () => void;
   /** Journal this generation without serializing it back over canonical bytes. */
   suppressCanonicalRepublish?: boolean;
-  /** Internal recursion guard for canonical-to-journal reconciliation. */
-  skipCanonicalReconciliation?: boolean;
+  /** Internal authenticated external-publication bridge; never infer from cache. */
+  authenticatedExternalParent?: unknown;
+  /** Optional cache-byte CAS fence for conditional publication operations. */
+  expectedCanonicalContentFingerprint?: string;
+  /** Called when the optional canonical CAS fence detects a replacement. */
+  onCanonicalCompareFailed?: () => void;
 }
 
 /**
@@ -903,27 +907,27 @@ export function occCommitMutation<TState, TResult>(
     if (current.ioError) return null; // fail closed: cannot fence without reading
     const canonical = occReadCanonicalSnapshot(filePath);
     if (canonical.ioError) return null;
+    if (options?.expectedCanonicalContentFingerprint !== undefined &&
+      canonical.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      return null;
+    }
     if (current.empty) {
       parentSeq = -1;
-      parentState = canonical.state;
+      // An authenticated external transaction has already captured this
+      // source generation before publishing its compatibility bytes. Its
+      // parent is therefore not inferred from those post-publication bytes.
+      parentState = options && Object.prototype.hasOwnProperty.call(options, 'authenticatedExternalParent')
+        ? options.authenticatedExternalParent
+        : canonical.state;
     } else {
       parentSeq = current.seq;
-      if (!options?.skipCanonicalReconciliation && occStateFingerprint(current.state) !== canonical.stateFingerprint) {
-        // Canonical is the compatibility authority for pre-OCC and emergency
-        // publishers. Sequence it before evaluating a conditional mutation so
-        // a later skip cannot leave journal readers on the old generation.
-        const reconciled = occCommitMutation<unknown, boolean>(
-          filePath,
-          () => ({ state: canonical.state, result: true }),
-          {
-            assertHeld: options?.assertHeld,
-            suppressCanonicalRepublish: true,
-            skipCanonicalReconciliation: true,
-          },
-        );
-        if (reconciled === null) return null;
-        continue;
-      }
+      // Once a journal head exists it is the sole state authority. The
+      // canonical file is a compatibility cache and may be delayed, stale, or
+      // replaced by an older installed writer. Never turn those bytes into a
+      // journal generation implicitly: that is precisely how a stale cache
+      // could roll a committed head backwards. Authenticated external writers
+      // use occCommitAuthenticatedExternalState below with a parent fence.
       parentState = current.state;
     }
     const produced = mutate(parentState, ownerToken);
@@ -994,6 +998,12 @@ export function occCommitMutation<TState, TResult>(
       occCleanupOwn(dir, seq, ownerToken);
       return null;
     }
+    if (options?.expectedCanonicalContentFingerprint !== undefined &&
+      canonicalFence.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
     if (canonicalFence.contentFingerprint !== canonical.contentFingerprint) {
       occCleanupOwn(dir, seq, ownerToken);
       continue;
@@ -1021,8 +1031,8 @@ export function occCommitMutation<TState, TResult>(
       try {
         atomicWriteJsonSync(filePath, next);
       } catch {
-        // The journal commit remains durable. A later writer will reconcile
-        // the compatibility file before it evaluates its own mutation.
+        // The journal commit remains durable. A later writer will re-publish
+        // the authoritative head; cache bytes are never journal input.
       }
     }
     return produced;
@@ -1040,31 +1050,82 @@ export function occReadCurrentState(filePath: string): unknown {
 }
 
 /**
- * Record a completed non-OCC publication while the caller holds the same
- * mutation lock used by public writes and clears. Emergency transactions use
- * this after their crash-safe canonical publish so later OCC reads cannot see
- * a stale journal generation. An absent canonical file is an explicit
- * tombstone; it is restored to absent after the journal commit.
+ * Sequence a non-OCC publication only when it proves the journal parent from
+ * which it was computed. This is the bridge for crash-safe emergency writers:
+ * their transaction authenticates the source bytes, then this fence prevents a
+ * completed newer OCC generation from being overwritten by the publication.
+ *
+ * Arbitrary canonical-only writes deliberately have no access to this API and
+ * therefore remain compatibility-cache changes, never journal authority.
  */
-export function occReconcileCanonicalState(filePath: string, assertHeld?: () => void): boolean {
+export function occCommitAuthenticatedExternalState(
+  filePath: string,
+  expectedParentState: unknown,
+  publishedState: unknown,
+  assertHeld?: () => void,
+): boolean {
   const committed = occCommitMutation<unknown, boolean>(
     filePath,
-    // occCommitMutation first sequences any observed canonical mismatch; this
-    // callback then receives that fenced generation on every retry. Do not
-    // capture a pre-retry snapshot here or a concurrent replacement could be
-    // reintroduced into the journal.
-    (currentState) => ({ state: currentState, result: true }),
-    { assertHeld, suppressCanonicalRepublish: true },
+    (currentState) => {
+      if (occStateFingerprint(currentState) !== occStateFingerprint(expectedParentState)) return null;
+      return { state: publishedState, result: true };
+    },
+    { assertHeld, suppressCanonicalRepublish: true, authenticatedExternalParent: expectedParentState },
   );
-  return committed !== null;
+  if (committed !== null) return true;
+  // A crash can happen after the durable OCC marker but before the emergency
+  // transaction removes its recovery artifacts. Treat an already-sequenced
+  // intended state as idempotent success so recovery can safely finish cleanup
+  // without trying to re-parent a completed transaction.
+  const current = occReadCurrent(filePath);
+  return !current.ioError && !current.empty &&
+    occStateFingerprint(current.state) === occStateFingerprint(publishedState);
 }
 
-/** Reconcile a recovered emergency publication while sharing normal write/clear exclusion. */
-function reconcileRecoveredEmergencyStateFile(filePath: string): boolean {
+/** Re-publish the authoritative head without ever deriving a new one from cache bytes. */
+function occRestoreCanonicalFromJournal(filePath: string, assertHeld?: () => void): boolean {
+  const current = occReadCurrent(filePath);
+  if (current.ioError || current.empty) return !current.ioError;
+  try {
+    assertHeld?.();
+    if (current.state === null) {
+      try { unlinkSync(filePath); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      }
+    } else {
+      atomicWriteJsonSync(filePath, current.state);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Finish a recovered emergency publication through the same parent fence used
+ * by the live writer. Older journals have no authenticated parsed parent; in
+ * that case the only safe action is restoring the existing journal authority.
+ */
+function commitRecoveredEmergencyPublication(filePath: string, journal: EmergencyMutationJournal): boolean {
   const lock = acquireMutationLock(filePath);
   if (!lock) return false;
   try {
-    return occReconcileCanonicalState(filePath, () => assertMutationLockHeld(lock));
+    const assertHeld = () => assertMutationLockHeld(lock);
+    if (!journal.parentState || !journal.intent) return occRestoreCanonicalFromJournal(filePath, assertHeld);
+    let publishedState: unknown = null;
+    if (journal.intent === 'publish') {
+      let raw: string;
+      try { raw = readFileSync(filePath, 'utf8'); publishedState = JSON.parse(raw); } catch { return false; }
+      // Recovery may have deliberately discarded this transaction because an
+      // unrelated canonical replacement won the exact-byte publication race.
+      // That replacement is not authenticated to become a journal head.
+      if (stateDigest(raw) !== journal.intendedDigest) return true;
+    } else if (existsSync(filePath)) {
+      // A clear that did not leave the primary absent likewise lost its
+      // publication race; preserve the winner without sequencing it.
+      return true;
+    }
+    return occCommitAuthenticatedExternalState(filePath, journal.parentState, publishedState, assertHeld);
   } finally {
     releaseMutationLock(lock);
   }
@@ -1157,6 +1218,12 @@ export function clearStateFileLockedIf(
   recoveryOptions?: EmergencyRecoveryOptions,
 ): ConditionalClearResult {
   if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return 'failed';
+  // Conditional clear has a second fence besides the journal predicate: a
+  // canonical replacement between observation and publish belongs to another
+  // publication attempt and must be preserved. The bytes are only a CAS
+  // generation token here, never input to journal state selection.
+  const observedCanonical = occReadCanonicalSnapshot(filePath);
+  if (observedCanonical.ioError) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64) {
     try {
       const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
@@ -1170,6 +1237,7 @@ export function clearStateFileLockedIf(
   if (!lock) return 'failed';
   try {
     let skipped = false;
+    let canonicalReplaced = false;
     const committed = occCommitMutation<null, ConditionalClearResult>(filePath, (currentRaw) => {
       if (currentRaw === null || typeof currentRaw !== 'object' || Array.isArray(currentRaw)) {
         skipped = true;
@@ -1180,8 +1248,13 @@ export function clearStateFileLockedIf(
         return null;
       }
       return { state: null, result: 'cleared' };
-    }, { assertHeld: () => assertMutationLockHeld(lock), suppressCanonicalRepublish: true });
-    if (committed === null) return skipped ? 'skipped' : 'failed';
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      suppressCanonicalRepublish: true,
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => { canonicalReplaced = true; },
+    });
+    if (committed === null) return skipped || canonicalReplaced ? 'skipped' : 'failed';
     assertMutationLockHeld(lock);
     unlinkSync(filePath);
     return committed.result;
@@ -1202,8 +1275,11 @@ export function writeStateFileLockedIf(
   if (!recoverEmergencyStateFile(filePath)) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64) {
     try {
-      const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
-      atomicWriteJsonSync(filePath, replacement);
+      // The seam models an external replacement that races this conditional
+      // write. Preserve the supplied bytes exactly: parsing and reserializing
+      // would hide byte-level replacement regressions behind JSON formatting.
+      const replacementRaw = Buffer.from(process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64, 'base64').toString('utf8');
+      atomicWriteFileSync(filePath, replacementRaw);
     } finally {
       delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH;
       delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64;
@@ -1308,6 +1384,8 @@ type EmergencyMutationJournal = {
   owner: EmergencyJournalOwner;
   sessionOwner?: string;
   originalDigest?: string;
+  /** Parsed source authenticated before the canonical publication. */
+  parentState?: Record<string, unknown>;
   intendedDigest?: string;
   intent?: 'clear' | 'publish';
   quarantinePath: string;
@@ -1502,6 +1580,7 @@ function readEmergencyJournal(path: string): EmergencyMutationJournal | null {
       typeof journal.owner.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) ||
       (journal.sessionOwner !== undefined && typeof journal.sessionOwner !== 'string') ||
       (journal.originalDigest !== undefined && (typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest))) ||
+      (journal.parentState !== undefined && (journal.parentState === null || typeof journal.parentState !== 'object' || Array.isArray(journal.parentState))) ||
       (journal.intendedDigest !== undefined && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) ||
       (journal.intent !== undefined && journal.intent !== 'clear' && journal.intent !== 'publish') ||
       typeof journal.quarantinePath !== 'string' ||
@@ -1722,15 +1801,20 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
     if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
     if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath, authorizeState) &&
-      reconcileRecoveredEmergencyStateFile(filePath);
+    if (!recoverDeadEmergencyStateFile(filePath, authorizeState, true)) return false;
+    if (!commitRecoveredEmergencyPublication(filePath, current)) return false;
+    return removeOwnedEmergencyArtifacts(journalPath, current, true);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
   }
 }
 
 /** Recover a previously interrupted emergency mutation while holding the recovery claim. */
-function recoverDeadEmergencyStateFile(filePath: string, authorizeState?: EmergencyStateAuthorization): boolean {
+function recoverDeadEmergencyStateFile(
+  filePath: string,
+  authorizeState?: EmergencyStateAuthorization,
+  preserveCompletedJournal = false,
+): boolean {
   const journalPath = emergencyJournalPath(filePath);
   if (!existsSync(journalPath)) return true;
   const journal = readEmergencyJournal(journalPath);
@@ -1757,7 +1841,7 @@ function recoverDeadEmergencyStateFile(filePath: string, authorizeState?: Emerge
       return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
     }
     journal.phase = 'prepared';
-    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal);
   }
   const originalDigest = journal.originalDigest!;
   const intent = journal.intent!;
@@ -1767,7 +1851,9 @@ function recoverDeadEmergencyStateFile(filePath: string, authorizeState?: Emerge
   const finalize = (): boolean => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
 
   if (hasPrimary && hasQuarantine) {
-    if (intent === 'publish' && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) return finalize();
+    if (intent === 'publish' && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) {
+      return preserveCompletedJournal || finalize();
+    }
     // The primary is an unrelated replacement. It wins; discard only this transaction.
     return removeOwnedEmergencyArtifacts(journalPath, journal, true);
   }
@@ -1782,22 +1868,23 @@ function recoverDeadEmergencyStateFile(filePath: string, authorizeState?: Emerge
         return false;
       }
       journal.phase = 'quarantined';
-      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal);
     }
     return false;
   }
   if (!hasQuarantine) {
-    return intent === 'clear' && journal.phase === 'published' && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    return intent === 'clear' && journal.phase === 'published' &&
+      (preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, false));
   }
   if (digest(journal.quarantinePath) !== originalDigest || !owned()) return false;
   try {
-    if (intent === 'clear') return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    if (intent === 'clear') return preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, true);
     const payload = readFileSync(payloadPath, 'utf8');
     if (stateDigest(payload) !== intendedDigest || !owned()) return false;
     linkSync(payloadPath, filePath); // exclusive: never overwrite a replacement
     journal.phase = 'published';
     if (!writeEmergencyJournal(journalPath, journal)) return false;
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    return preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, true);
   } catch { return false; }
 }
 
@@ -1814,7 +1901,7 @@ function abandonEmergencyJournal(journalPath: string, journal: EmergencyMutation
 
 /** Test crashes must relinquish ownership; a real crashed process is not live. */
 function abandonEmergencyJournalForTest(journalPath: string, journal: EmergencyMutationJournal): void {
-  if (!emergencyCrashAt('after-payload') && !emergencyCrashAt('before-rename') && !emergencyCrashAt('after-rename') && !emergencyCrashAt('after-publication') && !emergencyCrashAt('before-cleanup')) return;
+  if (!emergencyCrashAt('after-payload') && !emergencyCrashAt('before-rename') && !emergencyCrashAt('after-rename') && !emergencyCrashAt('after-publication') && !emergencyCrashAt('before-occ-fence') && !emergencyCrashAt('before-cleanup')) return;
   abandonEmergencyJournal(journalPath, journal);
 }
 
@@ -1869,6 +1956,7 @@ export function emergencyMutateStateFileIf(
     Object.assign(journal, {
       ...(getStateSessionOwner(current) ? { sessionOwner: getStateSessionOwner(current) } : {}),
       originalDigest: stateDigest(originalRaw),
+      parentState: current,
       ...(transformedRaw === undefined ? { intent: 'clear' as const } : { intent: 'publish' as const, intendedDigest: stateDigest(transformedRaw) }),
     });
     if (!owns() || !writeEmergencyJournal(journalPath, journal)) return false;
@@ -1906,8 +1994,17 @@ export function emergencyMutateStateFileIf(
       if (!writeEmergencyJournal(journalPath, journal)) return false;
     }
     if (emergencyCrashAt('before-cleanup')) { abandonEmergencyJournalForTest(journalPath, journal); return false; }
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true) &&
-      occReconcileCanonicalState(filePath, () => assertMutationLockHeld(lock));
+    // Keep the authenticated recovery journal and quarantined source until the
+    // OCC parent fence is durable. Otherwise a failed final fence would strand
+    // a canonical publication with no durable retry parent.
+    if (emergencyCrashAt('before-occ-fence')) { abandonEmergencyJournalForTest(journalPath, journal); return false; }
+    if (!occCommitAuthenticatedExternalState(
+        filePath,
+        current,
+        transformedRaw === undefined ? null : JSON.parse(transformedRaw),
+        () => assertMutationLockHeld(lock),
+      )) return false;
+    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
   } catch {
     if (journal) abandonEmergencyJournal(journalPath, journal);
     return false;

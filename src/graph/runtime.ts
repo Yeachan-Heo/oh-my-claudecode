@@ -241,6 +241,62 @@ function requiredControlPhase(status: GraphState['status']): 'reserved' | 'activ
   return null;
 }
 
+/**
+ * Reconcile the external control reservation after the durable approval
+ * transition. The graph transition is intentionally committed first: a failed
+ * promotion leaves a durable running graph with its exact reservation, and an
+ * idempotent retry can finish this step. Never skip this on a replay.
+ */
+function ensureGraphControlActive(
+  controlStore: ControlOwnerStore,
+  state: GraphState,
+  driverId: string,
+  promotedAt: string,
+): void {
+  const root = controlStore.read()?.root;
+  if (!root
+    || root.mode !== 'graph'
+    || root.run_id !== state.run_id
+    || root.nonce !== state.control_nonce
+    || !root.graph_revision
+    || root.graph_revision.revision_id !== state.active_revision_id
+    || root.graph_revision.revision_hash !== state.active_revision_hash) {
+    throw new Error(`control_root_mismatch: graph ${state.run_id} does not have its exact control reservation`);
+  }
+  if (root.phase === 'active') return;
+  controlStore.promoteRoot({
+    mode: 'graph',
+    run_id: state.run_id,
+    nonce: state.control_nonce,
+    promoted_at: promotedAt,
+    driver_lease: driverLease(driverId, promotedAt),
+  });
+}
+
+/**
+ * A succeeded graph cannot retain root control. Re-running a completed
+ * transition repeats this reconciliation, closing the crash window between
+ * durable terminal publish and control release.
+ */
+function releaseSucceededGraphControl(controlStore: ControlOwnerStore, state: GraphState): void {
+  const root = controlStore.read()?.root;
+  if (!root) return;
+  if (root.mode !== 'graph' || root.run_id !== state.run_id || root.nonce !== state.control_nonce) {
+    throw new Error(`control_root_mismatch: graph ${state.run_id} cannot release a different control root`);
+  }
+  controlStore.releaseRoot({
+    mode: 'graph',
+    run_id: state.run_id,
+    nonce: state.control_nonce,
+    disposition: {
+      graph_status: 'succeeded',
+      claims_fenced: true,
+      children_drained: true,
+    },
+    released_at: now(),
+  });
+}
+
 async function executeCreate(input: Readonly<Record<string, unknown>>): Promise<unknown> {
   const goal = requireString(input.goal, 'goal');
   const descriptorInput = requireObject(input.descriptor, 'descriptor');
@@ -475,23 +531,7 @@ function executeApprove(input: Readonly<Record<string, unknown>>): unknown {
   });
 
   const controlStore = new ControlOwnerStore({ sessionId });
-  // NOTE (finding #5): mutate-then-control ordering is intentionally retained here. Unlike
-  // executeResume, the control op is promoteRoot (the root was reserved during executeCreate),
-  // so if mutate throws, promote never runs and there is NO divergence. If mutate succeeds and
-  // promote throws, the graph is 'running' with a still-reserved root (phase='reserved'), which
-  // is recoverable via recoverGraphReservation. Reordering to control-first would trade this
-  // recoverable divergence for an active-root-over-awaiting_approval state whose cleanup would
-  // release a root that executeCreate reserved (a different, non-minimal compensation), so the
-  // reorder is not clearly safer here.
-  if (!result.replayed) {
-    controlStore.promoteRoot({
-      mode: 'graph',
-      run_id: runId,
-      nonce: result.state.control_nonce,
-      promoted_at: approvedAt,
-      driver_lease: driverLease(driverId, approvedAt),
-    });
-  }
+  ensureGraphControlActive(controlStore, result.state, driverId, approvedAt);
 
   return { result: result.result, replayed: result.replayed, summary: summarizeState(result.state) };
 }
@@ -749,6 +789,7 @@ function applyResultOperation(
         ...(externalIdempotencyKey ? { external_idempotency_key: externalIdempotencyKey } : {}),
       },
     });
+    const succeeded = isGraphSucceeded(descriptor, schedulerResult.projection);
     const next: GraphState = {
       ...current,
       projection: schedulerResult.projection,
@@ -761,7 +802,9 @@ function applyResultOperation(
       // takes precedence over the waiting_human->running transition so a failed
       // exhausted node does not leave an un-claimable, un-retryable activation
       // wedging the run forever.
-      ...(schedulerResult.transition.outcome === 'failed'
+      ...(succeeded
+        ? { status: 'succeeded' as const }
+        : schedulerResult.transition.outcome === 'failed'
         && schedulerResult.projection.activations[activationId]?.status === 'failed'
         ? { status: 'failed' as const }
         : current.status === 'waiting_human' ? { status: 'running' as const } : {}),
@@ -783,10 +826,14 @@ function applyResultOperation(
         outcome: schedulerResult.transition.outcome,
         selected_edge_ids: schedulerResult.transition.selected_edge_ids,
         created_activation_ids: schedulerResult.transition.created_activation_ids,
-        succeeded: isGraphSucceeded(descriptor, schedulerResult.projection),
+        succeeded,
       },
     };
   });
+
+  if (result.state.status === 'succeeded') {
+    releaseSucceededGraphControl(new ControlOwnerStore({ sessionId }), result.state);
+  }
 
   return { result: result.result, replayed: result.replayed };
 }

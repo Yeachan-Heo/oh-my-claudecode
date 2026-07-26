@@ -349,34 +349,10 @@ describe('red-team state-machine regressions', () => {
       claim: { lease_id: vClaim.lease_id, activation_id: vClaim.activation_id, attempt_id: vClaim.attempt_id },
       result: { outcome: 'succeeded', evidence_refs: [{ kind: 'command', ref: 'verify' }] },
     }) as { result: { succeeded: boolean } };
-    // The terminal node completed with evidence -> the projection is logically
-    // succeeded (the runtime surfaces this as result.succeeded; the graph status
-    // stays 'running' - it is not auto-promoted to a terminal status here).
+    // Terminal verification is a durable terminal state, not merely a summary
+    // hint. A succeeded run cannot accept another revision cycle.
     expect(verifyComplete.result.succeeded).toBe(true);
-
-    // Second patch cycle: propose off revision-2 at gen 1 (-> gen 2). A
-    // hardcoded-0 propose-patch fence would throw dispatch_generation_conflict
-    // here because the active generation is now 1. The graph is still 'running',
-    // so the propose must be accepted (no live claims at propose time).
-    const patch2 = sealGraphDescriptor(patchedDescriptor(baseInput, 'revision-3', 'Patched goal v2'));
-    await exec('propose-patch', {
-      session_id: sessionId, run_id: descriptor.run_id, base_revision_id: 'revision-2',
-      base_descriptor_hash: patch1.descriptor_hash, expected_sequence: 6,
-      transition_id: 't-propose-2',
-      patch: { proposed_descriptor: patch2, invalidated_node_ids: [], proposal_evidence: [] },
-    });
-    await exec('approve-patch', {
-      session_id: sessionId, run_id: descriptor.run_id, base_revision_id: 'revision-2',
-      base_descriptor_hash: patch1.descriptor_hash, expected_sequence: 7,
-      transition_id: 't-approve-2',
-      approval: {
-        proposed_revision_hash: patch2.descriptor_hash, invalidated_node_ids: [],
-        evidence: { kind: 'human', ref: 'approve-patch-2' },
-      },
-    });
-    const afterCycle2 = store.read()!;
-    expect(afterCycle2.dispatch_generation).toBe(2);
-    expect(afterCycle2.active_revision_id).toBe('revision-3');
+    expect(store.read()?.status).toBe('succeeded');
   });
 
   it('#4: second patch cycle on a paused-then-resumed graph fences at base_generation>=1', async () => {

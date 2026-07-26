@@ -866,20 +866,24 @@ export function occCommitMutation(filePath, mutate, options = {}) {
     if (current.ioError) return false; // fail closed: cannot fence without reading
     const canonical = occReadCanonicalSnapshot(filePath);
     if (canonical.ioError) return false;
+    if (options.expectedCanonicalContentFingerprint !== undefined &&
+      canonical.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      return false;
+    }
     if (current.empty) {
       parentSeq = -1;
-      parentState = canonical.state;
+      // An authenticated external publisher supplies the source it captured
+      // before cache publication. Never infer that parent from post-publish
+      // canonical bytes.
+      parentState = Object.prototype.hasOwnProperty.call(options, 'authenticatedExternalParent')
+        ? options.authenticatedExternalParent
+        : canonical.state;
     } else {
       parentSeq = current.seq;
-      if (!options.skipCanonicalReconciliation && occStateFingerprint(current.state) !== canonical.stateFingerprint) {
-        const reconciled = occCommitMutation(
-          filePath,
-          () => ({ state: canonical.state, result: true }),
-          { assertHeld: options.assertHeld, suppressCanonicalRepublish: true, skipCanonicalReconciliation: true },
-        );
-        if (!reconciled) return false;
-        continue;
-      }
+      // A committed journal head is authoritative. `filePath` is only a
+      // compatibility cache and may be stale or written by an older install;
+      // it must never be silently promoted into a new journal generation.
       parentState = current.state;
     }
     let produced;
@@ -942,6 +946,12 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       occCleanupOwn(dir, seq, ownerToken);
       return false;
     }
+    if (options.expectedCanonicalContentFingerprint !== undefined &&
+      canonicalFence.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      occCleanupOwn(dir, seq, ownerToken);
+      return false;
+    }
     if (canonicalFence.contentFingerprint !== canonical.contentFingerprint) {
       occCleanupOwn(dir, seq, ownerToken);
       continue;
@@ -970,8 +980,8 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       try {
         atomicWriteFileSync(filePath, JSON.stringify(next, null, 2));
       } catch {
-        // The journal commit remains durable. A later writer reconciles the
-        // compatibility file before evaluating its mutation.
+        // The journal commit remains durable. A later writer re-publishes its
+        // authoritative head; cache bytes are never journal input.
       }
     }
     return true;

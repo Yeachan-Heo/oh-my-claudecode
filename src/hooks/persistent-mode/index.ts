@@ -101,7 +101,7 @@ const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
+const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'graph', 'ralph', 'ralplan']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
   'complete',
   'completed',
@@ -468,6 +468,10 @@ function isTerminalWorkflowModeState(state: Record<string, unknown> | null): boo
   return Boolean(phase && TERMINAL_WORKFLOW_PHASES.has(phase));
 }
 
+function isGraphDurablyStopped(state: Record<string, unknown> | null): boolean {
+  return state?.status === 'paused' || isTerminalWorkflowModeState(state);
+}
+
 async function reconcileTerminalWorkflowSlots(
   workingDir: string,
   sessionId?: string,
@@ -476,6 +480,7 @@ async function reconcileTerminalWorkflowSlots(
     const {
       readSkillActiveStateNormalized,
       pruneExpiredWorkflowSkillTombstones,
+      markDurableWorkflowSkillCompleted,
       markWorkflowSkillCompleted,
       writeSkillActiveStateCopies,
     } = await import('../skill-state/index.js');
@@ -490,11 +495,18 @@ async function reconcileTerminalWorkflowSlots(
       }
 
       const modeState = readModeState<Record<string, unknown>>(slotName, workingDir, sessionId);
-      if (!isTerminalWorkflowModeState(modeState)) {
+      if (slotName === 'graph'
+        ? !isGraphDurablyStopped(modeState)
+        : !isTerminalWorkflowModeState(modeState)) {
         continue;
       }
 
-      current = markWorkflowSkillCompleted(current, slotName);
+      // Graph has durable lifecycle authority. Its generic Skill completion
+      // path deliberately cannot tombstone the slot; only this observation of
+      // a paused or terminal graph-state may do so.
+      current = slotName === 'graph'
+        ? markDurableWorkflowSkillCompleted(current, slotName)
+        : markWorkflowSkillCompleted(current, slotName);
       changed = true;
     }
 

@@ -448,14 +448,35 @@ function readJsonSnapshot(filePath: string): { state: Record<string, unknown>; s
 }
 
 function hasGraphAuthorityInSessionDir(sessionDir: string): boolean {
-  if (existsSync(join(sessionDir, MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH]))) return true;
+  const graphStatePath = join(sessionDir, MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH]);
+  if (existsSync(graphStatePath)) {
+    const graphState = readJsonSnapshot(graphStatePath)?.state;
+    // An unreadable graph ledger is never safe to discard. Paused and terminal
+    // ledgers, however, have no remaining recovery work and are intentionally
+    // eligible for stale-session cleanup once their skill slot is tombstoned.
+    if (!graphState) return true;
+    const status = graphState.status;
+    if (
+      typeof status !== 'string'
+      || !['paused', 'failed', 'cancelled', 'succeeded'].includes(status)
+    ) {
+      return true;
+    }
+  }
   const skillState = readJsonSnapshot(join(sessionDir, "skill-active-state.json"))?.state;
   if (
     skillState?.active_skills
     && typeof skillState.active_skills === "object"
-    && (skillState.active_skills as Record<string, unknown>).graph
   ) {
-    return true;
+    const graphSlot = (skillState.active_skills as Record<string, unknown>).graph;
+    // A malformed graph slot must remain conservative. A durable tombstone is
+    // the explicit signal that terminal Graph artifacts may be reclaimed.
+    if (!graphSlot || typeof graphSlot !== 'object') return true;
+    if (!('completed_at' in graphSlot)) return true;
+    const completedAt = (graphSlot as Record<string, unknown>).completed_at;
+    if (typeof completedAt !== 'string' || !Number.isFinite(new Date(completedAt).getTime())) {
+      return true;
+    }
   }
   const controlOwner = readJsonSnapshot(join(sessionDir, "control-owner-state.json"))?.state;
   const controlRoot = controlOwner?.root;
@@ -467,12 +488,34 @@ function hasGraphAuthorityInSessionDir(sessionDir: string): boolean {
   );
 }
 
+// Marker publication is synchronous but a cleanup can observe the file before
+// its writer has published it. Wait only for that short, lock-signalled window:
+// a missing marker with no mutation lock is already settled, and unrelated I/O
+// failures remain failures rather than being retried as if they were writers.
+const IN_FLIGHT_MARKER_PUBLISH_WAIT_MS = 250;
+const IN_FLIGHT_MARKER_PUBLISH_POLL_MS = 10;
+
+function waitForInFlightMarkerPublisher(filePath: string): boolean {
+  const deadline = Date.now() + IN_FLIGHT_MARKER_PUBLISH_WAIT_MS;
+  while (existsSync(`${filePath}.mutation.lock`) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, IN_FLIGHT_MARKER_PUBLISH_POLL_MS);
+  }
+  return !existsSync(`${filePath}.mutation.lock`);
+}
+
 function clearDiscoveredJsonFile(
   filePath: string,
   observed: { state: Record<string, unknown>; snapshot: string } | null,
   predicate: (state: Record<string, unknown>) => boolean = () => true,
 ): boolean {
   if (!observed) {
+    // An absent marker may still be in-flight under the same mutation lock
+    // used by its publisher. Observe that lock *before* running a conditional
+    // clear: recovery/observation must not race ahead of the publisher and
+    // make an absent pre-publication snapshot authoritative.
+    if (!existsSync(filePath) && existsSync(`${filePath}.mutation.lock`) && !waitForInFlightMarkerPublisher(filePath)) {
+      return false;
+    }
     const result = clearStateFileLockedIf(filePath, predicate);
     return result !== 'failed' && !(result === 'skipped' && existsSync(filePath));
   }
