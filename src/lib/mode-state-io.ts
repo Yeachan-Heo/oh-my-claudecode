@@ -810,7 +810,14 @@ function occReadCurrent(filePath: string): OccReadCurrentResult {
   return { seq: maxSeq, state: record.state, empty: false, ioError: false, reservedSeq };
 }
 
-type OccCanonicalSnapshot = { state: unknown; fingerprint: string; ioError: boolean };
+type OccCanonicalSnapshot = {
+  state: unknown;
+  /** Exact primary bytes, used to fence replacement without normalizing them. */
+  contentFingerprint: string;
+  /** Parsed-state identity, used to decide whether a journal reconciliation is needed. */
+  stateFingerprint: string;
+  ioError: boolean;
+};
 
 /**
  * The canonical file is an integrity fence as well as a compatibility cache.
@@ -819,12 +826,13 @@ type OccCanonicalSnapshot = { state: unknown; fingerprint: string; ioError: bool
  */
 function occReadCanonicalSnapshot(filePath: string): OccCanonicalSnapshot {
   try {
-    const state = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-    return { state, fingerprint: JSON.stringify(state), ioError: false };
+    const raw = readFileSync(filePath, 'utf8');
+    const state = JSON.parse(raw) as unknown;
+    return { state, contentFingerprint: stateDigest(raw), stateFingerprint: JSON.stringify(state), ioError: false };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return { state: null, fingerprint: 'absent', ioError: false };
-    return { state: null, fingerprint: '', ioError: true };
+    if (code === 'ENOENT') return { state: null, contentFingerprint: 'absent', stateFingerprint: 'absent', ioError: false };
+    return { state: null, contentFingerprint: '', stateFingerprint: '', ioError: true };
   }
 }
 
@@ -861,6 +869,10 @@ export interface OccCommitOptions {
   ownerToken?: string;
   /** Called at the commit/publish boundary by public mutation-lock holders. */
   assertHeld?: () => void;
+  /** Journal this generation without serializing it back over canonical bytes. */
+  suppressCanonicalRepublish?: boolean;
+  /** Internal recursion guard for canonical-to-journal reconciliation. */
+  skipCanonicalReconciliation?: boolean;
 }
 
 /**
@@ -896,7 +908,23 @@ export function occCommitMutation<TState, TResult>(
       parentState = canonical.state;
     } else {
       parentSeq = current.seq;
-      parentState = occStateFingerprint(current.state) === canonical.fingerprint ? current.state : canonical.state;
+      if (!options?.skipCanonicalReconciliation && occStateFingerprint(current.state) !== canonical.stateFingerprint) {
+        // Canonical is the compatibility authority for pre-OCC and emergency
+        // publishers. Sequence it before evaluating a conditional mutation so
+        // a later skip cannot leave journal readers on the old generation.
+        const reconciled = occCommitMutation<unknown, boolean>(
+          filePath,
+          () => ({ state: canonical.state, result: true }),
+          {
+            assertHeld: options?.assertHeld,
+            suppressCanonicalRepublish: true,
+            skipCanonicalReconciliation: true,
+          },
+        );
+        if (reconciled === null) return null;
+        continue;
+      }
+      parentState = current.state;
     }
     let produced: { state: TState; result: TResult } | null;
     produced = mutate(parentState, ownerToken);
@@ -967,7 +995,7 @@ export function occCommitMutation<TState, TResult>(
       occCleanupOwn(dir, seq, ownerToken);
       return null;
     }
-    if (canonicalFence.fingerprint !== canonical.fingerprint) {
+    if (canonicalFence.contentFingerprint !== canonical.contentFingerprint) {
       occCleanupOwn(dir, seq, ownerToken);
       continue;
     }
@@ -990,11 +1018,13 @@ export function occCommitMutation<TState, TResult>(
     // entry is now NOT the max, it remains a valid committed ancestor: leave it.
     occPruneOld(dir, seq);
     // Re-publish the canonical file so legacy readers see the latest state.
-    try {
-      atomicWriteJsonSync(filePath, next);
-    } catch {
-      // The journal IS the source of truth; a failed canonical re-publish is
-      // non-fatal (the committed entry already advances current). Return success.
+    if (!options?.suppressCanonicalRepublish) {
+      try {
+        atomicWriteJsonSync(filePath, next);
+      } catch {
+        // The journal commit remains durable. A later writer will reconcile
+        // the compatibility file before it evaluates its own mutation.
+      }
     }
     return produced;
   }
@@ -1005,10 +1035,9 @@ export function occCommitMutation<TState, TResult>(
 export function occReadCurrentState(filePath: string): unknown {
   const current = occReadCurrent(filePath);
   if (current.ioError) return null;
-  if (current.empty) {
-    try { return JSON.parse(readFileSync(filePath, 'utf8')); } catch { return null; }
-  }
-  return current.state;
+  if (!current.empty) return current.state;
+  const canonical = occReadCanonicalSnapshot(filePath);
+  return canonical.ioError ? null : canonical.state;
 }
 
 /**
@@ -1019,20 +1048,16 @@ export function occReadCurrentState(filePath: string): unknown {
  * tombstone; it is restored to absent after the journal commit.
  */
 export function occReconcileCanonicalState(filePath: string, assertHeld?: () => void): boolean {
-  const snapshot = occReadCanonicalSnapshot(filePath);
-  if (snapshot.ioError) return false;
   const committed = occCommitMutation<unknown, boolean>(
     filePath,
-    () => ({ state: snapshot.state, result: true }),
-    { assertHeld },
+    // occCommitMutation first sequences any observed canonical mismatch; this
+    // callback then receives that fenced generation on every retry. Do not
+    // capture a pre-retry snapshot here or a concurrent replacement could be
+    // reintroduced into the journal.
+    (currentState) => ({ state: currentState, result: true }),
+    { assertHeld, suppressCanonicalRepublish: true },
   );
-  if (committed === null) return false;
-  if (snapshot.state === null) {
-    try { unlinkSync(filePath); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
-    }
-  }
-  return true;
+  return committed !== null;
 }
 
 /** Reconcile a recovered emergency publication while sharing normal write/clear exclusion. */
@@ -1092,19 +1117,24 @@ export function writeStateFileLocked(filePath: string, state: Record<string, unk
 }
 
 export function clearStateFileLocked(filePath: string): boolean {
-  // NOTE: clear stays on the lease lock (NOT the OCC tombstone path). The OCC
-  // tombstone migration was reverted: it broke ~242 tests because the tombstone
-  // commit did not reliably unlink the canonical file for clear / runtime-
-  // artifact paths (clearModeState leaves marker files present). The maintainer's
-  // B11 "release" is satisfied by the lock-release path + occCleanupOwner (no
-  // shared lock file under OCC for writes) + release probe #2; the state-clear
-  // on the lease lock is fail-closed: assertMutationLockHeld aborts on overlap,
-  // and under (B) the canonical is a derived cache so a stale clear is harmless.
   if (!recoverEmergencyStateFile(filePath)) return false;
   const lock = acquireMutationLock(filePath);
   if (!lock) return false;
   try {
-    assertMutationLockHeld(lock); // B11: abort mutation if our lease expired mid-mutation
+    // Runtime artifact cleanup also routes through this primitive for small
+    // non-JSON marker files. They have no OCC state to tombstone.
+    if (!filePath.endsWith('.json')) {
+      assertMutationLockHeld(lock);
+      if (existsSync(filePath)) unlinkSync(filePath);
+      return true;
+    }
+    const committed = occCommitMutation<null, boolean>(
+      filePath,
+      () => ({ state: null, result: true }),
+      { assertHeld: () => assertMutationLockHeld(lock), suppressCanonicalRepublish: true },
+    );
+    if (committed === null) return false;
+    assertMutationLockHeld(lock);
     if (existsSync(filePath)) unlinkSync(filePath);
     return true;
   } catch {
@@ -1127,8 +1157,6 @@ export function clearStateFileLockedIf(
   predicate: (current: Record<string, unknown>) => boolean,
   recoveryOptions?: EmergencyRecoveryOptions,
 ): ConditionalClearResult {
-  // NOTE: conditional clear stays on the lease lock (see clearStateFileLocked
-  // above). The OCC tombstone migration was reverted for breaking clears.
   if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64) {
     try {
@@ -1142,17 +1170,22 @@ export function clearStateFileLockedIf(
   const lock = acquireMutationLock(filePath);
   if (!lock) return 'failed';
   try {
-    if (!existsSync(filePath)) return 'skipped';
-    let current: Record<string, unknown>;
-    try {
-      current = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>;
-    } catch {
-      return 'failed';
-    }
-    if (!predicate(current)) return 'skipped';
-    assertMutationLockHeld(lock); // B11: abort mutation if our lease expired mid-mutation
+    let skipped = false;
+    const committed = occCommitMutation<null, ConditionalClearResult>(filePath, (currentRaw) => {
+      if (currentRaw === null || typeof currentRaw !== 'object' || Array.isArray(currentRaw)) {
+        skipped = true;
+        return null;
+      }
+      if (!predicate(currentRaw as Record<string, unknown>)) {
+        skipped = true;
+        return null;
+      }
+      return { state: null, result: 'cleared' };
+    }, { assertHeld: () => assertMutationLockHeld(lock), suppressCanonicalRepublish: true });
+    if (committed === null) return skipped ? 'skipped' : 'failed';
+    assertMutationLockHeld(lock);
     unlinkSync(filePath);
-    return 'cleared';
+    return committed.result;
   } catch {
     return 'failed';
   } finally {

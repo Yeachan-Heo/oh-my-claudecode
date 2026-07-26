@@ -58,7 +58,7 @@ Usage:
   omc graph approve --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --transition-id <id> --approval <json-or-path> [--json]
   omc graph ready --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --expected-sequence <n> [--json]
   omc graph claim --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --expected-sequence <n> --driver-id <id> --transition-id <id> --limit <n> [--json]
-  omc graph complete --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --expected-sequence <n> --transition-id <id> --claim <json-or-path> --result <json-or-path> [--json]
+  omc graph complete --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --expected-sequence <n> --transition-id <id> --claim <json-or-path> --result <json-or-path> [--identities <json-or-path>] [--json]
   omc graph fail --run-id <id> --revision-id <id> --descriptor-hash <sha256> --session-id <id> --expected-sequence <n> --transition-id <id> --claim <json-or-path> --result <json-or-path> [--json]
   omc graph propose-patch --run-id <id> --session-id <id> --base-revision-id <id> --base-descriptor-hash <sha256> --expected-sequence <n> --transition-id <id> --patch <json-or-path> [--json]
   omc graph approve-patch --run-id <id> --session-id <id> --base-revision-id <id> --base-descriptor-hash <sha256> --expected-sequence <n> --transition-id <id> --approval <json-or-path> [--json]
@@ -84,6 +84,7 @@ interface FlagDefinition {
   flag: string;
   field: string;
   kind: FlagKind;
+  optional?: boolean;
 }
 
 const RUN: FlagDefinition = { flag: '--run-id', field: 'run_id', kind: 'id' };
@@ -158,6 +159,7 @@ const OPERATION_FLAGS: Record<GraphCommandOperation, readonly FlagDefinition[]> 
     TRANSITION,
     { flag: '--claim', field: 'claim', kind: 'json' },
     { flag: '--result', field: 'result', kind: 'json' },
+    { flag: '--identities', field: 'identities', kind: 'json', optional: true },
   ],
   fail: [
     RUN,
@@ -311,7 +313,7 @@ function parseRawFlags(
   }
 
   for (const definition of definitions) {
-    if (!values.has(definition.flag)) {
+    if (!definition.optional && !values.has(definition.flag)) {
       throw new GraphCommandError('missing_argument', `Missing required ${definition.flag} for graph ${operation}`);
     }
   }
@@ -391,7 +393,8 @@ async function parseRequest(
   const raw = parseRawFlags(operation, args);
   const input: Record<string, unknown> = {};
   for (const definition of OPERATION_FLAGS[operation]) {
-    const value = raw.get(definition.flag)!;
+    const value = raw.get(definition.flag);
+    if (value === undefined) continue;
     input[definition.field] = definition.kind === 'json'
       ? await parseJsonObject(value, definition.flag, cwd)
       : parseScalar(value, definition);

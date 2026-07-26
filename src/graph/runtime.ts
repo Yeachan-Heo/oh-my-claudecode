@@ -217,6 +217,30 @@ function readinessView(state: GraphState) {
   };
 }
 
+function assertExactGraphControlRoot(
+  controlStore: ControlOwnerStore,
+  state: GraphState,
+  expectedPhase: 'reserved' | 'active',
+): void {
+  const root = controlStore.read()?.root;
+  if (!root
+    || root.mode !== 'graph'
+    || root.run_id !== state.run_id
+    || root.nonce !== state.control_nonce
+    || root.phase !== expectedPhase
+    || !root.graph_revision
+    || root.graph_revision.revision_id !== state.active_revision_id
+    || root.graph_revision.revision_hash !== state.active_revision_hash) {
+    throw new Error(`control_root_mismatch: graph ${state.run_id} does not have its exact ${expectedPhase} control reservation`);
+  }
+}
+
+function requiredControlPhase(status: GraphState['status']): 'reserved' | 'active' | null {
+  if (status === 'awaiting_approval') return 'reserved';
+  if (['running', 'waiting_human', 'waiting_patch_approval', 'reconciling'].includes(status)) return 'active';
+  return null;
+}
+
 async function executeCreate(input: Readonly<Record<string, unknown>>): Promise<unknown> {
   const goal = requireString(input.goal, 'goal');
   const descriptorInput = requireObject(input.descriptor, 'descriptor');
@@ -244,6 +268,10 @@ async function executeCreate(input: Readonly<Record<string, unknown>>): Promise<
         `hash_mismatch: graph state already exists for run ${sealed.run_id} with descriptor hash ${existing.active_revision_hash}, cannot replace with ${sealed.descriptor_hash}`,
       );
     }
+    const expectedPhase = requiredControlPhase(existing.status);
+    if (expectedPhase) {
+      assertExactGraphControlRoot(new ControlOwnerStore({ sessionId }), existing, expectedPhase);
+    }
     return summarizeState(existing);
   }
 
@@ -256,8 +284,36 @@ async function executeCreate(input: Readonly<Record<string, unknown>>): Promise<
     terminal_verification_activation_ids: [],
   };
 
-  const controlNonce = randomUUID();
   const createdAt = now();
+
+  // Control authority is the creation gate. Reserve it BEFORE writing durable
+  // graph state so a conflicting root cannot leave an orphan graph behind.
+  // A crash after reservation but before publish can be retried only for the
+  // exact same graph revision; it reuses the original nonce rather than
+  // replacing or releasing another owner's reservation.
+  const controlStore = new ControlOwnerStore({ sessionId });
+  const existingRoot = controlStore.read()?.root;
+  let controlNonce: string;
+  let createdReservation = false;
+  if (!existingRoot) {
+    controlNonce = randomUUID();
+    controlStore.reserveRoot({
+      mode: 'graph',
+      run_id: sealed.run_id,
+      nonce: controlNonce,
+      reserved_at: createdAt,
+      graph_revision: { revision_id: sealed.revision_id, revision_hash: sealed.descriptor_hash },
+    });
+    createdReservation = true;
+  } else if (existingRoot.mode === 'graph'
+    && existingRoot.run_id === sealed.run_id
+    && existingRoot.phase === 'reserved'
+    && existingRoot.graph_revision?.revision_id === sealed.revision_id
+    && existingRoot.graph_revision.revision_hash === sealed.descriptor_hash) {
+    controlNonce = existingRoot.nonce;
+  } else {
+    throw new Error(`root_conflict: session is already controlled by ${existingRoot.mode}/${existingRoot.run_id}`);
+  }
 
   const initialState = createInitialGraphState({
     session_id: sessionId,
@@ -268,16 +324,46 @@ async function executeCreate(input: Readonly<Record<string, unknown>>): Promise<
     created_at: createdAt,
   });
 
-  const created = store.create(initialState);
-
-  const controlStore = new ControlOwnerStore({ sessionId });
-  controlStore.reserveRoot({
-    mode: 'graph',
-    run_id: sealed.run_id,
-    nonce: controlNonce,
-    reserved_at: createdAt,
-    graph_revision: { revision_id: sealed.revision_id, revision_hash: sealed.descriptor_hash },
-  });
+  let created: GraphState;
+  try {
+    created = store.create(initialState);
+  } catch (error) {
+    // Another exact retry can publish after our initial read but before this
+    // OCC create. Treat only the fully matching durable graph/control pair as
+    // the idempotent winner; every other create failure still compensates.
+    if ((error as { code?: unknown }).code === 'already_exists') {
+      const published = store.read();
+      if (published
+        && published.run_id === sealed.run_id
+        && published.active_revision_hash === sealed.descriptor_hash) {
+        const expectedPhase = requiredControlPhase(published.status);
+        if (expectedPhase) {
+          assertExactGraphControlRoot(controlStore, published, expectedPhase);
+        }
+        return summarizeState(published);
+      }
+    }
+    // Compensate only a reservation made by this invocation and only with its
+    // exact nonce. Reused crash-recovery reservations are never released by a
+    // failed retry, so a caller cannot erase unrelated control authority.
+    if (createdReservation) {
+      try {
+        const rollback = controlStore.releaseRoot({
+          mode: 'graph',
+          run_id: sealed.run_id,
+          nonce: controlNonce,
+          disposition: { graph_status: 'cancelled', claims_fenced: true, children_drained: true },
+          released_at: now(),
+        });
+        if (!rollback.released) {
+          throw new Error('exact reservation was no longer releasable');
+        }
+      } catch (rollbackError) {
+        throw new Error(`create_rollback_failed: ${String(rollbackError)}; initial graph publish failed: ${String(error)}`);
+      }
+    }
+    throw error;
+  }
 
   return {
     run_id: created.run_id,

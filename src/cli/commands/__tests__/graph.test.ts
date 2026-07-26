@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,11 @@ import {
   type GraphCommandRequest,
   type GraphCommandService,
 } from '../graph.js';
+import { sealGraphDescriptor } from '../../../graph/descriptor.js';
+import { graphCommandService } from '../../../graph/runtime.js';
+import { createInitialGraphState } from '../../../graph/runtime-types.js';
+import { GraphStateStore } from '../../../graph/store.js';
+import { forkJoinDescriptor } from '../../../graph/__tests__/fixtures.js';
 
 function captureConsole() {
   const out: string[] = [];
@@ -211,6 +216,137 @@ describe('omc graph CLI boundary', () => {
       operation,
       result: { phase: 'running' },
     });
+  });
+
+  it('parses optional complete identities and forwards them unchanged', async () => {
+    const { service, requests } = serviceReturning();
+    const identities = { join_activation_id: 'run-1:act:join-build:resolved' };
+
+    await graphCommand([
+      'complete',
+      ...operationArgs.complete,
+      '--identities', JSON.stringify(identities),
+    ], service);
+
+    expect(process.exitCode).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].input.identities).toEqual(identities);
+  });
+
+  it('forwards complete identities through the CLI boundary so a fan-out join activates', async () => {
+    const sessionId = 'session-cli-complete-identities';
+    const worktree = await mkdtemp(join(tmpdir(), 'omc-graph-cli-runtime-'));
+    const originalCwd = process.cwd();
+    process.chdir(worktree);
+
+    try {
+      await mkdir(join(worktree, '.omc', 'state', 'sessions', sessionId), { recursive: true });
+      const descriptor = sealGraphDescriptor(forkJoinDescriptor());
+      const store = new GraphStateStore({ sessionId, worktreeRoot: worktree });
+      const approvalActivationId = `${descriptor.run_id}:act:approval:entry`;
+      store.create(createInitialGraphState({
+        session_id: sessionId,
+        control_nonce: 'nonce-cli-complete-identities',
+        descriptor,
+        status: 'running',
+        created_at: '2026-07-26T00:00:00.000Z',
+        projection: {
+          activations: {
+            [approvalActivationId]: {
+              activation_id: approvalActivationId,
+              node_id: 'approval',
+              status: 'ready',
+              attempt_no: 0,
+              attempt_ids: [],
+              traversal_owner_id: approvalActivationId,
+            },
+          },
+          cohorts: {},
+          branch_tokens: {},
+          traversal_counts: {},
+          committed_transitions: {},
+          terminal_verification_activation_ids: [],
+        },
+        approval: {
+          approved_at: '2026-07-26T00:00:00.000Z',
+          evidence: { kind: 'human', ref: 'approval-cli' },
+        },
+      }));
+
+      const execute = (operation: string, input: Record<string, unknown>) => graphCommandService.execute({
+        operation: operation as GraphCommandRequest['operation'],
+        cwd: process.cwd(),
+        input,
+      }) as Promise<{ result: Record<string, unknown> }>;
+      const scope = {
+        session_id: sessionId,
+        run_id: descriptor.run_id,
+        revision_id: descriptor.revision_id,
+        descriptor_hash: descriptor.descriptor_hash,
+      };
+      const claim = async (expectedSequence: number, transitionId: string) => {
+        const response = await execute('claim', {
+          ...scope,
+          expected_sequence: expectedSequence,
+          driver_id: 'driver-cli',
+          transition_id: transitionId,
+          limit: 1,
+        });
+        return response.result.claims as Array<Record<string, unknown>>;
+      };
+      const complete = async (
+        expectedSequence: number,
+        transitionId: string,
+        currentClaim: Record<string, unknown>,
+        evidenceKind: 'human' | 'command',
+      ) => execute('complete', {
+        ...scope,
+        expected_sequence: expectedSequence,
+        transition_id: transitionId,
+        claim: {
+          lease_id: currentClaim.lease_id,
+          activation_id: currentClaim.activation_id,
+          attempt_id: currentClaim.attempt_id,
+        },
+        result: { outcome: 'succeeded', evidence_refs: [{ kind: evidenceKind, ref: transitionId }] },
+      });
+
+      const approvalClaim = (await claim(0, 'claim-approval'))[0];
+      await complete(1, 'complete-approval', approvalClaim, 'human');
+      const analyzeClaim = (await claim(2, 'claim-analyze'))[0];
+      await complete(3, 'complete-analyze', analyzeClaim, 'command');
+      const firstBranchClaim = (await claim(4, 'claim-branch-a'))[0];
+      await complete(5, 'complete-branch-a', firstBranchClaim, 'command');
+      const secondBranchClaim = (await claim(6, 'claim-branch-b'))[0];
+      const joinActivationId = `${descriptor.run_id}:act:join-build:cli`;
+
+      await graphCommand([
+        'complete',
+        '--run-id', descriptor.run_id,
+        '--revision-id', descriptor.revision_id,
+        '--descriptor-hash', descriptor.descriptor_hash,
+        '--session-id', sessionId,
+        '--expected-sequence', '7',
+        '--transition-id', 'complete-branch-b-cli',
+        '--claim', JSON.stringify({
+          lease_id: secondBranchClaim.lease_id,
+          activation_id: secondBranchClaim.activation_id,
+          attempt_id: secondBranchClaim.attempt_id,
+        }),
+        '--result', '{"outcome":"succeeded","evidence_refs":[{"kind":"command","ref":"branch-b"}]}',
+        '--identities', JSON.stringify({ join_activation_id: joinActivationId }),
+      ], graphCommandService);
+
+      expect(process.exitCode).toBe(0);
+      expect(JSON.parse(captured.out[0])).toMatchObject({ ok: true, operation: 'complete' });
+      expect(store.read()!.projection.activations[joinActivationId]).toMatchObject({
+        activation_id: joinActivationId,
+        status: 'ready',
+      });
+    } finally {
+      process.chdir(originalCwd);
+      await rm(worktree, { recursive: true, force: true });
+    }
   });
 
   it('parses JSON object flags from a file path', async () => {

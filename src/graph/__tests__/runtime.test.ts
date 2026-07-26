@@ -2,8 +2,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ControlOwnerStore } from '../control-owner.js';
 import { sealGraphDescriptor } from '../descriptor.js';
 import { occCommitMutation, occReadCurrentState } from '../../lib/mode-state-io.js';
 import { graphCommandService } from '../runtime.js';
@@ -425,7 +426,7 @@ describe('graphCommandService runtime operations', () => {
   it('non-blocker: create is idempotent only when the descriptor hash matches', async () => {
     const sessionId = 'session-idempotent';
     const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-linear', goal: 'Original goal' }));
-    const { store } = useTempWorktree(sessionId);
+    const { worktree, store } = useTempWorktree(sessionId);
     // Seed an existing graph with the SAME run_id/revision_id but a DIFFERENT goal
     // (and therefore a different descriptor hash).
     const otherInput = linearDescriptor({ runId: descriptor.run_id, goal: 'A different goal for hash mismatch' });
@@ -445,6 +446,25 @@ describe('graphCommandService runtime operations', () => {
       },
       approval: { approved_at: '2026-07-21T00:00:00.000Z', evidence: { kind: 'human', ref: 'approve' } },
     }));
+    const controls = new ControlOwnerStore({ sessionId, worktreeRoot: worktree });
+    controls.reserveRoot({
+      mode: 'graph',
+      run_id: otherDescriptor.run_id,
+      nonce: 'nonce-idem',
+      reserved_at: '2026-07-21T00:00:00.000Z',
+      graph_revision: { revision_id: otherDescriptor.revision_id, revision_hash: otherDescriptor.descriptor_hash },
+    });
+    controls.promoteRoot({
+      mode: 'graph',
+      run_id: otherDescriptor.run_id,
+      nonce: 'nonce-idem',
+      promoted_at: '2026-07-21T00:00:00.000Z',
+      driver_lease: {
+        driver_instance_id: 'driver-idem',
+        lease_id: 'lease-idem',
+        expires_at: '2026-07-21T01:00:00.000Z',
+      },
+    });
 
     // create with a different hash must throw hash_mismatch, not silently return.
     await expect(exec('create', {
@@ -464,5 +484,126 @@ describe('graphCommandService runtime operations', () => {
       transition_id: 't-create-idem',
     }) as { run_id: string };
     expect(idempotent.run_id).toBe(otherDescriptor.run_id);
+  });
+
+  it('reserves the control root before publishing and leaves no graph when another root owns the session', async () => {
+    const sessionId = 'session-create-root-conflict';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-root-conflict' }));
+    const { worktree, store } = useTempWorktree(sessionId);
+    const controls = new ControlOwnerStore({ sessionId, worktreeRoot: worktree });
+    controls.reserveRoot({
+      mode: 'autopilot',
+      run_id: 'autopilot-owner',
+      nonce: 'autopilot-nonce',
+      reserved_at: '2026-07-21T00:00:00.000Z',
+    });
+
+    await expect(exec('create', {
+      goal: descriptor.goal,
+      descriptor,
+      session_id: sessionId,
+      driver_id: 'driver-create',
+      transition_id: 't-create-conflict',
+    })).rejects.toThrow(/root_conflict/i);
+
+    expect(store.read()).toBeNull();
+    expect(controls.read()?.root).toMatchObject({
+      mode: 'autopilot', run_id: 'autopilot-owner', nonce: 'autopilot-nonce', phase: 'reserved',
+    });
+  });
+
+  it('reuses only the exact pre-publish graph reservation, then approval promotes that reservation', async () => {
+    const sessionId = 'session-create-reservation-retry';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-reservation-retry' }));
+    const { worktree, store } = useTempWorktree(sessionId);
+    const controls = new ControlOwnerStore({ sessionId, worktreeRoot: worktree });
+    controls.reserveRoot({
+      mode: 'graph',
+      run_id: descriptor.run_id,
+      nonce: 'crash-before-publish-nonce',
+      reserved_at: '2026-07-21T00:00:00.000Z',
+      graph_revision: { revision_id: descriptor.revision_id, revision_hash: descriptor.descriptor_hash },
+    });
+
+    const created = await exec('create', {
+      goal: descriptor.goal,
+      descriptor,
+      session_id: sessionId,
+      driver_id: 'driver-create',
+      transition_id: 't-create-retry',
+    });
+    expect(created.control_nonce).toBe('crash-before-publish-nonce');
+    expect(store.read()).toMatchObject({ control_nonce: 'crash-before-publish-nonce', status: 'awaiting_approval' });
+    expect(controls.read()?.root).toMatchObject({ nonce: 'crash-before-publish-nonce', phase: 'reserved' });
+
+    await exec('approve', {
+      session_id: sessionId,
+      run_id: descriptor.run_id,
+      revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash,
+      transition_id: 't-approve-retried-create',
+      approval: {
+        approved_at: '2026-07-21T00:00:01.000Z',
+        evidence: { kind: 'human', ref: 'operator-approved' },
+        driver_id: 'driver-approve',
+      },
+    });
+
+    expect(controls.read()?.root).toMatchObject({ nonce: 'crash-before-publish-nonce', phase: 'active' });
+  });
+
+  it('rolls back only its own reservation when the initial durable publish fails', async () => {
+    const sessionId = 'session-create-publish-failure';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-publish-failure' }));
+    const { worktree, store } = useTempWorktree(sessionId);
+    const create = vi.spyOn(GraphStateStore.prototype, 'create').mockImplementationOnce(() => {
+      throw new Error('simulated initial publish failure');
+    });
+
+    try {
+      await expect(exec('create', {
+        goal: descriptor.goal,
+        descriptor,
+        session_id: sessionId,
+        driver_id: 'driver-create',
+        transition_id: 't-create-publish-failure',
+      })).rejects.toThrow(/simulated initial publish failure/);
+    } finally {
+      create.mockRestore();
+    }
+
+    expect(store.read()).toBeNull();
+    expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toBeNull();
+  });
+
+  it('returns the exact concurrent publish as an idempotent create success', async () => {
+    const sessionId = 'session-create-concurrent-idempotent';
+    const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-concurrent-idempotent' }));
+    const { store } = useTempWorktree(sessionId);
+    const originalCreate = GraphStateStore.prototype.create;
+    const create = vi.spyOn(GraphStateStore.prototype, 'create').mockImplementationOnce(function(state) {
+      originalCreate.call(this, state);
+      const raced = new Error('Graph state already exists for this session') as Error & { code: string };
+      raced.code = 'already_exists';
+      throw raced;
+    });
+
+    try {
+      const result = await exec('create', {
+        goal: descriptor.goal,
+        descriptor,
+        session_id: sessionId,
+        driver_id: 'driver-create',
+        transition_id: 't-create-concurrent-idempotent',
+      }) as { run_id: string };
+      expect(result.run_id).toBe(descriptor.run_id);
+    } finally {
+      create.mockRestore();
+    }
+
+    expect(store.read()).toMatchObject({ run_id: descriptor.run_id, status: 'awaiting_approval' });
+    expect(new ControlOwnerStore({ sessionId }).read()?.root).toMatchObject({
+      mode: 'graph', run_id: descriptor.run_id, phase: 'reserved',
+    });
   });
 });

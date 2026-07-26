@@ -639,6 +639,9 @@ describe('mode-state-io', () => {
       expect(emergencyMutateStateFileIf(path, (state) => state.run === 'one', (state) => ({ ...state, active: false }))).toBe(false);
       delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
       expect(recoverEmergencyStateFile(path)).toBe(true);
+      // Reconciliation sequences this already-published generation without
+      // routing its compact bytes through atomicWriteJsonSync.
+      expect(readFileSync(path, 'utf8')).toBe(JSON.stringify({ active: false, run: 'one' }));
       expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ active: false, run: 'one' });
       expect(existsSync(`${path}.emergency-journal.json`)).toBe(false);
     });

@@ -806,11 +806,12 @@ function occReadCurrent(filePath) {
 
 function occReadCanonicalSnapshot(filePath) {
   try {
-    const state = JSON.parse(readFileSync(filePath, 'utf8'));
-    return { state, fingerprint: JSON.stringify(state), ioError: false };
+    const raw = readFileSync(filePath, 'utf8');
+    const state = JSON.parse(raw);
+    return { state, contentFingerprint: stateDigest(raw), stateFingerprint: JSON.stringify(state), ioError: false };
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { state: null, fingerprint: 'absent', ioError: false };
-    return { state: null, fingerprint: '', ioError: true };
+    if (error && error.code === 'ENOENT') return { state: null, contentFingerprint: 'absent', stateFingerprint: 'absent', ioError: false };
+    return { state: null, contentFingerprint: '', stateFingerprint: '', ioError: true };
   }
 }
 
@@ -870,7 +871,16 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       parentState = canonical.state;
     } else {
       parentSeq = current.seq;
-      parentState = occStateFingerprint(current.state) === canonical.fingerprint ? current.state : canonical.state;
+      if (!options.skipCanonicalReconciliation && occStateFingerprint(current.state) !== canonical.stateFingerprint) {
+        const reconciled = occCommitMutation(
+          filePath,
+          () => ({ state: canonical.state, result: true }),
+          { assertHeld: options.assertHeld, suppressCanonicalRepublish: true, skipCanonicalReconciliation: true },
+        );
+        if (!reconciled) return false;
+        continue;
+      }
+      parentState = current.state;
     }
     let produced;
     produced = mutate(parentState, ownerToken);
@@ -932,7 +942,7 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       occCleanupOwn(dir, seq, ownerToken);
       return false;
     }
-    if (canonicalFence.fingerprint !== canonical.fingerprint) {
+    if (canonicalFence.contentFingerprint !== canonical.contentFingerprint) {
       occCleanupOwn(dir, seq, ownerToken);
       continue;
     }
@@ -956,11 +966,13 @@ export function occCommitMutation(filePath, mutate, options = {}) {
     // entry is now NOT the max, it remains a valid committed ancestor: leave it.
     occPruneOld(dir, seq);
     // Re-publish the canonical file so legacy readers see the latest state.
-    try {
-      atomicWriteFileSync(filePath, JSON.stringify(next, null, 2));
-    } catch {
-      // The journal IS the source of truth; a failed canonical re-publish is
-      // non-fatal (the committed entry already advances current). Return true.
+    if (!options.suppressCanonicalRepublish) {
+      try {
+        atomicWriteFileSync(filePath, JSON.stringify(next, null, 2));
+      } catch {
+        // The journal commit remains durable. A later writer reconciles the
+        // compatibility file before evaluating its mutation.
+      }
     }
     return true;
   }
@@ -971,10 +983,9 @@ export function occCommitMutation(filePath, mutate, options = {}) {
 export function occReadCurrentState(filePath) {
   const current = occReadCurrent(filePath);
   if (current.ioError) return null;
-  if (current.empty) {
-    try { return JSON.parse(readFileSync(filePath, 'utf8')); } catch { return null; }
-  }
-  return current.state;
+  if (!current.empty) return current.state;
+  const canonical = occReadCanonicalSnapshot(filePath);
+  return canonical.ioError ? null : canonical.state;
 }
 
 /** Cleans up only this owner token's stale INCOMPLETE entries (release race cure). */
