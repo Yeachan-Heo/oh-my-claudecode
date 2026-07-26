@@ -36,6 +36,44 @@ function writeSubagentTrackingState(tempDir, agents) {
     }, null, 2));
 }
 describe('persistent-mode skill-state stop integration (issue #1033)', () => {
+    it('tombstones a Graph workflow slot only after its durable state is paused', async () => {
+        const sessionId = 'session-graph-paused';
+        const tempDir = makeTempProject();
+        try {
+            const stateDir = join(tempDir, '.omc', 'state');
+            const sessionDir = join(stateDir, 'sessions', sessionId);
+            mkdirSync(sessionDir, { recursive: true });
+            const ledger = {
+                version: 2,
+                active_skills: {
+                    graph: {
+                        skill_name: 'graph',
+                        started_at: new Date().toISOString(),
+                        completed_at: null,
+                        session_id: sessionId,
+                        mode_state_path: 'graph-state.json',
+                        initialized_mode: 'graph',
+                        initialized_state_path: join(stateDir, 'skill-active-state.json'),
+                        initialized_session_state_path: join(sessionDir, 'skill-active-state.json'),
+                    },
+                },
+            };
+            writeFileSync(join(sessionDir, 'skill-active-state.json'), JSON.stringify(ledger));
+            writeFileSync(join(stateDir, 'skill-active-state.json'), JSON.stringify(ledger));
+            writeFileSync(join(sessionDir, 'graph-state.json'), JSON.stringify({
+                session_id: sessionId,
+                status: 'paused',
+            }));
+            await checkPersistentModes(sessionId, tempDir);
+            const sessionLedger = JSON.parse(readFileSync(join(sessionDir, 'skill-active-state.json'), 'utf8'));
+            const rootLedger = JSON.parse(readFileSync(join(stateDir, 'skill-active-state.json'), 'utf8'));
+            expect(sessionLedger.active_skills.graph.completed_at).toEqual(expect.any(String));
+            expect(rootLedger.active_skills.graph.completed_at).toBe(sessionLedger.active_skills.graph.completed_at);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
     it('blocks stop when a skill is actively executing', async () => {
         const sessionId = 'session-skill-1033-block';
         const tempDir = makeTempProject();

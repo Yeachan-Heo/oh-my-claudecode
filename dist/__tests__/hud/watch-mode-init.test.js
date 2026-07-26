@@ -49,6 +49,7 @@ describe('HUD watch mode initialization', () => {
     let readRalphStateForHud;
     let readUltraworkStateForHud;
     let readAutopilotStateForHud;
+    let readGraphStateForHud;
     let getUsage;
     let render;
     let consoleLogSpy;
@@ -61,6 +62,7 @@ describe('HUD watch mode initialization', () => {
         readRalphStateForHud = vi.fn(() => null);
         readUltraworkStateForHud = vi.fn(() => null);
         readAutopilotStateForHud = vi.fn(() => null);
+        readGraphStateForHud = vi.fn(() => null);
         getUsage = vi.fn(async () => overrides.getUsageResult ?? null);
         render = vi.fn(async () => '[HUD] ok');
         vi.doMock('../../hud/stdin.js', () => ({
@@ -110,6 +112,7 @@ describe('HUD watch mode initialization', () => {
             readUltraworkStateForHud,
             readPrdStateForHud: vi.fn(() => null),
             readAutopilotStateForHud,
+            readGraphStateForHud,
         }));
         vi.doMock('../../hud/usage-api.js', () => ({
             getUsage,
@@ -186,6 +189,19 @@ describe('HUD watch mode initialization', () => {
         expect(readRalphStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
         expect(readUltraworkStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
         expect(readAutopilotStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
+    });
+    it('still calls getUsage when readGraphStateForHud throws (watch-mode init must not abort)', async () => {
+        // rateLimits must be enabled so getUsage() is on the critical render path.
+        const hud = await importHudModule({ config: makeConfig(true) });
+        readGraphStateForHud.mockImplementation(() => {
+            throw new Error('graph state read exploded');
+        });
+        await hud.main(true, false);
+        // The graph reader throwing must NOT abort the init flow: getUsage is the
+        // critical path that must still run, and render must still produce output.
+        expect(readGraphStateForHud).toHaveBeenCalledTimes(1);
+        expect(getUsage).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
     });
     it('merges stdin generic rate limits over usage API data when available', async () => {
         const hud = await importHudModule({

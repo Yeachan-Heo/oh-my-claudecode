@@ -44,6 +44,17 @@ describe('trace-tools', () => {
             expect(text).toContain('TOOL');
             expect(text).toContain('Read');
         });
+        it('formats untracked synthetic agent stops distinctly', async () => {
+            appendReplayEvent(testDir, 'untracked-sess', {
+                agent: 'native-', event: 'agent_stop', agent_type: 'untracked-native-fork', success: true,
+                synthetic: true, telemetry_status: 'unmatched_stop', reason: 'SubagentStop arrived without a matching SubagentStart',
+            });
+            const result = await traceTimelineTool.handler({ sessionId: 'untracked-sess', workingDirectory: testDir });
+            const text = result.content[0].text;
+            expect(text).toContain('UNTRACKED_STOP');
+            expect(text).toContain('untracked-native-fork');
+            expect(text).not.toContain('completed (0.0s)');
+        });
         it('should format flow trace events in timeline', async () => {
             appendReplayEvent(testDir, 'flow-sess', { agent: 'system', event: 'hook_fire', hook: 'keyword-detector', hook_event: 'UserPromptSubmit' });
             appendReplayEvent(testDir, 'flow-sess', { agent: 'system', event: 'keyword_detected', keyword: 'ultrawork' });
@@ -103,6 +114,16 @@ describe('trace-tools', () => {
             expect(text).toContain('Total Events');
             expect(text).toContain('Agents');
             expect(text).toContain('1 spawned');
+        });
+        it('counts untracked synthetic agent stops separately from completions', async () => {
+            appendReplayEvent(testDir, 'untracked-sum', {
+                agent: 'native-', event: 'agent_stop', agent_type: 'untracked-native-fork', success: true,
+                synthetic: true, telemetry_status: 'unmatched_stop',
+            });
+            const result = await traceSummaryTool.handler({ sessionId: 'untracked-sum', workingDirectory: testDir });
+            const text = result.content[0].text;
+            expect(text).toContain('0 spawned, 0 completed, 0 failed, 1 untracked stop(s)');
+            expect(text).toContain('untracked-native-fork agent stop was untracked');
         });
         it('should show flow trace statistics', async () => {
             appendReplayEvent(testDir, 'flow-sum', { agent: 'system', event: 'hook_fire', hook: 'test' });

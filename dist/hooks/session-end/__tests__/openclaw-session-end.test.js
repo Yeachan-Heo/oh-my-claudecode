@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-vi.mock("../callbacks.js", () => ({
-    triggerStopCallbacks: vi.fn(async () => undefined),
-}));
+vi.mock('../callbacks.js', async () => {
+    const actual = await vi.importActual('../callbacks.js');
+    return {
+        ...actual,
+        triggerStopCallbacks: vi.fn(async () => undefined),
+    };
+});
 vi.mock("../../../notifications/index.js", () => ({
     notify: vi.fn(async () => undefined),
 }));
@@ -27,9 +31,19 @@ vi.mock("../../../tools/python-repl/bridge-manager.js", () => ({
 vi.mock("../../../openclaw/index.js", () => ({
     wakeOpenClaw: vi.fn().mockResolvedValue({ gateway: "test", success: true }),
 }));
-import { _openclaw, processHook } from "../../bridge.js";
-import { processSessionEnd } from "../index.js";
-import { wakeOpenClaw } from "../../../openclaw/index.js";
+const workerMocks = vi.hoisted(() => ({
+    processSessionEndWorker: vi.fn(),
+    spawnSessionEndWorker: vi.fn(),
+}));
+vi.mock('../worker.js', () => workerMocks);
+vi.mock('../../../lib/worktree-paths.js', async () => {
+    const actual = await vi.importActual('../../../lib/worktree-paths.js');
+    return { ...actual, resolveToWorktreeRoot: vi.fn((directory) => directory ?? process.cwd()) };
+});
+import { processHook } from '../../bridge.js';
+import { processSessionEnd, runSessionEndOpenClaw } from '../index.js';
+import { readSessionEndJob } from '../cleanup-manifest.js';
+import { wakeOpenClaw } from '../../../openclaw/index.js';
 describe("session-end OpenClaw behavior (issue #1456)", () => {
     let tmpDir;
     let transcriptPath;
@@ -48,65 +62,73 @@ describe("session-end OpenClaw behavior (issue #1456)", () => {
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
     });
-    it("wakes OpenClaw from the bridge during session-end when OMC_OPENCLAW=1", async () => {
-        process.env.OMC_OPENCLAW = "1";
-        const wakeSpy = vi.spyOn(_openclaw, "wake");
-        await processHook("session-end", {
-            session_id: "session-claw-1",
+    it('defers an enabled OpenClaw wake from the bridge and executes it in the worker adapter', async () => {
+        process.env.OMC_OPENCLAW = '1';
+        await processHook('session-end', {
+            session_id: 'session-claw-1',
             transcript_path: transcriptPath,
             cwd: tmpDir,
-            permission_mode: "default",
-            hook_event_name: "SessionEnd",
-            reason: "clear",
+            permission_mode: 'default',
+            hook_event_name: 'SessionEnd',
+            reason: 'clear',
         });
-        expect(wakeSpy).toHaveBeenCalledWith("session-end", expect.objectContaining({
-            sessionId: "session-claw-1",
-            projectPath: tmpDir,
-            reason: "clear",
+        const manifest = readSessionEndJob(tmpDir, 'session-claw-1');
+        expect(manifest?.actions.openclaw).toEqual(expect.objectContaining({
+            status: 'pending',
+            payload: expect.objectContaining({ transcriptPath, reason: 'clear' }),
         }));
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        expect(wakeOpenClaw).toHaveBeenCalledWith("session-end", expect.objectContaining({
-            sessionId: "session-claw-1",
+        expect(manifest?.actions.callback.payload).toEqual(expect.objectContaining({
+            input: expect.objectContaining({ reason: 'clear', transcript_path: transcriptPath, cwd: tmpDir }),
+            metrics: expect.objectContaining({ session_id: 'session-claw-1', reason: 'clear' }),
+        }));
+        expect(workerMocks.spawnSessionEndWorker).toHaveBeenCalledWith({
+            directory: tmpDir,
+            sessionId: 'session-claw-1',
+        });
+        expect(wakeOpenClaw).not.toHaveBeenCalled();
+        await runSessionEndOpenClaw(tmpDir, 'session-claw-1');
+        expect(wakeOpenClaw).toHaveBeenCalledWith('session-end', expect.objectContaining({
+            sessionId: 'session-claw-1',
             projectPath: tmpDir,
-            reason: "clear",
         }));
     });
-    it("does not call wakeOpenClaw directly when processSessionEnd is invoked without the bridge", async () => {
-        process.env.OMC_OPENCLAW = "1";
+    it('does not call wakeOpenClaw directly when processSessionEnd is invoked without the bridge', async () => {
+        process.env.OMC_OPENCLAW = '1';
         await processSessionEnd({
-            session_id: "session-claw-2",
+            session_id: 'session-claw-2',
             transcript_path: transcriptPath,
             cwd: tmpDir,
-            permission_mode: "default",
-            hook_event_name: "SessionEnd",
-            reason: "clear",
+            permission_mode: 'default',
+            hook_event_name: 'SessionEnd',
+            reason: 'clear',
         });
         expect(wakeOpenClaw).not.toHaveBeenCalled();
     });
-    it("does not call wakeOpenClaw when OMC_OPENCLAW is not set", async () => {
+    it('does not wake OpenClaw from the worker adapter when OMC_OPENCLAW is not set', async () => {
         delete process.env.OMC_OPENCLAW;
-        await processHook("session-end", {
-            session_id: "session-claw-3",
+        await processSessionEnd({
+            session_id: 'session-claw-3',
             transcript_path: transcriptPath,
             cwd: tmpDir,
-            permission_mode: "default",
-            hook_event_name: "SessionEnd",
-            reason: "clear",
+            permission_mode: 'default',
+            hook_event_name: 'SessionEnd',
+            reason: 'clear',
         });
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await runSessionEndOpenClaw(tmpDir, 'session-claw-3');
         expect(wakeOpenClaw).not.toHaveBeenCalled();
     });
-    it("does not throw even if wakeOpenClaw mock is configured to reject", async () => {
-        process.env.OMC_OPENCLAW = "1";
-        vi.mocked(wakeOpenClaw).mockRejectedValueOnce(new Error("gateway down"));
-        await expect(processHook("session-end", {
-            session_id: "session-claw-4",
+    it('contains a rejected worker wake without failing session-end processing', async () => {
+        process.env.OMC_OPENCLAW = '1';
+        vi.mocked(wakeOpenClaw).mockRejectedValueOnce(new Error('gateway down'));
+        await processSessionEnd({
+            session_id: 'session-claw-4',
             transcript_path: transcriptPath,
             cwd: tmpDir,
-            permission_mode: "default",
-            hook_event_name: "SessionEnd",
-            reason: "clear",
-        })).resolves.toBeDefined();
+            permission_mode: 'default',
+            hook_event_name: 'SessionEnd',
+            reason: 'clear',
+        });
+        await expect(runSessionEndOpenClaw(tmpDir, 'session-claw-4')).resolves.toBeUndefined();
     });
 });
 //# sourceMappingURL=openclaw-session-end.test.js.map

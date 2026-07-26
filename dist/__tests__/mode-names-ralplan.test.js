@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { MODE_NAMES, ALL_MODE_NAMES, MODE_STATE_FILE_MAP, SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES, } from '../lib/mode-names.js';
 describe('mode-names ralplan', () => {
+    it('registers Graph with its canonical durable state file', () => {
+        expect(MODE_NAMES.GRAPH).toBe('graph');
+        expect(ALL_MODE_NAMES).toContain('graph');
+        expect(MODE_STATE_FILE_MAP.graph).toBe('graph-state.json');
+    });
+    it('does not register Graph for generic SessionEnd cleanup', () => {
+        expect(SESSION_END_MODE_STATE_FILES.some(entry => entry.mode === 'graph')).toBe(false);
+    });
     it('MODE_NAMES should include AUTORESEARCH', () => {
         expect(MODE_NAMES.AUTORESEARCH).toBe('autoresearch');
     });

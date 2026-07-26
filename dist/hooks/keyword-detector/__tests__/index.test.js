@@ -283,6 +283,27 @@ Final draft.`);
                 const result = detectKeywordsWithType('ralph 是什么？怎么用？');
                 expect(result).toEqual([]);
             });
+            it('should NOT detect informational Thai prompts with English mode names', () => {
+                expect(detectKeywordsWithType('ทำไม autopilot มันชอบทำงานเองนะ')).toEqual([]);
+                expect(detectKeywordsWithType('ผมอยากเพิ่ม rule ให้ถามกลับเหมือน skill deep interview แต่ระบบเดิมก็ทำได้อยู่แล้วถูกมั้ย')).toEqual([]);
+                expect(detectKeywordsWithType('autopilot คืออะไร ใช้งานยังไง')).toEqual([]);
+            });
+            it.each([
+                'autopilot: build me a todo app',
+                'autopilot: ทำเว็บเหมือน Trello',
+                'autopilot: แก้บั๊กเกี่ยวกับ auth',
+            ])('should detect explicit Thai-adjacent autopilot command "%s"', (prompt) => {
+                expect(detectKeywordsWithType(prompt).find((r) => r.type === 'autopilot')).toBeDefined();
+            });
+            it.each([
+                'build me a website เหมือน Airbnb',
+                'I want a dashboard เกี่ยวกับ sales',
+            ])('should detect Thai-adjacent autopilot creation alias "%s"', (prompt) => {
+                expect(detectKeywordsWithType(prompt).find((r) => r.type === 'autopilot')).toBeDefined();
+            });
+            it('should NOT detect colon-prefixed autopilot heading help question', () => {
+                expect(detectKeywordsWithType('autopilot: what is it and how do I use it?')).toEqual([]);
+            });
             it('Korean informational prompt does not trigger keyword', () => {
                 // "알려줘" (tell me about) is informational
                 expect(detectKeywordsWithType('오토파일럿 기능 알려줘')).toHaveLength(0);
@@ -378,10 +399,10 @@ Final draft.`);
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
                 expect(autopilotMatch).toBeDefined();
             });
-            it('should NOT detect "build me" phrase', () => {
-                const result = detectKeywordsWithType('build me a web app');
+            it('should detect documented "build me" autopilot alias', () => {
+                const result = detectKeywordsWithType('build me a website');
                 const autopilotMatch = result.find((r) => r.type === 'autopilot');
-                expect(autopilotMatch).toBeUndefined();
+                expect(autopilotMatch).toBeDefined();
             });
             it('should NOT detect "autonomous" keyword', () => {
                 const result = detectKeywordsWithType('Run in autonomous mode');
@@ -2174,6 +2195,26 @@ This article argues that fake popularity signals damage trust in open source.`;
     // all seed the same canonical state (T3 implementation required)
     // -------------------------------------------------------------------------
     describe('unified prefix detector: /omc: and /oh-my-claudecode: forms (spec g)', () => {
+        it.each([
+            '/graph migrate payments',
+            '/omc:graph migrate payments',
+            '/oh-my-claudecode:graph migrate payments',
+        ])('detects explicit Graph workflow invocation %s', (prompt) => {
+            const result = detectKeywordsWithType(prompt);
+            expect(result.find((entry) => entry.type === 'graph')).toBeDefined();
+        });
+        it.each([
+            'graph',
+            'please build a graph for this task',
+            'the graph keeps the project overview',
+            'run `/graph migrate payments` later',
+            '```\n/graph migrate payments\n```',
+            '/graph-state/runs.json',
+            '/graphical render',
+        ])('does not activate Graph from non-command text %s', (prompt) => {
+            const result = detectKeywordsWithType(prompt);
+            expect(result.find((entry) => entry.type === 'graph')).toBeUndefined();
+        });
         it('/omc:ralph fix auth detects ralph', () => {
             const result = detectKeywordsWithType('/omc:ralph fix auth');
             expect(result.find((r) => r.type === 'ralph')).toBeDefined();
@@ -2220,6 +2261,18 @@ This article argues that fake popularity signals damage trust in open source.`;
     // parseExplicitWorkflowSlashInvocation — unit tests (spec g)
     // -------------------------------------------------------------------------
     describe('parseExplicitWorkflowSlashInvocation — parser unit tests (spec g)', () => {
+        it('normalizes all Graph slash prefixes and preserves arguments', () => {
+            for (const prompt of [
+                '/graph migrate payments',
+                '/omc:graph migrate payments',
+                '/oh-my-claudecode:graph migrate payments',
+            ]) {
+                expect(parseExplicitWorkflowSlashInvocation(prompt)).toMatchObject({
+                    skill: 'graph',
+                    args: 'migrate payments',
+                });
+            }
+        });
         it('returns null for empty string', () => {
             expect(parseExplicitWorkflowSlashInvocation('')).toBeNull();
         });

@@ -95,6 +95,7 @@ describe('installer MCP config ownership (issue #1802)', () => {
                 PostToolUse: [],
                 PostToolUseFailure: [],
                 PreToolUse: [],
+                SessionEnd: [],
                 SessionStart: [],
                 Stop: [],
                 UserPromptSubmit: [],

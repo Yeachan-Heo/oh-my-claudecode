@@ -12,6 +12,7 @@ import { classifyTaskSize, isHeavyMode, } from '../task-size-detector/index.js';
  */
 const KEYWORD_PATTERNS = {
     cancel: /\b(cancelomc|stopomc)\b/i,
+    graph: /(?!x)x/,
     ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
     autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
     ultrawork: /\b(ultrawork|ulw)\b|(울트라워크)|(ウルトラワーク)/i,
@@ -56,7 +57,7 @@ const KEYWORD_SKIP_PREDICATES = {
  * Priority order for keyword detection
  */
 const KEYWORD_PRIORITY = [
-    'cancel', 'ralph', 'autopilot', 'team', 'ultrawork',
+    'cancel', 'graph', 'ralph', 'autopilot', 'team', 'ultrawork',
     'ccg', 'ralplan', 'tdd', 'code-review', 'security-review',
     'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
@@ -68,6 +69,7 @@ const KEYWORD_PRIORITY = [
  */
 const CANONICAL_WORKFLOW_SLASH_SKILLS = [
     'autopilot',
+    'graph',
     'ralph',
     'team',
     'ultrawork',
@@ -85,6 +87,7 @@ const CANONICAL_WORKFLOW_SLASH_SKILLS = [
  */
 const SLASH_SKILL_TO_KEYWORD_TYPE = {
     autopilot: 'autopilot',
+    graph: 'graph',
     ralph: 'ralph',
     team: 'team',
     ultrawork: 'ultrawork',

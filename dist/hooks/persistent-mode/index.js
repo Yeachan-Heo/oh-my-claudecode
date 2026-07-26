@@ -37,7 +37,7 @@ const STALE_STATE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const PENDING_ASYNC_STATE_STALE_MS = 24 * 60 * 60 * 1000;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_MAX = 3;
 const OVERSIZE_TOOL_RESULT_REDIRECT_STOP_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'ralph', 'ralplan']);
+const TERMINAL_WORKFLOW_SLOT_MODES = new Set(['autopilot', 'graph', 'ralph', 'ralplan']);
 const TERMINAL_WORKFLOW_PHASES = new Set([
     'complete',
     'completed',
@@ -152,7 +152,7 @@ function isSessionCancelInProgress(directory, sessionId) {
         cancelSignalPath = join(getOmcRoot(directory), 'state', 'cancel-signal-state.json');
     }
     const validateSignal = (target) => {
-        const locked = withStateFileMutationLock(cancelSignalPath, () => {
+        const locked = withStateFileMutationLock(cancelSignalPath, (assertHeld) => {
             let raw;
             try {
                 const parsed = JSON.parse(readFileSync(cancelSignalPath, 'utf-8'));
@@ -167,8 +167,10 @@ function isSessionCancelInProgress(directory, sessionId) {
             const requestedAt = typeof raw.requested_at === 'string' ? new Date(raw.requested_at).getTime() : NaN;
             const expiresAt = typeof raw.expires_at === 'string' ? new Date(raw.expires_at).getTime() : NaN;
             if (target) {
-                if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath))
+                if (Number.isFinite(expiresAt) && expiresAt <= now && existsSync(cancelSignalPath)) {
+                    assertHeld();
                     unlinkSync(cancelSignalPath);
+                }
                 return isAuthenticatedAutopilotCancelSignal(raw, target);
             }
             // A requested-at-only signal belongs to Ralph/Ultrawork. It must never be
@@ -188,8 +190,10 @@ function isSessionCancelInProgress(directory, sessionId) {
                 effectiveExpiry <= requestedAt ||
                 effectiveExpiry - requestedAt > CANCEL_SIGNAL_TTL_MS ||
                 effectiveExpiry <= now) {
-                if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath))
+                if (Number.isFinite(effectiveExpiry) && effectiveExpiry <= now && existsSync(cancelSignalPath)) {
+                    assertHeld();
                     unlinkSync(cancelSignalPath);
+                }
                 return false;
             }
             return true;
@@ -339,9 +343,12 @@ function isTerminalWorkflowModeState(state) {
     const phase = normalizeWorkflowTerminalPhase(state);
     return Boolean(phase && TERMINAL_WORKFLOW_PHASES.has(phase));
 }
+function isGraphDurablyStopped(state) {
+    return state?.status === 'paused' || isTerminalWorkflowModeState(state);
+}
 async function reconcileTerminalWorkflowSlots(workingDir, sessionId) {
     try {
-        const { readSkillActiveStateNormalized, pruneExpiredWorkflowSkillTombstones, markWorkflowSkillCompleted, writeSkillActiveStateCopies, } = await import('../skill-state/index.js');
+        const { readSkillActiveStateNormalized, pruneExpiredWorkflowSkillTombstones, markDurableWorkflowSkillCompleted, markWorkflowSkillCompleted, writeSkillActiveStateCopies, } = await import('../skill-state/index.js');
         const original = readSkillActiveStateNormalized(workingDir, sessionId);
         let current = pruneExpiredWorkflowSkillTombstones(original);
         let changed = current !== original;
@@ -350,10 +357,17 @@ async function reconcileTerminalWorkflowSlots(workingDir, sessionId) {
                 continue;
             }
             const modeState = readModeState(slotName, workingDir, sessionId);
-            if (!isTerminalWorkflowModeState(modeState)) {
+            if (slotName === 'graph'
+                ? !isGraphDurablyStopped(modeState)
+                : !isTerminalWorkflowModeState(modeState)) {
                 continue;
             }
-            current = markWorkflowSkillCompleted(current, slotName);
+            // Graph has durable lifecycle authority. Its generic Skill completion
+            // path deliberately cannot tombstone the slot; only this observation of
+            // a paused or terminal graph-state may do so.
+            current = slotName === 'graph'
+                ? markDurableWorkflowSkillCompleted(current, slotName)
+                : markWorkflowSkillCompleted(current, slotName);
             changed = true;
         }
         if (changed) {

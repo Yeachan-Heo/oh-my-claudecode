@@ -9,6 +9,7 @@
 export declare const MODE_NAMES: {
     readonly AUTOPILOT: "autopilot";
     readonly AUTORESEARCH: "autoresearch";
+    readonly GRAPH: "graph";
     readonly TEAM: "team";
     readonly RALPH: "ralph";
     readonly ULTRAWORK: "ultrawork";

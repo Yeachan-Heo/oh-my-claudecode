@@ -57,7 +57,7 @@ import {
   isModeActive,
   getActiveModes,
   getAllModeStatuses,
-  clearModeState,
+  clearModeStateDetailed,
   getStateFilePath,
   MODE_CONFIGS,
   getActiveSessionsForMode,
@@ -2349,7 +2349,7 @@ export const stateClearTool: ToolDefinition<{
 
         if (MODE_CONFIGS[mode as ExecutionMode]) {
           const expectedDirectState = directCandidate?.state;
-          const registryClearResult = clearModeState(
+          const registryClearResult = clearModeStateDetailed(
             mode as ExecutionMode,
             root,
             sessionId,
@@ -2471,7 +2471,7 @@ export const stateClearTool: ToolDefinition<{
                   mode,
                   ownerDirectCandidate,
                 );
-                const ownerClearResult = clearModeState(
+                const ownerClearResult = clearModeStateDetailed(
                   mode as ExecutionMode,
                   root,
                   ownerSessionId,
@@ -2954,7 +2954,7 @@ export const stateClearTool: ToolDefinition<{
         );
         const skippedCanonicalPaths = new Set<string>();
         if (primaryCandidate) {
-          const clearResult = clearModeState(
+          const clearResult = clearModeStateDetailed(
             mode as ExecutionMode,
             root,
             undefined,

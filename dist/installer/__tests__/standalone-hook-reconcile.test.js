@@ -19,6 +19,7 @@ function writePluginFile(path, content) {
 function writeCompletePluginPayload(root) {
     writePluginFile(join(root, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
     writePluginFile(join(root, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+    writePluginFile(join(root, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("CLAUDE.md coordinator");\n');
     writePluginFile(join(root, 'hooks', 'hooks.json'), JSON.stringify({
         hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node test.mjs' }] }] },
     }));
@@ -30,6 +31,7 @@ function writeCompletePluginPayload(root) {
         skills: ['./skills/plan/'],
     }, null, 2));
     writePluginFile(join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }, null, 2));
+    writePluginFile(join(root, 'docs', 'CLAUDE.md'), readFileSync(join(process.cwd(), 'docs', 'CLAUDE.md'), 'utf-8'));
 }
 function shippedStandaloneHookPayload(filename, location) {
     if (location === 'hooks') {
@@ -95,6 +97,7 @@ describe('install() standalone hook reconciliation', () => {
         expect(result.hooksConfigured).toBe(true);
         expect(writtenSettings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command).toBe(`node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`);
         expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(`node "${join(testClaudeDir, 'hooks', 'session-start.mjs').replace(/\\/g, '/')}"`);
+        expect(writtenSettings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command).toBe(`node "${join(testClaudeDir, 'hooks', 'session-end.mjs').replace(/\\/g, '/')}"`);
         expect(writtenSettings.statusLine?.command).toContain(`${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
         expect(writtenSettings.statusLine?.command).toContain('omc-hud-cache.sh');
         expect(readFileSync(join(testClaudeDir, 'hud', 'omc-hud-cache.sh'), 'utf-8')).toContain('HUD cached statusLine launcher');
@@ -103,6 +106,8 @@ describe('install() standalone hook reconciliation', () => {
         expect(readFileSync(join(testClaudeDir, 'hooks', 'lib', 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');
         expect(readFileSync(join(testClaudeDir, 'hooks', 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
         expect(readFileSync(join(testClaudeDir, 'hooks', 'pre-tool-use.mjs'), 'utf-8')).toContain('PreToolUse');
+        expect(readFileSync(join(testClaudeDir, 'hooks', 'session-end.mjs'), 'utf-8')).toContain('graph-session-settlement.mjs');
+        expect(readFileSync(join(testClaudeDir, 'hooks', 'lib', 'graph-session-settlement.mjs'), 'utf-8')).toContain('settle-session');
         expect(readFileSync(join(testClaudeDir, 'hooks', 'code-simplifier.mjs'), 'utf-8')).toContain('Code Simplifier');
     });
     it('mirrors the complete standalone templates/hooks/lib payload', async () => {
@@ -126,6 +131,24 @@ describe('install() standalone hook reconciliation', () => {
             rmSync(futureHelperPath, { force: true });
         }
     });
+    it('repairs stale partial standalone hooks/lib payloads before hook entrypoints are refreshed', async () => {
+        const hooksDir = join(testClaudeDir, 'hooks');
+        const hooksLibDir = join(hooksDir, 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        writeFileSync(join(hooksLibDir, 'config-dir.mjs'), 'export function getClaudeConfigDir() { return "/stale"; }\n');
+        writeFileSync(join(hooksDir, 'keyword-detector.mjs'), 'import "./lib/stdin.mjs";\n');
+        const { install } = await loadInstaller();
+        const result = install({
+            force: true,
+            skipClaudeCheck: true,
+        });
+        expect(result.success).toBe(true);
+        for (const filename of ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs']) {
+            expect(existsSync(join(hooksLibDir, filename)), filename).toBe(true);
+        }
+        expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');
+        expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).not.toContain('/stale');
+    });
     it('installs standalone hooks with all runtime helper imports', async () => {
         const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-hook-project-'));
         try {
@@ -142,6 +165,10 @@ describe('install() standalone hook reconciliation', () => {
                 {
                     file: 'session-start.mjs',
                     input: { hook_event_name: 'SessionStart', session_id: 'ci-upgrade-test', cwd: projectDir },
+                },
+                {
+                    file: 'session-end.mjs',
+                    input: { hook_event_name: 'SessionEnd', session_id: 'ci-upgrade-test', cwd: projectDir },
                 },
                 {
                     file: 'keyword-detector.mjs',
@@ -219,7 +246,7 @@ describe('install() standalone hook reconciliation', () => {
     it('removes legacy OMC settings hooks in plugin mode without re-injecting them', async () => {
         const settingsPath = join(testClaudeDir, 'settings.json');
         const pluginRoot = join(testClaudeDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.1.5');
-        mkdirSync(pluginRoot, { recursive: true });
+        writeCompletePluginPayload(pluginRoot);
         mkdirSync(testClaudeDir, { recursive: true });
         writeFileSync(settingsPath, JSON.stringify({
             hooks: {
@@ -256,6 +283,17 @@ describe('install() standalone hook reconciliation', () => {
         expect(commands).toEqual(['node $HOME/.claude/hooks/other-plugin.mjs']);
         expect(commands).not.toContain(`node "${join(testClaudeDir, 'hooks', 'keyword-detector.mjs').replace(/\\/g, '/')}"`);
         expect(writtenSettings.statusLine?.command).toContain(`${join(testClaudeDir, 'hud', 'omc-hud.mjs').replace(/\\/g, '/')}`);
+    });
+    it('reconciles the workflow profile runtime helper before persistent-mode is used', async () => {
+        const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        writeFileSync(join(hooksLibDir, 'workflow-profile-runtime.mjs'), 'export const stale = true;\n');
+        const { install } = await loadInstaller();
+        const result = install({ force: true, skipClaudeCheck: true });
+        const shipped = shippedStandaloneHookPayload('workflow-profile-runtime.mjs', 'hooks/lib');
+        expect(result.success).toBe(true);
+        expect(readFileSync(join(hooksLibDir, 'workflow-profile-runtime.mjs'), 'utf-8')).toBe(shipped);
+        expect(readFileSync(join(testClaudeDir, 'hooks', 'persistent-mode.mjs'), 'utf-8')).toContain('workflow-profile-runtime.mjs');
     });
 });
 // ── Plugin-provided hooks: duplicate prevention (#2252) ─────────────────────
@@ -381,6 +419,7 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
         const legacyFiles = [
             'keyword-detector.mjs',
             'session-start.mjs',
+            'session-end.mjs',
             'pre-tool-use.mjs',
             'post-tool-use.mjs',
             'post-tool-use-failure.mjs',
@@ -410,6 +449,84 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
         expect(readFileSync(join(hooksDir, 'notify-mac.sh'), 'utf-8')).toBe('user hook');
         expect(readFileSync(join(hooksLibDir, 'user-helper.mjs'), 'utf-8')).toBe('user helper');
         expect(readFileSync(join(hooksDir, 'attention', 'notify.mjs'), 'utf-8')).toBe('user nested hook');
+    });
+    it('preserves helpers when a default-format standalone OMC hook remains active in plugin mode', async () => {
+        setupPluginWithHooks();
+        const hooksDir = join(testClaudeDir, 'hooks');
+        const hooksLibDir = join(hooksDir, 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        for (const filename of ['persistent-mode.mjs', 'keyword-detector.mjs']) {
+            writeFileSync(join(hooksDir, filename), shippedStandaloneHookPayload(filename, 'hooks'));
+        }
+        for (const filename of ['atomic-write.mjs', 'config-dir.mjs', 'config-dir.sh', 'model-routing-override-message.mjs', 'state-root.mjs', 'stdin.mjs']) {
+            writeFileSync(join(hooksLibDir, filename), shippedStandaloneHookPayload(filename, 'hooks/lib'));
+        }
+        writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+            enabledPlugins: { 'oh-my-claudecode': true },
+            hooks: {
+                Stop: [
+                    {
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"',
+                            },
+                            {
+                                type: 'command',
+                                command: 'node $HOME/.claude/hooks/user-stop-hook.mjs',
+                            },
+                        ],
+                    },
+                ],
+            },
+        }, null, 2));
+        const { install } = await loadInstaller();
+        const result = install({ force: true, skipClaudeCheck: true });
+        const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8'));
+        const commands = writtenSettings.hooks?.Stop?.[0]?.hooks.map(hook => hook.command) ?? [];
+        expect(result.success).toBe(true);
+        expect(commands).toContain('node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.mjs"');
+        expect(commands).toContain('node $HOME/.claude/hooks/user-stop-hook.mjs');
+        expect(existsSync(join(hooksDir, 'persistent-mode.mjs'))).toBe(true);
+        expect(existsSync(join(hooksDir, 'keyword-detector.mjs'))).toBe(false);
+        expect(existsSync(join(hooksLibDir, 'config-dir.mjs'))).toBe(true);
+        expect(existsSync(join(hooksLibDir, 'state-root.mjs'))).toBe(true);
+        expect(existsSync(join(hooksLibDir, 'model-routing-override-message.mjs'))).toBe(true);
+    });
+    it('removes default-format standalone OMC hook entries before plugin stale helper pruning', async () => {
+        setupPluginWithHooks();
+        const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        writeFileSync(join(hooksLibDir, 'config-dir.mjs'), shippedStandaloneHookPayload('config-dir.mjs', 'hooks/lib'));
+        writeFileSync(join(hooksLibDir, 'state-root.mjs'), shippedStandaloneHookPayload('state-root.mjs', 'hooks/lib'));
+        writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+            enabledPlugins: { 'oh-my-claudecode': true },
+            hooks: {
+                UserPromptSubmit: [
+                    {
+                        hooks: [{
+                                type: 'command',
+                                command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/keyword-detector.mjs"',
+                            }],
+                    },
+                ],
+                Stop: [
+                    {
+                        hooks: [{
+                                type: 'command',
+                                command: 'node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/code-simplifier.mjs"',
+                            }],
+                    },
+                ],
+            },
+        }, null, 2));
+        const { install } = await loadInstaller();
+        const result = install({ force: true, skipClaudeCheck: true });
+        const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8'));
+        expect(result.success).toBe(true);
+        expect(writtenSettings.hooks).toBeUndefined();
+        expect(existsSync(join(hooksLibDir, 'config-dir.mjs'))).toBe(false);
+        expect(existsSync(join(hooksLibDir, 'state-root.mjs'))).toBe(false);
     });
     it('preserves same-basename non-OMC hook files while pruning shipped OMC payloads', async () => {
         setupPluginWithHooks();

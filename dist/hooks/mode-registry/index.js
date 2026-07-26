@@ -9,7 +9,7 @@
  * All modes store state in `.omc/state/` subdirectory for consistency.
  */
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, rmdirSync, rmSync, } from "fs";
-import { canClearStateForSession, clearStateFileLockedIf, writeStateFileLocked } from "../../lib/mode-state-io.js";
+import { canClearStateForSession, clearStateFileLockedIf, writeStateFileLocked, } from "../../lib/mode-state-io.js";
 import { join, dirname } from "path";
 import { listSessionIds, resolveSessionStatePath, getSessionStateDir, getOmcRoot, } from "../../lib/worktree-paths.js";
 import { MODE_STATE_FILE_MAP, MODE_NAMES } from "../../lib/mode-names.js";
@@ -29,6 +29,17 @@ const MODE_CONFIGS = {
         name: "Autoresearch",
         stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.AUTORESEARCH],
         activeProperty: "active",
+        hasGlobalState: false,
+    },
+    [MODE_NAMES.GRAPH]: {
+        name: "Graph",
+        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH],
+        activeStatuses: [
+            "running",
+            "waiting_human",
+            "waiting_patch_approval",
+            "reconciling",
+        ],
         hasGlobalState: false,
     },
     [MODE_NAMES.TEAM]: {
@@ -76,7 +87,11 @@ export { MODE_CONFIGS };
 /**
  * Modes that are mutually exclusive (cannot run concurrently)
  */
-const EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT, MODE_NAMES.AUTORESEARCH];
+const EXCLUSIVE_MODES = [
+    MODE_NAMES.AUTOPILOT,
+    MODE_NAMES.AUTORESEARCH,
+    MODE_NAMES.GRAPH,
+];
 /**
  * Get the state directory path
  */
@@ -172,10 +187,26 @@ function isWorkflowSlotTombstonedForMode(cwd, mode, sessionId, now = Date.now())
  * fallback preserved during the transition window).
  */
 function isJsonModeActive(cwd, mode, sessionId) {
+    const config = MODE_CONFIGS[mode];
+    // Workflow-slot tombstone override: when the session workflow ledger records
+    // this mode as tombstoned (soft-completed), the stale per-mode state file is
+    // ignored so a fresh invocation can proceed without clearing artifacts
+    // manually. This applies to durable-status modes (e.g. graph) too - a
+    // cancelled/finished graph whose skill slot was tombstoned must not read as
+    // active just because graph-state.json still holds an active status.
     if (isWorkflowSlotTombstonedForMode(cwd, mode, sessionId)) {
         return false;
     }
-    const config = MODE_CONFIGS[mode];
+    const stateIsActive = (state) => {
+        if (config.activeStatuses) {
+            return (typeof state.status === "string" &&
+                config.activeStatuses.includes(state.status));
+        }
+        if (config.activeProperty) {
+            return state[config.activeProperty] === true;
+        }
+        return true;
+    };
     // When sessionId is provided, ONLY check session-scoped path — no legacy fallback.
     // This prevents cross-session state leakage where one session's legacy file
     // could cause another session to see mode as active.
@@ -188,10 +219,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
             if (state.session_id && state.session_id !== sessionId) {
                 return false;
             }
-            if (config.activeProperty) {
-                return state[config.activeProperty] === true;
-            }
-            return true;
+            return stateIsActive(state);
         }
         catch (error) {
             if (error.code === "ENOENT") {
@@ -205,11 +233,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
     try {
         const content = readFileSync(stateFile, "utf-8");
         const state = JSON.parse(content);
-        if (config.activeProperty) {
-            return state[config.activeProperty] === true;
-        }
-        // Default: file existence means active
-        return true;
+        return stateIsActive(state);
     }
     catch (error) {
         if (error.code === "ENOENT") {
@@ -312,18 +336,22 @@ export function getAllModeStatuses(cwd, sessionId) {
 }
 function clearObservedJsonFile(filePath, predicate = () => true) {
     if (!existsSync(filePath))
-        return true;
+        return "cleared";
     let observed;
     try {
         observed = JSON.parse(readFileSync(filePath, "utf-8"));
     }
     catch {
-        return false;
+        return "failed";
     }
     if (!predicate(observed))
-        return true;
+        return "cleared";
     const snapshot = JSON.stringify(observed);
-    return clearStateFileLockedIf(filePath, (current) => predicate(current) && JSON.stringify(current) === snapshot) !== 'failed';
+    return normalizeClearResult(filePath, clearStateFileLockedIf(filePath, (current) => predicate(current) && JSON.stringify(current) === snapshot));
+}
+/** A missing file is already converged; only a surviving CAS skip is a replacement. */
+function normalizeClearResult(filePath, result) {
+    return result === "skipped" && !existsSync(filePath) ? "cleared" : result;
 }
 function readJsonSnapshot(filePath) {
     try {
@@ -334,15 +362,81 @@ function readJsonSnapshot(filePath) {
         return null;
     }
 }
+function hasGraphAuthorityInSessionDir(sessionDir) {
+    const graphStatePath = join(sessionDir, MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH]);
+    if (existsSync(graphStatePath)) {
+        const graphState = readJsonSnapshot(graphStatePath)?.state;
+        // An unreadable graph ledger is never safe to discard. Paused and terminal
+        // ledgers, however, have no remaining recovery work and are intentionally
+        // eligible for stale-session cleanup once their skill slot is tombstoned.
+        if (!graphState)
+            return true;
+        const status = graphState.status;
+        if (typeof status !== "string" ||
+            !["paused", "failed", "cancelled", "succeeded"].includes(status)) {
+            return true;
+        }
+    }
+    const skillState = readJsonSnapshot(join(sessionDir, "skill-active-state.json"))?.state;
+    if (skillState?.active_skills &&
+        typeof skillState.active_skills === "object") {
+        const graphSlot = skillState.active_skills
+            .graph;
+        // A malformed graph slot must remain conservative. A durable tombstone is
+        // the explicit signal that terminal Graph artifacts may be reclaimed.
+        if (!graphSlot || typeof graphSlot !== "object")
+            return true;
+        if (!("completed_at" in graphSlot))
+            return true;
+        const completedAt = graphSlot.completed_at;
+        if (typeof completedAt !== "string" ||
+            !Number.isFinite(new Date(completedAt).getTime())) {
+            return true;
+        }
+    }
+    const controlOwner = readJsonSnapshot(join(sessionDir, "control-owner-state.json"))?.state;
+    const controlRoot = controlOwner?.root;
+    return Boolean(controlRoot &&
+        typeof controlRoot === "object" &&
+        controlRoot.mode === MODE_NAMES.GRAPH &&
+        controlRoot.phase === "active");
+}
+// Marker publication is synchronous but a cleanup can observe the file before
+// its writer has published it. Wait only for that short, lock-signalled window:
+// a missing marker with no mutation lock is already settled, and unrelated I/O
+// failures remain failures rather than being retried as if they were writers.
+const IN_FLIGHT_MARKER_PUBLISH_WAIT_MS = 250;
+const IN_FLIGHT_MARKER_PUBLISH_POLL_MS = 10;
+function waitForInFlightMarkerPublisher(filePath) {
+    const deadline = Date.now() + IN_FLIGHT_MARKER_PUBLISH_WAIT_MS;
+    while (existsSync(`${filePath}.mutation.lock`) && Date.now() < deadline) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, IN_FLIGHT_MARKER_PUBLISH_POLL_MS);
+    }
+    return !existsSync(`${filePath}.mutation.lock`);
+}
 function clearDiscoveredJsonFile(filePath, observed, predicate = () => true) {
     if (!observed) {
-        const result = clearStateFileLockedIf(filePath, predicate);
-        return result !== 'failed' && !(result === 'skipped' && existsSync(filePath));
+        // An absent marker may still be in-flight under the same mutation lock
+        // used by its publisher. Observe that lock *before* running a conditional
+        // clear: recovery/observation must not race ahead of the publisher and
+        // make an absent pre-publication snapshot authoritative.
+        if (!existsSync(filePath) &&
+            existsSync(`${filePath}.mutation.lock`) &&
+            !waitForInFlightMarkerPublisher(filePath)) {
+            return "failed";
+        }
+        return normalizeClearResult(filePath, clearStateFileLockedIf(filePath, predicate));
     }
     if (!predicate(observed.state))
-        return true;
-    const result = clearStateFileLockedIf(filePath, (current) => predicate(current) && JSON.stringify(current) === observed.snapshot);
-    return result !== 'failed' && !(result === 'skipped' && existsSync(filePath));
+        return "cleared";
+    return normalizeClearResult(filePath, clearStateFileLockedIf(filePath, (current) => predicate(current) && JSON.stringify(current) === observed.snapshot));
+}
+function mergeClearResults(current, next) {
+    if (current === "failed" || next === "failed")
+        return "failed";
+    if (current === "skipped" || next === "skipped")
+        return "skipped";
+    return "cleared";
 }
 /**
  * Clear all state files for a mode
@@ -353,41 +447,50 @@ function clearDiscoveredJsonFile(filePath, observed, predicate = () => true) {
  * - Local marker file if applicable
  * - Global state file if applicable (~/.claude/{mode}-state.json)
  *
- * @returns true if all files were deleted successfully (or didn't exist)
+ * @returns `cleared`, `skipped` when a captured generation was replaced, or `failed`
  */
-export function clearModeState(mode, cwd, sessionId, expectedState) {
+export function clearModeStateDetailed(mode, cwd, sessionId, expectedState) {
+    if (mode === MODE_NAMES.GRAPH)
+        return "failed";
     const config = MODE_CONFIGS[mode];
-    let success = true;
+    let result = "cleared";
     const markerFile = getMarkerFilePath(cwd, mode);
     const isSessionScopedClear = Boolean(sessionId);
     const markerSnapshot = markerFile ? readJsonSnapshot(markerFile) : null;
     const sessionMarkerFile = isSessionScopedClear && sessionId && config.markerFile
         ? resolveSessionStatePath(config.markerFile.replace(/\.json$/i, ""), sessionId, cwd)
         : null;
-    const sessionMarkerSnapshot = sessionMarkerFile ? readJsonSnapshot(sessionMarkerFile) : null;
+    const sessionMarkerSnapshot = sessionMarkerFile
+        ? readJsonSnapshot(sessionMarkerFile)
+        : null;
     // Delete session-scoped state file if sessionId provided
     if (isSessionScopedClear && sessionId) {
         const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
         try {
-            const result = clearStateFileLockedIf(sessionStateFile, (current) => canClearStateForSession(current, sessionId) && (!expectedState || JSON.stringify(current) === JSON.stringify(expectedState)));
-            if (result === 'failed' || (result === 'skipped' && existsSync(sessionStateFile)))
+            const clearResult = normalizeClearResult(sessionStateFile, clearStateFileLockedIf(sessionStateFile, (current) => canClearStateForSession(current, sessionId) &&
+                (!expectedState ||
+                    JSON.stringify(current) === JSON.stringify(expectedState))));
+            result = mergeClearResults(result, clearResult);
+            if (clearResult === "failed")
                 throw new Error("state mutation lock unavailable");
         }
         catch (err) {
             if (err.code !== "ENOENT") {
-                success = false;
+                result = "failed";
             }
         }
         // Clear session-scoped marker artifacts (e.g., ralph-verification-state.json).
         // Keep legacy/shared marker files untouched for isolation.
         if (sessionMarkerFile) {
             try {
-                if (!clearDiscoveredJsonFile(sessionMarkerFile, sessionMarkerSnapshot, (current) => canClearStateForSession(current, sessionId)))
+                const clearResult = clearDiscoveredJsonFile(sessionMarkerFile, sessionMarkerSnapshot, (current) => canClearStateForSession(current, sessionId));
+                result = mergeClearResults(result, clearResult);
+                if (clearResult === "failed")
                     throw new Error("state mutation lock unavailable");
             }
             catch (err) {
                 if (err.code !== "ENOENT") {
-                    success = false;
+                    result = "failed";
                 }
             }
         }
@@ -399,12 +502,14 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
                 const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
                 if (!markerSessionId || markerSessionId === sessionId) {
                     try {
-                        if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId)))
+                        const clearResult = clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId));
+                        result = mergeClearResults(result, clearResult);
+                        if (clearResult === "failed")
                             throw new Error("state mutation lock unavailable");
                     }
                     catch (err) {
                         if (err.code !== "ENOENT") {
-                            success = false;
+                            result = "failed";
                         }
                     }
                 }
@@ -412,12 +517,14 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
             catch {
                 // Malformed or unreadable session-scoped markers fail closed.
                 try {
-                    if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId)))
+                    const clearResult = clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId));
+                    result = mergeClearResults(result, clearResult);
+                    if (clearResult === "failed")
                         throw new Error("state mutation lock unavailable");
                 }
                 catch (err) {
                     if (err.code !== "ENOENT") {
-                        success = false;
+                        result = "failed";
                     }
                 }
             }
@@ -427,29 +534,43 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
     const stateFile = getStateFilePath(cwd, mode);
     if (!isSessionScopedClear) {
         try {
-            const result = clearStateFileLockedIf(stateFile, (current) => !expectedState || JSON.stringify(current) === JSON.stringify(expectedState));
-            if (result === 'failed' || (result === 'skipped' && existsSync(stateFile)))
+            const clearResult = normalizeClearResult(stateFile, clearStateFileLockedIf(stateFile, (current) => !expectedState ||
+                JSON.stringify(current) === JSON.stringify(expectedState)));
+            result = mergeClearResults(result, clearResult);
+            if (clearResult === "failed")
                 throw new Error("state mutation lock unavailable");
         }
         catch (err) {
             if (err.code !== "ENOENT") {
-                success = false;
+                result = "failed";
             }
         }
     }
     // Session-scoped marker paths were handled once above from their original snapshots.
     if (markerFile && !isSessionScopedClear) {
         try {
-            if (!clearDiscoveredJsonFile(markerFile, markerSnapshot))
+            const clearResult = clearDiscoveredJsonFile(markerFile, markerSnapshot);
+            result = mergeClearResults(result, clearResult);
+            if (clearResult === "failed")
                 throw new Error("state mutation lock unavailable");
         }
         catch (err) {
             if (err.code !== "ENOENT")
-                success = false;
+                result = "failed";
         }
     }
     // Note: Global state files are no longer used (local-only state migration)
-    return success;
+    return result;
+}
+/**
+ * Clear all state files for a mode.
+ *
+ * This is the long-standing public boolean API. Callers which need to
+ * distinguish a CAS replacement from a failed mutation must use
+ * clearModeStateDetailed explicitly.
+ */
+export function clearModeState(mode, cwd, sessionId, expectedState) {
+    return clearModeStateDetailed(mode, cwd, sessionId, expectedState) === "cleared";
 }
 /**
  * Clear all mode states (force clear)
@@ -457,6 +578,8 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
 export function clearAllModeStates(cwd) {
     let success = true;
     for (const mode of Object.keys(MODE_CONFIGS)) {
+        if (mode === MODE_NAMES.GRAPH)
+            continue;
         if (!clearModeState(mode, cwd)) {
             success = false;
         }
@@ -464,8 +587,13 @@ export function clearAllModeStates(cwd) {
     // Clear skill-active-state.json (issue #1033)
     const skillStatePath = join(getStateDir(cwd), "skill-active-state.json");
     try {
-        if (!clearObservedJsonFile(skillStatePath))
+        const skillState = readJsonSnapshot(skillStatePath)?.state;
+        const graphSlot = skillState?.active_skills &&
+            typeof skillState.active_skills === "object" &&
+            skillState.active_skills.graph;
+        if (!graphSlot && clearObservedJsonFile(skillStatePath) !== "cleared") {
             throw new Error("state mutation lock unavailable");
+        }
     }
     catch (err) {
         if (err.code !== "ENOENT") {
@@ -477,6 +605,8 @@ export function clearAllModeStates(cwd) {
         const sessionIds = listSessionIds(cwd);
         for (const sid of sessionIds) {
             const sessionDir = getSessionStateDir(sid, cwd);
+            if (hasGraphAuthorityInSessionDir(sessionDir))
+                continue;
             rmSync(sessionDir, { recursive: true, force: true });
         }
     }
@@ -533,6 +663,10 @@ export function clearStaleSessionDirs(cwd, maxAgeMs = 24 * 60 * 60 * 1000) {
         const sessionDir = getSessionStateDir(sid, cwd);
         try {
             const files = readdirSync(sessionDir);
+            // Graph ledgers are durable recovery authority and are never removed by
+            // generic stale-session garbage collection.
+            if (hasGraphAuthorityInSessionDir(sessionDir))
+                continue;
             // Remove empty directories
             if (files.length === 0) {
                 rmdirSync(sessionDir);
@@ -604,7 +738,7 @@ export function removeModeMarker(mode, cwd) {
         return true; // No marker to remove
     }
     try {
-        if (!clearObservedJsonFile(markerPath))
+        if (clearObservedJsonFile(markerPath) !== "cleared")
             return false;
         return true;
     }
@@ -651,7 +785,7 @@ export function forceRemoveMarker(mode, cwd) {
         return true; // No marker to remove
     }
     try {
-        if (!clearObservedJsonFile(markerPath))
+        if (clearObservedJsonFile(markerPath) !== "cleared")
             return false;
         return true;
     }

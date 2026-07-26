@@ -80,6 +80,7 @@ describe('omc ultragoal CLI', () => {
             expect(joined).toMatch(/Ultragoal aggregate-goal handoff/);
             expect(joined).toMatch(/invoke \/goal/);
             expect(joined).toMatch(/--claude-goal-json/);
+            expect(joined).toMatch(/does not satisfy the PreToolUse \/goal guard/);
             expect(joined).toMatch(/Complete first milestone/);
             expect(joined).not.toMatch(/\bomx\b/);
             expect(joined).not.toMatch(/get_goal|create_goal|update_goal/);

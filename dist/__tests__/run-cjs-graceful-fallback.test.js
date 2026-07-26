@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync, spawnSync } from 'child_process';
@@ -31,14 +31,14 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
         }
         return versionDir;
     }
-    function runCjs(target, env = {}) {
-        const result = spawnSync(NODE, [RUN_CJS_PATH, target], {
+    function runCjs(target, env = {}, args = []) {
+        const result = spawnSync(NODE, [RUN_CJS_PATH, target, ...args], {
             encoding: 'utf-8',
             env: {
                 ...process.env,
                 ...env,
             },
-            timeout: 10000,
+            timeout: 30000,
             input: '{}',
         });
         return {
@@ -52,14 +52,37 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
         const promptHooks = hooksJson.hooks.UserPromptSubmit.flatMap((entry) => entry.hooks);
         const keywordDetector = promptHooks.find((hook) => hook.command.includes('keyword-detector.mjs'));
         const skillInjector = promptHooks.find((hook) => hook.command.includes('skill-injector.mjs'));
-        expect(keywordDetector?.timeout).toBe(10);
-        expect(skillInjector?.timeout).toBe(15);
+        expect(keywordDetector?.timeout).toBe(30);
+        expect(skillInjector?.timeout).toBe(30);
         const hooksDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'HOOKS.md'), 'utf-8');
         const referenceDoc = readFileSync(join(__dirname, '..', '..', 'docs', 'REFERENCE.md'), 'utf-8');
-        expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 10s |');
-        expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 15s |');
+        expect(hooksDoc).toContain('| `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 30s outer host fuse; 8s trusted Worker limit |');
+        expect(hooksDoc).toContain('| `skill-injector.mjs` | Injects skill prompts | 30s outer host fuse; 12s trusted Worker limit |');
+        expect(hooksDoc).toContain('A command that never reaches `run.cjs` can consume its full 30s outer fuse.');
         expect(referenceDoc).toContain('| **UserPromptSubmit**   | `keyword-detector.mjs`, `skill-injector.mjs`');
-        expect(referenceDoc).toContain('| 10s, 15s');
+        expect(referenceDoc).toContain('30s outer fuse per command; 8s, 12s trusted Worker limits');
+        expect(referenceDoc).toContain('A command that never starts the runner can take the entire 30s per-command fuse');
+    });
+    it('caps only trusted prompt Worker execution without extending lower manifest limits', () => {
+        const trustedPluginRoot = join(__dirname, '..', '..');
+        const policyProbe = `
+      const runner = require(process.argv[1]);
+      const root = process.argv[2];
+      const keyword = require('node:path').join(root, 'scripts', 'keyword-detector.mjs');
+      const skill = require('node:path').join(root, 'scripts', 'skill-injector.mjs');
+      const outer = { event: 'UserPromptSubmit', timeoutMs: 30000 };
+      const lower = { event: 'UserPromptSubmit', timeoutMs: 5000 };
+      process.stdout.write(JSON.stringify([
+        runner.resolveTrustedPromptWorkerTimeoutMs(keyword, outer, root),
+        runner.resolveTrustedPromptWorkerTimeoutMs(skill, outer, root),
+        runner.resolveTrustedPromptWorkerTimeoutMs(keyword, lower, root),
+        runner.resolveGenericTimeoutMs(outer),
+      ]));
+    `;
+        const values = JSON.parse(execFileSync(NODE, ['-e', policyProbe, RUN_CJS_PATH, trustedPluginRoot], {
+            encoding: 'utf-8',
+        }));
+        expect(values).toEqual([8000, 12000, 4000, 27000]);
     });
     it('exits 0 when no target argument is provided', () => {
         try {
@@ -210,6 +233,264 @@ describe('run.cjs — graceful fallback for stale plugin paths', () => {
         expect(result.stderr).toContain('[run.cjs] Hook slow-stop-hook.cjs timed out after 1500ms; exiting fail-open.');
         expect(result.stderr).not.toContain('timed out after 2000ms');
         expect(elapsedMs).toBeLessThan(2000);
+    });
+    it('uses prompt-scoped inner timeout cushions for UserPromptSubmit hooks', () => {
+        const pluginRoot = join(tmpDir, 'prompt-plugin-root');
+        const scriptsDir = join(pluginRoot, 'scripts');
+        const hooksDir = join(pluginRoot, 'hooks');
+        mkdirSync(scriptsDir, { recursive: true });
+        mkdirSync(hooksDir, { recursive: true });
+        const tenSecondTarget = join(scriptsDir, 'prompt-ten.cjs');
+        const fifteenSecondTarget = join(scriptsDir, 'prompt-fifteen.cjs');
+        writeFileSync(tenSecondTarget, 'setTimeout(() => { process.stdout.write("prompt-ten-done\\n"); process.exit(0); }, 9000);');
+        writeFileSync(fifteenSecondTarget, 'setTimeout(() => { process.stdout.write("prompt-fifteen-done\\n"); process.exit(0); }, 13000);');
+        writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
+            hooks: {
+                UserPromptSubmit: [
+                    {
+                        matcher: '',
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-ten.cjs',
+                                timeout: 10,
+                            },
+                            {
+                                type: 'command',
+                                command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-fifteen.cjs',
+                                timeout: 15,
+                            },
+                        ],
+                    },
+                ],
+            },
+        }, null, 2));
+        const tenStartedAt = Date.now();
+        const tenResult = runCjs(tenSecondTarget, {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+        });
+        const tenElapsedMs = Date.now() - tenStartedAt;
+        expect(tenResult.status).toBe(0);
+        expect(tenResult.stdout).not.toContain('prompt-ten-done');
+        expect(tenResult.stderr).toBe('');
+        expect(tenElapsedMs).toBeGreaterThanOrEqual(7500);
+        expect(tenElapsedMs).toBeLessThan(10000);
+        const fifteenStartedAt = Date.now();
+        const fifteenResult = runCjs(fifteenSecondTarget, {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+        });
+        const fifteenElapsedMs = Date.now() - fifteenStartedAt;
+        expect(fifteenResult.status).toBe(0);
+        expect(fifteenResult.stdout).not.toContain('prompt-fifteen-done');
+        expect(fifteenResult.stderr).toBe('');
+        expect(fifteenElapsedMs).toBeGreaterThanOrEqual(11500);
+        expect(fifteenElapsedMs).toBeLessThan(15000);
+    });
+    it('keeps the existing 500ms inner timeout cushion for non-prompt hooks', () => {
+        const pluginRoot = join(tmpDir, 'non-prompt-plugin-root');
+        const scriptsDir = join(pluginRoot, 'scripts');
+        const hooksDir = join(pluginRoot, 'hooks');
+        mkdirSync(scriptsDir, { recursive: true });
+        mkdirSync(hooksDir, { recursive: true });
+        const slowTarget = join(scriptsDir, 'non-prompt-slow.cjs');
+        writeFileSync(slowTarget, 'setTimeout(() => { process.stdout.write("non-prompt-done\\n"); process.exit(0); }, 3000);');
+        writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
+            hooks: {
+                Stop: [
+                    {
+                        matcher: '',
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/non-prompt-slow.cjs',
+                                timeout: 2,
+                            },
+                        ],
+                    },
+                ],
+            },
+        }, null, 2));
+        const startedAt = Date.now();
+        const result = runCjs(slowTarget, {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+        });
+        const elapsedMs = Date.now() - startedAt;
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('non-prompt-done');
+        expect(result.stderr).toContain('[run.cjs] Hook non-prompt-slow.cjs timed out after 1500ms; exiting fail-open.');
+        expect(elapsedMs).toBeLessThan(2000);
+    });
+    it('keeps prompt hook timeout diagnostics quiet by default and visible in hook debug mode', () => {
+        const pluginRoot = join(tmpDir, 'prompt-debug-plugin-root');
+        const scriptsDir = join(pluginRoot, 'scripts');
+        const hooksDir = join(pluginRoot, 'hooks');
+        mkdirSync(scriptsDir, { recursive: true });
+        mkdirSync(hooksDir, { recursive: true });
+        const slowTarget = join(scriptsDir, 'prompt-debug-slow.cjs');
+        writeFileSync(slowTarget, 'setTimeout(() => { process.stdout.write("prompt-debug-done\\n"); process.exit(0); }, 3000);');
+        writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
+            hooks: {
+                UserPromptSubmit: [
+                    {
+                        matcher: '',
+                        hooks: [
+                            {
+                                type: 'command',
+                                command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/prompt-debug-slow.cjs',
+                                timeout: 1,
+                            },
+                        ],
+                    },
+                ],
+            },
+        }, null, 2));
+        const quietResult = runCjs(slowTarget, {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+        });
+        const debugResult = runCjs(slowTarget, {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+            OMC_DEBUG_HOOKS: '1',
+        });
+        expect(quietResult.status).toBe(0);
+        expect(quietResult.stdout).not.toContain('prompt-debug-done');
+        expect(quietResult.stderr).toBe('');
+        expect(debugResult.status).toBe(0);
+        expect(debugResult.stdout).not.toContain('prompt-debug-done');
+        expect(debugResult.stderr).toContain('[run.cjs] Hook prompt-debug-slow.cjs timed out after 1ms; exiting fail-open.');
+    });
+});
+describe('run.cjs trusted UserPromptSubmit Worker selection', () => {
+    let tmpDir;
+    beforeEach(() => {
+        tmpDir = mkdtempSync(join(tmpdir(), 'omc-trusted-run-cjs-'));
+    });
+    afterEach(() => {
+        rmSync(tmpDir, { recursive: true, force: true });
+    });
+    function createTrustedPlugin(root, scripts, event = 'UserPromptSubmit', timeout = 10) {
+        mkdirSync(join(root, 'scripts'), { recursive: true });
+        mkdirSync(join(root, 'hooks'), { recursive: true });
+        writeFileSync(join(root, 'scripts', 'run.cjs'), '// plugin-root marker');
+        for (const [name, contents] of Object.entries(scripts))
+            writeFileSync(join(root, 'scripts', name), contents);
+        for (const expectedScript of ['keyword-detector.mjs', 'skill-injector.mjs']) {
+            const expectedPath = join(root, 'scripts', expectedScript);
+            if (!existsSync(expectedPath))
+                writeFileSync(expectedPath, 'process.exit(0);');
+        }
+        writeFileSync(join(root, 'hooks', 'hooks.json'), JSON.stringify({
+            hooks: {
+                [event]: [{ matcher: '', hooks: Object.keys(scripts).map(name => ({
+                            type: 'command',
+                            command: `node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${name}`,
+                            timeout,
+                        })) }],
+            },
+        }));
+    }
+    function run(target, env = {}, args = []) {
+        const result = spawnSync(NODE, [RUN_CJS_PATH, target, ...args], {
+            encoding: 'utf-8',
+            env: { ...process.env, ...env },
+            input: '{}',
+            timeout: 30000,
+            maxBuffer: 10 * 1024 * 1024,
+        });
+        return { status: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || '' };
+    }
+    const workerProbe = "import { isMainThread } from 'node:worker_threads'; process.stdin.on('end', () => process.stdout.write(isMainThread ? 'child' : 'worker')); process.stdin.resume();";
+    it('uses a Worker only for an exact canonical prompt script below the configured trusted root', () => {
+        const root = join(tmpDir, 'trusted-root');
+        const target = join(root, 'scripts', 'keyword-detector.mjs');
+        createTrustedPlugin(root, { 'keyword-detector.mjs': workerProbe });
+        const result = run(target, { CLAUDE_PLUGIN_ROOT: root });
+        expect(result).toMatchObject({ status: 0, stdout: 'worker' });
+    });
+    it('rejects same-basename outside-root, extra-argument, and nonprompt candidates to the generic child path', () => {
+        const root = join(tmpDir, 'trusted-root');
+        const outside = join(tmpDir, 'outside', 'scripts', 'keyword-detector.mjs');
+        createTrustedPlugin(root, { 'keyword-detector.mjs': workerProbe });
+        mkdirSync(join(tmpDir, 'outside', 'scripts'), { recursive: true });
+        writeFileSync(outside, workerProbe);
+        expect(run(outside, { CLAUDE_PLUGIN_ROOT: root })).toMatchObject({ status: 0, stdout: 'child' });
+        expect(run(join(root, 'scripts', 'keyword-detector.mjs'), { CLAUDE_PLUGIN_ROOT: root }, ['extra']))
+            .toMatchObject({ status: 0, stdout: 'child' });
+        const nonPromptRoot = join(tmpDir, 'nonprompt-root');
+        const nonPromptTarget = join(nonPromptRoot, 'scripts', 'keyword-detector.mjs');
+        createTrustedPlugin(nonPromptRoot, { 'keyword-detector.mjs': workerProbe }, 'Stop');
+        expect(run(nonPromptTarget, { CLAUDE_PLUGIN_ROOT: nonPromptRoot })).toMatchObject({ status: 0, stdout: 'child' });
+    });
+    it('rejects a lexical trusted-root path that escapes through a symlink', () => {
+        if (process.platform === 'win32')
+            return;
+        const root = join(tmpDir, 'trusted-root');
+        const outsideDir = join(tmpDir, 'outside');
+        createTrustedPlugin(root, { 'keyword-detector.mjs': workerProbe });
+        mkdirSync(outsideDir, { recursive: true });
+        writeFileSync(join(outsideDir, 'keyword-detector.mjs'), workerProbe);
+        rmSync(join(root, 'scripts', 'keyword-detector.mjs'));
+        symlinkSync(join(outsideDir, 'keyword-detector.mjs'), join(root, 'scripts', 'keyword-detector.mjs'));
+        expect(run(join(root, 'scripts', 'keyword-detector.mjs'), { CLAUDE_PLUGIN_ROOT: root }))
+            .toMatchObject({ status: 0, stdout: 'child' });
+    });
+    it('trusts only the explicitly selected canonical stale-cache sibling root', () => {
+        const cacheBase = join(tmpDir, 'cache');
+        const staleRoot = join(cacheBase, '4.2.0');
+        const selectedRoot = join(cacheBase, '4.3.0');
+        createTrustedPlugin(selectedRoot, { 'keyword-detector.mjs': workerProbe });
+        const result = run(join(staleRoot, 'scripts', 'keyword-detector.mjs'), { CLAUDE_PLUGIN_ROOT: staleRoot });
+        expect(result).toMatchObject({ status: 0, stdout: 'worker' });
+    });
+    it('preserves nonzero Worker failures and buffers normal output exactly once', () => {
+        const root = join(tmpDir, 'trusted-root');
+        const target = join(root, 'scripts', 'keyword-detector.mjs');
+        createTrustedPlugin(root, {
+            'keyword-detector.mjs': "process.stdout.write('once'); process.stderr.write('error'); process.exit(7);",
+        });
+        const result = run(target, { CLAUDE_PLUGIN_ROOT: root });
+        expect(result.status).toBe(7);
+        expect(result.stdout).toBe('once');
+        expect(result.stderr).toBe('error');
+    });
+    it('flushes large Worker stdout and stderr byte-for-byte before exit', () => {
+        const root = join(tmpDir, 'trusted-root');
+        const target = join(root, 'scripts', 'keyword-detector.mjs');
+        const stdout = 'o'.repeat(2 * 1024 * 1024);
+        const stderr = 'e'.repeat(2 * 1024 * 1024);
+        createTrustedPlugin(root, {
+            'keyword-detector.mjs': `process.stdin.on('end', () => { process.stdout.write(${JSON.stringify(stdout)}); process.stderr.write(${JSON.stringify(stderr)}); }); process.stdin.resume();`,
+        });
+        const result = run(target, { CLAUDE_PLUGIN_ROOT: root });
+        expect(result).toMatchObject({ status: 0, stdout, stderr });
+    });
+    it.each([
+        ['syntax failure', 'const = ;', 'SyntaxError'],
+        ['import failure', "import './missing-worker-dependency.mjs';", 'missing-worker-dependency'],
+        ['uncaught failure', "throw new Error('uncaught worker sentinel');", 'uncaught worker sentinel'],
+    ])('preserves Worker %s diagnostics once with a nonzero status', (_label, source, diagnostic) => {
+        const root = join(tmpDir, 'trusted-root');
+        const target = join(root, 'scripts', 'keyword-detector.mjs');
+        createTrustedPlugin(root, { 'keyword-detector.mjs': source });
+        const result = run(target, { CLAUDE_PLUGIN_ROOT: root });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain(diagnostic);
+        expect(result.stderr.split(diagnostic).length - 1).toBe(1);
+    });
+    it('terminates synchronous and async handle hangs fail-open without late output', () => {
+        const root = join(tmpDir, 'trusted-root');
+        const target = join(root, 'scripts', 'keyword-detector.mjs');
+        const startedMarker = join(tmpDir, 'worker-started');
+        createTrustedPlugin(root, {
+            'keyword-detector.mjs': `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(startedMarker)}, process.env.HANG_KIND); if (process.env.HANG_KIND === 'sync') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); setInterval(() => {}, 1000); setTimeout(() => process.stdout.write('late'), 20);`,
+        }, 'UserPromptSubmit', 2);
+        const quiet = run(target, { CLAUDE_PLUGIN_ROOT: root, HANG_KIND: 'sync' });
+        expect(quiet).toMatchObject({ status: 0, stdout: '', stderr: '' });
+        expect(readFileSync(startedMarker, 'utf-8')).toBe('sync');
+        const debug = run(target, { CLAUDE_PLUGIN_ROOT: root, HANG_KIND: 'async', OMC_DEBUG_HOOKS: '1' });
+        expect(debug.status).toBe(0);
+        expect(debug.stdout).toBe('');
+        expect(debug.stderr).toContain('Hook keyword-detector.mjs timed out after 1000ms; exiting fail-open.');
+        expect(readFileSync(startedMarker, 'utf-8')).toBe('async');
     });
 });
 //# sourceMappingURL=run-cjs-graceful-fallback.test.js.map

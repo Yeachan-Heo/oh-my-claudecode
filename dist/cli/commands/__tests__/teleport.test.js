@@ -38,14 +38,13 @@ import { teleportCommand, teleportRemoveCommand } from '../teleport.js';
 describe('teleportCommand', () => {
     beforeEach(async () => {
         vi.resetAllMocks();
-        execSync.mockImplementation((command) => {
-            if (command === 'git rev-parse --show-toplevel')
+        execFileSync.mockImplementation((command, args) => {
+            if (command === 'git' && args.join(' ') === 'rev-parse --show-toplevel')
                 return '/repo';
-            if (command === 'git remote get-url origin')
+            if (command === 'git' && args.join(' ') === 'remote get-url origin')
                 return 'git@github.com:owner/repo.git';
-            return '';
+            return Buffer.from('');
         });
-        execFileSync.mockReturnValue(Buffer.from(''));
         existsSync.mockImplementation((target) => {
             if (typeof target !== 'string')
                 return false;
@@ -86,18 +85,7 @@ describe('teleportCommand', () => {
     });
     it('passes branchName and baseBranch as discrete array arguments, never as a shell string', async () => {
         await teleportCommand('#1', { base: 'main; touch /tmp/pwned', worktreePath: '/root' });
-        const calls = execFileSync.mock.calls;
-        for (const [cmd, args] of calls) {
-            expect(Array.isArray(args)).toBe(true);
-            if (cmd !== 'git')
-                continue;
-            expect(typeof cmd).toBe('string');
-        }
-        expect(calls).toContainEqual([
-            'git',
-            ['fetch', 'origin', 'main; touch /tmp/pwned'],
-            expect.objectContaining({ cwd: '/repo' }),
-        ]);
+        expect(execFileSync).toHaveBeenCalledWith('git', ['fetch', 'origin', 'main; touch /tmp/pwned'], { cwd: '/repo', stdio: 'pipe', windowsHide: true });
     });
     it('does not invoke execSync for git fetch/branch/worktree creation commands', async () => {
         await teleportCommand('#2', { base: 'dev', worktreePath: '/root' });
@@ -188,12 +176,12 @@ describe('teleportRemoveCommand', () => {
         execFileSync.mockReturnValue(Buffer.from(''));
     });
     it.each(['.git', '/repo/.git', 'C:\\repo\\.git'])('refuses a main repo git-dir shape %s and does not remove the directory', async (gitDir) => {
-        execSync.mockImplementation((command) => {
-            if (command === 'git status --porcelain')
+        execFileSync.mockImplementation((command, args) => {
+            if (command === 'git' && args.join(' ') === 'status --porcelain')
                 return '';
-            if (command === 'git rev-parse --git-dir')
+            if (command === 'git' && args.join(' ') === 'rev-parse --git-dir')
                 return `${gitDir}\n`;
-            return '';
+            return Buffer.from('');
         });
         const result = await teleportRemoveCommand(targetPath, {});
         expect(result).toBe(1);
@@ -202,12 +190,12 @@ describe('teleportRemoveCommand', () => {
         expect(console.error).toHaveBeenCalledWith(expect.stringContaining('is not a registered worktree git-dir'));
     });
     it('refuses an unexpected non-worktree git-dir and does not remove the directory', async () => {
-        execSync.mockImplementation((command) => {
-            if (command === 'git status --porcelain')
+        execFileSync.mockImplementation((command, args) => {
+            if (command === 'git' && args.join(' ') === 'status --porcelain')
                 return '';
-            if (command === 'git rev-parse --git-dir')
+            if (command === 'git' && args.join(' ') === 'rev-parse --git-dir')
                 return '/tmp/unexpected/gitdir\n';
-            return '';
+            return Buffer.from('');
         });
         const result = await teleportRemoveCommand(targetPath, { force: true });
         expect(result).toBe(1);
@@ -216,17 +204,17 @@ describe('teleportRemoveCommand', () => {
         expect(console.error).toHaveBeenCalledWith(expect.stringContaining('is not a registered worktree git-dir'));
     });
     it('removes a registered worktree through git worktree remove', async () => {
-        execSync.mockImplementation((command) => {
-            if (command === 'git status --porcelain')
+        execFileSync.mockImplementation((command, args) => {
+            if (command === 'git' && args.join(' ') === 'status --porcelain')
                 return '';
-            if (command === 'git rev-parse --git-dir')
+            if (command === 'git' && args.join(' ') === 'rev-parse --git-dir')
                 return '/repo/.git/worktrees/repo-3089\n';
-            return '';
+            return Buffer.from('');
         });
         const result = await teleportRemoveCommand(targetPath, { force: true });
         expect(result).toBe(0);
         expect(rmSync).not.toHaveBeenCalled();
-        expect(execFileSync).toHaveBeenCalledWith('git', ['worktree', 'remove', '--force', targetPath], expect.objectContaining({ cwd: '/repo' }));
+        expect(execFileSync).toHaveBeenCalledWith('git', ['worktree', 'remove', '--force', targetPath], { cwd: '/repo', stdio: 'pipe', windowsHide: true });
     });
 });
 //# sourceMappingURL=teleport.test.js.map

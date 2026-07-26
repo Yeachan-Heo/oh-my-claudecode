@@ -5,9 +5,10 @@
  * not falsely flagged as "Other".
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import corpus from '../installer/__tests__/fixtures/legacy-guides.json' with { type: 'json' };
 // vi.hoisted runs before vi.mock hoisting — safe to reference in mock factories
 const { TEST_DIRS } = vi.hoisted(() => {
     const TEST_DIRS = { claudeDir: '', projectDir: '', projectClaudeDir: '', builtinSkillsDir: '' };
@@ -51,7 +52,7 @@ vi.mock('../features/builtin-skills/skills.js', () => ({
     },
 }));
 // Import after mock setup
-import { checkHookConflicts, checkClaudeMdStatus, checkConfigIssues, checkLegacySkills, checkWorkspaceMarker, checkWindowsUnsafePluginHooks, runConflictCheck, } from '../cli/commands/doctor-conflicts.js';
+import { checkHookConflicts, checkClaudeMdStatus, checkConfigIssues, checkLegacySkills, checkWorkspaceMarker, checkWindowsUnsafePluginHooks, runConflictCheck, formatReport, doctorConflictsCommand, } from '../cli/commands/doctor-conflicts.js';
 describe('doctor-conflicts: hook ownership classification', () => {
     let cwdSpy;
     beforeEach(() => {
@@ -484,7 +485,7 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
         expect(status.companionFile).toBeUndefined();
     });
     it('detects companion file reference in CLAUDE.md', () => {
-        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '# Config\nSee CLAUDE-omc.md for OMC settings\n');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '@CLAUDE-omc.md\n');
         const status = checkClaudeMdStatus();
         expect(status).not.toBeNull();
         expect(status.hasMarkers).toBe(false);
@@ -501,6 +502,115 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     it('returns null when no CLAUDE.md exists', () => {
         const status = checkClaudeMdStatus();
         expect(status).toBeNull();
+    });
+    it('inspects an orphan active companion when main CLAUDE.md is absent', () => {
+        const activePath = join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md');
+        const guide = Buffer.from(corpus.variants[0].dataBase64, 'base64');
+        writeFileSync(activePath, guide);
+        const status = checkClaudeMdStatus();
+        expect(status).not.toBeNull();
+        expect(status.files.map(file => file.path)).toEqual([activePath]);
+        expect(status.exactLegacyPaths).toEqual([activePath]);
+        expect(runConflictCheck().hasConflicts).toBe(true);
+    });
+    it('aggregates main, active, referenced, and generic companions in deterministic order', () => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        const activePath = join(TEST_CLAUDE_DIR, 'CLAUDE-omc.md');
+        const referencedPath = join(TEST_CLAUDE_DIR, 'CLAUDE-referenced.md');
+        const genericPath = join(TEST_CLAUDE_DIR, 'CLAUDE-zebra.md');
+        writeFileSync(mainPath, '@CLAUDE-referenced.md\n<!-- OMC:START -->\nmanaged\n<!-- OMC:END -->\n');
+        writeFileSync(activePath, '<!-- OMC:START -->\nactive\n<!-- OMC:END -->\n');
+        writeFileSync(referencedPath, '<!-- OMC:START -->\nreferenced\n<!-- OMC:END -->\n');
+        writeFileSync(genericPath, 'later user content\n');
+        const status = checkClaudeMdStatus();
+        expect(status.files.map(file => file.path)).toEqual([mainPath, activePath, referencedPath, genericPath]);
+        expect(status.dirtyFiles).toEqual([mainPath, genericPath]);
+        expect(status.hasMarkers).toBe(true);
+        expect(status.hasUserContent).toBe(true);
+    });
+    it('rejects indirect references while retaining direct missing-reference compatibility', () => {
+        const missingPath = join(TEST_CLAUDE_DIR, 'CLAUDE-missing.md');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), 'See @CLAUDE-ignored.md\n@CLAUDE-missing.md\n@../CLAUDE-escape.md\n');
+        const status = checkClaudeMdStatus();
+        expect(status.companionFile).toBe(missingPath);
+        expect(status.files).toHaveLength(1);
+        expect(runConflictCheck().hasConflicts).toBe(false);
+    });
+    it.each(corpus.variants)('classifies exact legacy %s in main and CRLF companion files without claiming guide ownership', async (variant) => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        const companionPath = join(TEST_CLAUDE_DIR, 'CLAUDE-companion.md');
+        const guide = Buffer.from(variant.dataBase64, 'base64').toString('utf8');
+        const crlfGuide = guide.replace(/\n/g, '\r\n');
+        writeFileSync(mainPath, `@CLAUDE-companion.md\n${guide}MAIN-SUFFIX\n`);
+        writeFileSync(companionPath, `COMPANION-PREFIX\r\n${crlfGuide}COMPANION-SUFFIX\r\n`);
+        const report = runConflictCheck();
+        const status = report.claudeMdStatus;
+        expect(status.companionFile).toBe(companionPath);
+        expect(status.exactLegacyPaths).toEqual([mainPath, companionPath]);
+        expect(status.dirtyFiles).toEqual([mainPath, companionPath]);
+        expect(status.files.map(file => file.hasUserContent)).toEqual([true, true]);
+        expect(report.hasConflicts).toBe(true);
+        expect(JSON.parse(formatReport(report, true)).claudeMdStatus.exactLegacyPaths).toEqual([mainPath, companionPath]);
+        expect(formatReport(report, false)).toContain('coordinator-backed cleanup with a verified backup');
+        const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+        try {
+            await expect(doctorConflictsCommand({ json: true })).resolves.toBe(1);
+        }
+        finally {
+            consoleLogSpy.mockRestore();
+        }
+    });
+    it('treats an exact-only legacy guide as generated rather than user content', () => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        const variant = corpus.variants[0];
+        writeFileSync(mainPath, Buffer.from(variant.dataBase64, 'base64'));
+        const status = checkClaudeMdStatus();
+        expect(status.exactLegacyPaths).toEqual([mainPath]);
+        expect(status.dirtyFiles).toEqual([]);
+        expect(status.hasUserContent).toBe(false);
+        expect(runConflictCheck().hasConflicts).toBe(true);
+    });
+    it('preserves a leading UTF-8 BOM when classifying legacy-looking user content', () => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        const guide = Buffer.from(corpus.variants[0].dataBase64, 'base64');
+        writeFileSync(mainPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), guide]));
+        const status = checkClaudeMdStatus();
+        expect(status.exactLegacyPaths).toEqual([]);
+        expect(status.dirtyFiles).toEqual([mainPath]);
+    });
+    it.each([
+        '<!-- OMC:START -->\n',
+        '<!-- OMC:END -->\n',
+        '<!-- OMC:START -->\n<!-- OMC:START -->\n<!-- OMC:END -->\n',
+    ])('marks malformed marker structures for manual review', content => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        writeFileSync(mainPath, content);
+        const status = checkClaudeMdStatus();
+        expect(status.files[0]).toMatchObject({ markerState: 'corrupt', hasUserContent: true });
+        expect(status.manualReviewPaths).toEqual([mainPath]);
+        expect(runConflictCheck().hasConflicts).toBe(true);
+    });
+    it('includes aggregated analyzer findings in JSON and formatted reports', () => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        writeFileSync(mainPath, '<!-- OMC:END -->\n');
+        const report = runConflictCheck();
+        expect(JSON.parse(formatReport(report, true)).claudeMdStatus.manualReviewPaths).toEqual([mainPath]);
+        expect(formatReport(report, false)).toContain(mainPath);
+        expect(formatReport(report, false)).toContain('Inspection-only review required');
+        expect(formatReport(report, false)).toContain('never deleted automatically');
+        expect(report.hasConflicts).toBe(true);
+    });
+    it('records symlink and invalid UTF-8 companions without following them', () => {
+        const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+        const symlinkPath = join(TEST_CLAUDE_DIR, 'CLAUDE-link.md');
+        const invalidPath = join(TEST_CLAUDE_DIR, 'CLAUDE-invalid.md');
+        writeFileSync(mainPath, 'user content\n');
+        symlinkSync(mainPath, symlinkPath);
+        writeFileSync(invalidPath, Buffer.from([0xff]));
+        const status = checkClaudeMdStatus();
+        expect(status.files.map(file => file.markerState)).toContain('symlink');
+        expect(status.files.map(file => file.markerState)).toContain('invalid-utf8');
+        expect(runConflictCheck().hasConflicts).toBe(true);
     });
 });
 describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {

@@ -1,5 +1,26 @@
-import { describe, it, expect } from 'vitest';
-import { LSP_SERVERS, getServerForFile, getServerForLanguage } from '../tools/lsp/servers.js';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { describe, expect, it } from 'vitest';
+import { LSP_SERVERS, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace } from '../tools/lsp/servers.js';
+function createTypeScriptProject(options) {
+    const root = mkdtempSync(join(tmpdir(), 'omc-lsp-ts-'));
+    const typescriptRoot = join(root, 'node_modules', 'typescript');
+    mkdirSync(join(typescriptRoot, 'lib'), { recursive: true });
+    writeFileSync(join(typescriptRoot, 'package.json'), JSON.stringify({ version: options.version }));
+    if (options.tsserver) {
+        writeFileSync(join(typescriptRoot, 'lib', 'tsserver.js'), '');
+    }
+    if (options.getExePath) {
+        writeFileSync(join(typescriptRoot, 'lib', 'getExePath.js'), '');
+    }
+    if (options.tscBin) {
+        const binDir = join(root, 'node_modules', '.bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(join(binDir, process.platform === 'win32' ? 'tsc.cmd' : 'tsc'), '');
+    }
+    return root;
+}
 describe('LSP Server Configurations', () => {
     const serverKeys = Object.keys(LSP_SERVERS);
     it('should have 20 configured servers', () => {
@@ -69,6 +90,66 @@ describe('getServerForFile', () => {
     });
     it('should return null for unknown extensions', () => {
         expect(getServerForFile('file.xyz')).toBeNull();
+    });
+});
+describe('TypeScript server selection', () => {
+    it('uses project-local tsc --lsp --stdio for TypeScript 7 projects', () => {
+        const root = createTypeScriptProject({ version: '7.0.1-rc', tscBin: true });
+        try {
+            const server = getTypeScriptServerForWorkspace(root);
+            expect(server.name).toBe('TypeScript 7 Native Language Server (typescript-go)');
+            expect(server.command).toBe(join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsc.cmd' : 'tsc'));
+            expect(server.args).toEqual(['--lsp', '--stdio']);
+            expect(getServerForFile(join(root, 'src', 'app.ts'), root)).toEqual(server);
+        }
+        finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+    it('uses project-local tsc when TypeScript has no tsserver.js', () => {
+        const root = createTypeScriptProject({ version: '6.0.0-dev', tscBin: true });
+        try {
+            const server = getTypeScriptServerForWorkspace(root);
+            expect(server.command).toBe(join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsc.cmd' : 'tsc'));
+            expect(server.args).toEqual(['--lsp', '--stdio']);
+        }
+        finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+    it('uses project-local tsc when TypeScript exposes native getExePath metadata', () => {
+        const root = createTypeScriptProject({ version: '6.0.0-dev', getExePath: true, tsserver: true, tscBin: true });
+        try {
+            const server = getTypeScriptServerForWorkspace(root);
+            expect(server.command).toBe(join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsc.cmd' : 'tsc'));
+            expect(server.args).toEqual(['--lsp', '--stdio']);
+        }
+        finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+    it('keeps classic typescript-language-server for classic TypeScript projects', () => {
+        const root = createTypeScriptProject({ version: '5.7.2', tsserver: true, tscBin: true });
+        try {
+            const server = getTypeScriptServerForWorkspace(root);
+            expect(server).toBe(LSP_SERVERS.typescript);
+            expect(server.command).toBe('typescript-language-server');
+            expect(server.args).toEqual(['--stdio']);
+        }
+        finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+    it('falls back to classic server when native TypeScript has no local tsc binary', () => {
+        const root = createTypeScriptProject({ version: '7.0.1-rc' });
+        try {
+            const server = getTypeScriptServerForWorkspace(root);
+            expect(server).toBe(LSP_SERVERS.typescript);
+            expect(server.command).toBe('typescript-language-server');
+        }
+        finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });
 describe('getServerForLanguage', () => {

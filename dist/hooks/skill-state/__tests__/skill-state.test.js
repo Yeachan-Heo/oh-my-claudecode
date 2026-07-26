@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { getSkillProtection, getSkillConfig, readSkillActiveState, writeSkillActiveState, clearSkillActiveState, isSkillStateStale, checkSkillActiveState, readSkillActiveStateNormalized, writeSkillActiveStateCopies, upsertWorkflowSkillSlot, markWorkflowSkillCompleted, clearWorkflowSkillSlot, pruneExpiredWorkflowSkillTombstones, resolveAuthoritativeWorkflowSkill, emptySkillActiveStateV2, WORKFLOW_TOMBSTONE_TTL_MS, } from '../index.js';
+import { getSkillProtection, getSkillConfig, readSkillActiveState, writeSkillActiveState, clearSkillActiveState, isSkillStateStale, checkSkillActiveState, readSkillActiveStateNormalized, writeSkillActiveStateCopies, upsertWorkflowSkillSlot, markWorkflowSkillCompleted, markDurableWorkflowSkillCompleted, clearWorkflowSkillSlot, pruneExpiredWorkflowSkillTombstones, resolveAuthoritativeWorkflowSkill, emptySkillActiveStateV2, WORKFLOW_TOMBSTONE_TTL_MS, } from '../index.js';
 function makeTempDir() {
     const tempDir = mkdtempSync(join(tmpdir(), 'skill-state-'));
     execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
@@ -38,6 +38,7 @@ describe('skill-state', () => {
             expect(getSkillProtection('team')).toBe('none');
             expect(getSkillProtection('ultrawork')).toBe('none');
             expect(getSkillProtection('cancel')).toBe('none');
+            expect(getSkillProtection('graph')).toBe('none');
         });
         it('returns none for instant/read-only skills', () => {
             expect(getSkillProtection('trace')).toBe('none');
@@ -851,6 +852,20 @@ describe('skill-state', () => {
     // Pure workflow-slot helpers — unit tests
     // -----------------------------------------------------------------------
     describe('upsertWorkflowSkillSlot — pure helper', () => {
+        it('recognizes Graph as a canonical workflow and creates its durable slot', () => {
+            const state = upsertWorkflowSkillSlot(emptySkillActiveStateV2(), 'graph', {
+                session_id: 'graph-session',
+                mode_state_path: 'graph-state.json',
+                initialized_mode: 'graph',
+                initialized_state_path: '',
+                initialized_session_state_path: '',
+            });
+            expect(state.active_skills.graph).toMatchObject({
+                skill_name: 'graph',
+                completed_at: null,
+                initialized_mode: 'graph',
+            });
+        });
         it('creates a new slot with provided fields', () => {
             const state = upsertWorkflowSkillSlot(emptySkillActiveStateV2(), 'ralph', {
                 session_id: 's1',
@@ -901,6 +916,29 @@ describe('skill-state', () => {
         });
     });
     describe('markWorkflowSkillCompleted — pure helper', () => {
+        it('does not tombstone a durable Graph slot on generic tool completion', () => {
+            const state = upsertWorkflowSkillSlot(emptySkillActiveStateV2(), 'graph', {
+                session_id: 'graph-session',
+                mode_state_path: 'graph-state.json',
+                initialized_mode: 'graph',
+                initialized_state_path: '',
+                initialized_session_state_path: '',
+            });
+            expect(markWorkflowSkillCompleted(state, 'graph', '2026-07-21T00:00:00.000Z')).toBe(state);
+            expect(state.active_skills.graph?.completed_at).toBeNull();
+        });
+        it('allows the Graph runtime to tombstone only after a durable stop', () => {
+            const state = upsertWorkflowSkillSlot(emptySkillActiveStateV2(), 'graph', {
+                session_id: 'graph-session',
+                mode_state_path: 'graph-state.json',
+                initialized_mode: 'graph',
+                initialized_state_path: '',
+                initialized_session_state_path: '',
+            });
+            const completedAt = '2026-07-21T00:00:00.000Z';
+            const tombstoned = markDurableWorkflowSkillCompleted(state, 'graph', completedAt);
+            expect(tombstoned.active_skills.graph?.completed_at).toBe(completedAt);
+        });
         it('sets completed_at to provided timestamp', () => {
             const ts = '2026-04-17T12:00:00.000Z';
             const state = {

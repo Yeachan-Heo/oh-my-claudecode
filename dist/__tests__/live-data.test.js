@@ -4,6 +4,7 @@ import * as child_process from 'child_process';
 import * as fs from 'fs';
 vi.mock('child_process', () => ({
     execSync: vi.fn(),
+    execFileSync: vi.fn(),
 }));
 vi.mock('fs', async () => {
     const actual = await vi.importActual('fs');
@@ -14,6 +15,7 @@ vi.mock('fs', async () => {
     };
 });
 const mockedExecSync = vi.mocked(child_process.execSync);
+const mockedExecFileSync = vi.mocked(child_process.execFileSync);
 const mockedExistsSync = vi.mocked(fs.existsSync);
 const mockedReadFileSync = vi.mocked(fs.readFileSync);
 beforeEach(() => {
@@ -164,31 +166,30 @@ describe('resolveLiveData - caching', () => {
 describe('resolveLiveData - conditional', () => {
     it('!if-modified skips when no files match', () => {
         // First call is git diff --name-only (condition check), returns no matching files
-        mockedExecSync.mockReturnValueOnce('README.md\npackage.json\n');
+        mockedExecFileSync.mockReturnValueOnce('README.md\npackage.json\n');
         const result = resolveLiveData('!if-modified src/** then git diff src/');
         expect(result).toContain('skipped="true"');
         expect(result).toContain('condition not met');
-        // Only the git diff --name-only call, not the actual command
-        expect(mockedExecSync).toHaveBeenCalledTimes(1);
+        expect(mockedExecFileSync).toHaveBeenCalledWith('git', ['diff', '--name-only'], expect.objectContaining({ timeout: 5000, windowsHide: true }));
+        expect(mockedExecSync).not.toHaveBeenCalled();
     });
     it('!if-modified executes when files match', () => {
-        mockedExecSync
-            .mockReturnValueOnce('src/main.ts\nREADME.md\n') // git diff --name-only
-            .mockReturnValueOnce('diff output\n'); // actual command
+        mockedExecFileSync.mockReturnValueOnce('src/main.ts\nREADME.md\n');
+        mockedExecSync.mockReturnValueOnce('diff output\n');
         const result = resolveLiveData('!if-modified src/** then git diff src/');
         expect(result).toContain('<live-data command="git diff src/">diff output\n</live-data>');
-        expect(mockedExecSync).toHaveBeenCalledTimes(2);
+        expect(mockedExecFileSync).toHaveBeenCalledTimes(1);
+        expect(mockedExecSync).toHaveBeenCalledTimes(1);
     });
     it('!if-branch skips when branch does not match', () => {
-        mockedExecSync.mockReturnValueOnce('main\n'); // git branch --show-current
+        mockedExecFileSync.mockReturnValueOnce('main\n');
         const result = resolveLiveData('!if-branch feat/* then echo "feature"');
         expect(result).toContain('skipped="true"');
         expect(result).toContain('branch does not match');
     });
     it('!if-branch executes when branch matches', () => {
-        mockedExecSync
-            .mockReturnValueOnce('feat/live-data\n') // git branch --show-current
-            .mockReturnValueOnce('feature\n'); // actual command
+        mockedExecFileSync.mockReturnValueOnce('feat/live-data\n');
+        mockedExecSync.mockReturnValueOnce('feature\n');
         const result = resolveLiveData('!if-branch feat/* then echo "feature"');
         expect(result).toContain('feature\n</live-data>');
         expect(result).not.toContain('skipped');

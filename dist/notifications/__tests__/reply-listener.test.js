@@ -225,7 +225,7 @@ describe("reply-listener", () => {
             expect(true).toBe(true);
         });
         it("detects stale PID file", () => {
-            const pid = 99999; // Non-existent process
+            const pid = 2_147_483_647; // Outside the supported PID range on test platforms
             // isProcessAlive would return false
             let isRunning = false;
             try {

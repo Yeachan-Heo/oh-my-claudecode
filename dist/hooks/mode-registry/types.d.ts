@@ -3,7 +3,7 @@
  *
  * Defines the supported execution modes and their state file locations.
  */
-export type ExecutionMode = 'autopilot' | 'autoresearch' | 'team' | 'ralph' | 'ultrawork' | 'ultraqa' | 'deep-interview' | 'merge-readiness' | 'self-improve';
+export type ExecutionMode = 'autopilot' | 'autoresearch' | 'graph' | 'team' | 'ralph' | 'ultrawork' | 'ultraqa' | 'deep-interview' | 'merge-readiness' | 'self-improve';
 export interface ModeConfig {
     /** Display name for the mode */
     name: string;
@@ -13,6 +13,8 @@ export interface ModeConfig {
     markerFile?: string;
     /** Property to check in JSON state (if JSON-based) */
     activeProperty?: string;
+    /** Status values that mean active when durable status owns lifecycle. */
+    activeStatuses?: readonly string[];
     /** Whether state is SQLite-based (requires marker file) */
     isSqlite?: boolean;
     /** Whether mode has global state in ~/.claude/ */

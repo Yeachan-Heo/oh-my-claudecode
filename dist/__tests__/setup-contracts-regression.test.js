@@ -553,6 +553,17 @@ describe('Contract 11: SessionEnd hooks are async (issue #3240)', () => {
                 `Add "async": true to every SessionEnd command hook.`);
         }
     });
+    it('keeps both SessionEnd scripts on the direct asynchronous run.cjs path', () => {
+        if (!existsSync(HOOKS_JSON_PATH))
+            return;
+        const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
+        const commands = (hooksJson.hooks.SessionEnd ?? [])
+            .flatMap(group => group.hooks)
+            .filter(hook => hook.type === 'command')
+            .map(hook => hook.command);
+        expect(commands).toContain('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs');
+        expect(commands).toContain('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/wiki-session-end.mjs');
+    });
     it('non-SessionEnd hooks do not unconditionally carry async:true', () => {
         if (!existsSync(HOOKS_JSON_PATH))
             return;
@@ -560,6 +571,7 @@ describe('Contract 11: SessionEnd hooks are async (issue #3240)', () => {
         // Only SessionEnd should have async:true; verify at least one event type that
         // is expected to be synchronous (Stop) is not accidentally marked async.
         const stopGroups = hooksJson.hooks?.['Stop'] ?? [];
+        expect(stopGroups.length).toBeGreaterThan(0);
         for (const group of stopGroups) {
             for (const hook of group.hooks ?? []) {
                 if (hook.type === 'command') {

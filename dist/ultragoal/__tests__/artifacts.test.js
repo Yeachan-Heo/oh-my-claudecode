@@ -60,8 +60,10 @@ describe('ultragoal artifacts', () => {
             expect(resumed.goal?.id).toBe('G001-first');
             expect(resumed.resumed).toBe(true);
             const instruction = buildClaudeGoalInstruction(started.goal, started.plan);
-            expect(instruction).toMatch(/active Claude \/goal condition/i);
+            expect(instruction).toMatch(/first confirm the active Claude \/goal for this session/i);
             expect(instruction).toMatch(/invoke \/goal/i);
+            expect(instruction).toMatch(/ask the user to type it/i);
+            expect(instruction).toMatch(/does not satisfy the PreToolUse \/goal guard/i);
             expect(instruction).toMatch(/Claude \/goal = the whole ultragoal run/i);
             expect(instruction).toMatch(/same aggregate objective as active/i);
             expect(instruction).toMatch(/do not clear the \/goal yet/i);
@@ -274,6 +276,8 @@ describe('ultragoal artifacts', () => {
             const instruction = buildClaudeGoalInstruction(first.goal, first.plan);
             expect(instruction).toMatch(/Ultragoal active-goal handoff/);
             expect(instruction).toMatch(/fresh Claude Code session/);
+            expect(instruction).toMatch(/ask the user to type it/i);
+            expect(instruction).toMatch(/does not satisfy the PreToolUse \/goal guard/i);
             await checkpointUltragoal(cwd, {
                 goalId: first.goal.id,
                 status: 'complete',

@@ -9,6 +9,7 @@
 export const MODE_NAMES = {
     AUTOPILOT: 'autopilot',
     AUTORESEARCH: 'autoresearch',
+    GRAPH: 'graph',
     TEAM: 'team',
     RALPH: 'ralph',
     ULTRAWORK: 'ultrawork',
@@ -34,6 +35,7 @@ export const DEPRECATED_MODE_NAMES = {
 export const ALL_MODE_NAMES = [
     MODE_NAMES.AUTOPILOT,
     MODE_NAMES.AUTORESEARCH,
+    MODE_NAMES.GRAPH,
     MODE_NAMES.TEAM,
     MODE_NAMES.RALPH,
     MODE_NAMES.ULTRAWORK,
@@ -50,6 +52,7 @@ export const ALL_MODE_NAMES = [
 export const MODE_STATE_FILE_MAP = {
     [MODE_NAMES.AUTOPILOT]: 'autopilot-state.json',
     [MODE_NAMES.AUTORESEARCH]: 'autoresearch-state.json',
+    [MODE_NAMES.GRAPH]: 'graph-state.json',
     [MODE_NAMES.TEAM]: 'team-state.json',
     [MODE_NAMES.RALPH]: 'ralph-state.json',
     [MODE_NAMES.ULTRAWORK]: 'ultrawork-state.json',

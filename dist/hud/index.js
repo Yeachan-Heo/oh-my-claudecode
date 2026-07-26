@@ -8,7 +8,7 @@
 import { readStdin, writeStdinCache, readStdinCache, getContextPercent, getModelId, getModelName, getRateLimitsFromStdin, stabilizeContextPercent, } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
 import { readHudState, readHudConfig, getRunningTasks, writeHudState, initializeHUDState, } from "./state.js";
-import { readRalphStateForHud, readUltraworkStateForHud, readPrdStateForHud, readAutopilotStateForHud, } from "./omc-state.js";
+import { readRalphStateForHud, readUltraworkStateForHud, readPrdStateForHud, readAutopilotStateForHud, readGraphStateForHud, } from "./omc-state.js";
 import { getUsage, getSubscriptionInfo } from "./usage-api.js";
 import { executeCustomProvider } from "./custom-rate-provider.js";
 import { render } from "./render.js";
@@ -245,6 +245,21 @@ async function main(watchMode = false, skipInit = false) {
         const ultrawork = readUltraworkStateForHud(cwd, currentSessionId ?? undefined);
         const prd = readPrdStateForHud(cwd);
         const autopilot = readAutopilotStateForHud(cwd, currentSessionId ?? undefined);
+        // readGraphStateForHud is best-effort: it must never abort the watch-mode
+        // init flow (which would prevent getUsage() from running and leave the HUD
+        // blank). The reader is defensive internally, but any unexpected throw
+        // (path resolution, import side-effects, future changes) is contained here
+        // so the rest of the render pipeline proceeds with graph === null.
+        let graph = null;
+        try {
+            graph = readGraphStateForHud(cwd, currentSessionId ?? undefined);
+        }
+        catch (error) {
+            if (process.env.OMC_DEBUG) {
+                console.error("[HUD] Graph state read failed (non-fatal):", error instanceof Error ? error.message : error);
+            }
+            graph = null;
+        }
         // Read HUD state for background tasks
         const hudState = readHudState(cwd, currentSessionId ?? undefined);
         const _backgroundTasks = hudState?.backgroundTasks || [];
@@ -359,6 +374,7 @@ async function main(watchMode = false, skipInit = false) {
             ultrawork,
             prd,
             autopilot,
+            graph,
             activeAgents: transcriptData.agents.filter((a) => a.status === "running"),
             todos: transcriptData.todos,
             backgroundTasks: getRunningTasks(hudState),

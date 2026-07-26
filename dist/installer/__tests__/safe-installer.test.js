@@ -57,6 +57,7 @@ describe('isOmcHook detection', () => {
         // These are the real commands OMC installs into settings.json
         expect(isOmcHook('node "$HOME/.claude/hooks/keyword-detector.mjs"')).toBe(true);
         expect(isOmcHook('node "$HOME/.claude/hooks/session-start.mjs"')).toBe(true);
+        expect(isOmcHook('node "$HOME/.claude/hooks/session-end.mjs"')).toBe(true);
         expect(isOmcHook('node "$HOME/.claude/hooks/pre-tool-use.mjs"')).toBe(true);
         expect(isOmcHook('node "$HOME/.claude/hooks/post-tool-use.mjs"')).toBe(true);
         expect(isOmcHook('node "$HOME/.claude/hooks/post-tool-use-failure.mjs"')).toBe(true);

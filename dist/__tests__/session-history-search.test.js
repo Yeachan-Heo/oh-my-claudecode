@@ -69,8 +69,8 @@ describe('session history search', () => {
             process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
         }
         delete process.env.OMC_STATE_DIR;
-        rmSync(tempRoot, { recursive: true, force: true });
-        rmSync(tildeClaudeDir, { recursive: true, force: true });
+        rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        rmSync(tildeClaudeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     });
     it('searches the current project by default and returns structured snippets', async () => {
         const report = await searchSessionHistory({

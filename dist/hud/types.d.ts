@@ -4,11 +4,12 @@
  * Type definitions for the HUD state, configuration, and rendering.
  */
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import type { GraphStateForHud } from './elements/graph.js';
 import type { ApiKeySource } from './elements/api-key-source.js';
 import type { SessionSummaryState } from './elements/session-summary.js';
 import type { PayloadEstimate } from './payload-estimate.js';
 import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
-export type { AutopilotStateForHud, ApiKeySource, SessionSummaryState };
+export type { AutopilotStateForHud, GraphStateForHud, ApiKeySource, SessionSummaryState };
 export interface BackgroundTask {
     id: string;
     description: string;
@@ -268,6 +269,8 @@ export interface HudRenderContext {
     prd: PrdStateForHud | null;
     /** Autopilot state */
     autopilot: AutopilotStateForHud | null;
+    /** Durable Graph state */
+    graph?: GraphStateForHud | null;
     /** Active subagents from transcript */
     activeAgents: ActiveAgent[];
     /** Todo list from transcript */
@@ -398,6 +401,7 @@ export interface HudElementConfig {
     rateLimits: boolean;
     ralph: boolean;
     autopilot: boolean;
+    graph: boolean;
     prdStory: boolean;
     activeSkills: boolean;
     lastSkill: boolean;

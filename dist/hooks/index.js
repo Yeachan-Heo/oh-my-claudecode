@@ -101,10 +101,8 @@ createLearnedSkillsHook, processMessageForSkills, isLearnerEnabled, getAllSkills
 USER_SKILLS_DIR, PROJECT_SKILLS_SUBDIR, SKILL_EXTENSION, FEATURE_FLAG_KEY, MAX_SKILL_CONTENT_LENGTH, MIN_QUALITY_SCORE, MAX_SKILLS_PER_SESSION } from './learner/index.js';
 // Autopilot
 export { readAutopilotState, writeAutopilotState, clearAutopilotState, isAutopilotActive, getAutopilotStateAge, initAutopilot, transitionPhase, incrementAgentCount, updateExpansion, updatePlanning, updateExecution, updateQA, updateValidation, ensureAutopilotDir, getSpecPath, getPlanPath, transitionRalphToUltraQA, transitionUltraQAToValidation, transitionToComplete, transitionToFailed, getTransitionPrompt, getExpansionPrompt, getDirectPlanningPrompt, getExecutionPrompt, getQAPrompt, getValidationPrompt, getPhasePrompt, recordValidationVerdict, getValidationStatus, startValidationRound, shouldRetryValidation, getIssuesToFix, getValidationSpawnPrompt, formatValidationResults, generateSummary, formatSummary, formatCompactSummary, formatFailureSummary, formatFileList, cancelAutopilot, clearAutopilot, canResumeAutopilot, resumeAutopilot, formatCancelMessage, STALE_STATE_MAX_AGE_MS, DEFAULT_CONFIG } from './autopilot/index.js';
-// Mode Registry (Centralized State Management)
-export { MODE_CONFIGS, getStateDir, ensureStateDir as ensureModeStateDir, getStateFilePath as getModeStateFilePath, getMarkerFilePath as getModeMarkerFilePath, getGlobalStateFilePath, clearModeState, hasModeState, getActiveModes, clearAllModeStates, 
-// Additional functions from PR #111
-isModeActive, getActiveExclusiveMode, canStartMode, getAllModeStatuses, createModeMarker, removeModeMarker, readModeMarker } from './mode-registry/index.js';
+// Mode Registry (Centralized State Management; additional functions from PR #111)
+export { MODE_CONFIGS, getStateDir, ensureStateDir as ensureModeStateDir, getStateFilePath as getModeStateFilePath, getMarkerFilePath as getModeMarkerFilePath, getGlobalStateFilePath, clearModeState, clearModeStateDetailed, hasModeState, getActiveModes, clearAllModeStates, isModeActive, getActiveExclusiveMode, canStartMode, getAllModeStatuses, createModeMarker, removeModeMarker, readModeMarker } from './mode-registry/index.js';
 export { 
 // Setup Hook
 ensureDirectoryStructure, validateConfigFiles, setEnvironmentVariables, processSetupInit, pruneOldStateFiles, cleanupOrphanedState, processSetupMaintenance, processSetup } from './setup/index.js';

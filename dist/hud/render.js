@@ -22,6 +22,7 @@ import { renderTokenUsage } from "./elements/token-usage.js";
 import { renderEnterpriseCost } from "./elements/enterprise-cost.js";
 import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
+import { renderGraph } from "./elements/graph.js";
 import { renderCwd } from "./elements/cwd.js";
 import { renderHostname } from "./elements/hostname.js";
 import { renderGitRepo, renderGitBranch, renderGitStatus } from "./elements/git.js";
@@ -347,6 +348,11 @@ export async function render(context, config) {
         const autopilot = renderAutopilot(context.autopilot, config.thresholds);
         if (autopilot)
             rendered.set("autopilot", autopilot);
+    }
+    if (enabledElements.graph && context.graph) {
+        const graph = renderGraph(context.graph);
+        if (graph)
+            rendered.set("graph", graph);
     }
     if (enabledElements.prdStory && context.prd) {
         const prd = renderPrd(context.prd);

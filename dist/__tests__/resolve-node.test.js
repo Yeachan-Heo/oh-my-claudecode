@@ -89,7 +89,7 @@ describe('resolveNodeBinary', () => {
             return path === '/opt/homebrew/Cellar/node/25.8.1_1/bin/node' || path === '/opt/homebrew/bin/node';
         });
         expect(resolveNodeBinary()).toBe('/opt/homebrew/bin/node');
-        expect(mockedExecSync).toHaveBeenCalledWith('which node', { encoding: 'utf-8', stdio: 'pipe' });
+        expect(mockedExecSync).toHaveBeenCalledWith('which node', { encoding: 'utf-8', stdio: 'pipe', windowsHide: true });
     });
     it('prefers PATH node over a CI-only hostedtoolcache process.execPath', () => {
         setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');

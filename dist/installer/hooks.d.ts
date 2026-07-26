@@ -79,6 +79,8 @@ export declare const PERSISTENT_MODE_SCRIPT_NODE: string;
 export declare const CODE_SIMPLIFIER_SCRIPT_NODE: string;
 /** Node.js session start hook script - loaded from templates/hooks/session-start.mjs */
 export declare const SESSION_START_SCRIPT_NODE: string;
+/** Node.js session end hook script - loaded from templates/hooks/session-end.mjs */
+export declare const SESSION_END_SCRIPT_NODE: string;
 /** Post-tool-use Node.js script - loaded from templates/hooks/post-tool-use.mjs */
 export declare const POST_TOOL_USE_SCRIPT_NODE: string;
 /**
@@ -97,6 +99,15 @@ export declare const HOOKS_SETTINGS_CONFIG_NODE: {
             hooks: {
                 type: "command";
                 command: string;
+            }[];
+        }[];
+        SessionEnd: {
+            matcher: string;
+            hooks: {
+                type: "command";
+                command: string;
+                timeout: number;
+                async: boolean;
             }[];
         }[];
         PreToolUse: {

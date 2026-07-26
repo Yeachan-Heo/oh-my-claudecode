@@ -23036,44 +23036,96 @@ var import_fs12 = require("fs");
 var import_path13 = require("path");
 var import_crypto3 = require("crypto");
 var import_child_process10 = require("child_process");
+var LOCK_SCHEMA_VERSION = 1;
+var LOCK_OLD_SCHEMA_VERSION = 1;
+var LOCK_OLD_OWNER_KEYS = ["createdAt", "nonce", "pid", "processStart", "version"];
+var LOCK_LEASE_MS = 3e5;
+function leaseNow() {
+  return Date.now();
+}
 function flockPath() {
+  if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_FORCE_FLOCKLESS === "1") return null;
   return process.env.NODE_ENV === "test" && process.env.OMC_TEST_FLOCK_AVAILABLE === "0" ? null : (0, import_fs12.existsSync)("/usr/bin/flock") ? "/usr/bin/flock" : (0, import_fs12.existsSync)("/bin/flock") ? "/bin/flock" : null;
+}
+function lockingDisabledForTest() {
+  return process.env.NODE_ENV === "test" && process.env.OMC_TEST_FLOCK_AVAILABLE === "0";
 }
 var LOCK_REMOVAL_SCRIPT = String.raw`
 const fs = require('fs');
-const [operation, lockPath, expectedRaw] = process.argv.slice(1);
-const keys = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
+const [operation, lockPath, expectedRaw, renewalPath] = process.argv.slice(1);
+const leaseKeys = ['createdAt', 'expires_at', 'nonce', 'pid', 'version'];
+const oldKeys = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
 function readOwner() {
+  let raw;
   try {
-    const value = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    raw = fs.readFileSync(lockPath, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return 'absent';
+    return 'io_error';
+  }
+  try {
+    const value = JSON.parse(raw);
     const actual = Object.keys(value).sort();
-    if (actual.length !== keys.length || !actual.every((key, index) => key === keys[index]) || value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.processStart !== 'string' || !/^\d+$/.test(value.processStart) || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
-    return value;
-  } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); return null; }
+    // v1 lease schema (the deployed current contract): expires_at, no processStart.
+    const leaseShaped = actual.length === leaseKeys.length && actual.every((key, index) => key === leaseKeys[index]) && Number.isSafeInteger(value.version) && value.version > 0 && Number.isSafeInteger(value.pid) && value.pid > 0 && typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt)) && typeof value.expires_at === 'string' && Number.isFinite(Date.parse(value.expires_at)) && typeof value.nonce === 'string' && /^[0-9a-f-]{36}$/i.test(value.nonce);
+    if (leaseShaped && value.version === 1) return value;
+    // v1 old-liveness schema (pre-upgrade contract): version 1, processStart, no
+    // expires_at. NOT corrupt - it is a live lock held under the old contract. The
+    // old owner may be alive; FAIL CLOSED (B12): never unlink, never reclaim.
+    if (actual.length === oldKeys.length && actual.every((key, index) => key === oldKeys[index]) && value.version === 1 && Number.isSafeInteger(value.pid) && value.pid > 0 && typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt)) && typeof value.processStart === 'string' && /^\d+$/.test(value.processStart) && typeof value.nonce === 'string' && /^[0-9a-f-]{36}$/i.test(value.nonce)) return 'old_version';
+    if (leaseShaped) return 'unknown_version';
+    // B12: a structurally-valid versioned object under a shape we don't recognise
+    // (e.g. a future lease with extra/renamed fields) MAY be a live owner. FAIL
+    // CLOSED (unknown_version -> exit 6): never unlink, never reclaim. Reserve
+    // 'corrupt' for genuinely unparseable / non-versioned garbage.
+    if (value && typeof value === 'object' && !Array.isArray(value) && Number.isSafeInteger(value.version) && value.version > 0) return 'unknown_version';
+    return 'corrupt';
+  } catch (error) { return 'corrupt'; }
 }
-const owner = readOwner();
-if (!owner) process.exit(3);
 if (operation === 'release') {
   let expected;
   try { expected = JSON.parse(expectedRaw); } catch { process.exit(3); }
-  if (owner.pid !== expected.pid || owner.processStart !== expected.processStart || owner.nonce !== expected.nonce) process.exit(4);
-  try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
+  const current = readOwner();
+  if (current === 'absent') process.exit(0);
+  if (current === 'io_error') process.exit(3);
+  if (current === 'old_version') process.exit(5); // not ours; leave the old-contract lock in place
+  if (current === 'unknown_version') process.exit(6); // not ours; leave the unsupported-contract lock in place
+  if (current === 'corrupt') process.exit(3);
+  if (current.pid !== expected.pid || current.nonce !== expected.nonce || current.createdAt !== expected.createdAt) process.exit(4);
+  try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); }
 }
-if (process.platform !== 'linux') process.exit(3);
-let currentStart;
-try {
-  const stat = fs.readFileSync('/proc/' + owner.pid + '/stat', 'utf8');
-  const end = stat.lastIndexOf(')');
-  const fields = end >= 0 ? stat.slice(end + 2).trim().split(/\s+/) : [];
-  currentStart = fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-} catch (error) { currentStart = error && error.code === 'ENOENT' ? 'absent' : null; }
-if (currentStart === null) process.exit(3);
-if (currentStart !== 'absent' && currentStart === owner.processStart) process.exit(2);
-try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
+if (operation === 'renew') {
+  let expected;
+  try { expected = JSON.parse(expectedRaw); } catch { process.exit(3); }
+  const current = readOwner();
+  if (current === 'absent') process.exit(4);
+  if (current === 'io_error') process.exit(3);
+  if (current === 'old_version') process.exit(5);
+  if (current === 'unknown_version') process.exit(6);
+  if (current === 'corrupt') process.exit(4);
+  if (current.pid !== expected.pid || current.nonce !== expected.nonce || current.createdAt !== expected.createdAt) process.exit(4);
+  if (Date.now() >= Date.parse(current.expires_at)) process.exit(2);
+  try { fs.renameSync(renewalPath, lockPath); process.exit(0); } catch { process.exit(3); }
+}
+const current = readOwner();
+if (current === 'absent') process.exit(0);
+if (current === 'io_error') process.exit(3);
+if (current === 'old_version') process.exit(5); // old-contract owner may be live; FAIL CLOSED (B12)
+if (current === 'unknown_version') process.exit(6); // unknown-contract owner may be live; FAIL CLOSED
+if (current === 'corrupt') { try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); } }
+if (Date.now() >= Date.parse(current.expires_at)) { try { fs.unlinkSync(lockPath); process.exit(0); } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); process.exit(4); } }
+process.exit(2);
 `;
+var cachedSelfProcessStart;
+function selfProcessStart() {
+  if (cachedSelfProcessStart === void 0) {
+    cachedSelfProcessStart = String(Math.max(1, Math.floor(Date.now() - process.uptime() * 1e3)));
+  }
+  return cachedSelfProcessStart;
+}
 function processStartIdentity(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
-  if (process.platform !== "linux") return pid === process.pid ? String(Math.max(1, Math.floor(Date.now() - process.uptime() * 1e3))) : null;
+  if (process.platform !== "linux") return pid === process.pid ? selfProcessStart() : null;
   if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_EMERGENCY_PROCESS_START_UNKNOWN_PID === String(pid)) return null;
   try {
     const stat = (0, import_fs12.readFileSync)(`/proc/${pid}/stat`, "utf8");
@@ -23084,6 +23136,16 @@ function processStartIdentity(pid) {
   } catch (error2) {
     return error2.code === "ENOENT" ? "absent" : null;
   }
+}
+function freshLockOwner() {
+  const now = leaseNow();
+  return {
+    version: LOCK_SCHEMA_VERSION,
+    pid: process.pid,
+    createdAt: new Date(now).toISOString(),
+    expires_at: new Date(now + LOCK_LEASE_MS).toISOString(),
+    nonce: (0, import_crypto3.randomUUID)()
+  };
 }
 function writeAllSync2(fd, content, label) {
   const bytes = Buffer.from(content, "utf-8");
@@ -23106,18 +23168,17 @@ function guardedLockRemoval(path13, operation, owner) {
   if (result.status === 0) return "retry";
   if (result.status === 2) return "live";
   if (result.status === 4) return "replaced";
+  if (result.status === 5) return "old_version";
+  if (result.status === 6) return "unknown_version";
   return "unverifiable";
 }
 function acquireLockAt(path13, requireExclusive = false) {
   (0, import_fs12.mkdirSync)((0, import_path13.dirname)(path13), { recursive: true });
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === "absent") {
-    console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${path13}`);
-    return null;
-  }
+  const hasFlock = !!flockPath();
+  if (lockingDisabledForTest()) return requireExclusive ? null : { unlocked: true };
+  if (!hasFlock && !requireExclusive) return { unlocked: true };
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const owner = { version: 1, pid: process.pid, processStart, createdAt: (/* @__PURE__ */ new Date()).toISOString(), nonce: (0, import_crypto3.randomUUID)() };
+    const owner = freshLockOwner();
     const tempPath = `${path13}.${process.pid}.${owner.nonce}.tmp`;
     let fd;
     try {
@@ -23139,18 +23200,113 @@ function acquireLockAt(path13, requireExclusive = false) {
       } catch {
       }
       if (error2.code !== "EEXIST") return null;
-      const disposition = guardedLockRemoval(path13, "reclaim");
-      if (disposition === "unverifiable") {
-        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path13}`);
-        return null;
+      if (hasFlock) {
+        const disposition = guardedLockRemoval(path13, "reclaim");
+        if (disposition === "unverifiable") {
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path13}`);
+          return null;
+        }
+        if (disposition === "old_version" || disposition === "unknown_version") {
+          console.error(`[omc-lock] state_mutation_lock_${disposition}: ${path13}`);
+          return null;
+        }
+        if (disposition === "live") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      } else {
+        const current = readLockOwner(path13);
+        if (current === "absent") {
+        } else if (current === null) {
+          console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path13}`);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        } else if (current === "old_version" || current === "unknown_version" || current === "unrecognised") {
+          console.error(`[omc-lock] state_mutation_lock_${current}: ${path13}`);
+          return null;
+        } else if (current === "corrupt") {
+          try {
+            (0, import_fs12.unlinkSync)(path13);
+          } catch {
+          }
+        } else if (leaseNow() >= Date.parse(current.expires_at)) {
+          try {
+            (0, import_fs12.unlinkSync)(path13);
+          } catch {
+          }
+        } else {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
       }
-      if (disposition === "live") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
   return null;
 }
 function acquireMutationLock(filePath) {
-  return acquireLockAt(`${filePath}.mutation.lock`);
+  return acquireLockAt(`${filePath}.mutation.lock`, !lockingDisabledForTest());
+}
+function sameLockOwner(left, right) {
+  return left.pid === right.pid && left.nonce === right.nonce && left.createdAt === right.createdAt;
+}
+var LOCK_OWNER_KEYS = ["createdAt", "expires_at", "nonce", "pid", "version"];
+function isOldLivenessOwner(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record2 = value;
+  const actual = Object.keys(record2).sort();
+  if (actual.length !== LOCK_OLD_OWNER_KEYS.length || !actual.every((key, index) => key === LOCK_OLD_OWNER_KEYS[index])) return false;
+  if (record2.version !== LOCK_OLD_SCHEMA_VERSION) return false;
+  if (!Number.isSafeInteger(record2.pid) || record2.pid <= 0) return false;
+  if (typeof record2.createdAt !== "string" || !Number.isFinite(Date.parse(record2.createdAt))) return false;
+  if (typeof record2.processStart !== "string" || !/^\d+$/.test(record2.processStart)) return false;
+  if (typeof record2.nonce !== "string" || !/^[0-9a-f-]{36}$/i.test(record2.nonce)) return false;
+  return true;
+}
+function validateLockOwner(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record2 = value;
+  const actual = Object.keys(record2).sort();
+  if (actual.length !== LOCK_OWNER_KEYS.length || !actual.every((key, index) => key === LOCK_OWNER_KEYS[index])) return null;
+  if (record2.version !== LOCK_SCHEMA_VERSION) return null;
+  if (!Number.isSafeInteger(record2.pid) || record2.pid <= 0) return null;
+  if (typeof record2.createdAt !== "string" || !Number.isFinite(Date.parse(record2.createdAt))) return null;
+  if (typeof record2.expires_at !== "string" || !Number.isFinite(Date.parse(record2.expires_at))) return null;
+  if (typeof record2.nonce !== "string" || !/^[0-9a-f-]{36}$/i.test(record2.nonce)) return null;
+  return record2;
+}
+function isUnknownLeaseOwner(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record2 = value;
+  const actual = Object.keys(record2).sort();
+  if (actual.length !== LOCK_OWNER_KEYS.length || !actual.every((key, index) => key === LOCK_OWNER_KEYS[index])) return false;
+  if (!Number.isSafeInteger(record2.version) || record2.version <= 0 || record2.version === LOCK_SCHEMA_VERSION) return false;
+  if (!Number.isSafeInteger(record2.pid) || record2.pid <= 0) return false;
+  if (typeof record2.createdAt !== "string" || !Number.isFinite(Date.parse(record2.createdAt))) return false;
+  if (typeof record2.expires_at !== "string" || !Number.isFinite(Date.parse(record2.expires_at))) return false;
+  return typeof record2.nonce === "string" && /^[0-9a-f-]{36}$/i.test(record2.nonce);
+}
+function isUnrecognisedVersionedOwner(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record2 = value;
+  if (!Number.isSafeInteger(record2.version) || record2.version <= 0) return false;
+  return true;
+}
+function readLockOwner(path13) {
+  let raw;
+  try {
+    raw = (0, import_fs12.readFileSync)(path13, "utf8");
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT") return "absent";
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "corrupt";
+  }
+  if (isOldLivenessOwner(parsed)) return "old_version";
+  if (isUnknownLeaseOwner(parsed)) return "unknown_version";
+  const owner = validateLockOwner(parsed);
+  if (owner !== null) return owner;
+  if (isUnrecognisedVersionedOwner(parsed)) return "unrecognised";
+  return "corrupt";
 }
 function releaseMutationLock(lock) {
   if (!lock || "unlocked" in lock) return;
@@ -23158,23 +23314,389 @@ function releaseMutationLock(lock) {
     (0, import_fs12.closeSync)(lock.fd);
   } catch {
   }
-  guardedLockRemoval(lock.path, "release", lock.owner);
+  if (flockPath()) {
+    const disposition = guardedLockRemoval(lock.path, "release", lock.owner);
+    if (disposition === "replaced" || disposition === "old_version") {
+      console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.path}`);
+    }
+    return;
+  }
+  const current = readLockOwner(lock.path);
+  if (current === "absent") return;
+  if (current === null) return;
+  if (current === "old_version" || current === "unknown_version" || current === "unrecognised") {
+    console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.path}`);
+    return;
+  }
+  if (current !== "corrupt" && sameLockOwner(current, lock.owner)) {
+    try {
+      (0, import_fs12.unlinkSync)(lock.path);
+    } catch {
+    }
+  } else {
+    console.error(`[omc-lock] state_mutation_lock_release_owner_mismatch: ${lock.path}`);
+  }
+}
+function assertMutationLockHeld(lock) {
+  if (!lock || "unlocked" in lock) return;
+  const current = readLockOwner(lock.path);
+  if (current === "absent" || current === "old_version" || current === "unknown_version" || current === "unrecognised" || current === "corrupt" || current === null) {
+    console.error(`[omc-lock] state_mutation_lock_lease_expired_during_mutation: ${lock.path}`);
+    throw new Error(`lease_expired_during_mutation: holder's lock is no longer live at ${lock.path}`);
+  }
+  if (!sameLockOwner(current, lock.owner)) {
+    console.error(`[omc-lock] state_mutation_lock_lease_expired_during_mutation: ${lock.path}`);
+    throw new Error(`lease_expired_during_mutation: on-disk owner replaced at ${lock.path}`);
+  }
+  if (leaseNow() >= Date.parse(current.expires_at)) {
+    console.error(`[omc-lock] state_mutation_lock_lease_expired_during_mutation: ${lock.path}`);
+    throw new Error(`lease_expired_during_mutation: holder's lease expired before publish at ${lock.path}`);
+  }
+}
+var OCC_JOURNAL_PRUNE_BEHIND = 8;
+var OCC_JOURNAL_MAX_RETRIES = 50;
+var OCC_TEST_HOOKS = {};
+function occJournalDir(filePath) {
+  return `${filePath}.journal`;
+}
+function occEntryPath(dir, seq, token) {
+  return (0, import_path13.join)(dir, `${seq}.${token}.json`);
+}
+function occCompletePath(dir, seq, token) {
+  return (0, import_path13.join)(dir, `${seq}.${token}.complete`);
+}
+function occAbortedPath(dir, seq, token) {
+  return (0, import_path13.join)(dir, `${seq}.${token}.aborted`);
+}
+function occClaimPath(dir, seq) {
+  return (0, import_path13.join)(dir, `${seq}.claim`);
+}
+var OCC_ENTRY_NAME_RE = /^(\d+)\.([0-9a-f-]{36})\.(json|complete|aborted)$/i;
+var OCC_CLAIM_NAME_RE = /^(\d+)\.claim$/;
+function occReadCurrent(filePath) {
+  const dir = occJournalDir(filePath);
+  let names;
+  try {
+    names = (0, import_fs12.readdirSync)(dir);
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT") return { seq: -1, state: null, empty: true, ioError: false, reservedSeq: -1 };
+    return { seq: -1, state: null, empty: false, ioError: true, reservedSeq: -1 };
+  }
+  const completeBySeq = /* @__PURE__ */ new Map();
+  const entryBySeq = /* @__PURE__ */ new Map();
+  let reservedSeq = -1;
+  for (const name of names) {
+    const claim = OCC_CLAIM_NAME_RE.exec(name);
+    if (claim) {
+      const seq2 = Number(claim[1]);
+      if (Number.isInteger(seq2) && seq2 >= 0) reservedSeq = Math.max(reservedSeq, seq2);
+      continue;
+    }
+    const match = OCC_ENTRY_NAME_RE.exec(name);
+    if (!match) continue;
+    const seq = Number(match[1]);
+    if (!Number.isInteger(seq) || seq < 0) continue;
+    const token2 = match[2];
+    const kind = match[3];
+    if (kind === "complete") {
+      const existing = completeBySeq.get(seq);
+      completeBySeq.set(seq, existing === void 0 ? token2 : existing === token2 ? token2 : null);
+    } else if (kind === "json") {
+      const existing = entryBySeq.get(seq);
+      if (existing === void 0) entryBySeq.set(seq, token2);
+      else if (existing !== token2) return { seq: -1, state: null, empty: false, ioError: true, reservedSeq };
+    }
+  }
+  if (completeBySeq.size === 0) return { seq: -1, state: null, empty: true, ioError: false, reservedSeq };
+  let maxSeq = -1;
+  for (const seq of completeBySeq.keys()) if (seq > maxSeq) maxSeq = seq;
+  const completeToken = completeBySeq.get(maxSeq);
+  const token = entryBySeq.get(maxSeq);
+  if (!token || !completeToken || completeToken !== token) {
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
+  }
+  let raw;
+  try {
+    raw = (0, import_fs12.readFileSync)(occEntryPath(dir, maxSeq, token), "utf8");
+  } catch {
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
+  }
+  let entry;
+  try {
+    entry = JSON.parse(raw);
+  } catch {
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
+  }
+  const record2 = entry;
+  if (!record2 || typeof record2 !== "object" || record2.seq !== maxSeq || record2.owner_token !== token || !("state" in record2)) {
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
+  }
+  return { seq: maxSeq, state: record2.state, empty: false, ioError: false, reservedSeq };
+}
+function occReadCanonicalSnapshot(filePath) {
+  try {
+    const raw = (0, import_fs12.readFileSync)(filePath, "utf8");
+    const state = JSON.parse(raw);
+    return { state, contentFingerprint: stateDigest(raw), stateFingerprint: JSON.stringify(state), ioError: false };
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT") return { state: null, contentFingerprint: "absent", stateFingerprint: "absent", ioError: false };
+    return { state: null, contentFingerprint: "", stateFingerprint: "", ioError: true };
+  }
+}
+function occReadCanonicalContentFingerprint(filePath) {
+  try {
+    return { contentFingerprint: stateDigest((0, import_fs12.readFileSync)(filePath, "utf8")), ioError: false };
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT") return { contentFingerprint: "absent", ioError: false };
+    return { contentFingerprint: "", ioError: true };
+  }
+}
+function occStateFingerprint(state) {
+  return state === null ? "absent" : JSON.stringify(state);
+}
+function occCleanupOwn(dir, seq, token) {
+  try {
+    (0, import_fs12.unlinkSync)(occClaimPath(dir, seq));
+  } catch {
+  }
+  try {
+    (0, import_fs12.unlinkSync)(occEntryPath(dir, seq, token));
+  } catch {
+  }
+  try {
+    (0, import_fs12.unlinkSync)(occCompletePath(dir, seq, token));
+  } catch {
+  }
+  try {
+    (0, import_fs12.unlinkSync)(occAbortedPath(dir, seq, token));
+  } catch {
+  }
+}
+function occPruneOld(dir, currentSeq) {
+  let names;
+  try {
+    names = (0, import_fs12.readdirSync)(dir);
+  } catch {
+    return;
+  }
+  const cutoff = currentSeq - OCC_JOURNAL_PRUNE_BEHIND;
+  for (const name of names) {
+    const match = OCC_ENTRY_NAME_RE.exec(name) ?? OCC_CLAIM_NAME_RE.exec(name);
+    if (!match) continue;
+    const seq = Number(match[1]);
+    if (Number.isInteger(seq) && seq < cutoff) {
+      try {
+        (0, import_fs12.unlinkSync)((0, import_path13.join)(dir, name));
+      } catch {
+      }
+    }
+  }
+}
+function occCommitMutation(filePath, mutate, options) {
+  const dir = occJournalDir(filePath);
+  try {
+    (0, import_fs12.mkdirSync)(dir, { recursive: true });
+  } catch {
+    return null;
+  }
+  const ownerToken = options?.ownerToken ?? (0, import_crypto3.randomUUID)();
+  let parentSeq = -1;
+  let parentState = null;
+  for (let attempt = 0; attempt < OCC_JOURNAL_MAX_RETRIES; attempt += 1) {
+    const current = occReadCurrent(filePath);
+    const canonical = occReadCanonicalSnapshot(filePath);
+    if (options?.expectedCanonicalContentFingerprint !== void 0 && canonical.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      return null;
+    }
+    if (current.ioError || canonical.ioError) return null;
+    if (current.empty) {
+      parentSeq = -1;
+      parentState = options && Object.prototype.hasOwnProperty.call(options, "authenticatedExternalParent") ? options.authenticatedExternalParent : canonical.state;
+    } else {
+      parentSeq = current.seq;
+      parentState = current.state;
+    }
+    const produced = mutate(parentState, ownerToken);
+    if (produced === null || produced === void 0) return null;
+    const next = produced.state;
+    const seq = Math.max(parentSeq, current.reservedSeq) + 1;
+    const entryPath = occEntryPath(dir, seq, ownerToken);
+    let fd;
+    try {
+      fd = (0, import_fs12.openSync)(occClaimPath(dir, seq), "wx", 384);
+      writeAllSync2(fd, ownerToken, "occ sequence claim");
+      (0, import_fs12.fsyncSync)(fd);
+      (0, import_fs12.closeSync)(fd);
+      fd = void 0;
+      fd = (0, import_fs12.openSync)(entryPath, "wx", 384);
+      const entry = { seq, parent_seq: parentSeq, owner_token: ownerToken, state: next };
+      writeAllSync2(fd, JSON.stringify(entry), "occ journal entry");
+      (0, import_fs12.fsyncSync)(fd);
+      (0, import_fs12.closeSync)(fd);
+      fd = void 0;
+    } catch (error2) {
+      if (fd !== void 0) {
+        try {
+          (0, import_fs12.closeSync)(fd);
+        } catch {
+        }
+      }
+      const code = error2.code;
+      if (code === "EEXIST") {
+        continue;
+      }
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (OCC_TEST_HOOKS.pauseAfterClaim && OCC_TEST_HOOKS.pauseAfterClaim.filePath === filePath) {
+      try {
+        OCC_TEST_HOOKS.pauseAfterClaim.fn(seq, ownerToken, parentSeq);
+      } catch {
+      }
+    }
+    const fence = occReadCurrent(filePath);
+    if (fence.ioError) {
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (!fence.empty && fence.seq > parentSeq) {
+      try {
+        (0, import_fs12.unlinkSync)(occEntryPath(dir, seq, ownerToken));
+      } catch {
+      }
+      try {
+        (0, import_fs12.closeSync)((0, import_fs12.openSync)(occAbortedPath(dir, seq, ownerToken), "wx", 384));
+      } catch {
+      }
+      continue;
+    }
+    try {
+      options?.assertHeld?.();
+    } catch {
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    const canonicalFence = occReadCanonicalSnapshot(filePath);
+    if (options?.expectedCanonicalContentFingerprint !== void 0 && canonicalFence.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
+      options.onCanonicalCompareFailed?.();
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (canonicalFence.ioError) {
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (canonicalFence.contentFingerprint !== canonical.contentFingerprint) {
+      occCleanupOwn(dir, seq, ownerToken);
+      continue;
+    }
+    let markerFd;
+    try {
+      markerFd = (0, import_fs12.openSync)(occCompletePath(dir, seq, ownerToken), "wx", 384);
+      (0, import_fs12.fsyncSync)(markerFd);
+      (0, import_fs12.closeSync)(markerFd);
+    } catch (error2) {
+      if (markerFd !== void 0) {
+        try {
+          (0, import_fs12.closeSync)(markerFd);
+        } catch {
+        }
+      }
+      occCleanupOwn(dir, seq, ownerToken);
+      const code = error2.code;
+      if (code === "EEXIST") continue;
+      return null;
+    }
+    occPruneOld(dir, seq);
+    if (!options?.suppressCanonicalRepublish) {
+      try {
+        atomicWriteJsonSync(filePath, next);
+      } catch {
+      }
+    }
+    return produced;
+  }
+  return null;
+}
+function occCommitAuthenticatedExternalState(filePath, expectedParentState, publishedState, assertHeld) {
+  const committed = occCommitMutation(
+    filePath,
+    (currentState) => {
+      if (occStateFingerprint(currentState) !== occStateFingerprint(expectedParentState)) return null;
+      return { state: publishedState, result: true };
+    },
+    { assertHeld, suppressCanonicalRepublish: true, authenticatedExternalParent: expectedParentState }
+  );
+  if (committed !== null) return true;
+  const current = occReadCurrent(filePath);
+  return !current.ioError && !current.empty && occStateFingerprint(current.state) === occStateFingerprint(publishedState);
+}
+function occRestoreCanonicalFromJournal(filePath, assertHeld) {
+  const current = occReadCurrent(filePath);
+  if (current.ioError || current.empty) return !current.ioError;
+  try {
+    assertHeld?.();
+    if (current.state === null) {
+      try {
+        (0, import_fs12.unlinkSync)(filePath);
+      } catch (error2) {
+        if (error2.code !== "ENOENT") return false;
+      }
+    } else {
+      atomicWriteJsonSync(filePath, current.state);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function commitRecoveredEmergencyPublication(filePath, journal) {
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return false;
+  try {
+    const assertHeld = () => assertMutationLockHeld(lock);
+    if (!journal.parentState || !journal.intent) return occRestoreCanonicalFromJournal(filePath, assertHeld);
+    let publishedState = null;
+    if (journal.intent === "publish") {
+      let raw;
+      try {
+        raw = (0, import_fs12.readFileSync)(filePath, "utf8");
+        publishedState = JSON.parse(raw);
+      } catch {
+        return false;
+      }
+      if (stateDigest(raw) !== journal.intendedDigest) return true;
+    } else if ((0, import_fs12.existsSync)(filePath)) {
+      return true;
+    }
+    return occCommitAuthenticatedExternalState(filePath, journal.parentState, publishedState, assertHeld);
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 function writeStateFileLocked(filePath, state) {
   if (!recoverEmergencyStateFile(filePath)) return false;
   const lock = acquireMutationLock(filePath);
   if (!lock) return false;
   try {
-    atomicWriteJsonSync(filePath, state);
-    return true;
-  } catch {
-    return false;
+    const committed = occCommitMutation(
+      filePath,
+      () => ({ state, result: true }),
+      { assertHeld: () => assertMutationLockHeld(lock) }
+    );
+    return committed !== null;
   } finally {
     releaseMutationLock(lock);
   }
 }
 function clearStateFileLockedIf(filePath, predicate, recoveryOptions) {
   if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return "failed";
+  const observedCanonical = occReadCanonicalSnapshot(filePath);
+  if (observedCanonical.ioError) return "failed";
   if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64) {
     try {
       const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64, "base64").toString("utf8"));
@@ -23187,16 +23709,35 @@ function clearStateFileLockedIf(filePath, predicate, recoveryOptions) {
   const lock = acquireMutationLock(filePath);
   if (!lock) return "failed";
   try {
-    if (!(0, import_fs12.existsSync)(filePath)) return "skipped";
-    let current;
-    try {
-      current = JSON.parse((0, import_fs12.readFileSync)(filePath, "utf8"));
-    } catch {
-      return "failed";
-    }
-    if (!predicate(current)) return "skipped";
+    let skipped = false;
+    let canonicalReplaced = false;
+    const committed = occCommitMutation(filePath, (currentRaw) => {
+      let current = currentRaw;
+      if (current === null || current === void 0 || typeof current !== "object" || Array.isArray(current)) {
+        const canonical = occReadCanonicalSnapshot(filePath);
+        current = canonical.ioError ? null : canonical.state;
+      }
+      if (current === null || typeof current !== "object" || Array.isArray(current)) {
+        skipped = true;
+        return null;
+      }
+      if (!predicate(current)) {
+        skipped = true;
+        return null;
+      }
+      return { state: null, result: "cleared" };
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      suppressCanonicalRepublish: true,
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => {
+        canonicalReplaced = true;
+      }
+    });
+    if (committed === null) return skipped || canonicalReplaced ? "skipped" : "failed";
+    assertMutationLockHeld(lock);
     (0, import_fs12.unlinkSync)(filePath);
-    return "cleared";
+    return committed.result;
   } catch {
     return "failed";
   } finally {
@@ -23205,62 +23746,81 @@ function clearStateFileLockedIf(filePath, predicate, recoveryOptions) {
 }
 function writeStateFileLockedIf(filePath, predicate, transform2) {
   if (!recoverEmergencyStateFile(filePath)) return "failed";
+  const observedCanonical = occReadCanonicalContentFingerprint(filePath);
+  if (observedCanonical.ioError) return "failed";
   if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64) {
     try {
-      const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64, "base64").toString("utf8"));
-      atomicWriteJsonSync(filePath, replacement);
+      const replacementRaw = Buffer.from(process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64, "base64").toString("utf8");
+      atomicWriteFileSync(filePath, replacementRaw);
     } finally {
       delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH;
       delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64;
     }
   }
-  if (!(0, import_fs12.existsSync)(filePath)) return "skipped";
   const lock = acquireMutationLock(filePath);
   if (!lock) return "failed";
   try {
-    if (!(0, import_fs12.existsSync)(filePath)) return "skipped";
-    let current;
-    try {
-      current = JSON.parse((0, import_fs12.readFileSync)(filePath, "utf8"));
-    } catch {
-      return "failed";
-    }
-    if (!predicate(current)) return "skipped";
-    atomicWriteJsonSync(filePath, transform2(current));
-    return "written";
-  } catch {
-    return "failed";
+    let skipped = false;
+    let canonicalReplaced = false;
+    const committed = occCommitMutation(filePath, (currentRaw) => {
+      if (currentRaw === null || currentRaw === void 0 || typeof currentRaw !== "object" || Array.isArray(currentRaw)) return null;
+      const current = currentRaw;
+      if (!predicate(current)) {
+        skipped = true;
+        return null;
+      }
+      return { state: transform2(current), result: "written" };
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => {
+        canonicalReplaced = true;
+      }
+    });
+    if (committed === null) return skipped || canonicalReplaced ? "skipped" : "failed";
+    return committed.result;
   } finally {
     releaseMutationLock(lock);
   }
 }
 function writeStateFileLockedCreateIf(filePath, predicate, transform2) {
   if (!recoverEmergencyStateFile(filePath)) return "failed";
+  const observedCanonical = occReadCanonicalContentFingerprint(filePath);
+  if (observedCanonical.ioError) return "failed";
+  if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
+    try {
+      const replacementRaw = Buffer.from(process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64, "base64").toString("utf8");
+      atomicWriteFileSync(filePath, replacementRaw);
+    } finally {
+      delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
+      delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
+    }
+  }
   const lock = acquireMutationLock(filePath);
   if (!lock) return "failed";
   try {
-    if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
-      try {
-        const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64, "base64").toString("utf8"));
-        atomicWriteJsonSync(filePath, replacement);
-      } finally {
-        delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
-        delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
+    let skipped = false;
+    let canonicalReplaced = false;
+    const committed = occCommitMutation(filePath, (currentRaw) => {
+      let current = null;
+      if (currentRaw !== null && currentRaw !== void 0) {
+        if (typeof currentRaw !== "object" || Array.isArray(currentRaw)) return null;
+        current = currentRaw;
       }
-    }
-    let current = null;
-    if ((0, import_fs12.existsSync)(filePath)) {
-      try {
-        current = JSON.parse((0, import_fs12.readFileSync)(filePath, "utf8"));
-      } catch {
-        return "failed";
+      if (!predicate(current)) {
+        skipped = true;
+        return null;
       }
-    }
-    if (!predicate(current)) return "skipped";
-    atomicWriteJsonSync(filePath, transform2(current));
-    return "written";
-  } catch {
-    return "failed";
+      return { state: transform2(current), result: "written" };
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => {
+        canonicalReplaced = true;
+      }
+    });
+    if (committed === null) return skipped || canonicalReplaced ? "skipped" : "failed";
+    return committed.result;
   } finally {
     releaseMutationLock(lock);
   }
@@ -23279,6 +23839,7 @@ function sameEmergencyOwner(left, right) {
   return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
 }
 function isEmergencyOwnerLive(owner) {
+  if (process.env.NODE_ENV === "test" && owner.pid === 999999999 && owner.processStart === "abandoned") return false;
   const current = processStartIdentity(owner.pid);
   return current === null || current !== "absent" && current === owner.processStart;
 }
@@ -23437,7 +23998,7 @@ function createEmergencyJournal(path13, journal) {
 function readEmergencyJournal(path13) {
   try {
     const journal = JSON.parse((0, import_fs12.readFileSync)(path13, "utf8"));
-    if (journal.version !== 1 || typeof journal.transactionId !== "string" || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) || !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== "string" || typeof journal.owner.nonce !== "string" || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) || journal.sessionOwner !== void 0 && typeof journal.sessionOwner !== "string" || journal.originalDigest !== void 0 && (typeof journal.originalDigest !== "string" || !/^[0-9a-f]{64}$/i.test(journal.originalDigest)) || journal.intendedDigest !== void 0 && (typeof journal.intendedDigest !== "string" || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest)) || journal.intent !== void 0 && journal.intent !== "clear" && journal.intent !== "publish" || typeof journal.quarantinePath !== "string" || journal.phase !== "preparing" && journal.phase !== "prepared" && journal.phase !== "quarantined" && journal.phase !== "published") return null;
+    if (journal.version !== 1 || typeof journal.transactionId !== "string" || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) || !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== "string" || typeof journal.owner.nonce !== "string" || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) || journal.sessionOwner !== void 0 && typeof journal.sessionOwner !== "string" || journal.originalDigest !== void 0 && (typeof journal.originalDigest !== "string" || !/^[0-9a-f]{64}$/i.test(journal.originalDigest)) || journal.parentState !== void 0 && (journal.parentState === null || typeof journal.parentState !== "object" || Array.isArray(journal.parentState)) || journal.intendedDigest !== void 0 && (typeof journal.intendedDigest !== "string" || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest)) || journal.intent !== void 0 && journal.intent !== "clear" && journal.intent !== "publish" || typeof journal.quarantinePath !== "string" || journal.phase !== "preparing" && journal.phase !== "prepared" && journal.phase !== "quarantined" && journal.phase !== "published") return null;
     const complete = typeof journal.originalDigest === "string" && (journal.intent === "clear" || journal.intent === "publish" && typeof journal.intendedDigest === "string");
     return journal.phase === "preparing" || complete ? journal : null;
   } catch {
@@ -23648,12 +24209,14 @@ function recoverEmergencyStateFile(filePath, options) {
     if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
     if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath, authorizeState);
+    if (!recoverDeadEmergencyStateFile(filePath, authorizeState, true)) return false;
+    if (current.parentState && !commitRecoveredEmergencyPublication(filePath, current)) return false;
+    return removeOwnedEmergencyArtifacts(journalPath, current, true);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
   }
 }
-function recoverDeadEmergencyStateFile(filePath, authorizeState) {
+function recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal = false) {
   const journalPath = emergencyJournalPath(filePath);
   if (!(0, import_fs12.existsSync)(journalPath)) return true;
   const journal = readEmergencyJournal(journalPath);
@@ -23662,6 +24225,7 @@ function recoverDeadEmergencyStateFile(filePath, authorizeState) {
   if (!recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return true;
   const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
   if (!owned()) return false;
+  const finish = (removeQuarantine) => preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine);
   const payloadPath = `${journal.quarantinePath}.payload`;
   const digest = (path13) => {
     try {
@@ -23674,27 +24238,29 @@ function recoverDeadEmergencyStateFile(filePath, authorizeState) {
     const complete = typeof journal.originalDigest === "string" && (journal.intent === "clear" || journal.intent === "publish" && typeof journal.intendedDigest === "string");
     if (!complete) {
       if ((0, import_fs12.existsSync)(journal.quarantinePath) || (0, import_fs12.existsSync)(payloadPath)) return false;
-      return removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return finish(false);
     }
     const originalStillPrimary = !(0, import_fs12.existsSync)(journal.quarantinePath) && digest(filePath) === journal.originalDigest;
     if (journal.intent === "publish" && digest(payloadPath) !== journal.intendedDigest) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return originalStillPrimary && finish(false);
     }
     if (journal.intent === "clear" && (0, import_fs12.existsSync)(payloadPath)) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return originalStillPrimary && finish(false);
     }
     journal.phase = "prepared";
-    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+    return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal);
   }
   const originalDigest = journal.originalDigest;
   const intent = journal.intent;
   const intendedDigest = journal.intendedDigest;
   const hasPrimary = (0, import_fs12.existsSync)(filePath);
   const hasQuarantine = (0, import_fs12.existsSync)(journal.quarantinePath);
-  const finalize = () => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
+  const finalize = () => finish(hasQuarantine);
   if (hasPrimary && hasQuarantine) {
-    if (intent === "publish" && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) return finalize();
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    if (intent === "publish" && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) {
+      return finalize();
+    }
+    return finish(true);
   }
   if (hasPrimary) {
     if (!hasQuarantine && journal.phase === "prepared" && digest(filePath) === originalDigest) {
@@ -23703,26 +24269,27 @@ function recoverDeadEmergencyStateFile(filePath, authorizeState) {
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
         if (owned() && (0, import_fs12.existsSync)(filePath) && (0, import_fs12.existsSync)(journal.quarantinePath) && digest(filePath) !== originalDigest) {
           removeOwnedEmergencyArtifacts(journalPath, journal, true);
+          return false;
         }
         return false;
       }
       journal.phase = "quarantined";
-      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState);
+      return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal);
     }
     return false;
   }
   if (!hasQuarantine) {
-    return intent === "clear" && journal.phase === "published" && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+    return intent === "clear" && journal.phase === "published" && finish(false);
   }
   if (digest(journal.quarantinePath) !== originalDigest || !owned()) return false;
   try {
-    if (intent === "clear") return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    if (intent === "clear") return finish(true);
     const payload = (0, import_fs12.readFileSync)(payloadPath, "utf8");
     if (stateDigest(payload) !== intendedDigest || !owned()) return false;
     (0, import_fs12.linkSync)(payloadPath, filePath);
     journal.phase = "published";
     if (!writeEmergencyJournal(journalPath, journal)) return false;
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    return finish(true);
   } catch {
     return false;
   }
@@ -23739,7 +24306,7 @@ function abandonEmergencyJournal(journalPath, journal) {
   }
 }
 function abandonEmergencyJournalForTest(journalPath, journal) {
-  if (!emergencyCrashAt("after-payload") && !emergencyCrashAt("before-rename") && !emergencyCrashAt("after-rename") && !emergencyCrashAt("after-publication") && !emergencyCrashAt("before-cleanup")) return;
+  if (!emergencyCrashAt("after-payload") && !emergencyCrashAt("before-rename") && !emergencyCrashAt("after-rename") && !emergencyCrashAt("after-publication") && !emergencyCrashAt("before-occ-fence") && !emergencyCrashAt("before-cleanup")) return;
   abandonEmergencyJournal(journalPath, journal);
 }
 function emergencyReplaceAfterPredicate(filePath) {
@@ -23764,87 +24331,104 @@ function emergencyReplaceAtCaptureBoundary(filePath) {
 }
 function emergencyMutateStateFileIf(filePath, predicate, transform2, recoveryOptions) {
   if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return false;
-  const owner = emergencyOwner();
-  if (!owner) return false;
-  const transactionId = (0, import_crypto3.randomUUID)();
-  const quarantinePath = `${filePath}.emergency-quarantine.${transactionId}`;
-  const journalPath = emergencyJournalPath(filePath);
-  const payloadPath = `${quarantinePath}.payload`;
-  let journal = null;
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return false;
   try {
-    journal = { version: 1, transactionId, owner, quarantinePath, phase: "preparing" };
-    if (!createEmergencyJournal(journalPath, journal)) return false;
-    const owns = () => journal !== null && journalIsOwned(journalPath, transactionId, owner);
-    if (!(0, import_fs12.existsSync)(filePath)) {
-      removeOwnedEmergencyArtifacts(journalPath, journal, false);
-      return false;
-    }
-    const originalRaw = (0, import_fs12.readFileSync)(filePath, "utf8");
-    const current = JSON.parse(originalRaw);
-    if (!predicate(current)) {
-      removeOwnedEmergencyArtifacts(journalPath, journal, false);
-      return false;
-    }
-    const transformedRaw = transform2 ? JSON.stringify(transform2(current)) : void 0;
-    Object.assign(journal, {
-      ...getStateSessionOwner(current) ? { sessionOwner: getStateSessionOwner(current) } : {},
-      originalDigest: stateDigest(originalRaw),
-      ...transformedRaw === void 0 ? { intent: "clear" } : { intent: "publish", intendedDigest: stateDigest(transformedRaw) }
-    });
-    if (!owns() || !writeEmergencyJournal(journalPath, journal)) return false;
-    if (transformedRaw !== void 0) {
-      if (!owns()) return false;
-      if (!publishEmergencyFileExclusive(payloadPath, transformedRaw)) return false;
-      if (!owns()) return false;
-    }
-    if (emergencyCrashAt("after-payload")) {
-      abandonEmergencyJournalForTest(journalPath, journal);
-      return false;
-    }
-    journal.phase = "prepared";
-    if (!writeEmergencyJournal(journalPath, journal)) return false;
-    const authenticatedRaw = (0, import_fs12.readFileSync)(filePath, "utf8");
-    const authenticated = JSON.parse(authenticatedRaw);
-    if (!owns() || stateDigest(authenticatedRaw) !== journal.originalDigest || !predicate(authenticated)) {
-      removeOwnedEmergencyArtifacts(journalPath, journal, false);
-      return false;
-    }
-    emergencyReplaceAfterPredicate(filePath);
-    if (emergencyCrashAt("before-rename")) {
-      abandonEmergencyJournalForTest(journalPath, journal);
-      return false;
-    }
-    if (!owns() || !captureAndUnlinkPrimary(filePath, quarantinePath, journal.originalDigest)) {
-      removeOwnedEmergencyArtifacts(journalPath, journal, true);
-      return false;
-    }
-    journal.phase = "quarantined";
-    if (!writeEmergencyJournal(journalPath, journal)) return false;
-    if (emergencyCrashAt("after-rename")) {
-      abandonEmergencyJournalForTest(journalPath, journal);
-      return false;
-    }
-    if (transformedRaw !== void 0) {
-      if (!owns()) return false;
-      (0, import_fs12.linkSync)(payloadPath, filePath);
-      journal.phase = "published";
-      if (!writeEmergencyJournal(journalPath, journal)) return false;
-      if (emergencyCrashAt("after-publication")) {
+    const owner = emergencyOwner();
+    if (!owner) return false;
+    const transactionId = (0, import_crypto3.randomUUID)();
+    const quarantinePath = `${filePath}.emergency-quarantine.${transactionId}`;
+    const journalPath = emergencyJournalPath(filePath);
+    const payloadPath = `${quarantinePath}.payload`;
+    let journal = null;
+    try {
+      journal = { version: 1, transactionId, owner, quarantinePath, phase: "preparing" };
+      if (!createEmergencyJournal(journalPath, journal)) return false;
+      const owns = () => journal !== null && journalIsOwned(journalPath, transactionId, owner);
+      if (!(0, import_fs12.existsSync)(filePath)) {
+        removeOwnedEmergencyArtifacts(journalPath, journal, false);
+        return false;
+      }
+      const originalRaw = (0, import_fs12.readFileSync)(filePath, "utf8");
+      const current = JSON.parse(originalRaw);
+      if (!predicate(current)) {
+        removeOwnedEmergencyArtifacts(journalPath, journal, false);
+        return false;
+      }
+      const transformedRaw = transform2 ? JSON.stringify(transform2(current)) : void 0;
+      Object.assign(journal, {
+        ...getStateSessionOwner(current) ? { sessionOwner: getStateSessionOwner(current) } : {},
+        originalDigest: stateDigest(originalRaw),
+        parentState: current,
+        ...transformedRaw === void 0 ? { intent: "clear" } : { intent: "publish", intendedDigest: stateDigest(transformedRaw) }
+      });
+      if (!owns() || !writeEmergencyJournal(journalPath, journal)) return false;
+      if (transformedRaw !== void 0) {
+        if (!owns()) return false;
+        if (!publishEmergencyFileExclusive(payloadPath, transformedRaw)) return false;
+        if (!owns()) return false;
+      }
+      if (emergencyCrashAt("after-payload")) {
         abandonEmergencyJournalForTest(journalPath, journal);
         return false;
       }
-    } else {
-      journal.phase = "published";
+      journal.phase = "prepared";
       if (!writeEmergencyJournal(journalPath, journal)) return false;
-    }
-    if (emergencyCrashAt("before-cleanup")) {
-      abandonEmergencyJournalForTest(journalPath, journal);
+      const authenticatedRaw = (0, import_fs12.readFileSync)(filePath, "utf8");
+      const authenticated = JSON.parse(authenticatedRaw);
+      if (!owns() || stateDigest(authenticatedRaw) !== journal.originalDigest || !predicate(authenticated)) {
+        removeOwnedEmergencyArtifacts(journalPath, journal, false);
+        return false;
+      }
+      emergencyReplaceAfterPredicate(filePath);
+      if (emergencyCrashAt("before-rename")) {
+        abandonEmergencyJournalForTest(journalPath, journal);
+        return false;
+      }
+      if (!owns() || !captureAndUnlinkPrimary(filePath, quarantinePath, journal.originalDigest)) {
+        removeOwnedEmergencyArtifacts(journalPath, journal, true);
+        return false;
+      }
+      journal.phase = "quarantined";
+      if (!writeEmergencyJournal(journalPath, journal)) return false;
+      if (emergencyCrashAt("after-rename")) {
+        abandonEmergencyJournalForTest(journalPath, journal);
+        return false;
+      }
+      if (transformedRaw !== void 0) {
+        if (!owns()) return false;
+        (0, import_fs12.linkSync)(payloadPath, filePath);
+        journal.phase = "published";
+        if (!writeEmergencyJournal(journalPath, journal)) return false;
+        if (emergencyCrashAt("after-publication")) {
+          abandonEmergencyJournalForTest(journalPath, journal);
+          return false;
+        }
+      } else {
+        journal.phase = "published";
+        if (!writeEmergencyJournal(journalPath, journal)) return false;
+      }
+      if (emergencyCrashAt("before-cleanup")) {
+        abandonEmergencyJournalForTest(journalPath, journal);
+        return false;
+      }
+      if (emergencyCrashAt("before-occ-fence")) {
+        abandonEmergencyJournalForTest(journalPath, journal);
+        return false;
+      }
+      if (!occCommitAuthenticatedExternalState(
+        filePath,
+        current,
+        transformedRaw === void 0 ? null : JSON.parse(transformedRaw),
+        () => assertMutationLockHeld(lock)
+      )) return false;
+      return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    } catch {
+      if (journal) abandonEmergencyJournal(journalPath, journal);
       return false;
     }
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
-  } catch {
-    if (journal) abandonEmergencyJournal(journalPath, journal);
-    return false;
+  } finally {
+    releaseMutationLock(lock);
   }
 }
 function getStateSessionOwner(state) {
@@ -23974,6 +24558,7 @@ var import_path14 = require("path");
 var MODE_NAMES = {
   AUTOPILOT: "autopilot",
   AUTORESEARCH: "autoresearch",
+  GRAPH: "graph",
   TEAM: "team",
   RALPH: "ralph",
   ULTRAWORK: "ultrawork",
@@ -23986,6 +24571,7 @@ var MODE_NAMES = {
 var ALL_MODE_NAMES = [
   MODE_NAMES.AUTOPILOT,
   MODE_NAMES.AUTORESEARCH,
+  MODE_NAMES.GRAPH,
   MODE_NAMES.TEAM,
   MODE_NAMES.RALPH,
   MODE_NAMES.ULTRAWORK,
@@ -23998,6 +24584,7 @@ var ALL_MODE_NAMES = [
 var MODE_STATE_FILE_MAP = {
   [MODE_NAMES.AUTOPILOT]: "autopilot-state.json",
   [MODE_NAMES.AUTORESEARCH]: "autoresearch-state.json",
+  [MODE_NAMES.GRAPH]: "graph-state.json",
   [MODE_NAMES.TEAM]: "team-state.json",
   [MODE_NAMES.RALPH]: "ralph-state.json",
   [MODE_NAMES.ULTRAWORK]: "ultrawork-state.json",
@@ -24043,6 +24630,17 @@ var MODE_CONFIGS = {
     activeProperty: "active",
     hasGlobalState: false
   },
+  [MODE_NAMES.GRAPH]: {
+    name: "Graph",
+    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.GRAPH],
+    activeStatuses: [
+      "running",
+      "waiting_human",
+      "waiting_patch_approval",
+      "reconciling"
+    ],
+    hasGlobalState: false
+  },
   [MODE_NAMES.TEAM]: {
     name: "Team",
     stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.TEAM],
@@ -24083,7 +24681,11 @@ var MODE_CONFIGS = {
     activeProperty: "active"
   }
 };
-var EXCLUSIVE_MODES = [MODE_NAMES.AUTOPILOT, MODE_NAMES.AUTORESEARCH];
+var EXCLUSIVE_MODES = [
+  MODE_NAMES.AUTOPILOT,
+  MODE_NAMES.AUTORESEARCH,
+  MODE_NAMES.GRAPH
+];
 function getStateDir(cwd) {
   return (0, import_path14.join)(getOmcRoot(cwd), "state");
 }
@@ -24120,10 +24722,19 @@ function isWorkflowSlotTombstonedForMode(cwd, mode, sessionId, now = Date.now())
   }
 }
 function isJsonModeActive(cwd, mode, sessionId) {
+  const config2 = MODE_CONFIGS[mode];
   if (isWorkflowSlotTombstonedForMode(cwd, mode, sessionId)) {
     return false;
   }
-  const config2 = MODE_CONFIGS[mode];
+  const stateIsActive = (state) => {
+    if (config2.activeStatuses) {
+      return typeof state.status === "string" && config2.activeStatuses.includes(state.status);
+    }
+    if (config2.activeProperty) {
+      return state[config2.activeProperty] === true;
+    }
+    return true;
+  };
   if (sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     try {
@@ -24132,10 +24743,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
       if (state.session_id && state.session_id !== sessionId) {
         return false;
       }
-      if (config2.activeProperty) {
-        return state[config2.activeProperty] === true;
-      }
-      return true;
+      return stateIsActive(state);
     } catch (error2) {
       if (error2.code === "ENOENT") {
         return false;
@@ -24147,10 +24755,7 @@ function isJsonModeActive(cwd, mode, sessionId) {
   try {
     const content = (0, import_fs13.readFileSync)(stateFile, "utf-8");
     const state = JSON.parse(content);
-    if (config2.activeProperty) {
-      return state[config2.activeProperty] === true;
-    }
-    return true;
+    return stateIsActive(state);
   } catch (error2) {
     if (error2.code === "ENOENT") {
       return false;
@@ -24177,6 +24782,9 @@ function getAllModeStatuses(cwd, sessionId) {
     stateFilePath: getStateFilePath(cwd, mode, sessionId)
   }));
 }
+function normalizeClearResult(filePath, result) {
+  return result === "skipped" && !(0, import_fs13.existsSync)(filePath) ? "cleared" : result;
+}
 function readJsonSnapshot(filePath) {
   try {
     const state = JSON.parse((0, import_fs13.readFileSync)(filePath, "utf-8"));
@@ -24185,42 +24793,88 @@ function readJsonSnapshot(filePath) {
     return null;
   }
 }
+var IN_FLIGHT_MARKER_PUBLISH_WAIT_MS = 250;
+var IN_FLIGHT_MARKER_PUBLISH_POLL_MS = 10;
+function waitForInFlightMarkerPublisher(filePath) {
+  const deadline = Date.now() + IN_FLIGHT_MARKER_PUBLISH_WAIT_MS;
+  while ((0, import_fs13.existsSync)(`${filePath}.mutation.lock`) && Date.now() < deadline) {
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      IN_FLIGHT_MARKER_PUBLISH_POLL_MS
+    );
+  }
+  return !(0, import_fs13.existsSync)(`${filePath}.mutation.lock`);
+}
 function clearDiscoveredJsonFile(filePath, observed, predicate = () => true) {
   if (!observed) {
-    const result2 = clearStateFileLockedIf(filePath, predicate);
-    return result2 !== "failed" && !(result2 === "skipped" && (0, import_fs13.existsSync)(filePath));
+    if (!(0, import_fs13.existsSync)(filePath) && (0, import_fs13.existsSync)(`${filePath}.mutation.lock`) && !waitForInFlightMarkerPublisher(filePath)) {
+      return "failed";
+    }
+    return normalizeClearResult(
+      filePath,
+      clearStateFileLockedIf(filePath, predicate)
+    );
   }
-  if (!predicate(observed.state)) return true;
-  const result = clearStateFileLockedIf(
+  if (!predicate(observed.state)) return "cleared";
+  return normalizeClearResult(
     filePath,
-    (current) => predicate(current) && JSON.stringify(current) === observed.snapshot
+    clearStateFileLockedIf(
+      filePath,
+      (current) => predicate(current) && JSON.stringify(current) === observed.snapshot
+    )
   );
-  return result !== "failed" && !(result === "skipped" && (0, import_fs13.existsSync)(filePath));
 }
-function clearModeState(mode, cwd, sessionId, expectedState) {
+function mergeClearResults(current, next) {
+  if (current === "failed" || next === "failed") return "failed";
+  if (current === "skipped" || next === "skipped") return "skipped";
+  return "cleared";
+}
+function clearModeStateDetailed(mode, cwd, sessionId, expectedState) {
+  if (mode === MODE_NAMES.GRAPH) return "failed";
   const config2 = MODE_CONFIGS[mode];
-  let success = true;
+  let result = "cleared";
   const markerFile = getMarkerFilePath(cwd, mode);
   const isSessionScopedClear = Boolean(sessionId);
   const markerSnapshot = markerFile ? readJsonSnapshot(markerFile) : null;
-  const sessionMarkerFile = isSessionScopedClear && sessionId && config2.markerFile ? resolveSessionStatePath(config2.markerFile.replace(/\.json$/i, ""), sessionId, cwd) : null;
+  const sessionMarkerFile = isSessionScopedClear && sessionId && config2.markerFile ? resolveSessionStatePath(
+    config2.markerFile.replace(/\.json$/i, ""),
+    sessionId,
+    cwd
+  ) : null;
   const sessionMarkerSnapshot = sessionMarkerFile ? readJsonSnapshot(sessionMarkerFile) : null;
   if (isSessionScopedClear && sessionId) {
     const sessionStateFile = resolveSessionStatePath(mode, sessionId, cwd);
     try {
-      const result = clearStateFileLockedIf(sessionStateFile, (current) => canClearStateForSession(current, sessionId) && (!expectedState || JSON.stringify(current) === JSON.stringify(expectedState)));
-      if (result === "failed" || result === "skipped" && (0, import_fs13.existsSync)(sessionStateFile)) throw new Error("state mutation lock unavailable");
+      const clearResult = normalizeClearResult(
+        sessionStateFile,
+        clearStateFileLockedIf(
+          sessionStateFile,
+          (current) => canClearStateForSession(current, sessionId) && (!expectedState || JSON.stringify(current) === JSON.stringify(expectedState))
+        )
+      );
+      result = mergeClearResults(result, clearResult);
+      if (clearResult === "failed")
+        throw new Error("state mutation lock unavailable");
     } catch (err) {
       if (err.code !== "ENOENT") {
-        success = false;
+        result = "failed";
       }
     }
     if (sessionMarkerFile) {
       try {
-        if (!clearDiscoveredJsonFile(sessionMarkerFile, sessionMarkerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
+        const clearResult = clearDiscoveredJsonFile(
+          sessionMarkerFile,
+          sessionMarkerSnapshot,
+          (current) => canClearStateForSession(current, sessionId)
+        );
+        result = mergeClearResults(result, clearResult);
+        if (clearResult === "failed")
+          throw new Error("state mutation lock unavailable");
       } catch (err) {
         if (err.code !== "ENOENT") {
-          success = false;
+          result = "failed";
         }
       }
     }
@@ -24230,19 +24884,33 @@ function clearModeState(mode, cwd, sessionId, expectedState) {
         const markerSessionId = markerRaw.session_id ?? markerRaw.sessionId;
         if (!markerSessionId || markerSessionId === sessionId) {
           try {
-            if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
+            const clearResult = clearDiscoveredJsonFile(
+              markerFile,
+              markerSnapshot,
+              (current) => canClearStateForSession(current, sessionId)
+            );
+            result = mergeClearResults(result, clearResult);
+            if (clearResult === "failed")
+              throw new Error("state mutation lock unavailable");
           } catch (err) {
             if (err.code !== "ENOENT") {
-              success = false;
+              result = "failed";
             }
           }
         }
       } catch {
         try {
-          if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId))) throw new Error("state mutation lock unavailable");
+          const clearResult = clearDiscoveredJsonFile(
+            markerFile,
+            markerSnapshot,
+            (current) => canClearStateForSession(current, sessionId)
+          );
+          result = mergeClearResults(result, clearResult);
+          if (clearResult === "failed")
+            throw new Error("state mutation lock unavailable");
         } catch (err) {
           if (err.code !== "ENOENT") {
-            success = false;
+            result = "failed";
           }
         }
       }
@@ -24251,22 +24919,33 @@ function clearModeState(mode, cwd, sessionId, expectedState) {
   const stateFile = getStateFilePath(cwd, mode);
   if (!isSessionScopedClear) {
     try {
-      const result = clearStateFileLockedIf(stateFile, (current) => !expectedState || JSON.stringify(current) === JSON.stringify(expectedState));
-      if (result === "failed" || result === "skipped" && (0, import_fs13.existsSync)(stateFile)) throw new Error("state mutation lock unavailable");
+      const clearResult = normalizeClearResult(
+        stateFile,
+        clearStateFileLockedIf(
+          stateFile,
+          (current) => !expectedState || JSON.stringify(current) === JSON.stringify(expectedState)
+        )
+      );
+      result = mergeClearResults(result, clearResult);
+      if (clearResult === "failed")
+        throw new Error("state mutation lock unavailable");
     } catch (err) {
       if (err.code !== "ENOENT") {
-        success = false;
+        result = "failed";
       }
     }
   }
   if (markerFile && !isSessionScopedClear) {
     try {
-      if (!clearDiscoveredJsonFile(markerFile, markerSnapshot)) throw new Error("state mutation lock unavailable");
+      const clearResult = clearDiscoveredJsonFile(markerFile, markerSnapshot);
+      result = mergeClearResults(result, clearResult);
+      if (clearResult === "failed")
+        throw new Error("state mutation lock unavailable");
     } catch (err) {
-      if (err.code !== "ENOENT") success = false;
+      if (err.code !== "ENOENT") result = "failed";
     }
   }
-  return success;
+  return result;
 }
 function getActiveSessionsForMode(mode, cwd) {
   const sessionIds = listSessionIds(cwd);
@@ -25553,10 +26232,1072 @@ function redactMergeReadinessState(state) {
   return redacted;
 }
 
+// src/graph/descriptor.ts
+var import_node_crypto = require("node:crypto");
+
+// src/graph/schema.ts
+var idSchema = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, "must be a stable identifier");
+var textSchema = external_exports.string().min(1).max(32768);
+var sideEffectFreeSchema = external_exports.object({ policy: external_exports.literal("side_effect_free") }).strict();
+var idempotentSchema = external_exports.object({
+  policy: external_exports.literal("idempotent"),
+  idempotency_key_template: external_exports.string().min(1).max(512)
+}).strict();
+var reconcileSchema = external_exports.object({ policy: external_exports.literal("reconcile") }).strict();
+var graphEffectPolicySchema = external_exports.discriminatedUnion("policy", [
+  sideEffectFreeSchema,
+  idempotentSchema,
+  reconcileSchema
+]);
+var nodeBase = {
+  id: idSchema,
+  title: external_exports.string().min(1).max(256)
+};
+var executableNodeBase = {
+  ...nodeBase,
+  timeout_ms: external_exports.number().int().min(100).max(864e5),
+  max_attempts: external_exports.number().int().min(1).max(20),
+  effect_policy: graphEffectPolicySchema
+};
+var graphAgentNodeSchema = external_exports.object({
+  ...executableNodeBase,
+  kind: external_exports.literal("agent"),
+  instructions: textSchema
+}).strict();
+var graphCommandNodeSchema = external_exports.object({
+  ...executableNodeBase,
+  kind: external_exports.literal("command"),
+  command: textSchema
+}).strict();
+var graphHumanApprovalNodeSchema = external_exports.object({
+  ...nodeBase,
+  kind: external_exports.literal("human-approval"),
+  prompt: textSchema
+}).strict();
+var graphJoinNodeSchema = external_exports.object({
+  ...nodeBase,
+  kind: external_exports.literal("join"),
+  fan_out_node_id: idSchema,
+  input_branch_ids: external_exports.array(idSchema).min(2).max(64)
+}).strict();
+var graphNodeSchema = external_exports.discriminatedUnion("kind", [
+  graphAgentNodeSchema,
+  graphCommandNodeSchema,
+  graphHumanApprovalNodeSchema,
+  graphJoinNodeSchema
+]);
+var edgeBase = { id: idSchema, from: idSchema, to: idSchema };
+var graphFixedEdgeSchema = external_exports.object({ ...edgeBase, kind: external_exports.literal("fixed") }).strict();
+var graphConditionalEdgeSchema = external_exports.object({ ...edgeBase, kind: external_exports.literal("conditional"), route: idSchema }).strict();
+var graphFanOutEdgeSchema = external_exports.object({
+  ...edgeBase,
+  kind: external_exports.literal("fan_out"),
+  branch_id: idSchema,
+  owner_join_id: idSchema
+}).strict();
+var graphBackEdgeSchema = external_exports.object({
+  ...edgeBase,
+  kind: external_exports.literal("back_edge"),
+  route: idSchema,
+  max_traversals: external_exports.number().int().min(1).max(100)
+}).strict();
+var graphEdgeSchema = external_exports.discriminatedUnion("kind", [
+  graphFixedEdgeSchema,
+  graphConditionalEdgeSchema,
+  graphFanOutEdgeSchema,
+  graphBackEdgeSchema
+]);
+var graphDescriptorSchema = external_exports.object({
+  descriptor_version: external_exports.literal(1),
+  run_id: idSchema,
+  revision_id: idSchema,
+  goal: textSchema,
+  nodes: external_exports.array(graphNodeSchema).min(1).max(1e3),
+  edges: external_exports.array(graphEdgeSchema).max(5e3),
+  entry_node_ids: external_exports.array(idSchema).min(1).max(64),
+  concurrency_limit: external_exports.number().int().min(1).max(64),
+  terminal_verification_node_id: idSchema,
+  descriptor_hash: external_exports.string().regex(/^[a-f0-9]{64}$/).optional()
+}).strict();
+var graphEvidenceReferenceSchema = external_exports.object({
+  kind: external_exports.enum(["file", "command", "test", "human", "url"]),
+  ref: external_exports.string().min(1).max(2048),
+  summary: external_exports.string().max(2048).optional()
+}).strict();
+var graphNodeResultSchema = external_exports.object({
+  outcome: external_exports.enum(["succeeded", "failed"]),
+  attempt_id: idSchema,
+  route: idSchema.optional(),
+  output_summary: external_exports.string().max(8192).optional(),
+  evidence_refs: external_exports.array(graphEvidenceReferenceSchema).max(64),
+  external_idempotency_key: external_exports.string().min(1).max(512).optional()
+}).strict();
+function parseGraphDescriptorShape(input) {
+  return graphDescriptorSchema.parse(input);
+}
+
+// src/graph/descriptor.ts
+var GraphDescriptorValidationError = class extends Error {
+  issues;
+  constructor(issues) {
+    super(`Invalid graph descriptor: ${issues.join("; ")}`);
+    this.name = "GraphDescriptorValidationError";
+    this.issues = issues;
+  }
+};
+function canonicalJson(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Canonical JSON does not support non-finite numbers");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const record2 = value;
+    const entries = Object.keys(record2).filter((key) => record2[key] !== void 0).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record2[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  throw new TypeError(`Canonical JSON does not support ${typeof value}`);
+}
+function descriptorHashPayload(input) {
+  return {
+    descriptor_version: input.descriptor_version,
+    run_id: input.run_id,
+    revision_id: input.revision_id,
+    goal: input.goal,
+    nodes: input.nodes,
+    edges: input.edges,
+    entry_node_ids: input.entry_node_ids,
+    concurrency_limit: input.concurrency_limit,
+    terminal_verification_node_id: input.terminal_verification_node_id
+  };
+}
+function computeDescriptorHash(input) {
+  return (0, import_node_crypto.createHash)("sha256").update(canonicalJson(descriptorHashPayload(input))).digest("hex");
+}
+function verifyDescriptorHash(input) {
+  return typeof input.descriptor_hash === "string" && input.descriptor_hash === computeDescriptorHash(input);
+}
+function duplicates(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const found = /* @__PURE__ */ new Set();
+  for (const value of values) {
+    if (seen.has(value)) found.add(value);
+    seen.add(value);
+  }
+  return [...found].sort();
+}
+function groupByFrom(edges) {
+  const result = /* @__PURE__ */ new Map();
+  for (const edge of edges) {
+    const group = result.get(edge.from) ?? [];
+    group.push(edge);
+    result.set(edge.from, group);
+  }
+  return result;
+}
+function adjacencyFor(edges, includeBackEdges) {
+  const result = /* @__PURE__ */ new Map();
+  for (const edge of edges) {
+    if (!includeBackEdges && edge.kind === "back_edge") continue;
+    const targets = result.get(edge.from) ?? [];
+    targets.push(edge.to);
+    result.set(edge.from, targets);
+  }
+  return result;
+}
+function isReachable(start, target, adjacency) {
+  const pending = [start];
+  const visited = /* @__PURE__ */ new Set();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === target) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    pending.push(...adjacency.get(current) ?? []);
+  }
+  return false;
+}
+function reachableSet(starts, adjacency) {
+  const pending = [...starts];
+  const visited = /* @__PURE__ */ new Set();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (visited.has(current)) continue;
+    visited.add(current);
+    pending.push(...adjacency.get(current) ?? []);
+  }
+  return visited;
+}
+function findForwardCycle(nodeIds, adjacency) {
+  const visited = /* @__PURE__ */ new Set();
+  const active = /* @__PURE__ */ new Set();
+  const stack = [];
+  const visit = (nodeId) => {
+    if (active.has(nodeId)) {
+      const start = stack.indexOf(nodeId);
+      return [...stack.slice(start), nodeId];
+    }
+    if (visited.has(nodeId)) return void 0;
+    visited.add(nodeId);
+    active.add(nodeId);
+    stack.push(nodeId);
+    for (const target of adjacency.get(nodeId) ?? []) {
+      const cycle = visit(target);
+      if (cycle) return cycle;
+    }
+    stack.pop();
+    active.delete(nodeId);
+    return void 0;
+  };
+  for (const nodeId of nodeIds) {
+    const cycle = visit(nodeId);
+    if (cycle) return cycle;
+  }
+  return void 0;
+}
+function collectBranchRegion(edge, allAdjacency, joinNodeId) {
+  const pending = [edge.to];
+  const result = /* @__PURE__ */ new Set();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === joinNodeId || result.has(current)) continue;
+    result.add(current);
+    pending.push(...allAdjacency.get(current) ?? []);
+  }
+  return result;
+}
+function validateOutgoingContracts(descriptor, nodes, outgoing, issues) {
+  for (const node of descriptor.nodes) {
+    const edges = outgoing.get(node.id) ?? [];
+    if (node.id === descriptor.terminal_verification_node_id) {
+      if (edges.length > 0) issues.push(`terminal verification node ${node.id} must not have outgoing edges`);
+      continue;
+    }
+    if (edges.length === 0) {
+      issues.push(`node ${node.id} cannot reach terminal verification because it has no outgoing edge`);
+      continue;
+    }
+    if (edges.every((edge) => edge.kind === "back_edge")) {
+      issues.push(
+        `node ${node.id} has no non-back-edge exit; a back-edge-only node wedges once max_traversals is exhausted`
+      );
+    }
+    const kinds = new Set(edges.map((edge) => edge.kind));
+    if (node.kind === "join") {
+      if (edges.length !== 1 || edges[0].kind !== "fixed") {
+        issues.push(`join node ${node.id} must have exactly one fixed outgoing edge`);
+      }
+      continue;
+    }
+    if (kinds.has("fixed") && (edges.length !== 1 || kinds.size !== 1)) {
+      issues.push(`node ${node.id} must use one fixed edge or an explicit route/fan-out set`);
+    }
+    if (kinds.has("fan_out")) {
+      if (kinds.size !== 1 || edges.length < 2) {
+        issues.push(`fan-out node ${node.id} must declare at least two fan_out edges and no other edge kind`);
+      }
+    } else if (!kinds.has("fixed")) {
+      if ([...kinds].some((kind) => kind !== "conditional" && kind !== "back_edge")) {
+        issues.push(`node ${node.id} has an unsupported routed edge combination`);
+      }
+      const routes = edges.filter((edge) => "route" in edge).map((edge) => edge.route);
+      const repeatedRoutes = duplicates(routes);
+      if (repeatedRoutes.length > 0) {
+        issues.push(`node ${node.id} declares duplicate route(s): ${repeatedRoutes.join(", ")}`);
+      }
+    }
+  }
+  for (const edge of descriptor.edges) {
+    if (!nodes.has(edge.from)) issues.push(`edge ${edge.id} references missing source node ${edge.from}`);
+    if (!nodes.has(edge.to)) issues.push(`edge ${edge.id} references missing target node ${edge.to}`);
+  }
+}
+function validateForkRegions(descriptor, nodes, outgoing, allAdjacency, issues) {
+  const fanGroups = /* @__PURE__ */ new Map();
+  for (const edge of descriptor.edges) {
+    if (edge.kind !== "fan_out") continue;
+    const group = fanGroups.get(edge.from) ?? [];
+    group.push(edge);
+    fanGroups.set(edge.from, group);
+  }
+  const regions = [];
+  for (const [fanOutNodeId, fanEdges] of fanGroups) {
+    const ownerJoinIds = new Set(fanEdges.map((edge) => edge.owner_join_id));
+    if (ownerJoinIds.size !== 1) {
+      issues.push(`fan-out node ${fanOutNodeId} must have one owning join`);
+      continue;
+    }
+    const joinNodeId = fanEdges[0].owner_join_id;
+    const joinNode = nodes.get(joinNodeId);
+    if (joinNode?.kind !== "join") {
+      issues.push(`fan-out node ${fanOutNodeId} references non-join owner ${joinNodeId}`);
+      continue;
+    }
+    if (joinNode.fan_out_node_id !== fanOutNodeId) {
+      issues.push(`join ${joinNodeId} does not bind fan-out node ${fanOutNodeId}`);
+    }
+    const branchIds = fanEdges.map((edge) => edge.branch_id);
+    const repeatedBranches = duplicates(branchIds);
+    if (repeatedBranches.length > 0) {
+      issues.push(`fan-out node ${fanOutNodeId} repeats branch ID(s): ${repeatedBranches.join(", ")}`);
+    }
+    if ([...new Set(branchIds)].sort().join("\0") !== [...new Set(joinNode.input_branch_ids)].sort().join("\0")) {
+      issues.push(`join ${joinNodeId} input branches do not match fan-out ${fanOutNodeId}`);
+    }
+    if (duplicates(joinNode.input_branch_ids).length > 0) {
+      issues.push(`join ${joinNodeId} repeats an input branch ID`);
+    }
+    const groupRegions = fanEdges.map((edge) => ({
+      fanOutNodeId,
+      joinNodeId,
+      branchId: edge.branch_id,
+      startNodeId: edge.to,
+      nodes: collectBranchRegion(edge, allAdjacency, joinNodeId)
+    }));
+    regions.push(...groupRegions);
+    for (const region of groupRegions) {
+      if (!region.nodes.has(region.startNodeId)) {
+        issues.push(`fork branch ${region.branchId} has no region`);
+      }
+      if (!isReachable(region.startNodeId, joinNodeId, allAdjacency)) {
+        issues.push(`fork branch ${region.branchId} cannot reach owning join ${joinNodeId}`);
+      }
+      for (const nodeId of region.nodes) {
+        const node = nodes.get(nodeId);
+        if (node?.kind === "join" && nodeId !== joinNodeId) {
+          issues.push(`nested join ${nodeId} is not allowed inside fork region ${fanOutNodeId}`);
+        }
+        if ((outgoing.get(nodeId) ?? []).some((edge) => edge.kind === "fan_out")) {
+          issues.push(`nested fan-out ${nodeId} is not allowed inside fork region ${fanOutNodeId}`);
+        }
+        if (!isReachable(nodeId, joinNodeId, allAdjacency)) {
+          issues.push(`fork branch ${region.branchId} contains node ${nodeId} that cannot reach its join`);
+        }
+      }
+      const reachesJoin = descriptor.edges.some(
+        (edge) => region.nodes.has(edge.from) && edge.to === joinNodeId
+      );
+      if (!reachesJoin) issues.push(`fork branch ${region.branchId} has no declared join input`);
+    }
+    for (let left = 0; left < groupRegions.length; left += 1) {
+      for (let right = left + 1; right < groupRegions.length; right += 1) {
+        const overlap = [...groupRegions[left].nodes].filter((id) => groupRegions[right].nodes.has(id));
+        if (overlap.length > 0) {
+          issues.push(
+            `fork branches ${groupRegions[left].branchId} and ${groupRegions[right].branchId} overlap at ${overlap.join(", ")}`
+          );
+        }
+      }
+    }
+  }
+  for (const node of descriptor.nodes) {
+    if (node.kind === "join" && !fanGroups.has(node.fan_out_node_id)) {
+      issues.push(`join ${node.id} has no matching fan-out node ${node.fan_out_node_id}`);
+    }
+  }
+  for (let left = 0; left < regions.length; left += 1) {
+    for (let right = left + 1; right < regions.length; right += 1) {
+      if (regions[left].fanOutNodeId === regions[right].fanOutNodeId) continue;
+      const overlap = [...regions[left].nodes].some((id) => regions[right].nodes.has(id));
+      if (overlap) {
+        issues.push(
+          `fork regions ${regions[left].fanOutNodeId} and ${regions[right].fanOutNodeId} overlap or nest`
+        );
+      }
+    }
+  }
+  for (const region of regions) {
+    for (const edge of descriptor.edges) {
+      if (edge.kind === "fan_out" && edge.from === region.fanOutNodeId && edge.branch_id === region.branchId) {
+        continue;
+      }
+      const fromInside = region.nodes.has(edge.from);
+      const toInside = region.nodes.has(edge.to);
+      if (!fromInside && toInside) {
+        issues.push(`edge ${edge.id} crosses into fork branch ${region.branchId}`);
+      }
+      if (fromInside && !toInside && edge.to !== region.joinNodeId) {
+        issues.push(`edge ${edge.id} crosses out of fork branch ${region.branchId}`);
+      }
+      if (edge.kind === "back_edge" && fromInside !== toInside) {
+        issues.push(`back-edge ${edge.id} crosses fork region ${region.fanOutNodeId}`);
+      }
+    }
+  }
+  for (const node of descriptor.nodes) {
+    if (node.kind !== "join") continue;
+    const ownerRegions = regions.filter((region) => region.joinNodeId === node.id);
+    for (const edge of descriptor.edges.filter((candidate) => candidate.to === node.id)) {
+      if (!ownerRegions.some((region) => region.nodes.has(edge.from))) {
+        issues.push(`edge ${edge.id} enters join ${node.id} outside its owning fork region`);
+      }
+    }
+  }
+}
+function validateGraphDescriptor(descriptor) {
+  const issues = [];
+  const repeatedNodeIds = duplicates(descriptor.nodes.map((node) => node.id));
+  if (repeatedNodeIds.length > 0) issues.push(`duplicate node ID(s): ${repeatedNodeIds.join(", ")}`);
+  const repeatedEdgeIds = duplicates(descriptor.edges.map((edge) => edge.id));
+  if (repeatedEdgeIds.length > 0) issues.push(`duplicate edge ID(s): ${repeatedEdgeIds.join(", ")}`);
+  const repeatedEntries = duplicates(descriptor.entry_node_ids);
+  if (repeatedEntries.length > 0) issues.push(`duplicate entry node ID(s): ${repeatedEntries.join(", ")}`);
+  const nodes = new Map(descriptor.nodes.map((node) => [node.id, node]));
+  const outgoing = groupByFrom(descriptor.edges);
+  validateOutgoingContracts(descriptor, nodes, outgoing, issues);
+  for (const entry of descriptor.entry_node_ids) {
+    if (!nodes.has(entry)) issues.push(`entry node ${entry} does not exist`);
+  }
+  const terminalNode = nodes.get(descriptor.terminal_verification_node_id);
+  if (!terminalNode) {
+    issues.push(`terminal verification node ${descriptor.terminal_verification_node_id} does not exist`);
+  } else if (terminalNode.kind !== "agent" && terminalNode.kind !== "command") {
+    issues.push("terminal verification must be an executable agent or command node");
+  }
+  const allAdjacency = adjacencyFor(descriptor.edges, true);
+  const forwardAdjacency = adjacencyFor(descriptor.edges, false);
+  const reachable = reachableSet(descriptor.entry_node_ids, allAdjacency);
+  const unreachable = descriptor.nodes.map((node) => node.id).filter((id) => !reachable.has(id));
+  if (unreachable.length > 0) issues.push(`unreachable node(s): ${unreachable.join(", ")}`);
+  const cycle = findForwardCycle(descriptor.nodes.map((node) => node.id), forwardAdjacency);
+  if (cycle) issues.push(`non-back-edge cycle detected: ${cycle.join(" -> ")}`);
+  for (const edge of descriptor.edges.filter(
+    (candidate) => candidate.kind === "back_edge"
+  )) {
+    if (!isReachable(edge.to, edge.from, forwardAdjacency)) {
+      issues.push(`back-edge ${edge.id} is not a structural return to an earlier node`);
+    }
+  }
+  if (terminalNode) {
+    const cannotVerify = descriptor.nodes.map((node) => node.id).filter((id) => !isReachable(id, terminalNode.id, allAdjacency));
+    if (cannotVerify.length > 0) {
+      issues.push(
+        `every successful path must reach terminal verification; failing node(s): ${cannotVerify.join(", ")}`
+      );
+    }
+  }
+  validateForkRegions(descriptor, nodes, outgoing, allAdjacency, issues);
+  if (issues.length > 0) throw new GraphDescriptorValidationError([...new Set(issues)]);
+  return descriptor;
+}
+function parseGraphDescriptor(input) {
+  const descriptor = validateGraphDescriptor(parseGraphDescriptorShape(input));
+  if (descriptor.descriptor_hash && !verifyDescriptorHash(descriptor)) {
+    throw new GraphDescriptorValidationError(["descriptor hash does not match the exact revision"]);
+  }
+  return descriptor;
+}
+
+// src/graph/runtime-types.ts
+var GRAPH_STATE_FORMAT_VERSION = 1;
+var GRAPH_STATE_MAX_BYTES = 8 * 1024 * 1024;
+var GRAPH_MAX_TRANSITIONS = 1e4;
+var GRAPH_MAX_DIAGNOSTICS = 128;
+var GRAPH_MAX_RECONCILIATIONS = 1e3;
+var GRAPH_MAX_CLAIMS = 2e3;
+var GRAPH_MAX_TRANSITION_RESULT_BYTES = 32 * 1024;
+function clone2(value) {
+  return structuredClone(value);
+}
+var GraphStateValidationError = class extends Error {
+  code = "invalid_graph_state";
+  constructor(message) {
+    super(`Invalid graph state: ${message}`);
+    this.name = "GraphStateValidationError";
+  }
+};
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function requireRecord(value, name) {
+  if (!isRecord2(value)) throw new GraphStateValidationError(`${name} must be an object`);
+  return value;
+}
+function requireString(value, name, max = 32768) {
+  if (typeof value !== "string" || value.length === 0 || value.length > max) {
+    throw new GraphStateValidationError(`${name} must be a non-empty bounded string`);
+  }
+  return value;
+}
+function requireInteger(value, name, max = Number.MAX_SAFE_INTEGER) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new GraphStateValidationError(`${name} must be a bounded non-negative integer`);
+  }
+  return value;
+}
+function requireTimestamp(value, name) {
+  const result = requireString(value, name, 64);
+  if (!Number.isFinite(Date.parse(result))) throw new GraphStateValidationError(`${name} must be an ISO timestamp`);
+  return result;
+}
+function assertExactKeys(record2, required2, optional2, name) {
+  const allowed = /* @__PURE__ */ new Set([...required2, ...optional2]);
+  const unknown2 = Object.keys(record2).filter((key) => !allowed.has(key));
+  const missing = required2.filter((key) => !(key in record2));
+  if (missing.length > 0) throw new GraphStateValidationError(`${name} missing ${missing.join(", ")}`);
+  if (unknown2.length > 0) throw new GraphStateValidationError(`${name} has unknown ${unknown2.join(", ")}`);
+}
+function requireStringArray(value, name, max) {
+  if (!Array.isArray(value) || value.length > max) {
+    throw new GraphStateValidationError(`${name} must be a bounded array`);
+  }
+  const result = value.map((item, index) => requireString(item, `${name}[${index}]`, 128));
+  if (new Set(result).size !== result.length) throw new GraphStateValidationError(`${name} contains duplicates`);
+  return result;
+}
+function validateEvidence(value, name) {
+  const evidence = requireRecord(value, name);
+  assertExactKeys(evidence, ["kind", "ref"], ["summary"], name);
+  if (!["file", "command", "test", "human", "url"].includes(String(evidence.kind))) {
+    throw new GraphStateValidationError(`${name}.kind is invalid`);
+  }
+  requireString(evidence.ref, `${name}.ref`, 2048);
+  if (evidence.summary !== void 0) requireString(evidence.summary, `${name}.summary`, 2048);
+  return value;
+}
+function validateEffectPolicy(value, name) {
+  const policy = requireRecord(value, name);
+  if (policy.policy === "side_effect_free" || policy.policy === "reconcile") {
+    assertExactKeys(policy, ["policy"], [], name);
+    return value;
+  }
+  if (policy.policy === "idempotent") {
+    assertExactKeys(policy, ["policy", "idempotency_key_template"], [], name);
+    requireString(policy.idempotency_key_template, `${name}.idempotency_key_template`, 512);
+    return value;
+  }
+  throw new GraphStateValidationError(`${name}.policy is invalid`);
+}
+function validateApproval(value, name, revisionId, revisionHash) {
+  const approval = requireRecord(value, name);
+  assertExactKeys(approval, ["revision_id", "revision_hash", "approved_at", "evidence"], [], name);
+  if (approval.revision_id !== revisionId || approval.revision_hash !== revisionHash) {
+    throw new GraphStateValidationError(`${name} does not bind the exact revision/hash`);
+  }
+  requireTimestamp(approval.approved_at, `${name}.approved_at`);
+  const evidence = validateEvidence(approval.evidence, `${name}.evidence`);
+  if (evidence.kind !== "human") throw new GraphStateValidationError(`${name} requires human evidence`);
+  return value;
+}
+function validateProjection(value, descriptor) {
+  const projection = requireRecord(value, "projection");
+  assertExactKeys(projection, [
+    "activations",
+    "cohorts",
+    "branch_tokens",
+    "traversal_counts",
+    "committed_transitions",
+    "terminal_verification_activation_ids"
+  ], [], "projection");
+  const nodeIds = new Set(descriptor.nodes.map((node) => node.id));
+  const activations = requireRecord(projection.activations, "projection.activations");
+  for (const [key, raw] of Object.entries(activations)) {
+    const activation = requireRecord(raw, `projection.activations.${key}`);
+    assertExactKeys(activation, [
+      "activation_id",
+      "node_id",
+      "status",
+      "attempt_no",
+      "attempt_ids",
+      "traversal_owner_id"
+    ], [
+      "active_attempt_id",
+      "completed_transition_id",
+      "cohort_id",
+      "branch_token_id"
+    ], `projection.activations.${key}`);
+    if (activation.activation_id !== key) throw new GraphStateValidationError(`activation key ${key} mismatches identity`);
+    const nodeId = requireString(activation.node_id, `projection.activations.${key}.node_id`, 128);
+    if (!nodeIds.has(nodeId)) throw new GraphStateValidationError(`activation ${key} references unknown node ${nodeId}`);
+    if (!["ready", "running", "completed", "failed"].includes(String(activation.status))) {
+      throw new GraphStateValidationError(`activation ${key} has invalid status`);
+    }
+    const attemptNo = requireInteger(activation.attempt_no, `projection.activations.${key}.attempt_no`, 20);
+    const attempts = requireStringArray(activation.attempt_ids, `projection.activations.${key}.attempt_ids`, 20);
+    if (attemptNo !== attempts.length) throw new GraphStateValidationError(`activation ${key} attempt count mismatch`);
+    requireString(activation.traversal_owner_id, `projection.activations.${key}.traversal_owner_id`, 128);
+    if (activation.active_attempt_id !== void 0) {
+      const activeAttempt = requireString(activation.active_attempt_id, `projection.activations.${key}.active_attempt_id`, 128);
+      if (!attempts.includes(activeAttempt)) throw new GraphStateValidationError(`activation ${key} active attempt is unknown`);
+    }
+    if (activation.status === "running" && !activation.active_attempt_id) {
+      throw new GraphStateValidationError(`running activation ${key} has no active attempt`);
+    }
+  }
+  const cohorts = requireRecord(projection.cohorts, "projection.cohorts");
+  for (const [key, raw] of Object.entries(cohorts)) {
+    const cohort = requireRecord(raw, `projection.cohorts.${key}`);
+    assertExactKeys(cohort, [
+      "cohort_id",
+      "fan_out_node_id",
+      "owner_join_id",
+      "expected_branch_token_ids",
+      "consumed"
+    ], ["join_activation_id"], `projection.cohorts.${key}`);
+    if (cohort.cohort_id !== key) throw new GraphStateValidationError(`cohort key ${key} mismatches identity`);
+    for (const property of ["fan_out_node_id", "owner_join_id"]) {
+      const nodeId = requireString(cohort[property], `projection.cohorts.${key}.${property}`, 128);
+      if (!nodeIds.has(nodeId)) throw new GraphStateValidationError(`cohort ${key} references unknown node ${nodeId}`);
+    }
+    requireStringArray(cohort.expected_branch_token_ids, `projection.cohorts.${key}.expected_branch_token_ids`, 64);
+    if (typeof cohort.consumed !== "boolean") throw new GraphStateValidationError(`cohort ${key}.consumed must be boolean`);
+    if (cohort.join_activation_id !== void 0 && !(String(cohort.join_activation_id) in activations)) {
+      throw new GraphStateValidationError(`cohort ${key} references unknown join activation`);
+    }
+  }
+  const tokens = requireRecord(projection.branch_tokens, "projection.branch_tokens");
+  for (const [key, raw] of Object.entries(tokens)) {
+    const token = requireRecord(raw, `projection.branch_tokens.${key}`);
+    assertExactKeys(token, [
+      "branch_token_id",
+      "cohort_id",
+      "branch_id",
+      "owner_join_id",
+      "status"
+    ], ["current_activation_id", "consumed_by_activation_id"], `projection.branch_tokens.${key}`);
+    if (token.branch_token_id !== key) throw new GraphStateValidationError(`branch token key ${key} mismatches identity`);
+    if (!(String(token.cohort_id) in cohorts)) throw new GraphStateValidationError(`branch token ${key} references unknown cohort`);
+    requireString(token.branch_id, `projection.branch_tokens.${key}.branch_id`, 128);
+    requireString(token.owner_join_id, `projection.branch_tokens.${key}.owner_join_id`, 128);
+    if (!["active", "arrived", "consumed"].includes(String(token.status))) {
+      throw new GraphStateValidationError(`branch token ${key} has invalid status`);
+    }
+    for (const property of ["current_activation_id", "consumed_by_activation_id"]) {
+      if (token[property] !== void 0 && !(String(token[property]) in activations)) {
+        throw new GraphStateValidationError(`branch token ${key} references unknown activation`);
+      }
+    }
+  }
+  const traversals = requireRecord(projection.traversal_counts, "projection.traversal_counts");
+  const traversalOwnerIds = /* @__PURE__ */ new Set([...Object.keys(activations), ...Object.keys(tokens)]);
+  for (const [key, count] of Object.entries(traversals)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(key);
+    } catch {
+      throw new GraphStateValidationError(`traversal count key ${key} is not valid JSON`);
+    }
+    if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") {
+      throw new GraphStateValidationError(`traversal count key ${key} is not a [owner, edgeId] pair`);
+    }
+    const [owner, edgeId] = parsed;
+    if (!traversalOwnerIds.has(owner)) {
+      throw new GraphStateValidationError(`traversal count key ${key} references unknown traversal owner ${owner}`);
+    }
+    if (!descriptor.edges.some((edge) => edge.id === edgeId && edge.kind === "back_edge")) {
+      throw new GraphStateValidationError(`traversal count references unknown back-edge ${edgeId}`);
+    }
+    requireInteger(count, `projection.traversal_counts.${key}`, 100);
+  }
+  const committed = requireRecord(projection.committed_transitions, "projection.committed_transitions");
+  if (Object.keys(committed).length > GRAPH_MAX_TRANSITIONS) {
+    throw new GraphStateValidationError("scheduler committed transitions exceed the configured bound");
+  }
+  for (const [key, raw] of Object.entries(committed)) {
+    const transition = requireRecord(raw, `projection.committed_transitions.${key}`);
+    assertExactKeys(transition, [
+      "transition_id",
+      "activation_id",
+      "node_id",
+      "outcome",
+      "request_fingerprint",
+      "selected_edge_ids",
+      "created_activation_ids",
+      "evidence_refs"
+    ], [
+      "cohort_id",
+      "attempt_id",
+      "route",
+      "output_summary",
+      "external_idempotency_key"
+    ], `projection.committed_transitions.${key}`);
+    if (transition.transition_id !== key) throw new GraphStateValidationError(`scheduler transition key ${key} mismatches identity`);
+    if (!(String(transition.activation_id) in activations)) {
+      throw new GraphStateValidationError(`scheduler transition ${key} references unknown activation`);
+    }
+    const nodeId = requireString(transition.node_id, `projection.committed_transitions.${key}.node_id`, 128);
+    if (!nodeIds.has(nodeId)) throw new GraphStateValidationError(`scheduler transition ${key} references unknown node`);
+    if (!["succeeded", "failed", "join_resolved"].includes(String(transition.outcome))) {
+      throw new GraphStateValidationError(`scheduler transition ${key} has invalid outcome`);
+    }
+    requireString(transition.request_fingerprint, `projection.committed_transitions.${key}.request_fingerprint`, 64);
+    requireStringArray(transition.selected_edge_ids, `projection.committed_transitions.${key}.selected_edge_ids`, 64);
+    requireStringArray(transition.created_activation_ids, `projection.committed_transitions.${key}.created_activation_ids`, 64);
+    if (!Array.isArray(transition.evidence_refs) || transition.evidence_refs.length > 64) {
+      throw new GraphStateValidationError(`scheduler transition ${key} evidence is invalid`);
+    }
+    transition.evidence_refs.forEach((item, index) => validateEvidence(item, `scheduler transition ${key} evidence[${index}]`));
+  }
+  const terminalIds = requireStringArray(
+    projection.terminal_verification_activation_ids,
+    "projection.terminal_verification_activation_ids",
+    GRAPH_MAX_TRANSITIONS
+  );
+  for (const activationId of terminalIds) {
+    const activation = activations[activationId];
+    if (!activation || activation.node_id !== descriptor.terminal_verification_node_id) {
+      throw new GraphStateValidationError(`terminal verification activation ${activationId} is invalid`);
+    }
+  }
+  return value;
+}
+function validateRevision(value, key, runId) {
+  const revision = requireRecord(value, `revisions.${key}`);
+  assertExactKeys(revision, [
+    "revision_id",
+    "descriptor_hash",
+    "descriptor",
+    "created_at",
+    "invalidated_node_ids"
+  ], ["approval"], `revisions.${key}`);
+  const revisionId = requireString(revision.revision_id, `revisions.${key}.revision_id`, 128);
+  const hash = requireString(revision.descriptor_hash, `revisions.${key}.descriptor_hash`, 64);
+  if (!/^[a-f0-9]{64}$/.test(hash)) throw new GraphStateValidationError(`revision ${key} hash is invalid`);
+  if (revisionId !== key) throw new GraphStateValidationError(`revision key ${key} does not match revision_id`);
+  const descriptor = parseGraphDescriptor(revision.descriptor);
+  if (!verifyDescriptorHash(descriptor) || descriptor.descriptor_hash !== hash) {
+    throw new GraphStateValidationError(`revision ${key} descriptor hash mismatch`);
+  }
+  if (descriptor.revision_id !== key || descriptor.run_id !== runId) {
+    throw new GraphStateValidationError(`revision ${key} descriptor identity mismatch`);
+  }
+  requireTimestamp(revision.created_at, `revisions.${key}.created_at`);
+  if (!Array.isArray(revision.invalidated_node_ids)) {
+    throw new GraphStateValidationError(`revisions.${key}.invalidated_node_ids must be an array`);
+  }
+  requireStringArray(revision.invalidated_node_ids, `revisions.${key}.invalidated_node_ids`, 1e3);
+  if (revision.approval !== void 0) validateApproval(revision.approval, `revisions.${key}.approval`, key, hash);
+  return value;
+}
+function parseGraphState(input) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(input);
+  } catch (error2) {
+    throw new GraphStateValidationError(`state is not JSON serializable: ${String(error2)}`);
+  }
+  if (Buffer.byteLength(serialized, "utf8") > GRAPH_STATE_MAX_BYTES) {
+    throw new GraphStateValidationError(`state exceeds ${GRAPH_STATE_MAX_BYTES} bytes`);
+  }
+  const state = requireRecord(input, "state");
+  assertExactKeys(state, [
+    "format_version",
+    "session_id",
+    "run_id",
+    "control_nonce",
+    "status",
+    "active_revision_id",
+    "active_revision_hash",
+    "dispatch_generation",
+    "commit_sequence",
+    "revisions",
+    "transitions",
+    "projection",
+    "claims",
+    "reconciliations",
+    "diagnostics",
+    "created_at",
+    "updated_at"
+  ], ["pending_approval", "pending_patch"], "state");
+  if (state.format_version !== GRAPH_STATE_FORMAT_VERSION) {
+    throw new GraphStateValidationError("unsupported format_version");
+  }
+  const sessionId = requireString(state.session_id, "session_id", 256);
+  const runId = requireString(state.run_id, "run_id", 128);
+  requireString(state.control_nonce, "control_nonce", 128);
+  const activeRevisionId = requireString(state.active_revision_id, "active_revision_id", 128);
+  const activeHash = requireString(state.active_revision_hash, "active_revision_hash", 64);
+  if (!/^[a-f0-9]{64}$/.test(activeHash)) throw new GraphStateValidationError("active_revision_hash is invalid");
+  requireInteger(state.dispatch_generation, "dispatch_generation");
+  const sequence = requireInteger(state.commit_sequence, "commit_sequence", GRAPH_MAX_TRANSITIONS);
+  requireTimestamp(state.created_at, "created_at");
+  requireTimestamp(state.updated_at, "updated_at");
+  const statuses = [
+    "draft",
+    "awaiting_approval",
+    "running",
+    "waiting_human",
+    "waiting_patch_approval",
+    "reconciling",
+    "paused",
+    "failed",
+    "cancelled",
+    "succeeded"
+  ];
+  if (!statuses.includes(state.status)) throw new GraphStateValidationError("invalid status");
+  const revisions = requireRecord(state.revisions, "revisions");
+  for (const [key, revision] of Object.entries(revisions)) validateRevision(revision, key, runId);
+  const active = revisions[activeRevisionId];
+  if (!active || active.descriptor_hash !== activeHash) {
+    throw new GraphStateValidationError("active revision/hash is not embedded");
+  }
+  const approvedStatuses = /* @__PURE__ */ new Set([
+    "running",
+    "waiting_human",
+    "waiting_patch_approval",
+    "reconciling",
+    "paused",
+    "failed",
+    "cancelled",
+    "succeeded"
+  ]);
+  if (approvedStatuses.has(state.status) && !active.approval) {
+    throw new GraphStateValidationError(`status ${String(state.status)} requires exact active revision approval`);
+  }
+  if (!Array.isArray(state.transitions) || state.transitions.length > GRAPH_MAX_TRANSITIONS) {
+    throw new GraphStateValidationError("transitions exceed the configured bound");
+  }
+  const transitionIds = /* @__PURE__ */ new Set();
+  let priorSequence = 0;
+  for (const raw of state.transitions) {
+    const transition = requireRecord(raw, "transition");
+    assertExactKeys(transition, [
+      "transition_id",
+      "operation",
+      "operation_fingerprint",
+      "request_fingerprint",
+      "sequence",
+      "committed_at",
+      "result"
+    ], [], "transition");
+    const id = requireString(transition.transition_id, "transition.transition_id", 128);
+    if (transitionIds.has(id)) throw new GraphStateValidationError(`duplicate transition ${id}`);
+    transitionIds.add(id);
+    const currentSequence = requireInteger(transition.sequence, "transition.sequence", GRAPH_MAX_TRANSITIONS);
+    if (currentSequence <= priorSequence) throw new GraphStateValidationError("transition sequence is not monotonic");
+    priorSequence = currentSequence;
+    requireString(transition.operation, "transition.operation", 128);
+    requireString(transition.operation_fingerprint, "transition.operation_fingerprint", 1024);
+    const fingerprint = requireString(transition.request_fingerprint, "transition.request_fingerprint", 64);
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+      throw new GraphStateValidationError(`transition ${id} request_fingerprint is invalid`);
+    }
+    requireTimestamp(transition.committed_at, "transition.committed_at");
+    if (Buffer.byteLength(JSON.stringify(transition.result), "utf8") > GRAPH_MAX_TRANSITION_RESULT_BYTES) {
+      throw new GraphStateValidationError(`transition ${id} result exceeds the configured bound`);
+    }
+  }
+  if (state.transitions.length > 0 && priorSequence !== sequence) {
+    throw new GraphStateValidationError("commit_sequence does not match transition history");
+  }
+  if (state.transitions.length === 0 && sequence !== 0) {
+    throw new GraphStateValidationError("nonzero commit_sequence has no transition history");
+  }
+  validateProjection(state.projection, active.descriptor);
+  const claims = requireRecord(state.claims, "claims");
+  const reconciliations = requireRecord(state.reconciliations, "reconciliations");
+  if (Object.keys(claims).length > GRAPH_MAX_CLAIMS) throw new GraphStateValidationError("claims exceed the configured bound");
+  if (Object.keys(reconciliations).length > GRAPH_MAX_RECONCILIATIONS) {
+    throw new GraphStateValidationError("reconciliations exceed the configured bound");
+  }
+  for (const [leaseId, raw] of Object.entries(claims)) {
+    const claim = requireRecord(raw, `claims.${leaseId}`);
+    assertExactKeys(claim, [
+      "run_id",
+      "revision_id",
+      "revision_hash",
+      "dispatch_generation",
+      "activation_id",
+      "attempt_id",
+      "attempt_no",
+      "claim_owner_session_id",
+      "driver_instance_id",
+      "lease_id",
+      "tracking_id",
+      "issued_at",
+      "expires_at",
+      "lease_duration_ms",
+      "renewal_count",
+      "max_renewals",
+      "effect_policy",
+      "status"
+    ], [
+      "external_idempotency_key",
+      "last_renewed_at",
+      "fenced_at",
+      "replacement_lease_id"
+    ], `claims.${leaseId}`);
+    if (claim.lease_id !== leaseId) throw new GraphStateValidationError(`claim key ${leaseId} mismatches identity`);
+    if (claim.run_id !== runId) throw new GraphStateValidationError(`claim ${leaseId} run fence mismatches`);
+    const revisionId = requireString(claim.revision_id, `claims.${leaseId}.revision_id`, 128);
+    const revisionHash = requireString(claim.revision_hash, `claims.${leaseId}.revision_hash`, 64);
+    const claimRevision = revisions[revisionId];
+    if (!claimRevision || claimRevision.descriptor_hash !== revisionHash) {
+      throw new GraphStateValidationError(`claim ${leaseId} revision fence is invalid`);
+    }
+    requireInteger(claim.dispatch_generation, `claims.${leaseId}.dispatch_generation`);
+    const activationId = requireString(claim.activation_id, `claims.${leaseId}.activation_id`, 128);
+    const activation = state.projection.activations[activationId];
+    if (!activation) throw new GraphStateValidationError(`claim ${leaseId} references unknown activation`);
+    const attemptId = requireString(claim.attempt_id, `claims.${leaseId}.attempt_id`, 128);
+    const attemptNo = requireInteger(claim.attempt_no, `claims.${leaseId}.attempt_no`, 20);
+    if (!activation.attempt_ids.includes(attemptId) || activation.attempt_no < attemptNo) {
+      throw new GraphStateValidationError(`claim ${leaseId} attempt fence is invalid`);
+    }
+    for (const property of ["claim_owner_session_id", "driver_instance_id", "tracking_id"]) {
+      requireString(claim[property], `claims.${leaseId}.${property}`, 256);
+    }
+    const issued = requireTimestamp(claim.issued_at, `claims.${leaseId}.issued_at`);
+    const expires = requireTimestamp(claim.expires_at, `claims.${leaseId}.expires_at`);
+    const duration3 = requireInteger(claim.lease_duration_ms, `claims.${leaseId}.lease_duration_ms`, 864e5);
+    const leaseStart = claim.last_renewed_at === void 0 ? issued : requireTimestamp(claim.last_renewed_at, `claims.${leaseId}.last_renewed_at`);
+    if (duration3 <= 0 || Date.parse(expires) - Date.parse(leaseStart) !== duration3) {
+      throw new GraphStateValidationError(`claim ${leaseId} lease duration is inconsistent`);
+    }
+    const renewals = requireInteger(claim.renewal_count, `claims.${leaseId}.renewal_count`, 20);
+    const maxRenewals = requireInteger(claim.max_renewals, `claims.${leaseId}.max_renewals`, 20);
+    if (renewals > maxRenewals) throw new GraphStateValidationError(`claim ${leaseId} renewal cap is exceeded`);
+    const policy = validateEffectPolicy(claim.effect_policy, `claims.${leaseId}.effect_policy`);
+    if (policy.policy === "idempotent") {
+      requireString(claim.external_idempotency_key, `claims.${leaseId}.external_idempotency_key`, 512);
+    } else if (claim.external_idempotency_key !== void 0) {
+      throw new GraphStateValidationError(`claim ${leaseId} has an unexpected idempotency key`);
+    }
+    if (!["live", "completed", "expired_retryable", "abandoned_retryable", "reconciling", "fenced"].includes(String(claim.status))) {
+      throw new GraphStateValidationError(`claim ${leaseId} has invalid status`);
+    }
+    if (claim.status !== "live" && claim.fenced_at === void 0) {
+      throw new GraphStateValidationError(`non-live claim ${leaseId} requires fenced_at`);
+    }
+    if (claim.fenced_at !== void 0) requireTimestamp(claim.fenced_at, `claims.${leaseId}.fenced_at`);
+    if (claim.replacement_lease_id !== void 0) {
+      requireString(claim.replacement_lease_id, `claims.${leaseId}.replacement_lease_id`, 128);
+    }
+  }
+  for (const [id, raw] of Object.entries(reconciliations)) {
+    const record2 = requireRecord(raw, `reconciliations.${id}`);
+    assertExactKeys(record2, [
+      "reconciliation_id",
+      "activation_id",
+      "attempt_id",
+      "lease_id",
+      "revision_id",
+      "revision_hash",
+      "dispatch_generation",
+      "status",
+      "reason",
+      "created_at"
+    ], ["resolved_at", "resolution_evidence"], `reconciliations.${id}`);
+    if (record2.reconciliation_id !== id) throw new GraphStateValidationError(`reconciliation key ${id} mismatches identity`);
+    const leaseId = requireString(record2.lease_id, `reconciliations.${id}.lease_id`, 128);
+    const claim = claims[leaseId];
+    if (!claim || record2.activation_id !== claim.activation_id || record2.attempt_id !== claim.attempt_id) {
+      throw new GraphStateValidationError(`reconciliation ${id} claim lineage is invalid`);
+    }
+    if (record2.revision_id !== claim.revision_id || record2.revision_hash !== claim.revision_hash || record2.dispatch_generation !== claim.dispatch_generation) {
+      throw new GraphStateValidationError(`reconciliation ${id} revision fence is invalid`);
+    }
+    if (!["unresolved", "committed", "proved_not_applied", "accepted", "invalidated"].includes(String(record2.status))) {
+      throw new GraphStateValidationError(`reconciliation ${id} status is invalid`);
+    }
+    if (!["expired_ambiguous", "session_end_ambiguous", "external_effect_ambiguous"].includes(String(record2.reason))) {
+      throw new GraphStateValidationError(`reconciliation ${id} reason is invalid`);
+    }
+    requireTimestamp(record2.created_at, `reconciliations.${id}.created_at`);
+    if (record2.status === "unresolved" && (record2.resolved_at !== void 0 || record2.resolution_evidence !== void 0)) {
+      throw new GraphStateValidationError(`unresolved reconciliation ${id} cannot have resolution fields`);
+    }
+    if (record2.status !== "unresolved") {
+      requireTimestamp(record2.resolved_at, `reconciliations.${id}.resolved_at`);
+      validateEvidence(record2.resolution_evidence, `reconciliations.${id}.resolution_evidence`);
+    }
+  }
+  if (!Array.isArray(state.diagnostics) || state.diagnostics.length > GRAPH_MAX_DIAGNOSTICS) {
+    throw new GraphStateValidationError("diagnostics exceed the configured bound");
+  }
+  state.diagnostics.forEach((raw, index) => {
+    const diagnostic = requireRecord(raw, `diagnostics[${index}]`);
+    assertExactKeys(diagnostic, ["kind", "recorded_at", "summary"], [
+      "activation_id",
+      "attempt_id",
+      "lease_id"
+    ], `diagnostics[${index}]`);
+    if (!["late_result", "operation", "recovery", "control"].includes(String(diagnostic.kind))) {
+      throw new GraphStateValidationError(`diagnostics[${index}].kind is invalid`);
+    }
+    requireTimestamp(diagnostic.recorded_at, `diagnostics[${index}].recorded_at`);
+    requireString(diagnostic.summary, `diagnostics[${index}].summary`, 8192);
+    for (const property of ["activation_id", "attempt_id", "lease_id"]) {
+      if (diagnostic[property] !== void 0) requireString(diagnostic[property], `diagnostics[${index}].${property}`, 128);
+    }
+  });
+  if (state.pending_approval !== void 0) {
+    const pending = requireRecord(state.pending_approval, "pending_approval");
+    assertExactKeys(pending, ["revision_id", "revision_hash", "requested_at"], [], "pending_approval");
+    if (pending.revision_id !== activeRevisionId || pending.revision_hash !== activeHash) {
+      throw new GraphStateValidationError("pending approval does not bind the active revision/hash");
+    }
+    requireTimestamp(pending.requested_at, "pending_approval.requested_at");
+  }
+  if (state.status === "awaiting_approval" && !state.pending_approval) {
+    throw new GraphStateValidationError("awaiting_approval requires pending_approval");
+  }
+  if (state.status !== "awaiting_approval" && state.pending_approval) {
+    throw new GraphStateValidationError("pending_approval must be absent outside awaiting_approval");
+  }
+  if (state.pending_approval && active.approval) {
+    throw new GraphStateValidationError("approved revision cannot remain pending approval");
+  }
+  if (!active.approval && Object.values(state.projection.activations).some(
+    (activation) => activation.status === "ready" || activation.status === "running"
+  )) {
+    throw new GraphStateValidationError("unapproved graph cannot expose claimable work");
+  }
+  if (state.pending_patch !== void 0) {
+    const patch = requireRecord(state.pending_patch, "pending_patch");
+    assertExactKeys(patch, [
+      "proposal_id",
+      "base_revision_id",
+      "base_revision_hash",
+      "base_dispatch_generation",
+      "proposed_revision_id",
+      "proposed_revision_hash",
+      "proposed_descriptor",
+      "invalidated_node_ids",
+      "proposal_evidence",
+      "proposed_at"
+    ], [], "pending_patch");
+    requireString(patch.proposal_id, "pending_patch.proposal_id", 128);
+    if (patch.base_revision_id !== activeRevisionId || patch.base_revision_hash !== activeHash) {
+      throw new GraphStateValidationError("pending patch base does not bind active revision/hash");
+    }
+    const baseGeneration = requireInteger(patch.base_dispatch_generation, "pending_patch.base_dispatch_generation");
+    if (baseGeneration + 1 !== state.dispatch_generation) {
+      throw new GraphStateValidationError("pending patch dispatch generation is invalid");
+    }
+    const proposed = parseGraphDescriptor(patch.proposed_descriptor);
+    if (!verifyDescriptorHash(proposed) || proposed.revision_id !== patch.proposed_revision_id || proposed.descriptor_hash !== patch.proposed_revision_hash || proposed.run_id !== runId || proposed.revision_id === activeRevisionId) {
+      throw new GraphStateValidationError("pending patch proposed descriptor identity/hash is invalid");
+    }
+    requireStringArray(patch.invalidated_node_ids, "pending_patch.invalidated_node_ids", 1e3);
+    if (!Array.isArray(patch.proposal_evidence) || patch.proposal_evidence.length > 64) {
+      throw new GraphStateValidationError("pending patch proposal evidence is invalid");
+    }
+    patch.proposal_evidence.forEach((item, index) => validateEvidence(item, `pending_patch.proposal_evidence[${index}]`));
+    requireTimestamp(patch.proposed_at, "pending_patch.proposed_at");
+  }
+  if (state.pending_patch && state.status !== "waiting_patch_approval") {
+    throw new GraphStateValidationError("pending_patch requires waiting_patch_approval status");
+  }
+  if (!state.pending_patch && state.status === "waiting_patch_approval") {
+    throw new GraphStateValidationError("waiting_patch_approval requires pending_patch");
+  }
+  if (Object.values(claims).some(
+    (raw) => raw.claim_owner_session_id !== sessionId
+  )) {
+    throw new GraphStateValidationError("claim owner session does not match graph authority session");
+  }
+  return clone2(input);
+}
+
 // src/tools/state-tools.ts
 var EXECUTION_MODES = [
   "autopilot",
   "autoresearch",
+  "graph",
   "team",
   "ralph",
   "ultrawork",
@@ -25572,15 +27313,30 @@ var STATE_TOOL_MODES = [
   "merge-readiness"
 ];
 var STATE_WRITE_MODES = [
-  ...EXECUTION_MODES,
+  "autopilot",
+  "autoresearch",
+  "team",
+  "ralph",
+  "ultrawork",
+  "ultraqa",
+  "deep-interview",
+  "self-improve",
   "ralplan",
   "omc-teams",
   "skill-active"
 ];
-var EXTRA_STATE_ONLY_MODES = ["ralplan", "omc-teams", "skill-active"];
+var STATE_CLEAR_MODES = [...STATE_TOOL_MODES, "all"];
+var EXTRA_STATE_ONLY_MODES = [
+  "ralplan",
+  "omc-teams",
+  "skill-active"
+];
 var CANCEL_SIGNAL_TTL_MS = 3e4;
 var OWNER_SESSION_FALLBACK_MODES = /* @__PURE__ */ new Set(["ralph"]);
-var CONVERGED_STATE_PATH_MODES = /* @__PURE__ */ new Set(["ralph", "ultrawork"]);
+var CONVERGED_STATE_PATH_MODES = /* @__PURE__ */ new Set([
+  "ralph",
+  "ultrawork"
+]);
 function getStateFileName(mode) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
   return `${normalizedName}.json`;
@@ -25592,18 +27348,28 @@ function readJsonRecord(filePath) {
     return null;
   }
 }
-var NAMED_WORKFLOW_MARKERS = ["workflow", "workflowRunId", "pipelineTracking"];
+var NAMED_WORKFLOW_MARKERS = [
+  "workflow",
+  "workflowRunId",
+  "pipelineTracking"
+];
 function hasOwnProperty(record2, key) {
   return Object.prototype.hasOwnProperty.call(record2, key);
 }
 function hasNamedWorkflowMarker(record2) {
   if (!record2) return false;
-  return NAMED_WORKFLOW_MARKERS.some((marker) => hasOwnProperty(record2, marker));
+  return NAMED_WORKFLOW_MARKERS.some(
+    (marker) => hasOwnProperty(record2, marker)
+  );
 }
 function hasValidatedNamedWorkflowTuple(record2) {
-  if (!NAMED_WORKFLOW_MARKERS.every((marker) => hasOwnProperty(record2, marker))) return false;
+  if (!NAMED_WORKFLOW_MARKERS.every((marker) => hasOwnProperty(record2, marker)))
+    return false;
   const sessionId = getStateSessionOwner(record2);
-  return typeof sessionId === "string" && validateNamedWorkflowStateStructure(record2, sessionId) !== null;
+  return typeof sessionId === "string" && validateNamedWorkflowStateStructure(
+    record2,
+    sessionId
+  ) !== null;
 }
 function isExactEmergencyNamedMutation(record2, requestedRunId) {
   return hasValidatedNamedWorkflowTuple(record2) && typeof requestedRunId === "string" && record2.workflowRunId === requestedRunId;
@@ -25670,8 +27436,11 @@ function isConvergedCandidateActiveForSession(statePath, sessionId) {
   return canClearStateForSession(raw, sessionId);
 }
 function emergencyRecoveryOptionsForProject(mode, path13, root) {
-  if (mode !== "autopilot" || !isSharedHomeAutopilotCandidate(path13, root)) return void 0;
-  return { authorizeState: (state) => isStateCandidateForProject(mode, path13, state, root) };
+  if (mode !== "autopilot" || !isSharedHomeAutopilotCandidate(path13, root))
+    return void 0;
+  return {
+    authorizeState: (state) => isStateCandidateForProject(mode, path13, state, root)
+  };
 }
 function clearDiscoveredStateCandidate(candidate, predicate, recoveryOptions) {
   return clearStateFileLockedIf(
@@ -25711,7 +27480,9 @@ function discoverStatePaths(paths) {
   }
   return discovered;
 }
-function clearConvergedStateCandidates(mode, root, sessionId, discovered = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId))) {
+function clearConvergedStateCandidates(mode, root, sessionId, discovered = discoverStatePaths(
+  getConvergedStateCandidates(mode, root, sessionId)
+)) {
   let cleared = 0;
   let hadFailure = false;
   for (const candidate of discovered) {
@@ -25722,10 +27493,16 @@ function clearConvergedStateCandidates(mode, root, sessionId, discovered = disco
     if (result === "cleared") cleared++;
     else if (result === "failed") hadFailure = true;
   }
-  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
+  return {
+    cleared,
+    hadFailure,
+    paths: discovered.map((candidate) => candidate.path)
+  };
 }
 function hasActiveConvergedState(mode, root, sessionId) {
-  return getConvergedStateCandidates(mode, root, sessionId).some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
+  return getConvergedStateCandidates(mode, root, sessionId).some(
+    (statePath) => isConvergedCandidateActiveForSession(statePath, sessionId)
+  );
 }
 function readTeamNamesFromStateFile(statePath) {
   if (!(0, import_fs25.existsSync)(statePath)) return [];
@@ -25738,7 +27515,11 @@ function readTeamNamesFromStateFile(statePath) {
   }
 }
 function pruneMissionBoardTeams(root, teamNames) {
-  const missionStatePath = (0, import_path25.join)(getOmcRoot(root), "state", "mission-state.json");
+  const missionStatePath = (0, import_path25.join)(
+    getOmcRoot(root),
+    "state",
+    "mission-state.json"
+  );
   if (!(0, import_fs25.existsSync)(missionStatePath)) return 0;
   try {
     const parsed = JSON.parse((0, import_fs25.readFileSync)(missionStatePath, "utf-8"));
@@ -25753,11 +27534,18 @@ function pruneMissionBoardTeams(root, teamNames) {
     });
     const removed = parsed.missions.length - remainingMissions.length;
     if (removed > 0) {
-      (0, import_fs25.writeFileSync)(missionStatePath, JSON.stringify({
-        ...parsed,
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        missions: remainingMissions
-      }, null, 2));
+      (0, import_fs25.writeFileSync)(
+        missionStatePath,
+        JSON.stringify(
+          {
+            ...parsed,
+            updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            missions: remainingMissions
+          },
+          null,
+          2
+        )
+      );
     }
     return removed;
   } catch {
@@ -25799,7 +27587,8 @@ function getLegacyStateFileCandidates(mode, root) {
     getStatePath(mode, root),
     (0, import_path25.join)(getOmcRoot(root), `${normalizedName}.json`)
   ];
-  if (mode === "autopilot") candidates.push((0, import_path25.join)((0, import_os4.homedir)(), ".omc", "state", "autopilot-state.json"));
+  if (mode === "autopilot")
+    candidates.push((0, import_path25.join)((0, import_os4.homedir)(), ".omc", "state", "autopilot-state.json"));
   return [...new Set(candidates)];
 }
 function isSharedHomeAutopilotCandidate(path13, root) {
@@ -25813,13 +27602,15 @@ function isSharedHomeAutopilotCandidate(path13, root) {
   return !isDescendant(canonicalStateRoot, candidatePath) && isDescendant(sharedHomeStateRoot, candidatePath);
 }
 function isStateCandidateForProject(mode, path13, state, root) {
-  if (mode !== "autopilot" || !isSharedHomeAutopilotCandidate(path13, root)) return true;
+  if (mode !== "autopilot" || !isSharedHomeAutopilotCandidate(path13, root))
+    return true;
   return typeof state.project_path === "string" && (0, import_path25.resolve)(state.project_path) === (0, import_path25.resolve)(root);
 }
 function isAutopilotRecoveryCandidateForProject(path13, root) {
   if (!isSharedHomeAutopilotCandidate(path13, root)) return true;
   const primary = readJsonRecord(path13);
-  if (primary) return isStateCandidateForProject("autopilot", path13, primary, root);
+  if (primary)
+    return isStateCandidateForProject("autopilot", path13, primary, root);
   const artifactPrefix = `${(0, import_path25.basename)(path13)}.emergency-quarantine.`;
   let artifacts;
   try {
@@ -25843,12 +27634,22 @@ function shouldCheckWorkingDirectoryLocalState(root) {
 }
 function getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
-  return (0, import_path25.join)(getWorkingDirectoryLocalOmcRoot(root), "state", "sessions", sessionId, `${normalizedName}.json`);
+  return (0, import_path25.join)(
+    getWorkingDirectoryLocalOmcRoot(root),
+    "state",
+    "sessions",
+    sessionId,
+    `${normalizedName}.json`
+  );
 }
 function getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
   return [
-    (0, import_path25.join)(getWorkingDirectoryLocalOmcRoot(root), "state", `${normalizedName}.json`),
+    (0, import_path25.join)(
+      getWorkingDirectoryLocalOmcRoot(root),
+      "state",
+      `${normalizedName}.json`
+    ),
     (0, import_path25.join)(getWorkingDirectoryLocalOmcRoot(root), `${normalizedName}.json`)
   ];
 }
@@ -25860,15 +27661,22 @@ function getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId) {
   if (sessionId) {
     paths.add(getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId));
   }
-  for (const legacyPath of getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root)) {
+  for (const legacyPath of getWorkingDirectoryLocalLegacyStateFileCandidates(
+    mode,
+    root
+  )) {
     paths.add(legacyPath);
   }
   return [...paths];
 }
-function clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, discovered = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId))) {
+function clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, discovered = discoverStatePaths(
+  getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)
+)) {
   let cleared = 0;
   let hadFailure = false;
-  const localLegacyPaths = new Set(getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root));
+  const localLegacyPaths = new Set(
+    getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root)
+  );
   for (const candidate of discovered) {
     const result = clearDiscoveredStateCandidate(
       candidate,
@@ -25877,7 +27685,11 @@ function clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, discov
     if (result === "cleared") cleared++;
     else if (result === "failed") hadFailure = true;
   }
-  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
+  return {
+    cleared,
+    hadFailure,
+    paths: discovered.map((candidate) => candidate.path)
+  };
 }
 function clearLegacyStateCandidates(mode, root, sessionId, discovered = discoverStatePaths(getLegacyStateFileCandidates(mode, root))) {
   let cleared = 0;
@@ -25905,38 +27717,60 @@ function clearSessionOwnedStateCandidates(mode, root, sessionId, discovered = fi
     if (result === "cleared") cleared++;
     else if (result === "failed") hadFailure = true;
   }
-  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
+  return {
+    cleared,
+    hadFailure,
+    paths: discovered.map((candidate) => candidate.path)
+  };
 }
-function clearCompletedSessionStateCandidates(mode, root, requesterSessionId, discovered = findCompletedSessionStateCandidates(mode, root, requesterSessionId)) {
+function clearCompletedSessionStateCandidates(mode, root, requesterSessionId, discovered = findCompletedSessionStateCandidates(
+  mode,
+  root,
+  requesterSessionId
+)) {
   let cleared = 0;
   let hadFailure = false;
   for (const candidate of discovered) {
     const result = clearDiscoveredStateCandidate(
       candidate,
-      (current) => current.active === true && Boolean(candidate.completionEvidencePath && (0, import_fs25.existsSync)(candidate.completionEvidencePath)),
+      (current) => current.active === true && Boolean(
+        candidate.completionEvidencePath && (0, import_fs25.existsSync)(candidate.completionEvidencePath)
+      ),
       emergencyRecoveryOptionsForProject(mode, candidate.path, root)
     );
     if (result === "cleared") cleared++;
     else if (result === "failed") hadFailure = true;
   }
-  return { cleared, hadFailure, paths: discovered.map((candidate) => candidate.path) };
+  return {
+    cleared,
+    hadFailure,
+    paths: discovered.map((candidate) => candidate.path)
+  };
 }
 function getStateClearCheckedPaths(mode, root, sessionId) {
   const paths = /* @__PURE__ */ new Set();
   if (sessionId) {
-    paths.add(MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sessionId) : resolveSessionStatePath(mode, sessionId, root));
+    paths.add(
+      MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sessionId) : resolveSessionStatePath(mode, sessionId, root)
+    );
   } else {
     paths.add(getStatePath(mode, root));
   }
   for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
     paths.add(legacyPath);
   }
-  for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)) {
+  for (const localPath of getWorkingDirectoryLocalStateClearCandidates(
+    mode,
+    root,
+    sessionId
+  )) {
     paths.add(localPath);
   }
   const sessionIds = sessionId ? [sessionId, ...listSessionIds(root)] : listSessionIds(root);
   for (const sid of new Set(sessionIds)) {
-    paths.add(MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sid) : resolveSessionStatePath(mode, sid, root));
+    paths.add(
+      MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sid) : resolveSessionStatePath(mode, sid, root)
+    );
   }
   return [...paths];
 }
@@ -25986,7 +27820,11 @@ function clearModeRuntimeArtifacts(mode, root, sessionId) {
 function writeSessionCancelSignal(root, sessionId, mode, candidate) {
   ensureSessionStateDir(sessionId, root);
   const now = Date.now();
-  const cancelSignalPath = resolveSessionStatePath("cancel-signal", sessionId, root);
+  const cancelSignalPath = resolveSessionStatePath(
+    "cancel-signal",
+    sessionId,
+    root
+  );
   const payload = {
     active: true,
     requested_at: new Date(now).toISOString(),
@@ -25994,10 +27832,14 @@ function writeSessionCancelSignal(root, sessionId, mode, candidate) {
     mode,
     source: "state_clear",
     ...candidate?.workflowRunId ? { target_workflow_run_id: candidate.workflowRunId } : {},
-    ...candidate ? { target_state_sha256: (0, import_crypto7.createHash)("sha256").update(candidate.snapshot).digest("hex") } : {}
+    ...candidate ? {
+      target_state_sha256: (0, import_crypto7.createHash)("sha256").update(candidate.snapshot).digest("hex")
+    } : {}
   };
   if (!writeStateFileLocked(cancelSignalPath, payload)) {
-    throw new Error(`state mutation lock unavailable for cancel signal: ${cancelSignalPath}`);
+    throw new Error(
+      `state mutation lock unavailable for cancel signal: ${cancelSignalPath}`
+    );
   }
 }
 function isSessionModeActive(mode, root, sessionId) {
@@ -26016,23 +27858,84 @@ function isSessionModeActive(mode, root, sessionId) {
   }
 }
 function findSingleOwningSessionForMode(mode, root, requesterSessionId) {
-  const owningSessions = listSessionIds(root).filter((sid) => sid !== requesterSessionId && isSessionModeActive(mode, root, sid));
+  const owningSessions = listSessionIds(root).filter(
+    (sid) => sid !== requesterSessionId && isSessionModeActive(mode, root, sid)
+  );
   return owningSessions.length === 1 ? owningSessions[0] : void 0;
 }
+function malformedGraphPublicState() {
+  return { type: "graph_state_summary", valid: false, status: "malformed" };
+}
+function redactGraphPublicState(state) {
+  try {
+    const graph = parseGraphState(state);
+    const activationStatuses = Object.values(graph.projection.activations).map(
+      (activation) => activation.status
+    );
+    const claims = Object.values(graph.claims);
+    const reconciliations = Object.values(graph.reconciliations);
+    return {
+      type: "graph_state_summary",
+      valid: true,
+      format_version: graph.format_version,
+      run_id: graph.run_id.slice(0, 128),
+      status: graph.status,
+      active_revision_id: graph.active_revision_id.slice(0, 128),
+      short_revision_hash: graph.active_revision_hash.slice(0, 12),
+      dispatch_generation: graph.dispatch_generation,
+      commit_sequence: graph.commit_sequence,
+      progress: {
+        total: activationStatuses.length,
+        ready: activationStatuses.filter((status) => status === "ready").length,
+        running: activationStatuses.filter((status) => status === "running").length,
+        completed: activationStatuses.filter((status) => status === "completed").length,
+        failed: activationStatuses.filter((status) => status === "failed").length
+      },
+      claims: {
+        total: claims.length,
+        live: claims.filter((claim) => claim.status === "live").length,
+        reconciling: claims.filter((claim) => claim.status === "reconciling").length,
+        unresolved_reconciliations: reconciliations.filter(
+          (reconciliation) => reconciliation.status === "unresolved"
+        ).length
+      },
+      pending: {
+        approval: graph.pending_approval !== void 0,
+        patch: graph.pending_patch !== void 0
+      }
+    };
+  } catch {
+    return malformedGraphPublicState();
+  }
+}
 function canonicalWorkflowJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalWorkflowJson).join(",")}]`;
+  if (Array.isArray(value))
+    return `[${value.map(canonicalWorkflowJson).join(",")}]`;
   if (value && typeof value === "object") {
     const record2 = value;
-    return `{${Object.keys(record2).sort().map((key) => `${JSON.stringify(key)}:${canonicalWorkflowJson(record2[key])}`).join(",")}}`;
+    return `{${Object.keys(record2).sort().map(
+      (key) => `${JSON.stringify(key)}:${canonicalWorkflowJson(record2[key])}`
+    ).join(",")}}`;
   }
   return JSON.stringify(value);
 }
 function isValidPublicWorkflowDescriptor(descriptor) {
   const stages = descriptor.stages;
-  if (descriptor.descriptorVersion !== 1 || descriptor.profileVersion !== 1 || typeof descriptor.workflowName !== "string" || !Array.isArray(stages) || !stages.every((stage) => typeof stage === "string") || typeof descriptor.profileHash !== "string") return false;
-  const allowed = /* @__PURE__ */ new Set(["ralplan,execution", "ralplan,execution,ralph", "ralplan,execution,qa", "ralplan,execution,ralph,qa"]);
+  if (descriptor.descriptorVersion !== 1 || descriptor.profileVersion !== 1 || typeof descriptor.workflowName !== "string" || !Array.isArray(stages) || !stages.every((stage) => typeof stage === "string") || typeof descriptor.profileHash !== "string")
+    return false;
+  const allowed = /* @__PURE__ */ new Set([
+    "ralplan,execution",
+    "ralplan,execution,ralph",
+    "ralplan,execution,qa",
+    "ralplan,execution,ralph,qa"
+  ]);
   if (!allowed.has(stages.join(","))) return false;
-  const canonical = canonicalWorkflowJson({ descriptorVersion: 1, workflowName: descriptor.workflowName, profileVersion: 1, stages });
+  const canonical = canonicalWorkflowJson({
+    descriptorVersion: 1,
+    workflowName: descriptor.workflowName,
+    profileVersion: 1,
+    stages
+  });
   return (0, import_crypto7.createHash)("sha256").update(canonical).digest("hex") === descriptor.profileHash;
 }
 function redactAutopilotPublicState(state) {
@@ -26045,11 +27948,27 @@ function redactAutopilotPublicState(state) {
   }
   const workflow = record2.workflow;
   if (!hasValidatedNamedWorkflowTuple(record2) || !workflow || typeof workflow !== "object") {
-    return { name: "invalid", version: 1, shortHash: "invalid", stages: [], currentStage: null, status: "workflow_descriptor_integrity_failed", progress: "0/0" };
+    return {
+      name: "invalid",
+      version: 1,
+      shortHash: "invalid",
+      stages: [],
+      currentStage: null,
+      status: "workflow_descriptor_integrity_failed",
+      progress: "0/0"
+    };
   }
   const descriptor = workflow;
   if (!isValidPublicWorkflowDescriptor(descriptor)) {
-    return { name: "invalid", version: 1, shortHash: "invalid", stages: [], currentStage: null, status: "workflow_descriptor_integrity_failed", progress: "0/0" };
+    return {
+      name: "invalid",
+      version: 1,
+      shortHash: "invalid",
+      stages: [],
+      currentStage: null,
+      status: "workflow_descriptor_integrity_failed",
+      progress: "0/0"
+    };
   }
   const stages = Array.isArray(descriptor.stages) && descriptor.stages.every((stage) => typeof stage === "string") ? descriptor.stages : [];
   const pipelineTracking = record2.pipelineTracking && typeof record2.pipelineTracking === "object" ? record2.pipelineTracking : void 0;
@@ -26075,16 +27994,36 @@ function publicStateForMode(mode, state) {
   if (mode === "autopilot") {
     return redactAutopilotPublicState(state);
   }
-  return mode === "merge-readiness" ? redactMergeReadinessState(state) : state;
+  if (mode === "graph") {
+    return redactGraphPublicState(state);
+  }
+  return mode === "merge-readiness" ? redactMergeReadinessState(
+    state
+  ) : state;
+}
+function parsePublicStateContent(mode, content) {
+  try {
+    return publicStateForMode(mode, JSON.parse(content));
+  } catch (error2) {
+    if (mode === "graph") return malformedGraphPublicState();
+    throw error2;
+  }
 }
 var stateReadTool = {
   name: "state_read",
   description: "Read the current state for a specific mode (ralph, ultrawork, autopilot, etc.). Returns the JSON state data or indicates if no state exists.",
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false
+  },
   schema: {
     mode: external_exports.enum(STATE_TOOL_MODES).describe("The mode to read state for"),
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
-    session_id: external_exports.string().optional().describe("Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).")
+    session_id: external_exports.string().optional().describe(
+      "Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions)."
+    )
   },
   handler: async (args) => {
     const { mode, workingDirectory, session_id } = args;
@@ -26095,51 +28034,63 @@ var stateReadTool = {
         validateSessionId(sessionId);
         const statePath2 = MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sessionId) : resolveSessionStatePath(mode, sessionId, root);
         if (!(0, import_fs25.existsSync)(statePath2)) {
-          const completedSessionPaths = findCompletedSessionStateFiles(mode, root, sessionId);
+          const completedSessionPaths = findCompletedSessionStateFiles(
+            mode,
+            root,
+            sessionId
+          );
           if (completedSessionPaths.length > 0) {
             const orphanList = completedSessionPaths.map((orphanPath) => {
               const sessionMarker = `${(0, import_path25.join)("state", "sessions")}/`;
               const markerIndex = orphanPath.indexOf(sessionMarker);
               if (markerIndex === -1) return `- ${orphanPath}`;
-              const rest = orphanPath.slice(markerIndex + sessionMarker.length);
+              const rest = orphanPath.slice(
+                markerIndex + sessionMarker.length
+              );
               const orphanSessionId = rest.split(/[\\/]/)[0] || "unknown";
               return `- session: ${orphanSessionId}
   path: ${orphanPath}`;
             }).join("\n");
             return {
-              content: [{
-                type: "text",
-                text: `No state found for mode: ${mode} in session: ${sessionId}
+              content: [
+                {
+                  type: "text",
+                  text: `No state found for mode: ${mode} in session: ${sessionId}
 Expected path: ${statePath2}
 
 Discovered ${completedSessionPaths.length} completed-session orphan state file${completedSessionPaths.length === 1 ? "" : "s"} for this mode:
 ${orphanList}
 
 Run state_clear(mode="${mode}", session_id="${sessionId}") to clear the current session plus these completed-session orphan files.`
-              }]
+                }
+              ]
             };
           }
           return {
-            content: [{
-              type: "text",
-              text: `No state found for mode: ${mode} in session: ${sessionId}
+            content: [
+              {
+                type: "text",
+                text: `No state found for mode: ${mode} in session: ${sessionId}
 Expected path: ${statePath2}`
-            }]
+              }
+            ]
           };
         }
         const content = (0, import_fs25.readFileSync)(statePath2, "utf-8");
-        const state = JSON.parse(content);
+        const publicState = parsePublicStateContent(mode, content);
         return {
-          content: [{
-            type: "text",
-            text: `## State for ${mode} (session: ${sessionId})
+          content: [
+            {
+              type: "text",
+              text: `## State for ${mode} (session: ${sessionId})
 
 Path: ${statePath2}
 
 \`\`\`json
-${JSON.stringify(publicStateForMode(mode, state), null, 2)}
+${JSON.stringify(publicState, null, 2)}
 \`\`\``
-          }]
+            }
+          ]
         };
       }
       const statePath = getStatePath(mode, root);
@@ -26154,14 +28105,16 @@ ${JSON.stringify(publicStateForMode(mode, state), null, 2)}
       }
       if (!legacyExists && activeSessions.length === 0) {
         return {
-          content: [{
-            type: "text",
-            text: `No state found for mode: ${mode}
+          content: [
+            {
+              type: "text",
+              text: `No state found for mode: ${mode}
 Expected legacy path: ${statePath}
 No active sessions found.
 
 Note: Reading from legacy/aggregate path (no session_id). This may include state from other sessions.`
-          }]
+            }
+          ]
         };
       }
       let output = `## State for ${mode}
@@ -26172,12 +28125,12 @@ Note: Reading from legacy/aggregate path (no session_id). This may include state
       if (legacyExists) {
         try {
           const content = (0, import_fs25.readFileSync)(statePath, "utf-8");
-          const state = JSON.parse(content);
+          const publicState = parsePublicStateContent(mode, content);
           output += `### Legacy Path (shared)
 Path: ${statePath}
 
 \`\`\`json
-${JSON.stringify(publicStateForMode(mode, state), null, 2)}
+${JSON.stringify(publicState, null, 2)}
 \`\`\`
 
 `;
@@ -26197,12 +28150,12 @@ Path: ${statePath}
           const sessionStatePath = MODE_CONFIGS[mode] ? getStateFilePath(root, mode, sid) : resolveSessionStatePath(mode, sid, root);
           try {
             const content = (0, import_fs25.readFileSync)(sessionStatePath, "utf-8");
-            const state = JSON.parse(content);
+            const publicState = parsePublicStateContent(mode, content);
             output += `**Session: ${sid}**
 Path: ${sessionStatePath}
 
 \`\`\`json
-${JSON.stringify(publicStateForMode(mode, state), null, 2)}
+${JSON.stringify(publicState, null, 2)}
 \`\`\`
 
 `;
@@ -26216,17 +28169,21 @@ Path: ${sessionStatePath}
         }
       }
       return {
-        content: [{
-          type: "text",
-          text: output
-        }]
+        content: [
+          {
+            type: "text",
+            text: output
+          }
+        ]
       };
     } catch (error2) {
       return {
-        content: [{
-          type: "text",
-          text: `Error reading state for ${mode}: ${error2 instanceof Error ? error2.message : String(error2)}`
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Error reading state for ${mode}: ${error2 instanceof Error ? error2.message : String(error2)}`
+          }
+        ],
         isError: true
       };
     }
@@ -26235,7 +28192,12 @@ Path: ${sessionStatePath}
 var stateWriteTool = {
   name: "state_write",
   description: "Write/update state for a specific mode. Creates the state file and directories if they do not exist. Common fields (active, iteration, phase, etc.) can be set directly as parameters. Additional custom fields can be passed via the optional `state` parameter. Note: swarm uses SQLite and cannot be written via this tool.",
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false
+  },
   schema: {
     mode: external_exports.enum(STATE_WRITE_MODES).describe("The mode to write state for"),
     active: external_exports.boolean().optional().describe("Whether the mode is currently active"),
@@ -26247,9 +28209,13 @@ var stateWriteTool = {
     started_at: external_exports.string().max(100).optional().describe("ISO timestamp when the mode started"),
     completed_at: external_exports.string().max(100).optional().describe("ISO timestamp when the mode completed"),
     error: external_exports.string().max(2e3).optional().describe("Error message if the mode failed"),
-    state: external_exports.record(external_exports.string(), external_exports.unknown()).optional().describe("Additional custom state fields (merged with explicit parameters)"),
+    state: external_exports.record(external_exports.string(), external_exports.unknown()).optional().describe(
+      "Additional custom state fields (merged with explicit parameters)"
+    ),
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
-    session_id: external_exports.string().optional().describe("Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).")
+    session_id: external_exports.string().optional().describe(
+      "Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions)."
+    )
   },
   handler: async (args) => {
     const {
@@ -26270,14 +28236,32 @@ var stateWriteTool = {
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id;
+      if (mode === "graph") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                type: "guarded_mode",
+                mode: "graph",
+                operation: "write",
+                changed: false
+              })
+            }
+          ],
+          isError: true
+        };
+      }
       if (state) {
         const validation = validatePayload(state);
         if (!validation.valid) {
           return {
-            content: [{
-              type: "text",
-              text: `Error: state payload rejected \u2014 ${validation.error}`
-            }],
+            content: [
+              {
+                type: "text",
+                text: `Error: state payload rejected \u2014 ${validation.error}`
+              }
+            ],
             isError: true
           };
         }
@@ -26294,9 +28278,11 @@ var stateWriteTool = {
       const builtState = {};
       if (active !== void 0) builtState.active = active;
       if (iteration !== void 0) builtState.iteration = iteration;
-      if (max_iterations !== void 0) builtState.max_iterations = max_iterations;
+      if (max_iterations !== void 0)
+        builtState.max_iterations = max_iterations;
       if (current_phase !== void 0) builtState.current_phase = current_phase;
-      if (task_description !== void 0) builtState.task_description = task_description;
+      if (task_description !== void 0)
+        builtState.task_description = task_description;
       if (plan_path !== void 0) builtState.plan_path = plan_path;
       if (started_at !== void 0) builtState.started_at = started_at;
       if (completed_at !== void 0) builtState.completed_at = completed_at;
@@ -26312,7 +28298,9 @@ var stateWriteTool = {
       const requestedStateDigest = typeof builtState.target_state_sha256 === "string" ? builtState.target_state_sha256 : void 0;
       const isExactNamedPause = isExactNamedPauseRequest(builtState);
       if (mode === "autopilot" && (hasNamedWorkflowMarker(builtState) || hasOwnProperty(builtState, "target_state_sha256")) && !isExactNamedPause) {
-        throw new Error("named autopilot workflow markers are runtime-owned; only active:false with an exact workflowRunId and optional state digest may pause a run");
+        throw new Error(
+          "named autopilot workflow markers are runtime-owned; only active:false with an exact workflowRunId and optional state digest may pause a run"
+        );
       }
       const stateWithMeta = {
         ...builtState,
@@ -26333,16 +28321,25 @@ var stateWriteTool = {
         }
         if (hasNamedWorkflowMarker(currentState ?? {})) {
           if (!isExactNamedPause || !requestedRunId) {
-            throw new Error("named autopilot workflow state requires active:false with its exact workflowRunId");
+            throw new Error(
+              "named autopilot workflow state requires active:false with its exact workflowRunId"
+            );
           }
           if (namedWorkflowRuntimeSupported()) {
             const result = writeStateFileLockedIf(
               statePath,
-              (current) => matchesNamedPauseTarget(current, sessionId, requestedRunId, requestedStateDigest),
+              (current) => matchesNamedPauseTarget(
+                current,
+                sessionId,
+                requestedRunId,
+                requestedStateDigest
+              ),
               (current) => ({ ...current, active: false })
             );
             if (result !== "written") {
-              throw new Error(result === "failed" ? "state mutation lock unavailable" : "named autopilot run changed, is stale, or failed integrity validation");
+              throw new Error(
+                result === "failed" ? "state mutation lock unavailable" : "named autopilot run changed, is stale, or failed integrity validation"
+              );
             }
             namedPauseCommitted = true;
           } else {
@@ -26352,7 +28349,8 @@ var stateWriteTool = {
               (current) => JSON.stringify(current) === snapshot && isExactEmergencyNamedMutation(current, requestedRunId) && (requestedStateDigest === void 0 || (0, import_crypto7.createHash)("sha256").update(JSON.stringify(current)).digest("hex") === requestedStateDigest),
               (current) => ({ ...current, active: false })
             );
-            if (!written) throw new Error("autopilot run changed before deactivation");
+            if (!written)
+              throw new Error("autopilot run changed before deactivation");
             namedPauseCommitted = true;
           }
         } else {
@@ -26364,7 +28362,10 @@ var stateWriteTool = {
               return writtenState;
             }
           );
-          if (result !== "written") throw new Error(result === "failed" ? "state mutation lock unavailable" : "autopilot run changed before deactivation");
+          if (result !== "written")
+            throw new Error(
+              result === "failed" ? "state mutation lock unavailable" : "autopilot run changed before deactivation"
+            );
         }
       } else if (mode === "autopilot") {
         let namedWorkflowExists = false;
@@ -26381,8 +28382,13 @@ var stateWriteTool = {
           }
         );
         if (result !== "written") {
-          if (namedWorkflowExists) throw new Error("named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed");
-          throw new Error(result === "failed" ? "state mutation lock unavailable" : "autopilot state changed before write");
+          if (namedWorkflowExists)
+            throw new Error(
+              "named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed"
+            );
+          throw new Error(
+            result === "failed" ? "state mutation lock unavailable" : "autopilot state changed before write"
+          );
         }
       } else if (!writeStateFileLocked(statePath, stateWithMeta)) {
         throw new Error("state mutation lock unavailable");
@@ -26390,22 +28396,26 @@ var stateWriteTool = {
       const sessionInfo = sessionId ? ` (session: ${sessionId})` : " (legacy path)";
       const warningMessage = sessionId ? "" : "\n\nWARNING: No session_id provided. State written to legacy shared path which may leak across parallel sessions. Pass session_id for session-scoped isolation.";
       return {
-        content: [{
-          type: "text",
-          text: namedPauseCommitted ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.` : `Successfully wrote state for ${mode}${sessionInfo}
+        content: [
+          {
+            type: "text",
+            text: namedPauseCommitted ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.` : `Successfully wrote state for ${mode}${sessionInfo}
 Path: ${statePath}
 
 \`\`\`json
 ${JSON.stringify(writtenState, null, 2)}
 \`\`\`${warningMessage}`
-        }]
+          }
+        ]
       };
     } catch (error3) {
       return {
-        content: [{
-          type: "text",
-          text: `Error writing state for ${mode}: ${error3 instanceof Error ? error3.message : String(error3)}`
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Error writing state for ${mode}: ${error3 instanceof Error ? error3.message : String(error3)}`
+          }
+        ],
         isError: true
       };
     }
@@ -26413,10 +28423,16 @@ ${JSON.stringify(writtenState, null, 2)}
 };
 function discoverAllRootSessionStateCandidates(mode, root) {
   const paths = /* @__PURE__ */ new Set();
-  const roots = /* @__PURE__ */ new Set([...getConvergedOmcRoots(root), getWorkingDirectoryLocalOmcRoot(root), getOmcRoot(root)]);
+  const roots = /* @__PURE__ */ new Set([
+    ...getConvergedOmcRoots(root),
+    getWorkingDirectoryLocalOmcRoot(root),
+    getOmcRoot(root)
+  ]);
   for (const omcRoot of roots) {
     for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-      paths.add((0, import_path25.join)(omcRoot, "state", "sessions", sid, getStateFileName(mode)));
+      paths.add(
+        (0, import_path25.join)(omcRoot, "state", "sessions", sid, getStateFileName(mode))
+      );
     }
   }
   return discoverStatePaths([...paths]);
@@ -26429,24 +28445,50 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
   ]);
   const localOmcRoot = getWorkingDirectoryLocalOmcRoot(root);
   for (const sid of listSessionIdsUnderOmcRoot(localOmcRoot)) {
-    broadPaths.add((0, import_path25.join)(localOmcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
+    broadPaths.add(
+      (0, import_path25.join)(
+        localOmcRoot,
+        "state",
+        "sessions",
+        sid,
+        getStateFileName("autopilot")
+      )
+    );
   }
   for (const omcRoot of getConvergedOmcRoots(root)) {
     for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-      broadPaths.add((0, import_path25.join)(omcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
+      broadPaths.add(
+        (0, import_path25.join)(omcRoot, "state", "sessions", sid, getStateFileName("autopilot"))
+      );
     }
   }
   const directSessionPaths = /* @__PURE__ */ new Set();
   if (sessionId) {
-    directSessionPaths.add(resolveSessionStatePath("autopilot", sessionId, root));
-    directSessionPaths.add(getWorkingDirectoryLocalSessionStatePath("autopilot", root, sessionId));
+    directSessionPaths.add(
+      resolveSessionStatePath("autopilot", sessionId, root)
+    );
+    directSessionPaths.add(
+      getWorkingDirectoryLocalSessionStatePath("autopilot", root, sessionId)
+    );
     for (const omcRoot of getConvergedOmcRoots(root)) {
-      directSessionPaths.add((0, import_path25.join)(omcRoot, "state", "sessions", sessionId, getStateFileName("autopilot")));
+      directSessionPaths.add(
+        (0, import_path25.join)(
+          omcRoot,
+          "state",
+          "sessions",
+          sessionId,
+          getStateFileName("autopilot")
+        )
+      );
     }
     for (const path13 of directSessionPaths) broadPaths.add(path13);
   }
   for (const path13 of broadPaths) {
-    const recoveryOptions = emergencyRecoveryOptionsForProject("autopilot", path13, root);
+    const recoveryOptions = emergencyRecoveryOptionsForProject(
+      "autopilot",
+      path13,
+      root
+    );
     if (!isAutopilotRecoveryCandidateForProject(path13, root)) continue;
     if (sessionId && !directSessionPaths.has(path13)) {
       const visibleOwner = getStateSessionOwner(readJsonRecord(path13) ?? {});
@@ -26454,32 +28496,229 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
       const journalOwner = typeof journal?.sessionOwner === "string" ? journal.sessionOwner : void 0;
       if (visibleOwner !== sessionId && journalOwner !== sessionId) continue;
     }
-    if (!recoverEmergencyStateFile(path13, recoveryOptions)) throw new Error(`workflow_emergency_recovery_failed: ${path13}`);
-    if (recoveryOptions && !isAutopilotRecoveryCandidateForProject(path13, root)) continue;
+    if (!recoverEmergencyStateFile(path13, recoveryOptions))
+      throw new Error(`workflow_emergency_recovery_failed: ${path13}`);
+    if (recoveryOptions && !isAutopilotRecoveryCandidateForProject(path13, root))
+      continue;
     const artifactPrefix = `${(0, import_path25.basename)(path13)}.emergency-`;
     let artifacts;
     try {
-      artifacts = (0, import_fs25.readdirSync)((0, import_path25.dirname)(path13)).filter((name) => name.startsWith(artifactPrefix) && !name.endsWith(".recovery.guard"));
+      artifacts = (0, import_fs25.readdirSync)((0, import_path25.dirname)(path13)).filter(
+        (name) => name.startsWith(artifactPrefix) && !name.endsWith(".recovery.guard")
+      );
     } catch {
       artifacts = [];
     }
-    if (artifacts.length > 0) throw new Error(`workflow_emergency_recovery_failed: ${path13}`);
+    if (artifacts.length > 0)
+      throw new Error(`workflow_emergency_recovery_failed: ${path13}`);
   }
+}
+function classifyGraphRunStatus(status) {
+  if (MODE_CONFIGS.graph.activeStatuses?.includes(status)) return "active";
+  if (status === "draft") return "draft";
+  if (status === "paused") return "paused";
+  return "terminal";
+}
+function classifyGraphStateForClear(root, sessionId) {
+  const paths = sessionId ? [getStateFilePath(root, "graph", sessionId)] : [
+    getStateFilePath(root, "graph"),
+    ...listSessionIds(root).sort().map((sid) => getStateFilePath(root, "graph", sid))
+  ];
+  const classifications = [];
+  for (const path13 of paths) {
+    if (!(0, import_fs25.existsSync)(path13)) continue;
+    try {
+      classifications.push(
+        classifyGraphRunStatus(
+          parseGraphState(JSON.parse((0, import_fs25.readFileSync)(path13, "utf8"))).status
+        )
+      );
+    } catch {
+      classifications.push("malformed");
+    }
+  }
+  if (classifications.length === 0) return "missing";
+  for (const classification of [
+    "active",
+    "paused",
+    "draft",
+    "terminal",
+    "malformed"
+  ]) {
+    if (classifications.includes(classification)) return classification;
+  }
+  return "malformed";
+}
+function hasGraphWorkflowSlot(root, sessionId) {
+  const paths = [resolveStatePath("skill-active", root)];
+  const sessionIds = sessionId ? [sessionId] : listSessionIds(root);
+  for (const sid of sessionIds)
+    paths.push(resolveSessionStatePath("skill-active", sid, root));
+  return paths.some((path13) => {
+    const state = readJsonRecord(path13);
+    return Boolean(
+      state?.active_skills && typeof state.active_skills === "object" && state.active_skills.graph
+    );
+  });
+}
+function clearSkillActiveStateForAll(root, sessionId) {
+  const legacyCandidates = discoverStatePaths(
+    getLegacyStateFileCandidates("skill-active", root)
+  ).filter(
+    (candidate) => !sessionId || canClearStateForSession(candidate.state, sessionId)
+  );
+  const localCandidates = discoverStatePaths(
+    getWorkingDirectoryLocalStateClearCandidates(
+      "skill-active",
+      root,
+      sessionId
+    )
+  ).filter(
+    (candidate) => !sessionId || canClearStateForSession(candidate.state, sessionId)
+  );
+  const sessionCandidates = sessionId ? [
+    ...findSessionOwnedStateCandidates("skill-active", sessionId, root),
+    ...findCompletedSessionStateCandidates("skill-active", root, sessionId)
+  ] : [
+    ...listSessionIds(root).flatMap(
+      (sid) => findSessionOwnedStateCandidates("skill-active", sid, root)
+    ),
+    ...discoverAllRootSessionStateCandidates("skill-active", root)
+  ];
+  const candidates = [
+    ...new Map(
+      [...legacyCandidates, ...localCandidates, ...sessionCandidates].map(
+        (candidate) => [candidate.path, candidate]
+      )
+    ).values()
+  ];
+  let changed = false;
+  let failed = false;
+  let preservedGraphWorkflowSlot = false;
+  for (const candidate of candidates) {
+    const skills = candidate.state.active_skills;
+    const graphIsPresent = skills !== null && typeof skills === "object" && !Array.isArray(skills) && Object.prototype.hasOwnProperty.call(skills, "graph");
+    if (!graphIsPresent) {
+      const result2 = clearDiscoveredStateCandidate(
+        candidate,
+        (current) => (!sessionId || canClearStateForSession(current, sessionId)) && JSON.stringify(current) === candidate.snapshot
+      );
+      if (result2 === "cleared") changed = true;
+      else if (result2 === "failed" || result2 === "skipped" && (0, import_fs25.existsSync)(candidate.path))
+        failed = true;
+      continue;
+    }
+    preservedGraphWorkflowSlot = true;
+    const activeSkills = skills;
+    const nonGraphSkills = Object.keys(activeSkills).filter(
+      (name) => name !== "graph"
+    );
+    if (nonGraphSkills.length === 0) continue;
+    const result = writeStateFileLockedIf(
+      candidate.path,
+      (current) => (!sessionId || canClearStateForSession(current, sessionId)) && JSON.stringify(current) === candidate.snapshot,
+      (current) => {
+        const currentSkills = current.active_skills;
+        return { ...current, active_skills: { graph: currentSkills.graph } };
+      }
+    );
+    if (result === "written") changed = true;
+    else failed = true;
+  }
+  return { changed, failed, preservedGraphWorkflowSlot };
 }
 var stateClearTool = {
   name: "state_clear",
-  description: "Clear/delete state for a specific mode. Removes the state file and any associated marker files. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).",
-  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  description: "Clear/delete state for a specific mode or all generically clearable modes. Graph is guarded and is never deleted by this tool. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).",
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: false
+  },
   schema: {
-    mode: external_exports.enum(STATE_TOOL_MODES).describe("The mode to clear state for"),
+    mode: external_exports.enum(STATE_CLEAR_MODES).describe("The mode to clear state for, or all"),
+    force: external_exports.boolean().optional().describe(
+      "Request broad cleanup. This never bypasses guarded Graph state."
+    ),
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
-    session_id: external_exports.string().optional().describe("Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).")
+    session_id: external_exports.string().optional().describe(
+      "Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions)."
+    )
   },
   handler: async (args) => {
-    const { mode, workingDirectory, session_id } = args;
+    const { mode, force, workingDirectory, session_id } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
       const sessionId = session_id;
+      if (sessionId) validateSessionId(sessionId);
+      if (mode === "graph") {
+        const graphClassification = classifyGraphStateForClear(root, sessionId);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                type: "guarded_mode",
+                mode: "graph",
+                operation: "clear",
+                classification: graphClassification,
+                changed: false,
+                force_bypassed: false
+              })
+            }
+          ],
+          isError: true
+        };
+      }
+      if (mode === "all") {
+        const graphClassification = classifyGraphStateForClear(root, sessionId);
+        const clearedModes = [];
+        const failedModes = [];
+        let preserveGraphWorkflowSlot = hasGraphWorkflowSlot(root, sessionId);
+        for (const candidate of STATE_TOOL_MODES) {
+          if (candidate === "graph") {
+            continue;
+          }
+          if (candidate === "skill-active") {
+            const result2 = clearSkillActiveStateForAll(root, sessionId);
+            preserveGraphWorkflowSlot ||= result2.preservedGraphWorkflowSlot;
+            if (result2.failed) failedModes.push(candidate);
+            else if (result2.changed) clearedModes.push(candidate);
+            continue;
+          }
+          const result = await stateClearTool.handler({
+            mode: candidate,
+            force,
+            workingDirectory,
+            session_id
+          });
+          if (result.isError) failedModes.push(candidate);
+          else clearedModes.push(candidate);
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                type: "clear_all",
+                cleared_modes: clearedModes,
+                failed_modes: failedModes,
+                skipped: [
+                  {
+                    mode: "graph",
+                    reason: "guarded_mode",
+                    classification: graphClassification
+                  }
+                ],
+                preserved_graph_workflow_slot: preserveGraphWorkflowSlot,
+                force_bypassed: false
+              })
+            }
+          ],
+          ...failedModes.length > 0 ? { isError: true } : {}
+        };
+      }
       if (mode === "merge-readiness") {
         const cancelledSessions = [];
         const blockedSessions = [];
@@ -26497,7 +28736,8 @@ var stateClearTool = {
           recordResult(sessionId, cancelActiveSession(sessionId));
         } else {
           const callerSid = process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-          if (callerSid) recordResult(callerSid, cancelActiveSession(callerSid));
+          if (callerSid)
+            recordResult(callerSid, cancelActiveSession(callerSid));
           recordResult("legacy", cancelActiveSession());
         }
         const blocked = blockedSessions.length > 0;
@@ -26507,7 +28747,8 @@ var stateClearTool = {
           ...blocked ? { isError: true } : {}
         };
       }
-      if (mode === "autopilot") recoverAutopilotEmergencyTransactions(root, sessionId);
+      if (mode === "autopilot")
+        recoverAutopilotEmergencyTransactions(root, sessionId);
       const cleanedTeamNames = /* @__PURE__ */ new Set();
       const collectTeamNamesForCleanup = (statePath) => {
         if (mode !== "team") return;
@@ -26517,40 +28758,131 @@ var stateClearTool = {
       };
       if (sessionId) {
         validateSessionId(sessionId);
-        const requestedSessionCandidates = findSessionOwnedStateCandidates(mode, sessionId, root).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const requestedSessionOwnedPaths = requestedSessionCandidates.map((candidate) => candidate.path);
-        for (const teamStatePath of findSessionOwnedStateFiles("team", sessionId, root)) {
+        const requestedSessionCandidates = findSessionOwnedStateCandidates(
+          mode,
+          sessionId,
+          root
+        ).filter(
+          (candidate) => isStateCandidateForProject(
+            mode,
+            candidate.path,
+            candidate.state,
+            root
+          )
+        );
+        const requestedSessionOwnedPaths = requestedSessionCandidates.map(
+          (candidate) => candidate.path
+        );
+        for (const teamStatePath of findSessionOwnedStateFiles(
+          "team",
+          sessionId,
+          root
+        )) {
           collectTeamNamesForCleanup(teamStatePath);
         }
         if (mode === "team") {
-          for (const teamStatePath of findCompletedSessionStateFiles("team", root, sessionId)) {
+          for (const teamStatePath of findCompletedSessionStateFiles(
+            "team",
+            root,
+            sessionId
+          )) {
             collectTeamNamesForCleanup(teamStatePath);
           }
         }
-        const completedCandidates = findCompletedSessionStateCandidates(mode, root, sessionId).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const localCandidates = discoverStatePaths(getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const convergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root, sessionId)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-        const operationCandidates = [...new Map([
-          ...requestedSessionCandidates,
-          ...completedCandidates,
-          ...legacyCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
-          ...localCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId)),
-          ...convergedCandidates.filter((candidate) => canClearStateForSession(candidate.state, sessionId))
-        ].map((candidate) => [candidate.path, candidate])).values()];
-        const directCandidate = requestedSessionCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)) ?? requestedSessionCandidates[0];
-        const namedPrimaries = mode === "autopilot" ? operationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
-        const namedPrimaryPaths = new Set(namedPrimaries.map((candidate) => candidate.path));
+        const completedCandidates = findCompletedSessionStateCandidates(
+          mode,
+          root,
+          sessionId
+        ).filter(
+          (candidate) => isStateCandidateForProject(
+            mode,
+            candidate.path,
+            candidate.state,
+            root
+          )
+        );
+        const legacyCandidates = discoverStatePaths(
+          getLegacyStateFileCandidates(mode, root)
+        ).filter(
+          (candidate) => isStateCandidateForProject(
+            mode,
+            candidate.path,
+            candidate.state,
+            root
+          )
+        );
+        const localCandidates = discoverStatePaths(
+          getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)
+        ).filter(
+          (candidate) => isStateCandidateForProject(
+            mode,
+            candidate.path,
+            candidate.state,
+            root
+          )
+        );
+        const convergedCandidates = discoverStatePaths(
+          getConvergedStateCandidates(mode, root, sessionId)
+        ).filter(
+          (candidate) => isStateCandidateForProject(
+            mode,
+            candidate.path,
+            candidate.state,
+            root
+          )
+        );
+        const operationCandidates = [
+          ...new Map(
+            [
+              ...requestedSessionCandidates,
+              ...completedCandidates,
+              ...legacyCandidates.filter(
+                (candidate) => canClearStateForSession(candidate.state, sessionId)
+              ),
+              ...localCandidates.filter(
+                (candidate) => canClearStateForSession(candidate.state, sessionId)
+              ),
+              ...convergedCandidates.filter(
+                (candidate) => canClearStateForSession(candidate.state, sessionId)
+              )
+            ].map((candidate) => [candidate.path, candidate])
+          ).values()
+        ];
+        const directCandidate = requestedSessionCandidates.find(
+          (candidate) => candidate.path === resolveSessionStatePath(mode, sessionId, root)
+        ) ?? requestedSessionCandidates[0];
+        const namedPrimaries = mode === "autopilot" ? operationCandidates.filter(
+          (candidate) => hasNamedWorkflowMarker(candidate.state)
+        ) : [];
+        const namedPrimaryPaths = new Set(
+          namedPrimaries.map((candidate) => candidate.path)
+        );
         let directCleared = 0;
         for (const candidate of namedPrimaries) {
           const success = clearAutopilotMarkerCandidate(candidate, root);
-          if (!success || (0, import_fs25.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+          if (!success || (0, import_fs25.existsSync)(candidate.path))
+            throw new Error(
+              `primary state mutation failed; dependent state preserved: ${candidate.path}`
+            );
           directCleared += 1;
         }
-        const completedSessionCleanup = clearCompletedSessionStateCandidates(mode, root, sessionId, completedCandidates.filter((candidate) => !namedPrimaryPaths.has(candidate.path)));
+        const completedSessionCleanup = clearCompletedSessionStateCandidates(
+          mode,
+          root,
+          sessionId,
+          completedCandidates.filter(
+            (candidate) => !namedPrimaryPaths.has(candidate.path)
+          )
+        );
         const runtimeCleanup2 = clearModeRuntimeArtifacts(mode, root, sessionId);
-        let convergedCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
-        const sessionSignalCandidates = operationCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+        let convergedCleanup = {
+          cleared: 0,
+          hadFailure: false,
+          paths: []
+        };
+        const sessionSignalCandidates = operationCandidates.filter(
+          (candidate) => !hasNamedWorkflowMarker(candidate.state)
+        );
         const signaledCandidateDirs = /* @__PURE__ */ new Set();
         for (const candidate of sessionSignalCandidates) {
           const signalDir = (0, import_path25.dirname)(candidate.path);
@@ -26572,42 +28904,146 @@ var stateClearTool = {
           } catch {
           }
         }
-        if (sessionSignalCandidates.length === 0 && namedPrimaries.length === 0) writeSessionCancelSignal(root, sessionId, mode, directCandidate);
+        if (sessionSignalCandidates.length === 0 && namedPrimaries.length === 0)
+          writeSessionCancelSignal(root, sessionId, mode, directCandidate);
         if (MODE_CONFIGS[mode]) {
           const expectedDirectState = directCandidate?.state;
-          const success = clearModeState(mode, root, sessionId, expectedDirectState);
-          if (directCandidate && !(0, import_fs25.existsSync)(directCandidate.path)) directCleared = 1;
-          const sessionCleanup2 = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
-          const legacyCleanup2 = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
+          const registryClearResult = clearModeStateDetailed(
+            mode,
+            root,
+            sessionId,
+            expectedDirectState
+          );
+          const skippedCanonicalPaths = new Set(
+            registryClearResult === "skipped" && directCandidate ? [directCandidate.path] : []
+          );
+          const success = registryClearResult === "cleared";
+          if (directCandidate && !(0, import_fs25.existsSync)(directCandidate.path))
+            directCleared = 1;
+          const sessionCleanup2 = clearSessionOwnedStateCandidates(
+            mode,
+            root,
+            sessionId,
+            requestedSessionCandidates.filter(
+              (candidate) => !skippedCanonicalPaths.has(candidate.path)
+            )
+          );
+          const legacyCleanup2 = clearLegacyStateCandidates(
+            mode,
+            root,
+            sessionId,
+            legacyCandidates.filter(
+              (candidate) => !skippedCanonicalPaths.has(candidate.path)
+            )
+          );
           const shouldUseLocalFallback2 = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0;
-          const workingDirectoryLocalCleanup2 = shouldUseLocalFallback2 ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates) : { cleared: 0, hadFailure: false, paths: [] };
-          convergedCleanup2 = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
+          const workingDirectoryLocalCleanup2 = shouldUseLocalFallback2 ? clearWorkingDirectoryLocalStateCandidates(
+            mode,
+            root,
+            sessionId,
+            localCandidates.filter(
+              (candidate) => !skippedCanonicalPaths.has(candidate.path)
+            )
+          ) : { cleared: 0, hadFailure: false, paths: [] };
+          convergedCleanup = clearConvergedStateCandidates(
+            mode,
+            root,
+            sessionId,
+            convergedCandidates.filter(
+              (candidate) => !skippedCanonicalPaths.has(candidate.path)
+            )
+          );
           let ownerSessionId2;
-          let ownerSessionCleanup2 = { cleared: 0, hadFailure: false, paths: [] };
+          let ownerSessionCleanup2 = {
+            cleared: 0,
+            hadFailure: false,
+            paths: []
+          };
           let ownerLegacyCleanup2 = { cleared: 0, hadFailure: false };
-          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedCandidates.length === 0 && legacyCandidates.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
-            ownerSessionId2 = findSingleOwningSessionForMode(mode, root, sessionId);
+          if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedCandidates.length === 0 && legacyCandidates.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup2.cleared === 0 && legacyCleanup2.cleared === 0 && convergedCleanup.cleared === 0 && workingDirectoryLocalCleanup2.cleared === 0) {
+            ownerSessionId2 = findSingleOwningSessionForMode(
+              mode,
+              root,
+              sessionId
+            );
             if (ownerSessionId2) {
               if (mode === "team") {
-                for (const teamStatePath of findSessionOwnedStateFiles("team", ownerSessionId2, root)) {
+                for (const teamStatePath of findSessionOwnedStateFiles(
+                  "team",
+                  ownerSessionId2,
+                  root
+                )) {
                   collectTeamNamesForCleanup(teamStatePath);
                 }
               }
-              const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId2, root);
-              const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId2, root)) ?? ownerCandidates[0];
+              const ownerCandidates = findSessionOwnedStateCandidates(
+                mode,
+                ownerSessionId2,
+                root
+              );
+              const ownerDirectCandidate = ownerCandidates.find(
+                (candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId2, root)
+              ) ?? ownerCandidates[0];
               const ownerNamedPrimary = mode === "autopilot" && ownerDirectCandidate && hasNamedWorkflowMarker(ownerDirectCandidate.state) ? ownerDirectCandidate : void 0;
               if (ownerNamedPrimary) {
-                const success2 = clearAutopilotMarkerCandidate(ownerNamedPrimary, root);
-                if (!success2 || (0, import_fs25.existsSync)(ownerNamedPrimary.path)) throw new Error("primary state mutation failed; dependent state preserved");
+                const success2 = clearAutopilotMarkerCandidate(
+                  ownerNamedPrimary,
+                  root
+                );
+                if (!success2 || (0, import_fs25.existsSync)(ownerNamedPrimary.path))
+                  throw new Error(
+                    "primary state mutation failed; dependent state preserved"
+                  );
               } else {
-                writeSessionCancelSignal(root, ownerSessionId2, mode, ownerDirectCandidate);
-                clearModeState(mode, root, ownerSessionId2, ownerDirectCandidate?.state);
+                writeSessionCancelSignal(
+                  root,
+                  ownerSessionId2,
+                  mode,
+                  ownerDirectCandidate
+                );
+                const ownerClearResult = clearModeStateDetailed(
+                  mode,
+                  root,
+                  ownerSessionId2,
+                  ownerDirectCandidate?.state
+                );
+                const skippedOwnerCanonicalPath = ownerClearResult === "skipped" ? ownerDirectCandidate?.path : void 0;
+                ownerSessionCleanup2 = clearSessionOwnedStateCandidates(
+                  mode,
+                  root,
+                  ownerSessionId2,
+                  ownerCandidates.filter(
+                    (candidate) => candidate.path !== skippedOwnerCanonicalPath
+                  )
+                );
+                ownerLegacyCleanup2 = clearLegacyStateCandidates(
+                  mode,
+                  root,
+                  ownerSessionId2
+                );
               }
-              const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId2);
+              const ownerRuntimeCleanup = clearModeRuntimeArtifacts(
+                mode,
+                root,
+                ownerSessionId2
+              );
               runtimeCleanup2.cleared += ownerRuntimeCleanup.cleared;
               runtimeCleanup2.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-              ownerSessionCleanup2 = clearSessionOwnedStateCandidates(mode, root, ownerSessionId2, ownerCandidates.filter((candidate) => candidate.path !== ownerNamedPrimary?.path));
-              ownerLegacyCleanup2 = clearLegacyStateCandidates(mode, root, ownerSessionId2);
+              if (ownerNamedPrimary) {
+                ownerSessionCleanup2 = clearSessionOwnedStateCandidates(
+                  mode,
+                  root,
+                  ownerSessionId2,
+                  ownerCandidates.filter(
+                    (candidate) => candidate.path !== ownerNamedPrimary.path
+                  )
+                );
+                ownerLegacyCleanup2 = clearLegacyStateCandidates(
+                  mode,
+                  root,
+                  ownerSessionId2
+                );
+              }
             }
           }
           const ghostNoteParts2 = [];
@@ -26615,19 +29051,29 @@ var stateClearTool = {
             ghostNoteParts2.push("ghost legacy file also removed");
           }
           if (completedSessionCleanup.cleared > 0) {
-            ghostNoteParts2.push(`removed ${completedSessionCleanup.cleared} completed-session orphan file${completedSessionCleanup.cleared === 1 ? "" : "s"}`);
+            ghostNoteParts2.push(
+              `removed ${completedSessionCleanup.cleared} completed-session orphan file${completedSessionCleanup.cleared === 1 ? "" : "s"}`
+            );
           }
           if (sessionCleanup2.cleared > 0) {
-            ghostNoteParts2.push(`removed ${sessionCleanup2.cleared} recovered session file${sessionCleanup2.cleared === 1 ? "" : "s"}`);
+            ghostNoteParts2.push(
+              `removed ${sessionCleanup2.cleared} recovered session file${sessionCleanup2.cleared === 1 ? "" : "s"}`
+            );
           }
           if (workingDirectoryLocalCleanup2.cleared > 0) {
-            ghostNoteParts2.push(`removed ${workingDirectoryLocalCleanup2.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup2.cleared === 1 ? "" : "s"}`);
+            ghostNoteParts2.push(
+              `removed ${workingDirectoryLocalCleanup2.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup2.cleared === 1 ? "" : "s"}`
+            );
           }
-          if (convergedCleanup2.cleared > 0) {
-            ghostNoteParts2.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+          if (convergedCleanup.cleared > 0) {
+            ghostNoteParts2.push(
+              `removed ${convergedCleanup.cleared} converged state file${convergedCleanup.cleared === 1 ? "" : "s"}`
+            );
           }
           if (runtimeCleanup2.cleared > 0) {
-            ghostNoteParts2.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
+            ghostNoteParts2.push(
+              `removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`
+            );
           }
           if (ownerSessionId2) {
             ghostNoteParts2.push(`cleared owning session: ${ownerSessionId2}`);
@@ -26639,64 +29085,132 @@ var stateClearTool = {
             const removedRoots = cleanupTeamRuntimeState(root, teamNames);
             const prunedMissions = pruneMissionBoardTeams(root, teamNames);
             const details = [];
-            if (removedRoots > 0) details.push(`removed ${removedRoots} team runtime root(s)`);
-            if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
+            if (removedRoots > 0)
+              details.push(`removed ${removedRoots} team runtime root(s)`);
+            if (prunedMissions > 0)
+              details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
             return details.length > 0 ? ` (${details.join(", ")})` : "";
           })();
-          const clearedStateOrArtifacts2 = directCleared + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
-          const capturedCleanupIncomplete2 = operationCandidates.some((candidate) => (0, import_fs25.existsSync)(candidate.path));
-          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !capturedCleanupIncomplete2 && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          const clearedStateOrArtifacts2 = directCleared + completedSessionCleanup.cleared + sessionCleanup2.cleared + legacyCleanup2.cleared + convergedCleanup.cleared + workingDirectoryLocalCleanup2.cleared + ownerSessionCleanup2.cleared + ownerLegacyCleanup2.cleared + runtimeCleanup2.cleared;
+          const capturedCleanupIncomplete2 = operationCandidates.some(
+            (candidate) => (0, import_fs25.existsSync)(candidate.path)
+          );
+          if (!ownerSessionId2 && clearedStateOrArtifacts2 === 0 && success && !capturedCleanupIncomplete2 && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
-              content: [{
-                type: "text",
-                text: formatStateClearNoopMessage(mode, root, sessionId)
-              }]
+              content: [
+                {
+                  type: "text",
+                  text: formatStateClearNoopMessage(mode, root, sessionId)
+                }
+              ]
             };
           }
-          if (!capturedCleanupIncomplete2 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup2.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
+          if (!capturedCleanupIncomplete2 && success && !legacyCleanup2.hadFailure && !sessionCleanup2.hadFailure && !workingDirectoryLocalCleanup2.hadFailure && !convergedCleanup.hadFailure && !completedSessionCleanup.hadFailure && !ownerSessionCleanup2.hadFailure && !ownerLegacyCleanup2.hadFailure && !runtimeCleanup2.hadFailure) {
             return {
-              content: [{
-                type: "text",
-                text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}${ghostNote2}${runtimeCleanupNote2}`
-              }]
+              content: [
+                {
+                  type: "text",
+                  text: `Successfully cleared state for mode: ${mode} in session: ${sessionId}${ghostNote2}${runtimeCleanupNote2}`
+                }
+              ]
             };
           } else {
             return {
-              content: [{
-                type: "text",
-                text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}${ghostNote2}${runtimeCleanupNote2}`
-              }],
+              content: [
+                {
+                  type: "text",
+                  text: `Warning: Some files could not be removed for mode: ${mode} in session: ${sessionId}${ghostNote2}${runtimeCleanupNote2}`
+                }
+              ],
               isError: true
             };
           }
         }
-        const sessionCleanup = clearSessionOwnedStateCandidates(mode, root, sessionId, requestedSessionCandidates);
-        const legacyCleanup = clearLegacyStateCandidates(mode, root, sessionId, legacyCandidates);
+        const sessionCleanup = clearSessionOwnedStateCandidates(
+          mode,
+          root,
+          sessionId,
+          requestedSessionCandidates
+        );
+        const legacyCleanup = clearLegacyStateCandidates(
+          mode,
+          root,
+          sessionId,
+          legacyCandidates
+        );
         const shouldUseLocalFallback = requestedSessionOwnedPaths.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0;
-        const workingDirectoryLocalCleanup = shouldUseLocalFallback ? clearWorkingDirectoryLocalStateCandidates(mode, root, sessionId, localCandidates) : { cleared: 0, hadFailure: false, paths: [] };
-        convergedCleanup2 = clearConvergedStateCandidates(mode, root, sessionId, convergedCandidates);
+        const workingDirectoryLocalCleanup = shouldUseLocalFallback ? clearWorkingDirectoryLocalStateCandidates(
+          mode,
+          root,
+          sessionId,
+          localCandidates
+        ) : { cleared: 0, hadFailure: false, paths: [] };
+        convergedCleanup = clearConvergedStateCandidates(
+          mode,
+          root,
+          sessionId,
+          convergedCandidates
+        );
         let ownerSessionId;
-        let ownerSessionCleanup = { cleared: 0, hadFailure: false, paths: [] };
+        let ownerSessionCleanup = {
+          cleared: 0,
+          hadFailure: false,
+          paths: []
+        };
         let ownerLegacyCleanup = { cleared: 0, hadFailure: false };
-        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedCandidates.length === 0 && legacyCandidates.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && convergedCleanup2.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
-          ownerSessionId = findSingleOwningSessionForMode(mode, root, sessionId);
+        if (OWNER_SESSION_FALLBACK_MODES.has(mode) && requestedSessionOwnedPaths.length === 0 && completedCandidates.length === 0 && legacyCandidates.length === 0 && completedSessionCleanup.cleared === 0 && sessionCleanup.cleared === 0 && legacyCleanup.cleared === 0 && convergedCleanup.cleared === 0 && workingDirectoryLocalCleanup.cleared === 0) {
+          ownerSessionId = findSingleOwningSessionForMode(
+            mode,
+            root,
+            sessionId
+          );
           if (ownerSessionId) {
             if (mode === "team") {
-              for (const teamStatePath of findSessionOwnedStateFiles("team", ownerSessionId, root)) {
+              for (const teamStatePath of findSessionOwnedStateFiles(
+                "team",
+                ownerSessionId,
+                root
+              )) {
                 collectTeamNamesForCleanup(teamStatePath);
               }
             }
-            const ownerCandidates = findSessionOwnedStateCandidates(mode, ownerSessionId, root);
-            if (mode === "autopilot" && ownerCandidates.some((candidate) => hasNamedWorkflowMarker(candidate.state)) && !namedWorkflowRuntimeSupported()) {
+            const ownerCandidates = findSessionOwnedStateCandidates(
+              mode,
+              ownerSessionId,
+              root
+            );
+            if (mode === "autopilot" && ownerCandidates.some(
+              (candidate) => hasNamedWorkflowMarker(candidate.state)
+            ) && !namedWorkflowRuntimeSupported()) {
               throw new Error("unsupported-runtime");
             }
-            const ownerDirectCandidate = ownerCandidates.find((candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId, root)) ?? ownerCandidates[0];
-            writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
-            const ownerRuntimeCleanup = clearModeRuntimeArtifacts(mode, root, ownerSessionId);
+            const ownerDirectCandidate = ownerCandidates.find(
+              (candidate) => candidate.path === resolveSessionStatePath(mode, ownerSessionId, root)
+            ) ?? ownerCandidates[0];
+            writeSessionCancelSignal(
+              root,
+              ownerSessionId,
+              mode,
+              ownerDirectCandidate
+            );
+            const ownerRuntimeCleanup = clearModeRuntimeArtifacts(
+              mode,
+              root,
+              ownerSessionId
+            );
             runtimeCleanup2.cleared += ownerRuntimeCleanup.cleared;
             runtimeCleanup2.hadFailure ||= ownerRuntimeCleanup.hadFailure;
-            ownerSessionCleanup = clearSessionOwnedStateCandidates(mode, root, ownerSessionId, ownerCandidates);
-            ownerLegacyCleanup = clearLegacyStateCandidates(mode, root, ownerSessionId);
+            ownerSessionCleanup = clearSessionOwnedStateCandidates(
+              mode,
+              root,
+              ownerSessionId,
+              ownerCandidates
+            );
+            ownerLegacyCleanup = clearLegacyStateCandidates(
+              mode,
+              root,
+              ownerSessionId
+            );
           }
         }
         const ghostNoteParts = [];
@@ -26704,19 +29218,29 @@ var stateClearTool = {
           ghostNoteParts.push("ghost legacy file also removed");
         }
         if (completedSessionCleanup.cleared > 0) {
-          ghostNoteParts.push(`removed ${completedSessionCleanup.cleared} completed-session orphan file${completedSessionCleanup.cleared === 1 ? "" : "s"}`);
+          ghostNoteParts.push(
+            `removed ${completedSessionCleanup.cleared} completed-session orphan file${completedSessionCleanup.cleared === 1 ? "" : "s"}`
+          );
         }
         if (sessionCleanup.cleared > 0) {
-          ghostNoteParts.push(`removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? "" : "s"}`);
+          ghostNoteParts.push(
+            `removed ${sessionCleanup.cleared} recovered session file${sessionCleanup.cleared === 1 ? "" : "s"}`
+          );
         }
         if (workingDirectoryLocalCleanup.cleared > 0) {
-          ghostNoteParts.push(`removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? "" : "s"}`);
+          ghostNoteParts.push(
+            `removed ${workingDirectoryLocalCleanup.cleared} workingDirectory-local state file${workingDirectoryLocalCleanup.cleared === 1 ? "" : "s"}`
+          );
         }
-        if (convergedCleanup2.cleared > 0) {
-          ghostNoteParts.push(`removed ${convergedCleanup2.cleared} converged state file${convergedCleanup2.cleared === 1 ? "" : "s"}`);
+        if (convergedCleanup.cleared > 0) {
+          ghostNoteParts.push(
+            `removed ${convergedCleanup.cleared} converged state file${convergedCleanup.cleared === 1 ? "" : "s"}`
+          );
         }
         if (runtimeCleanup2.cleared > 0) {
-          ghostNoteParts.push(`removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`);
+          ghostNoteParts.push(
+            `removed ${runtimeCleanup2.cleared} runtime artifact${runtimeCleanup2.cleared === 1 ? "" : "s"}`
+          );
         }
         if (ownerSessionId) {
           ghostNoteParts.push(`cleared owning session: ${ownerSessionId}`);
@@ -26728,47 +29252,84 @@ var stateClearTool = {
           const removedRoots = cleanupTeamRuntimeState(root, teamNames);
           const prunedMissions = pruneMissionBoardTeams(root, teamNames);
           const details = [];
-          if (removedRoots > 0) details.push(`removed ${removedRoots} team runtime root(s)`);
-          if (prunedMissions > 0) details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
+          if (removedRoots > 0)
+            details.push(`removed ${removedRoots} team runtime root(s)`);
+          if (prunedMissions > 0)
+            details.push(`pruned ${prunedMissions} HUD mission entry(ies)`);
           return details.length > 0 ? ` (${details.join(", ")})` : "";
         })();
-        const clearedStateOrArtifacts = completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
-        const capturedCleanupIncomplete = operationCandidates.some((candidate) => (0, import_fs25.existsSync)(candidate.path));
-        const hadFailure = capturedCleanupIncomplete || legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || convergedCleanup2.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
+        const clearedStateOrArtifacts = completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + convergedCleanup.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
+        const capturedCleanupIncomplete = operationCandidates.some(
+          (candidate) => (0, import_fs25.existsSync)(candidate.path)
+        );
+        const hadFailure = capturedCleanupIncomplete || legacyCleanup.hadFailure || sessionCleanup.hadFailure || workingDirectoryLocalCleanup.hadFailure || convergedCleanup.hadFailure || completedSessionCleanup.hadFailure || ownerSessionCleanup.hadFailure || ownerLegacyCleanup.hadFailure || runtimeCleanup2.hadFailure;
         if (!ownerSessionId && clearedStateOrArtifacts === 0 && !hadFailure) {
           return {
-            content: [{
-              type: "text",
-              text: formatStateClearNoopMessage(mode, root, sessionId)
-            }]
+            content: [
+              {
+                type: "text",
+                text: formatStateClearNoopMessage(mode, root, sessionId)
+              }
+            ]
           };
         }
         return {
-          content: [{
-            type: "text",
-            text: `${hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
-          }],
+          content: [
+            {
+              type: "text",
+              text: `${hadFailure ? "Warning: Some files could not be removed" : "Successfully cleared state"} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            }
+          ],
           ...hadFailure ? { isError: true } : {}
         };
       }
-      const broadLegacyCandidates = discoverStatePaths(getLegacyStateFileCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-      const broadSessionCandidates = [...new Map([
-        ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates(mode, sid, root)),
-        ...discoverAllRootSessionStateCandidates(mode, root)
-      ].map((candidate) => [candidate.path, candidate])).values()].filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-      const broadConvergedCandidates = discoverStatePaths(getConvergedStateCandidates(mode, root)).filter((candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root));
-      const broadOperationCandidates = [...new Map([
-        ...broadLegacyCandidates,
-        ...broadSessionCandidates,
-        ...broadConvergedCandidates
-      ].map((candidate) => [candidate.path, candidate])).values()];
-      const broadNamedPrimaries = mode === "autopilot" ? broadOperationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
+      const broadLegacyCandidates = discoverStatePaths(
+        getLegacyStateFileCandidates(mode, root)
+      ).filter(
+        (candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root)
+      );
+      const broadSessionCandidates = [
+        ...new Map(
+          [
+            ...listSessionIds(root).flatMap(
+              (sid) => findSessionOwnedStateCandidates(mode, sid, root)
+            ),
+            ...discoverAllRootSessionStateCandidates(mode, root)
+          ].map((candidate) => [candidate.path, candidate])
+        ).values()
+      ].filter(
+        (candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root)
+      );
+      const broadConvergedCandidates = discoverStatePaths(
+        getConvergedStateCandidates(mode, root)
+      ).filter(
+        (candidate) => isStateCandidateForProject(mode, candidate.path, candidate.state, root)
+      );
+      const broadOperationCandidates = [
+        ...new Map(
+          [
+            ...broadLegacyCandidates,
+            ...broadSessionCandidates,
+            ...broadConvergedCandidates
+          ].map((candidate) => [candidate.path, candidate])
+        ).values()
+      ];
+      const broadNamedPrimaries = mode === "autopilot" ? broadOperationCandidates.filter(
+        (candidate) => hasNamedWorkflowMarker(candidate.state)
+      ) : [];
       for (const candidate of broadNamedPrimaries) {
         const success = clearAutopilotMarkerCandidate(candidate, root);
-        if (!success || (0, import_fs25.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+        if (!success || (0, import_fs25.existsSync)(candidate.path))
+          throw new Error(
+            `primary state mutation failed; dependent state preserved: ${candidate.path}`
+          );
       }
-      const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
-      const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
+      const broadLegacySignalCandidates = broadLegacyCandidates.filter(
+        (candidate) => !hasNamedWorkflowMarker(candidate.state)
+      );
+      const broadSessionSignalCandidates = broadSessionCandidates.filter(
+        (candidate) => !hasNamedWorkflowMarker(candidate.state)
+      );
       if (broadLegacySignalCandidates.length > 0 || broadSessionSignalCandidates.length > 0) {
         const now = Date.now();
         const cancelSignalPayload = {
@@ -26812,28 +29373,77 @@ var stateClearTool = {
         collectTeamNamesForCleanup(getStateFilePath(root, "team"));
       }
       if (MODE_CONFIGS[mode]) {
-        const primaryLegacyStatePath = getStateFilePath(root, mode);
-        const primaryCandidate = broadLegacyCandidates.find((candidate) => candidate.path === primaryLegacyStatePath);
+        const primaryLegacyStatePath = getStateFilePath(
+          root,
+          mode
+        );
+        const primaryCandidate = broadLegacyCandidates.find(
+          (candidate) => candidate.path === primaryLegacyStatePath
+        );
+        const skippedCanonicalPaths = /* @__PURE__ */ new Set();
         if (primaryCandidate) {
-          const success = clearModeState(mode, root, void 0, primaryCandidate.state);
-          if (success && !(0, import_fs25.existsSync)(primaryCandidate.path)) {
+          const clearResult = clearModeStateDetailed(
+            mode,
+            root,
+            void 0,
+            primaryCandidate.state
+          );
+          if (clearResult === "cleared" && !(0, import_fs25.existsSync)(primaryCandidate.path)) {
             clearedCount++;
+          } else if (clearResult === "skipped") {
+            skippedCanonicalPaths.add(primaryCandidate.path);
+            errors.push("legacy path skipped");
           } else if ((0, import_fs25.existsSync)(primaryCandidate.path)) {
             errors.push("legacy path skipped");
-          } else if (!success) {
+          } else if (clearResult === "failed") {
             errors.push("legacy path");
           }
         }
-      }
-      const extraLegacyCleanup = clearLegacyStateCandidates(mode, root, void 0, broadLegacyCandidates);
-      clearedCount += extraLegacyCleanup.cleared;
-      if (extraLegacyCleanup.hadFailure) {
-        errors.push("legacy path");
-      }
-      const convergedCleanup = clearConvergedStateCandidates(mode, root, void 0, broadConvergedCandidates);
-      clearedCount += convergedCleanup.cleared;
-      if (convergedCleanup.hadFailure) {
-        errors.push("converged paths");
+        const extraLegacyCleanup = clearLegacyStateCandidates(
+          mode,
+          root,
+          void 0,
+          broadLegacyCandidates.filter(
+            (candidate) => !skippedCanonicalPaths.has(candidate.path)
+          )
+        );
+        clearedCount += extraLegacyCleanup.cleared;
+        if (extraLegacyCleanup.hadFailure) {
+          errors.push("legacy path");
+        }
+        const convergedCleanup = clearConvergedStateCandidates(
+          mode,
+          root,
+          void 0,
+          broadConvergedCandidates.filter(
+            (candidate) => !skippedCanonicalPaths.has(candidate.path)
+          )
+        );
+        clearedCount += convergedCleanup.cleared;
+        if (convergedCleanup.hadFailure) {
+          errors.push("converged paths");
+        }
+      } else {
+        const extraLegacyCleanup = clearLegacyStateCandidates(
+          mode,
+          root,
+          void 0,
+          broadLegacyCandidates
+        );
+        clearedCount += extraLegacyCleanup.cleared;
+        if (extraLegacyCleanup.hadFailure) {
+          errors.push("legacy path");
+        }
+        const convergedCleanup = clearConvergedStateCandidates(
+          mode,
+          root,
+          void 0,
+          broadConvergedCandidates
+        );
+        clearedCount += convergedCleanup.cleared;
+        if (convergedCleanup.hadFailure) {
+          errors.push("converged paths");
+        }
       }
       clearedCount += runtimeCleanup.cleared;
       if (runtimeCleanup.hadFailure) {
@@ -26847,24 +29457,34 @@ var stateClearTool = {
         if (processedBroadPaths.has(candidate.path)) continue;
         processedBroadPaths.add(candidate.path);
         if (mode === "team") collectTeamNamesForCleanup(candidate.path);
-        const result = clearDiscoveredStateCandidate(candidate, (current) => isStateCandidateForProject(mode, candidate.path, current, root), emergencyRecoveryOptionsForProject(mode, candidate.path, root));
+        const result = clearDiscoveredStateCandidate(
+          candidate,
+          (current) => isStateCandidateForProject(mode, candidate.path, current, root),
+          emergencyRecoveryOptionsForProject(mode, candidate.path, root)
+        );
         if (result === "cleared") {
           clearedCount++;
         } else if (result === "failed" || (0, import_fs25.existsSync)(candidate.path)) {
           errors.push(`session candidate: ${candidate.path}`);
         }
       }
-      const broadCapturedCandidates = [...new Map([
-        ...broadLegacyCandidates,
-        ...broadConvergedCandidates,
-        ...broadSessionCandidates
-      ].map((candidate) => [candidate.path, candidate])).values()];
+      const broadCapturedCandidates = [
+        ...new Map(
+          [
+            ...broadLegacyCandidates,
+            ...broadConvergedCandidates,
+            ...broadSessionCandidates
+          ].map((candidate) => [candidate.path, candidate])
+        ).values()
+      ];
       for (const candidate of broadCapturedCandidates) {
         if ((0, import_fs25.existsSync)(candidate.path) && !errors.some((error2) => error2.includes(candidate.path))) {
           errors.push(`captured candidate survived: ${candidate.path}`);
         }
       }
-      clearedCount = broadCapturedCandidates.filter((candidate) => !(0, import_fs25.existsSync)(candidate.path)).length + runtimeCleanup.cleared;
+      clearedCount = broadCapturedCandidates.filter(
+        (candidate) => !(0, import_fs25.existsSync)(candidate.path)
+      ).length + runtimeCleanup.cleared;
       let removedTeamRoots = 0;
       let prunedMissionEntries = 0;
       if (mode === "team") {
@@ -26875,10 +29495,12 @@ var stateClearTool = {
       }
       if (clearedCount === 0 && errors.length === 0 && removedTeamRoots === 0 && prunedMissionEntries === 0) {
         return {
-          content: [{
-            type: "text",
-            text: formatStateClearNoopMessage(mode, root)
-          }]
+          content: [
+            {
+              type: "text",
+              text: formatStateClearNoopMessage(mode, root)
+            }
+          ]
         };
       }
       let message = `Cleared state for mode: ${mode}
@@ -26899,18 +29521,22 @@ var stateClearTool = {
       }
       message += "\nWARNING: No session_id provided. Cleared legacy plus all session-scoped state; this is a broad operation that may affect other sessions.";
       return {
-        content: [{
-          type: "text",
-          text: message
-        }],
+        content: [
+          {
+            type: "text",
+            text: message
+          }
+        ],
         ...errors.length > 0 ? { isError: true } : {}
       };
     } catch (error2) {
       return {
-        content: [{
-          type: "text",
-          text: `Error clearing state for ${mode}: ${error2 instanceof Error ? error2.message : String(error2)}`
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Error clearing state for ${mode}: ${error2 instanceof Error ? error2.message : String(error2)}`
+          }
+        ],
         isError: true
       };
     }
@@ -26919,11 +29545,20 @@ var stateClearTool = {
 var stateListActiveTool = {
   name: "state_list_active",
   description: "List all currently active modes. By default, scopes to the current session (OMC_SESSION_ID). Pass all:true to list active modes across all sessions.",
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false
+  },
   schema: {
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
-    session_id: external_exports.string().optional().describe("Explicit session ID to scope the listing. Overrides OMC_SESSION_ID when provided."),
-    all: external_exports.boolean().optional().describe("When true, list active modes across all sessions (legacy + every session-scoped dir). Overrides the default current-session scope.")
+    session_id: external_exports.string().optional().describe(
+      "Explicit session ID to scope the listing. Overrides OMC_SESSION_ID when provided."
+    ),
+    all: external_exports.boolean().optional().describe(
+      "When true, list active modes across all sessions (legacy + every session-scoped dir). Overrides the default current-session scope."
+    )
   },
   handler: async (args) => {
     const { workingDirectory, session_id, all } = args;
@@ -26955,22 +29590,26 @@ var stateListActiveTool = {
         }
         if (activeModes.length === 0) {
           return {
-            content: [{
-              type: "text",
-              text: `## Active Modes (session: ${sessionId})
+            content: [
+              {
+                type: "text",
+                text: `## Active Modes (session: ${sessionId})
 
 No modes are currently active in this session.`
-            }]
+              }
+            ]
           };
         }
         const modeList = activeModes.map((mode) => `- **${mode}**`).join("\n");
         return {
-          content: [{
-            type: "text",
-            text: `## Active Modes (session: ${sessionId}, ${activeModes.length})
+          content: [
+            {
+              type: "text",
+              text: `## Active Modes (session: ${sessionId}, ${activeModes.length})
 
 ${modeList}`
-          }]
+            }
+          ]
         };
       }
       const modeSessionMap = /* @__PURE__ */ new Map();
@@ -27024,10 +29663,12 @@ ${modeList}`
       }
       if (modeSessionMap.size === 0) {
         return {
-          content: [{
-            type: "text",
-            text: "## Active Modes\n\nNo modes are currently active."
-          }]
+          content: [
+            {
+              type: "text",
+              text: "## Active Modes\n\nNo modes are currently active."
+            }
+          ]
         };
       }
       const lines = [`## Active Modes (${modeSessionMap.size})
@@ -27036,17 +29677,21 @@ ${modeList}`
         lines.push(`- **${mode}** (${sessions.join(", ")})`);
       }
       return {
-        content: [{
-          type: "text",
-          text: lines.join("\n")
-        }]
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n")
+          }
+        ]
       };
     } catch (error2) {
       return {
-        content: [{
-          type: "text",
-          text: `Error listing active modes: ${error2 instanceof Error ? error2.message : String(error2)}`
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Error listing active modes: ${error2 instanceof Error ? error2.message : String(error2)}`
+          }
+        ],
         isError: true
       };
     }
@@ -27055,11 +29700,18 @@ ${modeList}`
 var stateGetStatusTool = {
   name: "state_get_status",
   description: "Get detailed status for a specific mode or all modes. Shows active status, file paths, and state contents.",
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false
+  },
   schema: {
     mode: external_exports.enum(STATE_TOOL_MODES).optional().describe("Specific mode to check (omit for all modes)"),
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
-    session_id: external_exports.string().optional().describe("Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).")
+    session_id: external_exports.string().optional().describe(
+      "Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions)."
+    )
   },
   handler: async (args) => {
     const { mode, workingDirectory, session_id } = args;
@@ -27085,9 +29737,13 @@ var stateGetStatusTool = {
           if ((0, import_fs25.existsSync)(statePath)) {
             try {
               const content = (0, import_fs25.readFileSync)(statePath, "utf-8");
-              const state = JSON.parse(content);
-              statePreview = JSON.stringify(publicStateForMode(mode, state), null, 2).slice(0, 500);
-              if (statePreview.length >= 500) statePreview += "\n...(truncated)";
+              statePreview = JSON.stringify(
+                parsePublicStateContent(mode, content),
+                null,
+                2
+              ).slice(0, 500);
+              if (statePreview.length >= 500)
+                statePreview += "\n...(truncated)";
             } catch {
               statePreview = "Error reading state file";
             }
@@ -27096,16 +29752,20 @@ var stateGetStatusTool = {
           lines2.push(`- **Active:** ${active ? "Yes" : "No"}`);
           lines2.push(`- **State Path:** ${statePath}`);
           lines2.push(`- **Exists:** ${(0, import_fs25.existsSync)(statePath) ? "Yes" : "No"}`);
-          lines2.push(`
+          lines2.push(
+            `
 ### State Preview
 \`\`\`json
 ${statePreview}
-\`\`\``);
+\`\`\``
+          );
           return {
-            content: [{
-              type: "text",
-              text: lines2.join("\n")
-            }]
+            content: [
+              {
+                type: "text",
+                text: lines2.join("\n")
+              }
+            ]
           };
         }
         const legacyPath = getStatePath(mode, root);
@@ -27146,10 +29806,12 @@ ${statePreview}
 No active sessions for this mode.`);
         }
         return {
-          content: [{
-            type: "text",
-            text: lines2.join("\n")
-          }]
+          content: [
+            {
+              type: "text",
+              text: lines2.join("\n")
+            }
+          ]
         };
       }
       const statuses = getAllModeStatuses(root, sessionId);
@@ -27157,7 +29819,9 @@ No active sessions for this mode.`);
 `] : ["## All Mode Statuses\n"];
       for (const status of statuses) {
         const icon = status.active ? "[ACTIVE]" : "[INACTIVE]";
-        lines.push(`${icon} **${status.mode}**: ${status.active ? "Active" : "Inactive"}`);
+        lines.push(
+          `${icon} **${status.mode}**: ${status.active ? "Active" : "Inactive"}`
+        );
         lines.push(`   Path: \`${status.stateFilePath}\``);
         if (!sessionId && MODE_CONFIGS[status.mode]) {
           const activeSessions = getActiveSessionsForMode(status.mode, root);
@@ -27182,17 +29846,21 @@ No active sessions for this mode.`);
         lines.push(`   Path: \`${statePath}\``);
       }
       return {
-        content: [{
-          type: "text",
-          text: lines.join("\n")
-        }]
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n")
+          }
+        ]
       };
     } catch (error2) {
       return {
-        content: [{
-          type: "text",
-          text: `Error getting status: ${error2 instanceof Error ? error2.message : String(error2)}`
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Error getting status: ${error2 instanceof Error ? error2.message : String(error2)}`
+          }
+        ],
         isError: true
       };
     }
@@ -27207,58 +29875,138 @@ var stateTools = [
   {
     name: "merge_readiness_start",
     description: "Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick or --deep; standard is the default when neither flag is present). Re-running it while an active attempt is still pending is rejected - cancel via merge_readiness_cancel or let the attempt pass/pause first, so the in-progress audit trail is never silently overwritten.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
     schema: {
       summary: external_exports.string().max(2e3),
-      baseRef: external_exports.string().max(200).regex(/^[A-Za-z0-9._\/@{}~^:-]+$/, "baseRef must be a valid git ref").refine((s) => !s.startsWith("-"), "baseRef must not start with '-'").optional().describe("Base ref to diff committed changes against (e.g. origin/dev, HEAD, HEAD~1, HEAD^). Defaults to the branch upstream / origin/HEAD."),
+      baseRef: external_exports.string().max(200).regex(/^[A-Za-z0-9._\/@{}~^:-]+$/, "baseRef must be a valid git ref").refine((s) => !s.startsWith("-"), "baseRef must not start with '-'").optional().describe(
+        "Base ref to diff committed changes against (e.g. origin/dev, HEAD, HEAD~1, HEAD^). Defaults to the branch upstream / origin/HEAD."
+      ),
       workingDirectory: external_exports.string().optional(),
       session_id: external_exports.string().optional()
     },
     handler: async (args) => {
       try {
-        const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+        const directory = validateWorkingDirectory(
+          args.workingDirectory || process.cwd()
+        );
         const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
+        const state = createInitialMergeReadinessState(
+          directory,
+          args.summary,
+          sessionId,
+          args.baseRef
+        );
         const blocked = state.result === "blocked";
-        return { content: [{ type: "text", text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(" ") ?? "missing evidence"}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...blocked ? { isError: true } : {} };
+        return {
+          content: [
+            {
+              type: "text",
+              text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(" ") ?? "missing evidence"}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.`
+            }
+          ],
+          ...blocked ? { isError: true } : {}
+        };
       } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ],
+          isError: true
+        };
       }
     }
   },
   {
     name: "merge_readiness_set_content",
     description: "Validate and submit the five-section merge-readiness report and objective MCQs. Requires an active gate (call merge_readiness_start first).",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
     schema: {
       why: external_exports.string().max(1e4),
       whatChanged: external_exports.string().max(1e4),
       tradeoffs: external_exports.string().max(1e4),
       risksConsidered: external_exports.string().max(1e4),
       teamUnderstanding: external_exports.string().max(1e4),
-      questions: external_exports.array(external_exports.object({ id: external_exports.string().max(100), dimension: external_exports.enum(["why", "change", "tradeoff", "risk", "team"]), stem: external_exports.string().max(2e3), options: external_exports.array(external_exports.object({ id: external_exports.string().max(100), text: external_exports.string().max(1e3) })).max(8), correctOptionId: external_exports.string().max(100), rationale: external_exports.string().max(2e3).optional() })).max(8),
+      questions: external_exports.array(
+        external_exports.object({
+          id: external_exports.string().max(100),
+          dimension: external_exports.enum(["why", "change", "tradeoff", "risk", "team"]),
+          stem: external_exports.string().max(2e3),
+          options: external_exports.array(
+            external_exports.object({
+              id: external_exports.string().max(100),
+              text: external_exports.string().max(1e3)
+            })
+          ).max(8),
+          correctOptionId: external_exports.string().max(100),
+          rationale: external_exports.string().max(2e3).optional()
+        })
+      ).max(8),
       workingDirectory: external_exports.string().optional(),
       session_id: external_exports.string().optional()
     },
     handler: async (args) => {
       try {
-        const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+        const directory = validateWorkingDirectory(
+          args.workingDirectory || process.cwd()
+        );
         const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
         const state = setMergeReadinessContent(directory, args, sessionId);
         if (!state || !state.active) {
-          return { content: [{ type: "text", text: "Merge-readiness content rejected: no active gate (the gate is missing or already terminal - pass/cancelled/overridden). Call merge_readiness_start first." }], isError: true };
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Merge-readiness content rejected: no active gate (the gate is missing or already terminal - pass/cancelled/overridden). Call merge_readiness_start first."
+              }
+            ],
+            isError: true
+          };
         }
         const errors = state.validation_errors ?? [];
-        return { content: [{ type: "text", text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(" ")}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? "none"}` }], ...errors.length > 0 ? { isError: true } : {} };
+        return {
+          content: [
+            {
+              type: "text",
+              text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(" ")}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? "none"}`
+            }
+          ],
+          ...errors.length > 0 ? { isError: true } : {}
+        };
       } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ],
+          isError: true
+        };
       }
     }
   },
   {
     name: "merge_readiness_record_answer",
     description: "Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
     schema: {
       questionId: external_exports.string().max(100),
       optionId: external_exports.string().max(100),
@@ -27267,61 +30015,158 @@ var stateTools = [
     },
     handler: async (args) => {
       try {
-        const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+        const directory = validateWorkingDirectory(
+          args.workingDirectory || process.cwd()
+        );
         const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
+        const state = recordMergeReadinessMCQAnswer(
+          directory,
+          args.questionId,
+          args.optionId,
+          sessionId
+        );
         if (!state) {
-          return { content: [{ type: "text", text: "Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ." }], isError: true };
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ."
+              }
+            ],
+            isError: true
+          };
         }
         const result = state.result;
         const score = state.readiness_score;
         const persistFailed = result === "blocked" && (state.validation_errors ?? []).some((e) => e.includes("persisted"));
         const text = persistFailed ? `Merge-readiness answer NOT recorded: state could not be persisted (read-only state dir / full disk / invalid path). The gate is still armed on disk. ${(state.validation_errors ?? []).join(" ")}` : result === "pass" || result === "paused" || result === "blocked" || result === "overridden" ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === "pass" ? "The change may proceed to human merge approval." : result === "paused" ? "Explanation gap remains; reread the report and rerun /merge-readiness." : result === "blocked" ? "Missing evidence; produce it before rerunning." : "Gate overridden; terminal session state preserves the record."}` : `Answer recorded. Next question: ${state.pending_question?.id ?? "none"}. Answered: ${state.answers.length}/${state.questions.length}.`;
-        return { content: [{ type: "text", text }], ...persistFailed ? { isError: true } : {} };
+        return {
+          content: [{ type: "text", text }],
+          ...persistFailed ? { isError: true } : {}
+        };
       } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ],
+          isError: true
+        };
       }
     }
   },
   {
     name: "merge_readiness_report",
     description: "Render the authoritative merge-readiness session state as a Markdown report without writing a file.",
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    schema: { workingDirectory: external_exports.string().optional(), session_id: external_exports.string().optional() },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
+    schema: {
+      workingDirectory: external_exports.string().optional(),
+      session_id: external_exports.string().optional()
+    },
     handler: async (args) => {
       try {
-        const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+        const directory = validateWorkingDirectory(
+          args.workingDirectory || process.cwd()
+        );
         const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
         const state = readMergeReadinessState(directory, sessionId);
         if (!state) {
-          return { content: [{ type: "text", text: "Merge-readiness report unavailable: no session state found." }], isError: true };
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Merge-readiness report unavailable: no session state found."
+              }
+            ],
+            isError: true
+          };
         }
-        return { content: [{ type: "text", text: formatMergeReadinessReport(state) }] };
+        return {
+          content: [
+            { type: "text", text: formatMergeReadinessReport(state) }
+          ]
+        };
       } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ],
+          isError: true
+        };
       }
     }
   },
   {
     name: "merge_readiness_cancel",
     description: "Cancel an active merge-readiness gate while preserving its terminal state audit record.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    schema: { workingDirectory: external_exports.string().optional(), session_id: external_exports.string().optional() },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
+    schema: {
+      workingDirectory: external_exports.string().optional(),
+      session_id: external_exports.string().optional()
+    },
     handler: async (args) => {
       try {
-        const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+        const directory = validateWorkingDirectory(
+          args.workingDirectory || process.cwd()
+        );
         const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
         const state = cancelMergeReadiness(directory, sessionId);
         const persistFailed = state?.result === "blocked" && (state.validation_errors ?? []).some((e) => e.includes("persisted"));
         if (persistFailed) {
-          return { content: [{ type: "text", text: `Merge-readiness cancellation FAILED: state could not be persisted (read-only state dir / full disk). The gate is still armed on disk. ${(state?.validation_errors ?? []).join(" ")}` }], isError: true };
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Merge-readiness cancellation FAILED: state could not be persisted (read-only state dir / full disk). The gate is still armed on disk. ${(state?.validation_errors ?? []).join(" ")}`
+              }
+            ],
+            isError: true
+          };
         }
         if (!state || state.result !== "cancelled") {
-          return { content: [{ type: "text", text: "Merge-readiness cancellation rejected: no active gate." }], isError: true };
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Merge-readiness cancellation rejected: no active gate."
+              }
+            ],
+            isError: true
+          };
         }
-        return { content: [{ type: "text", text: "Merge-readiness cancelled. Terminal session state preserved as the audit record." }] };
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Merge-readiness cancelled. Terminal session state preserved as the audit record."
+            }
+          ]
+        };
       } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}`
+            }
+          ],
+          isError: true
+        };
       }
     }
   }

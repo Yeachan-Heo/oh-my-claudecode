@@ -6,6 +6,7 @@
  */
 import type { RalphStateForHud, UltraworkStateForHud, PrdStateForHud } from './types.js';
 import type { AutopilotStateForHud } from './elements/autopilot.js';
+import type { GraphStateForHud } from './elements/graph.js';
 /**
  * Read Ralph Loop state for HUD display.
  * Returns null if no state file exists or on error.
@@ -26,6 +27,11 @@ export declare function readPrdStateForHud(directory: string): PrdStateForHud | 
  * Returns shape matching AutopilotStateForHud from elements/autopilot.ts.
  */
 export declare function readAutopilotStateForHud(directory: string, sessionId?: string): AutopilotStateForHud | null;
+/**
+ * Read the validated Graph state and return a bounded public projection.
+ * Durable waits are intentionally not hidden by the legacy two-hour HUD cutoff.
+ */
+export declare function readGraphStateForHud(directory: string, sessionId?: string): GraphStateForHud | null;
 /**
  * Check if any OMC mode is currently active
  */

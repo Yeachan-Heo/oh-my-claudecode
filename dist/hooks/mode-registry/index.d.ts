@@ -8,6 +8,7 @@
  *
  * All modes store state in `.omc/state/` subdirectory for consistency.
  */
+import { type ConditionalClearResult } from "../../lib/mode-state-io.js";
 import type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult } from "./types.js";
 export type { ExecutionMode, ModeConfig, ModeStatus, CanStartResult, } from "./types.js";
 /**
@@ -97,7 +98,15 @@ export declare function getAllModeStatuses(cwd: string, sessionId?: string): Mod
  * - Local marker file if applicable
  * - Global state file if applicable (~/.claude/{mode}-state.json)
  *
- * @returns true if all files were deleted successfully (or didn't exist)
+ * @returns `cleared`, `skipped` when a captured generation was replaced, or `failed`
+ */
+export declare function clearModeStateDetailed(mode: ExecutionMode, cwd: string, sessionId?: string, expectedState?: Record<string, unknown>): ConditionalClearResult;
+/**
+ * Clear all state files for a mode.
+ *
+ * This is the long-standing public boolean API. Callers which need to
+ * distinguish a CAS replacement from a failed mutation must use
+ * clearModeStateDetailed explicitly.
  */
 export declare function clearModeState(mode: ExecutionMode, cwd: string, sessionId?: string, expectedState?: Record<string, unknown>): boolean;
 /**

@@ -8,6 +8,7 @@ import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
+import { parseGraphState } from '../graph/runtime-types.js';
 /**
  * Maximum age for state files to be considered "active".
  * Files older than this are treated as stale/abandoned.
@@ -261,6 +262,67 @@ export function readAutopilotStateForHud(directory, sessionId) {
     }
 }
 // ============================================================================
+// Graph State
+// ============================================================================
+const ACTIVE_GRAPH_STATUSES = new Set([
+    'awaiting_approval',
+    'running',
+    'waiting_human',
+    'waiting_patch_approval',
+    'reconciling',
+]);
+/**
+ * Read the validated Graph state and return a bounded public projection.
+ * Durable waits are intentionally not hidden by the legacy two-hour HUD cutoff.
+ */
+export function readGraphStateForHud(directory, sessionId) {
+    const stateFile = resolveStatePath(directory, 'graph-state.json', sessionId);
+    if (!stateFile)
+        return null;
+    // Read the raw content first so we can distinguish "legitimately absent"
+    // (no file / empty file) from "file exists but is mid-write and unparseable".
+    // A transient partial write during commit must not silently drop the graph
+    // indicator while a run is live.
+    let content;
+    try {
+        content = readFileSync(stateFile, 'utf-8');
+    }
+    catch {
+        return null;
+    }
+    if (content.trim().length === 0)
+        return null;
+    try {
+        const state = parseGraphState(JSON.parse(content));
+        if (!ACTIVE_GRAPH_STATUSES.has(state.status))
+            return null;
+        const activations = Object.values(state.projection.activations);
+        return {
+            status: state.status,
+            completedActivations: activations.filter((activation) => activation.status === 'completed').length,
+            totalActivations: activations.length,
+            readyActivations: activations.filter((activation) => activation.status === 'ready').length,
+            liveClaims: Object.values(state.claims).filter((claim) => claim.status === 'live').length,
+            unresolvedReconciliations: Object.values(state.reconciliations)
+                .filter((record) => record.status === 'unresolved').length,
+            revisionHashShort: state.active_revision_hash.slice(0, 12),
+        };
+    }
+    catch {
+        // File exists and is non-empty but failed to parse/validate. Treat the
+        // graph as still active rather than hiding it (transient partial write).
+        return {
+            status: 'unreadable',
+            completedActivations: 0,
+            totalActivations: 0,
+            readyActivations: 0,
+            liveClaims: 0,
+            unresolvedReconciliations: 0,
+            revisionHashShort: '?',
+        };
+    }
+}
+// ============================================================================
 // Combined State Check
 // ============================================================================
 /**
@@ -270,7 +332,11 @@ export function isAnyModeActive(directory, sessionId) {
     const ralph = readRalphStateForHud(directory, sessionId);
     const ultrawork = readUltraworkStateForHud(directory, sessionId);
     const autopilot = readAutopilotStateForHud(directory, sessionId);
-    return (ralph?.active ?? false) || (ultrawork?.active ?? false) || (autopilot?.active ?? false);
+    const graph = readGraphStateForHud(directory, sessionId);
+    return (ralph?.active ?? false)
+        || (ultrawork?.active ?? false)
+        || (autopilot?.active ?? false)
+        || graph !== null;
 }
 /**
  * Get active skill names for display
@@ -280,6 +346,9 @@ export function getActiveSkills(directory, sessionId) {
     const autopilot = readAutopilotStateForHud(directory, sessionId);
     if (autopilot?.active) {
         skills.push('autopilot');
+    }
+    if (readGraphStateForHud(directory, sessionId)) {
+        skills.push('graph');
     }
     const ralph = readRalphStateForHud(directory, sessionId);
     if (ralph?.active) {

@@ -43,7 +43,7 @@ export declare const WORKFLOW_TOMBSTONE_TTL_MS: number;
  * Non-workflow skills keep today's `light/medium/heavy` protection via the
  * `support_skill` branch.
  */
-export declare const CANONICAL_WORKFLOW_SKILLS: readonly ["autopilot", "ralph", "team", "ultrawork", "ultraqa", "deep-interview", "ralplan", "self-improve"];
+export declare const CANONICAL_WORKFLOW_SKILLS: readonly ["autopilot", "graph", "ralph", "team", "ultrawork", "ultraqa", "deep-interview", "ralplan", "self-improve"];
 export type CanonicalWorkflowSkill = typeof CANONICAL_WORKFLOW_SKILLS[number];
 export declare function isCanonicalWorkflowSkill(skillName: string): skillName is CanonicalWorkflowSkill;
 export type SkillProtectionLevel = 'none' | 'light' | 'medium' | 'heavy';
@@ -111,6 +111,8 @@ export declare function upsertWorkflowSkillSlot(state: SkillActiveStateV2, skill
  * absent (idempotent).
  */
 export declare function markWorkflowSkillCompleted(state: SkillActiveStateV2, skillName: string, now?: string): SkillActiveStateV2;
+/** Tombstone Graph only after its durable state is paused or terminal. */
+export declare function markDurableWorkflowSkillCompleted(state: SkillActiveStateV2, skillName: string, now?: string): SkillActiveStateV2;
 /** Hard-clear: remove a slot entirely (for explicit cancel). Pure. */
 export declare function clearWorkflowSkillSlot(state: SkillActiveStateV2, skillName: string): SkillActiveStateV2;
 /**

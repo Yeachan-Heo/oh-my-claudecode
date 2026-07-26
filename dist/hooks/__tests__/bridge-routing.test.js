@@ -366,6 +366,55 @@ $ ultrawork search the codebase`,
                 rmSync(tempDir, { recursive: true, force: true });
             }
         });
+        it.each([
+            '/autopilot --workflow release-flow ship the release',
+            '/omc:autopilot --workflow release-flow ship the release',
+            '/autopilot --workflow',
+            '/autopilot --workflow=release-flow ship the release',
+            '/autopilot --workflow unknown-flow ship the release',
+        ])('rejects named autopilot invocation without seeding legacy state: %s', async (prompt) => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-named-autopilot-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(result.message).toContain('State was left unchanged');
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('preserves existing autopilot state for a named invocation on an unsupported runtime', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-existing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-existing-named-autopilot-session';
+                const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+                mkdirSync(join(statePath, '..'), { recursive: true });
+                const existingState = JSON.stringify({ active: true, session_id: sessionId, originalIdea: 'legacy state' });
+                writeFileSync(statePath, existingState);
+                process.env.OMC_WORKFLOW_TEST_PLATFORM = 'darwin';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/omc:autopilot --workflow release-flow ship the release',
+                    directory: tempDir,
+                });
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(readFileSync(statePath, 'utf8')).toBe(existingState);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json'))).toBe(false);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'skill-active-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
         it('seeds inert autopilot state for keyword routing so stop enforcement stays inert until the skill confirms', async () => {
             const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-autopilot-'));
             try {

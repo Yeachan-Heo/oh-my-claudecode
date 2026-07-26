@@ -4,10 +4,41 @@
  * Provides tools for reading, writing, and managing mode state files.
  * All paths are validated to stay within the worktree boundary.
  */
-import { z } from 'zod';
-import { ToolDefinition } from './types.js';
+import { z } from "zod";
+import { ToolDefinition } from "./types.js";
+import { type GraphRunStatus } from "../graph/runtime-types.js";
 declare const STATE_TOOL_MODES: [string, ...string[]];
 declare const STATE_WRITE_MODES: [string, ...string[]];
+declare const STATE_CLEAR_MODES: [string, ...string[]];
+interface GraphPublicStateSummary {
+    type: "graph_state_summary";
+    valid: boolean;
+    format_version?: number;
+    run_id?: string;
+    status: GraphRunStatus | "malformed";
+    active_revision_id?: string;
+    short_revision_hash?: string;
+    dispatch_generation?: number;
+    commit_sequence?: number;
+    progress?: {
+        total: number;
+        ready: number;
+        running: number;
+        completed: number;
+        failed: number;
+    };
+    claims?: {
+        total: number;
+        live: number;
+        reconciling: number;
+        unresolved_reconciliations: number;
+    };
+    pending?: {
+        approval: boolean;
+        patch: boolean;
+    };
+}
+export declare function redactGraphPublicState(state: unknown): GraphPublicStateSummary;
 export declare function redactAutopilotPublicState(state: unknown): unknown;
 export declare const stateReadTool: ToolDefinition<{
     mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
@@ -30,7 +61,8 @@ export declare const stateWriteTool: ToolDefinition<{
     session_id: z.ZodOptional<z.ZodString>;
 }>;
 export declare const stateClearTool: ToolDefinition<{
-    mode: z.ZodEnum<typeof STATE_TOOL_MODES>;
+    mode: z.ZodEnum<typeof STATE_CLEAR_MODES>;
+    force: z.ZodOptional<z.ZodBoolean>;
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
 }>;
@@ -63,6 +95,11 @@ export declare const stateTools: (ToolDefinition<{
     completed_at: z.ZodOptional<z.ZodString>;
     error: z.ZodOptional<z.ZodString>;
     state: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    workingDirectory: z.ZodOptional<z.ZodString>;
+    session_id: z.ZodOptional<z.ZodString>;
+}> | ToolDefinition<{
+    mode: z.ZodEnum<typeof STATE_CLEAR_MODES>;
+    force: z.ZodOptional<z.ZodBoolean>;
     workingDirectory: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
 }> | ToolDefinition<{

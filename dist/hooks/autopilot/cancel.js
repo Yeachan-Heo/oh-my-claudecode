@@ -5,6 +5,7 @@
  * including any active Ralph or UltraQA modes.
  */
 import { readAutopilotState, clearAutopilotState, getAutopilotStateAge, updateAutopilotStateIfCurrent, updateAutopilotStateIfExact, } from './state.js';
+import { lstatSync } from 'fs';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure } from './named-workflow-resume-validator.js';
@@ -21,6 +22,28 @@ function validNamedWorkflowForResume(state, sessionId) {
     return hasNamedWorkflowMarkers(state) && Boolean(namedWorkflowRuntimeSupported()
         ? validateNamedWorkflowState(state, sessionId)
         : validateNamedWorkflowStateStructure(state, sessionId));
+}
+/**
+ * An unsupported runtime cannot authenticate a transcript, but it can still
+ * reject an already-observable symlink. Do that before returning the generic
+ * unsupported-runtime response so a forged boundary is never treated as a
+ * merely unavailable feature.
+ */
+function hasSymlinkedNamedWorkflowTranscript(state) {
+    const boundaries = [
+        state.pipelineTracking?.activationBoundary,
+        ...(state.pipelineTracking?.completionObservations?.map((observation) => observation.activationBoundary) ?? []),
+    ];
+    return boundaries.some((boundary) => {
+        if (!boundary || typeof boundary.transcriptPath !== 'string')
+            return false;
+        try {
+            return lstatSync(boundary.transcriptPath).isSymbolicLink();
+        }
+        catch {
+            return false;
+        }
+    });
 }
 function clearSessionOwnedNestedRalplanState(directory, sessionId) {
     if (!sessionId)
@@ -199,6 +222,9 @@ export function canResumeAutopilot(directory, sessionId) {
     }
     if (hasNamedWorkflowMarkers(state)) {
         if (!validNamedWorkflowForResume(state, sessionId)) {
+            return { canResume: false, resumePhase: state.phase, integrityFailed: true };
+        }
+        if (hasSymlinkedNamedWorkflowTranscript(state)) {
             return { canResume: false, resumePhase: state.phase, integrityFailed: true };
         }
         if (!namedWorkflowRuntimeSupported()) {
