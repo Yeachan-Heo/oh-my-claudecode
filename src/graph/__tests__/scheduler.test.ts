@@ -311,14 +311,31 @@ describe('graph scheduler', () => {
       ),
     ).toThrow(/fresh evidence/i);
 
-    const failed = applyNodeResult(descriptor, projection, {
+    // A3: a failed verification is retryable while the attempt budget remains
+    // (executableNode verify has max_attempts=2), so the FIRST failure leaves it
+    // 'ready'; only the SECOND failure (budget exhausted) goes terminal 'failed'.
+    let failed = applyNodeResult(descriptor, projection, {
       activation_id: 'act-verify',
-      transition_id: 'transition-failed-verify',
+      transition_id: 'transition-failed-verify-1',
       result: {
         outcome: 'failed',
         attempt_id: 'try-verify',
         output_summary: 'Verification failed',
         evidence_refs: [{ kind: 'test', ref: 'npm-test', summary: 'One test failed' }],
+      },
+    });
+    expect(failed.projection.activations['act-verify'].status).toBe('ready');
+    expect(isGraphSucceeded(descriptor, failed.projection)).toBe(false);
+
+    projection = begin(failed.projection, 'act-verify', 'try-verify-2');
+    failed = applyNodeResult(descriptor, projection, {
+      activation_id: 'act-verify',
+      transition_id: 'transition-failed-verify-2',
+      result: {
+        outcome: 'failed',
+        attempt_id: 'try-verify-2',
+        output_summary: 'Verification failed again',
+        evidence_refs: [{ kind: 'test', ref: 'npm-test', summary: 'Still failing' }],
       },
     });
     expect(failed.projection.activations['act-verify'].status).toBe('failed');

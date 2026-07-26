@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { sealGraphDescriptor } from '../descriptor.js';
+import { occCommitMutation, occReadCurrentState } from '../../lib/mode-state-io.js';
 import { graphCommandService } from '../runtime.js';
 import { createInitialGraphState } from '../runtime-types.js';
 import { GraphStateStore } from '../store.js';
@@ -39,8 +40,8 @@ function useTempWorktree(sessionId: string): { worktree: string; store: GraphSta
     dependencies: {
       fileExists: existsSync,
       readText: (path) => readFileSync(path, 'utf8'),
-      writeAtomic: (path, value) => writeFileSync(path, JSON.stringify(value)),
-      withExclusiveLock: (_path, callback) => ({ acquired: true, value: callback() }),
+      readCurrent: occReadCurrentState,
+      occCommit: occCommitMutation,
     },
   });
   return { worktree, store };
@@ -397,9 +398,12 @@ describe('graphCommandService runtime operations', () => {
         },
       },
     } as unknown as typeof running;
-    // Overwrite the state file directly through the store's write path.
+    // Publish the externally-recovered reconciling state through the OCC
+    // journal (B11/B): the journal is the source of truth, so a direct canonical
+    // write would be invisible to the next mutation. Simulate the recovery by
+    // committing the reconciling state as a journal entry.
     const storePath = (store as unknown as { path: string }).path;
-    writeFileSync(storePath, JSON.stringify(reconcilingState));
+    occCommitMutation(storePath, () => ({ state: reconcilingState, result: true }));
     // Sanity: the store re-reads the reconciling state.
     expect(store.read()?.status).toBe('reconciling');
 

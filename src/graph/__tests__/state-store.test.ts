@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { sealGraphDescriptor } from '../descriptor.js';
+import { occCommitMutation, occReadCurrentState } from '../../lib/mode-state-io.js';
 import { createInitialGraphState } from '../runtime-types.js';
 import { approveGraphPatch, proposeGraphPatch } from '../revisions.js';
 import { GraphStateStore, GraphStoreError, type GraphStateStoreDependencies } from '../store.js';
@@ -14,8 +14,7 @@ import { forkJoinDescriptor } from './fixtures.js';
 const temporaryDirectories: string[] = [];
 
 function createStore(
-  writeAtomic = atomicWriteJsonSync,
-  withExclusiveLock: GraphStateStoreDependencies['withExclusiveLock'] = (_path, callback) => ({ acquired: true, value: callback(() => {}) }),
+  occCommit: GraphStateStoreDependencies['occCommit'] = occCommitMutation,
 ) {
   const worktreeRoot = mkdtempSync(join(tmpdir(), 'omc-graph-store-'));
   temporaryDirectories.push(worktreeRoot);
@@ -25,8 +24,8 @@ function createStore(
     dependencies: {
       fileExists: existsSync,
       readText: (path) => readFileSync(path, 'utf8'),
-      writeAtomic,
-      withExclusiveLock,
+      readCurrent: occReadCurrentState,
+      occCommit,
     },
   });
 }
@@ -68,9 +67,9 @@ describe('GraphStateStore', () => {
     expect(store.read()?.session_id).toBe('session-store');
   });
 
-  it('commits one complete generation and replays an exact transition without a second write', () => {
-    const writeAtomic = vi.fn(atomicWriteJsonSync);
-    const store = createStore(writeAtomic);
+  it('commits one complete generation and replays an exact transition without re-running the callback', () => {
+    const occCommit = vi.fn(occCommitMutation) as unknown as GraphStateStoreDependencies['occCommit'];
+    const store = createStore(occCommit);
     const created = store.create(initialState());
     const request = {
       transition_id: 'transition-complete-a',
@@ -109,19 +108,19 @@ describe('GraphStateStore', () => {
     expect(committed.state.commit_sequence).toBe(1);
     expect(replay).toMatchObject({ replayed: true, result: { selected_edge_ids: ['fan-a'] } });
     expect(replay.state.diagnostics).toHaveLength(1);
-    expect(writeAtomic).toHaveBeenCalledTimes(2);
+    // create() commits once; the first mutate() commits once; the replayed
+    // mutate() is served from the committed transition (no new transition), so
+    // the OCC callback still runs to detect the replay but no logical write.
+    expect(occCommit).toHaveBeenCalledTimes(3);
   });
 
-  it('exposes cooperative lease renewal and renews again before publishing a graph mutation', () => {
-    const renew = vi.fn();
-    const store = createStore(
-      atomicWriteJsonSync,
-      (_path, callback) => ({ acquired: true, value: callback(renew) }),
-    );
+  it('does not invoke a renewal hook (OCC has no lease; renew is a no-op)', () => {
+    const store = createStore();
     const created = store.create(initialState());
-    renew.mockClear();
 
-    store.mutate({
+    // Under OCC there is no lease to renew; the mutate callback's `renew`
+    // argument is a no-op. The mutation still commits exactly once.
+    const committed = store.mutate({
       transition_id: 'renewable-transition',
       operation: 'renewable-operation',
       operation_fingerprint: 'renewable-operation:v1',
@@ -133,12 +132,12 @@ describe('GraphStateStore', () => {
         dispatch_generation: created.dispatch_generation,
         commit_sequence: created.commit_sequence,
       },
-    }, (state, renewLease) => {
-      renewLease();
+    }, (state, renew) => {
+      renew();
       return { next: state, result: 'renewed' };
     });
 
-    expect(renew).toHaveBeenCalledTimes(2);
+    expect(committed.result).toBe('renewed');
   });
 
   it('allows one expected-sequence writer and rejects the stale competitor', async () => {
@@ -173,24 +172,9 @@ describe('GraphStateStore', () => {
     expect(store.read()?.commit_sequence).toBe(1);
   });
 
-  it('exposes a complete old or new generation across atomic writer failures', () => {
+  it('leaves the prior committed generation intact when a mutation callback throws (OCC is all-or-nothing)', () => {
     const store = createStore();
     const created = store.create(initialState());
-    let mode: 'before' | 'after' = 'before';
-    const failingStore = new GraphStateStore({
-      sessionId: 'session-store',
-      worktreeRoot: store.worktreeRoot,
-      dependencies: {
-        fileExists: existsSync,
-        readText: (path) => readFileSync(path, 'utf8'),
-        withExclusiveLock: (_path, callback) => ({ acquired: true, value: callback() }),
-        writeAtomic: (path, value) => {
-          if (mode === 'before') throw new Error('before rename');
-          atomicWriteJsonSync(path, value);
-          throw new Error('after rename');
-        },
-      },
-    });
     const request = {
       transition_id: 'atomic-transition',
       operation: 'atomic-test',
@@ -205,17 +189,23 @@ describe('GraphStateStore', () => {
       },
     } as const;
 
-    expect(() => failingStore.mutate(request, (state) => ({ next: state, result: 'new' })))
-      .toThrow('before rename');
-    expect(store.read()?.commit_sequence).toBe(0);
+    // First, commit a successful transition so there is a real prior generation.
+    store.mutate(request, (state) => ({ next: state, result: 'committed' }));
+    expect(store.read()?.commit_sequence).toBe(1);
 
-    mode = 'after';
-    expect(() => failingStore.mutate(request, (state) => ({ next: state, result: 'new' })))
-      .toThrow('after rename');
-    expect(store.read()).toMatchObject({
-      commit_sequence: 1,
-      transitions: [{ transition_id: 'atomic-transition' }],
-    });
+    // A callback that throws must NOT advance the committed state: OCC commits
+    // only on a clean { state, result } return, so the throw aborts the entry.
+    const second = {
+      ...request,
+      transition_id: 'throwing-transition',
+      expected: { ...request.expected, commit_sequence: 1 },
+    } as const;
+    expect(() => store.mutate(second, () => {
+      throw new Error('mutation aborted');
+    })).toThrow('mutation aborted');
+    expect(store.read()?.commit_sequence).toBe(1);
+    // The original generation is still readable and intact.
+    expect(store.read()?.transitions).toHaveLength(1);
   });
 
   it('fails closed for a reused transition ID with a different request fence', () => {

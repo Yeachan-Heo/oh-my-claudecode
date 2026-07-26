@@ -169,12 +169,19 @@ export function beginActivationAttempt(
       `Activation ${activation.activation_id} is ${activation.status}, not ready`,
     );
   }
+  const attemptNo = activation.attempt_no + 1;
+  if (input.max_attempts !== undefined && attemptNo > input.max_attempts) {
+    throw new GraphSchedulerError(
+      'max_attempts_exceeded',
+      `Activation ${activation.activation_id} exceeds max_attempts ${input.max_attempts}`,
+    );
+  }
   ensureUniqueIdentity(projection, 'attempt', input.attempt_id);
   const next = cloneProjection(projection);
   next.activations[input.activation_id] = {
     ...next.activations[input.activation_id],
     status: 'running',
-    attempt_no: activation.attempt_no + 1,
+    attempt_no: attemptNo,
     attempt_ids: [...activation.attempt_ids, input.attempt_id],
     active_attempt_id: input.attempt_id,
   };
@@ -488,8 +495,21 @@ export function applyNodeResult(
 
   const next = cloneProjection(projection);
   const nextActivation = next.activations[activation.activation_id];
-  nextActivation.status = result.outcome === 'succeeded' ? 'completed' : 'failed';
-  nextActivation.completed_transition_id = rawInput.transition_id;
+  // A3: a failed activation is retryable while attempt budget remains; once
+  // exhausted it goes terminal 'failed' so the run can be promoted to a failed
+  // graph status instead of wedging as an un-claimable, un-retryable activation.
+  const maxAttempts = node.kind === 'agent' || node.kind === 'command' ? node.max_attempts : undefined;
+  const exhausted = maxAttempts === undefined || activation.attempt_no >= maxAttempts;
+  const nextStatus = result.outcome === 'succeeded'
+    ? 'completed'
+    : (exhausted ? 'failed' : 'ready');
+  nextActivation.status = nextStatus;
+  // Only record the terminal transition on terminal outcomes; a retryable
+  // failure returns to 'ready' for a fresh begin and must not carry a stale
+  // completed_transition_id from the failed attempt.
+  if (nextStatus !== 'ready') {
+    nextActivation.completed_transition_id = rawInput.transition_id;
+  }
   const selected = result.outcome === 'succeeded'
     ? selectEdges(descriptor, activation, result.route, projection)
     : [];

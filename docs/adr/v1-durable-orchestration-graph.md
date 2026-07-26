@@ -92,6 +92,59 @@ atomic create—fails before reserving control or creating or mutating Graph
 state. Pure descriptor validation and scheduler logic remain portable and
 tested across platforms.
 
+### OCC journal - the concurrency fence (B11 root cure)
+
+The lease lock below is retained for serialising mutations, but on a
+**flock-less runtime (macOS/Windows - real production)** it cannot atomically
+*check-ownership + write* an EXISTING state file: `renewMutationLock` returns
+false there and `assertMutationLockHeld` is a read-then-write TOCTOU. A stale
+holder whose lease expired mid-mutation could therefore overwrite a successor's
+publish (B11), and a stale releaser could unlink a successor's lock (release
+race). No combination of `rename`/`link`/`unlink` atomically fences an
+EXISTING file on flock-less - the unconditional canonical `rename` IS the B11
+window (the `parent_seq` fence only catches a fork detected at check time, not
+the post-check unconditional overwrite, and the successor's state lived only in
+the canonical file the stale writer then clobbered).
+
+The root cure is an **optimistic concurrency control (OCC) journal** that uses
+ONLY `O_EXCL` (portable, no `flock`, no liveness probe, testable on mac). It is
+first-class safe on flock-less runtimes. Journal layout per state file
+`filePath`: a directory `filePath.journal/` of entries
+`<seq>.<owner_token>.json` = `{ seq, parent_seq, owner_token, state }`, a
+commit marker `<seq>.<owner_token>.complete` (an `O_EXCL` file = committed), and
+an `<seq>.<owner_token>.aborted` marker for a detected dead fork. **The journal
+is the source of truth**: "current" = the entry with the MAX `seq` bearing a
+`.complete` marker; readers (`GraphStateStore.read`, `occReadCurrentState`)
+return that entry's state, NOT the canonical file. The canonical `filePath`
+is a **derived cache** re-published on each commit so legacy readers keep
+working; it is never trusted as authoritative.
+
+Commit protocol (replaces writeAtomic-under-lock): read current = max complete
+seq `S` + its state; run a PURE `mutate(current)` callback to produce the next
+state; claim `<S+1>.<token>.json` via `O_EXCL` (EEXIST -> another writer took
+`S+1` -> re-read, re-run, retry with `S+2`); write `{parent_seq: S, state: next}`,
+fsync; **re-validate** by re-scanning the max complete - if a successor
+committed in the window (`current.seq > S`), this entry is a DEAD FORK: unlink
+it, mark `.aborted`, re-read the successor's state, re-run the callback, and
+re-sequence AFTER the successor (never overwriting it); finally create the
+`.complete` marker via `O_EXCL` (commit) and re-publish the canonical file.
+
+Why this cures B11: a stale writer A forks off an old parent, and its commit
+re-validation detects `parent != current-max-complete` AFTER the successor B
+committed - so A re-runs on B's state and sequences AFTER B. A never performs
+an unconditional overwrite. The release race is cured because there is no shared
+lock file: cleanup (`occCleanupOwner`) removes only the writer's OWN incomplete
+entries (by `owner_token`); a writer can never touch a successor's entries.
+
+Fail-closed behaviour: an OCC commit returns null (fail closed) ONLY when the
+journal directory is present but unreadable with a non-ENOENT I/O error
+(`EACCES`/`EMFILE`/`EIO`/`ENOMEM`), or when the bounded retry budget is
+exhausted under extreme live contention. A thrown mutation is propagated to
+the caller (it is a semantic rejection, e.g. `sequence_conflict`, not a
+fork-retry). The emergency-journal crash-recovery subsystem is SEPARATE and
+composes with OCC: OCC handles concurrency, the emergency journal handles
+single-write crash-safety of a partial publish.
+
 Reclaim policy is **lease-based and converged across the `flock` and flock-less
 paths** (B7/B10). The mutation lock (`<state>.mutation.lock`) is an `O_EXCL`
 atomic create whose owner JSON is `{ version: 1, pid, createdAt, expires_at,

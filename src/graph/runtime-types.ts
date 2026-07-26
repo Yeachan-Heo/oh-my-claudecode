@@ -417,11 +417,28 @@ function validateProjection(value: unknown, descriptor: SealedGraphDescriptor): 
   }
 
   const traversals = requireRecord(projection.traversal_counts, 'projection.traversal_counts');
-  for (const [edgeId, count] of Object.entries(traversals)) {
+  // traversal_counts keys are produced by traversalCounterKey() as
+  // canonicalJson([traversal_owner_id, edge.id]). The traversal_owner_id is always
+  // an activation_id or branch_token_id, both of which are record keys in scope here.
+  const traversalOwnerIds = new Set<string>([...Object.keys(activations), ...Object.keys(tokens)]);
+  for (const [key, count] of Object.entries(traversals)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(key);
+    } catch {
+      throw new GraphStateValidationError(`traversal count key ${key} is not valid JSON`);
+    }
+    if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== 'string' || typeof parsed[1] !== 'string') {
+      throw new GraphStateValidationError(`traversal count key ${key} is not a [owner, edgeId] pair`);
+    }
+    const [owner, edgeId] = parsed as [string, string];
+    if (!traversalOwnerIds.has(owner)) {
+      throw new GraphStateValidationError(`traversal count key ${key} references unknown traversal owner ${owner}`);
+    }
     if (!descriptor.edges.some((edge) => edge.id === edgeId && edge.kind === 'back_edge')) {
       throw new GraphStateValidationError(`traversal count references unknown back-edge ${edgeId}`);
     }
-    requireInteger(count, `projection.traversal_counts.${edgeId}`, 100);
+    requireInteger(count, `projection.traversal_counts.${key}`, 100);
   }
 
   const committed = requireRecord(projection.committed_transitions, 'projection.committed_transitions');

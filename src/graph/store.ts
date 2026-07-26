@@ -1,14 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
-import { atomicWriteJsonSync } from '../lib/atomic-write.js';
-import {
-  acquireMutationLockAt,
-  assertMutationLockHeld,
-  mutationLockRenewalSupported,
-  releaseMutationLockSync,
-  renewMutationLock,
-} from '../lib/mode-state-io.js';
+import { occCommitMutation, occReadCurrentState } from '../lib/mode-state-io.js';
 import { resolveSessionStatePaths } from '../lib/worktree-paths.js';
 import { canonicalJson } from './descriptor.js';
 import {
@@ -54,8 +47,28 @@ export interface GraphMutationResult<T extends JsonValue> {
 export interface GraphStateStoreDependencies {
   fileExists(path: string): boolean;
   readText(path: string): string;
-  writeAtomic(path: string, value: unknown): void;
-  withExclusiveLock<T>(path: string, callback: (renew?: () => void) => T): { acquired: boolean; value: T | undefined };
+  /**
+   * Reads the OCC journal's authoritative current committed state (the
+   * max-complete journal entry's state). Under (B) the journal - NOT the
+   * canonical file - is the source of truth; the canonical file is a derived
+   * cache re-published on each commit. Returns null when the journal is empty
+   * or on an unreadable journal directory (fail closed).
+   */
+  readCurrent(path: string): unknown;
+  /**
+   * OCC (optimistic concurrency control) commit. Runs `mutate(currentState,
+   * ownerToken)` purely against the OCC-validated current committed state and
+   * commits it atomically (O_EXCL claim + parent-validation). Returns the
+   * committed { state, result } or null on fork-exhaustion / fail-closed I/O.
+   * Replaces the old lease-lock + writeAtomic publish (B11 root cure): a stale
+   * writer that forks off an old parent is re-sequenced AFTER its successor
+   * instead of overwriting it.
+   */
+  occCommit<TState, TResult>(
+    path: string,
+    mutate: (currentState: unknown, ownerToken: string) => { state: TState; result: TResult } | null,
+    options?: { ownerToken?: string },
+  ): { state: TState; result: TResult } | null;
   now?(): string;
 }
 
@@ -75,38 +88,11 @@ export class GraphStoreError extends Error {
   }
 }
 
-function withRenewingExclusiveLock<T>(
-  path: string,
-  callback: (renew?: () => void) => T,
-): { acquired: boolean; value: T | undefined } {
-  const lock = acquireMutationLockAt(path, true);
-  if (!lock) return { acquired: false, value: undefined };
-  const renew = (): void => {
-    assertMutationLockHeld(lock);
-    // On a flock-less runtime (macOS/Windows) there is no portable atomic
-    // rename-over-the-live-lock, so `renewMutationLock` returns false even
-    // though the lock is still held and its lease is valid for LEASE_MS. In that
-    // case renewal is simply UNAVAILABLE - no-op and rely on the
-    // publish-time `assertMutationLockHeld` (the safety net). Only treat a
-    // `false` on a flock-capable runtime (where renewal IS supported) as a
-    // genuine `lock_lost` (owner replaced / lease expired / I/O error).
-    if (mutationLockRenewalSupported(lock) && !renewMutationLock(lock)) {
-      throw new GraphStoreError('lock_lost', 'Graph state mutation lock could not be renewed');
-    }
-  };
-  try {
-    renew();
-    return { acquired: true, value: callback(renew) };
-  } finally {
-    releaseMutationLockSync(lock);
-  }
-}
-
 const DEFAULT_DEPENDENCIES: GraphStateStoreDependencies = {
   fileExists: existsSync,
   readText: (path) => readFileSync(path, 'utf8'),
-  writeAtomic: atomicWriteJsonSync,
-  withExclusiveLock: (path, callback) => withRenewingExclusiveLock(path, callback),
+  readCurrent: occReadCurrentState,
+  occCommit: occCommitMutation,
   now: () => new Date().toISOString(),
 };
 
@@ -228,12 +214,17 @@ export class GraphStateStore {
   }
 
   read(): GraphState | null {
-    if (!this.dependencies.fileExists(this.readPath)) return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(this.dependencies.readText(this.readPath));
-    } catch (error) {
-      throw new GraphStoreError('malformed_state', `Cannot parse graph-state.json: ${String(error)}`);
+    // Under (B) the OCC journal is the source of truth; the canonical file is a
+    // derived cache. read() returns the journal's max-complete committed state.
+    const currentRaw = this.dependencies.readCurrent(this.readPath);
+    if (currentRaw === null || currentRaw === undefined) return null;
+    let parsed: unknown = currentRaw;
+    if (typeof currentRaw === 'string') {
+      try {
+        parsed = JSON.parse(currentRaw);
+      } catch (error) {
+        throw new GraphStoreError('malformed_state', `Cannot parse graph-state.json: ${String(error)}`);
+      }
     }
     const state = parseGraphState(parsed);
     if (state.session_id !== this.sessionId) {
@@ -243,26 +234,29 @@ export class GraphStateStore {
   }
 
   create(state: GraphState): GraphState {
-    const result = this.dependencies.withExclusiveLock(this.path, (renew) => {
-      if (this.dependencies.fileExists(this.readPath)) {
-        throw new GraphStoreError('already_exists', 'Graph state already exists for this session');
-      }
-      const validated = parseGraphState(state);
-      if (validated.session_id !== this.sessionId) {
-        throw new GraphStoreError('session_mismatch', 'Initial Graph state session does not match the store');
-      }
-      if (validated.commit_sequence !== 0 || validated.transitions.length !== 0) {
-        throw new GraphStoreError('invalid_initial_state', 'Initial Graph state must start at sequence zero');
-      }
-      this.assertStateSize(validated);
-      renew?.();
-      this.dependencies.writeAtomic(this.path, validated);
-      return validated;
-    });
-    if (!result.acquired || !result.value) {
-      throw new GraphStoreError('lock_busy', 'Could not acquire the exclusive Graph state lock');
+    const validated = parseGraphState(state);
+    if (validated.session_id !== this.sessionId) {
+      throw new GraphStoreError('session_mismatch', 'Initial Graph state session does not match the store');
     }
-    return result.value;
+    if (validated.commit_sequence !== 0 || validated.transitions.length !== 0) {
+      throw new GraphStoreError('invalid_initial_state', 'Initial Graph state must start at sequence zero');
+    }
+    this.assertStateSize(validated);
+    const committed = this.dependencies.occCommit<GraphState, GraphState>(
+      this.path,
+      (currentRaw) => {
+        if (currentRaw !== null && currentRaw !== undefined) {
+          // A committed state already exists in the OCC journal (or seeded from
+          // the canonical file). create() must not overwrite it.
+          throw new GraphStoreError('already_exists', 'Graph state already exists for this session');
+        }
+        return { state: validated, result: validated };
+      },
+    );
+    if (!committed) {
+      throw new GraphStoreError('lock_busy', 'Could not commit the initial Graph state via OCC');
+    }
+    return committed.result;
   }
 
   mutate<T extends JsonValue>(
@@ -271,53 +265,65 @@ export class GraphStateStore {
   ): GraphMutationResult<T> {
     assertRequest(request);
     const fingerprint = requestFingerprint(request);
-    const locked = this.dependencies.withExclusiveLock(this.path, (renew) => {
-      const renewLease = renew ?? (() => {});
-      const current = this.read();
-      if (!current) throw new GraphStoreError('not_found', 'Graph state does not exist for this session');
-
-      const prior = current.transitions.find((transition) => transition.transition_id === request.transition_id);
-      if (prior) {
-        if (prior.request_fingerprint !== fingerprint) {
-          throw new GraphStoreError('transition_reused', 'Transition ID was already committed for a different request');
+    const committed = this.dependencies.occCommit<GraphState, GraphMutationResult<T>>(
+      this.path,
+      (currentRaw) => {
+        if (currentRaw === null || currentRaw === undefined) {
+          throw new GraphStoreError('not_found', 'Graph state does not exist for this session');
         }
-        return { state: current, result: prior.result as T, replayed: true };
-      }
+        let current: GraphState;
+        try {
+          current = parseGraphState(JSON.parse(JSON.stringify(currentRaw)));
+        } catch (error) {
+          throw new GraphStoreError('malformed_state', `Cannot parse graph-state.json: ${String(error)}`);
+        }
+        if (current.session_id !== this.sessionId) {
+          throw new GraphStoreError('session_mismatch', 'Graph state belongs to a different session');
+        }
 
-      assertFence(current, request);
-      if (current.transitions.length >= GRAPH_MAX_TRANSITIONS) {
-        throw new GraphStoreError('transition_limit', 'Graph transition limit has been reached');
-      }
-      // User-supplied mutations can extend the lease at long-running checkpoints.
-      const mutation = callback(structuredClone(current), renewLease);
-      assertStoreManagedFieldsUnchanged(current, mutation.next);
-      const result = boundedJsonClone(mutation.result, 'transition result');
-      const sequence = current.commit_sequence + 1;
-      const committedAt = this.dependencies.now?.() ?? new Date().toISOString();
-      const transition: GraphStateTransition = {
-        transition_id: request.transition_id,
-        operation: request.operation,
-        operation_fingerprint: request.operation_fingerprint,
-        request_fingerprint: fingerprint,
-        sequence,
-        committed_at: committedAt,
-        result,
-      };
-      const next = parseGraphState({
-        ...mutation.next,
-        commit_sequence: sequence,
-        transitions: [...current.transitions, transition],
-        updated_at: committedAt,
-      });
-      this.assertStateSize(next);
-      renewLease();
-      this.dependencies.writeAtomic(this.path, next);
-      return { state: next, result, replayed: false };
-    });
-    if (!locked.acquired || !locked.value) {
-      throw new GraphStoreError('lock_busy', 'Could not acquire the exclusive Graph state lock');
+        const prior = current.transitions.find((transition) => transition.transition_id === request.transition_id);
+        if (prior) {
+          if (prior.request_fingerprint !== fingerprint) {
+            throw new GraphStoreError('transition_reused', 'Transition ID was already committed for a different request');
+          }
+          return { state: current, result: { state: current, result: prior.result as T, replayed: true } };
+        }
+
+        assertFence(current, request);
+        if (current.transitions.length >= GRAPH_MAX_TRANSITIONS) {
+          throw new GraphStoreError('transition_limit', 'Graph transition limit has been reached');
+        }
+        // The OCC wrapper validates + commits the returned state atomically; the
+        // old `renew` lease hook is obsolete (no lease under OCC) so it is a no-op.
+        const renew = (): void => {};
+        const mutation = callback(structuredClone(current), renew);
+        assertStoreManagedFieldsUnchanged(current, mutation.next);
+        const result = boundedJsonClone(mutation.result, 'transition result');
+        const sequence = current.commit_sequence + 1;
+        const committedAt = this.dependencies.now?.() ?? new Date().toISOString();
+        const transition: GraphStateTransition = {
+          transition_id: request.transition_id,
+          operation: request.operation,
+          operation_fingerprint: request.operation_fingerprint,
+          request_fingerprint: fingerprint,
+          sequence,
+          committed_at: committedAt,
+          result,
+        };
+        const next = parseGraphState({
+          ...mutation.next,
+          commit_sequence: sequence,
+          transitions: [...current.transitions, transition],
+          updated_at: committedAt,
+        });
+        this.assertStateSize(next);
+        return { state: next, result: { state: next, result, replayed: false } };
+      },
+    );
+    if (!committed) {
+      throw new GraphStoreError('lock_busy', 'Could not commit the Graph state mutation via OCC');
     }
-    return locked.value;
+    return committed.result;
   }
 
   private assertStateSize(state: GraphState): void {

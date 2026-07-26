@@ -451,14 +451,18 @@ function executeClaim(input: Readonly<Record<string, unknown>>): unknown {
       const attemptId = randomUUID();
       const leaseId = randomUUID();
       const trackingId = randomUUID();
-      const projection = beginActivationAttempt(working.projection, {
-        activation_id: activation.activation_id,
-        attempt_id: attemptId,
-      });
+      // Resolve the node BEFORE beginning the attempt so the begin can gate
+      // on node.max_attempts for agent/command nodes (ordinary retries must not
+      // bypass the per-node bound). Human-approval/join nodes carry no bound.
       const node = descriptor.nodes.find((candidate) => candidate.id === activation.node_id);
       if (!node) {
         throw new Error(`activation ${activation.activation_id} has no matching node`);
       }
+      const projection = beginActivationAttempt(working.projection, {
+        activation_id: activation.activation_id,
+        attempt_id: attemptId,
+        ...(node.kind === 'agent' || node.kind === 'command' ? { max_attempts: node.max_attempts } : {}),
+      });
       if (node.kind === 'human-approval') {
         // B6: human-approval nodes are executable via the in-session question surface.
         // Issue a durable claim that fences the activation while we wait for the human
@@ -666,7 +670,15 @@ function applyResultOperation(
       // the durable wait (the human answered), so return to 'running' and let the
       // driver claim the next ready activation. Without this the run would wedge
       // in 'waiting_human' after the human-approval node completes.
-      ...(current.status === 'waiting_human' ? { status: 'running' as const } : {}),
+      // A3: if the completed result failed AND the activation has exhausted its
+      // retry budget (terminal 'failed'), promote the graph to 'failed'. This
+      // takes precedence over the waiting_human->running transition so a failed
+      // exhausted node does not leave an un-claimable, un-retryable activation
+      // wedging the run forever.
+      ...(schedulerResult.transition.outcome === 'failed'
+        && schedulerResult.projection.activations[activationId]?.status === 'failed'
+        ? { status: 'failed' as const }
+        : current.status === 'waiting_human' ? { status: 'running' as const } : {}),
       claims: {
         ...current.claims,
         [leaseId]: {

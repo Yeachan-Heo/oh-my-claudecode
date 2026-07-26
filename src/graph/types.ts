@@ -173,6 +173,10 @@ export interface GraphSchedulerProjection {
 export interface BeginActivationAttemptInput {
   activation_id: string;
   attempt_id: string;
+  // Optional per-node retry bound (agent/command nodes). When supplied the
+  // scheduler rejects any begin whose resulting attempt_no exceeds it, so an
+  // ordinary release+reclaim loop cannot bypass the node's max_attempts.
+  max_attempts?: number;
 }
 
 export type ReleaseAttemptForRetryInput = BeginActivationAttemptInput;
