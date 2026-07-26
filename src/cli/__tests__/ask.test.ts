@@ -155,6 +155,8 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "      encoding: options.encoding ?? null,",
       "      stdio: options.stdio ?? null,",
       "      input: options.input ?? null,",
+      "      timeout: options.timeout ?? null,",
+      "      killSignal: options.killSignal ?? null,",
       '      env: {',
       "        CLAUDECODE: options.env?.CLAUDECODE ?? null,",
       "        CLAUDE_SESSION_ID: options.env?.CLAUDE_SESSION_ID ?? null,",
@@ -172,6 +174,9 @@ function writeSpawnSyncCapturePrelude(dir: string): string {
       "    return { status: 1, stdout: '', stderr: \"'\" + command + \"' is not recognized\", pid: 0, output: [], signal: null };",
       '  }',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
+      "  if (mode === 'version-timeout' && isVersionProbe) {",
+      "    return { status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
+      '  }',
       "  if (mode === 'empty-output' && !isVersionProbe) {",
       "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
       '  }',
@@ -229,6 +234,9 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       '    },',
       '  });',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
+      "  if (mode === 'version-timeout' && isVersionProbe) {",
+      "    return { status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '', pid: 0, output: [] };",
+      '  }',
       "  if (mode === 'empty-output' && !isVersionProbe) {",
       "    return { status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null };",
       '  }',
@@ -574,7 +582,6 @@ describe('run-provider-advisor script contract', () => {
     // antigravity is intentionally omitted here: this matrix runs under the win32
     // capture prelude, and antigravity is guarded (exits early) on Windows. Its
     // env-stripping on supported platforms is covered by the non-Windows tests.
-    ['grok', ['grok', '--prompt', 'nested grok prompt']],
     ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
   ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
     const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
@@ -624,13 +631,11 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
-  it('launches grok as `grok -p <prompt> --always-approve` and never pipes stdin', () => {
+  it('fails closed for grok because no verified read-only mode is available', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-grok-args-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
       const preludePath = writeSpawnSyncCapturePrelude(wd);
-      // A multiline prompt is piped over stdin for codex/gemini; grok reserves stdin
-      // for ACP JSON-RPC, so it must take the prompt as a `-p` arg instead.
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         ['grok', '--prompt', 'review this\nand that'],
@@ -639,27 +644,18 @@ describe('run-provider-advisor script contract', () => {
       );
 
       expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-
-      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
-        command: string;
-        args: string[];
-        options: { input: string | null };
-      }>;
-
-      // version probe + launch, both via the `grok` binary
-      expect(calls).toHaveLength(2);
-      const launch = calls.find((c) => !c.args.includes('--version'));
-      expect(launch).toBeDefined();
-      expect(launch!.command).toBe('grok');
-      expect(launch!.args).toEqual(['-p', 'review this\nand that', '--always-approve']);
-      expect(launch!.options.input ?? null).toBeNull();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('no verified Grok read-only/plan mode');
+      if (existsSync(capturePath)) {
+        const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{ command: string }>;
+        expect(calls.some((c) => c.command === 'grok')).toBe(false);
+      }
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
   });
 
-  it('launches cursor as `cursor-agent --print --force --trust --sandbox disabled <prompt>` and never pipes stdin', () => {
+  it('launches cursor in plan mode with sandbox enabled and never pipes stdin', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cursor-args-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
@@ -679,7 +675,11 @@ describe('run-provider-advisor script contract', () => {
       const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
         command: string;
         args: string[];
-        options: { input: string | null };
+        options: {
+          input: string | null;
+          timeout: number | null;
+          killSignal: string | null;
+        };
       }>;
 
       expect(calls).toHaveLength(2);
@@ -688,13 +688,80 @@ describe('run-provider-advisor script contract', () => {
       expect(launch!.command).toBe('cursor-agent');
       expect(launch!.args).toEqual([
         '--print',
-        '--force',
+        '--mode',
+        'plan',
         '--trust',
         '--sandbox',
-        'disabled',
+        'enabled',
         'review this\nand that',
       ]);
       expect(launch!.options.input ?? null).toBeNull();
+      expect(calls[0].options.timeout).toBe(10000);
+      expect(calls[0].options.killSignal).toBe('SIGKILL');
+      expect(launch!.options.timeout).toBe(600000);
+      expect(launch!.options.killSignal).toBe('SIGKILL');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a provider version probe after the fixed safety timeout', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-version-timeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['claude', '--prompt', 'review this'],
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          SPAWN_CAPTURE_MODE: 'version-timeout',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('claude --version timed out after 10000ms');
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        args: string[];
+        options: { timeout: number | null; killSignal: string | null };
+      }>;
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toEqual(['--version']);
+      expect(calls[0].options).toMatchObject({ timeout: 10000, killSignal: 'SIGKILL' });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('honors the bounded provider timeout override and reports a timed-out run', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-provider-timeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['claude', '--prompt', 'review this'],
+        wd,
+        {
+          SPAWN_CAPTURE_PATH: capturePath,
+          SPAWN_CAPTURE_MODE: 'timeout',
+          OMC_PROVIDER_TIMEOUT_MS: '1200',
+        },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('provider timed out after 1200ms');
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        args: string[];
+        options: { timeout: number | null; killSignal: string | null };
+      }>;
+      expect(calls).toHaveLength(2);
+      expect(calls[1].options).toMatchObject({ timeout: 1200, killSignal: 'SIGKILL' });
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
@@ -757,7 +824,7 @@ describe('run-provider-advisor script contract', () => {
       });
       expect(calls[1]).toMatchObject({
         command: 'codex',
-        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'windows cmd support 你好' },
       });
     } finally {
@@ -820,7 +887,7 @@ describe('run-provider-advisor script contract', () => {
       });
       expect(calls[1]).toMatchObject({
         command: 'gemini',
-        args: ['--yolo'],
+        args: ['--approval-mode', 'plan'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
       });
     } finally {
@@ -853,7 +920,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'codex',
-        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: multilinePrompt },
       });
     } finally {
@@ -886,7 +953,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'gemini',
-        args: ['--yolo'],
+        args: ['--approval-mode', 'plan'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: longPrompt },
       });
     } finally {
@@ -920,7 +987,7 @@ describe('run-provider-advisor script contract', () => {
       // Even multiline prompts go via argv (safe: spawned without a shell); never stdin.
       expect(calls[1]).toMatchObject({
         command: 'agy',
-        args: ['--dangerously-skip-permissions', '-p', multilinePrompt],
+        args: ['--mode', 'plan', '--sandbox', '-p', multilinePrompt],
         options: { input: null },
       });
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
@@ -954,7 +1021,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'agy',
-        args: ['--dangerously-skip-permissions', '-p', longPrompt],
+        args: ['--mode', 'plan', '--sandbox', '-p', longPrompt],
         options: { input: null },
       });
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
@@ -963,7 +1030,7 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
-  it('launches antigravity as `agy --dangerously-skip-permissions -p <prompt>` for short prompts', () => {
+  it('launches antigravity in plan mode with sandboxing for short prompts', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-short-argv-'));
     const shortPrompt = 'review this change';
     try {
@@ -988,7 +1055,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'agy',
-        args: ['--dangerously-skip-permissions', '-p', shortPrompt],
+        args: ['--mode', 'plan', '--sandbox', '-p', shortPrompt],
         options: { input: null },
       });
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
@@ -1115,7 +1182,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'claude',
-        args: ['-p'],
+        args: ['-p', '--permission-mode', 'plan'],
         options: { stdio: null, input: multilinePrompt },
       });
     } finally {
@@ -1148,7 +1215,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'claude',
-        args: ['-p'],
+        args: ['-p', '--permission-mode', 'plan'],
         options: { input: frontmatterPrompt },
       });
     } finally {
@@ -1181,7 +1248,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'claude',
-        args: ['-p'],
+        args: ['-p', '--permission-mode', 'plan'],
         options: { input: dashPrompt },
       });
     } finally {
@@ -1214,7 +1281,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'claude',
-        args: ['-p', shortPrompt],
+        args: ['-p', shortPrompt, '--permission-mode', 'plan'],
         options: { input: null },
       });
       expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);

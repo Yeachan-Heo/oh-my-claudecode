@@ -14,6 +14,20 @@ const PROVIDER_BINARIES = {
   cursor: 'cursor-agent',
 };
 const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
+const PROVIDER_VERSION_TIMEOUT_MS = 10000;
+const PROVIDER_RUN_TIMEOUT_DEFAULT_MS = 600000;
+const PROVIDER_RUN_TIMEOUT_MS = (() => {
+  const raw = process.env.OMC_PROVIDER_TIMEOUT_MS;
+  if (raw === undefined || raw === '') {
+    return PROVIDER_RUN_TIMEOUT_DEFAULT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1000) {
+    console.error(`[ask] Ignoring invalid OMC_PROVIDER_TIMEOUT_MS="${raw}" (need an integer >= 1000); using ${PROVIDER_RUN_TIMEOUT_DEFAULT_MS}ms.`);
+    return PROVIDER_RUN_TIMEOUT_DEFAULT_MS;
+  }
+  return Math.min(parsed, 3600000);
+})();
 
 // Antigravity (`agy`) headless print mode has a known upstream non-TTY bug
 // (google-antigravity/antigravity-cli#76) that, beyond the empty-exit-0 case,
@@ -41,22 +55,32 @@ const ANTIGRAVITY_TIMEOUT_MS = (() => {
 
 /**
  * Build CLI args for a given provider.
- * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
- * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
- * - gemini: `gemini -p <prompt> --yolo`
- * - antigravity: `agy --dangerously-skip-permissions -p <prompt>` (Antigravity CLI;
+ * - claude: `claude -p <prompt> --permission-mode plan`
+ * - codex: `codex exec --skip-git-repo-check --sandbox read-only <prompt>`
+ * - gemini: `gemini -p <prompt> --approval-mode plan`
+ * - antigravity: `agy --mode plan --sandbox -p <prompt>` (Antigravity CLI;
  *   `-p` takes the prompt as its value and cannot read it from stdin, so the
- *   prompt is always passed as an arg with approval flags first, like grok)
- * - grok: `grok -p <prompt> --always-approve` (headless mode takes the prompt
+ *   prompt is always passed as an arg with safety flags first, like grok)
+ * - grok: `grok -p <prompt>` (headless mode takes the prompt
  *   as an arg; grok's stdin is reserved for ACP JSON-RPC, never the prompt)
- * - cursor: `cursor-agent --print --force --trust --sandbox disabled <prompt>`
+ * - cursor: `cursor-agent --print --mode plan --trust --sandbox enabled <prompt>`
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
-    return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
+    return [
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--color',
+      'never',
+      pipePromptViaStdin ? '-' : prompt,
+    ];
   }
   if (provider === 'gemini') {
-    return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+    return pipePromptViaStdin
+      ? ['--approval-mode', 'plan']
+      : ['-p', prompt, '--approval-mode', 'plan'];
   }
   if (provider === 'antigravity') {
     // Antigravity (`agy`): `-p`/`--print` takes the prompt as its VALUE (next
@@ -64,20 +88,22 @@ function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}
     // (`agy -p` with no value errors "flag needs an argument"). So always pass
     // the prompt as the `-p` value with approval flags first, like grok.
     // Verified on agy 1.0.10.
-    return ['--dangerously-skip-permissions', '-p', prompt];
+    return ['--mode', 'plan', '--sandbox', '-p', prompt];
   }
   if (provider === 'grok') {
     // Grok's headless mode always takes the prompt as a `-p` arg; its stdin is
     // for ACP JSON-RPC, not the prompt, so it never uses the stdin pipe path.
-    return ['-p', prompt, '--always-approve'];
+    return ['-p', prompt];
   }
   if (provider === 'cursor') {
     // Cursor Agent's print mode takes the prompt as a positional arg. Keep stdin
     // closed so it cannot interpret advisor prompt bytes as interactive input.
-    return ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt];
+    return ['--print', '--mode', 'plan', '--trust', '--sandbox', 'enabled', prompt];
   }
   // claude: `claude -p` reads the prompt from stdin when no prompt arg is given.
-  return pipePromptViaStdin ? ['-p'] : ['-p', prompt];
+  return pipePromptViaStdin
+    ? ['-p', '--permission-mode', 'plan']
+    : ['-p', prompt, '--permission-mode', 'plan'];
 }
 
 function shouldPipePromptViaStdin(provider, prompt) {
@@ -185,6 +211,11 @@ function buildProviderEnv(provider, env = process.env) {
 // as argv through cmd.exe (spawn `shell: true`) is not reliably quoted. Rather
 // than emit silently-broken output, guard Windows with a clear, actionable error.
 function guardProviderPlatform(provider) {
+  if (provider === 'grok') {
+    console.error('[ask-grok] Blocked: no verified Grok read-only/plan mode is available.');
+    console.error('[ask-grok] Use a provider with an enforced plan/read-only mode for advisory work.');
+    process.exit(1);
+  }
   if (provider === 'antigravity' && SHOULD_USE_WINDOWS_SHELL) {
     console.error('[ask-antigravity] Antigravity CLI (agy) headless mode is not supported on Windows yet:');
     console.error('[ask-antigravity]   agy --print takes the prompt as an argv value (it cannot read stdin),');
@@ -200,7 +231,15 @@ function ensureBinary(provider, binary) {
     encoding: 'utf8',
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
+    timeout: PROVIDER_VERSION_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   });
+
+  if (probe.error?.code === 'ETIMEDOUT' || probe.signal === 'SIGKILL') {
+    console.error(`[ask-${provider}] ${binary} --version timed out after ${PROVIDER_VERSION_TIMEOUT_MS}ms.`);
+    console.error(`[ask-${provider}] Repair or reinstall the CLI before invoking a provider.`);
+    process.exit(1);
+  }
 
   const isMissingOnWindowsShell = SHOULD_USE_WINDOWS_SHELL
     && probe.status !== 0
@@ -324,10 +363,9 @@ async function main() {
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
     shell: SHOULD_USE_WINDOWS_SHELL,
-    // Bound antigravity so an upstream non-TTY hang (#76) fails cleanly instead of
-    // blocking forever; agy's own --print-timeout does not work. SIGKILL (not a
-    // catchable SIGTERM) guarantees spawnSync returns even if agy traps signals.
-    ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: ANTIGRAVITY_TIMEOUT_KILL_SIGNAL } : {}),
+    // Bound every provider. A broken CLI must not block `omc ask` indefinitely.
+    timeout: provider === 'antigravity' ? ANTIGRAVITY_TIMEOUT_MS : PROVIDER_RUN_TIMEOUT_MS,
+    killSignal: provider === 'antigravity' ? ANTIGRAVITY_TIMEOUT_KILL_SIGNAL : 'SIGKILL',
     ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
   });
 
@@ -352,6 +390,9 @@ async function main() {
     console.error('[ask-antigravity] agy exited 0 but produced no output under pipe capture.');
     console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
     console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
+    exitCode = 1;
+  } else if (provider !== 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === 'SIGKILL')) {
+    console.error(`[ask-${provider}] provider timed out after ${PROVIDER_RUN_TIMEOUT_MS}ms with no completed response.`);
     exitCode = 1;
   }
 
