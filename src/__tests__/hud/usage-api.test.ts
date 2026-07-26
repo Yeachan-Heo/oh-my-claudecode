@@ -1784,17 +1784,54 @@ describe('parseKimiResponse', () => {
     expect(result!.fiveHourPercent).toBe(0);
   });
 
-  it('picks the shortest sub-12h window as the 5h bucket and ignores longer windows', () => {
+  it('picks the 300-minute window as the 5h bucket, never a shorter or longer one', () => {
     const result = parseKimiResponse({
       usage: { limit: '100', used: '45' },
       limits: [
         { window: { duration: 1, timeUnit: 'TIME_UNIT_DAY' }, detail: { limit: '100', used: '50' } },
-        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '7' } },
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '12' } },
         { window: { duration: 60, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '3' } },
       ],
     });
     expect(result).not.toBeNull();
-    expect(result!.fiveHourPercent).toBe(3); // 60-minute window wins over 300-minute
+    expect(result!.fiveHourPercent).toBe(12); // the actual 5h window, not the 60-minute one
+  });
+
+  it('leaves the 5h bucket empty rather than labelling another window as 5h', () => {
+    // Regression: a shorter burst window must never be rendered under "5h".
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 60, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '80' } },
+        { window: { duration: 1, timeUnit: 'TIME_UNIT_DAY' }, detail: { limit: '100', used: '90' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.weeklyPercent).toBe(45);
+    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.fiveHourResetsAt).toBeUndefined();
+  });
+
+  it('accepts a 5h window expressed in hours (5 × TIME_UNIT_HOUR)', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      limits: [
+        { window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' }, detail: { limit: '100', used: '12' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(12);
+  });
+
+  it('falls through an unusable 5h row to a later usable one', () => {
+    const result = parseKimiResponse({
+      limits: [
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '0', used: '0' } },
+        { window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', used: '4' } },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.fiveHourPercent).toBe(4);
   });
 
   it('returns null when no usable quota rows exist', () => {
@@ -1878,6 +1915,72 @@ describe('parseKimiResponse', () => {
     expect(result!.weeklyPercent).toBe(45);
   });
 
+  it('skips booster wallet when the limit/used currencies disagree', () => {
+    const mismatched = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 15000, currency: 'CNY' },
+      },
+    });
+    expect(mismatched).not.toBeNull();
+    expect(mismatched!.extraUsagePercent).toBeUndefined();
+    expect(mismatched!.extraUsageSpentUsd).toBeUndefined();
+    expect(mismatched!.extraUsageLimitUsd).toBeUndefined();
+
+    const reversed = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 20000, currency: 'CNY' },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(reversed).not.toBeNull();
+    expect(reversed!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('skips booster wallet when only one side declares a currency', () => {
+    const limitOnly = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 'USD' },
+        monthlyUsed: { priceInCents: 1500 },
+      },
+    });
+    expect(limitOnly!.extraUsagePercent).toBeUndefined();
+
+    const usedOnly = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000 },
+        monthlyUsed: { priceInCents: 1500, currency: 'USD' },
+      },
+    });
+    expect(usedOnly!.extraUsagePercent).toBeUndefined();
+  });
+
+  it('survives a non-string currency without throwing', () => {
+    const result = parseKimiResponse({
+      usage: { limit: '100', used: '45' },
+      boosterWallet: {
+        balance: { type: 'BOOSTER', amount: 1_000_000_000, amountLeft: 500_000_000 },
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimit: { priceInCents: 2000, currency: 840 as unknown as string },
+        monthlyUsed: { priceInCents: 1500, currency: 840 as unknown as string },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.extraUsagePercent).toBeUndefined();
+  });
+
   it('skips booster wallet when currency is absent (never guesses "$")', () => {
     const result = parseKimiResponse({
       usage: { limit: '100', used: '45' },
@@ -1921,6 +2024,7 @@ describe('getUsage routing - kimi', () => {
     vi.mocked(childProcess.execFileSync).mockImplementation(() => { throw new Error('mock: no keychain'); });
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.KIMI_API_KEY;
     httpsModule = await import('https') as unknown as typeof httpsModule;
   });
@@ -1957,6 +2061,22 @@ describe('getUsage routing - kimi', () => {
     expect(callArgs.headers.Authorization).toBe('Bearer test-auth-token');
   });
 
+  it('authenticates with ANTHROPIC_API_KEY, the credential Kimi documents', async () => {
+    // Kimi's Claude Code setup: ANTHROPIC_BASE_URL=https://api.kimi.com/coding/
+    // plus ANTHROPIC_API_KEY. That config alone must reach the usage endpoint.
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.ANTHROPIC_API_KEY = 'documented-kimi-key';
+
+    const result = await getUsage();
+    expect(result.error).toBe('network'); // reached the request, not no_credentials
+
+    expect(httpsModule.default.request).toHaveBeenCalledTimes(1);
+    const callArgs = httpsModule.default.request.mock.calls[0][0];
+    expect(callArgs.hostname).toBe('api.kimi.com');
+    expect(callArgs.path).toBe('/coding/v1/usages');
+    expect(callArgs.headers.Authorization).toBe('Bearer documented-kimi-key');
+  });
+
   it('prefers KIMI_API_KEY over ANTHROPIC_AUTH_TOKEN', async () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
     process.env.KIMI_API_KEY = 'preferred-key';
@@ -1969,9 +2089,49 @@ describe('getUsage routing - kimi', () => {
     expect(callArgs.headers.Authorization).toBe('Bearer preferred-key');
   });
 
+  it('applies the full credential precedence: KIMI_API_KEY > ANTHROPIC_API_KEY > ANTHROPIC_AUTH_TOKEN', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'kimi-key';
+    process.env.ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'auth-token';
+
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer kimi-key');
+
+    // Drop the most specific: ANTHROPIC_API_KEY takes over. Moonshot documents
+    // it for this endpoint and warns a stale AUTH_TOKEN conflicts, so the key
+    // the documented setup authenticates with must win over the leftover.
+    vi.clearAllMocks();
+    delete process.env.KIMI_API_KEY;
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer anthropic-key');
+
+    // Only the auth token left: still used (kimi-code CLI / platform setups).
+    vi.clearAllMocks();
+    delete process.env.ANTHROPIC_API_KEY;
+    await getUsage();
+    expect(httpsModule.default.request.mock.calls[0][0].headers.Authorization)
+      .toBe('Bearer auth-token');
+  });
+
+  it('does not send the bearer token to a non-canonical *.kimi.com subdomain', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://evil.kimi.com/coding/';
+    process.env.ANTHROPIC_API_KEY = 'leaky-key';
+
+    const result = await getUsage();
+
+    // Detected as kimi (so we never report another provider's numbers), but the
+    // credential stays home.
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
   it('returns no_credentials when kimi host detected but no API key', async () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
-    // Neither KIMI_API_KEY nor ANTHROPIC_AUTH_TOKEN set
+    // No KIMI_API_KEY, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN set
 
     const result = await getUsage();
     expect(result.rateLimits).toBeNull();

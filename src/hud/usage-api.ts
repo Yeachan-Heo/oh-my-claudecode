@@ -35,7 +35,8 @@ import { lockPathFor, withFileLock, type FileLockOptions } from '../lib/file-loc
  * - anthropic: Claude Code OAuth subscription (api.anthropic.com/api/oauth/usage)
  * - zai: z.ai GLM coding plan (via ANTHROPIC_BASE_URL host detection)
  * - minimax: MiniMax coding plan (via ANTHROPIC_BASE_URL host detection)
- * - kimi: Kimi For Coding plan, api.kimi.com (API key or OAuth token)
+ * - kimi: Kimi For Coding plan, api.kimi.com (ANTHROPIC_API_KEY per Kimi's
+ *   Claude Code docs; KIMI_API_KEY / ANTHROPIC_AUTH_TOKEN also accepted)
  */
 type UsageSource = 'anthropic' | 'zai' | 'minimax' | 'kimi';
 
@@ -227,6 +228,20 @@ interface KimiQuotaRow {
   reset_at?: string;
   resetAt?: string;
 }
+
+/**
+ * Hostnames allowed to receive the Kimi bearer token.
+ *
+ * `isKimiHost()` deliberately matches every `*.kimi.com` subdomain so provider
+ * detection stays forgiving, but the credential itself must only ever travel to
+ * the first-party origin Moonshot documents (`https://api.kimi.com/coding/`).
+ * Pinning here keeps an attacker-influenced `ANTHROPIC_BASE_URL` — say a
+ * takeover-prone or user-content `*.kimi.com` subdomain — from exfiltrating it.
+ */
+const KIMI_USAGE_HOSTNAMES = new Set(['api.kimi.com', 'kimi.com']);
+
+/** Fixed path of the Kimi usage endpoint; never derived from the environment */
+const KIMI_USAGE_PATH = '/coding/v1/usages';
 
 interface KimiUsageResponse {
   usage?: KimiQuotaRow;
@@ -1310,8 +1325,10 @@ export function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateL
 /**
  * Fetch usage from the Kimi For Coding platform.
  *
- * Endpoint: GET {origin}/coding/v1/usages (origin taken from ANTHROPIC_BASE_URL,
- * whose path may be /coding, /coding/, or /coding/v1 depending on setup docs).
+ * Endpoint: GET https://{canonical kimi host}/coding/v1/usages. Only the host
+ * comes from ANTHROPIC_BASE_URL (whose path may be /coding, /coding/, or
+ * /coding/v1 depending on setup docs) and it must be one of
+ * KIMI_USAGE_HOSTNAMES — the bearer token never leaves that origin.
  * Auth: Bearer token — accepts both Kimi API keys (METHOD_API_KEY) and OAuth
  * access tokens from the kimi-code CLI.
  */
@@ -1333,14 +1350,23 @@ function fetchUsageFromKimi(apiKey: string): Promise<FetchResult<KimiUsageRespon
     }
 
     try {
-      const url = new URL(baseUrl);
-      const quotaUrl = `${url.protocol}//${url.host}/coding/v1/usages`;
-      const urlObj = new URL(quotaUrl);
+      const hostname = new URL(baseUrl).hostname.toLowerCase();
+
+      // Provider detection accepts any *.kimi.com host; the credential does not.
+      if (!KIMI_USAGE_HOSTNAMES.has(hostname)) {
+        if (process.env.OMC_DEBUG) {
+          console.error(
+            `[usage-api] Refusing to send Kimi credentials to non-canonical host '${hostname}'`,
+          );
+        }
+        resolve({ data: null });
+        return;
+      }
 
       const req = https.request(
         {
-          hostname: urlObj.hostname,
-          path: urlObj.pathname,
+          hostname,
+          path: KIMI_USAGE_PATH,
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
@@ -1418,6 +1444,15 @@ function parseKimiResetTime(row: KimiQuotaRow | undefined): Date | null {
 }
 
 /**
+ * Normalize a Kimi currency code to upper case, or null when absent.
+ * Non-string values are rejected rather than coerced: runtime payloads are
+ * untrusted and `.toUpperCase()` on a number would throw into the HUD.
+ */
+function kimiCurrencyCode(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value.toUpperCase() : null;
+}
+
+/**
  * Used quota for a Kimi row: direct `used`, or `limit - remaining` fallback
  * (mirrors kimi-code's loose parser — field spelling drifted across versions).
  */
@@ -1436,7 +1471,9 @@ function kimiUsedQuota(row: KimiQuotaRow): number | null {
  */
 function kimiWindowMinutes(window: { duration?: number; timeUnit?: string } | undefined): number | null {
   const duration = window?.duration;
-  const timeUnit = window?.timeUnit ?? '';
+  // Untrusted payload: a non-string timeUnit must not throw on .includes()
+  const rawUnit = window?.timeUnit;
+  const timeUnit = typeof rawUnit === 'string' ? rawUnit : '';
   if (duration == null || !Number.isFinite(duration) || duration <= 0) return null;
   if (timeUnit.includes('MINUTE')) return duration;
   if (timeUnit.includes('HOUR')) return duration * 60;
@@ -1444,16 +1481,25 @@ function kimiWindowMinutes(window: { duration?: number; timeUnit?: string } | un
   return null;
 }
 
-/** Windows up to 12 hours are treated as the short ("5h") rolling bucket */
-const KIMI_SHORT_WINDOW_MAX_MINUTES = 12 * 60;
+/**
+ * Duration of the Kimi For Coding rolling window the HUD renders as "5h".
+ *
+ * Kimi documents a rolling 5-hour rate window on top of the weekly quota, and
+ * the live payload reports it as `{ duration: 300, timeUnit: TIME_UNIT_MINUTE }`.
+ * Only this exact duration may fill `fiveHourPercent`: the HUD prints that field
+ * under a hard-coded "5h" label, so accepting a nearby window (a 1h burst cap,
+ * say) would report one product limit while claiming another.
+ */
+const KIMI_FIVE_HOUR_WINDOW_MINUTES = 300;
 
 /**
  * Parse Kimi For Coding `/usages` response into RateLimits.
  *
  * Mapping (verified against live payload):
  * - Top-level `usage` → weekly window (resetTime ~7 days out)
- * - `limits[]` entry with the shortest window ≤ 12h → 5-hour window
- *   (observed: window.duration=300, timeUnit=TIME_UNIT_MINUTE)
+ * - `limits[]` entry whose window is exactly 300 minutes → 5-hour window
+ *   (observed: window.duration=300, timeUnit=TIME_UNIT_MINUTE). Any other
+ *   duration is dropped, never rendered under the HUD's "5h" label.
  * - `boosterWallet` (optional) → extra usage, USD only: the HUD's extra-usage
  *   renderer hard-codes "$", so CNY wallets are skipped rather than mislabeled.
  */
@@ -1473,36 +1519,33 @@ export function parseKimiResponse(response: KimiUsageResponse): RateLimits | nul
     }
   }
 
-  // 5-hour window: shortest limits[] window at or below 12 hours
+  // 5-hour window: the limits[] entry whose window is exactly 5 hours. Windows
+  // of any other duration (and unclassifiable ones) are left out rather than
+  // relabelled — see KIMI_FIVE_HOUR_WINDOW_MINUTES.
   const limits = Array.isArray(response.limits) ? response.limits : [];
-  let shortBucket: { row: KimiQuotaRow; resetAt: Date | null; minutes: number } | null = null;
-  let skippedUnknownWindow = false;
+  let filledFiveHour = false;
+  let sawOtherWindow = false;
   for (const entry of limits) {
     if (!entry || typeof entry !== 'object') continue;
-    const row = entry.detail ?? entry;
-    const minutes = kimiWindowMinutes(entry.window);
-    if (minutes == null) {
-      skippedUnknownWindow = true;
+    if (kimiWindowMinutes(entry.window) !== KIMI_FIVE_HOUR_WINDOW_MINUTES) {
+      sawOtherWindow = true;
       continue;
     }
-    if (minutes > KIMI_SHORT_WINDOW_MAX_MINUTES) continue;
-    if (shortBucket == null || minutes < shortBucket.minutes) {
-      shortBucket = { row, resetAt: parseKimiResetTime(row), minutes };
-    }
+    const row = entry.detail ?? entry;
+    const limit = kimiToNumber(row.limit);
+    const used = kimiUsedQuota(row);
+    // Keep scanning on an unusable row: a duplicate 5h entry may still be good
+    if (limit == null || limit <= 0 || used == null) continue;
+    result.fiveHourPercent = clamp((used / limit) * 100);
+    result.fiveHourResetsAt = parseKimiResetTime(row);
+    hasAny = true;
+    filledFiveHour = true;
+    break;
   }
-  if (skippedUnknownWindow && shortBucket == null && process.env.OMC_DEBUG) {
+  if (!filledFiveHour && sawOtherWindow && process.env.OMC_DEBUG) {
     console.error(
-      '[usage-api] Kimi limits[] present but no window could be classified (unknown timeUnit?) — 5h bucket dropped',
+      `[usage-api] Kimi limits[] carried no ${KIMI_FIVE_HOUR_WINDOW_MINUTES}-minute window — 5h bucket left empty`,
     );
-  }
-  if (shortBucket != null) {
-    const limit = kimiToNumber(shortBucket.row.limit);
-    const used = kimiUsedQuota(shortBucket.row);
-    if (limit != null && limit > 0 && used != null) {
-      result.fiveHourPercent = clamp((used / limit) * 100);
-      result.fiveHourResetsAt = shortBucket.resetAt;
-      hasAny = true;
-    }
   }
 
   // Extra (metered) usage: booster wallet monthly spend vs monthly cap.
@@ -1512,12 +1555,16 @@ export function parseKimiResponse(response: KimiUsageResponse): RateLimits | nul
   if (wallet?.balance?.type === 'BOOSTER') {
     const limitCents = kimiToNumber(wallet.monthlyChargeLimit?.priceInCents);
     const usedCents = kimiToNumber(wallet.monthlyUsed?.priceInCents);
-    const currency = (wallet.monthlyChargeLimit?.currency ?? wallet.monthlyUsed?.currency)?.toUpperCase();
+    // Both sides must declare USD independently. Falling back from one to the
+    // other would render a mismatched pair (limit USD / used CNY) as one "$"
+    // figure over another, silently misstating the spend.
+    const limitCurrency = kimiCurrencyCode(wallet.monthlyChargeLimit?.currency);
+    const usedCurrency = kimiCurrencyCode(wallet.monthlyUsed?.currency);
     if (
       wallet.monthlyChargeLimitEnabled === true &&
       limitCents != null && limitCents > 0 &&
       usedCents != null &&
-      currency === 'USD'
+      limitCurrency === 'USD' && usedCurrency === 'USD'
     ) {
       result.extraUsageSpentUsd = usedCents / 100;
       result.extraUsageLimitUsd = limitCents / 100;
@@ -1604,7 +1651,18 @@ export async function getUsage(): Promise<UsageResult> {
   const isKimi = baseUrl != null && isKimiHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const kimiApiKey = process.env.KIMI_API_KEY || authToken;
+  // Kimi For Coding documents `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`
+  // paired with `ANTHROPIC_API_KEY`; the Moonshot open platform and the
+  // kimi-code CLI use `ANTHROPIC_AUTH_TOKEN` instead. Both reach this branch,
+  // so try them in order of specificity to this host:
+  //   1. KIMI_API_KEY        — explicit, provider-scoped override
+  //   2. ANTHROPIC_API_KEY   — the documented credential for api.kimi.com
+  //   3. ANTHROPIC_AUTH_TOKEN — OAuth access tokens / platform-style setups
+  // (2) outranks (3) because Moonshot warns the two conflict and tells users on
+  // this endpoint to unset ANTHROPIC_AUTH_TOKEN — a leftover one must not mask
+  // the key the documented setup actually authenticates with.
+  const kimiApiKey =
+    process.env.KIMI_API_KEY || process.env.ANTHROPIC_API_KEY || authToken;
   const currentSource: UsageSource =
     isMinimax ? 'minimax' : isKimi ? 'kimi' : isZai && authToken ? 'zai' : 'anthropic';
   const pollIntervalMs = getUsagePollIntervalMs();

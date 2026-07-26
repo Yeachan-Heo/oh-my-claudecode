@@ -53433,6 +53433,15 @@ function isMinimaxHost(urlString) {
     return false;
   }
 }
+function isKimiHost(urlString) {
+  try {
+    const url = new URL(urlString);
+    const hostname4 = url.hostname.toLowerCase();
+    return hostname4 === "kimi.com" || hostname4.endsWith(".kimi.com");
+  } catch {
+    return false;
+  }
+}
 function getLegacyCachePath() {
   return (0, import_path131.join)(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".usage-cache.json");
 }
@@ -54159,6 +54168,175 @@ function parseMinimaxResponse(response) {
     weeklyResetsAt: parseResetTime(codingModel.weekly_end_time)
   };
 }
+function fetchUsageFromKimi(apiKey) {
+  return new Promise((resolve32) => {
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+    if (!baseUrl) {
+      resolve32({ data: null });
+      return;
+    }
+    const validation = validateAnthropicBaseUrl(baseUrl);
+    if (!validation.allowed) {
+      console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
+      resolve32({ data: null });
+      return;
+    }
+    try {
+      const hostname4 = new URL(baseUrl).hostname.toLowerCase();
+      if (!KIMI_USAGE_HOSTNAMES.has(hostname4)) {
+        if (process.env.OMC_DEBUG) {
+          console.error(
+            `[usage-api] Refusing to send Kimi credentials to non-canonical host '${hostname4}'`
+          );
+        }
+        resolve32({ data: null });
+        return;
+      }
+      const req = import_https3.default.request(
+        {
+          hostname: hostname4,
+          path: KIMI_USAGE_PATH,
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Accept": "application/json"
+          },
+          timeout: API_TIMEOUT_MS2
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => {
+            data += chunk;
+          });
+          res.on("end", () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve32({ data: JSON.parse(data) });
+              } catch {
+                resolve32({ data: null });
+              }
+            } else if (res.statusCode === 429) {
+              if (process.env.OMC_DEBUG) {
+                console.error(`[usage-api] Kimi API returned 429 (rate limited)`);
+              }
+              resolve32({ data: null, rateLimited: true });
+            } else {
+              resolve32({ data: null });
+            }
+          });
+        }
+      );
+      req.on("error", () => resolve32({ data: null }));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve32({ data: null });
+      });
+      req.end();
+    } catch {
+      resolve32({ data: null });
+    }
+  });
+}
+function kimiToNumber(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+function parseKimiResetTime(row) {
+  const raw = row?.resetTime ?? row?.reset_at ?? row?.resetAt;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  let normalized = raw;
+  if (normalized.includes(".") && normalized.endsWith("Z")) {
+    const [base, frac] = normalized.slice(0, -1).split(".");
+    if (base && frac) {
+      normalized = `${base}.${frac.slice(0, 3)}Z`;
+    }
+  }
+  try {
+    const date3 = new Date(normalized);
+    return isNaN(date3.getTime()) ? null : date3;
+  } catch {
+    return null;
+  }
+}
+function kimiCurrencyCode(value) {
+  return typeof value === "string" && value.length > 0 ? value.toUpperCase() : null;
+}
+function kimiUsedQuota(row) {
+  const used = kimiToNumber(row.used);
+  if (used != null) return used;
+  const limit = kimiToNumber(row.limit);
+  const remaining = kimiToNumber(row.remaining);
+  if (limit != null && remaining != null) return limit - remaining;
+  return null;
+}
+function kimiWindowMinutes(window) {
+  const duration3 = window?.duration;
+  const rawUnit = window?.timeUnit;
+  const timeUnit = typeof rawUnit === "string" ? rawUnit : "";
+  if (duration3 == null || !Number.isFinite(duration3) || duration3 <= 0) return null;
+  if (timeUnit.includes("MINUTE")) return duration3;
+  if (timeUnit.includes("HOUR")) return duration3 * 60;
+  if (timeUnit.includes("DAY")) return duration3 * 60 * 24;
+  return null;
+}
+function parseKimiResponse(response) {
+  const result = { fiveHourPercent: 0 };
+  let hasAny = false;
+  const weekly = response.usage;
+  if (weekly) {
+    const limit = kimiToNumber(weekly.limit);
+    const used = kimiUsedQuota(weekly);
+    if (limit != null && limit > 0 && used != null) {
+      result.weeklyPercent = clamp(used / limit * 100);
+      result.weeklyResetsAt = parseKimiResetTime(weekly);
+      hasAny = true;
+    }
+  }
+  const limits = Array.isArray(response.limits) ? response.limits : [];
+  let filledFiveHour = false;
+  let sawOtherWindow = false;
+  for (const entry of limits) {
+    if (!entry || typeof entry !== "object") continue;
+    if (kimiWindowMinutes(entry.window) !== KIMI_FIVE_HOUR_WINDOW_MINUTES) {
+      sawOtherWindow = true;
+      continue;
+    }
+    const row = entry.detail ?? entry;
+    const limit = kimiToNumber(row.limit);
+    const used = kimiUsedQuota(row);
+    if (limit == null || limit <= 0 || used == null) continue;
+    result.fiveHourPercent = clamp(used / limit * 100);
+    result.fiveHourResetsAt = parseKimiResetTime(row);
+    hasAny = true;
+    filledFiveHour = true;
+    break;
+  }
+  if (!filledFiveHour && sawOtherWindow && process.env.OMC_DEBUG) {
+    console.error(
+      `[usage-api] Kimi limits[] carried no ${KIMI_FIVE_HOUR_WINDOW_MINUTES}-minute window \u2014 5h bucket left empty`
+    );
+  }
+  const wallet = response.boosterWallet;
+  if (wallet?.balance?.type === "BOOSTER") {
+    const limitCents = kimiToNumber(wallet.monthlyChargeLimit?.priceInCents);
+    const usedCents = kimiToNumber(wallet.monthlyUsed?.priceInCents);
+    const limitCurrency = kimiCurrencyCode(wallet.monthlyChargeLimit?.currency);
+    const usedCurrency = kimiCurrencyCode(wallet.monthlyUsed?.currency);
+    if (wallet.monthlyChargeLimitEnabled === true && limitCents != null && limitCents > 0 && usedCents != null && limitCurrency === "USD" && usedCurrency === "USD") {
+      result.extraUsageSpentUsd = usedCents / 100;
+      result.extraUsageLimitUsd = limitCents / 100;
+      result.extraUsagePercent = clamp(usedCents / limitCents * 100);
+      hasAny = true;
+    }
+  }
+  return hasAny ? result : null;
+}
 async function fetchAndCacheUsage(opts) {
   const { source, fetchFn, parseFn, cache, pollIntervalMs } = opts;
   const result = await fetchFn();
@@ -54205,9 +54383,11 @@ async function getUsage() {
   const baseUrl = process.env.ANTHROPIC_BASE_URL;
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const isMinimax = baseUrl != null && isMinimaxHost(baseUrl);
+  const isKimi = baseUrl != null && isKimiHost(baseUrl);
   const isZai = baseUrl != null && isZaiHost(baseUrl);
   const minimaxApiKey = process.env.MINIMAX_API_KEY || authToken;
-  const currentSource = isMinimax ? "minimax" : isZai && authToken ? "zai" : "anthropic";
+  const kimiApiKey = process.env.KIMI_API_KEY || process.env.ANTHROPIC_API_KEY || authToken;
+  const currentSource = isMinimax ? "minimax" : isKimi ? "kimi" : isZai && authToken ? "zai" : "anthropic";
   const pollIntervalMs = getUsagePollIntervalMs();
   migrateLegacyCache(currentSource);
   const initialCache = readCache(currentSource);
@@ -54229,6 +54409,19 @@ async function getUsage() {
           source: "minimax",
           fetchFn: () => fetchUsageFromMinimax(minimaxApiKey),
           parseFn: parseMinimaxResponse,
+          cache,
+          pollIntervalMs
+        });
+      }
+      if (isKimi) {
+        if (!kimiApiKey) {
+          writeCache({ data: null, error: true, source: "kimi", errorReason: "no_credentials" });
+          return { rateLimits: null, error: "no_credentials" };
+        }
+        return fetchAndCacheUsage({
+          source: "kimi",
+          fetchFn: () => fetchUsageFromKimi(kimiApiKey),
+          parseFn: parseKimiResponse,
           cache,
           pollIntervalMs
         });
@@ -54286,7 +54479,7 @@ async function getUsage() {
     return { rateLimits: null, error: "network" };
   }
 }
-var import_fs111, import_path131, import_child_process36, import_crypto32, import_os20, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK;
+var import_fs111, import_path131, import_child_process36, import_crypto32, import_os20, import_https3, CACHE_TTL_FAILURE_MS, CACHE_TTL_TRANSIENT_NETWORK_MS, MAX_RATE_LIMITED_BACKOFF_MS, API_TIMEOUT_MS2, MAX_STALE_DATA_MS, TOKEN_REFRESH_URL_HOSTNAME, USAGE_CACHE_LOCK_OPTS, TOKEN_REFRESH_URL_PATH, DEFAULT_OAUTH_CLIENT_ID, ZAI_UNIT_WEEK, KIMI_USAGE_HOSTNAMES, KIMI_USAGE_PATH, KIMI_FIVE_HOUR_WINDOW_MINUTES;
 var init_usage_api = __esm({
   "src/hud/usage-api.ts"() {
     "use strict";
@@ -54311,6 +54504,9 @@ var init_usage_api = __esm({
     TOKEN_REFRESH_URL_PATH = "/v1/oauth/token";
     DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     ZAI_UNIT_WEEK = 6;
+    KIMI_USAGE_HOSTNAMES = /* @__PURE__ */ new Set(["api.kimi.com", "kimi.com"]);
+    KIMI_USAGE_PATH = "/coding/v1/usages";
+    KIMI_FIVE_HOUR_WINDOW_MINUTES = 300;
   }
 });
 
