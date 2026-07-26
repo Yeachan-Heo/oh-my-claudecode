@@ -231,6 +231,12 @@ function writeSpawnSyncCapturePreludeNative(dir: string): string {
       "      input: options.input ?? null,",
       "      timeout: options.timeout ?? null,",
       "      killSignal: options.killSignal ?? null,",
+      '      env: {',
+      "        CLAUDECODE: options.env?.CLAUDECODE ?? null,",
+      "        CLAUDE_SESSION_ID: options.env?.CLAUDE_SESSION_ID ?? null,",
+      "        CLAUDECODE_SESSION_ID: options.env?.CLAUDECODE_SESSION_ID ?? null,",
+      "        CLAUDE_CODE_ENTRYPOINT: options.env?.CLAUDE_CODE_ENTRYPOINT ?? null,",
+      '      },',
       '    },',
       '  });',
       "  const isVersionProbe = Array.isArray(args) && args[0] === '--version';",
@@ -587,7 +593,9 @@ describe('run-provider-advisor script contract', () => {
     const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-advisor-env-`));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
-      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const preludePath = provider === 'cursor'
+        ? writeSpawnSyncCapturePreludeNative(wd)
+        : writeSpawnSyncCapturePrelude(wd);
       const result = runAdvisorScriptWithPrelude(
         preludePath,
         args,
@@ -659,7 +667,7 @@ describe('run-provider-advisor script contract', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cursor-args-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
-      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
       // cursor-agent print mode takes the prompt as a positional arg; stdin is
       // interactive input and must stay closed even for multiline prompts.
       const result = runAdvisorScriptWithPrelude(
@@ -700,6 +708,30 @@ describe('run-provider-advisor script contract', () => {
       expect(calls[0].options.killSignal).toBe('SIGKILL');
       expect(launch!.options.timeout).toBe(600000);
       expect(launch!.options.killSignal).toBe('SIGKILL');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('guards cursor on Windows so prompt argv never crosses cmd.exe', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-cursor-win32-guard-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['cursor', '--prompt', 'review this & whoami'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('not supported on Windows');
+      if (existsSync(capturePath)) {
+        const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{ command: string }>;
+        expect(calls.some((c) => c.command === 'cursor-agent')).toBe(false);
+      }
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
@@ -766,6 +798,32 @@ describe('run-provider-advisor script contract', () => {
       rmSync(wd, { recursive: true, force: true });
     }
   });
+
+  it.each(['claude', 'codex', 'gemini', 'cursor'] as const)(
+    'treats an empty-output %s run as a failure',
+    (provider) => {
+      const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-empty-`));
+      try {
+        const capturePath = join(wd, 'spawn-sync-calls.json');
+        const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+        const result = runAdvisorScriptWithPrelude(
+          preludePath,
+          [provider, '--prompt', 'reply please'],
+          wd,
+          {
+            SPAWN_CAPTURE_PATH: capturePath,
+            SPAWN_CAPTURE_MODE: 'empty-output',
+          },
+        );
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('exited 0 but produced no output');
+      } finally {
+        rmSync(wd, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('sanitizes Rust env vars for codex so artifacts do not capture Rust stderr logs', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-rust-env-'));
@@ -889,6 +947,38 @@ describe('run-provider-advisor script contract', () => {
         command: 'gemini',
         args: ['--approval-mode', 'plan'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
+      });
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('pipes Windows claude prompts over stdin so cmd.exe never parses prompt metacharacters', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-claude-win32-stdin-'));
+    const prompt = 'review this & whoami';
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePrelude(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['claude', '--prompt', prompt],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; input: string | null };
+      }>;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toMatchObject({
+        command: 'claude',
+        args: ['-p', '--permission-mode', 'plan'],
+        options: { shell: true, input: prompt },
       });
     } finally {
       rmSync(wd, { recursive: true, force: true });

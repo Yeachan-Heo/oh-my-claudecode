@@ -129,11 +129,15 @@ function shouldPipePromptViaStdin(provider, prompt) {
       return false;
     }
 
-    return prompt.includes('\n') || prompt.length > 500 || /^\s*-/.test(prompt);
+    return SHOULD_USE_WINDOWS_SHELL
+      || prompt.includes('\n')
+      || prompt.length > 500
+      || /^\s*-/.test(prompt);
   }
 
   // grok (ACP stdin), cursor-agent (interactive stdin), and any other provider
-  // never pipe the prompt.
+  // never pipe the prompt. Providers that require argv prompts are blocked on
+  // Windows below so untrusted prompt text never crosses cmd.exe.
   return false;
 }
 
@@ -214,6 +218,12 @@ function guardProviderPlatform(provider) {
   if (provider === 'grok') {
     console.error('[ask-grok] Blocked: no verified Grok read-only/plan mode is available.');
     console.error('[ask-grok] Use a provider with an enforced plan/read-only mode for advisory work.');
+    process.exit(1);
+  }
+  if (provider === 'cursor' && SHOULD_USE_WINDOWS_SHELL) {
+    console.error('[ask-cursor] Cursor Agent advisor mode is not supported on Windows yet:');
+    console.error('[ask-cursor]   cursor-agent requires the prompt as an argv value, which is unsafe through cmd.exe.');
+    console.error('[ask-cursor] Run `omc ask cursor` on macOS/Linux, or use Claude, Codex, or Gemini on Windows.');
     process.exit(1);
   }
   if (provider === 'antigravity' && SHOULD_USE_WINDOWS_SHELL) {
@@ -390,6 +400,10 @@ async function main() {
     console.error('[ask-antigravity] agy exited 0 but produced no output under pipe capture.');
     console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
     console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
+    exitCode = 1;
+  } else if (provider !== 'antigravity' && exitCode === 0 && rawOutput.trim() === '') {
+    console.error(`[ask-${provider}] ${binary} exited 0 but produced no output.`);
+    console.error(`[ask-${provider}] Treating the empty advisor response as a failure.`);
     exitCode = 1;
   } else if (provider !== 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === 'SIGKILL')) {
     console.error(`[ask-${provider}] provider timed out after ${PROVIDER_RUN_TIMEOUT_MS}ms with no completed response.`);
