@@ -81,6 +81,15 @@ describe('OCC journal B11 probe: stale-holder-publishes-after-reclaim', () => {
     // B, it did not clobber B's entry).
     const dir = `${filePath}.journal`;
     const names = readdirSync(dir);
+    const entryCounts = new Map<number, number>();
+    for (const name of names) {
+      const match = name.match(/^(\d+)\.[0-9a-f-]{36}\.json$/i);
+      if (match) entryCounts.set(Number(match[1]), (entryCounts.get(Number(match[1])) ?? 0) + 1);
+    }
+    // P1: a sequence is reserved by `<seq>.claim`, so competing tokens can
+    // never both create entries for the same sequence.
+    expect([...entryCounts.values()].every((count) => count === 1)).toBe(true);
+    expect(names.filter((name) => /^\d+\.claim$/.test(name)).length).toBeGreaterThanOrEqual(entryCounts.size);
     const committedStates = names
       .filter((n) => n.endsWith('.complete'))
       .map((n) => {

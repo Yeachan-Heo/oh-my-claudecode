@@ -341,7 +341,12 @@ function acquireLockAt(path: string, requireExclusive = false): MutationLock | n
 }
 
 function acquireMutationLock(filePath: string): MutationLock | null {
-  return acquireLockAt(`${filePath}.mutation.lock`);
+  // State mutation is never best-effort: public write/clear paths must honor
+  // the same lock even on flock-less hosts. `unlocked` is only for legacy
+  // observational callers that explicitly request non-exclusive access. The
+  // explicit no-lock test seam preserves its historical unlocked simulation;
+  // real macOS/Windows hosts take the linkSync O_EXCL branch below.
+  return acquireLockAt(`${filePath}.mutation.lock`, !lockingDisabledForTest());
 }
 
 function sameLockOwner(left: MutationLockOwner, right: MutationLockOwner): boolean {
@@ -704,6 +709,7 @@ type OccReadCurrentResult = {
   state: unknown;
   empty: boolean;
   ioError: boolean;
+  reservedSeq: number;
 };
 
 function occJournalDir(filePath: string): string {
@@ -722,7 +728,13 @@ function occAbortedPath(dir: string, seq: number, token: string): string {
   return join(dir, `${seq}.${token}.aborted`);
 }
 
+/** A sequence-level O_EXCL reservation: one sequence has exactly one writer. */
+function occClaimPath(dir: string, seq: number): string {
+  return join(dir, `${seq}.claim`);
+}
+
 const OCC_ENTRY_NAME_RE = /^(\d+)\.([0-9a-f-]{36})\.(json|complete|aborted)$/i;
+const OCC_CLAIM_NAME_RE = /^(\d+)\.claim$/;
 
 /**
  * Scans the OCC journal directory and returns the current committed state: the
@@ -740,12 +752,19 @@ function occReadCurrent(filePath: string): OccReadCurrentResult {
     names = readdirSync(dir);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return { seq: -1, state: null, empty: true, ioError: false };
-    return { seq: -1, state: null, empty: false, ioError: true };
+    if (code === 'ENOENT') return { seq: -1, state: null, empty: true, ioError: false, reservedSeq: -1 };
+    return { seq: -1, state: null, empty: false, ioError: true, reservedSeq: -1 };
   }
-  const completeSeqs = new Set<number>();
+  const completeBySeq = new Map<number, string | null>();
   const entryBySeq = new Map<number, string>();
+  let reservedSeq = -1;
   for (const name of names) {
+    const claim = OCC_CLAIM_NAME_RE.exec(name);
+    if (claim) {
+      const seq = Number(claim[1]);
+      if (Number.isInteger(seq) && seq >= 0) reservedSeq = Math.max(reservedSeq, seq);
+      continue;
+    }
     const match = OCC_ENTRY_NAME_RE.exec(name);
     if (!match) continue;
     const seq = Number(match[1]);
@@ -753,54 +772,69 @@ function occReadCurrent(filePath: string): OccReadCurrentResult {
     const token = match[2];
     const kind = match[3];
     if (kind === 'complete') {
-      completeSeqs.add(seq);
+      const existing = completeBySeq.get(seq);
+      completeBySeq.set(seq, existing === undefined ? token : existing === token ? token : null);
     } else if (kind === 'json') {
-      if (!entryBySeq.has(seq)) entryBySeq.set(seq, token);
+      const existing = entryBySeq.get(seq);
+      if (existing === undefined) entryBySeq.set(seq, token);
+      else if (existing !== token) return { seq: -1, state: null, empty: false, ioError: true, reservedSeq };
     }
   }
-  if (completeSeqs.size === 0) return { seq: -1, state: null, empty: true, ioError: false };
+  if (completeBySeq.size === 0) return { seq: -1, state: null, empty: true, ioError: false, reservedSeq };
   let maxSeq = -1;
-  for (const seq of completeSeqs) if (seq > maxSeq) maxSeq = seq;
+  for (const seq of completeBySeq.keys()) if (seq > maxSeq) maxSeq = seq;
+  const completeToken = completeBySeq.get(maxSeq);
   const token = entryBySeq.get(maxSeq);
-  if (!token) {
+  if (!token || !completeToken || completeToken !== token) {
     // A complete marker exists without its entry json: the entry was pruned or
     // never written. Treat the journal as unreadable at this fence and fail
     // closed rather than guessing a parent.
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   let raw: string;
   try {
     raw = readFileSync(occEntryPath(dir, maxSeq, token), 'utf8');
   } catch {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   let entry: unknown;
   try {
     entry = JSON.parse(raw);
   } catch {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   const record = entry as Record<string, unknown> | null;
   if (!record || typeof record !== 'object' || record.seq !== maxSeq || record.owner_token !== token || !('state' in record)) {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
-  return { seq: maxSeq, state: record.state, empty: false, ioError: false };
+  return { seq: maxSeq, state: record.state, empty: false, ioError: false, reservedSeq };
 }
 
-/** Seed state for the first commit when the journal is empty: the canonical file, if any. */
-function occSeedState(filePath: string): unknown {
+type OccCanonicalSnapshot = { state: unknown; fingerprint: string; ioError: boolean };
+
+/**
+ * The canonical file is an integrity fence as well as a compatibility cache.
+ * Non-OCC paths still exist in deployed installs, so an OCC retry must see a
+ * valid canonical replacement instead of committing against a stale journal.
+ */
+function occReadCanonicalSnapshot(filePath: string): OccCanonicalSnapshot {
   try {
-    const raw = readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
+    const state = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+    return { state, fingerprint: JSON.stringify(state), ioError: false };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return null;
-    throw error;
+    if (code === 'ENOENT') return { state: null, fingerprint: 'absent', ioError: false };
+    return { state: null, fingerprint: '', ioError: true };
   }
+}
+
+function occStateFingerprint(state: unknown): string {
+  return state === null ? 'absent' : JSON.stringify(state);
 }
 
 /** Removes only the caller's OWN incomplete entry + any markers for (seq, token). */
 function occCleanupOwn(dir: string, seq: number, token: string): void {
+  try { unlinkSync(occClaimPath(dir, seq)); } catch { /* absent */ }
   try { unlinkSync(occEntryPath(dir, seq, token)); } catch { /* absent */ }
   try { unlinkSync(occCompletePath(dir, seq, token)); } catch { /* absent */ }
   try { unlinkSync(occAbortedPath(dir, seq, token)); } catch { /* absent */ }
@@ -812,7 +846,7 @@ function occPruneOld(dir: string, currentSeq: number): void {
   try { names = readdirSync(dir); } catch { return; }
   const cutoff = currentSeq - OCC_JOURNAL_PRUNE_BEHIND;
   for (const name of names) {
-    const match = OCC_ENTRY_NAME_RE.exec(name);
+    const match = OCC_ENTRY_NAME_RE.exec(name) ?? OCC_CLAIM_NAME_RE.exec(name);
     if (!match) continue;
     const seq = Number(match[1]);
     if (Number.isInteger(seq) && seq < cutoff) {
@@ -825,6 +859,8 @@ export type OccMutate<TState, TResult> = (currentState: unknown, ownerToken: str
 
 export interface OccCommitOptions {
   ownerToken?: string;
+  /** Called at the commit/publish boundary by public mutation-lock holders. */
+  assertHeld?: () => void;
 }
 
 /**
@@ -842,46 +878,58 @@ export function occCommitMutation<TState, TResult>(
   options?: OccCommitOptions,
 ): { state: TState; result: TResult } | null {
   const dir = occJournalDir(filePath);
-  mkdirSync(dir, { recursive: true });
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    return null;
+  }
   const ownerToken = options?.ownerToken ?? randomUUID();
   let parentSeq = -1;
   let parentState: unknown = null;
   for (let attempt = 0; attempt < OCC_JOURNAL_MAX_RETRIES; attempt += 1) {
     const current = occReadCurrent(filePath);
     if (current.ioError) return null; // fail closed: cannot fence without reading
+    const canonical = occReadCanonicalSnapshot(filePath);
+    if (canonical.ioError) return null;
     if (current.empty) {
       parentSeq = -1;
-      parentState = occSeedState(filePath);
+      parentState = canonical.state;
     } else {
       parentSeq = current.seq;
-      parentState = current.state;
+      parentState = occStateFingerprint(current.state) === canonical.fingerprint ? current.state : canonical.state;
     }
     let produced: { state: TState; result: TResult } | null;
     produced = mutate(parentState, ownerToken);
     if (produced === null || produced === undefined) return null; // cancelled, no commit
     const next = produced.state;
-    const seq = parentSeq + 1;
+    const seq = Math.max(parentSeq, current.reservedSeq) + 1;
     const entryPath = occEntryPath(dir, seq, ownerToken);
     let fd: number | undefined;
-    let claimed = false;
     try {
+      // Claim the sequence itself, not a token-qualified child. Otherwise two
+      // writers can both create `<seq>.<token>.json` and lose one mutation.
+      fd = openSync(occClaimPath(dir, seq), 'wx', 0o600);
+      writeAllSync(fd, ownerToken, 'occ sequence claim');
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
       fd = openSync(entryPath, 'wx', 0o600);
       const entry = { seq, parent_seq: parentSeq, owner_token: ownerToken, state: next };
       writeAllSync(fd, JSON.stringify(entry), 'occ journal entry');
       fsyncSync(fd);
       closeSync(fd);
       fd = undefined;
-      claimed = true;
     } catch (error) {
       if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort descriptor cleanup */ } }
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'EEXIST') {
-        // Another writer already claimed this seq. Re-read and retry with seq+1.
+        // Another writer owns this exact sequence. Re-read its reservation and
+        // claim a later sequence rather than sharing a token-qualified child.
         continue;
       }
+      occCleanupOwn(dir, seq, ownerToken);
       return null;
     }
-    void claimed;
     // Test seam (B11 probe): when a pause hook is registered for this filePath,
     // invoke it AFTER the entry is claimed but BEFORE the fence revalidation.
     // This deterministically forces the stale-holder-publishes-after-reclaim
@@ -904,6 +952,24 @@ export function occCommitMutation<TState, TResult>(
       // mark the fork as aborted so it is distinguishable from a live claim
       try { closeSync(openSync(occAbortedPath(dir, seq, ownerToken), 'wx', 0o600)); } catch { /* already marked */ }
       continue; // re-run mutate on the successor's state
+    }
+    try {
+      options?.assertHeld?.();
+    } catch {
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    // This is deliberately adjacent to marker publication. A canonical-only
+    // replacement observed after the mutation was calculated invalidates this
+    // attempt so conditional writers cannot overwrite it from stale state.
+    const canonicalFence = occReadCanonicalSnapshot(filePath);
+    if (canonicalFence.ioError) {
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (canonicalFence.fingerprint !== canonical.fingerprint) {
+      occCleanupOwn(dir, seq, ownerToken);
+      continue;
     }
     // COMMIT: create the .complete marker via O_EXCL.
     let markerFd: number | undefined;
@@ -945,6 +1011,30 @@ export function occReadCurrentState(filePath: string): unknown {
   return current.state;
 }
 
+/**
+ * Record a completed non-OCC publication while the caller holds the same
+ * mutation lock used by public writes and clears. Emergency transactions use
+ * this after their crash-safe canonical publish so later OCC reads cannot see
+ * a stale journal generation. An absent canonical file is an explicit
+ * tombstone; it is restored to absent after the journal commit.
+ */
+export function occReconcileCanonicalState(filePath: string, assertHeld?: () => void): boolean {
+  const snapshot = occReadCanonicalSnapshot(filePath);
+  if (snapshot.ioError) return false;
+  const committed = occCommitMutation<unknown, boolean>(
+    filePath,
+    () => ({ state: snapshot.state, result: true }),
+    { assertHeld },
+  );
+  if (committed === null) return false;
+  if (snapshot.state === null) {
+    try { unlinkSync(filePath); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+    }
+  }
+  return true;
+}
+
 /** Cleans up only this owner token's stale INCOMPLETE entries (release race cure). */
 export function occCleanupOwner(filePath: string, ownerToken: string): void {
   const dir = occJournalDir(filePath);
@@ -976,8 +1066,18 @@ export function writeStateFileLocked(filePath: string, state: Record<string, unk
   // sequence, so a stale holder whose lease expired mid-mutation is
   // re-sequenced AFTER any successor instead of overwriting it. The mutation is
   // pure (returns `state` regardless of current); the OCC wrapper commits.
-  const committed = occCommitMutation<Record<string, unknown>, boolean>(filePath, () => ({ state, result: true }));
-  return committed !== null;
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return false;
+  try {
+    const committed = occCommitMutation<Record<string, unknown>, boolean>(
+      filePath,
+      () => ({ state, result: true }),
+      { assertHeld: () => assertMutationLockHeld(lock) },
+    );
+    return committed !== null;
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 
 export function clearStateFileLocked(filePath: string): boolean {
@@ -1070,15 +1170,24 @@ export function writeStateFileLockedIf(
   // validated current committed state on each retry, so a stale writer that
   // forked off an old parent re-runs against the successor's state. A
   // predicate that no longer holds returns null (skip) without committing.
-  const committed = occCommitMutation<Record<string, unknown> | null, ConditionalWriteResult>(filePath, (currentRaw) => {
-    if (currentRaw === null || currentRaw === undefined) return null;
-    if (typeof currentRaw !== 'object' || Array.isArray(currentRaw)) return null;
-    const current = currentRaw as Record<string, unknown>;
-    if (!predicate(current)) return { state: current, result: 'skipped' as ConditionalWriteResult };
-    return { state: transform(current), result: 'written' as ConditionalWriteResult };
-  });
-  if (committed === null) return 'skipped';
-  return committed.result;
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return 'failed';
+  try {
+    let skipped = false;
+    const committed = occCommitMutation<Record<string, unknown>, ConditionalWriteResult>(filePath, (currentRaw) => {
+      if (currentRaw === null || currentRaw === undefined || typeof currentRaw !== 'object' || Array.isArray(currentRaw)) return null;
+      const current = currentRaw as Record<string, unknown>;
+      if (!predicate(current)) {
+        skipped = true;
+        return null;
+      }
+      return { state: transform(current), result: 'written' as ConditionalWriteResult };
+    }, { assertHeld: () => assertMutationLockHeld(lock) });
+    if (committed === null) return skipped ? 'skipped' : 'failed';
+    return committed.result;
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 
 export function writeStateFileLockedCreateIf(
@@ -1099,17 +1208,27 @@ export function writeStateFileLockedCreateIf(
   // OCC commit (B11 root cure): the create-if mutation runs against the OCC-
   // validated current (null when absent). The predicate gates whether a state
   // is produced at all; a falsy predicate returns null (skip, no commit).
-  const committed = occCommitMutation<Record<string, unknown>, ConditionalWriteResult>(filePath, (currentRaw) => {
-    let current: Record<string, unknown> | null = null;
-    if (currentRaw !== null && currentRaw !== undefined) {
-      if (typeof currentRaw !== 'object' || Array.isArray(currentRaw)) return null;
-      current = currentRaw as Record<string, unknown>;
-    }
-    if (!predicate(current)) return { state: current ?? {}, result: 'skipped' as ConditionalWriteResult };
-    return { state: transform(current), result: 'written' as ConditionalWriteResult };
-  });
-  if (committed === null) return 'skipped';
-  return committed.result;
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return 'failed';
+  try {
+    let skipped = false;
+    const committed = occCommitMutation<Record<string, unknown>, ConditionalWriteResult>(filePath, (currentRaw) => {
+      let current: Record<string, unknown> | null = null;
+      if (currentRaw !== null && currentRaw !== undefined) {
+        if (typeof currentRaw !== 'object' || Array.isArray(currentRaw)) return null;
+        current = currentRaw as Record<string, unknown>;
+      }
+      if (!predicate(current)) {
+        skipped = true;
+        return null;
+      }
+      return { state: transform(current), result: 'written' as ConditionalWriteResult };
+    }, { assertHeld: () => assertMutationLockHeld(lock) });
+    if (committed === null) return skipped ? 'skipped' : 'failed';
+    return committed.result;
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 
 /**
@@ -1680,35 +1799,10 @@ export function emergencyMutateStateFileIf(
   transform: ((current: Record<string, unknown>) => Record<string, unknown>) | null,
   recoveryOptions?: EmergencyRecoveryOptions,
 ): boolean {
-  // TODO(B11/OCC composition): under (B) the OCC journal is the source of truth
-  // and the canonical file is a derived cache. This emergency mutation's final
-  // publish writes the CANONICAL file directly (linkSync for publish intent,
-  // unlink at capture for clear intent) without committing an OCC journal entry,
-  // so a subsequent writeStateFileLocked*/clearStateFileLocked* call (which reads
-  // current from the journal) would NOT observe it - the same class of visibility
-  // gap that required routing recoverExpiredGraphClaim and the runtime.test.ts
-  // setup through OCC/the store.
-  //
-  // Routing the emergency publish through occCommitMutation was ATTEMPTED and
-  // STOPPED as genuinely risky: the emergency mutation is NOT a pure function of
-  // the OCC current - it is a function of the emergency journal's captured +
-  // digested canonical generation (originalDigest/intendedDigest fence its
-  // single-write crash-safety). OCC's pure-callback model would, on a fork,
-  // re-run the callback against a DIFFERENT current than the emergency captured,
-  // so committing the emergency's intended `next` as a constant after a successor
-  // could clobber the successor's value with an older intended state. A correct
-  // composition would need the OCC mutate callback to re-derive the emergency
-  // intent against the OCC-validated current (re-running predicate + transform +
-  // digest), which materially changes the emergency crash-recovery invariants and
-  // cannot be verified safe on macOS (the emergency crash-injection tests live
-  // in the flock-gated workflow-profile suite). The graph path + write family +
-  // clear family (tombstones) + deterministic B11 probes are all (B)-correct and
-  // green; only this emergency-publish visibility gap remains. Callers that mix
-  // emergencyMutateStateFileIf with writeStateFileLocked*/clearStateFileLocked*
-  // on the same filePath may not see the emergency mutation through the journal;
-  // the emergency journal itself remains crash-safe and the canonical file is
-  // still updated.
   if (!recoverEmergencyStateFile(filePath, recoveryOptions)) return false;
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return false;
+  try {
   const owner = emergencyOwner();
   if (!owner) return false;
   const transactionId = randomUUID();
@@ -1765,10 +1859,14 @@ export function emergencyMutateStateFileIf(
       if (!writeEmergencyJournal(journalPath, journal)) return false;
     }
     if (emergencyCrashAt('before-cleanup')) { abandonEmergencyJournalForTest(journalPath, journal); return false; }
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    return removeOwnedEmergencyArtifacts(journalPath, journal, true) &&
+      occReconcileCanonicalState(filePath, () => assertMutationLockHeld(lock));
   } catch {
     if (journal) abandonEmergencyJournal(journalPath, journal);
     return false;
+  }
+  } finally {
+    releaseMutationLock(lock);
   }
 }
 

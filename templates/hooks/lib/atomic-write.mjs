@@ -725,7 +725,12 @@ function occAbortedPath(dir, seq, token) {
   return join(dir, `${seq}.${token}.aborted`);
 }
 
+function occClaimPath(dir, seq) {
+  return join(dir, `${seq}.claim`);
+}
+
 const OCC_ENTRY_NAME_RE = /^(\d+)\.([0-9a-f-]{36})\.(json|complete|aborted)$/i;
+const OCC_CLAIM_NAME_RE = /^(\d+)\.claim$/;
 
 /**
  * Scans the OCC journal directory and returns the current committed state: the
@@ -742,12 +747,19 @@ function occReadCurrent(filePath) {
   try {
     names = readdirSync(dir);
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { seq: -1, state: null, empty: true, ioError: false };
-    return { seq: -1, state: null, empty: false, ioError: true };
+    if (error && error.code === 'ENOENT') return { seq: -1, state: null, empty: true, ioError: false, reservedSeq: -1 };
+    return { seq: -1, state: null, empty: false, ioError: true, reservedSeq: -1 };
   }
-  const completeSeqs = new Set();
+  const completeBySeq = new Map();
   const entryBySeq = new Map();
+  let reservedSeq = -1;
   for (const name of names) {
+    const claim = OCC_CLAIM_NAME_RE.exec(name);
+    if (claim) {
+      const seq = Number(claim[1]);
+      if (Number.isInteger(seq) && seq >= 0) reservedSeq = Math.max(reservedSeq, seq);
+      continue;
+    }
     const match = OCC_ENTRY_NAME_RE.exec(name);
     if (!match) continue;
     const seq = Number(match[1]);
@@ -755,52 +767,60 @@ function occReadCurrent(filePath) {
     const token = match[2];
     const kind = match[3];
     if (kind === 'complete') {
-      completeSeqs.add(seq);
+      const existing = completeBySeq.get(seq);
+      completeBySeq.set(seq, existing === undefined ? token : existing === token ? token : null);
     } else if (kind === 'json') {
-      if (!entryBySeq.has(seq)) entryBySeq.set(seq, token);
+      const existing = entryBySeq.get(seq);
+      if (existing === undefined) entryBySeq.set(seq, token);
+      else if (existing !== token) return { seq: -1, state: null, empty: false, ioError: true, reservedSeq };
     }
   }
-  if (completeSeqs.size === 0) return { seq: -1, state: null, empty: true, ioError: false };
+  if (completeBySeq.size === 0) return { seq: -1, state: null, empty: true, ioError: false, reservedSeq };
   let maxSeq = -1;
-  for (const seq of completeSeqs) if (seq > maxSeq) maxSeq = seq;
+  for (const seq of completeBySeq.keys()) if (seq > maxSeq) maxSeq = seq;
+  const completeToken = completeBySeq.get(maxSeq);
   const token = entryBySeq.get(maxSeq);
-  if (!token) {
+  if (!token || !completeToken || completeToken !== token) {
     // A complete marker exists without its entry json: the entry was pruned or
     // never written. Treat the journal as unreadable at this fence and fail
     // closed rather than guessing a parent.
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   let raw;
   try {
     raw = readFileSync(occEntryPath(dir, maxSeq, token), 'utf8');
   } catch {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   let entry;
   try {
     entry = JSON.parse(raw);
   } catch {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
   if (!entry || typeof entry !== 'object' || entry.seq !== maxSeq || entry.owner_token !== token || !('state' in entry)) {
-    return { seq: maxSeq, state: null, empty: false, ioError: true };
+    return { seq: maxSeq, state: null, empty: false, ioError: true, reservedSeq };
   }
-  return { seq: maxSeq, state: entry.state, empty: false, ioError: false };
+  return { seq: maxSeq, state: entry.state, empty: false, ioError: false, reservedSeq };
 }
 
-/** Seed state for the first commit when the journal is empty: the canonical file, if any. */
-function occSeedState(filePath) {
+function occReadCanonicalSnapshot(filePath) {
   try {
-    const raw = readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
+    const state = JSON.parse(readFileSync(filePath, 'utf8'));
+    return { state, fingerprint: JSON.stringify(state), ioError: false };
   } catch (error) {
-    if (error && error.code === 'ENOENT') return null;
-    throw error;
+    if (error && error.code === 'ENOENT') return { state: null, fingerprint: 'absent', ioError: false };
+    return { state: null, fingerprint: '', ioError: true };
   }
+}
+
+function occStateFingerprint(state) {
+  return state === null ? 'absent' : JSON.stringify(state);
 }
 
 /** Removes only the caller's OWN incomplete entry + any markers for (seq, token). */
 function occCleanupOwn(dir, seq, token) {
+  try { unlinkSync(occClaimPath(dir, seq)); } catch { /* absent */ }
   try { unlinkSync(occEntryPath(dir, seq, token)); } catch { /* absent */ }
   try { unlinkSync(occCompletePath(dir, seq, token)); } catch { /* absent */ }
   try { unlinkSync(occAbortedPath(dir, seq, token)); } catch { /* absent */ }
@@ -812,7 +832,7 @@ function occPruneOld(dir, currentSeq) {
   try { names = readdirSync(dir); } catch { return; }
   const cutoff = currentSeq - OCC_JOURNAL_PRUNE_BEHIND;
   for (const name of names) {
-    const match = OCC_ENTRY_NAME_RE.exec(name);
+    const match = OCC_ENTRY_NAME_RE.exec(name) || OCC_CLAIM_NAME_RE.exec(name);
     if (!match) continue;
     const seq = Number(match[1]);
     if (Number.isInteger(seq) && seq < cutoff) {
@@ -835,7 +855,7 @@ function occPruneOld(dir, currentSeq) {
  */
 export function occCommitMutation(filePath, mutate, options = {}) {
   const dir = occJournalDir(filePath);
-  ensureDirSync(dir);
+  try { ensureDirSync(dir); } catch { return false; }
   const ownerToken = options.ownerToken || randomUUID();
   let parentSeq = -1;
   let parentState = null;
@@ -843,35 +863,41 @@ export function occCommitMutation(filePath, mutate, options = {}) {
   for (let attempt = 0; attempt < OCC_JOURNAL_MAX_RETRIES; attempt += 1) {
     const current = occReadCurrent(filePath);
     if (current.ioError) return false; // fail closed: cannot fence without reading
+    const canonical = occReadCanonicalSnapshot(filePath);
+    if (canonical.ioError) return false;
     if (current.empty) {
       parentSeq = -1;
-      parentState = occSeedState(filePath);
+      parentState = canonical.state;
     } else {
       parentSeq = current.seq;
-      parentState = current.state;
+      parentState = occStateFingerprint(current.state) === canonical.fingerprint ? current.state : canonical.state;
     }
     let produced;
     produced = mutate(parentState, ownerToken);
     if (produced === null || produced === undefined) return false; // cancelled, no commit
     next = produced;
-    const seq = parentSeq + 1;
+    const seq = Math.max(parentSeq, current.reservedSeq) + 1;
     const entryPath = occEntryPath(dir, seq, ownerToken);
     let fd;
-    let claimed = false;
     try {
+      fd = openSync(occClaimPath(dir, seq), 'wx', 0o600);
+      writeAllSync(fd, ownerToken, 'occ sequence claim');
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
       fd = openSync(entryPath, 'wx', 0o600);
       const entry = { seq, parent_seq: parentSeq, owner_token: ownerToken, state: next };
       writeAllSync(fd, JSON.stringify(entry), 'occ journal entry');
       fsyncSync(fd);
       closeSync(fd);
       fd = undefined;
-      claimed = true;
     } catch (error) {
       if (fd !== undefined) { try { closeSync(fd); } catch {} }
       if (error && error.code === 'EEXIST') {
         // Another writer already claimed this seq. Re-read and retry with seq+1.
         continue;
       }
+      occCleanupOwn(dir, seq, ownerToken);
       return false;
     }
     // Test seam (B11 probe): when a pause hook is registered for this filePath,
@@ -896,6 +922,19 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       // mark the fork as aborted so it is distinguishable from a live claim
       try { openSync(occAbortedPath(dir, seq, ownerToken), 'wx', 0o600); } catch { /* already marked */ }
       continue; // re-run mutate on the successor's state
+    }
+    try { options.assertHeld?.(); } catch {
+      occCleanupOwn(dir, seq, ownerToken);
+      return false;
+    }
+    const canonicalFence = occReadCanonicalSnapshot(filePath);
+    if (canonicalFence.ioError) {
+      occCleanupOwn(dir, seq, ownerToken);
+      return false;
+    }
+    if (canonicalFence.fingerprint !== canonical.fingerprint) {
+      occCleanupOwn(dir, seq, ownerToken);
+      continue;
     }
     // COMMIT: create the .complete marker via O_EXCL.
     let markerFd;
