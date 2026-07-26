@@ -109,7 +109,6 @@ describe('A2: beginActivationAttempt enforces max_attempts', () => {
     expect((thrown as GraphSchedulerError).code).toBe('max_attempts_exceeded');
   });
 });
-
 describe('A3: applyNodeResult makes a failed activation retryable or terminal-failed', () => {
   function failAttempt(
     descriptor: ReturnType<typeof sealGraphDescriptor>,
@@ -301,4 +300,3 @@ describe('A3: runtime promotes the graph to failed when an exhausted node fails'
     expect(afterSecond.projection.activations[claim1.activation_id as string].status).toBe('failed');
   });
 });
-
