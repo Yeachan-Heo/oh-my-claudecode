@@ -1005,7 +1005,7 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
     retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
     return result.value.stagePrompt;
   } catch (error) {
-    if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
+    if (error?.message?.startsWith('workflow_emergency_recovery_failed') || error?.message === 'workflow_transcript_record_too_large') throw error;
     return false;
   }
 }
@@ -1061,7 +1061,7 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
     retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
     return result.value.stagePrompt;
   } catch (error) {
-    if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
+    if (error?.message?.startsWith('workflow_emergency_recovery_failed') || error?.message === 'workflow_transcript_record_too_large') throw error;
     return false;
   }
 }

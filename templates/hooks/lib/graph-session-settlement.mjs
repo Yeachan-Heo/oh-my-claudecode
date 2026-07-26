@@ -32,7 +32,13 @@ export async function settleGraphSessionEnd(input) {
 
   try {
     const { writePath } = await resolveSessionStatePathsForHook(cwd, 'graph', sessionId);
-    if (!existsSync(writePath)) return;
+    // Under OCC (B11 root cure) the journal dir `${writePath}.journal` is the
+    // authoritative state location; the canonical `writePath` file is a derived
+    // cache that may be absent (e.g. not re-published, or cleared) while the
+    // journal still holds state with live claims requiring settlement. Gate on
+    // the journal dir, not the canonical cache, so SessionEnd does not skip
+    // settle when the canonical is absent but journal authority still requires it.
+    if (!existsSync(`${writePath}.journal`)) return;
     spawnSync('omc', [
       'graph',
       'settle-session',

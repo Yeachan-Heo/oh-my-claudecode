@@ -341,4 +341,62 @@ describe('graph claim recovery', () => {
     expect(sessionScoped.state.claims['lease-1'].status).toBe('abandoned_retryable');
     expect(sessionScoped.state.claims['lease-2'].status).toBe('abandoned_retryable');
   });
+
+  it('WEDGE 2: SessionEnd settles a non-ambiguous human-approval claim and returns the run to re-claimable running', () => {
+    // A human-approval node holds the run in 'waiting_human' while a live claim
+    // fences its activation waiting for the human answer. When SessionEnd
+    // settles that claim (non-ambiguous: human-approval claims carry
+    // side_effect_free), the claim must be abandoned_retryable, the activation
+    // reset to 'ready', AND the run must leave 'waiting_human' for 'running' so
+    // issueGraphClaim can re-claim the activation instead of wedging.
+    const base = runningState();
+    // Bind a live human-approval claim and move the run to waiting_human, mirroring
+    // the runtime dispatch path (runtime.ts human-approval branch).
+    const waitingHuman: typeof base = {
+      ...base,
+      status: 'waiting_human',
+      claims: {
+        'lease-human': {
+          run_id: base.run_id,
+          revision_id: base.active_revision_id,
+          revision_hash: base.active_revision_hash,
+          dispatch_generation: base.dispatch_generation,
+          activation_id: 'activation',
+          attempt_id: 'attempt-1',
+          attempt_no: 1,
+          claim_owner_session_id: base.session_id,
+          driver_instance_id: 'driver-1',
+          lease_id: 'lease-human',
+          tracking_id: 'tool-1',
+          issued_at: '2026-07-21T00:00:00.000Z',
+          expires_at: '2026-07-21T01:00:00.000Z',
+          lease_duration_ms: 3_600_000,
+          renewal_count: 0,
+          max_renewals: 0,
+          effect_policy: { policy: 'side_effect_free' },
+          status: 'live',
+        },
+      },
+    };
+
+    const settled = settleDriverClaims(waitingHuman, {
+      claim_owner_session_id: 'session-recovery',
+      driver_instance_id: 'driver-1',
+      recorded_at: '2026-07-21T00:00:01.000Z',
+      scope: 'session',
+    });
+
+    expect(settled.settled_lease_ids).toEqual(['lease-human']);
+    expect(settled.state.claims['lease-human'].status).toBe('abandoned_retryable');
+    // The activation is reset to ready (active attempt dropped).
+    expect(settled.state.projection.activations['activation'].status).toBe('ready');
+    expect(settled.state.projection.activations['activation'].active_attempt_id).toBeUndefined();
+    // WEDGE 2 fix: the run is no longer wedged in waiting_human; it is running
+    // again so the scheduler dispatch path (which beginActivationAttempt ->
+    // issueGraphClaim on a ready activation) can re-claim it. A run stuck in
+    // waiting_human would block dispatch entirely (issueGraphClaim requires
+    // status === 'running').
+    expect(settled.state.status).toBe('running');
+    expect(settled.state.projection.activations['activation'].status).toBe('ready');
+  });
 });

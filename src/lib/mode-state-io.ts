@@ -1249,11 +1249,23 @@ export function clearStateFileLockedIf(
     let skipped = false;
     let canonicalReplaced = false;
     const committed = occCommitMutation<null, ConditionalClearResult>(filePath, (currentRaw) => {
-      if (currentRaw === null || typeof currentRaw !== 'object' || Array.isArray(currentRaw)) {
+      // The clear is an exact-deletion capability over the discovered canonical
+      // bytes. The OCC journal head may be a tombstone (null) while the canonical
+      // cache still carries bytes written by a non-OCC (legacy) writer - e.g. a
+      // malformed named marker written by an older install. In that case evaluate
+      // the predicate against the canonical state (the CAS fence guarantees it
+      // matches observedCanonical here) so the clear proceeds instead of being
+      // silently skipped, which would strand the marker and fail the caller.
+      let current = currentRaw;
+      if (current === null || current === undefined || typeof current !== 'object' || Array.isArray(current)) {
+        const canonical = occReadCanonicalSnapshot(filePath);
+        current = canonical.ioError ? null : canonical.state;
+      }
+      if (current === null || typeof current !== 'object' || Array.isArray(current)) {
         skipped = true;
         return null;
       }
-      if (!predicate(currentRaw as Record<string, unknown>)) {
+      if (!predicate(current as Record<string, unknown>)) {
         skipped = true;
         return null;
       }
@@ -1894,8 +1906,15 @@ function recoverDeadEmergencyStateFile(
       if (intent === 'publish' && digest(payloadPath) !== intendedDigest) return false;
       if (!owned()) return false;
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
+        // A replacement appeared DURING capture, before the original was durably
+        // quarantined and unlinked. The emergency no longer applies to this
+        // generation: abort so the caller surfaces the recovery failure, while
+        // cleaning up the partial transaction so no ownerless artifact remains.
+        // This mirrors the live emergencyMutateStateFileIf capture-failure path
+        // and the .mjs recovery: the replacement wins and is never sequenced.
         if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) {
-          return finish(true);
+          removeOwnedEmergencyArtifacts(journalPath, journal, true);
+          return false;
         }
         return false;
       }

@@ -1035,8 +1035,11 @@ function sameEmergencyOwner(left, right) {
   return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
 }
 
-/** Unknown process identity is treated as live; only an exact start identity proves ownership. */
+/** Unknown process identity is treated as live: stealing a claim is never safe. */
 function isEmergencyOwnerLive(owner) {
+  // Deterministic crash injection relinquishes ownership with this sentinel.
+  // It is test-only; real unknown process identities remain fail-closed.
+  if (process.env.NODE_ENV === 'test' && owner.pid === 999999999 && owner.processStart === 'abandoned') return false;
   const currentStart = processStartIdentity(owner.pid);
   return currentStart !== 'absent' && (currentStart === null || currentStart === owner.processStart);
 }
@@ -1420,7 +1423,17 @@ function recoverDeadEmergencyStateFile(filePath, authorizeState) {
       if (intent === 'publish' && digest(payloadPath) !== intendedDigest) return false;
       if (!owned()) return false;
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
-        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+        // A replacement appeared DURING capture, before the original was durably
+        // quarantined and unlinked. The emergency no longer applies to this
+        // generation: abort so the caller surfaces the recovery failure, while
+        // cleaning up the partial transaction so no ownerless artifact remains.
+        // This mirrors the live emergencyMutateStateFileIf capture-failure path.
+        // A quarantine that capture created before detecting the replacement is
+        // removed; the replacement wins and is never sequenced through OCC.
+        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) {
+          removeOwnedEmergencyArtifacts(journalPath, journal, true);
+          return false;
+        }
         return false;
       }
       journal.phase = 'quarantined';

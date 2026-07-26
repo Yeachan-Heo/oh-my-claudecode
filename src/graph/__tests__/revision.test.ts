@@ -142,7 +142,7 @@ describe('graph revisions', () => {
     expect(proposed.revisions['revision-2']).toBeUndefined();
   });
 
-  it('blocks approval until old claims drain and reconciliation is resolved', () => {
+  it('fences non-ambiguous live claims on patch approval and still rejects ambiguous/reconciliation', () => {
     const state = proposeGraphPatch(approvedState(), {
       proposal_id: 'patch-1',
       base_revision_id: 'revision-1',
@@ -173,7 +173,11 @@ describe('graph revisions', () => {
       status: 'live',
     };
 
-    expect(() => approveGraphPatch(state, {
+    // WEDGE 1: a non-ambiguous (side_effect_free) live claim no longer hard-
+    // rejects; it is fenced atomically with patch approval so the run does not
+    // wedge while waiting for the claim to drain (which it cannot, because the
+    // runtime result/release gates reject waiting_patch_approval).
+    const approved = approveGraphPatch(state, {
       proposal_id: 'patch-1',
       base_revision_id: state.active_revision_id,
       base_revision_hash: state.active_revision_hash,
@@ -181,23 +185,110 @@ describe('graph revisions', () => {
       invalidated_node_ids: [],
       approval_evidence: { kind: 'human', ref: 'approve-patch-1' },
       approved_at: '2026-07-21T00:00:02.000Z',
-    }, (projection) => projection)).toThrow(/live claim/i);
+    }, (projection) => projection);
+    expect(approved.status).toBe('running');
+    expect(approved.claims['lease-old'].status).toBe('fenced');
+    expect(approved.claims['lease-old'].fenced_at).toBe('2026-07-21T00:00:02.000Z');
 
-    state.claims['lease-old'].status = 'reconciling';
-    state.claims['lease-old'].fenced_at = '2026-07-21T00:00:01.500Z';
-    state.reconciliations['reconciliation-old'] = {
+    // An ambiguous (reconcile-policy) live claim still hard-rejects: its
+    // external-effect outcome requires human resolution and must not be
+    // silently dropped by a patch approval.
+    const ambiguous = proposeGraphPatch(approvedState(), {
+      proposal_id: 'patch-2',
+      base_revision_id: 'revision-1',
+      base_revision_hash: approvedState().active_revision_hash,
+      proposed_descriptor: nextDescriptor(),
+      invalidated_node_ids: [],
+      proposal_evidence: [],
+      proposed_at: '2026-07-21T00:00:01.000Z',
+    });
+    ambiguous.claims['lease-amb'] = {
+      ...state.claims['lease-old'],
+      lease_id: 'lease-amb',
+      effect_policy: { policy: 'reconcile' },
+      status: 'live',
+    };
+    expect(() => approveGraphPatch(ambiguous, {
+      proposal_id: 'patch-2',
+      base_revision_id: ambiguous.active_revision_id,
+      base_revision_hash: ambiguous.active_revision_hash,
+      proposed_revision_hash: ambiguous.pending_patch!.proposed_revision_hash,
+      invalidated_node_ids: [],
+      approval_evidence: { kind: 'human', ref: 'approve-patch-2' },
+      approved_at: '2026-07-21T00:00:02.000Z',
+    }, (projection) => projection)).toThrow(/ambiguous.*reconcile-policy.*live claim/i);
+
+    // Unresolved reconciliation still blocks.
+    ambiguous.claims['lease-amb'].status = 'reconciling';
+    ambiguous.claims['lease-amb'].fenced_at = '2026-07-21T00:00:01.500Z';
+    ambiguous.reconciliations['reconciliation-old'] = {
       reconciliation_id: 'reconciliation-old',
       activation_id: 'completed',
       attempt_id: 'attempt-a',
-      lease_id: 'lease-old',
-      revision_id: state.active_revision_id,
-      revision_hash: state.active_revision_hash,
+      lease_id: 'lease-amb',
+      revision_id: ambiguous.active_revision_id,
+      revision_hash: ambiguous.active_revision_hash,
       dispatch_generation: 0,
       status: 'unresolved',
       reason: 'external_effect_ambiguous',
       created_at: '2026-07-21T00:00:01.500Z',
     };
-    expect(() => approveGraphPatch(state, {
+    expect(() => approveGraphPatch(ambiguous, {
+      proposal_id: 'patch-2',
+      base_revision_id: ambiguous.active_revision_id,
+      base_revision_hash: ambiguous.active_revision_hash,
+      proposed_revision_hash: ambiguous.pending_patch!.proposed_revision_hash,
+      invalidated_node_ids: [],
+      approval_evidence: { kind: 'human', ref: 'approve-patch-2' },
+      approved_at: '2026-07-21T00:00:02.000Z',
+    }, (projection) => projection)).toThrow(/unresolved reconciliation/i);
+  });
+
+  it('resets a fenced live claim activation to ready so it is re-claimable under the new revision', () => {
+    // WEDGE 1: the activation bound to a fenced live claim must return to
+    // 'ready' (active attempt dropped) so the scheduler can re-claim it under
+    // the approved revision; otherwise the work is silently lost.
+    const base = approvedState();
+    // Add a running activation bound to a live claim that will be fenced.
+    base.projection.activations['running'] = {
+      activation_id: 'running',
+      node_id: 'branch-a',
+      status: 'running',
+      attempt_no: 1,
+      attempt_ids: ['attempt-running'],
+      active_attempt_id: 'attempt-running',
+      traversal_owner_id: 'root',
+    };
+    const state = proposeGraphPatch(base, {
+      proposal_id: 'patch-1',
+      base_revision_id: base.active_revision_id,
+      base_revision_hash: base.active_revision_hash,
+      proposed_descriptor: nextDescriptor(),
+      invalidated_node_ids: [],
+      proposal_evidence: [],
+      proposed_at: '2026-07-21T00:00:01.000Z',
+    });
+    state.claims['lease-running'] = {
+      run_id: state.run_id,
+      revision_id: state.active_revision_id,
+      revision_hash: state.active_revision_hash,
+      dispatch_generation: 0,
+      activation_id: 'running',
+      attempt_id: 'attempt-running',
+      attempt_no: 1,
+      claim_owner_session_id: state.session_id,
+      driver_instance_id: 'driver',
+      lease_id: 'lease-running',
+      tracking_id: 'tool',
+      issued_at: '2026-07-21T00:00:00.000Z',
+      expires_at: '2026-07-21T00:01:00.000Z',
+      lease_duration_ms: 60_000,
+      renewal_count: 0,
+      max_renewals: 1,
+      effect_policy: { policy: 'side_effect_free' },
+      status: 'live',
+    };
+    const approved = approveGraphPatch(state, {
       proposal_id: 'patch-1',
       base_revision_id: state.active_revision_id,
       base_revision_hash: state.active_revision_hash,
@@ -205,7 +296,11 @@ describe('graph revisions', () => {
       invalidated_node_ids: [],
       approval_evidence: { kind: 'human', ref: 'approve-patch-1' },
       approved_at: '2026-07-21T00:00:02.000Z',
-    }, (projection) => projection)).toThrow(/unresolved reconciliation/i);
+    }, (projection) => projection);
+    expect(approved.claims['lease-running'].status).toBe('fenced');
+    const settled = approved.projection.activations['running'];
+    expect(settled.status).toBe('ready');
+    expect(settled.active_attempt_id).toBeUndefined();
   });
 
   it('keeps stale-base and unapproved patch proposals inert', () => {

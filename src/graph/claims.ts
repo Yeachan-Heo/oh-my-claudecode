@@ -485,9 +485,24 @@ export function settleDriverClaims(
   if (Object.keys(reconciliations).length > GRAPH_MAX_RECONCILIATIONS) {
     throw new GraphClaimError('reconciliation_limit', 'SessionEnd would exceed the reconciliation bound');
   }
+  // WEDGE 2: a non-ambiguous human-approval claim holds the run in
+  // 'waiting_human' while it waits for a human answer. When SessionEnd fences
+  // that claim (abandoned_retryable) and resets its activation to 'ready', the
+  // run must leave 'waiting_human' too - otherwise issueGraphClaim's
+  // dispatch_paused gate (status !== 'running') prevents the now-ready
+  // activation from ever being re-claimed, wedging the run. The run was placed
+  // in 'waiting_human' solely because a human-approval claim was live; once no
+  // live claims remain there is nothing left to wait for, so return to
+  // 'running' and let the scheduler re-claim the ready activation. Ambiguous
+  // (reconcile-policy) settlements take precedence and move the run to
+  // 'reconciling' via hasAmbiguous below.
+  const wasWaitingHuman = state.status === 'waiting_human';
+  const remainingLive = Object.values(claims).some((claim) => claim.status === 'live');
+  const resumeRunning = wasWaitingHuman && !hasAmbiguous && !remainingLive;
   const next: GraphState = {
     ...structuredClone(state),
     ...(hasAmbiguous ? { status: 'reconciling' as const } : {}),
+    ...(resumeRunning ? { status: 'running' as const } : {}),
     claims,
     reconciliations,
     projection: { ...state.projection, activations },

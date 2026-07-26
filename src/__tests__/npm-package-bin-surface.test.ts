@@ -241,14 +241,6 @@ describe("npm package bin surface regression", () => {
       expect(packedPackageFixture.files.has(relativePath), relativePath).toBe(
         true,
       );
-      if (
-        relativePath === "dist" ||
-        relativePath.startsWith("dist/") ||
-        relativePath === "bridge" ||
-        relativePath.startsWith("bridge/")
-      ) {
-        continue;
-      }
       expect(
         sha256(join(extractedPackageRoot, relativePath)),
         relativePath,

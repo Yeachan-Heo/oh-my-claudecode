@@ -2,6 +2,7 @@ import { canonicalJson, parseGraphDescriptor, verifyDescriptorHash } from './des
 import {
   parseGraphState,
   type GraphApprovalRecord,
+  type GraphClaim,
   type GraphRevisionRecord,
   type GraphState,
 } from './runtime-types.js';
@@ -252,8 +253,42 @@ export function approveGraphPatch(
   if (canonicalJson(requestedInvalidations) !== canonicalJson([...patch.invalidated_node_ids].sort())) {
     throw new GraphRevisionError('invalidation_mismatch', 'Patch approval must enumerate the exact proposed invalidation set');
   }
-  if (Object.values(state.claims).some((claim) => claim.status === 'live')) {
-    throw new GraphRevisionError('live_claims', 'Patch approval is blocked until every live claim drains');
+  // WEDGE 1: once a patch is proposed the run sits in 'waiting_patch_approval',
+  // and the runtime result/release/pause gates reject any status other than
+  // running/waiting_human. A live claim therefore cannot complete, renew
+  // forever (cap), or release during that window, so a hard 'live_claims' reject
+  // here would wedge the run: the patch cannot be approved and the live claim
+  // cannot drain. Instead of rejecting, fence every non-ambiguous live claim
+  // atomically with the patch approval (same semantics as SessionEnd settle):
+  // the claim becomes 'fenced' so a late worker result is rejected (and recorded
+  // as a late diagnostic) rather than mutating the new revision, and the bound
+  // activation is reset to 'ready' so the scheduler can re-claim it under the
+  // approved revision. Reconcile-policy (ambiguous external-effect) claims still
+  // hard-reject: their outcome requires human resolution and must not be
+  // silently dropped by a patch approval.
+  const liveClaims = Object.values(state.claims).filter((claim) => claim.status === 'live');
+  const fencedClaims: Record<string, GraphClaim> = {};
+  const baseActivations = structuredClone(state.projection.activations);
+  for (const claim of liveClaims) {
+    if (claim.effect_policy.policy === 'reconcile') {
+      throw new GraphRevisionError(
+        'live_claims',
+        'Patch approval is blocked until every ambiguous (reconcile-policy) live claim is resolved',
+      );
+    }
+    const fenced: GraphClaim = { ...claim, status: 'fenced', fenced_at: input.approved_at };
+    fencedClaims[claim.lease_id] = fenced;
+    // Reset the bound activation to 'ready' so it can be re-claimed under the
+    // new revision. Only reset when the activation is still running on this
+    // claim's attempt; a completed or already-reset activation is left alone.
+    const activation = baseActivations[claim.activation_id];
+    if (activation
+      && activation.status === 'running'
+      && activation.active_attempt_id === claim.attempt_id) {
+      const released = { ...activation, status: 'ready' as const };
+      delete released.active_attempt_id;
+      baseActivations[claim.activation_id] = released;
+    }
   }
   if (Object.values(state.reconciliations).some((record) => record.status === 'unresolved')) {
     throw new GraphRevisionError('unresolved_reconciliation', 'Patch approval is blocked by unresolved reconciliation');
@@ -264,7 +299,7 @@ export function approveGraphPatch(
   const nextNodes = new Map(nextDescriptor.nodes.map((node) => [node.id, node]));
   const invalidated = new Set(requestedInvalidations);
   const completedNodeIds = new Set(
-    Object.values(state.projection.activations)
+    Object.values(baseActivations)
       .filter((activation) => activation.status === 'completed')
       .map((activation) => activation.node_id),
   );
@@ -293,10 +328,14 @@ export function approveGraphPatch(
     invalidated_node_ids: requestedInvalidations,
   };
   const projection = recomputeProjection(
-    structuredClone(state.projection),
+    { ...structuredClone(state.projection), activations: baseActivations },
     structuredClone(nextDescriptor),
     invalidated,
   );
+  const claims = structuredClone(state.claims);
+  for (const [leaseId, fenced] of Object.entries(fencedClaims)) {
+    claims[leaseId] = fenced;
+  }
   return parseGraphState({
     ...structuredClone(state),
     status: 'running',
@@ -304,6 +343,7 @@ export function approveGraphPatch(
     active_revision_hash: nextDescriptor.descriptor_hash,
     revisions: { ...state.revisions, [nextDescriptor.revision_id]: revision },
     projection,
+    claims,
     pending_patch: undefined,
     updated_at: input.approved_at,
   });
