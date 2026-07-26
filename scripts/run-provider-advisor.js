@@ -42,8 +42,8 @@ const ANTIGRAVITY_TIMEOUT_MS = (() => {
 /**
  * Build CLI args for a given provider.
  * - claude: `claude -p <prompt>` (or `claude -p` reading the prompt from stdin)
- * - codex: `codex exec --dangerously-bypass-approvals-and-sandbox <prompt>`
- * - gemini: `gemini -p <prompt> --yolo`
+ * - codex: `codex exec --sandbox read-only <prompt>` (advisor is READ-ONLY)
+ * - gemini: `gemini -p <prompt> --approval-mode plan` (advisor is READ-ONLY)
  * - antigravity: `agy --dangerously-skip-permissions -p <prompt>` (Antigravity CLI;
  *   `-p` takes the prompt as its value and cannot read it from stdin, so the
  *   prompt is always passed as an arg with approval flags first, like grok)
@@ -53,10 +53,10 @@ const ANTIGRAVITY_TIMEOUT_MS = (() => {
  */
 function buildProviderArgs(provider, prompt, { pipePromptViaStdin = false } = {}) {
   if (provider === 'codex') {
-    return ['exec', '--dangerously-bypass-approvals-and-sandbox', pipePromptViaStdin ? '-' : prompt];
+    return ['exec', '--sandbox', 'read-only', pipePromptViaStdin ? '-' : prompt];
   }
   if (provider === 'gemini') {
-    return pipePromptViaStdin ? ['--yolo'] : ['-p', prompt, '--yolo'];
+    return pipePromptViaStdin ? ['--approval-mode', 'plan'] : ['-p', prompt, '--approval-mode', 'plan'];
   }
   if (provider === 'antigravity') {
     // Antigravity (`agy`): `-p`/`--print` takes the prompt as its VALUE (next

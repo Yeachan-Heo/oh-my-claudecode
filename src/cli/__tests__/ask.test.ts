@@ -757,7 +757,7 @@ describe('run-provider-advisor script contract', () => {
       });
       expect(calls[1]).toMatchObject({
         command: 'codex',
-        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        args: ['exec', '--sandbox', 'read-only', '-'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'windows cmd support 你好' },
       });
     } finally {
@@ -820,7 +820,7 @@ describe('run-provider-advisor script contract', () => {
       });
       expect(calls[1]).toMatchObject({
         command: 'gemini',
-        args: ['--yolo'],
+        args: ['--approval-mode', 'plan'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: 'ship safely 你好' },
       });
     } finally {
@@ -853,7 +853,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'codex',
-        args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
+        args: ['exec', '--sandbox', 'read-only', '-'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: multilinePrompt },
       });
     } finally {
@@ -886,7 +886,7 @@ describe('run-provider-advisor script contract', () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]).toMatchObject({
         command: 'gemini',
-        args: ['--yolo'],
+        args: ['--approval-mode', 'plan'],
         options: { shell: true, encoding: 'utf8', stdio: null, input: longPrompt },
       });
     } finally {
