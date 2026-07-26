@@ -59,7 +59,7 @@ describe('resolveLiveData - basic', () => {
     mockedExecSync.mockReturnValue('hello world\n');
     const result = resolveLiveData('!echo hello');
     expect(result).toBe('<live-data command="echo hello">hello world\n</live-data>');
-    expect(mockedExecSync).toHaveBeenCalledWith('echo hello', expect.objectContaining({ timeout: 10_000 }));
+    expect(mockedExecSync).toHaveBeenCalledWith('echo hello', expect.objectContaining({ timeout: 10_000, windowsHide: true }));
   });
 
   it('handles multiple commands', () => {
@@ -442,6 +442,7 @@ describe('resolveLiveData - multi-line scripts', () => {
       'bash',
       expect.objectContaining({
         input: 'echo "hello"\necho "world"',
+        windowsHide: true,
       })
     );
   });

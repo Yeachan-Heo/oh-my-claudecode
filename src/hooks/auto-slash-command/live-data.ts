@@ -387,6 +387,7 @@ function executeCommand(command: string): { stdout: string; error: boolean } {
       maxBuffer: MAX_OUTPUT_BYTES + 1024,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let output = stdout ?? "";
@@ -535,6 +536,7 @@ export function resolveLiveData(content: string): string {
         maxBuffer: MAX_OUTPUT_BYTES + 1024,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
       scriptReplacements.set(
         block.startLine,
