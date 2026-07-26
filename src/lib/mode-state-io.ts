@@ -1035,6 +1035,17 @@ export function occReconcileCanonicalState(filePath: string, assertHeld?: () => 
   return true;
 }
 
+/** Reconcile a recovered emergency publication while sharing normal write/clear exclusion. */
+function reconcileRecoveredEmergencyStateFile(filePath: string): boolean {
+  const lock = acquireMutationLock(filePath);
+  if (!lock) return false;
+  try {
+    return occReconcileCanonicalState(filePath, () => assertMutationLockHeld(lock));
+  } finally {
+    releaseMutationLock(lock);
+  }
+}
+
 /** Cleans up only this owner token's stale INCOMPLETE entries (release race cure). */
 export function occCleanupOwner(filePath: string, ownerToken: string): void {
   const dir = occJournalDir(filePath);
@@ -1676,7 +1687,8 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
     if (!recoveryGenerationsAuthorized(filePath, current, authorizeState)) return true;
     if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
-    return recoverDeadEmergencyStateFile(filePath, authorizeState);
+    return recoverDeadEmergencyStateFile(filePath, authorizeState) &&
+      reconcileRecoveredEmergencyStateFile(filePath);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
   }
