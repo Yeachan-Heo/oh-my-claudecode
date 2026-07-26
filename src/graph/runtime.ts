@@ -273,12 +273,9 @@ function ensureGraphControlActive(
   });
 }
 
-/**
- * A succeeded graph cannot retain root control. Re-running a completed
- * transition repeats this reconciliation, closing the crash window between
- * durable terminal publish and control release.
- */
-function releaseSucceededGraphControl(controlStore: ControlOwnerStore, state: GraphState): void {
+/** Releases the exact root after a terminal graph transition. */
+function releaseTerminalGraphControl(controlStore: ControlOwnerStore, state: GraphState): void {
+  if (state.status !== 'succeeded' && state.status !== 'failed') return;
   const root = controlStore.read()?.root;
   if (!root) return;
   if (root.mode !== 'graph' || root.run_id !== state.run_id || root.nonce !== state.control_nonce) {
@@ -289,7 +286,7 @@ function releaseSucceededGraphControl(controlStore: ControlOwnerStore, state: Gr
     run_id: state.run_id,
     nonce: state.control_nonce,
     disposition: {
-      graph_status: 'succeeded',
+      graph_status: state.status,
       claims_fenced: true,
       children_drained: true,
     },
@@ -646,7 +643,10 @@ function executeClaim(input: Readonly<Record<string, unknown>>): unknown {
           kind: 'human-approval',
           waiting_human: true,
         });
-        continue;
+        // A human wait gates the graph. Do not continue a multi-claim batch
+        // after transitioning to waiting_human: issueGraphClaim only accepts a
+        // running state, and later work must not pass the approval boundary.
+        break;
       }
       if (node.kind !== 'agent' && node.kind !== 'command') {
         throw new Error(`activation ${activation.activation_id} is not on an executable node`);
@@ -790,6 +790,17 @@ function applyResultOperation(
       },
     });
     const succeeded = isGraphSucceeded(descriptor, schedulerResult.projection);
+    const completedClaim: GraphClaim = {
+      ...claim,
+      status: 'completed' as const,
+      fenced_at: now(),
+    };
+    const nextClaims = { ...current.claims, [leaseId]: completedClaim };
+    const completedNode = descriptor.nodes.find((node) => node.id === activationNodeId);
+    const hasLiveHumanApproval = Object.values(nextClaims).some((candidate) => {
+      if (candidate.status !== 'live') return false;
+      return descriptor.nodes.find((node) => node.id === current.projection.activations[candidate.activation_id]?.node_id)?.kind === 'human-approval';
+    });
     const next: GraphState = {
       ...current,
       projection: schedulerResult.projection,
@@ -807,15 +818,10 @@ function applyResultOperation(
         : schedulerResult.transition.outcome === 'failed'
         && schedulerResult.projection.activations[activationId]?.status === 'failed'
         ? { status: 'failed' as const }
-        : current.status === 'waiting_human' ? { status: 'running' as const } : {}),
-      claims: {
-        ...current.claims,
-        [leaseId]: {
-          ...claim,
-          status: 'completed' as const,
-          fenced_at: now(),
-        },
-      },
+        : current.status === 'waiting_human' && completedNode?.kind === 'human-approval' && !hasLiveHumanApproval
+          ? { status: 'running' as const }
+          : {}),
+      claims: nextClaims,
     };
     return {
       next,
@@ -831,8 +837,8 @@ function applyResultOperation(
     };
   });
 
-  if (result.state.status === 'succeeded') {
-    releaseSucceededGraphControl(new ControlOwnerStore({ sessionId }), result.state);
+  if (result.state.status === 'succeeded' || result.state.status === 'failed') {
+    releaseTerminalGraphControl(new ControlOwnerStore({ sessionId }), result.state);
   }
 
   return { result: result.result, replayed: result.replayed };

@@ -48,7 +48,7 @@ function useTempWorktree(sessionId: string): { worktree: string; store: GraphSta
   return { worktree, store };
 }
 
-function linearDescriptor(opts: { reconcile?: boolean; runId?: string; goal?: string } = {}): ForkJoin {
+function linearDescriptor(opts: { reconcile?: boolean; runId?: string; goal?: string; maxAttempts?: number } = {}): ForkJoin {
   return {
     descriptor_version: 1,
     run_id: opts.runId ?? 'run-linear',
@@ -60,12 +60,12 @@ function linearDescriptor(opts: { reconcile?: boolean; runId?: string; goal?: st
     nodes: [
       {
         id: 'start', kind: 'agent', title: 'start', instructions: 'Do start',
-        timeout_ms: 1_000, max_attempts: 2,
+        timeout_ms: 1_000, max_attempts: opts.maxAttempts ?? 2,
         effect_policy: opts.reconcile ? { policy: 'reconcile' } : { policy: 'side_effect_free' },
       },
       {
         id: 'verify', kind: 'command', title: 'verify', command: 'run-verify',
-        timeout_ms: 1_000, max_attempts: 2, effect_policy: { policy: 'side_effect_free' },
+        timeout_ms: 1_000, max_attempts: opts.maxAttempts ?? 2, effect_policy: { policy: 'side_effect_free' },
       },
     ],
     edges: [{ id: 'start-verify', kind: 'fixed', from: 'start', to: 'verify' }],
@@ -137,6 +137,128 @@ describe('graphCommandService runtime operations', () => {
     expect(completed.result.created_activation_ids).toHaveLength(1);
     const afterComplete = store.read()!;
     expect(afterComplete.claims[claim.lease_id as string].status).toBe('completed');
+  });
+
+  it('stops a multi-claim batch at a human approval boundary', async () => {
+    const sessionId = 'session-human-batch-boundary';
+    const descriptor = sealGraphDescriptor({ ...forkJoinDescriptor(), concurrency_limit: 3 });
+    const humanActivationId = `${descriptor.run_id}:act:approval:entry`;
+    const agentActivationId = `${descriptor.run_id}:act:analyze:parallel`;
+    const afterHumanActivationId = `${descriptor.run_id}:act:branch-a:after-human`;
+    const { store } = seedRunning(sessionId, descriptor, 'approval', {
+      activations: {
+        [humanActivationId]: {
+          activation_id: humanActivationId, node_id: 'approval', status: 'ready',
+          attempt_no: 0, attempt_ids: [], traversal_owner_id: humanActivationId,
+        },
+        [agentActivationId]: {
+          activation_id: agentActivationId, node_id: 'analyze', status: 'ready',
+          attempt_no: 0, attempt_ids: [], traversal_owner_id: agentActivationId,
+        },
+        [afterHumanActivationId]: {
+          activation_id: afterHumanActivationId, node_id: 'branch-a', status: 'ready',
+          attempt_no: 0, attempt_ids: [], traversal_owner_id: afterHumanActivationId,
+        },
+      },
+      cohorts: {}, branch_tokens: {}, traversal_counts: {},
+      committed_transitions: {}, terminal_verification_activation_ids: [],
+    });
+
+    const claimed = await exec('claim', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 0,
+      driver_id: 'driver-1', transition_id: 'transition-human-batch', limit: 2,
+    }) as { result: { claims: Array<Record<string, unknown>> } };
+
+    expect(claimed.result.claims).toHaveLength(2);
+    expect(claimed.result.claims[1]).toMatchObject({ activation_id: humanActivationId, kind: 'human-approval' });
+    expect(store.read()).toMatchObject({
+      status: 'waiting_human',
+      projection: { activations: { [afterHumanActivationId]: { status: 'ready' } } },
+    });
+  });
+
+  it('does not release a human wait when an agent claim from a persisted mixed batch completes', async () => {
+    const sessionId = 'session-human-mixed-claim';
+    const descriptor = sealGraphDescriptor(forkJoinDescriptor());
+    const humanActivationId = `${descriptor.run_id}:act:approval:entry`;
+    const agentActivationId = `${descriptor.run_id}:act:analyze:parallel`;
+    const { store } = seedRunning(sessionId, descriptor, 'approval', {
+      activations: {
+        [humanActivationId]: {
+          activation_id: humanActivationId, node_id: 'approval', status: 'ready',
+          attempt_no: 0, attempt_ids: [], traversal_owner_id: humanActivationId,
+        },
+      },
+      cohorts: {}, branch_tokens: {}, traversal_counts: {},
+      committed_transitions: {}, terminal_verification_activation_ids: [],
+    });
+    const human = await exec('claim', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 0,
+      driver_id: 'driver-1', transition_id: 'transition-human', limit: 1,
+    }) as { result: { claims: Array<Record<string, string>> } };
+    const waiting = store.read()!;
+    const agentLeaseId = 'lease-persisted-agent';
+    const agentAttemptId = 'attempt-persisted-agent';
+    const mixed = {
+      ...waiting,
+      projection: {
+        ...waiting.projection,
+        activations: {
+          ...waiting.projection.activations,
+          [agentActivationId]: {
+            activation_id: agentActivationId,
+            node_id: 'analyze',
+            status: 'running' as const,
+            attempt_no: 1,
+            attempt_ids: [agentAttemptId],
+            active_attempt_id: agentAttemptId,
+            traversal_owner_id: agentActivationId,
+          },
+        },
+      },
+      claims: {
+        ...waiting.claims,
+        [agentLeaseId]: {
+          run_id: waiting.run_id,
+          revision_id: waiting.active_revision_id,
+          revision_hash: waiting.active_revision_hash,
+          dispatch_generation: waiting.dispatch_generation,
+          activation_id: agentActivationId,
+          attempt_id: agentAttemptId,
+          attempt_no: 1,
+          claim_owner_session_id: sessionId,
+          driver_instance_id: 'driver-1',
+          lease_id: agentLeaseId,
+          tracking_id: 'tracking-persisted-agent',
+          issued_at: '2026-07-21T00:00:00.000Z',
+          expires_at: '2026-07-21T00:10:00.000Z',
+          lease_duration_ms: 600_000,
+          renewal_count: 0,
+          max_renewals: 3,
+          effect_policy: { policy: 'side_effect_free' as const },
+          status: 'live' as const,
+        },
+      },
+    };
+    occCommitMutation((store as unknown as { path: string }).path, () => ({ state: mixed, result: true }));
+
+    await exec('complete', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 1,
+      transition_id: 'transition-complete-persisted-agent',
+      claim: { lease_id: agentLeaseId, activation_id: agentActivationId, attempt_id: agentAttemptId },
+      result: { outcome: 'succeeded', evidence_refs: [{ kind: 'command', ref: 'agent-result' }] },
+    });
+
+    expect(store.read()).toMatchObject({
+      status: 'waiting_human',
+      claims: {
+        [human.result.claims[0].lease_id]: { status: 'live' },
+        [agentLeaseId]: { status: 'completed' },
+      },
+    });
   });
 
   it('B2: resolve-join resolves a ready join activation through the runtime', async () => {
@@ -625,6 +747,41 @@ describe('graphCommandService runtime operations', () => {
 
     expect(terminal.result.succeeded).toBe(true);
     expect(store.read()?.status).toBe('succeeded');
+    expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toBeNull();
+  });
+
+  it('releases exact graph control after a terminal failure', async () => {
+    const sessionId = 'session-terminal-failure-control-release';
+    const descriptor = sealGraphDescriptor(linearDescriptor({
+      runId: 'run-terminal-failure-control-release',
+      maxAttempts: 1,
+    }));
+    const { worktree, store } = useTempWorktree(sessionId);
+    await exec('create', {
+      goal: descriptor.goal, descriptor, session_id: sessionId,
+      driver_id: 'driver-create', transition_id: 't-create-failure',
+    });
+    await exec('approve', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, transition_id: 't-approve-failure',
+      approval: {
+        approved_at: '2026-07-21T00:00:01.000Z',
+        evidence: { kind: 'human', ref: 'operator-approved' }, driver_id: 'driver-approve',
+      },
+    });
+    const start = await exec('claim', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 1,
+      driver_id: 'driver-approve', transition_id: 't-claim-failure', limit: 1,
+    }) as { result: { claims: Array<Record<string, string>> } };
+    await exec('fail', {
+      session_id: sessionId, run_id: descriptor.run_id, revision_id: descriptor.revision_id,
+      descriptor_hash: descriptor.descriptor_hash, expected_sequence: 2, transition_id: 't-fail-terminal',
+      claim: start.result.claims[0],
+      result: { outcome: 'failed', evidence_refs: [{ kind: 'command', ref: 'start-failed' }] },
+    });
+
+    expect(store.read()?.status).toBe('failed');
     expect(new ControlOwnerStore({ sessionId, worktreeRoot: worktree }).read()?.root).toBeNull();
   });
 
