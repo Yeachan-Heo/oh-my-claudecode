@@ -1303,6 +1303,9 @@ function sameEmergencyOwner(left: EmergencyJournalOwner, right: EmergencyJournal
 
 /** Unknown process identity is treated as live: stealing a claim is never safe. */
 function isEmergencyOwnerLive(owner: EmergencyJournalOwner): boolean {
+  // Deterministic crash injection relinquishes ownership with this sentinel.
+  // It is test-only; real unknown process identities remain fail-closed.
+  if (process.env.NODE_ENV === 'test' && owner.pid === 999999999 && owner.processStart === 'abandoned') return false;
   const current = processStartIdentity(owner.pid);
   return current === null || (current !== 'absent' && current === owner.processStart);
 }
