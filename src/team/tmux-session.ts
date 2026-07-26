@@ -1339,12 +1339,26 @@ export async function captureTeamPane(paneId: string): Promise<string> {
   return capturePaneAsync(paneId);
 }
 
+/**
+ * `send-keys C-m` transmits a bare CR (0x0D). A TUI that has enabled the kitty
+ * keyboard protocol — the Codex CLI does — does not accept that as an Enter key
+ * event, so worker input is typed into the composer and never submitted. The
+ * `Enter` key name lets tmux encode whatever the pane actually negotiated, and
+ * resolves to the same CR for shells and for the Claude CLI.
+ *
+ * The cmux surface path is deliberately left alone: it applies its own key-name
+ * normalisation and has not been verified against Codex.
+ */
+function resolveTmuxSubmitKey(key: string): string {
+  return key === 'C-m' ? 'Enter' : key;
+}
+
 export async function sendTeamPaneKey(paneId: string, key: string): Promise<void> {
   if (isCmuxSurfaceTarget(paneId)) {
     await cmuxSendSurfaceKey(paneId, key);
     return;
   }
-  await tmuxExecAsync(['send-keys', '-t', paneId, key]);
+  await tmuxExecAsync(['send-keys', '-t', paneId, resolveTmuxSubmitKey(key)]);
 }
 
 export async function killTeamPane(paneId: string): Promise<void> {

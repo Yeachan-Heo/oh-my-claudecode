@@ -188,6 +188,31 @@ describe('spawnWorkerInPane', () => {
     expect(mockedCalls.cmuxArgs[1]).toEqual(['send-key-surface', '--surface', 'cmux-worker-1', 'enter']);
   });
 
+  it('submits with the Enter key name so kitty-protocol TUIs accept it', async () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-501/default,1,0');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+
+    await sendTeamPaneKey('%1', 'C-m');
+
+    // A bare CR is ignored by TUIs that negotiated the kitty keyboard protocol
+    // (the Codex CLI does), leaving worker input typed but never submitted.
+    expect(mockedCalls.tmuxArgs).toContainEqual(['send-keys', '-t', '%1', 'Enter']);
+    expect(mockedCalls.tmuxArgs).not.toContainEqual(['send-keys', '-t', '%1', 'C-m']);
+  });
+
+  it('passes non-submit keys through to tmux unchanged', async () => {
+    vi.stubEnv('TMUX', '/tmp/tmux-501/default,1,0');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+
+    await sendTeamPaneKey('%1', 'Tab');
+    await sendTeamPaneKey('%1', 'C-u');
+    await sendTeamPaneKey('%1', 'C-c');
+
+    expect(mockedCalls.tmuxArgs).toContainEqual(['send-keys', '-t', '%1', 'Tab']);
+    expect(mockedCalls.tmuxArgs).toContainEqual(['send-keys', '-t', '%1', 'C-u']);
+    expect(mockedCalls.tmuxArgs).toContainEqual(['send-keys', '-t', '%1', 'C-c']);
+  });
+
   it('uses cmux send-key-surface semantics for Enter and control keys', async () => {
     vi.stubEnv('TMUX', '');
     vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
