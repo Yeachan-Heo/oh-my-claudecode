@@ -12,6 +12,7 @@ import {
   updateAutopilotStateIfCurrent,
   updateAutopilotStateIfExact,
 } from './state.js';
+import { lstatSync } from 'fs';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import type { AutopilotState } from './types.js';
@@ -44,6 +45,27 @@ function validNamedWorkflowForResume(state: AutopilotState, sessionId?: string):
       ? validateNamedWorkflowState(state, sessionId)
       : validateNamedWorkflowStateStructure(state, sessionId),
   );
+}
+
+/**
+ * An unsupported runtime cannot authenticate a transcript, but it can still
+ * reject an already-observable symlink. Do that before returning the generic
+ * unsupported-runtime response so a forged boundary is never treated as a
+ * merely unavailable feature.
+ */
+function hasSymlinkedNamedWorkflowTranscript(state: AutopilotState): boolean {
+  const boundaries = [
+    state.pipelineTracking?.activationBoundary,
+    ...(state.pipelineTracking?.completionObservations?.map((observation) => observation.activationBoundary) ?? []),
+  ];
+  return boundaries.some((boundary) => {
+    if (!boundary || typeof boundary.transcriptPath !== 'string') return false;
+    try {
+      return lstatSync(boundary.transcriptPath).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
 }
 
 function clearSessionOwnedNestedRalplanState(directory: string, sessionId?: string): boolean | null {
@@ -241,6 +263,9 @@ export function canResumeAutopilot(directory: string, sessionId?: string): {
 
   if (hasNamedWorkflowMarkers(state)) {
     if (!validNamedWorkflowForResume(state, sessionId)) {
+      return { canResume: false, resumePhase: state.phase, integrityFailed: true };
+    }
+    if (hasSymlinkedNamedWorkflowTranscript(state)) {
       return { canResume: false, resumePhase: state.phase, integrityFailed: true };
     }
     if (!namedWorkflowRuntimeSupported()) {

@@ -775,6 +775,7 @@ describe('AutopilotCancel', () => {
       process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64 = Buffer.from(JSON.stringify(replacement)).toString('base64');
       expect(resumeAutopilot(testDir, sessionId)).toMatchObject({ success: false, message: 'workflow_descriptor_integrity_failed' });
       expect(readAutopilotState(testDir, sessionId)).toEqual(replacement);
+      expect(require('fs').readFileSync(stateFile, 'utf8')).toBe(JSON.stringify(replacement));
 
       writeAutopilotState(testDir, state, sessionId);
       expect(validateNamedWorkflowState(readAutopilotState(testDir, sessionId)!, sessionId)).not.toBeNull();

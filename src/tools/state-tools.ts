@@ -1385,6 +1385,80 @@ function hasGraphWorkflowSlot(root: string, sessionId?: string): boolean {
   });
 }
 
+type SkillActiveClearResult = {
+  changed: boolean;
+  failed: boolean;
+  preservedGraphWorkflowSlot: boolean;
+};
+
+/**
+ * Graph owns its slot in skill-active-state.json, but that ownership must not
+ * shield unrelated skill slots from an all-mode clear. Work from discovered
+ * snapshots and conditionally publish the reduced record so a concurrent
+ * replacement is never removed based on stale observations.
+ */
+function clearSkillActiveStateForAll(root: string, sessionId?: string): SkillActiveClearResult {
+  const legacyCandidates = discoverStatePaths(getLegacyStateFileCandidates('skill-active', root))
+    .filter((candidate) => !sessionId || canClearStateForSession(candidate.state, sessionId));
+  const localCandidates = discoverStatePaths(
+    getWorkingDirectoryLocalStateClearCandidates('skill-active', root, sessionId),
+  ).filter((candidate) => !sessionId || canClearStateForSession(candidate.state, sessionId));
+  const sessionCandidates = sessionId
+    ? [
+        ...findSessionOwnedStateCandidates('skill-active', sessionId, root),
+        ...findCompletedSessionStateCandidates('skill-active', root, sessionId),
+      ]
+    : [
+        ...listSessionIds(root).flatMap((sid) => findSessionOwnedStateCandidates('skill-active', sid, root)),
+        ...discoverAllRootSessionStateCandidates('skill-active', root),
+      ];
+  const candidates = [...new Map([
+    ...legacyCandidates,
+    ...localCandidates,
+    ...sessionCandidates,
+  ].map((candidate) => [candidate.path, candidate])).values()];
+
+  let changed = false;
+  let failed = false;
+  let preservedGraphWorkflowSlot = false;
+
+  for (const candidate of candidates) {
+    const skills = candidate.state.active_skills;
+    const graphIsPresent = skills !== null && typeof skills === 'object' && !Array.isArray(skills) &&
+      Object.prototype.hasOwnProperty.call(skills, 'graph');
+
+    if (!graphIsPresent) {
+      const result = clearDiscoveredStateCandidate(
+        candidate,
+        (current) => (!sessionId || canClearStateForSession(current, sessionId)) &&
+          JSON.stringify(current) === candidate.snapshot,
+      );
+      if (result === 'cleared') changed = true;
+      else if (result === 'failed' || (result === 'skipped' && existsSync(candidate.path))) failed = true;
+      continue;
+    }
+
+    preservedGraphWorkflowSlot = true;
+    const activeSkills = skills as Record<string, unknown>;
+    const nonGraphSkills = Object.keys(activeSkills).filter((name) => name !== 'graph');
+    if (nonGraphSkills.length === 0) continue;
+
+    const result = writeStateFileLockedIf(
+      candidate.path,
+      (current) => (!sessionId || canClearStateForSession(current, sessionId)) &&
+        JSON.stringify(current) === candidate.snapshot,
+      (current) => {
+        const currentSkills = current.active_skills as Record<string, unknown>;
+        return { ...current, active_skills: { graph: currentSkills.graph } };
+      },
+    );
+    if (result === 'written') changed = true;
+    else failed = true;
+  }
+
+  return { changed, failed, preservedGraphWorkflowSlot };
+}
+
 export const stateClearTool: ToolDefinition<{
   mode: z.ZodEnum<typeof STATE_CLEAR_MODES>;
   force: z.ZodOptional<z.ZodBoolean>;
@@ -1431,9 +1505,16 @@ export const stateClearTool: ToolDefinition<{
         const graphClassification = classifyGraphStateForClear(root, sessionId);
         const clearedModes: string[] = [];
         const failedModes: string[] = [];
-        const preserveGraphWorkflowSlot = hasGraphWorkflowSlot(root, sessionId);
+        let preserveGraphWorkflowSlot = hasGraphWorkflowSlot(root, sessionId);
         for (const candidate of STATE_TOOL_MODES) {
-          if (candidate === 'graph' || (candidate === 'skill-active' && preserveGraphWorkflowSlot)) {
+          if (candidate === 'graph') {
+            continue;
+          }
+          if (candidate === 'skill-active') {
+            const result = clearSkillActiveStateForAll(root, sessionId);
+            preserveGraphWorkflowSlot ||= result.preservedGraphWorkflowSlot;
+            if (result.failed) failedModes.push(candidate);
+            else if (result.changed) clearedModes.push(candidate);
             continue;
           }
           const result = await stateClearTool.handler({

@@ -5,7 +5,7 @@ import { mkdirSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync
 import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 
-import { acquireMutationLockAt, emergencyMutateStateFileIf, recoverEmergencyStateFile, writeModeState, readModeState, clearModeStateFile } from '../mode-state-io.js';
+import { acquireMutationLockAt, emergencyMutateStateFileIf, recoverEmergencyStateFile, writeModeState, writeStateFileLockedIf, writeStateFileLockedCreateIf, readModeState, clearModeStateFile } from '../mode-state-io.js';
 import { clearWorktreeCache, getProjectIdentifier } from '../worktree-paths.js';
 
 let tempDir: string;
@@ -585,6 +585,52 @@ describe('mode-state-io', () => {
   });
 
   describe('durable emergency mutation journal', () => {
+    it('makes an emergency publication visible to a later conditional write', () => {
+      expect(writeModeState('autopilot', { active: true, run: 'emergency-visible' }, tempDir)).toBe(true);
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+
+      expect(emergencyMutateStateFileIf(
+        path,
+        (state) => state.run === 'emergency-visible' && state.active === true,
+        (state) => ({ ...state, active: false }),
+      )).toBe(true);
+
+      // The emergency path must reconcile its canonical publication with OCC.
+      // Otherwise this predicate sees the pre-emergency journal state and
+      // overwrites the paused state with a stale update.
+      expect(writeStateFileLockedIf(
+        path,
+        (state) => state.run === 'emergency-visible' && state.active === true,
+        (state) => ({ ...state, staleOverwrite: true }),
+      )).toBe('skipped');
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({
+        active: false,
+        run: 'emergency-visible',
+      });
+    });
+
+    it('records an emergency clear as an OCC tombstone for a later create', () => {
+      expect(writeModeState('autopilot', { active: true, run: 'emergency-clear' }, tempDir)).toBe(true);
+      const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+
+      expect(emergencyMutateStateFileIf(
+        path,
+        (state) => state.run === 'emergency-clear',
+        null,
+      )).toBe(true);
+      expect(existsSync(path)).toBe(false);
+
+      expect(writeStateFileLockedCreateIf(
+        path,
+        (current) => current === null,
+        () => ({ active: true, run: 'created-after-emergency-clear' }),
+      )).toBe('written');
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({
+        active: true,
+        run: 'created-after-emergency-clear',
+      });
+    });
+
     it('recovers a paused publication interrupted after primary publication', () => {
       const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');
       mkdirSync(dirname(path), { recursive: true });

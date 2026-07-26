@@ -2400,6 +2400,53 @@ describe('state-tools', () => {
       }
     });
 
+    it('clear all removes unrelated skill-active slots without crossing session boundaries', async () => {
+      const sessionId = 'graph-clear-mixed-slots';
+      const siblingSessionId = 'graph-clear-mixed-slots-sibling';
+      const paths = writeGuardedGraphArtifacts(sessionId);
+      const mixedSlots = {
+        version: 2,
+        active_skills: {
+          graph: { skill_name: 'graph', session_id: sessionId, completed_at: null },
+          ralph: { skill_name: 'ralph', session_id: sessionId, completed_at: null },
+        },
+      };
+      writeFileSync(paths.rootSlot, JSON.stringify(mixedSlots));
+      writeFileSync(paths.sessionSlot, JSON.stringify(mixedSlots));
+
+      const siblingDir = join(TEST_DIR, '.omc', 'state', 'sessions', siblingSessionId);
+      mkdirSync(siblingDir, { recursive: true });
+      const siblingSlot = join(siblingDir, 'skill-active-state.json');
+      const siblingSlots = {
+        version: 2,
+        active_skills: {
+          graph: { skill_name: 'graph', session_id: siblingSessionId, completed_at: null },
+          team: { skill_name: 'team', session_id: siblingSessionId, completed_at: null },
+        },
+      };
+      writeFileSync(siblingSlot, JSON.stringify(siblingSlots));
+
+      const result = await stateClearTool.handler({
+        mode: 'all',
+        force: true,
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      } as never);
+      const clearAll = JSON.parse(result.content[0].text);
+
+      expect(clearAll).toMatchObject({
+        type: 'clear_all',
+        cleared_modes: expect.arrayContaining(['skill-active']),
+        preserved_graph_workflow_slot: true,
+      });
+      for (const path of [paths.rootSlot, paths.sessionSlot]) {
+        expect(JSON.parse(readFileSync(path, 'utf8')).active_skills).toEqual({
+          graph: { skill_name: 'graph', session_id: sessionId, completed_at: null },
+        });
+      }
+      expect(JSON.parse(readFileSync(siblingSlot, 'utf8'))).toEqual(siblingSlots);
+    });
+
     it('clear all preserves Graph slot and control ownership when the primary ledger is missing', async () => {
       const sessionId = 'graph-clear-all-missing-ledger';
       const paths = writeGuardedGraphArtifacts(sessionId);
