@@ -19,6 +19,7 @@ import {
   isModeActive,
   getActiveModes,
   clearModeState,
+  clearModeStateDetailed,
   createModeMarker,
   hasModeState,
   isModeActiveInAnySession,
@@ -340,7 +341,8 @@ describe("Session-Scoped State Isolation", () => {
       );
       const before = readFileSync(graphPath, "utf8");
 
-      expect(clearModeState("graph", tempDir, sessionId)).toBe("failed");
+      expect(clearModeStateDetailed("graph", tempDir, sessionId)).toBe("failed");
+      expect(clearModeState("graph", tempDir, sessionId)).toBe(false);
       expect(readFileSync(graphPath, "utf8")).toBe(before);
     });
 
@@ -457,7 +459,7 @@ describe("Session-Scoped State Isolation", () => {
         JSON.stringify(replacement),
       ).toString("base64");
 
-      expect(clearModeState("ralph", tempDir, sessionA)).toBe("skipped");
+      expect(clearModeStateDetailed("ralph", tempDir, sessionA)).toBe("skipped");
       expect(JSON.parse(readFileSync(markerPath, "utf8"))).toEqual(replacement);
     });
   });
@@ -594,7 +596,7 @@ describe("Session-Scoped State Isolation", () => {
         );
       });
 
-      expect(clearModeState("ralph", tempDir, sessionId)).toBe("cleared");
+      expect(clearModeState("ralph", tempDir, sessionId)).toBe(true);
       await completed;
       expect(existsSync(markerPath)).toBe(false);
     });

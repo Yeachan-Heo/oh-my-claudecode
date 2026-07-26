@@ -631,7 +631,7 @@ export {
   type CancelResult
 } from './autopilot/index.js';
 
-// Mode Registry (Centralized State Management)
+// Mode Registry (Centralized State Management; additional functions from PR #111)
 export {
   MODE_CONFIGS,
   getStateDir,
@@ -640,10 +640,10 @@ export {
   getMarkerFilePath as getModeMarkerFilePath,
   getGlobalStateFilePath,
   clearModeState,
+  clearModeStateDetailed,
   hasModeState,
   getActiveModes,
   clearAllModeStates,
-  // Additional functions from PR #111
   isModeActive,
   getActiveExclusiveMode,
   canStartMode,

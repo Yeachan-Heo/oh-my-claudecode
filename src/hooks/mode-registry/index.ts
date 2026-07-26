@@ -599,7 +599,7 @@ function mergeClearResults(
  *
  * @returns `cleared`, `skipped` when a captured generation was replaced, or `failed`
  */
-export function clearModeState(
+export function clearModeStateDetailed(
   mode: ExecutionMode,
   cwd: string,
   sessionId?: string,
@@ -751,6 +751,22 @@ export function clearModeState(
 }
 
 /**
+ * Clear all state files for a mode.
+ *
+ * This is the long-standing public boolean API. Callers which need to
+ * distinguish a CAS replacement from a failed mutation must use
+ * clearModeStateDetailed explicitly.
+ */
+export function clearModeState(
+  mode: ExecutionMode,
+  cwd: string,
+  sessionId?: string,
+  expectedState?: Record<string, unknown>,
+): boolean {
+  return clearModeStateDetailed(mode, cwd, sessionId, expectedState) === "cleared";
+}
+
+/**
  * Clear all mode states (force clear)
  */
 export function clearAllModeStates(cwd: string): boolean {
@@ -758,7 +774,7 @@ export function clearAllModeStates(cwd: string): boolean {
 
   for (const mode of Object.keys(MODE_CONFIGS) as ExecutionMode[]) {
     if (mode === MODE_NAMES.GRAPH) continue;
-    if (clearModeState(mode, cwd) !== "cleared") {
+    if (!clearModeState(mode, cwd)) {
       success = false;
     }
   }
