@@ -67,6 +67,18 @@ function statusMeta(status) {
 // ---------------------------------------------------------------------------
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const CSI_RE = /(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g;
+const OSC_RE = /(?:\x1b\]|\x9d)(?:[^\x07\x1b\x9c]|\x1b(?!\\))*(?:\x07|\x1b\\|\x9c|$)/g;
+const TERMINAL_CONTROL_RE = /[\x00-\x1f\x7f-\x9f]/g;
+
+// The visualizer can be pointed at an untrusted state file. Strip every C0
+// and C1 control before a value reaches a width calculation or terminal
+// output. CSI and OSC are removed as complete sequences so their payloads do
+// not leak into the diagram after the introducer is stripped.
+function terminalText(value, fallback = '') {
+  if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return fallback;
+  return String(value).replace(OSC_RE, '').replace(CSI_RE, '').replace(TERMINAL_CONTROL_RE, '');
+}
 
 function stripAnsi(text) {
   return text.replace(ANSI_RE, '');
@@ -202,7 +214,7 @@ function formatLeftContent(node, status) {
   const rightW = visualWidth(meta.word);
   // Reserve headW + rightW + 4 (left/right padding + gaps) inside the cap.
   const idBudget = MAX_INNER_WIDTH - headW - rightW - 4;
-  const id = String(node.id ?? '');
+  const id = terminalText(node.id);
   const idW = visualWidth(id);
   if (idW <= idBudget) {
     const display = `${head}${id}`;
@@ -255,7 +267,7 @@ function renderNodeBox(node, status, innerWidth) {
   const rows = [];
   rows.push(`${tl}${bar}${tr}`);
   rows.push(`│${padRight(' ' + left + gap + right + ' ', innerWidth)}│`);
-  const titleLines = wrapText(node.title ?? '', innerWidth - 2);
+  const titleLines = wrapText(terminalText(node.title), innerWidth - 2);
   for (const titleLine of titleLines.length ? titleLines : ['']) {
     rows.push(`│${padRight(' ' + titleLine + ' ', innerWidth)}│`);
   }
@@ -269,15 +281,16 @@ function renderForwardEdge(edge, centerCol) {
   const isFanOut = kind === 'fan_out';
   const shaft = isFanOut ? '║' : (isConditional ? '╎' : '│');
   const head = isConditional ? '▽' : '▼';
-  const label = (edge.route || edge.branch_id) ? ` ${edge.route || edge.branch_id}` : '';
+  const route = terminalText(edge.route || edge.branch_id);
+  const label = route ? ` ${route}` : '';
   const indent = ' '.repeat(centerCol);
   return [`${indent}${shaft}${label}`, `${indent}${head}`];
 }
 
 function renderBackEdgeNote(edge, innerWidth) {
-  const route = edge.route ?? 'retry';
+  const route = terminalText(edge.route, 'retry') || 'retry';
   const max = typeof edge.max_traversals === 'number' ? ` (max ${edge.max_traversals})` : '';
-  const label = `↺ ${route}${max} -> ${edge.to}`;
+  const label = `↺ ${route}${max} -> ${terminalText(edge.to)}`;
   const dashCount = Math.max(4, innerWidth - 8);
   return `   ◂${'─'.repeat(dashCount)}┘  ${label}`;
 }
@@ -305,7 +318,7 @@ export function renderAsciiGraph(descriptor, nodeStatus, runStatus) {
     const status = normalizeStatus(nodeStatus.get(id) ?? 'ready');
     const meta = statusMeta(status);
     if (status === 'completed') completed += 1;
-    const token = `${id}${meta.emoji}`;
+    const token = `${terminalText(id)}${meta.emoji}`;
     const colored = maybeColor(token, meta.color);
     progressParts.push(status === 'completed' ? `[${colored}]` : colored);
   }
@@ -313,7 +326,7 @@ export function renderAsciiGraph(descriptor, nodeStatus, runStatus) {
 
   const lines = [];
   if (runStatus) {
-    lines.push(`(run status: ${runStatus})`);
+    lines.push(`(run status: ${terminalText(runStatus)})`);
     lines.push('');
   }
   lines.push(`Progress: ${completed}/${total} done  ${progressParts.join(' -> ')}`);
@@ -339,14 +352,16 @@ export function renderAsciiGraph(descriptor, nodeStatus, runStatus) {
 }
 
 export function renderHeader(state, descriptor) {
-  const hash = state?.active_revision_hash ?? 'pending';
+  const hash = terminalText(state?.active_revision_hash, 'pending') || 'pending';
   const hashShort =
-    typeof hash === 'string' && hash.length >= 8 ? hash.slice(0, 8) : (hash || 'pending');
-  const goal = descriptor.goal ?? '(no goal)';
-  const status = state?.status ?? 'unknown';
-  const entry = (descriptor.entry_node_ids ?? []).join(', ') || '(none)';
-  const terminal = descriptor.terminal_verification_node_id ?? '(none)';
-  const concurrency = descriptor.concurrency_limit ?? 1;
+    hash.length >= 8 ? hash.slice(0, 8) : hash;
+  const goal = terminalText(descriptor.goal, '(no goal)') || '(no goal)';
+  const status = terminalText(state?.status, 'unknown') || 'unknown';
+  const entry = (Array.isArray(descriptor.entry_node_ids)
+    ? descriptor.entry_node_ids.map((id) => terminalText(id)).join(', ')
+    : '') || '(none)';
+  const terminal = terminalText(descriptor.terminal_verification_node_id, '(none)') || '(none)';
+  const concurrency = terminalText(descriptor.concurrency_limit, '1') || '1';
 
   const lines = [];
   const goalLines = wrapText(goal, 58);

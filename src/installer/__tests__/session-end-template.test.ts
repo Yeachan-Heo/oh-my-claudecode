@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const roots: string[] = [];
 const templatePath = join(process.cwd(), 'templates', 'hooks', 'session-end.mjs');
+const pluginRunnerPath = join(process.cwd(), 'scripts', 'session-end.mjs');
+const templateSettlementPath = join(process.cwd(), 'templates', 'hooks', 'lib', 'graph-session-settlement.mjs');
+const pluginSettlementPath = join(process.cwd(), 'scripts', 'lib', 'graph-session-settlement.mjs');
 
 function temporaryRoot(prefix: string): string {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -18,14 +21,17 @@ afterEach(() => {
 });
 
 describe('standalone SessionEnd Graph settlement hook', () => {
-  it('is bounded, shell-free, and delegates mutations to the Graph CLI', () => {
-    const source = readFileSync(templatePath, 'utf8');
+  it('shares bounded, shell-free Graph CLI settlement with the plugin runner', () => {
+    const source = readFileSync(templateSettlementPath, 'utf8');
     expect(source).toContain("spawnSync('omc'");
     expect(source).toContain("'settle-session'");
     expect(source).toContain('shell: false');
     expect(source).toContain('timeout: SETTLE_TIMEOUT_MS');
     expect(source).not.toContain('writeFileSync');
     expect(source).not.toContain('unlinkSync');
+    expect(readFileSync(pluginSettlementPath, 'utf8')).toBe(source);
+    expect(readFileSync(templatePath, 'utf8')).toContain("'graph-session-settlement.mjs'");
+    expect(readFileSync(pluginRunnerPath, 'utf8')).toContain("'./lib/graph-session-settlement.mjs'");
   });
 
   it('allows SessionEnd without invoking the CLI when Graph state is absent', () => {

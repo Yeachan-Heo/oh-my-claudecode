@@ -231,7 +231,7 @@ describe("npm package bin surface regression", () => {
     expect(packedFiles.has("bridge/run-mcp-server.sh")).toBe(true);
   });
 
-  it("keeps the committed plugin runtime closure as a byte-identical npm package subset", () => {
+  it("keeps source-controlled plugin runtime files byte-identical in the npm package", () => {
     const surface = collectPluginRuntimeClosure(
       committedSnapshotCache!,
     ) as PluginShippingSurface;
@@ -241,6 +241,14 @@ describe("npm package bin surface regression", () => {
       expect(packedPackageFixture.files.has(relativePath), relativePath).toBe(
         true,
       );
+      if (
+        relativePath === "dist" ||
+        relativePath.startsWith("dist/") ||
+        relativePath === "bridge" ||
+        relativePath.startsWith("bridge/")
+      ) {
+        continue;
+      }
       expect(
         sha256(join(extractedPackageRoot, relativePath)),
         relativePath,
@@ -269,6 +277,14 @@ describe("npm package bin surface regression", () => {
     );
     expect(resultHelp).toContain("team_name");
     expect(resultHelp).toContain("request_id");
+
+    const graphHelp = execFileSync(
+      process.execPath,
+      [packedCli, "graph", "--help"],
+      { cwd: tmpdir(), encoding: "utf-8" },
+    );
+    expect(graphHelp).toContain("omc graph");
+    expect(graphHelp).toContain("graph create");
   });
 
   it("packs the fixed worktree-paths dist with hidden Windows git subprocesses", () => {

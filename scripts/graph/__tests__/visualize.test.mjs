@@ -90,3 +90,40 @@ describe('renderHeader', () => {
     expect(output).toContain('Concurrency: 1');
   });
 });
+
+describe('terminal-control sanitization', () => {
+  // Newlines are renderer-owned line separators; reject all controls that can
+  // originate in a hostile descriptor or state value.
+  const controls = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
+  const hostileDescriptor = {
+    goal: 'ship\x1b]8;;https://example.invalid\x07click\x1b]8;;\x07',
+    entry_node_ids: ['entry\x9b2J'],
+    terminal_verification_node_id: 'verify\x1b[2J',
+    concurrency_limit: '1\x1b[?25l',
+    nodes: [
+      { id: 'entry\x1b[2J', title: 'Title\x1b]52;c;payload\x07', kind: 'agent' },
+      { id: 'verify\x9b2J', title: 'Verify\x00done\x1b]0;unterminated', kind: 'agent' },
+    ],
+    edges: [
+      { from: 'entry\x1b[2J', to: 'verify\x9b2J', route: 'route\x1b]0;owned\x07' },
+      { from: 'verify\x9b2J', to: 'entry\x1b[2J', kind: 'back_edge', route: 'retry\x1b[31m' },
+    ],
+  };
+
+  it('removes C0/C1, CSI, and OSC controls from graph output', () => {
+    const graph = renderAsciiGraph(
+      hostileDescriptor,
+      new Map([['entry\x1b[2J', 'running\x1b[31m']]),
+      'running\x1b]0;owned\x07',
+    );
+    const header = renderHeader({ active_revision_hash: 'deadbeef\x1b[2J', status: 'running\x9b2J' }, hostileDescriptor);
+
+    expect(graph).not.toMatch(controls);
+    expect(header).not.toMatch(controls);
+    expect(graph).toContain('entry');
+    expect(graph).toContain('route');
+    expect(graph).not.toContain('owned');
+    expect(graph).not.toContain('unterminated');
+    expect(header).toContain('Goal: shipclick');
+  });
+});

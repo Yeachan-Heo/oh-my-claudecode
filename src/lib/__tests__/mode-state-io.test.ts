@@ -22,6 +22,10 @@ describe('mode-state-io', () => {
     delete process.env.OMC_STATE_DIR;
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_PATH;
     delete process.env.OMC_TEST_CONDITIONAL_CLEAR_REPLACEMENT_BASE64;
+    delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64;
+    delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
+    delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_FLOCK_AVAILABLE;
     delete process.env.OMC_TEST_EMERGENCY_CRASH_PHASE;
     delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH;
@@ -585,6 +589,38 @@ describe('mode-state-io', () => {
   });
 
   describe('durable emergency mutation journal', () => {
+    it('skips a conditional write that races a malformed canonical replacement', () => {
+      const path = join(tempDir, '.omc', 'state', 'conditional-write-raced-replacement.json');
+      const original = JSON.stringify({ active: true, run: 'original' });
+      const replacement = '{"active":false';
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, original);
+      process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH = path;
+      process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64 = Buffer.from(replacement).toString('base64');
+
+      expect(writeStateFileLockedIf(
+        path,
+        (state) => state.active === true,
+        (state) => ({ ...state, changed: true }),
+      )).toBe('skipped');
+      expect(readFileSync(path, 'utf8')).toBe(replacement);
+    });
+
+    it('skips a conditional create that races a malformed canonical replacement', () => {
+      const path = join(tempDir, '.omc', 'state', 'conditional-create-raced-replacement.json');
+      const replacement = '{"active":true';
+      mkdirSync(dirname(path), { recursive: true });
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH = path;
+      process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64 = Buffer.from(replacement).toString('base64');
+
+      expect(writeStateFileLockedCreateIf(
+        path,
+        (current) => current === null,
+        () => ({ active: true, run: 'created' }),
+      )).toBe('skipped');
+      expect(readFileSync(path, 'utf8')).toBe(replacement);
+    });
+
     it('makes an emergency publication visible to a later conditional write', () => {
       expect(writeModeState('autopilot', { active: true, run: 'emergency-visible' }, tempDir)).toBe(true);
       const path = join(tempDir, '.omc', 'state', 'autopilot-state.json');

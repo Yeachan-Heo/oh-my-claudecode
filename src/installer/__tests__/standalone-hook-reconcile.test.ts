@@ -136,7 +136,8 @@ describe('install() standalone hook reconciliation', () => {
     );
     expect(readFileSync(join(testClaudeDir, 'hooks', 'keyword-detector.mjs'), 'utf-8')).toContain('Ralph keywords');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'pre-tool-use.mjs'), 'utf-8')).toContain('PreToolUse');
-    expect(readFileSync(join(testClaudeDir, 'hooks', 'session-end.mjs'), 'utf-8')).toContain('settle-session');
+    expect(readFileSync(join(testClaudeDir, 'hooks', 'session-end.mjs'), 'utf-8')).toContain('graph-session-settlement.mjs');
+    expect(readFileSync(join(testClaudeDir, 'hooks', 'lib', 'graph-session-settlement.mjs'), 'utf-8')).toContain('settle-session');
     expect(readFileSync(join(testClaudeDir, 'hooks', 'code-simplifier.mjs'), 'utf-8')).toContain('Code Simplifier');
   });
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readSessionEndFrame } from './lib/stdin.mjs';
+import { settleGraphSessionEnd } from './lib/graph-session-settlement.mjs';
 
 const fallback = { continue: true, suppressOutput: true };
 
@@ -12,6 +13,7 @@ async function main() {
   }
 
   try {
+    await settleGraphSessionEnd(frame.value);
     const { processSessionEnd } = await import('../dist/hooks/session-end/index.js');
     const result = await processSessionEnd(frame.value);
     console.log(JSON.stringify(result));

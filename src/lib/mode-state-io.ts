@@ -836,6 +836,17 @@ function occReadCanonicalSnapshot(filePath: string): OccCanonicalSnapshot {
   }
 }
 
+/** Reads only the canonical generation token, without requiring valid JSON. */
+function occReadCanonicalContentFingerprint(filePath: string): { contentFingerprint: string; ioError: boolean } {
+  try {
+    return { contentFingerprint: stateDigest(readFileSync(filePath, 'utf8')), ioError: false };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { contentFingerprint: 'absent', ioError: false };
+    return { contentFingerprint: '', ioError: true };
+  }
+}
+
 function occStateFingerprint(state: unknown): string {
   return state === null ? 'absent' : JSON.stringify(state);
 }
@@ -904,14 +915,13 @@ export function occCommitMutation<TState, TResult>(
   let parentState: unknown = null;
   for (let attempt = 0; attempt < OCC_JOURNAL_MAX_RETRIES; attempt += 1) {
     const current = occReadCurrent(filePath);
-    if (current.ioError) return null; // fail closed: cannot fence without reading
     const canonical = occReadCanonicalSnapshot(filePath);
-    if (canonical.ioError) return null;
     if (options?.expectedCanonicalContentFingerprint !== undefined &&
       canonical.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
       options.onCanonicalCompareFailed?.();
       return null;
     }
+    if (current.ioError || canonical.ioError) return null; // fail closed: cannot fence without reading
     if (current.empty) {
       parentSeq = -1;
       // An authenticated external transaction has already captured this
@@ -994,13 +1004,13 @@ export function occCommitMutation<TState, TResult>(
     // replacement observed after the mutation was calculated invalidates this
     // attempt so conditional writers cannot overwrite it from stale state.
     const canonicalFence = occReadCanonicalSnapshot(filePath);
-    if (canonicalFence.ioError) {
-      occCleanupOwn(dir, seq, ownerToken);
-      return null;
-    }
     if (options?.expectedCanonicalContentFingerprint !== undefined &&
       canonicalFence.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
       options.onCanonicalCompareFailed?.();
+      occCleanupOwn(dir, seq, ownerToken);
+      return null;
+    }
+    if (canonicalFence.ioError) {
       occCleanupOwn(dir, seq, ownerToken);
       return null;
     }
@@ -1273,6 +1283,8 @@ export function writeStateFileLockedIf(
   transform: (current: Record<string, unknown>) => Record<string, unknown>,
 ): ConditionalWriteResult {
   if (!recoverEmergencyStateFile(filePath)) return 'failed';
+  const observedCanonical = occReadCanonicalContentFingerprint(filePath);
+  if (observedCanonical.ioError) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_WRITE_REPLACEMENT_BASE64) {
     try {
       // The seam models an external replacement that races this conditional
@@ -1293,6 +1305,7 @@ export function writeStateFileLockedIf(
   if (!lock) return 'failed';
   try {
     let skipped = false;
+    let canonicalReplaced = false;
     const committed = occCommitMutation<Record<string, unknown>, ConditionalWriteResult>(filePath, (currentRaw) => {
       if (currentRaw === null || currentRaw === undefined || typeof currentRaw !== 'object' || Array.isArray(currentRaw)) return null;
       const current = currentRaw as Record<string, unknown>;
@@ -1301,8 +1314,12 @@ export function writeStateFileLockedIf(
         return null;
       }
       return { state: transform(current), result: 'written' as ConditionalWriteResult };
-    }, { assertHeld: () => assertMutationLockHeld(lock) });
-    if (committed === null) return skipped ? 'skipped' : 'failed';
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => { canonicalReplaced = true; },
+    });
+    if (committed === null) return skipped || canonicalReplaced ? 'skipped' : 'failed';
     return committed.result;
   } finally {
     releaseMutationLock(lock);
@@ -1315,10 +1332,12 @@ export function writeStateFileLockedCreateIf(
   transform: (current: Record<string, unknown> | null) => Record<string, unknown>,
 ): ConditionalWriteResult {
   if (!recoverEmergencyStateFile(filePath)) return 'failed';
+  const observedCanonical = occReadCanonicalContentFingerprint(filePath);
+  if (observedCanonical.ioError) return 'failed';
   if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
     try {
-      const replacement = JSON.parse(Buffer.from(process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64, 'base64').toString('utf8')) as Record<string, unknown>;
-      atomicWriteJsonSync(filePath, replacement);
+      const replacementRaw = Buffer.from(process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64, 'base64').toString('utf8');
+      atomicWriteFileSync(filePath, replacementRaw);
     } finally {
       delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH;
       delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
@@ -1331,6 +1350,7 @@ export function writeStateFileLockedCreateIf(
   if (!lock) return 'failed';
   try {
     let skipped = false;
+    let canonicalReplaced = false;
     const committed = occCommitMutation<Record<string, unknown>, ConditionalWriteResult>(filePath, (currentRaw) => {
       let current: Record<string, unknown> | null = null;
       if (currentRaw !== null && currentRaw !== undefined) {
@@ -1342,8 +1362,12 @@ export function writeStateFileLockedCreateIf(
         return null;
       }
       return { state: transform(current), result: 'written' as ConditionalWriteResult };
-    }, { assertHeld: () => assertMutationLockHeld(lock) });
-    if (committed === null) return skipped ? 'skipped' : 'failed';
+    }, {
+      assertHeld: () => assertMutationLockHeld(lock),
+      expectedCanonicalContentFingerprint: observedCanonical.contentFingerprint,
+      onCanonicalCompareFailed: () => { canonicalReplaced = true; },
+    });
+    if (committed === null) return skipped || canonicalReplaced ? 'skipped' : 'failed';
     return committed.result;
   } finally {
     releaseMutationLock(lock);
@@ -1802,7 +1826,10 @@ export function recoverEmergencyStateFile(filePath: string, options?: EmergencyR
     if (!reconcileEmergencyPublicationTemps(filePath, authorizeState)) return false;
     if (!current || current.quarantinePath !== `${filePath}.emergency-quarantine.${current.transactionId}` || isEmergencyOwnerLive(current.owner)) return false;
     if (!recoverDeadEmergencyStateFile(filePath, authorizeState, true)) return false;
-    if (!commitRecoveredEmergencyPublication(filePath, current)) return false;
+    // Legacy journals have no authenticated OCC parent. Their recovery has
+    // already either published the durable payload or safely discarded it;
+    // do not route a safe discard through publication reconciliation.
+    if (current.parentState && !commitRecoveredEmergencyPublication(filePath, current)) return false;
     return removeOwnedEmergencyArtifacts(journalPath, current, true);
   } finally {
     releaseRecoveryClaim(claimPath, claim);
@@ -1823,6 +1850,11 @@ function recoverDeadEmergencyStateFile(
   if (!recoveryGenerationsAuthorized(filePath, journal, authorizeState)) return true;
   const owned = () => journalIsOwned(journalPath, journal.transactionId, journal.owner);
   if (!owned()) return false;
+  // Top-level recovery owns cleanup after it has either sequenced the recovered
+  // publication or deliberately preserved a replacement. Keeping cleanup in
+  // one place prevents a safe discard from being reported as a later failure.
+  const finish = (removeQuarantine: boolean): boolean =>
+    preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, removeQuarantine);
   const payloadPath = `${journal.quarantinePath}.payload`;
   const digest = (path: string): string | null => {
     try { return stateDigest(readFileSync(path, 'utf8')); } catch { return null; }
@@ -1831,14 +1863,14 @@ function recoverDeadEmergencyStateFile(
     const complete = typeof journal.originalDigest === 'string' && (journal.intent === 'clear' || (journal.intent === 'publish' && typeof journal.intendedDigest === 'string'));
     if (!complete) {
       if (existsSync(journal.quarantinePath) || existsSync(payloadPath)) return false;
-      return removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return finish(false);
     }
     const originalStillPrimary = !existsSync(journal.quarantinePath) && digest(filePath) === journal.originalDigest;
     if (journal.intent === 'publish' && digest(payloadPath) !== journal.intendedDigest) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return originalStillPrimary && finish(false);
     }
     if (journal.intent === 'clear' && existsSync(payloadPath)) {
-      return originalStillPrimary && removeOwnedEmergencyArtifacts(journalPath, journal, false);
+      return originalStillPrimary && finish(false);
     }
     journal.phase = 'prepared';
     return writeEmergencyJournal(journalPath, journal) && recoverDeadEmergencyStateFile(filePath, authorizeState, preserveCompletedJournal);
@@ -1848,14 +1880,14 @@ function recoverDeadEmergencyStateFile(
   const intendedDigest = journal.intendedDigest;
   const hasPrimary = existsSync(filePath);
   const hasQuarantine = existsSync(journal.quarantinePath);
-  const finalize = (): boolean => removeOwnedEmergencyArtifacts(journalPath, journal, hasQuarantine);
+  const finalize = (): boolean => finish(hasQuarantine);
 
   if (hasPrimary && hasQuarantine) {
     if (intent === 'publish' && digest(filePath) === intendedDigest && digest(journal.quarantinePath) === originalDigest) {
-      return preserveCompletedJournal || finalize();
+      return finalize();
     }
     // The primary is an unrelated replacement. It wins; discard only this transaction.
-    return removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    return finish(true);
   }
   if (hasPrimary) {
     if (!hasQuarantine && journal.phase === 'prepared' && digest(filePath) === originalDigest) {
@@ -1863,7 +1895,7 @@ function recoverDeadEmergencyStateFile(
       if (!owned()) return false;
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
         if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) {
-          removeOwnedEmergencyArtifacts(journalPath, journal, true);
+          return finish(true);
         }
         return false;
       }
@@ -1874,17 +1906,17 @@ function recoverDeadEmergencyStateFile(
   }
   if (!hasQuarantine) {
     return intent === 'clear' && journal.phase === 'published' &&
-      (preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, false));
+      finish(false);
   }
   if (digest(journal.quarantinePath) !== originalDigest || !owned()) return false;
   try {
-    if (intent === 'clear') return preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    if (intent === 'clear') return finish(true);
     const payload = readFileSync(payloadPath, 'utf8');
     if (stateDigest(payload) !== intendedDigest || !owned()) return false;
     linkSync(payloadPath, filePath); // exclusive: never overwrite a replacement
     journal.phase = 'published';
     if (!writeEmergencyJournal(journalPath, journal)) return false;
-    return preserveCompletedJournal || removeOwnedEmergencyArtifacts(journalPath, journal, true);
+    return finish(true);
   } catch { return false; }
 }
 

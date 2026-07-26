@@ -863,14 +863,13 @@ export function occCommitMutation(filePath, mutate, options = {}) {
   let next = null;
   for (let attempt = 0; attempt < OCC_JOURNAL_MAX_RETRIES; attempt += 1) {
     const current = occReadCurrent(filePath);
-    if (current.ioError) return false; // fail closed: cannot fence without reading
     const canonical = occReadCanonicalSnapshot(filePath);
-    if (canonical.ioError) return false;
     if (options.expectedCanonicalContentFingerprint !== undefined &&
       canonical.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
       options.onCanonicalCompareFailed?.();
       return false;
     }
+    if (current.ioError || canonical.ioError) return false; // fail closed: cannot fence without reading
     if (current.empty) {
       parentSeq = -1;
       // An authenticated external publisher supplies the source it captured
@@ -942,13 +941,13 @@ export function occCommitMutation(filePath, mutate, options = {}) {
       return false;
     }
     const canonicalFence = occReadCanonicalSnapshot(filePath);
-    if (canonicalFence.ioError) {
-      occCleanupOwn(dir, seq, ownerToken);
-      return false;
-    }
     if (options.expectedCanonicalContentFingerprint !== undefined &&
       canonicalFence.contentFingerprint !== options.expectedCanonicalContentFingerprint) {
       options.onCanonicalCompareFailed?.();
+      occCleanupOwn(dir, seq, ownerToken);
+      return false;
+    }
+    if (canonicalFence.ioError) {
       occCleanupOwn(dir, seq, ownerToken);
       return false;
     }
@@ -1421,7 +1420,7 @@ function recoverDeadEmergencyStateFile(filePath, authorizeState) {
       if (intent === 'publish' && digest(payloadPath) !== intendedDigest) return false;
       if (!owned()) return false;
       if (!captureAndUnlinkPrimary(filePath, journal.quarantinePath, originalDigest)) {
-        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) removeOwnedEmergencyArtifacts(journalPath, journal, true);
+        if (owned() && existsSync(filePath) && existsSync(journal.quarantinePath) && digest(filePath) !== originalDigest) return removeOwnedEmergencyArtifacts(journalPath, journal, true);
         return false;
       }
       journal.phase = 'quarantined';
