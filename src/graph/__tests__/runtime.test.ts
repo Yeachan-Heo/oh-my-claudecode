@@ -581,7 +581,7 @@ describe('graphCommandService runtime operations', () => {
     const descriptor = sealGraphDescriptor(linearDescriptor({ runId: 'run-create-concurrent-idempotent' }));
     const { store } = useTempWorktree(sessionId);
     const originalCreate = GraphStateStore.prototype.create;
-    const create = vi.spyOn(GraphStateStore.prototype, 'create').mockImplementationOnce(function(state) {
+    const create = vi.spyOn(GraphStateStore.prototype, 'create').mockImplementationOnce(function(this: GraphStateStore, state: Parameters<GraphStateStore['create']>[0]) {
       originalCreate.call(this, state);
       const raced = new Error('Graph state already exists for this session') as Error & { code: string };
       raced.code = 'already_exists';

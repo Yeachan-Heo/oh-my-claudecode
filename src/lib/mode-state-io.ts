@@ -6,7 +6,7 @@
  * and file permissions so that individual mode modules don't duplicate this logic.
  */
 
-import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -926,8 +926,7 @@ export function occCommitMutation<TState, TResult>(
       }
       parentState = current.state;
     }
-    let produced: { state: TState; result: TResult } | null;
-    produced = mutate(parentState, ownerToken);
+    const produced = mutate(parentState, ownerToken);
     if (produced === null || produced === undefined) return null; // cancelled, no commit
     const next = produced.state;
     const seq = Math.max(parentSeq, current.reservedSeq) + 1;
