@@ -1510,7 +1510,10 @@ const KIMI_FIVE_HOUR_WINDOW_MINUTES = 300;
  *   renderer hard-codes "$", so CNY wallets are skipped rather than mislabeled.
  */
 export function parseKimiResponse(response: KimiUsageResponse): RateLimits | null {
-  const result: RateLimits = { fiveHourPercent: 0 };
+  // fiveHourPercent is intentionally left unset: seeding 0 would render as
+  // "5h:0%" for a payload that carried no 5-hour window at all, asserting zero
+  // usage of a quota we have no data for.
+  const result: RateLimits = {};
   let hasAny = false;
 
   // Weekly window: top-level usage row

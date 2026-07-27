@@ -54288,7 +54288,7 @@ function kimiWindowMinutes(window) {
   return null;
 }
 function parseKimiResponse(response) {
-  const result = { fiveHourPercent: 0 };
+  const result = {};
   let hasAny = false;
   const weekly = response.usage;
   if (weekly) {
@@ -56271,11 +56271,13 @@ function renderRateLimits(limits, stale) {
   if (!limits) return null;
   const staleMarker = stale ? `${DIM4}*${RESET}` : "";
   const resetPrefix = stale ? "~" : "";
-  const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
-  const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
-  const fiveHourPart = fiveHourReset ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
-  const parts = [fiveHourPart];
+  const parts = [];
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+    parts.push(fiveHourReset ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`);
+  }
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
     const weeklyColor = getColor(weekly);
@@ -56312,20 +56314,23 @@ function renderRateLimits(limits, stale) {
     const extraPart = extraReset ? `${DIM4}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM4}(${resetPrefix}${extraReset})${RESET}` : `${DIM4}extra:${RESET}${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}`;
     parts.push(extraPart);
   }
+  if (parts.length === 0) return null;
   return parts.join(" ");
 }
 function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
   if (!limits) return null;
   const staleMarker = stale ? `${DIM4}*${RESET}` : "";
   const resetPrefix = stale ? "~" : "";
-  const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
-  const fiveHourFilled = Math.round(fiveHour / 100 * barWidth);
-  const fiveHourEmpty = barWidth - fiveHourFilled;
-  const fiveHourBar = `${fiveHourColor}${"\u2588".repeat(fiveHourFilled)}${DIM4}${"\u2591".repeat(fiveHourEmpty)}${RESET}`;
-  const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
-  const fiveHourPart = fiveHourReset ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
-  const parts = [fiveHourPart];
+  const parts = [];
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourFilled = Math.round(fiveHour / 100 * barWidth);
+    const fiveHourEmpty = barWidth - fiveHourFilled;
+    const fiveHourBar = `${fiveHourColor}${"\u2588".repeat(fiveHourFilled)}${DIM4}${"\u2591".repeat(fiveHourEmpty)}${RESET}`;
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+    parts.push(fiveHourReset ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${fiveHourReset})${RESET}` : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`);
+  }
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
     const weeklyColor = getColor(weekly);
@@ -56377,6 +56382,7 @@ function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
     const extraPart = extraReset ? `${DIM4}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}${DIM4}(${resetPrefix}${extraReset})${RESET}` : `${DIM4}extra:${RESET}[${extraBar}]${extraColor}${extra}%${RESET}${staleMarker}${dollarPart}`;
     parts.push(extraPart);
   }
+  if (parts.length === 0) return null;
   return parts.join(" ");
 }
 function renderRateLimitsError(result) {

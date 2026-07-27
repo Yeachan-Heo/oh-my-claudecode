@@ -67,15 +67,17 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
   const staleMarker = stale ? `${DIM}*${RESET}` : '';
   const resetPrefix = stale ? '~' : '';
 
-  const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
-  const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+  const parts: string[] = [];
 
-  const fiveHourPart = fiveHourReset
-    ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
-    : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
 
-  const parts = [fiveHourPart];
+    parts.push(fiveHourReset
+      ? `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+      : `5h:${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`);
+  }
 
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
@@ -138,6 +140,8 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     parts.push(extraPart);
   }
 
+  // Every bucket can now be absent; render nothing rather than an empty string
+  if (parts.length === 0) return null;
   return parts.join(' ');
 }
 
@@ -149,10 +153,13 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
 export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boolean): string | null {
   if (!limits) return null;
 
-  const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
+  const parts: string[] = [];
 
-  const parts = [`${fiveHourColor}${fiveHour}%${RESET}`];
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    parts.push(`${fiveHourColor}${fiveHour}%${RESET}`);
+  }
 
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
@@ -184,6 +191,8 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
     parts.push(`${extraColor}${extra}%${RESET}`);
   }
 
+  // Every bucket can now be absent; a lone stale marker would be meaningless
+  if (parts.length === 0) return null;
   const result = parts.join('/');
   return stale ? `${result}${DIM}*${RESET}` : result;
 }
@@ -203,18 +212,20 @@ export function renderRateLimitsWithBar(
   const staleMarker = stale ? `${DIM}*${RESET}` : '';
   const resetPrefix = stale ? '~' : '';
 
-  const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
-  const fiveHourColor = getColor(fiveHour);
-  const fiveHourFilled = Math.round((fiveHour / 100) * barWidth);
-  const fiveHourEmpty = barWidth - fiveHourFilled;
-  const fiveHourBar = `${fiveHourColor}${'█'.repeat(fiveHourFilled)}${DIM}${'░'.repeat(fiveHourEmpty)}${RESET}`;
-  const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
+  const parts: string[] = [];
 
-  const fiveHourPart = fiveHourReset
-    ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
-    : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`;
+  if (limits.fiveHourPercent != null) {
+    const fiveHour = Math.min(100, Math.max(0, Math.round(limits.fiveHourPercent)));
+    const fiveHourColor = getColor(fiveHour);
+    const fiveHourFilled = Math.round((fiveHour / 100) * barWidth);
+    const fiveHourEmpty = barWidth - fiveHourFilled;
+    const fiveHourBar = `${fiveHourColor}${'█'.repeat(fiveHourFilled)}${DIM}${'░'.repeat(fiveHourEmpty)}${RESET}`;
+    const fiveHourReset = formatResetTime(limits.fiveHourResetsAt);
 
-  const parts = [fiveHourPart];
+    parts.push(fiveHourReset
+      ? `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}${DIM}(${resetPrefix}${fiveHourReset})${RESET}`
+      : `5h:[${fiveHourBar}]${fiveHourColor}${fiveHour}%${RESET}${staleMarker}`);
+  }
 
   if (limits.weeklyPercent != null) {
     const weekly = Math.min(100, Math.max(0, Math.round(limits.weeklyPercent)));
@@ -292,6 +303,8 @@ export function renderRateLimitsWithBar(
     parts.push(extraPart);
   }
 
+  // Every bucket can now be absent; render nothing rather than an empty string
+  if (parts.length === 0) return null;
   return parts.join(' ');
 }
 

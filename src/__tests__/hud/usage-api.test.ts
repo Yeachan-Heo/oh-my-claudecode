@@ -1781,7 +1781,7 @@ describe('parseKimiResponse', () => {
     const result = parseKimiResponse({ usage: { limit: '100', used: '40' } });
     expect(result).not.toBeNull();
     expect(result!.weeklyPercent).toBe(40);
-    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.fiveHourPercent).toBeUndefined();
   });
 
   it('picks the 300-minute window as the 5h bucket, never a shorter or longer one', () => {
@@ -1808,7 +1808,7 @@ describe('parseKimiResponse', () => {
     });
     expect(result).not.toBeNull();
     expect(result!.weeklyPercent).toBe(45);
-    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.fiveHourPercent).toBeUndefined();
     expect(result!.fiveHourResetsAt).toBeUndefined();
   });
 
@@ -1911,7 +1911,7 @@ describe('parseKimiResponse', () => {
       ],
     });
     expect(result).not.toBeNull();
-    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.fiveHourPercent).toBeUndefined();
     expect(result!.weeklyPercent).toBe(45);
   });
 
@@ -2005,7 +2005,7 @@ describe('parseKimiResponse', () => {
       },
     });
     expect(result).not.toBeNull();
-    expect(result!.fiveHourPercent).toBe(0);
+    expect(result!.fiveHourPercent).toBeUndefined();
     expect(result!.extraUsagePercent).toBe(25);
     expect(result!.extraUsageSpentUsd).toBe(5);
     expect(result!.extraUsageLimitUsd).toBe(20);
@@ -2216,6 +2216,42 @@ describe('getUsage routing - kimi', () => {
     expect(written.source).toBe('kimi');
     expect(written.data.fiveHourPercent).toBe(2);
     expect(written.data.weeklyPercent).toBe(45);
+  });
+
+  it('settles as a network error when the request emits error (DNS/connection failure)', async () => {
+    // The routing mocks return undefined and hit the synchronous catch; this
+    // drives the asynchronous req 'error' listener instead.
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    httpsModule.default.request.mockImplementationOnce((_options, _callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = vi.fn();
+      req.end = () => { req.emit('error', new Error('ENOTFOUND')); };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+  });
+
+  it('settles as a network error and destroys the request on timeout', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+    process.env.KIMI_API_KEY = 'test-key';
+
+    const destroy = vi.fn();
+    httpsModule.default.request.mockImplementationOnce((_options, _callback) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+      req.destroy = destroy;
+      req.end = () => { req.emit('timeout'); };
+      return req;
+    });
+
+    const result = await getUsage();
+    expect(result.rateLimits).toBeNull();
+    expect(result.error).toBe('network');
+    expect(destroy).toHaveBeenCalled(); // must not leak the socket
   });
 
   it('degrades to a network error when the response stream errors after headers', async () => {

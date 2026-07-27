@@ -178,8 +178,13 @@ export interface PrdStateForHud {
 // ============================================================================
 
 export interface RateLimits {
-  /** 5-hour rolling window usage percentage (0-100) - all models combined */
-  fiveHourPercent: number;
+  /**
+   * 5-hour rolling window usage percentage (0-100) - all models combined.
+   * Undefined when the provider reports no 5-hour bucket at all: renderers omit
+   * it rather than printing "5h:0%", which would assert zero usage of a quota
+   * we have no data for. Providers that always carry the window still set it.
+   */
+  fiveHourPercent?: number;
   /** Weekly usage percentage (0-100) - all models combined (undefined if not applicable) */
   weeklyPercent?: number;
   /** When the 5-hour limit resets (null if unavailable) */
