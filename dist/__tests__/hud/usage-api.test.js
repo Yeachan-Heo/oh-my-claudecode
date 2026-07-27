@@ -1940,6 +1940,45 @@ describe('getUsage routing - kimi', () => {
         expect(written.data.fiveHourPercent).toBe(2);
         expect(written.data.weeklyPercent).toBe(45);
     });
+    it('degrades to a network error when the response stream errors after headers', async () => {
+        // A socket reset after headers surfaces on the response, not the request.
+        // Unhandled, that 'error' would take the HUD process down.
+        process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+        process.env.KIMI_API_KEY = 'test-key';
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', '{"usage":'); // truncated mid-body
+                res.emit('error', new Error('ECONNRESET'));
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result.rateLimits).toBeNull();
+        expect(result.error).toBe('network');
+    });
+    it('degrades to a network error when the response is aborted', async () => {
+        process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
+        process.env.KIMI_API_KEY = 'test-key';
+        httpsModule.default.request.mockImplementationOnce((_options, callback) => {
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('aborted');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        expect(result.rateLimits).toBeNull();
+        expect(result.error).toBe('network');
+    });
     it('reports rate_limited when the kimi API returns 429', async () => {
         process.env.ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/';
         process.env.KIMI_API_KEY = 'test-key';

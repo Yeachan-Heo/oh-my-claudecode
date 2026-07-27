@@ -1376,6 +1376,12 @@ function fetchUsageFromKimi(apiKey: string): Promise<FetchResult<KimiUsageRespon
         },
         (res) => {
           let data = '';
+          // A socket reset *after* headers arrive surfaces on the response
+          // stream, not the request. Without these listeners that 'error' is
+          // unhandled and takes the HUD process down instead of degrading to a
+          // network failure. resolve() past the first call is a no-op.
+          res.on('error', () => resolve({ data: null }));
+          res.on('aborted', () => resolve({ data: null }));
           res.on('data', (chunk) => { data += chunk; });
           res.on('end', () => {
             if (res.statusCode === 200) {

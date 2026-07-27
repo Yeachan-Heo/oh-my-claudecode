@@ -54205,6 +54205,8 @@ function fetchUsageFromKimi(apiKey) {
         },
         (res) => {
           let data = "";
+          res.on("error", () => resolve32({ data: null }));
+          res.on("aborted", () => resolve32({ data: null }));
           res.on("data", (chunk) => {
             data += chunk;
           });
