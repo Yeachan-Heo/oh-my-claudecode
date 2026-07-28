@@ -334,10 +334,24 @@ describe('HUD stdin rate limits', () => {
 
     expect(result).toEqual({
       fiveHourPercent: 100,
-      weeklyPercent: undefined,
       fiveHourResetsAt: null,
+    });
+  });
+
+  it('does not synthesize a 5h bucket when stdin only includes seven_day', () => {
+    const result = getRateLimitsFromStdin(makeStdin({
+      rate_limits: {
+        seven_day: {
+          used_percentage: 2,
+        },
+      },
+    }));
+
+    expect(result).toEqual({
+      weeklyPercent: 2,
       weeklyResetsAt: null,
     });
+    expect(result!.fiveHourPercent).toBeUndefined();
   });
 });
 

@@ -1252,31 +1252,43 @@
     {
       "pullNumber": 3539,
       "targetRef": "dev",
-      "mergeBaseSha": "10078ece166ad36332390ecbaab2d5e247852bbc",
-      "headSha": "2396c60c67722f576efb8f61183c48f6883cc178",
+      "mergeBaseSha": "77b83cdeb0c2e385bdbe71b2ab6c194b2a533cf3",
+      "headSha": "e2cf59b01a6b2d3c8be0605d0cdd59c75df161dd",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-05T00:00:00.000Z",
       "generatedDelta": {
-        "count": 3,
-        "sha256": "a419dd54588869a4ea889854f4e753ad7c2f1d736038bda25234273c44c2e211"
+        "count": 5,
+        "sha256": "cd6c0d30b94098bc262d2613a0de56dbbe128fc73d4043fd1f67884c3cf56e3c"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "69f86054a5a2b1f1671df0bdf2f1a426dadcc7d3",
+          "sha": "a77e6fb3df22eff36bb7956380c85deaa5c5e4e7",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/historical-agent-ownership.d.ts",
+          "sha": "3902ec42a77d6fa6ebf1366a188c14af9e451a21",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/installer/historical-agent-ownership.js",
+          "sha": "73dbb7342a1affb00a3d1f435fd178aae4816822",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/installer/index.d.ts",
-          "sha": "f5ffa2b1b1dee166e565aba9a7536a95f638ddf3",
+          "sha": "5fe1619f84ef538126c56080dd63a068052204c2",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/installer/index.js",
-          "sha": "736b2b41a336c94ab7886452a6c09b2fd7fcb033",
+          "sha": "92295b0f7b76f41253f0572da186a2ce618112c7",
           "previousFilename": null
         }
       ]

@@ -134,8 +134,8 @@ export interface PrdStateForHud {
     total: number;
 }
 export interface RateLimits {
-    /** 5-hour rolling window usage percentage (0-100) - all models combined */
-    fiveHourPercent: number;
+    /** 5-hour rolling window usage percentage (0-100) - all models combined; absent when provider omitted this bucket */
+    fiveHourPercent?: number;
     /** Weekly usage percentage (0-100) - all models combined (undefined if not applicable) */
     weeklyPercent?: number;
     /** When the 5-hour limit resets (null if unavailable) */
@@ -150,6 +150,24 @@ export interface RateLimits {
     opusWeeklyPercent?: number;
     /** Opus weekly reset time */
     opusWeeklyResetsAt?: Date | null;
+    /**
+     * Weekly scoped per-model quotas from `limits[]` (`kind: "weekly_scoped"`) that
+     * did not map onto the recognized Sonnet/Opus families above — e.g. new/unnamed
+     * tiers such as "Fable". Rendered generically so new tiers don't need a source
+     * release (see issue #3576). Deduped by normalized `scope.model.display_name`.
+     */
+    scopedWeeklyBuckets?: Array<{
+        /** Stable identifier for the bucket: `scope.model.id` when present, else the normalized display name */
+        id: string;
+        /** Display label as returned by the API (e.g. "Fable") */
+        label: string;
+        /** Usage percentage (0-100) */
+        percent: number;
+        /** When this bucket resets (null if unavailable) */
+        resetsAt: Date | null;
+        /** Whether the API flagged this bucket as the currently-active/limiting one */
+        isActive: boolean;
+    }>;
     /** Monthly usage percentage (0-100), if available from API */
     monthlyPercent?: number;
     /** When the monthly limit resets (null if unavailable) */

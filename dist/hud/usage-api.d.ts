@@ -40,6 +40,20 @@ interface UsageApiResponse {
         currency?: string;
         decimal_places?: number;
     };
+    limits?: Array<{
+        kind?: string;
+        group?: string;
+        percent?: number;
+        is_active?: boolean;
+        resets_at?: string;
+        scope?: {
+            model?: {
+                id?: string | null;
+                display_name?: string | null;
+            } | null;
+            surface?: unknown;
+        } | null;
+    }>;
 }
 interface ParseUsageResponseOptions {
     /** Subscription type from OAuth credentials (for distinguishing Max/Pro overage from Enterprise billing) */

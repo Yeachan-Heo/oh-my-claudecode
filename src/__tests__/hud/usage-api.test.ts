@@ -9,6 +9,11 @@ import * as childProcess from 'child_process';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, getUsage, parseUsageResponse } from '../../hud/usage-api.js';
+import { renderRateLimits, renderRateLimitsCompact, renderRateLimitsWithBar } from '../../hud/elements/limits.js';
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
 
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
 vi.mock('../../lib/file-lock.js', () => ({
@@ -671,6 +676,321 @@ describe('getUsage routing', () => {
     expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
   });
 
+  describe('limits[] weekly_scoped fallback (#3576)', () => {
+    it('leaves old-shape responses unchanged when limits[] is absent', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 10, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 20 },
+        seven_day_sonnet: { utilization: 8, resets_at: '2026-04-25T13:00:00Z' },
+        seven_day_opus: { utilization: 5, resets_at: '2026-04-26T13:00:00Z' },
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(8);
+      expect(result!.opusWeeklyPercent).toBe(5);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('fills sonnet/opus from limits[] weekly_scoped entries when flat fields are null (recognized shape)', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 12, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 22 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 40, scope: null, is_active: false },
+          { kind: 'weekly_all', group: 'weekly', percent: 22, scope: null, is_active: false },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 33, is_active: true,
+            resets_at: '2026-04-25T13:00:00Z',
+            scope: { model: { id: null, display_name: 'Sonnet' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 9, is_active: false,
+            resets_at: '2026-04-26T13:00:00Z',
+            scope: { model: { id: 'claude-opus-4-6', display_name: 'Opus' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(33);
+      expect(result!.sonnetWeeklyResetsAt).toBeInstanceOf(Date);
+      expect(result!.opusWeeklyPercent).toBe(9);
+      expect(result!.opusWeeklyResetsAt).toBeInstanceOf(Date);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('exposes an unrecognized scoped weekly model (e.g. "Fable") as a generic bucket', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 40, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 18 },
+        seven_day_oauth_apps: null,
+        seven_day_opus: null,
+        seven_day_sonnet: null,
+        seven_day_cowork: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 40, scope: null, is_active: false, resets_at: '2026-04-24T18:00:00Z' },
+          { kind: 'weekly_all', group: 'weekly', percent: 18, scope: null, is_active: false, resets_at: '2026-05-01T00:00:00Z' },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 61, is_active: true,
+            resets_at: '2026-05-01T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBeUndefined();
+      expect(result!.opusWeeklyPercent).toBeUndefined();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 61, resetsAt: expect.any(Date), isActive: true },
+      ]);
+    });
+
+    it('mixed shape: legacy flat sonnet wins over limits[], opus fills from limits[], unrecognized name becomes generic', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 5 },
+        seven_day: { utilization: 7 },
+        seven_day_sonnet: { utilization: 44, resets_at: '2026-04-20T00:00:00Z' },
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 99, is_active: false,
+            scope: { model: { id: null, display_name: 'sonnet' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 12, is_active: true, resets_at: '2026-04-27T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Opus 4.6' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 3, is_active: false,
+            scope: { model: { id: null, display_name: 'Haiku Lite' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      // Legacy flat field wins; the limits[] "sonnet" entry (percent 99) must not overwrite it.
+      expect(result!.sonnetWeeklyPercent).toBe(44);
+      // Opus has no flat data, so it fills from the case-insensitive family match.
+      expect(result!.opusWeeklyPercent).toBe(12);
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'haiku lite', label: 'Haiku Lite', percent: 3, resetsAt: null, isActive: false },
+      ]);
+    });
+
+    it('ignores malformed/null limits entries without throwing', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          null,
+          undefined,
+          'not-an-object',
+          42,
+          { kind: 'weekly_scoped' }, // missing scope/model/display_name entirely
+          { kind: 'weekly_scoped', scope: {} }, // missing model
+          { kind: 'weekly_scoped', scope: { model: {} } }, // missing display_name
+          { kind: 'weekly_scoped', scope: { model: { display_name: '' } } }, // blank display_name
+          { kind: 'weekly_scoped', scope: { model: { display_name: 'Ghost' } } }, // missing percent
+          { kind: 'weekly_scoped', scope: { model: { display_name: 'NaNModel' } }, percent: NaN },
+          { kind: 'session', scope: { model: { display_name: 'NotWeekly' } }, percent: 50 }, // wrong kind
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBeUndefined();
+      expect(result!.opusWeeklyPercent).toBeUndefined();
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('non-array limits field is ignored defensively', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        limits: { not: 'an array' },
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('dedups duplicate model buckets, preferring the is_active entry', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 20, is_active: false, resets_at: '2026-04-01T00:00:00Z',
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 77, is_active: true, resets_at: '2026-04-02T00:00:00Z',
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toHaveLength(1);
+      expect(result!.scopedWeeklyBuckets![0].percent).toBe(77);
+      expect(result!.scopedWeeklyBuckets![0].isActive).toBe(true);
+    });
+
+    it('does not let a second distinct display name matching a recognized family overwrite the first fill', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 2 },
+        seven_day_sonnet: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 15, is_active: false,
+            scope: { model: { display_name: 'Sonnet Classic' }, surface: null },
+          },
+          {
+            kind: 'weekly_scoped', percent: 88, is_active: false,
+            scope: { model: { display_name: 'Sonnet Turbo' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.sonnetWeeklyPercent).toBe(15);
+      expect(result!.scopedWeeklyBuckets).toBeUndefined();
+    });
+
+    it('renders an active scoped bucket in the HUD even when generic weekly_all is not the constraining bucket', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 12, resets_at: '2026-04-24T13:00:00Z' },
+        seven_day: { utilization: 10 },
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          { kind: 'session', group: 'session', percent: 10, scope: null, is_active: false },
+          { kind: 'weekly_all', group: 'weekly', percent: 10, scope: null, is_active: false },
+          {
+            kind: 'weekly_scoped', group: 'weekly', percent: 95, is_active: true,
+            resets_at: '2026-04-25T00:00:00Z',
+            scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 95, resetsAt: expect.any(Date), isActive: true },
+      ]);
+      expect(result!.weeklyPercent).toBe(10);
+
+      const rendered = renderRateLimits(result, false);
+      expect(rendered).toContain('fable:');
+      expect(rendered).toContain('95%');
+      expect(rendered).toContain('wk:');
+    });
+
+    it('an inactive scoped bucket still renders (is_active is a dedup tiebreak, not a visibility filter)', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 5 },
+        seven_day: { utilization: 5 },
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 42, is_active: false,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 42, resetsAt: null, isActive: false },
+      ]);
+
+      const rendered = renderRateLimits(result, false);
+      expect(rendered).toContain('fable:');
+      expect(rendered).toContain('42%');
+    });
+
+    it('provides at least one valid value when only limits[] data is present (five_hour/seven_day nullish)', () => {
+      const result = parseUsageResponse({
+        five_hour: null,
+        seven_day: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.scopedWeeklyBuckets).toEqual([
+        { id: 'fable', label: 'Fable', percent: 30, resetsAt: null, isActive: true },
+      ]);
+    });
+
+    it('does not fabricate a 5h:0% bucket when only limits[] scoped weekly data is present', () => {
+      const result = parseUsageResponse({
+        five_hour: null,
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBeUndefined();
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('fable:30%');
+      expect(compact).toBe('30%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
+      expect(withBar).not.toContain('5h:');
+      expect(detailed).not.toContain('5h:0%');
+      expect(compact.startsWith('0%/')).toBe(false);
+    });
+
+    it('preserves an explicit real 0% five-hour bucket across all built-in renderers', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 0 },
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBe(0);
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('5h:0% fable:30%');
+      expect(compact).toBe('0%/30%');
+      expect(withBar).toContain('5h:[');
+      expect(withBar).toContain(']0%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
+    });
+  });
+
   it('passes OAuth subscription metadata so Max used_credits overage stays extra usage', async () => {
     const mockedExistsSync = vi.mocked(fs.existsSync);
     const mockedReadFileSync = vi.mocked(fs.readFileSync);
@@ -857,6 +1177,36 @@ describe('getUsage routing', () => {
     expect(httpsModule.default.request).not.toHaveBeenCalled();
 
     vi.useRealTimers();
+  });
+
+  it('rehydrates scoped reset dates from serialized cache before rendering', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.usage-cache-anthropic.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.usage-cache-anthropic.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 60_000,
+          source: 'anthropic',
+          data: {
+            scopedWeeklyBuckets: [
+              { id: 'fable', label: 'Fable', percent: 61, resetsAt, isActive: true },
+            ],
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+    const bucket = result.rateLimits?.scopedWeeklyBuckets?.[0];
+
+    expect(bucket?.resetsAt).toBeInstanceOf(Date);
+    expect(stripAnsi(renderRateLimits(result.rateLimits, false)!)).toContain('fable:61%');
+    expect(stripAnsi(renderRateLimitsWithBar(result.rateLimits, 8, false)!)).toContain('fable:[');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
   });
 
   it('respects configured usageApiPollIntervalMs for successful cache reuse', async () => {
