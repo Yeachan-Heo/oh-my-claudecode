@@ -2257,3 +2257,4 @@ export function getInstallInfo() {
         return null;
     }
 }
+//# sourceMappingURL=index.js.map

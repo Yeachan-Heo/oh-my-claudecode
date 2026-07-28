@@ -210,3 +210,4 @@ export const HISTORICAL_AGENT_OWNERSHIP = [
     { filename: 'writer.md', byteLength: 4253, sha256: '92c3e76dc8de5c25f01fe8ec72a787212195699bb2fc416edb1f4b5e6ca2a95c', gitBlob: '8deebfea03dc2098e7109565c5836b428c314c33', firstReleaseTag: 'v4.12.0', lastReleaseTag: 'v4.13.2' },
     { filename: 'writer.md', byteLength: 4386, sha256: 'ccbf8dc3957f1c633c95c5b99a0e74237ed1a393c562474cc3443c62abbc47c0', gitBlob: 'f50c4ca484cc51d903a1079b0476a895f1400cac', firstReleaseTag: 'v4.13.3', lastReleaseTag: 'v4.15.7' },
 ];
+//# sourceMappingURL=historical-agent-ownership.js.map
