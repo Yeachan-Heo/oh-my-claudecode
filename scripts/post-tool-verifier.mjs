@@ -9,7 +9,6 @@
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, renameSync, unlinkSync } from 'fs';
-import { closeSync, openSync, readSync, statSync } from 'fs';
 import { basename, join, dirname, resolve } from 'path';
 import { homedir, tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -17,6 +16,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
+import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
@@ -24,7 +24,6 @@ const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY
 const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
 const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT || '90', 10);
 const PREEMPTIVE_COOLDOWN_MS = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS || '60000', 10);
-const PREEMPTIVE_TRANSCRIPT_TAIL_BYTES = 4096;
 const PREEMPTIVE_LARGE_OUTPUT_TOOLS = new Set(['read', 'grep', 'glob', 'bash', 'webfetch', 'task', 'taskcreate', 'taskupdate', 'taskoutput']);
 const QUIET_LEVEL = getQuietLevel();
 const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
@@ -415,79 +414,6 @@ function resolveTranscriptPath(transcriptPath, cwd) {
   return transcriptPath;
 }
 
-function readTranscriptUsage(transcriptPath) {
-  if (!transcriptPath) return null;
-
-  let fd = -1;
-  try {
-    const stat = statSync(transcriptPath);
-    if (stat.size === 0) return null;
-
-    fd = openSync(transcriptPath, 'r');
-    const readSize = Math.min(PREEMPTIVE_TRANSCRIPT_TAIL_BYTES, stat.size);
-    const buffer = Buffer.alloc(readSize);
-    readSync(fd, buffer, 0, readSize, stat.size - readSize);
-    closeSync(fd);
-    fd = -1;
-
-    const tail = buffer.toString('utf-8');
-    const windowMatches = tail.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
-    const inputMatches = tail.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
-    if (!windowMatches || !inputMatches) return null;
-
-    const lastWindow = Number.parseInt(
-      windowMatches[windowMatches.length - 1].match(/(\d+)/)?.[1] || '0',
-      10,
-    );
-    const lastInput = Number.parseInt(
-      inputMatches[inputMatches.length - 1].match(/(\d+)/)?.[1] || '0',
-      10,
-    );
-    if (!Number.isFinite(lastWindow) || lastWindow <= 0) return null;
-    if (!Number.isFinite(lastInput) || lastInput < 0) return null;
-
-    return Math.round((lastInput / lastWindow) * 100);
-  } catch {
-    return null;
-  } finally {
-    if (fd !== -1) {
-      try { closeSync(fd); } catch {}
-    }
-  }
-}
-
-function readContextUsageFromHookInput(data) {
-  const contextWindow = data?.context_window;
-  if (!contextWindow || typeof contextWindow !== 'object') {
-    return null;
-  }
-
-  const usedPercentage = contextWindow.used_percentage;
-  if (Number.isFinite(usedPercentage) && usedPercentage >= 0) {
-    return Math.min(100, Math.max(0, Math.round(usedPercentage)));
-  }
-
-  const size = contextWindow.context_window_size;
-  if (!Number.isFinite(size) || size <= 0) {
-    return null;
-  }
-
-  const usage = contextWindow.current_usage;
-  if (!usage || typeof usage !== 'object') {
-    return null;
-  }
-
-  const inputTokens = Number(usage.input_tokens || 0);
-  const cacheCreationTokens = Number(usage.cache_creation_input_tokens || 0);
-  const cacheReadTokens = Number(usage.cache_read_input_tokens || 0);
-
-  const totalTokens = inputTokens + cacheCreationTokens + cacheReadTokens;
-  if (!Number.isFinite(totalTokens) || totalTokens < 0) {
-    return null;
-  }
-
-  return Math.min(100, Math.max(0, Math.round((totalTokens / size) * 100)));
-}
 
 function getPreemptiveCooldownFilePath(directory, sessionId) {
   const cooldownScope =
@@ -539,16 +465,17 @@ function buildPreemptiveContextMessage(percentUsed, severity) {
   return `[OMC WARNING] Context at ${percentUsed}% (warning threshold: ${getPreemptiveWarningThreshold()}%). Plan a /compact soon to preserve room for the next large tool output.`;
 }
 
-function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) {
+async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) {
   if (!PREEMPTIVE_LARGE_OUTPUT_TOOLS.has(String(toolName || '').toLowerCase())) {
     return '';
   }
 
-  const percentFromTranscript = readTranscriptUsage(
+  const percentUsed = await resolveContextPercent(
+    data,
     resolveTranscriptPath(data.transcript_path || data.transcriptPath, directory),
+    directory,
   );
-  const percentUsed =
-    percentFromTranscript ?? readContextUsageFromHookInput(data);
+
   const warningThreshold = getPreemptiveWarningThreshold();
   const criticalThreshold = getPreemptiveCriticalThreshold();
 
@@ -1138,7 +1065,7 @@ async function main() {
         structuredWriteSuccess,
         structuredWriteFailure,
       }),
-      maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
+      await maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
     );
 
     // Build response - use hookSpecificOutput.additionalContext for PostToolUse

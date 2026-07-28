@@ -19,13 +19,13 @@
  *   - { continue: true, suppressOutput: true } otherwise
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { readStdin } from './lib/stdin.mjs';
+import { resolveContextPercent } from './lib/context-usage.mjs';
 
 const THRESHOLD = parseInt(process.env.OMC_CONTEXT_GUARD_THRESHOLD || '75', 10);
 const CRITICAL_THRESHOLD = 95;
@@ -142,43 +142,6 @@ function resolveTranscriptPath(transcriptPath, cwd) {
   return transcriptPath;
 }
 
-/**
- * Estimate context usage percentage from the transcript file.
- */
-function estimateContextPercent(transcriptPath) {
-  if (!transcriptPath) return 0;
-
-  let fd = -1;
-  try {
-    const stat = statSync(transcriptPath);
-    if (stat.size === 0) return 0;
-
-    fd = openSync(transcriptPath, 'r');
-    const readSize = Math.min(4096, stat.size);
-    const buf = Buffer.alloc(readSize);
-    readSync(fd, buf, 0, readSize, stat.size - readSize);
-    closeSync(fd);
-    fd = -1;
-
-    const tail = buf.toString('utf-8');
-
-    // Bounded quantifiers to avoid ReDoS on malformed input
-    const windowMatch = tail.match(/"context_window"\s{0,5}:\s{0,5}(\d+)/g);
-    const inputMatch = tail.match(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g);
-
-    if (!windowMatch || !inputMatch) return 0;
-
-    const lastWindow = parseInt(windowMatch[windowMatch.length - 1].match(/(\d+)/)[1], 10);
-    const lastInput = parseInt(inputMatch[inputMatch.length - 1].match(/(\d+)/)[1], 10);
-
-    if (lastWindow === 0) return 0;
-    return Math.round((lastInput / lastWindow) * 100);
-  } catch {
-    return 0;
-  } finally {
-    if (fd !== -1) try { closeSync(fd); } catch { /* ignore */ }
-  }
-}
 
 /**
  * Retry guard: track how many times we've blocked this transcript.
@@ -249,7 +212,7 @@ async function main() {
     const sessionId = data.session_id || data.sessionId || '';
     const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
     const transcriptPath = resolveTranscriptPath(rawTranscriptPath, data.cwd);
-    const pct = estimateContextPercent(transcriptPath);
+    const pct = (await resolveContextPercent(data, transcriptPath, data.cwd)) ?? 0;
 
     if (pct >= CRITICAL_THRESHOLD) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
