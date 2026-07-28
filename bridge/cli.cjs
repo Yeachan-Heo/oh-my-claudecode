@@ -53936,6 +53936,46 @@ function clamp(v) {
   if (v == null || !isFinite(v)) return 0;
   return Math.max(0, Math.min(100, v));
 }
+function resolveScopedWeeklyLimits(limits, parseDate) {
+  const result = { generic: [] };
+  if (!Array.isArray(limits)) return result;
+  const byKey = /* @__PURE__ */ new Map();
+  for (const entry of limits) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.kind !== "weekly_scoped") continue;
+    if (typeof entry.percent !== "number" || !isFinite(entry.percent)) continue;
+    const displayName = entry.scope?.model?.display_name;
+    if (typeof displayName !== "string" || displayName.trim() === "") continue;
+    const key = displayName.trim().toLowerCase();
+    const isActive = entry.is_active === true;
+    const existing = byKey.get(key);
+    if (!existing || isActive && !existing.isActive) {
+      byKey.set(key, {
+        percent: entry.percent,
+        resetsAt: entry.resets_at,
+        isActive,
+        modelId: entry.scope?.model?.id,
+        displayName: displayName.trim()
+      });
+    }
+  }
+  for (const bucket of byKey.values()) {
+    const percent = clamp(bucket.percent);
+    const resetsAt = parseDate(bucket.resetsAt);
+    const lower = bucket.displayName.toLowerCase();
+    const isSonnetFamily = lower.includes("sonnet");
+    const isOpusFamily = lower.includes("opus");
+    if (isSonnetFamily) {
+      if (result.sonnet == null) result.sonnet = { percent, resetsAt };
+    } else if (isOpusFamily) {
+      if (result.opus == null) result.opus = { percent, resetsAt };
+    } else {
+      const id = typeof bucket.modelId === "string" && bucket.modelId.trim() !== "" ? bucket.modelId : lower;
+      result.generic.push({ id, label: bucket.displayName, percent, resetsAt, isActive: bucket.isActive });
+    }
+  }
+  return result;
+}
 function minorUnitDecimals(currency, decimalPlaces) {
   if (decimalPlaces != null && Number.isInteger(decimalPlaces) && decimalPlaces >= 0 && decimalPlaces <= 4) {
     return decimalPlaces;
@@ -53958,7 +53998,6 @@ function parseUsageResponse(response, options) {
   const hasUsableUsdExtraUsage = extra?.limit_usd != null && extra.limit_usd > 0;
   const hasUsableCreditExtraUsage = !isEnterpriseContext && usedCredits != null && extraCurrency === "USD" && extra?.monthly_limit != null && extra.monthly_limit > 0;
   const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
-  if (fiveHour == null && sevenDay == null && sonnetSevenDay == null && opusSevenDay == null && !hasUsableEnterprise && !hasUsableExtraUsage) return null;
   const parseDate = (dateStr) => {
     if (!dateStr) return null;
     try {
@@ -53968,6 +54007,8 @@ function parseUsageResponse(response, options) {
       return null;
     }
   };
+  const scopedWeekly = resolveScopedWeeklyLimits(response.limits, parseDate);
+  if (fiveHour == null && sevenDay == null && sonnetSevenDay == null && opusSevenDay == null && !hasUsableEnterprise && !hasUsableExtraUsage && scopedWeekly.sonnet == null && scopedWeekly.opus == null && scopedWeekly.generic.length === 0) return null;
   const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
   const result = {
     fiveHourPercent: clamp(fiveHour),
@@ -53980,11 +54021,20 @@ function parseUsageResponse(response, options) {
   if (sonnetSevenDay != null) {
     result.sonnetWeeklyPercent = clamp(sonnetSevenDay);
     result.sonnetWeeklyResetsAt = parseDate(sonnetResetsAt);
+  } else if (scopedWeekly.sonnet != null) {
+    result.sonnetWeeklyPercent = scopedWeekly.sonnet.percent;
+    result.sonnetWeeklyResetsAt = scopedWeekly.sonnet.resetsAt;
   }
   const opusResetsAt = response.seven_day_opus?.resets_at;
   if (opusSevenDay != null) {
     result.opusWeeklyPercent = clamp(opusSevenDay);
     result.opusWeeklyResetsAt = parseDate(opusResetsAt);
+  } else if (scopedWeekly.opus != null) {
+    result.opusWeeklyPercent = scopedWeekly.opus.percent;
+    result.opusWeeklyResetsAt = scopedWeekly.opus.resetsAt;
+  }
+  if (scopedWeekly.generic.length > 0) {
+    result.scopedWeeklyBuckets = scopedWeekly.generic;
   }
   if (extra != null) {
     const currency = extraCurrency;
@@ -56106,6 +56156,16 @@ function renderRateLimits(limits, stale) {
     const opusPart = opusReset ? `${DIM4}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${opusReset})${RESET}` : `${DIM4}op:${RESET}${opusColor}${opus}%${RESET}${staleMarker}`;
     parts.push(opusPart);
   }
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+      const part = reset ? `${DIM4}${label}:${RESET}${color}${value}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${reset})${RESET}` : `${DIM4}${label}:${RESET}${color}${value}%${RESET}${staleMarker}`;
+      parts.push(part);
+    }
+  }
   if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
     const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
     const extraColor = getColor(extra);
@@ -56167,6 +56227,19 @@ function renderRateLimitsWithBar(limits, barWidth = 8, stale) {
     const opusReset = formatResetTime(limits.opusWeeklyResetsAt);
     const opusPart = opusReset ? `${DIM4}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${opusReset})${RESET}` : `${DIM4}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}`;
     parts.push(opusPart);
+  }
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const filled = Math.round(value / 100 * barWidth);
+      const empty = barWidth - filled;
+      const bar = `${color}${"\u2588".repeat(filled)}${DIM4}${"\u2591".repeat(empty)}${RESET}`;
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+      const part = reset ? `${DIM4}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}${DIM4}(${resetPrefix}${reset})${RESET}` : `${DIM4}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}`;
+      parts.push(part);
+    }
   }
   if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
     const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
