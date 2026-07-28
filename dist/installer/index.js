@@ -27,6 +27,7 @@ import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compa
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 import { executeClaudeMdTransaction } from './claude-md-transaction.js';
+import { HISTORICAL_AGENT_OWNERSHIP } from './historical-agent-ownership.js';
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -65,41 +66,37 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([
     'verify',
     'debug',
 ]);
-// These rows are the complete release-authenticated v4.4.0 cleanup authority.
-// Do not add a row without independently verifying the package and release evidence.
-const AUTHENTICATED_HISTORICAL_AGENTS = [
-    { filename: 'architect.md', lifecycle: 'duplicate', byteLength: 5846, sha256: '3c865d6fbf364b92ec33f3151803a4b7b9dd3a6a1a664fe599de5ef7be6fb570', packageName: 'oh-my-claude-sisyphus', packageVersion: '4.4.0', registryTarball: 'https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz', registryIntegrity: 'sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==', tarMember: 'package/agents/architect.md', releaseTag: 'v4.4.0', releaseCommit: 'a57fc858fe84ff942167540ce5c43bfcc822dc44', gitBlob: '377de6ae92d9a03e515d5261e12d06766d258fb2', packageTagMatch: 'MATCH' },
-    { filename: 'build-fixer.md', lifecycle: 'stale', byteLength: 4555, sha256: 'af080383b633f6871618f98b76678a8753aec11b5cb5688197495d17748a0c52', packageName: 'oh-my-claude-sisyphus', packageVersion: '4.4.0', registryTarball: 'https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz', registryIntegrity: 'sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==', tarMember: 'package/agents/build-fixer.md', releaseTag: 'v4.4.0', releaseCommit: 'a57fc858fe84ff942167540ce5c43bfcc822dc44', gitBlob: 'f2e79fa048558cd1aefdd348c254cad299cb7981', packageTagMatch: 'MATCH' },
-    { filename: 'deep-executor.md', lifecycle: 'stale', byteLength: 6488, sha256: '392b91cb10baacdd876953c0b95f445bd6e3379e5d190b60bcb59ede30f761ca', packageName: 'oh-my-claude-sisyphus', packageVersion: '4.4.0', registryTarball: 'https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz', registryIntegrity: 'sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==', tarMember: 'package/agents/deep-executor.md', releaseTag: 'v4.4.0', releaseCommit: 'a57fc858fe84ff942167540ce5c43bfcc822dc44', gitBlob: '39b0dec823c8742179407ed1e4e8356808151e15', packageTagMatch: 'MATCH' },
-    { filename: 'quality-reviewer.md', lifecycle: 'stale', byteLength: 8535, sha256: '98f44f332f9fe951c9aac52fd34ad4e1183cf0e4fcce05c3d7493ca5919b9c14', packageName: 'oh-my-claude-sisyphus', packageVersion: '4.4.0', registryTarball: 'https://registry.npmjs.org/oh-my-claude-sisyphus/-/oh-my-claude-sisyphus-4.4.0.tgz', registryIntegrity: 'sha512-dS9E3T0ktFOI/AdG6iZgEFev4hn3i29J2rlv7BF+x9540Y0raI7uR77Vogcf6nHq4Jv6bQ4jjlIOut1l5OdSkQ==', tarMember: 'package/agents/quality-reviewer.md', releaseTag: 'v4.4.0', releaseCommit: 'a57fc858fe84ff942167540ce5c43bfcc822dc44', gitBlob: '99812ffe67e72692aa1a6b72404945c7bd20ac53', packageTagMatch: 'MATCH' },
-];
 function isSafeAgentFilename(filename) {
     return /^[a-z0-9-]+\.md$/.test(filename);
 }
 function isValidHistoricalAgent(record) {
-    return isSafeAgentFilename(record.filename)
-        && (record.lifecycle === 'duplicate' || record.lifecycle === 'stale')
-        && record.byteLength > 0
-        && /^[a-f0-9]{64}$/.test(record.sha256)
-        && record.packageName === 'oh-my-claude-sisyphus'
-        && record.packageVersion === '4.4.0'
-        && record.registryTarball === `https://registry.npmjs.org/${record.packageName}/-/${record.packageName}-${record.packageVersion}.tgz`
-        && record.registryIntegrity.startsWith('sha512-')
-        && record.tarMember === `package/agents/${record.filename}`
-        && record.releaseTag === 'v4.4.0'
-        && record.releaseCommit === 'a57fc858fe84ff942167540ce5c43bfcc822dc44'
-        && /^[a-f0-9]{40}$/.test(record.gitBlob)
-        && record.packageTagMatch === 'MATCH';
+    if (!record || typeof record !== 'object')
+        return false;
+    const candidate = record;
+    return typeof candidate.filename === 'string'
+        && isSafeAgentFilename(candidate.filename)
+        && Number.isSafeInteger(candidate.byteLength)
+        && candidate.byteLength > 0
+        && typeof candidate.sha256 === 'string'
+        && /^[a-f0-9]{64}$/.test(candidate.sha256)
+        && typeof candidate.gitBlob === 'string'
+        && /^[a-f0-9]{40}$/.test(candidate.gitBlob)
+        && typeof candidate.firstReleaseTag === 'string'
+        && /^v4\.\d+\.\d+$/.test(candidate.firstReleaseTag)
+        && typeof candidate.lastReleaseTag === 'string'
+        && /^v4\.\d+\.\d+$/.test(candidate.lastReleaseTag);
 }
-const HISTORICAL_AGENT_BY_FILENAME = new Map(AUTHENTICATED_HISTORICAL_AGENTS
-    .filter(isValidHistoricalAgent)
-    .map(record => [record.filename, record]));
-function hasAuthenticatedHistoricalAgentBytes(filename, lifecycle, content) {
-    const record = HISTORICAL_AGENT_BY_FILENAME.get(filename);
-    return record !== undefined
-        && record.lifecycle === lifecycle
-        && content.length === record.byteLength
-        && createHash('sha256').update(content).digest('hex') === record.sha256;
+const HISTORICAL_AGENT_HASHES_BY_FILENAME = new Map();
+for (const record of HISTORICAL_AGENT_OWNERSHIP) {
+    if (!isValidHistoricalAgent(record))
+        continue;
+    const hashes = HISTORICAL_AGENT_HASHES_BY_FILENAME.get(record.filename) ?? new Set();
+    hashes.add(`${record.byteLength}:${record.sha256}`);
+    HISTORICAL_AGENT_HASHES_BY_FILENAME.set(record.filename, hashes);
+}
+function hasAuthenticatedHistoricalAgentBytes(filename, content) {
+    const hashes = HISTORICAL_AGENT_HASHES_BY_FILENAME.get(filename);
+    return hashes?.has(`${content.length}:${createHash('sha256').update(content).digest('hex')}`) ?? false;
 }
 function readRegularAgentFile(filepath) {
     try {
@@ -797,7 +794,7 @@ function equalAgentWitnesses(left, right) {
 }
 function getActiveAgentFiles() {
     const pluginRootResolution = resolveInstalledOmcPluginRoots();
-    if (pluginRootResolution.mode === 'unknown')
+    if (pluginRootResolution.mode === 'unknown' || !pluginRootResolution.cleanupAllowed)
         return null;
     const roots = pluginRootResolution.mode === 'legacy'
         ? [getPackageDir()]
@@ -824,7 +821,8 @@ function listAgentDirectoryEntries(agentsDir) {
 /**
  * Remove stale OMC agents only when their exact raw bytes match the bounded,
  * release-authenticated historical inventory and their basename is absent from
- * the active payload. All uncertain ownership and filesystem states preserve.
+ * both the resolved active payload and the current package. All uncertain ownership
+ * and filesystem states preserve.
  */
 export function cleanupStaleAgents(log) {
     const agentsDir = currentAgentsDir();
@@ -833,17 +831,21 @@ export function cleanupStaleAgents(log) {
     const activeAgentFiles = getActiveAgentFiles();
     if (!activeAgentFiles)
         return [];
+    const currentPackageAgentWitnesses = readActiveAgentWitnesses(join(getPackageDir(), 'agents'));
+    if (!currentPackageAgentWitnesses)
+        return [];
+    const currentPackageAgentFiles = new Set(currentPackageAgentWitnesses.keys());
     const agentEntries = listAgentDirectoryEntries(agentsDir);
     if (!agentEntries)
         return [];
     const removed = [];
     for (const entry of agentEntries) {
         const file = entry.name;
-        if (!entry.isFile() || file === 'AGENTS.md' || !isSafeAgentFilename(file) || activeAgentFiles.has(file))
+        if (!entry.isFile() || file === 'AGENTS.md' || !isSafeAgentFilename(file) || activeAgentFiles.has(file) || currentPackageAgentFiles.has(file))
             continue;
         const filepath = join(agentsDir, file);
         const candidate = readRegularAgentFile(filepath);
-        if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, 'stale', candidate.content))
+        if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, candidate.content))
             continue;
         try {
             if (!hasUnchangedRegularAgentFile(filepath, candidate))
@@ -879,7 +881,7 @@ export function prunePluginDuplicateAgents(log) {
             continue;
         const filepath = join(agentsDir, file);
         const candidate = readRegularAgentFile(filepath);
-        if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, 'duplicate', candidate.content))
+        if (!candidate || !hasAuthenticatedHistoricalAgentBytes(file, candidate.content))
             continue;
         try {
             if (!hasUnchangedRegularAgentFile(filepath, candidate))
@@ -1065,44 +1067,58 @@ function resolveInstalledOmcPluginRoots() {
     const explicitRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim()
         || process.env.CLAUDE_PLUGIN_ROOT?.trim();
     if (explicitRoot) {
-        return { mode: 'plugin', roots: [explicitRoot] };
+        return { mode: 'plugin', roots: [explicitRoot], cleanupAllowed: true };
     }
-    const pluginRoots = new Set();
     const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
     if (!existsSync(installedPluginsPath)) {
-        return { mode: 'legacy', roots: [] };
+        return { mode: 'legacy', roots: [], cleanupAllowed: true };
     }
     try {
         const raw = JSON.parse(readFileSync(installedPluginsPath, 'utf-8'));
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-            return { mode: 'unknown', roots: [] };
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+            return { mode: 'unknown', roots: [], cleanupAllowed: false };
+        }
         const registry = raw;
         const plugins = registry.plugins ?? raw;
-        if (!plugins || typeof plugins !== 'object' || Array.isArray(plugins))
-            return { mode: 'unknown', roots: [] };
+        if (!plugins || typeof plugins !== 'object' || Array.isArray(plugins)) {
+            return { mode: 'unknown', roots: [], cleanupAllowed: false };
+        }
+        const pluginRoots = new Set();
+        let ambiguous = false;
         for (const [pluginId, entries] of Object.entries(plugins)) {
-            if (!isOfficialOmcPluginId(pluginId)) {
-                if (isOmcPluginLookalike(pluginId))
-                    return { mode: 'unknown', roots: [] };
+            const official = isOfficialOmcPluginId(pluginId);
+            if (!Array.isArray(entries) || entries.length === 0) {
+                ambiguous = true;
                 continue;
             }
-            if (!Array.isArray(entries) || entries.length === 0)
-                return { mode: 'unknown', roots: [] };
+            if (!official) {
+                if (isOmcPluginLookalike(pluginId))
+                    ambiguous = true;
+                continue;
+            }
             for (const entry of entries) {
                 if (!entry || typeof entry !== 'object' || typeof entry.installPath !== 'string') {
-                    return { mode: 'unknown', roots: [] };
+                    ambiguous = true;
+                    continue;
                 }
                 const installPath = entry.installPath.trim();
-                if (!installPath)
-                    return { mode: 'unknown', roots: [] };
+                if (!installPath) {
+                    ambiguous = true;
+                    continue;
+                }
                 pluginRoots.add(installPath);
             }
         }
+        if (pluginRoots.size === 0) {
+            return ambiguous
+                ? { mode: 'unknown', roots: [], cleanupAllowed: false }
+                : { mode: 'legacy', roots: [], cleanupAllowed: true };
+        }
+        return { mode: 'plugin', roots: [...pluginRoots], cleanupAllowed: !ambiguous };
     }
     catch {
-        return { mode: 'unknown', roots: [] };
+        return { mode: 'unknown', roots: [], cleanupAllowed: false };
     }
-    return pluginRoots.size > 0 ? { mode: 'plugin', roots: [...pluginRoots] } : { mode: 'legacy', roots: [] };
 }
 export function getInstalledOmcPluginRoots() {
     const resolution = resolveInstalledOmcPluginRoots();
@@ -2241,4 +2257,3 @@ export function getInstallInfo() {
         return null;
     }
 }
-//# sourceMappingURL=index.js.map

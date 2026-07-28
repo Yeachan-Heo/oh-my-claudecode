@@ -127,7 +127,8 @@ export declare function isProjectScopedPlugin(): boolean;
 /**
  * Remove stale OMC agents only when their exact raw bytes match the bounded,
  * release-authenticated historical inventory and their basename is absent from
- * the active payload. All uncertain ownership and filesystem states preserve.
+ * both the resolved active payload and the current package. All uncertain ownership
+ * and filesystem states preserve.
  */
 export declare function cleanupStaleAgents(log: (msg: string) => void): string[];
 /**
@@ -225,4 +226,3 @@ export declare function getInstallInfo(): {
     installedAt: string;
     method: string;
 } | null;
-//# sourceMappingURL=index.d.ts.map

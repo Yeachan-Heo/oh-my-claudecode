@@ -44,8 +44,16 @@ function createManagedSkillMarker(dir: string, skillName: string): void {
   writeFileSync(join(dir, skillName, '.omc-managed'), 'omc-managed\n');
 }
 
-function historicalAgent(filename: string): Buffer {
-  return readFileSync(join(process.cwd(), 'src', 'installer', '__tests__', 'fixtures', 'historical-agents', filename));
+function historicalAgent(filename: string, fixturePath = filename): Buffer {
+  return readFileSync(join(process.cwd(), 'src', 'installer', '__tests__', 'fixtures', 'historical-agents', fixturePath));
+}
+
+function sameLengthByteDivergence(content: Buffer): Buffer {
+  const changed = Buffer.from(content);
+  const bodyStart = content.indexOf(Buffer.from('\n\n'));
+  const offset = bodyStart >= 0 && bodyStart + 2 < changed.length ? bodyStart + 2 : 0;
+  changed[offset] ^= 1;
+  return changed;
 }
 
 function createPluginRoot(dir: string, agentContents: Record<string, Buffer>): void {
@@ -110,6 +118,17 @@ describe('cleanupStaleAgents', () => {
     expect(cleanup(log)).toEqual([]);
   });
 
+  it('removes the v4.1.0 build-fixer bytes as stale history', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, 'build-fixer.md'), historicalAgent('build-fixer.md', 'v4.1.0/build-fixer.md'));
+
+    expect(cleanup(log)).toEqual(['build-fixer.md']);
+    expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(false);
+  });
+
   it('preserves an exact duplicate-only ledger row during stale cleanup', async () => {
     vi.resetModules();
     const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
@@ -160,6 +179,30 @@ describe('cleanupStaleAgents', () => {
 
       expect(cleanup(log)).toEqual([]);
       expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(true);
+    } finally {
+      if (originalOmcRoot === undefined) delete process.env.OMC_PLUGIN_ROOT;
+      else process.env.OMC_PLUGIN_ROOT = originalOmcRoot;
+      if (originalClaudeRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = originalClaudeRoot;
+    }
+  });
+
+  it('preserves a current-package basename when the explicit plugin witness omits it', async () => {
+    const originalOmcRoot = process.env.OMC_PLUGIN_ROOT;
+    const originalClaudeRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      const pluginRoot = join(tempDir, 'partial-active-plugin-root');
+      createPluginRoot(pluginRoot, { 'executor.md': Buffer.from('active executor\n') });
+      process.env.OMC_PLUGIN_ROOT = pluginRoot;
+      delete process.env.CLAUDE_PLUGIN_ROOT;
+
+      vi.resetModules();
+      const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+      mkdirSync(agentsDir, { recursive: true });
+      writeFileSync(join(agentsDir, 'architect.md'), historicalAgent('architect.md', 'v4.5.0/architect.md'));
+
+      expect(cleanup(log)).toEqual([]);
+      expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
     } finally {
       if (originalOmcRoot === undefined) delete process.env.OMC_PLUGIN_ROOT;
       else process.env.OMC_PLUGIN_ROOT = originalOmcRoot;
@@ -291,6 +334,10 @@ describe('cleanupStaleAgents', () => {
     expect(existsSync(join(agentsDir, 'third-party.md'))).toBe(true);
     expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(true);
     expect(existsSync(join(agentsDir, 'malformed.md'))).toBe(true);
+
+    writeFileSync(join(agentsDir, 'build-fixer.md'), sameLengthByteDivergence(historicalAgent('build-fixer.md')));
+    expect(cleanup(log)).toEqual([]);
+    expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(true);
 
     writeFileSync(join(agentsDir, 'build-fixer.md'), Buffer.concat([historicalAgent('build-fixer.md'), Buffer.from('\n')]));
     expect(cleanup(log)).toEqual([]);
@@ -668,6 +715,20 @@ describe('prunePluginDuplicateAgents', () => {
     expect(prune(log)).toEqual([]);
   });
 
+  it.each([
+    ['analyst.md', 'v4.4.0/analyst.md'],
+    ['architect.md', 'v4.5.0/architect.md'],
+  ])('prunes current-name bytes from released history for %s', async (filename, fixturePath) => {
+    vi.resetModules();
+    const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
+
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, filename), historicalAgent(filename, fixturePath));
+
+    expect(prune(log)).toEqual([filename]);
+    expect(existsSync(join(agentsDir, filename))).toBe(false);
+  });
+
   it('preserves user-created agents without OMC frontmatter', async () => {
     vi.resetModules();
     const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
@@ -715,6 +776,10 @@ describe('prunePluginDuplicateAgents', () => {
 
     mkdirSync(agentsDir, { recursive: true });
     createAgentFile(agentsDir, 'architect.md', 'architect');
+    expect(prune(log)).toEqual([]);
+    expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
+
+    writeFileSync(join(agentsDir, 'architect.md'), sameLengthByteDivergence(historicalAgent('architect.md')));
     expect(prune(log)).toEqual([]);
     expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
 
