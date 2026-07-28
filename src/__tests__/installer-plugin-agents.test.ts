@@ -200,6 +200,49 @@ describe('installer legacy agent sync gating (issue #1502)', () => {
     expect(installer.isInstalled()).toBe(true);
   });
 
+  it('recognizes the documented local-marketplace plugin id', async () => {
+    const pluginInstallPath = join(
+      claudeConfigDir,
+      'plugins',
+      'cache',
+      'oh-my-claudecode',
+      'oh-my-claudecode',
+      '9.9.9',
+    );
+    const pluginAgentsDir = join(pluginInstallPath, 'agents');
+    writeCompletePluginPayload(pluginInstallPath);
+    mkdirSync(pluginAgentsDir, { recursive: true });
+    writeFileSync(
+      join(pluginAgentsDir, 'executor.md'),
+      '---\nname: executor\ndescription: test\n---\n',
+    );
+
+    mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(claudeConfigDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify(
+        {
+          plugins: {
+            'oh-my-claudecode@oh-my-claudecode': [
+              { installPath: pluginInstallPath },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+    expect(installer.getInstalledOmcPluginRoots()).toEqual([pluginInstallPath]);
+    expect(installer.hasPluginProvidedAgentFiles()).toBe(true);
+
+    const result = installer.install({ skipClaudeCheck: true, skipHud: true });
+    expect(result.success).toBe(true);
+    expect(result.installedAgents).toEqual([]);
+    expect(existsSync(join(claudeConfigDir, 'agents'))).toBe(false);
+  });
+
   it('still installs legacy agent files when no plugin-provided agent files are available', async () => {
     const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
     const result = installer.install({

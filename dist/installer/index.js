@@ -1050,7 +1050,7 @@ function directoryHasSkillDefinitions(directory) {
         return false;
     }
 }
-const OMC_PLUGIN_IDS = new Set(['oh-my-claudecode', 'oh-my-claudecode@omc']);
+const OMC_PLUGIN_IDS = new Set(['oh-my-claudecode', 'oh-my-claudecode@omc', 'oh-my-claudecode@oh-my-claudecode']);
 const OMC_PLUGIN_MANIFEST_NAME = 'oh-my-claudecode';
 function isOfficialOmcPluginId(pluginId) {
     return OMC_PLUGIN_IDS.has(pluginId.toLowerCase());

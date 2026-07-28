@@ -18063,7 +18063,7 @@ var init_installer = __esm({
       "persistent-mode.mjs",
       "code-simplifier.mjs"
     ];
-    OMC_PLUGIN_IDS = /* @__PURE__ */ new Set(["oh-my-claudecode", "oh-my-claudecode@omc"]);
+    OMC_PLUGIN_IDS = /* @__PURE__ */ new Set(["oh-my-claudecode", "oh-my-claudecode@omc", "oh-my-claudecode@oh-my-claudecode"]);
     OMC_PLUGIN_MANIFEST_NAME = "oh-my-claudecode";
     PLUGIN_SYNC_PAYLOAD = [
       "dist",

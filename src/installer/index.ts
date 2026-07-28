@@ -1236,7 +1236,7 @@ type PluginRootResolution =
   | { mode: 'plugin'; roots: string[] }
   | { mode: 'unknown'; roots: [] };
 
-const OMC_PLUGIN_IDS = new Set(['oh-my-claudecode', 'oh-my-claudecode@omc']);
+const OMC_PLUGIN_IDS = new Set(['oh-my-claudecode', 'oh-my-claudecode@omc', 'oh-my-claudecode@oh-my-claudecode']);
 const OMC_PLUGIN_MANIFEST_NAME = 'oh-my-claudecode';
 
 function isOfficialOmcPluginId(pluginId: string): boolean {
