@@ -98,6 +98,21 @@ interface UsageApiResponse {
     // (EUR=2, JPY=0, BHD=3). When present we no longer have to guess the scale.
     decimal_places?: number;
   };
+  // Generic per-bucket limits (replaces/supplements the flat seven_day_* keys on
+  // newer accounts). Per-model weekly quotas arrive here as `kind: "weekly_scoped"`
+  // entries keyed by `scope.model.display_name` rather than a fixed field name
+  // (see issue #3576).
+  limits?: Array<{
+    kind?: string;
+    group?: string;
+    percent?: number;
+    is_active?: boolean;
+    resets_at?: string;
+    scope?: {
+      model?: { id?: string | null; display_name?: string | null } | null;
+      surface?: unknown;
+    } | null;
+  }>;
 }
 
 interface ParseUsageResponseOptions {
@@ -899,7 +914,89 @@ function clamp(v: number | undefined): number {
   if (v == null || !isFinite(v)) return 0;
   return Math.max(0, Math.min(100, v));
 }
+/**
+ * Result of resolving `response.limits[]` `kind: "weekly_scoped"` entries into
+ * the typed Sonnet/Opus fields plus a generic bucket list for unrecognized
+ * model families (see issue #3576).
+ */
+interface ScopedWeeklyResolution {
+  sonnet?: { percent: number; resetsAt: Date | null };
+  opus?: { percent: number; resetsAt: Date | null };
+  generic: Array<{ id: string; label: string; percent: number; resetsAt: Date | null; isActive: boolean }>;
+}
 
+/**
+ * Parse `response.limits[]` defensively into recognized Sonnet/Opus weekly
+ * quotas plus a generic bucket list for unrecognized scoped weekly model
+ * families (e.g. "Fable").
+ *
+ * - Only `kind === "weekly_scoped"` entries are considered.
+ * - Entries missing/malformed `scope.model.display_name` or a finite `percent`
+ *   are skipped rather than throwing.
+ * - Family recognition is a case-insensitive substring match against
+ *   `display_name` (not an exact-case/enum match), so "Sonnet 4.5" or
+ *   "claude-sonnet" style names still map onto the Sonnet field.
+ * - Duplicate buckets for the same `display_name` are deduped, preferring the
+ *   entry flagged `is_active: true`; `is_active` is used only for this
+ *   tiebreak, never to hide/filter a bucket, so an inactive-but-present scoped
+ *   quota still renders.
+ * - When multiple *distinct* display names map onto the same recognized
+ *   family (e.g. two differently-named Sonnet tiers), the first one wins —
+ *   later ones do not overwrite an already-filled typed field.
+ */
+function resolveScopedWeeklyLimits(
+  limits: UsageApiResponse['limits'],
+  parseDate: (dateStr: string | undefined) => Date | null,
+): ScopedWeeklyResolution {
+  const result: ScopedWeeklyResolution = { generic: [] };
+  if (!Array.isArray(limits)) return result;
+
+  // Dedup by normalized display_name, preferring the is_active entry.
+  const byKey = new Map<string, { percent: number; resetsAt: string | undefined; isActive: boolean; modelId: string | null | undefined; displayName: string }>();
+  for (const entry of limits) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.kind !== 'weekly_scoped') continue;
+    if (typeof entry.percent !== 'number' || !isFinite(entry.percent)) continue;
+
+    const displayName = entry.scope?.model?.display_name;
+    if (typeof displayName !== 'string' || displayName.trim() === '') continue;
+
+    const key = displayName.trim().toLowerCase();
+    const isActive = entry.is_active === true;
+    const existing = byKey.get(key);
+    if (!existing || (isActive && !existing.isActive)) {
+      byKey.set(key, {
+        percent: entry.percent,
+        resetsAt: entry.resets_at,
+        isActive,
+        modelId: entry.scope?.model?.id,
+        displayName: displayName.trim(),
+      });
+    }
+  }
+
+  for (const bucket of byKey.values()) {
+    const percent = clamp(bucket.percent);
+    const resetsAt = parseDate(bucket.resetsAt);
+    const lower = bucket.displayName.toLowerCase();
+    const isSonnetFamily = lower.includes('sonnet');
+    const isOpusFamily = lower.includes('opus');
+
+    if (isSonnetFamily) {
+      // First Sonnet-family entry wins; later distinct Sonnet-named entries are
+      // dropped rather than falling through to the generic bucket (they refer
+      // to the same recognized family, not an unrecognized one).
+      if (result.sonnet == null) result.sonnet = { percent, resetsAt };
+    } else if (isOpusFamily) {
+      if (result.opus == null) result.opus = { percent, resetsAt };
+    } else {
+      const id = typeof bucket.modelId === 'string' && bucket.modelId.trim() !== '' ? bucket.modelId : lower;
+      result.generic.push({ id, label: bucket.displayName, percent, resetsAt, isActive: bucket.isActive });
+    }
+  }
+
+  return result;
+}
 /**
  * Resolve the minor-unit exponent for `used_credits`/`monthly_limit`.
  *
@@ -947,17 +1044,6 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
   const hasUsableCreditExtraUsage = !isEnterpriseContext && usedCredits != null && extraCurrency === 'USD' && extra?.monthly_limit != null && extra.monthly_limit > 0;
   const hasUsableExtraUsage = hasUsableUsdExtraUsage || hasUsableCreditExtraUsage;
 
-  // Need at least one valid value. Model-specific weekly buckets are valid usage data
-  // even when generic subscription/window metadata is absent or nullish.
-  if (
-    fiveHour == null &&
-    sevenDay == null &&
-    sonnetSevenDay == null &&
-    opusSevenDay == null &&
-    !hasUsableEnterprise &&
-    !hasUsableExtraUsage
-  ) return null;
-
   // Parse ISO 8601 date strings to Date objects
   const parseDate = (dateStr: string | undefined): Date | null => {
     if (!dateStr) return null;
@@ -968,6 +1054,27 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
       return null;
     }
   };
+
+  // Fall back to `limits[]` (`kind: "weekly_scoped"`) for per-model weekly quotas
+  // when the legacy flat seven_day_sonnet/seven_day_opus fields are null/absent
+  // (see issue #3576). Recognized families (sonnet/opus) fill the typed fields;
+  // unrecognized model names (e.g. "Fable") become a generic bucket.
+  const scopedWeekly = resolveScopedWeeklyLimits(response.limits, parseDate);
+
+  // Need at least one valid value. Model-specific weekly buckets (flat or
+  // limits[]-derived) are valid usage data even when generic subscription/window
+  // metadata is absent or nullish.
+  if (
+    fiveHour == null &&
+    sevenDay == null &&
+    sonnetSevenDay == null &&
+    opusSevenDay == null &&
+    !hasUsableEnterprise &&
+    !hasUsableExtraUsage &&
+    scopedWeekly.sonnet == null &&
+    scopedWeekly.opus == null &&
+    scopedWeekly.generic.length === 0
+  ) return null;
 
   // Per-model quotas are at the top level (flat structure)
   // e.g., response.seven_day_sonnet, response.seven_day_opus
@@ -983,17 +1090,31 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
     result.weeklyResetsAt = parseDate(response.seven_day?.resets_at);
   }
 
-  // Add Sonnet-specific quota if available from API
+  // Add Sonnet-specific quota if available from API (flat field takes precedence;
+  // limits[] weekly_scoped fallback only fills the gap when the flat field is
+  // null/absent — never overwrites trustworthy old-shape data).
   if (sonnetSevenDay != null) {
     result.sonnetWeeklyPercent = clamp(sonnetSevenDay);
     result.sonnetWeeklyResetsAt = parseDate(sonnetResetsAt);
+  } else if (scopedWeekly.sonnet != null) {
+    result.sonnetWeeklyPercent = scopedWeekly.sonnet.percent;
+    result.sonnetWeeklyResetsAt = scopedWeekly.sonnet.resetsAt;
   }
 
-  // Add Opus-specific quota if available from API
+  // Add Opus-specific quota if available from API (same precedence as Sonnet above).
   const opusResetsAt = response.seven_day_opus?.resets_at;
   if (opusSevenDay != null) {
     result.opusWeeklyPercent = clamp(opusSevenDay);
     result.opusWeeklyResetsAt = parseDate(opusResetsAt);
+  } else if (scopedWeekly.opus != null) {
+    result.opusWeeklyPercent = scopedWeekly.opus.percent;
+    result.opusWeeklyResetsAt = scopedWeekly.opus.resetsAt;
+  }
+
+  // Unrecognized scoped weekly model buckets (e.g. "Fable") render generically so
+  // new tiers don't need a source release.
+  if (scopedWeekly.generic.length > 0) {
+    result.scopedWeeklyBuckets = scopedWeekly.generic;
   }
 
   // Add extra (metered) usage if available (Pro subscribers with extra usage allocation)

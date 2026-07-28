@@ -125,6 +125,21 @@ export function renderRateLimits(limits: RateLimits | null, stale?: boolean): st
     parts.push(opusPart);
   }
 
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+
+      const part = reset
+        ? `${DIM}${label}:${RESET}${color}${value}%${RESET}${staleMarker}${DIM}(${resetPrefix}${reset})${RESET}`
+        : `${DIM}${label}:${RESET}${color}${value}%${RESET}${staleMarker}`;
+
+      parts.push(part);
+    }
+  }
+
   if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
     const extra = Math.min(100, Math.max(0, Math.round(limits.extraUsagePercent)));
     const extraColor = getColor(extra);
@@ -176,6 +191,14 @@ export function renderRateLimitsCompact(limits: RateLimits | null, stale?: boole
     const opus = Math.min(100, Math.max(0, Math.round(limits.opusWeeklyPercent)));
     const opusColor = getColor(opus);
     parts.push(`${opusColor}${opus}%${RESET}`);
+  }
+
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      parts.push(`${color}${value}%${RESET}`);
+    }
   }
 
   if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
@@ -274,6 +297,24 @@ export function renderRateLimitsWithBar(
       : `${DIM}op:${RESET}[${opusBar}]${opusColor}${opus}%${RESET}${staleMarker}`;
 
     parts.push(opusPart);
+  }
+
+  if (limits.scopedWeeklyBuckets != null) {
+    for (const bucket of limits.scopedWeeklyBuckets) {
+      const value = Math.min(100, Math.max(0, Math.round(bucket.percent)));
+      const color = getColor(value);
+      const filled = Math.round((value / 100) * barWidth);
+      const empty = barWidth - filled;
+      const bar = `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
+      const reset = formatResetTime(bucket.resetsAt);
+      const label = bucket.label.toLowerCase();
+
+      const part = reset
+        ? `${DIM}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}${DIM}(${resetPrefix}${reset})${RESET}`
+        : `${DIM}${label}:${RESET}[${bar}]${color}${value}%${RESET}${staleMarker}`;
+
+      parts.push(part);
+    }
   }
 
   if (limits.extraUsagePercent != null && limits.extraUsageLimitUsd != null) {
