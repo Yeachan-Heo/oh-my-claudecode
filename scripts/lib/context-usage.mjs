@@ -123,14 +123,18 @@ export async function resolveHudCacheContextPercent(data, directory) {
     }
 
     const root = getWorktreeRoot(directory || undefined) || directory || process.cwd();
-    // Mirror the HUD's own session-identity resolution (src/hud/stdin.ts
-    // getStdinCachePath): try each candidate — payload session id first,
-    // then the env-var candidates in priority order — and skip a candidate
-    // that fails validation or has no usable cache rather than giving up
-    // immediately. Once ANY candidate yields a valid cache, it is
-    // authoritative — never fall through to scanning other sessions' caches
-    // once a real identity has resolved, or a concurrent unrelated session
-    // could falsely trigger this session's warning/block.
+    // Mirror the HUD's own session-identity resolution exactly
+    // (src/hud/stdin.ts getStdinCachePath): walk the candidates — payload
+    // session id first, then the env-var candidates in priority order —
+    // and skip only a candidate that FAILS VALIDATION (getSessionStateDir
+    // throws). The FIRST candidate that validates is authoritative and the
+    // search stops there, exactly like getStdinCachePath: if that
+    // identity's own cache is missing or unusable, return null immediately
+    // rather than falling through to another (possibly concurrent,
+    // unrelated) session's cache — matching readStdinCache's behavior of
+    // returning null once a real session-scoped path was determined. Only
+    // when NO candidate validates at all do we fall through to the
+    // identity-less legacy/mtime recovery path below.
     for (const candidate of getSessionIdentityCandidates(data)) {
       let candidatePath;
       try {
@@ -139,14 +143,15 @@ export async function resolveHudCacheContextPercent(data, directory) {
         continue;
       }
       const cached = readJsonFile(candidatePath);
-      if (!hasContextWindowObject(cached)) continue;
+      if (!hasContextWindowObject(cached)) return null;
       return clampPercent(getContextPercent(cached));
     }
 
-    // No candidate validated to a usable cache: fall back exactly as the
-    // HUD does — the legacy flat cache first, then the most recently
-    // updated session-scoped cache as a last resort (e.g. a detached
-    // watcher that never inherited session env vars).
+    // No candidate validated to a real identity at all: fall back exactly
+    // as the HUD does for a fully identity-less reader — the legacy flat
+    // cache first, then the most recently updated session-scoped cache as
+    // a last resort (e.g. a detached watcher that never inherited session
+    // env vars).
     let cached = readJsonFile(resolveOmcPath('state/' + HUD_CACHE_FILENAME, root));
 
     if (cached === null) {

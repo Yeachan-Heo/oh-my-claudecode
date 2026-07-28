@@ -275,23 +275,66 @@ describe('resolveHudCacheContextPercent', () => {
     }
   });
 
-  it('skips a valid but cache-less primary identity and uses a usable secondary candidate', async () => {
+  it('returns null for a valid but cache-less primary identity instead of falling through to a secondary candidate', async () => {
     // 'hud-valid-primary-no-cache' is a syntactically valid session id with
-    // no cache file written for it — this must be skipped (not treated as a
-    // terminal failure) in favor of the next, usable candidate.
-    writeHudCache('hud-valid-secondary-with-cache', makeHudPayload({
+    // no cache file written for it. A valid identity is authoritative the
+    // moment it is found (matching src/hud/stdin.ts's getStdinCachePath,
+    // which commits to the first candidate that passes validation) -- it
+    // must NOT fall through to a different, unrelated secondary candidate
+    // even if that candidate happens to have a cache.
+    writeHudCache('hud-unrelated-secondary-with-cache', makeHudPayload({
       context_window: { used_percentage: 77 },
     }));
 
     const originalLegacy = process.env.CLAUDECODE_SESSION_ID;
-    process.env.CLAUDECODE_SESSION_ID = 'hud-valid-secondary-with-cache';
+    process.env.CLAUDECODE_SESSION_ID = 'hud-unrelated-secondary-with-cache';
     try {
       expect(await resolveHudCacheContextPercent(
         { session_id: 'hud-valid-primary-no-cache' },
         tempDir,
-      )).toBe(77);
+      )).toBeNull();
     } finally {
       if (originalLegacy === undefined) delete process.env.CLAUDECODE_SESSION_ID; else process.env.CLAUDECODE_SESSION_ID = originalLegacy;
+    }
+  });
+
+  it('returns null for a valid payload identity with no cache even when a newer foreign session cache exists', async () => {
+    const foreignPath = writeHudCache('hud-foreign-high-session', makeHudPayload({
+      context_window: { used_percentage: 90 },
+    }));
+    utimesSync(foreignPath, (Date.now() + 1_000) / 1000, (Date.now() + 1_000) / 1000);
+
+    // The current session's own identity ('hud-valid-payload-no-cache') is
+    // syntactically valid but has not written a cache yet (e.g. before the
+    // first statusline render). It must resolve to null, never to a
+    // concurrent unrelated session's high-percentage cache -- otherwise a
+    // fresh session could be falsely warned/blocked by another session's
+    // context usage.
+    expect(await resolveHudCacheContextPercent(
+      { session_id: 'hud-valid-payload-no-cache' },
+      tempDir,
+    )).toBeNull();
+  });
+
+  it('returns null for a valid env-bound identity with no cache even when the legacy flat cache is populated', async () => {
+    const legacyDir = join(tempDir, '.omc', 'state');
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(
+      join(legacyDir, HUD_CACHE_FILENAME),
+      JSON.stringify(makeHudPayload({ context_window: { used_percentage: 95 } })),
+      'utf-8',
+    );
+
+    const originalClaude = process.env.CLAUDE_SESSION_ID;
+    process.env.CLAUDE_SESSION_ID = 'hud-valid-env-no-cache';
+    try {
+      // A valid env-bound identity with no cache of its own must resolve to
+      // null, never to the legacy flat cache -- the legacy path is reserved
+      // for the fully identity-less case (src/hud/stdin.ts readStdinCache
+      // only falls back to it when no session env var resolved at all).
+      expect(await resolveHudCacheContextPercent({}, tempDir)).toBeNull();
+    } finally {
+      if (originalClaude === undefined) delete process.env.CLAUDE_SESSION_ID; else process.env.CLAUDE_SESSION_ID = originalClaude;
     }
   });
 
