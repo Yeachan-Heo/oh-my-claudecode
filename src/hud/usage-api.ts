@@ -1080,10 +1080,12 @@ export function parseUsageResponse(response: UsageApiResponse, options?: ParseUs
   // e.g., response.seven_day_sonnet, response.seven_day_opus
   const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
 
-  const result: RateLimits = {
-    fiveHourPercent: clamp(fiveHour),
-    fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
-  };
+  const result: RateLimits = {};
+
+  if (fiveHour != null) {
+    result.fiveHourPercent = clamp(fiveHour);
+    result.fiveHourResetsAt = parseDate(response.five_hour?.resets_at);
+  }
 
   if (sevenDay != null) {
     result.weeklyPercent = clamp(sevenDay);

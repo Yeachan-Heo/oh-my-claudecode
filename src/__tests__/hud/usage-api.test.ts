@@ -9,7 +9,11 @@ import * as childProcess from 'child_process';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { isZaiHost, parseZaiResponse, isMinimaxHost, parseMinimaxResponse, getUsage, parseUsageResponse } from '../../hud/usage-api.js';
-import { renderRateLimits } from '../../hud/elements/limits.js';
+import { renderRateLimits, renderRateLimitsCompact, renderRateLimitsWithBar } from '../../hud/elements/limits.js';
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
 
 // Mock file-lock so withFileLock always executes the callback (tests focus on routing, not locking)
 vi.mock('../../lib/file-lock.js', () => ({
@@ -925,6 +929,65 @@ describe('getUsage routing', () => {
       expect(result!.scopedWeeklyBuckets).toEqual([
         { id: 'fable', label: 'Fable', percent: 30, resetsAt: null, isActive: true },
       ]);
+    });
+
+    it('does not fabricate a 5h:0% bucket when only limits[] scoped weekly data is present', () => {
+      const result = parseUsageResponse({
+        five_hour: null,
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBeUndefined();
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('fable:30%');
+      expect(compact).toBe('30%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
+      expect(withBar).not.toContain('5h:');
+      expect(detailed).not.toContain('5h:0%');
+      expect(compact.startsWith('0%/')).toBe(false);
+    });
+
+    it('preserves an explicit real 0% five-hour bucket across all built-in renderers', () => {
+      const result = parseUsageResponse({
+        five_hour: { utilization: 0 },
+        seven_day: null,
+        seven_day_sonnet: null,
+        seven_day_opus: null,
+        limits: [
+          {
+            kind: 'weekly_scoped', percent: 30, is_active: true,
+            scope: { model: { display_name: 'Fable' }, surface: null },
+          },
+        ],
+      } as unknown as Parameters<typeof parseUsageResponse>[0]);
+
+      expect(result).not.toBeNull();
+      expect(result!.fiveHourPercent).toBe(0);
+
+      const detailed = stripAnsi(renderRateLimits(result, false)!);
+      const compact = stripAnsi(renderRateLimitsCompact(result, false)!);
+      const withBar = stripAnsi(renderRateLimitsWithBar(result, 8, false)!);
+
+      expect(detailed).toBe('5h:0% fable:30%');
+      expect(compact).toBe('0%/30%');
+      expect(withBar).toContain('5h:[');
+      expect(withBar).toContain(']0%');
+      expect(withBar).toContain('fable:[');
+      expect(withBar).toContain(']30%');
     });
   });
 
