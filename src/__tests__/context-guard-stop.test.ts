@@ -37,6 +37,17 @@ function writeTranscriptWithContext(filePath: string, contextWindow: number, inp
   });
   writeFileSync(filePath, `${line}\n`, 'utf-8');
 }
+function writeTranscriptWithoutContext(filePath: string, inputTokens: number): void {
+  const line = JSON.stringify({
+    message: {
+      usage: {
+        input_tokens: inputTokens,
+        output_tokens: 10,
+      },
+    },
+  });
+  writeFileSync(filePath, `${line}\n`, 'utf-8');
+}
 
 describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
   let tempDir: string;
@@ -64,6 +75,46 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
     expect(out.decision).toBe('block');
     expect(String(out.reason)).toContain('Run /compact immediately');
     expect(String(out.reason)).toContain('.omc/state');
+  });
+
+  it('blocks using HUD cache when transcript and hook payload omit context_window', () => {
+    const sessionId = `hud-stop-${Date.now()}`;
+    writeTranscriptWithoutContext(transcriptPath, 10);
+    const cacheDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(
+      join(cacheDir, 'hud-stdin-cache.json'),
+      JSON.stringify({
+        cwd: tempDir,
+        context_window: {
+          used_percentage: 80,
+          context_window_size: 1000,
+          current_usage: {
+            input_tokens: 10,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const out = runContextGuardStopWithEnv(
+      {
+        session_id: sessionId,
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        stop_reason: 'normal',
+      },
+      {
+        CLAUDE_PLUGIN_ROOT: process.cwd(),
+        OMC_CONTEXT_GUARD_THRESHOLD: '75',
+      },
+    );
+
+    expect(out.continue).toBe(false);
+    expect(out.decision).toBe('block');
+    expect(String(out.reason)).toContain('Run /compact immediately');
   });
 
   it('fails open at critical context exhaustion to avoid stop-hook deadlock', () => {

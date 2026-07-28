@@ -289,7 +289,7 @@ function recordsEqual(left, right) {
 
 export function validateAuthorizationManifest(manifest) {
   assertExactKeys(manifest, ['schemaVersion', 'repository', 'owner', 'authorizations'], 'authorization manifest');
-  if (manifest.schemaVersion !== 1) fail('authorization manifest has an unsupported schema version');
+  if (manifest.schemaVersion !== 2) fail('authorization manifest has an unsupported schema version');
 
   const repository = requiredString(manifest.repository, 'authorization manifest.repository');
   const { owner } = parseRepository(repository);
@@ -303,7 +303,7 @@ export function validateAuthorizationManifest(manifest) {
     const label = `authorization manifest.authorizations[${index}]`;
     assertExactKeys(
       entry,
-      ['pullNumber', 'targetRef', 'mergeBaseSha', 'headSha', 'owner', 'generatedDelta', 'generatedFiles'],
+      ['pullNumber', 'targetRef', 'mergeBaseSha', 'headSha', 'owner', 'expiresAt', 'generatedDelta', 'generatedFiles'],
       label,
     );
     const pullNumber = requiredPositiveInteger(entry.pullNumber, `${label}.pullNumber`);
@@ -317,6 +317,10 @@ export function validateAuthorizationManifest(manifest) {
     const mergeBaseSha = requiredSha(entry.mergeBaseSha, `${label}.mergeBaseSha`);
     const headSha = requiredSha(entry.headSha, `${label}.headSha`);
     if (entry.owner !== manifest.owner) fail(`${label}.owner does not match the manifest owner`);
+    const expiresAt = requiredString(entry.expiresAt, `${label}.expiresAt`);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresAt) || Number.isNaN(Date.parse(expiresAt))) {
+      fail(`${label}.expiresAt is not a canonical UTC timestamp`);
+    }
 
     assertExactKeys(entry.generatedDelta, ['count', 'sha256'], `${label}.generatedDelta`);
     const generatedDelta = {
@@ -336,10 +340,9 @@ export function validateAuthorizationManifest(manifest) {
       fail(`${label} generated file closure does not match its count and digest`);
     }
 
-    return { pullNumber, targetRef, mergeBaseSha, headSha, owner: entry.owner, generatedDelta, generatedFiles };
+    return { pullNumber, targetRef, mergeBaseSha, headSha, owner: entry.owner, expiresAt, generatedDelta, generatedFiles };
   });
-
-  return { schemaVersion: 1, repository, owner: manifest.owner, authorizations };
+  return { schemaVersion: 2, repository, owner: manifest.owner, authorizations };
 }
 
 function eventIdentity(event, repository, owner) {
@@ -459,6 +462,7 @@ export function authorizeGeneratedArtifactPullRequest({
   commit,
   signature,
   files,
+  now = new Date(),
 }) {
   const trustedManifest = validateAuthorizationManifest(manifest);
   const eventData = eventIdentity(event, trustedManifest.repository, trustedManifest.owner);
@@ -498,6 +502,9 @@ export function authorizeGeneratedArtifactPullRequest({
 
   const authorization = trustedManifest.authorizations.find(entry => entry.pullNumber === eventData.pullNumber);
   if (!authorization) fail('generated changes have no base-owned authorization entry');
+  if (Date.parse(authorization.expiresAt) <= now.getTime()) {
+    fail('generated-artifact authorization has expired');
+  }
   if (
     authorization.targetRef !== eventData.baseRef ||
     authorization.targetRef !== liveData.baseRef ||

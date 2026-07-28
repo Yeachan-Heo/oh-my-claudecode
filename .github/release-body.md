@@ -1,33 +1,29 @@
-# oh-my-claudecode v4.15.6: Named Stage Profiles & Reliability Fixes
+# oh-my-claudecode v4.15.7: Bug Fixes
 
 ## Release Notes
 
-Release with **1 new feature**, **10 bug fixes** across **11 merged PRs**.
+Release with **4 bug fixes**, **1 other change** across **5 merged PRs**.
 
 ### Highlights
 
-- **feat(autopilot): add named stage profiles** (#3492)
-
-### New Features
-
-- **feat(autopilot): add named stage profiles** (#3492)
+- **fix(psm): fail closed on malformed worktree results** (#3531)
+- **fix(psm): use jira-cli --raw instead of non-existent --output json** (#3529)
+- **fix(psm): use tmux-safe session names so sessions stay manageable** (#3530)
 
 ### Bug Fixes
 
-- **fix(release): guard coordinator across shipped surfaces** (#3516)
-- **fix: ship complete plugin runtime closure** (#3479)
-- **fix(windows): ship hidden worktree git subprocesses** (#3501)
-- **fix(ultragoal): make the /goal handoff satisfy the guard, not just the ledger** (#3514)
-- **fix(lsp): handle server-to-client requests** (#3511)
-- **fix(ultragoal): defer /goal guard until confirmation** (#3510)
-- **fix(beads): correct CLI instruction syntax** (#3505)
-- **fix(session-start): keep plugin drift guidance on marketplace channel** (#3500)
-- **fix(session-start): align update notices with plugin channel** (#3499)
-- **fix(windows): bound generic-hook runner timeout ownership and nested git** (#3496)
+- **fix(psm): fail closed on malformed worktree results** (#3531)
+- **fix(psm): use jira-cli --raw instead of non-existent --output json** (#3529)
+- **fix(psm): use tmux-safe session names so sessions stay manageable** (#3530)
+- **fix(windows): separate prompt host and worker timeouts** (#3525)
+
+### Other Changes
+
+- **ci: add main generated-artifact authorization trust root** (#3540)
 
 ### Stats
 
-- **11 PRs merged** | **1 new feature** | **10 bug fixes** | **0 security/hardening improvements** | **0 other changes**
+- **5 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **1 other change**
 
 ### Install / Update
 
@@ -36,7 +32,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@4.15.6
+npm install -g oh-my-claude-sisyphus@4.15.7
 ```
 
 **Claude Code plugin:**
@@ -45,10 +41,10 @@ npm install -g oh-my-claude-sisyphus@4.15.6
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.5...v4.15.6
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.6...v4.15.7
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@FrontHeadlock @Yeachan-Heo
+@Yeachan-Heo

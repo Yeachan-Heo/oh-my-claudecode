@@ -9,7 +9,7 @@ import { join } from 'path';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import process from 'process';
-import { detectBashFailure, detectWriteFailure, isClaudeCodeWriteSuccess, isNonZeroExitWithOutput, summarizeAgentResult } from '../../scripts/post-tool-verifier.mjs';
+import { detectAnnouncedBackgroundLaunch, detectBashFailure, detectWriteFailure, isBackgroundToolInvocation, isClaudeCodeWriteSuccess, isNonZeroExitWithOutput, summarizeAgentResult } from '../../scripts/post-tool-verifier.mjs';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'post-tool-verifier.mjs');
 const TEMPLATE_HOOK_PATH = join(process.cwd(), 'templates', 'hooks', 'post-tool-use.mjs');
@@ -1064,5 +1064,155 @@ describe('Skill active state cleanup on PostToolUse (issue #2103)', () => {
       expect(existsSync(skillStatePath(tempDir, sessionId))).toBe(false);
       expect(existsSync(legacySkillStatePath(tempDir))).toBe(false);
     });
+  });
+});
+
+describe('background operation detection (issue #3578)', () => {
+  const TRIGGER_WORDS = ['started', 'running', 'background', 'async', 'task_id', 'spawned'];
+
+  describe('isBackgroundToolInvocation', () => {
+    it('is true only when run_in_background is exactly true', () => {
+      expect(isBackgroundToolInvocation({ run_in_background: true })).toBe(true);
+      expect(isBackgroundToolInvocation({ run_in_background: false })).toBe(false);
+      expect(isBackgroundToolInvocation({ run_in_background: 'true' })).toBe(false);
+      expect(isBackgroundToolInvocation({ command: 'echo running' })).toBe(false);
+    });
+
+    it('fails safe on malformed or missing tool_input', () => {
+      expect(isBackgroundToolInvocation(undefined)).toBe(false);
+      expect(isBackgroundToolInvocation(null)).toBe(false);
+      expect(isBackgroundToolInvocation('run_in_background')).toBe(false);
+      expect(isBackgroundToolInvocation([{ run_in_background: true }])).toBe(false);
+      expect(isBackgroundToolInvocation(42)).toBe(false);
+    });
+  });
+
+  describe('detectAnnouncedBackgroundLaunch', () => {
+    it('matches the harness announcement only at the start of output', () => {
+      expect(detectAnnouncedBackgroundLaunch('Async agent launched successfully\nagentId: a8de3dd')).toBe(true);
+      expect(detectAnnouncedBackgroundLaunch('  Background task launched\n')).toBe(true);
+      expect(detectAnnouncedBackgroundLaunch('Background task resumed')).toBe(true);
+    });
+
+    it('does not match the phrase quoted elsewhere in the output', () => {
+      expect(
+        detectAnnouncedBackgroundLaunch('Report: the parser checks for Async agent launched strings.'),
+      ).toBe(false);
+    });
+
+    it('is case-sensitive by design', () => {
+      expect(detectAnnouncedBackgroundLaunch('async agent launched successfully')).toBe(false);
+    });
+
+    it('fails safe on non-string output', () => {
+      expect(detectAnnouncedBackgroundLaunch(undefined)).toBe(false);
+      expect(detectAnnouncedBackgroundLaunch(null)).toBe(false);
+      expect(detectAnnouncedBackgroundLaunch({ text: 'Async agent launched' })).toBe(false);
+    });
+  });
+
+  describe('foreground Bash never reports a background operation', () => {
+    for (const word of TRIGGER_WORDS) {
+      it(`does not fire when foreground output contains "${word}"`, () => {
+        const out = runPostToolVerifier({
+          tool_name: 'Bash',
+          tool_input: { command: 'echo demo' },
+          tool_response: `the service is ${word} normally`,
+          session_id: `bg-fp-${word}`,
+        });
+
+        expect(out).toEqual({ continue: true, suppressOutput: true });
+      });
+    }
+
+    it('does not fire when foreground output contains every trigger word at once', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Bash',
+        tool_input: { command: 'cat notes.txt' },
+        tool_response: TRIGGER_WORDS.join(' '),
+        session_id: 'bg-fp-all',
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+    });
+
+    it('does not fire for the reported repro payload', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Bash',
+        tool_input: { command: 'echo "the service is running"' },
+        tool_response: 'the service is running',
+        session_id: 'bg-fp-repro',
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+    });
+  });
+
+  describe('genuine background invocations still fire', () => {
+    it('fires for Bash with run_in_background=true', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Bash',
+        tool_input: { command: 'sleep 100', run_in_background: true },
+        tool_response: 'ok',
+        session_id: 'bg-real-bash',
+      });
+
+      expect(out.hookSpecificOutput.additionalContext).toContain('Background operation detected');
+    });
+
+    it('fires for Task with run_in_background=true', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Task',
+        tool_input: { description: 'explore', run_in_background: true },
+        tool_response: 'ok',
+        session_id: 'bg-real-task',
+      });
+
+      expect(out.hookSpecificOutput.additionalContext).toContain('Background task launched');
+    });
+
+    it('fires for a Task output leading with the launch announcement', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Task',
+        tool_input: { description: 'explore' },
+        tool_response: 'Async agent launched successfully\nagentId: a8de3dd',
+        session_id: 'bg-real-announce',
+      });
+
+      expect(out.hookSpecificOutput.additionalContext).toContain('Background task launched');
+    });
+
+    it('does not fire for a foreground Task result that merely quotes the announcement', () => {
+      const out = runPostToolVerifier({
+        tool_name: 'Task',
+        tool_input: { description: 'investigate' },
+        tool_response: 'Investigation report: the parser matches "Async agent launched" text.',
+        session_id: 'bg-fg-task-quote',
+      });
+
+      expect(out).toEqual({ continue: true, suppressOutput: true });
+    });
+  });
+
+  describe('malformed tool_input fails safely', () => {
+    for (const [label, toolInput] of [
+      ['missing', undefined],
+      ['null', null],
+      ['string', 'run_in_background=true'],
+      ['array', [{ run_in_background: true }]],
+    ]) {
+      it(`does not fire and still continues for ${label} tool_input`, () => {
+        const payload = {
+          tool_name: 'Bash',
+          tool_response: TRIGGER_WORDS.join(' '),
+          session_id: `bg-malformed-${label}`,
+        };
+        if (toolInput !== undefined) payload.tool_input = toolInput;
+
+        const out = runPostToolVerifier(payload);
+
+        expect(out).toEqual({ continue: true, suppressOutput: true });
+      });
+    }
   });
 });

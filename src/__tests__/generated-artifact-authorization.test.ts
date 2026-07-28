@@ -6,11 +6,11 @@ import { pathToFileURL } from 'node:url';
 
 const REPOSITORY = 'Yeachan-Heo/oh-my-claudecode';
 const OWNER = 'Yeachan-Heo';
-const MERGE_BASE_SHA = '761ed112868072c2bc5866f5b0dbe5b0dda114c2';
-const LIVE_BASE_SHA = '1111111111111111111111111111111111111111';
-const HEAD_SHA = '8065c11a32e58b4dd2e44b2c768e0d37fb4f4b86';
+const MERGE_BASE_SHA = '76c90920b74494df6e34d6165be963bca8a9adf6';
+const LIVE_BASE_SHA = '21a6e488ce12d79b9a22d37e1093ac8e79f21029';
+const HEAD_SHA = '10078ece166ad36332390ecbaab2d5e247852bbc';
 const MAIN_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const PULL_NUMBER = 3479;
+const PULL_NUMBER = 3537;
 const ROOT = process.cwd();
 const WORKFLOW_PATH = join(ROOT, '.github', 'workflows', 'generated-artifact-authorization.yml');
 const MANIFEST_PATH = join(ROOT, '.github', 'generated-artifact-authorizations.json');
@@ -33,6 +33,7 @@ type Manifest = {
     mergeBaseSha: string;
     headSha: string;
     owner: string;
+    expiresAt: string;
     generatedDelta: { count: number; sha256: string };
     generatedFiles: CanonicalRecord[];
   }>;
@@ -118,7 +119,7 @@ const verifier = (await import(pathToFileURL(VERIFIER_PATH).href)) as unknown as
 const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as Manifest;
 const exactAuthorization = (() => {
   const authorization = manifest.authorizations.find(entry => entry.pullNumber === PULL_NUMBER);
-  if (!authorization) throw new Error('Missing exact #3479 base-owned authorization fixture');
+  if (!authorization) throw new Error('Missing exact #3537 base-owned authorization fixture');
   return authorization;
 })();
 
@@ -145,7 +146,7 @@ function authorizedInput(): MutableInput {
       githubSha: MAIN_SHA,
       githubWorkflowRef: `${REPOSITORY}/.github/workflows/generated-artifact-authorization.yml@refs/heads/main`,
       githubWorkflowSha: MAIN_SHA,
-      trustedEventBaseRef: 'dev',
+      trustedEventBaseRef: 'main',
       trustedEventBaseSha: LIVE_BASE_SHA,
     },
     manifest: clone(manifest),
@@ -162,7 +163,7 @@ function authorizedInput(): MutableInput {
       number: PULL_NUMBER,
       repository: { full_name: REPOSITORY, owner: { login: OWNER } },
       pull_request: {
-        base: { ref: 'dev', sha: LIVE_BASE_SHA, repo: { full_name: REPOSITORY } },
+        base: { ref: 'main', sha: LIVE_BASE_SHA, repo: { full_name: REPOSITORY } },
         head: { sha: HEAD_SHA, repo: { full_name: REPOSITORY } },
         user: { login: OWNER },
         author_association: 'OWNER',
@@ -170,7 +171,7 @@ function authorizedInput(): MutableInput {
     },
     livePull: {
       number: PULL_NUMBER,
-      base: { ref: 'dev', sha: LIVE_BASE_SHA, repo: { full_name: REPOSITORY } },
+      base: { ref: 'main', sha: LIVE_BASE_SHA, repo: { full_name: REPOSITORY } },
       head: { sha: HEAD_SHA, repo: { full_name: REPOSITORY } },
       user: { login: OWNER },
       author_association: 'OWNER',
@@ -207,7 +208,7 @@ describe('generated-artifact base trust root workflow', () => {
     const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 
     expect(workflow).toMatch(
-      /^on:\n\x20{2}pull_request_target:\n\x20{4}branches: \[dev\]\n\x20{4}types: \[opened, synchronize, reopened\]$/m,
+      /^on:\n\x20{2}pull_request_target:\n\x20{4}branches: \[main, dev\]\n\x20{4}types: \[opened, synchronize, reopened\]$/m,
     );
     expect(workflow).not.toMatch(/^\x20{2}pull_request:/m);
     expect(workflow).toContain('contents: read');
@@ -236,13 +237,27 @@ describe('generated-artifact base trust root workflow', () => {
     expect(workflow).not.toMatch(/^\s+run: (?!node scripts\/verify-generated-artifact-authorization\.mjs$)/m);
   });
 
-  it('documents that a dev-targeted prerequisite is inert until promotion to default main', () => {
+  it('covers both the main promotion and the retained dev authorization targets', () => {
     const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 
     expect(workflow).toContain('workflow bytes from the default branch, main');
-    expect(workflow).toMatch(/cannot activate or authorize itself until this exact\s*\n# workflow is promoted to main/);
-    expect(workflow).toContain('runtime GITHUB_REF/GITHUB_SHA bind main');
-    expect(workflow).toContain('branches: [dev]');
+    expect(workflow).toContain('branches: [main, dev]');
+    expect(manifest.authorizations.map(entry => [entry.pullNumber, entry.targetRef])).toEqual([
+      [3537, 'main'],
+      [3538, 'dev'],
+      [3539, 'dev'],
+      [3541, 'dev'],
+    ]);
+    expect(manifest.authorizations.find(entry => entry.pullNumber === 3538)).toMatchObject({
+      targetRef: 'dev',
+      headSha: 'e798c12426f1f11701dede43a0f35c183651627e',
+      mergeBaseSha: '10078ece166ad36332390ecbaab2d5e247852bbc',
+    });
+    expect(manifest.authorizations.find(entry => entry.pullNumber === 3539)).toMatchObject({
+      targetRef: 'dev',
+      headSha: '2396c60c67722f576efb8f61183c48f6883cc178',
+      mergeBaseSha: '10078ece166ad36332390ecbaab2d5e247852bbc',
+    });
   });
 
   it('is immune to candidate workflow and checker replacement because the trusted workflow checks out only base bytes', () => {
@@ -272,21 +287,22 @@ describe('generated-artifact base trust root workflow', () => {
 });
 
 describe('generated-artifact base-owned authorization decision', () => {
-  it('contains the exact independently derived #3479 closure and allows only its exact positive case', () => {
+  it('contains the exact independently derived #3537 closure and allows only its exact positive case', () => {
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       repository: REPOSITORY,
       owner: OWNER,
     });
     expect(exactAuthorization).toMatchObject({
       pullNumber: PULL_NUMBER,
-      targetRef: 'dev',
+      targetRef: 'main',
       mergeBaseSha: MERGE_BASE_SHA,
       headSha: HEAD_SHA,
       owner: OWNER,
+      expiresAt: '2026-08-05T00:00:00.000Z',
       generatedDelta: {
-        count: 55,
-        sha256: '71ab926f799a6ad1ae2fc0baf7a41203ee7f6bcfc7973d590e8b7dbfe063823d',
+        count: 199,
+        sha256: '3c1987d239441a787e5428d38b74e9bff51d694ad554d9fe34eae72cd78b059f',
       },
     });
     expect(verifier.calculateGeneratedDelta(exactAuthorization.generatedFiles)).toEqual(exactAuthorization.generatedDelta);
@@ -349,7 +365,7 @@ describe('generated-artifact base-owned authorization decision', () => {
       input.workflowCommit.sha = 'b'.repeat(40);
     }, 'runtime GITHUB_WORKFLOW_SHA does not match the current protected default-main workflow commit SHA');
     expectDenied(input => {
-      input.environment.trustedEventBaseRef = 'main';
+      input.environment.trustedEventBaseRef = 'dev';
     }, 'explicit event base ref does not match');
     expectDenied(input => {
       input.environment.trustedEventBaseRef = '';
@@ -491,6 +507,9 @@ describe('generated-artifact base-owned authorization decision', () => {
     expectDenied(input => {
       input.files[0].sha = 'c'.repeat(40);
     }, 'authorized closure');
+    expectDenied(input => {
+      input.manifest.authorizations[0].expiresAt = '2000-01-01T00:00:00.000Z';
+    }, 'authorization has expired');
     expectDenied(input => {
       input.files.push({ status: 'added', filename: 'dist/extra.js', sha: 'd'.repeat(40) });
       input.livePull.changed_files += 1;
@@ -726,8 +745,9 @@ describe('generated-artifact base-owned authorization decision', () => {
         if (path === `/repos/${REPOSITORY}`) body = input.repositoryMetadata;
         else if (path === `/repos/${REPOSITORY}/commits/main`) body = ++mainCommitRequests === 1 ? input.runtimeCommit : input.workflowCommit;
         else if (path === `/repos/${REPOSITORY}/pulls/${PULL_NUMBER}`) body = input.livePull;
-        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=1')) body = input.files;
-        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=2')) body = [];
+        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=1')) body = input.files.slice(0, 100);
+        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=2')) body = input.files.slice(100);
+        else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=3')) body = [];
         else if (path.startsWith(`/repos/${REPOSITORY}/compare/`)) body = input.compare;
         else if (path === `/repos/${REPOSITORY}/commits/${HEAD_SHA}`) body = input.commit;
         else if (path === '/graphql') body = { data: { repository: { object: input.signature } } };

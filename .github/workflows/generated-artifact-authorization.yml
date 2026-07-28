@@ -2,16 +2,15 @@ name: Generated Artifact Authorization
 
 on:
   pull_request_target:
-    branches: [dev]
+    branches: [main, dev]
     types: [opened, synchronize, reopened]
 
 # GitHub loads pull_request_target workflow bytes from the default branch, main.
 # Its runtime GITHUB_REF/GITHUB_SHA bind main and its live main commit, while
 # GITHUB_WORKFLOW_REF/GITHUB_WORKFLOW_SHA bind this protected workflow and a
 # separately fetched live main commit. The explicit event-base inputs below bind
-# the dev target and its immutable event commit for the trusted detached checkout.
-# This prerequisite dev PR cannot activate or authorize itself until this exact
-# workflow is promoted to main. The trusted checkout contains only base-owned
+# the target branch and its immutable event commit for the trusted detached checkout.
+# This main-owned workflow authorizes only exact manifest records for main and dev targets. The trusted checkout contains only base-owned
 # verifier and manifest bytes.
 permissions:
   contents: read
