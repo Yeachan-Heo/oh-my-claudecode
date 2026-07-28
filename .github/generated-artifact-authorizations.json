@@ -1253,18 +1253,18 @@
       "pullNumber": 3539,
       "targetRef": "dev",
       "mergeBaseSha": "10078ece166ad36332390ecbaab2d5e247852bbc",
-      "headSha": "a82db66c18d88759cdd3455f65fd4ae9ae95dbc9",
+      "headSha": "2396c60c67722f576efb8f61183c48f6883cc178",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-05T00:00:00.000Z",
       "generatedDelta": {
         "count": 3,
-        "sha256": "b90fbed9042db47d77c35c2adcf4425446d725dd28b67991ad3d700a94e9e45d"
+        "sha256": "a419dd54588869a4ea889854f4e753ad7c2f1d736038bda25234273c44c2e211"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "78e4dd26cef8a0ac1908e822e5e1ce5e2e8be7af",
+          "sha": "69f86054a5a2b1f1671df0bdf2f1a426dadcc7d3",
           "previousFilename": null
         },
         {
@@ -1276,7 +1276,7 @@
         {
           "status": "modified",
           "filename": "dist/installer/index.js",
-          "sha": "75b271300996bf04e421f5ebd227b7def846a1bd",
+          "sha": "736b2b41a336c94ab7886452a6c09b2fd7fcb033",
           "previousFilename": null
         }
       ]

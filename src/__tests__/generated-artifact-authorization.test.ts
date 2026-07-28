@@ -253,6 +253,11 @@ describe('generated-artifact base trust root workflow', () => {
       headSha: 'e798c12426f1f11701dede43a0f35c183651627e',
       mergeBaseSha: '10078ece166ad36332390ecbaab2d5e247852bbc',
     });
+    expect(manifest.authorizations.find(entry => entry.pullNumber === 3539)).toMatchObject({
+      targetRef: 'dev',
+      headSha: '2396c60c67722f576efb8f61183c48f6883cc178',
+      mergeBaseSha: '10078ece166ad36332390ecbaab2d5e247852bbc',
+    });
   });
 
   it('is immune to candidate workflow and checker replacement because the trusted workflow checks out only base bytes', () => {
