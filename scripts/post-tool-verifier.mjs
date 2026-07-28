@@ -350,18 +350,26 @@ export function detectBashFailure(output) {
     .some(line => linePatterns.some(pattern => pattern.test(line)));
 }
 
-// Detect background operation
-function detectBackgroundOperation(output) {
-  const bgPatterns = [
-    /started/i,
-    /running/i,
-    /background/i,
-    /async/i,
-    /task_id/i,
-    /spawned/i,
-  ];
+// Detect whether a tool call was actually backgrounded.
+//
+// The PostToolUse payload carries the tool's own `tool_input`, and Bash/Task
+// expose `run_in_background` — that flag, not the command output, is what
+// determines background execution. Substring-matching words like "running" or
+// "async" against arbitrary output misreports ordinary foreground calls
+// (issue #3578).
+export function isBackgroundToolInvocation(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return false;
+  return toolInput.run_in_background === true;
+}
 
-  return bgPatterns.some(pattern => pattern.test(output));
+// Anchored fallback for the harness's own background-launch announcement.
+// Deliberately case-sensitive and anchored to the start of the output: text
+// that merely quotes the phrase elsewhere is not a launch (same rule as
+// src/hud/transcript.ts). Only the Task family gets this fallback — Bash has
+// no equivalent announcement, so it relies on the input flag alone.
+export function detectAnnouncedBackgroundLaunch(output) {
+  if (typeof output !== 'string') return false;
+  return /^(?:Async agent launched|Background task (?:launched|resumed))\b/.test(output.trimStart());
 }
 
 function resolveTranscriptPath(transcriptPath, cwd) {
@@ -897,6 +905,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
     rawLength = 0,
     structuredWriteSuccess = false,
     structuredWriteFailure = false,
+    toolInput = {},
   } = options;
   let message = '';
 
@@ -909,7 +918,7 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
         message = `Command exited with code ${code} but produced valid output. This may be expected behavior.`;
       } else if (detectBashFailure(toolOutput)) {
         message = 'Command failed. Please investigate the error and fix before continuing.';
-      } else if (QUIET_LEVEL < 2 && detectBackgroundOperation(toolOutput)) {
+      } else if (QUIET_LEVEL < 2 && isBackgroundToolInvocation(toolInput)) {
         message = 'Background operation detected. Remember to verify results before proceeding.';
       }
       break;
@@ -920,7 +929,10 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
       const agentSummary = getAgentCompletionSummary(directory, QUIET_LEVEL, sessionId);
       if (detectWriteFailure(toolOutput)) {
         message = 'Task delegation failed. Verify agent name and parameters.';
-      } else if (QUIET_LEVEL < 2 && detectBackgroundOperation(toolOutput)) {
+      } else if (
+        QUIET_LEVEL < 2 &&
+        (isBackgroundToolInvocation(toolInput) || detectAnnouncedBackgroundLaunch(toolOutput))
+      ) {
         message = 'Background task launched. Use TaskOutput to check results when needed.';
       } else if (QUIET_LEVEL < 2 && toolCount > 5) {
         message = `Multiple tasks delegated (${toolCount} total). Track their completion status.`;
@@ -1021,13 +1033,13 @@ async function main() {
     const { clipped: clippedToolOutput, wasTruncated } = clipToolOutputForAnalysis(toolName, toolOutput);
     const sessionId = data.session_id || data.sessionId || 'unknown';
     const directory = data.cwd || data.directory || process.cwd();
+    const toolInput = data.tool_input || data.toolInput || {};
 
     // Update session statistics
     const toolCount = updateStats(toolName, sessionId);
 
     // Append Bash commands to ~/.bash_history for terminal recall
     if ((toolName === 'Bash' || toolName === 'bash') && getBashHistoryConfig()) {
-      const toolInput = data.tool_input || data.toolInput || {};
       const command = typeof toolInput === 'string' ? toolInput : (toolInput.command || '');
       appendToBashHistory(command);
     }
@@ -1043,7 +1055,6 @@ async function main() {
     }
 
     if (toolName === 'Skill' || toolName === 'skill') {
-      const toolInput = data.tool_input || data.toolInput || {};
       const skillName = getInvokedSkillName(toolInput);
       const currentState = readSkillActiveState(directory, sessionId);
       const completingSkill = (skillName ?? '')
@@ -1064,6 +1075,7 @@ async function main() {
         rawLength: toolOutput.length,
         structuredWriteSuccess,
         structuredWriteFailure,
+        toolInput,
       }),
       await maybeBuildPreemptiveCompactionMessage(toolName, data, directory),
     );
