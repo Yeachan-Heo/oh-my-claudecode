@@ -11095,25 +11095,32 @@ async function runWorkerActivationGate(gate) {
       child.once("error", () => resolve8(false));
     });
     if (!spawned) {
+      const failed = await completion;
       await invocation.cleanup();
-      return { outcome: "provider_spawn_failed" };
+      return failed.outcome === "provider_spawn_failed" ? { outcome: "provider_spawn_failed" } : failed;
     }
-    await new Promise((resolve8) => setTimeout(resolve8, 150));
-    if (settled) return await completion;
-    const providerPid = child.pid;
-    const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
-    if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+    try {
+      await new Promise((resolve8) => setTimeout(resolve8, 150));
+      if (settled) return await completion;
+      const providerPid = child.pid;
+      const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
+      if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+        child.kill();
+        await completion;
+        return { outcome: "provider_spawn_failed" };
+      }
+      await writeAtomic3(`${gate.runPath}.launched`, {
+        ...expected,
+        provider_pid: providerPid,
+        provider_start_identity: providerStartIdentity,
+        written_at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return { completion };
+    } catch {
       child.kill();
       await completion;
       return { outcome: "provider_spawn_failed" };
     }
-    await writeAtomic3(`${gate.runPath}.launched`, {
-      ...expected,
-      provider_pid: providerPid,
-      provider_start_identity: providerStartIdentity,
-      written_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return { completion };
   });
   if (!fenced.ok) return { outcome: "superseded" };
   if ("completion" in fenced.value) {

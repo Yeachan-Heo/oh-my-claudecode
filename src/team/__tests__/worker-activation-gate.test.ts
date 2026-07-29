@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -98,7 +98,29 @@ describe('worker recovery activation gate', () => {
       timeoutMs: 1_000, pollIntervalMs: 5,
     })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     expect(existsSync(`${runPath}.launched`)).toBe(false);
+    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'error' });
   });
+  it('kills the provider when durable launched evidence cannot be published', async () => {
+    const readyPath = join(cwd, 'marker-failure-ready.json');
+    const activatePath = join(cwd, 'marker-failure-activate.json');
+    const runPath = join(cwd, 'marker-failure-run.json');
+    const launchAttempt = await acceptedAttempt('worker-1', '%10', 'recovery-marker-failure', 10, 'attempt-marker-failure');
+    const record = { recovery_id: 'recovery-marker-failure', worker_name: 'worker-1', replacement_generation: 10,
+      pane_attempt_id: 'attempt-marker-failure', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
+    writeFileSync(activatePath, JSON.stringify(record));
+    writeFileSync(runPath, JSON.stringify(record));
+    mkdirSync(`${runPath}.launched`);
+
+    await expect(runWorkerActivationGate({
+      recoveryId: 'recovery-marker-failure', workerName: 'worker-1', replacementGeneration: 10,
+      paneAttemptId: 'attempt-marker-failure', readyPath, activatePath, runPath,
+      providerArgv: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 5000)'],
+      launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
+    })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
+    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit' });
+  });
+
   it.each([
     ['launch_attempt_id', 'wrong-attempt'],
     ['launch_nonce', 'wrong-nonce'],
