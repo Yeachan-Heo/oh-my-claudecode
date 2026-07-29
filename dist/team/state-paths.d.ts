@@ -38,6 +38,7 @@ export declare const TeamPaths: {
     readonly workerLaunchCurrent: (teamName: string, workerName: string) => string;
     readonly workerLaunchExpected: (teamName: string, workerName: string, attemptId: string) => string;
     readonly workerLaunchAck: (teamName: string, workerName: string, attemptId: string) => string;
+    readonly workerLaunchStarted: (teamName: string, workerName: string, attemptId: string) => string;
     readonly workerLaunchDecision: (teamName: string, workerName: string, attemptId: string) => string;
     readonly mailbox: (teamName: string, workerName: string) => string;
     readonly mailboxLockDir: (teamName: string, workerName: string) => string;

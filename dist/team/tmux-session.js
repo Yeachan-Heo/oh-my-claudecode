@@ -793,15 +793,17 @@ export function proveWorkerPaneOwnership(evidence, constraints) {
         ok: true,
         ownership: {
             provider: evidence.provider,
+            providerTarget: constraints.providerTarget,
             paneId: evidence.paneId,
             splitTarget: evidence.splitTarget,
             leaderPaneId: constraints.leaderPaneId,
             reservedPaneIds: [...constraints.reservedPaneIds],
+            source: 'split',
         },
     };
 }
-export function adoptWorkerPaneOwnership(input) {
-    return proveWorkerPaneOwnership({
+export async function adoptWorkerPaneOwnership(input) {
+    const proved = proveWorkerPaneOwnership({
         commandSucceeded: true,
         provider: input.provider,
         splitTarget: '',
@@ -810,10 +812,28 @@ export function adoptWorkerPaneOwnership(input) {
         stderr: '',
         paneId: input.paneId,
     }, {
+        providerTarget: input.providerTarget,
         leaderPaneId: input.leaderPaneId,
         reservedPaneIds: input.reservedPaneIds,
         requireNewFromSplitTarget: false,
     });
+    if (!proved.ok)
+        return proved;
+    const membership = await verifyTeamTargetOwnership({
+        provider: input.provider,
+        providerTarget: input.providerTarget,
+        recipient: 'worker',
+        recipientRole: 'worker',
+        paneId: input.paneId,
+    }, input.dependencies);
+    if (membership.kind === 'foreign')
+        return { ok: false, reason: 'pane_foreign' };
+    if (membership.kind !== 'owned')
+        return { ok: false, reason: 'pane_membership_unavailable' };
+    return {
+        ok: true,
+        ownership: { ...proved.ownership, source: 'adopted' },
+    };
 }
 export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd) {
     const provider = isCmuxContext() ? 'cmux' : 'tmux';
@@ -1012,9 +1032,7 @@ export async function spawnWorkerInPane(sessionName, paneId, config) {
     const requireAcknowledgement = async () => {
         if (!config.launchAttempt)
             return;
-        const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt, {
-            beforeAccept: config.beforeLaunchAccept,
-        });
+        const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
         if (!accepted.ok) {
             throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
         }
@@ -1148,6 +1166,17 @@ export async function killTeamPane(paneId) {
     await tmuxExecAsync(['kill-pane', '-t', paneId]);
 }
 export async function killOwnedWorkerPane(ownership) {
+    if (ownership.source === 'adopted') {
+        const membership = await verifyTeamTargetOwnership({
+            provider: ownership.provider,
+            providerTarget: ownership.providerTarget,
+            recipient: 'worker',
+            recipientRole: 'worker',
+            paneId: ownership.paneId,
+        });
+        if (membership.kind !== 'owned')
+            throw new Error('owned_pane_membership_unverified');
+    }
     await killTeamPane(ownership.paneId);
 }
 function detectPaneTrustPromptKind(captured) {

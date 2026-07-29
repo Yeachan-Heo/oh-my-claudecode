@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
+import { lockPathFor, withFileLock } from '../lib/file-lock.js';
 
 const WORKER_LAUNCH_SCHEMA_VERSION = 1 as const;
 const DEFAULT_ACK_TIMEOUT_MS = 8_000;
@@ -45,18 +46,28 @@ interface WorkerLaunchDecision extends WorkerLaunchIdentity {
   written_at: string;
 }
 
+interface WorkerLaunchProviderStarted extends WorkerLaunchIdentity {
+  kind: 'worker_launch_provider_started';
+  pid: number | null;
+  written_at: string;
+}
+
 export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
+  currentPath: string;
   expectedPath: string;
   ackPath: string;
   decisionPath: string;
+  startedPath: string;
   runtimeCliPath: string;
   context?: WorkerLaunchContext;
 }
 
 export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
+  current_path: string;
   expected_path: string;
   ack_path: string;
   decision_path: string;
+  started_path: string;
   provider_argv: string[];
   cwd: string;
   decision_timeout_ms: number;
@@ -64,11 +75,11 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
 
 export type WorkerLaunchAcceptance =
   | { ok: true }
-  | { ok: false; reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid' | 'acceptance_persist_failed' };
+  | { ok: false; reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid' | 'attempt_superseded' };
 
 export type WorkerLaunchBootstrapResult =
   | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'provider_spawn_failed' };
+  | { outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed' };
 
 export interface ProviderSpawnInvocation {
   command: string;
@@ -154,6 +165,11 @@ async function readJson(path: string): Promise<JsonReadResult> {
   }
 }
 
+async function isCurrentLaunchIdentity(currentPath: string, identity: WorkerLaunchIdentity): Promise<boolean> {
+  const current = await readJson(currentPath);
+  return current.kind === 'value' && identityMatches(current.value, identity);
+}
+
 async function writeExclusiveAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
@@ -198,25 +214,30 @@ export async function prepareWorkerLaunchAttempt(input: {
   };
   const attempt: WorkerLaunchAttempt = {
     ...identity,
+    currentPath: absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName)),
     expectedPath: absPath(input.cwd, TeamPaths.workerLaunchExpected(input.teamName, input.workerName, attemptId)),
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, attemptId)),
+    startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, attemptId)),
     runtimeCliPath: input.runtimeCliPath,
     ...(input.context ? { context: input.context } : {}),
   };
-  if (existsSync(attempt.expectedPath) || existsSync(attempt.ackPath) || existsSync(attempt.decisionPath)) {
+  if (existsSync(attempt.expectedPath) || existsSync(attempt.ackPath)
+    || existsSync(attempt.decisionPath) || existsSync(attempt.startedPath)) {
     throw new Error('worker_launch_attempt_path_conflict');
   }
   await writeExclusiveAtomic(attempt.expectedPath, identity);
   try {
-    await atomicWriteJson(
-      absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName)),
-      {
-        ...identity,
-        runtime_cli_path: input.runtimeCliPath,
-        ...(input.context ? { context: input.context } : {}),
-      },
-    );
+    await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      await atomicWriteJson(
+        attempt.currentPath,
+        {
+          ...identity,
+          runtime_cli_path: input.runtimeCliPath,
+          ...(input.context ? { context: input.context } : {}),
+        },
+      );
+    });
   } catch (error) {
     await unlink(attempt.expectedPath).catch(() => undefined);
     throw error;
@@ -242,9 +263,11 @@ export async function loadWorkerLaunchAttempt(input: {
     || identity.provider !== input.provider) return null;
   return {
     ...identity,
+    currentPath: absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName)),
     expectedPath,
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, input.attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, input.attemptId)),
+    startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, input.attemptId)),
     runtimeCliPath: input.runtimeCliPath,
   };
 }
@@ -271,7 +294,8 @@ export async function loadCurrentWorkerLaunchAttempt(input: {
     attemptId: record.attempt_id,
     runtimeCliPath: record.runtime_cli_path,
   });
-  if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)) return null;
+  if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)
+    || !await isWorkerLaunchProviderStarted(attempt)) return null;
   return {
     ...attempt,
     ...(record.context ? { context: record.context } : {}),
@@ -285,9 +309,11 @@ export function buildWorkerLaunchBootstrapSpec(
 ): WorkerLaunchBootstrapSpec {
   return {
     ...identityOf(attempt),
+    current_path: attempt.currentPath,
     expected_path: attempt.expectedPath,
     ack_path: attempt.ackPath,
     decision_path: attempt.decisionPath,
+    started_path: attempt.startedPath,
     provider_argv: [...providerArgv],
     cwd,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
@@ -343,29 +369,28 @@ function acknowledgementResult(value: unknown, attempt: WorkerLaunchAttempt): Wo
 async function acceptObservedAcknowledgement(
   attempt: WorkerLaunchAttempt,
   read: JsonReadResult,
-  beforeAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>,
 ): Promise<WorkerLaunchAcceptance | null> {
   if (read.kind === 'absent') return null;
   if (read.kind === 'malformed') return { ok: false, reason: 'ack_malformed' };
   const invalid = acknowledgementResult(read.value, attempt);
   if (invalid) return invalid;
   try {
-    await beforeAccept?.(attempt);
+    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
+        return { ok: false, reason: 'attempt_superseded' } as WorkerLaunchAcceptance;
+      }
+      return await publishDecision(attempt, 'accepted', 'ack_valid')
+        ? { ok: true } as WorkerLaunchAcceptance
+        : { ok: false, reason: 'decision_conflict' } as WorkerLaunchAcceptance;
+    });
   } catch {
-    return { ok: false, reason: 'acceptance_persist_failed' };
+    return { ok: false, reason: 'decision_conflict' };
   }
-  return await publishDecision(attempt, 'accepted', 'ack_valid')
-    ? { ok: true }
-    : { ok: false, reason: 'decision_conflict' };
 }
 
 export async function awaitWorkerLaunchAcknowledgement(
   attempt: WorkerLaunchAttempt,
-  options: {
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-    beforeAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
-  } = {},
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
 ): Promise<WorkerLaunchAcceptance> {
   const expected = await readJson(attempt.expectedPath);
   if (expected.kind !== 'value' || !identityMatches(expected.value, attempt)) {
@@ -375,13 +400,13 @@ export async function awaitWorkerLaunchAcknowledgement(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath), options.beforeAccept);
+    const result = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath));
     if (result) {
       return result.ok ? result : rejectWorkerLaunchAttempt(attempt, result.reason);
     }
     await sleep(pollIntervalMs);
   }
-  const finalResult = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath), options.beforeAccept);
+  const finalResult = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath));
   if (finalResult) {
     return finalResult.ok ? finalResult : rejectWorkerLaunchAttempt(attempt, finalResult.reason);
   }
@@ -396,12 +421,25 @@ export async function isWorkerLaunchAttemptAccepted(attempt: WorkerLaunchAttempt
     && (decision.value as Partial<WorkerLaunchDecision>).decision === 'accepted';
 }
 
+export async function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean> {
+  const started = await readJson(attempt.startedPath);
+  const record = started.kind === 'value' ? started.value as Partial<WorkerLaunchProviderStarted> : null;
+  return Boolean(record
+    && identityMatches(record, attempt)
+    && record.kind === 'worker_launch_provider_started'
+    && (record.pid === null || Number.isSafeInteger(record.pid))
+    && typeof record.written_at === 'string'
+    && Number.isFinite(Date.parse(record.written_at)));
+}
+
 function isValidBootstrapSpec(value: unknown): value is WorkerLaunchBootstrapSpec {
   if (!isValidIdentity(value)) return false;
   const spec = value as Partial<WorkerLaunchBootstrapSpec>;
-  return isExactText(spec.expected_path)
+  return isExactText(spec.current_path)
+    && isExactText(spec.expected_path)
     && isExactText(spec.ack_path)
     && isExactText(spec.decision_path)
+    && isExactText(spec.started_path)
     && Array.isArray(spec.provider_argv)
     && spec.provider_argv.length > 0
     && isExactText(spec.provider_argv[0])
@@ -467,6 +505,28 @@ export function buildProviderSpawnInvocation(
   return { command, args };
 }
 
+async function publishProviderStarted(spec: WorkerLaunchBootstrapSpec, pid: number | undefined): Promise<boolean> {
+  const record: WorkerLaunchProviderStarted = {
+    schema_version: spec.schema_version,
+    attempt_id: spec.attempt_id,
+    nonce: spec.nonce,
+    team_name: spec.team_name,
+    worker_name: spec.worker_name,
+    pane_id: spec.pane_id,
+    provider: spec.provider,
+    created_at: spec.created_at,
+    kind: 'worker_launch_provider_started',
+    pid: Number.isSafeInteger(pid) ? pid! : null,
+    written_at: new Date().toISOString(),
+  };
+  try {
+    await writeExclusiveAtomic(spec.started_path, record);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult> {
   if (!isValidBootstrapSpec(value)) return { outcome: 'invalid_spec' };
   const spec = value;
@@ -476,22 +536,45 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
   const decision = await waitForBootstrapDecision(spec);
   if (decision === 'timeout') return { outcome: 'decision_timeout' };
   if (decision === 'revoked') return { outcome: 'revoked' };
-
   const { OMC_WORKER_LAUNCH_SPEC: _launchSpec, ...providerEnv } = process.env;
-  const invocation = buildProviderSpawnInvocation(spec.provider_argv);
-  const child = spawn(invocation.command, invocation.args, {
-    cwd: spec.cwd,
-    env: providerEnv,
-    stdio: 'inherit',
-  });
-  const completion = new Promise<WorkerLaunchBootstrapResult>(resolve => {
-    child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
-    child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
-  });
-  const spawned = await new Promise<boolean>(resolve => {
-    child.once('spawn', () => resolve(true));
-    child.once('error', () => resolve(false));
-  });
-  if (!spawned) return { outcome: 'provider_spawn_failed' };
-  return completion;
+  try {
+    const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
+        return { outcome: 'superseded' as const };
+      }
+      const invocation = buildProviderSpawnInvocation(spec.provider_argv);
+      const child = spawn(invocation.command, invocation.args, {
+        cwd: spec.cwd,
+        env: providerEnv,
+        stdio: 'inherit',
+      });
+      const completion = new Promise<WorkerLaunchBootstrapResult>(resolve => {
+        child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
+        child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
+      });
+      const spawned = await new Promise<boolean>(resolve => {
+        child.once('spawn', () => resolve(true));
+        child.once('error', () => resolve(false));
+      });
+      if (!spawned) return { outcome: 'provider_spawn_failed' as const };
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
+        child.kill();
+        await completion;
+        return { outcome: 'superseded' as const };
+      }
+      if (!await publishProviderStarted(spec, child.pid)) {
+        child.kill();
+        await completion;
+        return { outcome: 'provider_spawn_failed' as const };
+      }
+      return { completion };
+    });
+    if ('completion' in launched) {
+      if (!launched.completion) return { outcome: 'provider_spawn_failed' };
+      return await launched.completion;
+    }
+    return launched;
+  } catch {
+    return { outcome: 'superseded' };
+  }
 }

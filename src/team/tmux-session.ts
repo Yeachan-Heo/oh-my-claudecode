@@ -434,7 +434,6 @@ export interface WorkerPaneConfig {
   launchBootstrapPath?: string;
   launchStateCwd?: string;
   launchContext?: WorkerLaunchContext;
-  beforeLaunchAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
   launchAttempt?: WorkerLaunchAttempt;
 }
 
@@ -985,15 +984,17 @@ export interface WorkerPaneSplitEvidence {
 
 export interface WorkerPaneOwnership {
   provider: WorkerPaneSplitEvidence['provider'];
+  providerTarget: string;
   paneId: string;
   splitTarget: string;
   leaderPaneId: string;
   reservedPaneIds: readonly string[];
+  source: 'split' | 'adopted';
 }
 
 export type WorkerPaneOwnershipResult =
   | { ok: true; ownership: WorkerPaneOwnership }
-  | { ok: false; reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias' };
+  | { ok: false; reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias' | 'pane_foreign' | 'pane_membership_unavailable' };
 
 export interface StartupPaneContext {
   ownership: WorkerPaneOwnership;
@@ -1008,7 +1009,7 @@ function paneIdentityIsProviderNative(provider: WorkerPaneSplitEvidence['provide
 
 export function proveWorkerPaneOwnership(
   evidence: WorkerPaneSplitEvidence,
-  constraints: { leaderPaneId: string; reservedPaneIds: readonly string[]; requireNewFromSplitTarget?: boolean },
+  constraints: { providerTarget: string; leaderPaneId: string; reservedPaneIds: readonly string[]; requireNewFromSplitTarget?: boolean },
 ): WorkerPaneOwnershipResult {
   if (!evidence.commandSucceeded) return { ok: false, reason: 'split_failed' };
   if (!evidence.paneId) return { ok: false, reason: 'pane_id_missing' };
@@ -1022,21 +1023,25 @@ export function proveWorkerPaneOwnership(
     ok: true,
     ownership: {
       provider: evidence.provider,
+      providerTarget: constraints.providerTarget,
       paneId: evidence.paneId,
       splitTarget: evidence.splitTarget,
       leaderPaneId: constraints.leaderPaneId,
       reservedPaneIds: [...constraints.reservedPaneIds],
+      source: 'split',
     },
   };
 }
 
-export function adoptWorkerPaneOwnership(input: {
+export async function adoptWorkerPaneOwnership(input: {
   provider: WorkerPaneSplitEvidence['provider'];
+  providerTarget: string;
   paneId: string;
   leaderPaneId: string;
   reservedPaneIds: readonly string[];
-}): WorkerPaneOwnershipResult {
-  return proveWorkerPaneOwnership({
+  dependencies?: MailboxTargetOwnershipDependencies;
+}): Promise<WorkerPaneOwnershipResult> {
+  const proved = proveWorkerPaneOwnership({
     commandSucceeded: true,
     provider: input.provider,
     splitTarget: '',
@@ -1045,10 +1050,25 @@ export function adoptWorkerPaneOwnership(input: {
     stderr: '',
     paneId: input.paneId,
   }, {
+    providerTarget: input.providerTarget,
     leaderPaneId: input.leaderPaneId,
     reservedPaneIds: input.reservedPaneIds,
     requireNewFromSplitTarget: false,
   });
+  if (!proved.ok) return proved;
+  const membership = await verifyTeamTargetOwnership({
+    provider: input.provider,
+    providerTarget: input.providerTarget,
+    recipient: 'worker',
+    recipientRole: 'worker',
+    paneId: input.paneId,
+  }, input.dependencies);
+  if (membership.kind === 'foreign') return { ok: false, reason: 'pane_foreign' };
+  if (membership.kind !== 'owned') return { ok: false, reason: 'pane_membership_unavailable' };
+  return {
+    ok: true,
+    ownership: { ...proved.ownership, source: 'adopted' },
+  };
 }
 
 export async function splitTeamWorkerPaneWithEvidence(
@@ -1273,9 +1293,7 @@ export async function spawnWorkerInPane(
   const fingerprint = commandFingerprint(startCmd);
   const requireAcknowledgement = async (): Promise<void> => {
     if (!config.launchAttempt) return;
-    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt, {
-      beforeAccept: config.beforeLaunchAccept,
-    });
+    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
     if (!accepted.ok) {
       throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
     }
@@ -1442,6 +1460,16 @@ export async function killTeamPane(paneId: string): Promise<void> {
 }
 
 export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promise<void> {
+  if (ownership.source === 'adopted') {
+    const membership = await verifyTeamTargetOwnership({
+      provider: ownership.provider,
+      providerTarget: ownership.providerTarget,
+      recipient: 'worker',
+      recipientRole: 'worker',
+      paneId: ownership.paneId,
+    });
+    if (membership.kind !== 'owned') throw new Error('owned_pane_membership_unverified');
+  }
   await killTeamPane(ownership.paneId);
 }
 

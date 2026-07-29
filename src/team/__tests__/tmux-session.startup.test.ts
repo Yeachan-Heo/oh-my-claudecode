@@ -54,6 +54,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
 
 import {
   deliverStartupInbox,
+  adoptWorkerPaneOwnership,
   proveWorkerPaneOwnership,
   spawnWorkerInPane,
   retryStartupInboxSubmit,
@@ -88,10 +89,12 @@ afterEach(async () => {
 function ownership(paneId = '%2'): WorkerPaneOwnership {
   return {
     provider: 'tmux',
+    providerTarget: 'startup:0',
     paneId,
     splitTarget: '%1',
     leaderPaneId: '%1',
     reservedPaneIds: [],
+    source: 'split',
   };
 }
 
@@ -135,9 +138,36 @@ describe('worker pane startup safety', () => {
       rawOutput: `${paneId}\n`,
       stderr: '',
       paneId,
-    }, { leaderPaneId, reservedPaneIds });
+    }, { providerTarget: 'startup:0', leaderPaneId, reservedPaneIds });
     expect(result).toEqual({ ok: false, reason });
     expect(tmuxState.args).toEqual([]);
+  });
+
+  it('adopts only panes proven inside the expected tmux target', async () => {
+    const owned = await adoptWorkerPaneOwnership({
+      provider: 'tmux',
+      providerTarget: 'startup:0',
+      paneId: '%9',
+      leaderPaneId: '%1',
+      reservedPaneIds: [],
+      dependencies: {
+        tmuxExec: vi.fn(async () => ({ stdout: '%9\n', stderr: '' })),
+        cmuxExec: vi.fn(),
+      },
+    });
+    expect(owned).toMatchObject({ ok: true, ownership: { paneId: '%9', providerTarget: 'startup:0', source: 'adopted' } });
+
+    await expect(adoptWorkerPaneOwnership({
+      provider: 'tmux',
+      providerTarget: 'startup:0',
+      paneId: '%9',
+      leaderPaneId: '%1',
+      reservedPaneIds: [],
+      dependencies: {
+        tmuxExec: vi.fn(async () => ({ stdout: '%8\n', stderr: '' })),
+        cmuxExec: vi.fn(),
+      },
+    })).resolves.toEqual({ ok: false, reason: 'pane_foreign' });
   });
 
   it.each([

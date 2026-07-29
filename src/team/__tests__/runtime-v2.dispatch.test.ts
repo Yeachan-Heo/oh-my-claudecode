@@ -182,7 +182,6 @@ describe('runtime v2 startup inbox dispatch', () => {
         workerName: string;
         provider: string;
         envVars?: Record<string, string>;
-        beforeLaunchAccept?: (attempt: unknown) => Promise<void>;
       },
     ) => {
       const attempt = {
@@ -206,7 +205,6 @@ describe('runtime v2 startup inbox dispatch', () => {
           OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
         },
       });
-      await config.beforeLaunchAccept?.(attempt);
       return {
         ownership,
         provider: config.provider,

@@ -68,7 +68,6 @@ export interface WorkerPaneConfig {
     launchBootstrapPath?: string;
     launchStateCwd?: string;
     launchContext?: WorkerLaunchContext;
-    beforeLaunchAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
     launchAttempt?: WorkerLaunchAttempt;
 }
 export declare function getDefaultShell(): string;
@@ -153,17 +152,19 @@ export interface WorkerPaneSplitEvidence {
 }
 export interface WorkerPaneOwnership {
     provider: WorkerPaneSplitEvidence['provider'];
+    providerTarget: string;
     paneId: string;
     splitTarget: string;
     leaderPaneId: string;
     reservedPaneIds: readonly string[];
+    source: 'split' | 'adopted';
 }
 export type WorkerPaneOwnershipResult = {
     ok: true;
     ownership: WorkerPaneOwnership;
 } | {
     ok: false;
-    reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias';
+    reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias' | 'pane_foreign' | 'pane_membership_unavailable';
 };
 export interface StartupPaneContext {
     ownership: WorkerPaneOwnership;
@@ -171,16 +172,19 @@ export interface StartupPaneContext {
     provider: CliAgentType;
 }
 export declare function proveWorkerPaneOwnership(evidence: WorkerPaneSplitEvidence, constraints: {
+    providerTarget: string;
     leaderPaneId: string;
     reservedPaneIds: readonly string[];
     requireNewFromSplitTarget?: boolean;
 }): WorkerPaneOwnershipResult;
 export declare function adoptWorkerPaneOwnership(input: {
     provider: WorkerPaneSplitEvidence['provider'];
+    providerTarget: string;
     paneId: string;
     leaderPaneId: string;
     reservedPaneIds: readonly string[];
-}): WorkerPaneOwnershipResult;
+    dependencies?: MailboxTargetOwnershipDependencies;
+}): Promise<WorkerPaneOwnershipResult>;
 export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<WorkerPaneSplitEvidence>;
 export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;

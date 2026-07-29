@@ -235,6 +235,7 @@ export {
   awaitWorkerLaunchAcknowledgement,
   isWorkerLaunchAttemptAccepted,
   runWorkerLaunchBootstrap,
+  isWorkerLaunchProviderStarted,
   buildProviderSpawnInvocation,
 } from './worker-launch-ack.js';
 

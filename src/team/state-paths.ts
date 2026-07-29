@@ -81,6 +81,9 @@ export const TeamPaths = {
   workerLaunchAck: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
 
+  workerLaunchStarted: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/provider-started.json`,
+
   workerLaunchDecision: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -141,6 +141,12 @@ describe('worker launch acknowledgement', () => {
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
+    await expect(loadCurrentWorkerLaunchAttempt({
+      cwd,
+      teamName: launchAttempt.team_name,
+      workerName: launchAttempt.worker_name,
+      provider: launchAttempt.provider,
+    })).resolves.toBeNull();
   });
 
   it('reloads an accepted attempt only for the exact pane and provider identity', async () => {
@@ -173,40 +179,57 @@ describe('worker launch acknowledgement', () => {
       runtimeCliPath: '/runtime-cli.cjs',
     })).resolves.toBeNull();
   });
-  it('keeps revocation terminal when a valid acknowledgement already exists', async () => {
+  it('keeps revocation terminal when it races a valid acknowledgement', async () => {
     const launchAttempt = await attempt();
-    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
-    await writeFile(launchAttempt.ackPath, JSON.stringify({
-      ...expected,
-      kind: 'worker_launch_ack',
-      written_at: new Date().toISOString(),
-    }), 'utf8');
-
-    await expect(revokeWorkerLaunchAttempt(launchAttempt, 'timeout')).resolves.toBe(true);
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 50,
-      pollIntervalMs: 5,
-    })).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
-    await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
-  });
-
-  it('revokes before provider release when ownership persistence fails', async () => {
-    const launchAttempt = await attempt();
-    const providerMarker = join(cwd, 'provider-ran');
-    const spec = buildWorkerLaunchBootstrapSpec(
+    const providerMarker = join(cwd, 'revocation-race-provider-ran');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       launchAttempt,
       [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
       cwd,
-    );
-    const bootstrap = runWorkerLaunchBootstrap(spec);
+    ));
+    await vi.waitFor(async () => {
+      const acknowledgement = JSON.parse(await readFile(launchAttempt.ackPath, 'utf8'));
+      expect(acknowledgement.kind).toBe('worker_launch_ack');
+    }, { timeout: 2_000, interval: 5 });
 
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+    const revocation = revokeWorkerLaunchAttempt(launchAttempt, 'timeout');
+    const acceptance = awaitWorkerLaunchAcknowledgement(launchAttempt, {
       timeoutMs: 2_000,
       pollIntervalMs: 5,
-      beforeAccept: async () => { throw new Error('persist failed'); },
-    })).resolves.toEqual({ ok: false, reason: 'acceptance_persist_failed' });
+    });
+    await expect(revocation).resolves.toBe(true);
+    await expect(acceptance).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
     await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
+  });
+
+  it('prevents an older acknowledged attempt from releasing a provider after supersession', async () => {
+    const olderAttempt = await attempt();
+    const providerMarker = join(cwd, 'superseded-provider-ran');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      olderAttempt,
+      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      cwd,
+    ));
+    const newerAttempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: olderAttempt.team_name,
+      workerName: olderAttempt.worker_name,
+      paneId: '%3',
+      provider: olderAttempt.provider,
+      runtimeCliPath: olderAttempt.runtimeCliPath,
+      context: { kind: 'initial' },
+    });
+
+    await expect(awaitWorkerLaunchAcknowledgement(olderAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
+    await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(isWorkerLaunchAttemptAccepted(olderAttempt)).resolves.toBe(false);
+    await expect(isWorkerLaunchAttemptAccepted(newerAttempt)).resolves.toBe(false);
   });
 
   it('reloads the accepted current recovery launch with its durable context', async () => {

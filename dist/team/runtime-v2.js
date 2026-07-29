@@ -605,6 +605,7 @@ async function spawnV2Worker(opts) {
     const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
     const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
     const ownershipResult = proveWorkerPaneOwnership(split, {
+        providerTarget: opts.sessionName,
         leaderPaneId: opts.leaderPaneId,
         reservedPaneIds: opts.existingWorkerPaneIds,
     });
@@ -1684,8 +1685,9 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                     if (committedPaneLiveness === 'alive') {
                         let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
                         if (!pending) {
-                            const adopted = adoptWorkerPaneOwnership({
+                            const adopted = await adoptWorkerPaneOwnership({
                                 provider: committedPane.paneId.startsWith('%') ? 'tmux' : 'cmux',
+                                providerTarget: owner.config.tmux_session,
                                 paneId: committedPane.paneId,
                                 leaderPaneId,
                                 reservedPaneIds,
@@ -1742,8 +1744,9 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                             || context.replacement_generation !== sagaInput.replacementGeneration) {
                             return { ok: false, error: 'worker_activation_failed' };
                         }
-                        const adopted = adoptWorkerPaneOwnership({
+                        const adopted = await adoptWorkerPaneOwnership({
                             provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+                            providerTarget: owner.config.tmux_session,
                             paneId: currentLaunch.pane_id,
                             leaderPaneId,
                             reservedPaneIds,
@@ -1780,7 +1783,11 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                 const splitDirection = livePaneIds.length > 0 ? 'down' : 'right';
                 const workerCwd = currentWorker.working_dir ?? input.cwd;
                 const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
-                const ownershipResult = proveWorkerPaneOwnership(split, { leaderPaneId, reservedPaneIds });
+                const ownershipResult = proveWorkerPaneOwnership(split, {
+                    providerTarget: owner.config.tmux_session,
+                    leaderPaneId,
+                    reservedPaneIds,
+                });
                 if (!ownershipResult.ok) {
                     await recordUnaddressableRecoveryPaneFailure(input, sagaInput.recoveryId, paneAttemptId, `pane_identity_${ownershipResult.reason}`, split);
                     return { ok: false, error: 'spawn_failed' };

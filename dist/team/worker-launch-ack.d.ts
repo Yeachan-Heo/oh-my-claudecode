@@ -19,16 +19,20 @@ export type WorkerLaunchContext = {
     pane_attempt_id: string;
 };
 export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
+    currentPath: string;
     expectedPath: string;
     ackPath: string;
     decisionPath: string;
+    startedPath: string;
     runtimeCliPath: string;
     context?: WorkerLaunchContext;
 }
 export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
+    current_path: string;
     expected_path: string;
     ack_path: string;
     decision_path: string;
+    started_path: string;
     provider_argv: string[];
     cwd: string;
     decision_timeout_ms: number;
@@ -37,14 +41,14 @@ export type WorkerLaunchAcceptance = {
     ok: true;
 } | {
     ok: false;
-    reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid' | 'acceptance_persist_failed';
+    reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid' | 'attempt_superseded';
 };
 export type WorkerLaunchBootstrapResult = {
     outcome: 'ran';
     exitCode: number | null;
     signal: NodeJS.Signals | null;
 } | {
-    outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'provider_spawn_failed';
+    outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed';
 };
 export interface ProviderSpawnInvocation {
     command: string;
@@ -79,9 +83,9 @@ export declare function revokeWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, 
 export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;
     pollIntervalMs?: number;
-    beforeAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
 }): Promise<WorkerLaunchAcceptance>;
 export declare function isWorkerLaunchAttemptAccepted(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;
 export {};

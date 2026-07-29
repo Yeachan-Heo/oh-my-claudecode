@@ -172,9 +172,11 @@ describe('buildWorkerStartCommand', () => {
         pane_id: '%2',
         provider: 'codex',
         created_at: '2026-01-01T00:00:00.000Z',
+        currentPath: '/tmp/current.json',
         expectedPath: '/tmp/expected.json',
         ackPath: '/tmp/ack.json',
         decisionPath: '/tmp/decision.json',
+        startedPath: '/tmp/provider-started.json',
         runtimeCliPath: '/opt/omc/runtime-cli.cjs',
       },
     });
@@ -205,9 +207,11 @@ describe('buildWorkerStartCommand', () => {
         pane_id: '%2',
         provider: 'codex',
         created_at: '2026-01-01T00:00:00.000Z',
+        currentPath: 'C:\\state\\current.json',
         expectedPath: 'C:\\state\\expected.json',
         ackPath: 'C:\\state\\ack.json',
         decisionPath: 'C:\\state\\decision.json',
+        startedPath: 'C:\\state\\provider-started.json',
         runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
       },
     });

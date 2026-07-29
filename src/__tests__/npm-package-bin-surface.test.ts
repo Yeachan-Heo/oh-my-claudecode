@@ -34,6 +34,7 @@ type PackageJson = {
   bin?: Record<string, string>;
   name?: string;
   version?: string;
+  devDependencies?: Record<string, string>;
 };
 
 type PackedPackage = {
@@ -290,18 +291,30 @@ describe("npm package bin surface regression", () => {
     )).not.toThrow();
   });
 
-  it("typechecks a supported root import from a clean tarball install", () => {
+  it("typechecks the supported team export from a clean tarball install", () => {
     const consumerRoot = join(fixtureRootCache!, "clean-type-consumer");
+    const sourcePackage = readPackageJson();
+    const typescriptVersion = sourcePackage.devDependencies?.typescript;
+    const nodeTypesVersion = sourcePackage.devDependencies?.["@types/node"];
+    if (!typescriptVersion || !nodeTypesVersion) throw new Error("typecheck fixture dependencies missing");
     mkdirSync(consumerRoot, { recursive: true });
     writeFileSync(join(consumerRoot, "package.json"), JSON.stringify({ type: "module", private: true }));
     execFileSync(
       "npm",
-      ["install", tarballPathCache!, "--ignore-scripts", "--no-audit", "--no-fund"],
+      [
+        "install",
+        tarballPathCache!,
+        `typescript@${typescriptVersion}`,
+        `@types/node@${nodeTypesVersion}`,
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+      ],
       { cwd: consumerRoot, stdio: "pipe" },
     );
     writeFileSync(
       join(consumerRoot, "index.ts"),
-      `import { recoverDeadWorkerV2 } from ${JSON.stringify(packedPackageFixture.packageJson.name!)};\nvoid recoverDeadWorkerV2;\n`,
+      `import { recoverDeadWorkerV2 } from ${JSON.stringify(`${packedPackageFixture.packageJson.name!}/team`)};\nvoid recoverDeadWorkerV2;\n`,
     );
     writeFileSync(join(consumerRoot, "tsconfig.json"), JSON.stringify({
       compilerOptions: {
@@ -309,7 +322,7 @@ describe("npm package bin surface regression", () => {
         module: "NodeNext",
         moduleResolution: "NodeNext",
         strict: true,
-        skipLibCheck: true,
+        skipLibCheck: false,
         noEmit: true,
       },
       include: ["index.ts"],
@@ -317,7 +330,7 @@ describe("npm package bin surface regression", () => {
 
     expect(() => execFileSync(
       process.execPath,
-      [join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumerRoot, "tsconfig.json")],
+      [join(consumerRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumerRoot, "tsconfig.json")],
       { cwd: consumerRoot, stdio: "pipe" },
     )).not.toThrow();
   });

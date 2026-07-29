@@ -13,7 +13,6 @@ const paneMocks = vi.hoisted(() => ({
   spawnOwnedWorkerInPane: vi.fn(),
   killTeamPane: vi.fn(async (_paneId: string) => { throw new Error('pane still alive'); }),
   killOwnedWorkerPane: vi.fn(),
-  isPromptModeAgent: vi.fn(() => false),
 }));
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => ({
@@ -30,7 +29,6 @@ vi.mock('../model-contract.js', async importOriginal => ({
   resolveValidatedBinaryPath: vi.fn(() => '/bin/echo'),
   buildWorkerArgv: vi.fn(() => ['/bin/echo']),
   getWorkerEnv: vi.fn(() => ({})),
-  isPromptModeAgent: paneMocks.isPromptModeAgent,
 }));
 
 paneMocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName: string, ownership: { paneId: string }, config: unknown) => {
@@ -59,7 +57,6 @@ const launchMetadata = { worker_cli: 'claude' as const,
 let cwd = '';
 afterEach(() => {
   vi.clearAllMocks();
-  paneMocks.isPromptModeAgent.mockImplementation(() => false);
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -187,7 +184,7 @@ describe('recovery pane rollback evidence', () => {
         name: 'worker-1',
         index: 1,
         worker_cli: 'gemini',
-        launch_descriptor: { schema_version: 1, provider: 'gemini', model: null, binary: process.execPath, args: [] },
+        launch_descriptor: { schema_version: 1, provider: 'gemini', model: null, binary: process.execPath, args: ['-e', 'process.exit(0)'] },
         pane_id: '%1',
         replacement_generation: 1,
         working_dir: cwd,
@@ -223,56 +220,63 @@ describe('recovery pane rollback evidence', () => {
       teamName,
       workerName: 'worker-1',
     }, recoveryId);
-    paneMocks.isPromptModeAgent.mockImplementation((provider?: string) => provider === 'gemini');
     paneMocks.getWorkerLiveness.mockResolvedValueOnce('dead').mockResolvedValue('alive');
 
+    let bootstrapResult: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    const previousGateSpec = process.env.OMC_RECOVERY_GATE_SPEC;
+    const previousLaunchAttemptId = process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
     paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (
       _sessionName: string,
       ownership: { paneId: string },
-      config: { envVars: Record<string, string>; provider: string },
-    ) => {
-      const gate = JSON.parse(config.envVars.OMC_RECOVERY_GATE_SPEC) as {
-        recoveryId: string;
+      config: {
+        cwd: string;
+        launchStateCwd: string;
+        teamName: string;
         workerName: string;
-        replacementGeneration: number;
-        paneAttemptId: string;
-        readyPath: string;
-        runPath: string;
-      };
-      const record = {
-        recovery_id: gate.recoveryId,
-        worker_name: gate.workerName,
-        replacement_generation: gate.replacementGeneration,
-        pane_attempt_id: gate.paneAttemptId,
-        written_at: new Date().toISOString(),
-      };
-      mkdirSync(join(gate.readyPath, '..'), { recursive: true });
-      writeFileSync(gate.readyPath, JSON.stringify(record));
-      writeFileSync(`${gate.readyPath}.adoption-ready`, JSON.stringify(record));
-      mkdirSync(join(gate.runPath, '..'), { recursive: true });
-      writeFileSync(`${gate.runPath}.launched`, JSON.stringify(record));
-      return {
-        ownership,
+        provider: 'gemini';
+        launchBootstrapPath: string;
+        launchBinary: string;
+        launchArgs: string[];
+        envVars: Record<string, string>;
+        launchContext?: { kind: 'recovery'; recovery_id: string; replacement_generation: number; pane_attempt_id: string };
+      },
+    ) => {
+      const attempt = await prepareWorkerLaunchAttempt({
+        cwd: config.launchStateCwd,
+        teamName: config.teamName,
+        workerName: config.workerName,
+        paneId: ownership.paneId,
         provider: config.provider,
-        attempt: {
-          schema_version: 1,
-          attempt_id: 'attempt-idle-gemini',
-          nonce: 'nonce-idle-gemini',
-          team_name: teamName,
-          worker_name: 'worker-1',
-          pane_id: ownership.paneId,
-          provider: config.provider,
-          created_at: new Date().toISOString(),
-          expectedPath: '/tmp/expected.json',
-          ackPath: '/tmp/ack.json',
-          decisionPath: '/tmp/decision.json',
-          runtimeCliPath: '/tmp/runtime-cli.cjs',
-        },
-      };
+        runtimeCliPath: config.launchBootstrapPath,
+        context: config.launchContext,
+      });
+      process.env.OMC_RECOVERY_GATE_SPEC = config.envVars.OMC_RECOVERY_GATE_SPEC;
+      process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = attempt.attempt_id;
+      const spec = buildWorkerLaunchBootstrapSpec(
+        attempt,
+        [config.launchBinary, ...config.launchArgs],
+        config.cwd,
+      );
+      bootstrapResult = runWorkerLaunchBootstrap(spec);
+      const accepted = await awaitWorkerLaunchAcknowledgement(attempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      });
+      if (!accepted.ok) throw new Error(`launch acknowledgement failed: ${accepted.reason}`);
+      return { ownership, provider: config.provider, attempt };
     });
 
-    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
-      .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
+    try {
+      await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+        .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
+      expect(bootstrapResult).toBeDefined();
+      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    } finally {
+      if (previousGateSpec === undefined) delete process.env.OMC_RECOVERY_GATE_SPEC;
+      else process.env.OMC_RECOVERY_GATE_SPEC = previousGateSpec;
+      if (previousLaunchAttemptId === undefined) delete process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
+      else process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = previousLaunchAttemptId;
+    }
   });
 
   it('publishes durable orphan evidence when split succeeds without a parseable pane id', async () => {

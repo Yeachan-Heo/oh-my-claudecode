@@ -390,14 +390,14 @@ function getOmcRoot(worktreeRoot) {
 }
 
 // src/team/task-file-ops.ts
-var import_fs5 = require("fs");
+var import_fs6 = require("fs");
 var import_path7 = require("path");
 
 // src/team/tmux-session.ts
-var import_fs3 = require("fs");
+var import_fs5 = require("fs");
 var import_crypto2 = require("crypto");
-var import_child_process3 = require("child_process");
-var import_util2 = require("util");
+var import_child_process4 = require("child_process");
+var import_util3 = require("util");
 var import_path6 = require("path");
 var import_promises = __toESM(require("fs/promises"), 1);
 
@@ -484,6 +484,7 @@ var TeamPaths = {
   workerLaunchCurrent: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/current.json`,
   workerLaunchExpected: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
   workerLaunchAck: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
+  workerLaunchStarted: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/provider-started.json`,
   workerLaunchDecision: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
   mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
   mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
@@ -574,8 +575,161 @@ function ensureDirSync(dir) {
 }
 var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
 
-// src/team/tmux-session.ts
+// src/lib/file-lock.ts
+var import_fs4 = require("fs");
+var path3 = __toESM(require("path"), 1);
+
+// src/platform/index.ts
+var path2 = __toESM(require("path"), 1);
+var import_fs3 = require("fs");
+
+// src/platform/process-utils.ts
+var import_child_process3 = require("child_process");
+var import_util2 = require("util");
+var fsPromises = __toESM(require("fs/promises"), 1);
 var execFileAsync = (0, import_util2.promisify)(import_child_process3.execFile);
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
+// src/platform/index.ts
+var PLATFORM = process.platform;
+
+// src/lib/file-lock.ts
+var DEFAULT_STALE_LOCK_MS = 3e4;
+var DEFAULT_RETRY_DELAY_MS = 50;
+function isLockStale(lockPath, staleLockMs) {
+  try {
+    const stat = (0, import_fs4.statSync)(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < staleLockMs) return false;
+    try {
+      const raw = (0, import_fs4.readFileSync)(lockPath, "utf-8");
+      const payload = JSON.parse(raw);
+      if (payload.pid && isProcessAlive(payload.pid)) return false;
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function tryAcquireSync(lockPath, staleLockMs) {
+  ensureDirSync(path3.dirname(lockPath));
+  try {
+    const fd = (0, import_fs4.openSync)(
+      lockPath,
+      import_fs4.constants.O_CREAT | import_fs4.constants.O_EXCL | import_fs4.constants.O_WRONLY,
+      384
+    );
+    try {
+      const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+      (0, import_fs4.writeSync)(fd, payload, null, "utf-8");
+    } catch (writeErr) {
+      try {
+        (0, import_fs4.closeSync)(fd);
+      } catch {
+      }
+      try {
+        (0, import_fs4.unlinkSync)(lockPath);
+      } catch {
+      }
+      throw writeErr;
+    }
+    return { fd, path: lockPath };
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+      if (isLockStale(lockPath, staleLockMs)) {
+        try {
+          (0, import_fs4.unlinkSync)(lockPath);
+        } catch {
+        }
+        try {
+          const fd = (0, import_fs4.openSync)(
+            lockPath,
+            import_fs4.constants.O_CREAT | import_fs4.constants.O_EXCL | import_fs4.constants.O_WRONLY,
+            384
+          );
+          try {
+            const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+            (0, import_fs4.writeSync)(fd, payload, null, "utf-8");
+          } catch (writeErr) {
+            try {
+              (0, import_fs4.closeSync)(fd);
+            } catch {
+            }
+            try {
+              (0, import_fs4.unlinkSync)(lockPath);
+            } catch {
+            }
+            throw writeErr;
+          }
+          return { fd, path: lockPath };
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+    throw err;
+  }
+}
+function acquireFileLockSync(lockPath, opts) {
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const timeoutMs = opts?.timeoutMs ?? 0;
+  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const handle = tryAcquireSync(lockPath, staleLockMs);
+  if (handle || timeoutMs <= 0) return handle;
+  const deadline = Date.now() + timeoutMs;
+  const sharedBuf = new SharedArrayBuffer(4);
+  const sharedArr = new Int32Array(sharedBuf);
+  while (Date.now() < deadline) {
+    const waitMs = Math.min(retryDelayMs, deadline - Date.now());
+    try {
+      Atomics.wait(sharedArr, 0, 0, waitMs);
+    } catch {
+      const waitUntil = Date.now() + waitMs;
+      while (Date.now() < waitUntil) {
+      }
+    }
+    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
+    if (retryHandle) return retryHandle;
+  }
+  return null;
+}
+function releaseFileLockSync(handle) {
+  try {
+    (0, import_fs4.closeSync)(handle.fd);
+  } catch {
+  }
+  try {
+    (0, import_fs4.unlinkSync)(handle.path);
+  } catch {
+  }
+}
+function withFileLockSync(lockPath, fn, opts) {
+  const handle = acquireFileLockSync(lockPath, opts);
+  if (!handle) {
+    throw new Error(`Failed to acquire file lock: ${lockPath}`);
+  }
+  try {
+    return fn();
+  } finally {
+    releaseFileLockSync(handle);
+  }
+}
+
+// src/team/tmux-session.ts
+var execFileAsync2 = (0, import_util3.promisify)(import_child_process4.execFile);
 var TMUX_SESSION_PREFIX = "omc-team";
 function sanitizeName(name) {
   const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
@@ -598,53 +752,28 @@ function killSession(teamName, workerName) {
   }
 }
 
-// src/platform/index.ts
-var path2 = __toESM(require("path"), 1);
-var import_fs4 = require("fs");
-
-// src/platform/process-utils.ts
-var import_child_process4 = require("child_process");
-var import_util3 = require("util");
-var fsPromises = __toESM(require("fs/promises"), 1);
-var execFileAsync2 = (0, import_util3.promisify)(import_child_process4.execFile);
-function isProcessAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
-      return true;
-    }
-    return false;
-  }
-}
-
-// src/platform/index.ts
-var PLATFORM = process.platform;
-
 // src/team/task-file-ops.ts
-var DEFAULT_STALE_LOCK_MS = 3e4;
+var DEFAULT_STALE_LOCK_MS2 = 3e4;
 function acquireTaskLock(teamName, taskId, opts) {
-  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS2;
   const dir = canonicalTasksDir(teamName, opts?.cwd);
   ensureDirWithMode(dir);
   const lockPath = (0, import_path7.join)(dir, `${sanitizeTaskId(taskId)}.lock`);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const fd = (0, import_fs5.openSync)(lockPath, import_fs5.constants.O_CREAT | import_fs5.constants.O_EXCL | import_fs5.constants.O_WRONLY, 384);
+      const fd = (0, import_fs6.openSync)(lockPath, import_fs6.constants.O_CREAT | import_fs6.constants.O_EXCL | import_fs6.constants.O_WRONLY, 384);
       const payload = JSON.stringify({
         pid: process.pid,
         workerName: opts?.workerName ?? "",
         timestamp: Date.now()
       });
-      (0, import_fs5.writeSync)(fd, payload, null, "utf-8");
+      (0, import_fs6.writeSync)(fd, payload, null, "utf-8");
       return { fd, path: lockPath };
     } catch (err) {
       if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
-        if (attempt === 0 && isLockStale(lockPath, staleLockMs)) {
+        if (attempt === 0 && isLockStale2(lockPath, staleLockMs)) {
           try {
-            (0, import_fs5.unlinkSync)(lockPath);
+            (0, import_fs6.unlinkSync)(lockPath);
           } catch {
           }
           continue;
@@ -658,21 +787,21 @@ function acquireTaskLock(teamName, taskId, opts) {
 }
 function releaseTaskLock(handle) {
   try {
-    (0, import_fs5.closeSync)(handle.fd);
+    (0, import_fs6.closeSync)(handle.fd);
   } catch {
   }
   try {
-    (0, import_fs5.unlinkSync)(handle.path);
+    (0, import_fs6.unlinkSync)(handle.path);
   } catch {
   }
 }
-function isLockStale(lockPath, staleLockMs) {
+function isLockStale2(lockPath, staleLockMs) {
   try {
-    const stat = (0, import_fs5.statSync)(lockPath);
+    const stat = (0, import_fs6.statSync)(lockPath);
     const ageMs = Date.now() - stat.mtimeMs;
     if (ageMs < staleLockMs) return false;
     try {
-      const raw = (0, import_fs5.readFileSync)(lockPath, "utf-8");
+      const raw = (0, import_fs6.readFileSync)(lockPath, "utf-8");
       const payload = JSON.parse(raw);
       if (payload.pid && isProcessAlive(payload.pid)) return false;
     } catch {
@@ -702,9 +831,9 @@ function legacyTasksDir(teamName) {
 }
 function resolveTaskPathForRead(teamName, taskId, cwd) {
   const canonical = (0, import_path7.join)(canonicalTasksDir(teamName, cwd), `${sanitizeTaskId(taskId)}.json`);
-  if ((0, import_fs5.existsSync)(canonical)) return canonical;
+  if ((0, import_fs6.existsSync)(canonical)) return canonical;
   const legacy = (0, import_path7.join)(legacyTasksDir(teamName), `${sanitizeTaskId(taskId)}.json`);
-  if ((0, import_fs5.existsSync)(legacy)) return legacy;
+  if ((0, import_fs6.existsSync)(legacy)) return legacy;
   return canonical;
 }
 function resolveTaskPathForWrite(teamName, taskId, cwd) {
@@ -715,9 +844,9 @@ function failureSidecarPath(teamName, taskId, cwd) {
 }
 function readTask(teamName, taskId, opts) {
   const filePath = resolveTaskPathForRead(teamName, taskId, opts?.cwd);
-  if (!(0, import_fs5.existsSync)(filePath)) return null;
+  if (!(0, import_fs6.existsSync)(filePath)) return null;
   try {
-    const raw = (0, import_fs5.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_fs6.readFileSync)(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -729,7 +858,7 @@ function updateTask(teamName, taskId, updates, opts) {
     const readPath = resolveTaskPathForRead(teamName, taskId, opts?.cwd);
     let task;
     try {
-      const raw = (0, import_fs5.readFileSync)(readPath, "utf-8");
+      const raw = (0, import_fs6.readFileSync)(readPath, "utf-8");
       task = JSON.parse(raw);
     } catch {
       throw new Error(`Task file not found or malformed: ${taskId}`);
@@ -758,7 +887,7 @@ function updateTask(teamName, taskId, updates, opts) {
 }
 async function findNextTask(teamName, workerName, opts) {
   const dir = canonicalTasksDir(teamName, opts?.cwd);
-  if (!(0, import_fs5.existsSync)(dir)) return null;
+  if (!(0, import_fs6.existsSync)(dir)) return null;
   const taskIds = listTaskIds(teamName, opts);
   for (const id of taskIds) {
     const task = readTask(teamName, id, opts);
@@ -777,7 +906,7 @@ async function findNextTask(teamName, workerName, opts) {
       let taskData;
       try {
         const readPath = resolveTaskPathForRead(teamName, id, opts?.cwd);
-        const raw = (0, import_fs5.readFileSync)(readPath, "utf-8");
+        const raw = (0, import_fs6.readFileSync)(readPath, "utf-8");
         taskData = JSON.parse(raw);
       } catch {
         continue;
@@ -816,9 +945,9 @@ function writeTaskFailure(teamName, taskId, error, opts) {
 }
 function readTaskFailure(teamName, taskId, opts) {
   const filePath = failureSidecarPath(teamName, taskId, opts?.cwd);
-  if (!(0, import_fs5.existsSync)(filePath)) return null;
+  if (!(0, import_fs6.existsSync)(filePath)) return null;
   try {
-    const raw = (0, import_fs5.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_fs6.readFileSync)(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -826,9 +955,9 @@ function readTaskFailure(teamName, taskId, opts) {
 }
 function listTaskIds(teamName, opts) {
   const scanDir = (dir) => {
-    if (!(0, import_fs5.existsSync)(dir)) return [];
+    if (!(0, import_fs6.existsSync)(dir)) return [];
     try {
-      return (0, import_fs5.readdirSync)(dir).filter((f) => f.endsWith(".json") && !f.includes(".tmp.") && !f.includes(".failure.") && !f.endsWith(".lock")).map((f) => f.replace(".json", ""));
+      return (0, import_fs6.readdirSync)(dir).filter((f) => f.endsWith(".json") && !f.includes(".tmp.") && !f.includes(".failure.") && !f.endsWith(".lock")).map((f) => f.replace(".json", ""));
     } catch {
       return [];
     }
@@ -846,7 +975,7 @@ function listTaskIds(teamName, opts) {
 }
 
 // src/team/inbox-outbox.ts
-var import_fs6 = require("fs");
+var import_fs7 = require("fs");
 var import_path8 = require("path");
 var MAX_INBOX_READ_SIZE = 10 * 1024 * 1024;
 function teamsDir(teamName) {
@@ -880,32 +1009,32 @@ function appendOutbox(teamName, workerName, message) {
 }
 function rotateOutboxIfNeeded(teamName, workerName, maxLines) {
   const filePath = outboxPath(teamName, workerName);
-  if (!(0, import_fs6.existsSync)(filePath)) return;
+  if (!(0, import_fs7.existsSync)(filePath)) return;
   try {
-    const content = (0, import_fs6.readFileSync)(filePath, "utf-8");
+    const content = (0, import_fs7.readFileSync)(filePath, "utf-8");
     const lines = content.split("\n").filter((l) => l.trim());
     if (lines.length <= maxLines) return;
     const keepCount = Math.floor(maxLines / 2);
     const kept = keepCount === 0 ? [] : lines.slice(-keepCount);
     const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
     writeFileWithMode(tmpPath, kept.join("\n") + "\n");
-    (0, import_fs6.renameSync)(tmpPath, filePath);
+    (0, import_fs7.renameSync)(tmpPath, filePath);
   } catch {
   }
 }
 function rotateInboxIfNeeded(teamName, workerName, maxSizeBytes) {
   const filePath = inboxPath(teamName, workerName);
-  if (!(0, import_fs6.existsSync)(filePath)) return;
+  if (!(0, import_fs7.existsSync)(filePath)) return;
   try {
-    const stat = (0, import_fs6.statSync)(filePath);
+    const stat = (0, import_fs7.statSync)(filePath);
     if (stat.size <= maxSizeBytes) return;
-    const content = (0, import_fs6.readFileSync)(filePath, "utf-8");
+    const content = (0, import_fs7.readFileSync)(filePath, "utf-8");
     const lines = content.split("\n").filter((l) => l.trim());
     const keepCount = Math.max(1, Math.floor(lines.length / 2));
     const kept = lines.slice(-keepCount);
     const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
     writeFileWithMode(tmpPath, kept.join("\n") + "\n");
-    (0, import_fs6.renameSync)(tmpPath, filePath);
+    (0, import_fs7.renameSync)(tmpPath, filePath);
     const cursorFile = inboxCursorPath(teamName, workerName);
     atomicWriteJson(cursorFile, { bytesRead: 0 });
   } catch {
@@ -914,16 +1043,16 @@ function rotateInboxIfNeeded(teamName, workerName, maxSizeBytes) {
 function readNewInboxMessages(teamName, workerName) {
   const inbox = inboxPath(teamName, workerName);
   const cursorFile = inboxCursorPath(teamName, workerName);
-  if (!(0, import_fs6.existsSync)(inbox)) return [];
+  if (!(0, import_fs7.existsSync)(inbox)) return [];
   let offset = 0;
-  if ((0, import_fs6.existsSync)(cursorFile)) {
+  if ((0, import_fs7.existsSync)(cursorFile)) {
     try {
-      const cursor = JSON.parse((0, import_fs6.readFileSync)(cursorFile, "utf-8"));
+      const cursor = JSON.parse((0, import_fs7.readFileSync)(cursorFile, "utf-8"));
       offset = cursor.bytesRead;
     } catch {
     }
   }
-  const stat = (0, import_fs6.statSync)(inbox);
+  const stat = (0, import_fs7.statSync)(inbox);
   if (stat.size < offset) {
     offset = 0;
   }
@@ -933,12 +1062,12 @@ function readNewInboxMessages(teamName, workerName) {
   if (cappedSize < readSize) {
     console.warn(`[inbox-outbox] Inbox for ${workerName} exceeds ${MAX_INBOX_READ_SIZE} bytes, reading truncated`);
   }
-  const fd = (0, import_fs6.openSync)(inbox, "r");
+  const fd = (0, import_fs7.openSync)(inbox, "r");
   const buffer = Buffer.alloc(cappedSize);
   try {
-    (0, import_fs6.readSync)(fd, buffer, 0, buffer.length, offset);
+    (0, import_fs7.readSync)(fd, buffer, 0, buffer.length, offset);
   } finally {
-    (0, import_fs6.closeSync)(fd);
+    (0, import_fs7.closeSync)(fd);
   }
   const newData = buffer.toString("utf-8");
   const lastNewlineIdx = newData.lastIndexOf("\n");
@@ -975,9 +1104,9 @@ function readNewInboxMessages(teamName, workerName) {
 }
 function checkShutdownSignal(teamName, workerName) {
   const filePath = signalPath(teamName, workerName);
-  if (!(0, import_fs6.existsSync)(filePath)) return null;
+  if (!(0, import_fs7.existsSync)(filePath)) return null;
   try {
-    const raw = (0, import_fs6.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_fs7.readFileSync)(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -985,18 +1114,18 @@ function checkShutdownSignal(teamName, workerName) {
 }
 function deleteShutdownSignal(teamName, workerName) {
   const filePath = signalPath(teamName, workerName);
-  if ((0, import_fs6.existsSync)(filePath)) {
+  if ((0, import_fs7.existsSync)(filePath)) {
     try {
-      (0, import_fs6.unlinkSync)(filePath);
+      (0, import_fs7.unlinkSync)(filePath);
     } catch {
     }
   }
 }
 function checkDrainSignal(teamName, workerName) {
   const filePath = drainSignalPath(teamName, workerName);
-  if (!(0, import_fs6.existsSync)(filePath)) return null;
+  if (!(0, import_fs7.existsSync)(filePath)) return null;
   try {
-    const raw = (0, import_fs6.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_fs7.readFileSync)(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -1004,9 +1133,9 @@ function checkDrainSignal(teamName, workerName) {
 }
 function deleteDrainSignal(teamName, workerName) {
   const filePath = drainSignalPath(teamName, workerName);
-  if ((0, import_fs6.existsSync)(filePath)) {
+  if ((0, import_fs7.existsSync)(filePath)) {
     try {
-      (0, import_fs6.unlinkSync)(filePath);
+      (0, import_fs7.unlinkSync)(filePath);
     } catch {
     }
   }
@@ -1015,134 +1144,6 @@ function deleteDrainSignal(teamName, workerName) {
 // src/team/team-registration.ts
 var import_fs8 = require("fs");
 var import_path9 = require("path");
-
-// src/lib/file-lock.ts
-var import_fs7 = require("fs");
-var path3 = __toESM(require("path"), 1);
-var DEFAULT_STALE_LOCK_MS2 = 3e4;
-var DEFAULT_RETRY_DELAY_MS = 50;
-function isLockStale2(lockPath, staleLockMs) {
-  try {
-    const stat = (0, import_fs7.statSync)(lockPath);
-    const ageMs = Date.now() - stat.mtimeMs;
-    if (ageMs < staleLockMs) return false;
-    try {
-      const raw = (0, import_fs7.readFileSync)(lockPath, "utf-8");
-      const payload = JSON.parse(raw);
-      if (payload.pid && isProcessAlive(payload.pid)) return false;
-    } catch {
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-function tryAcquireSync(lockPath, staleLockMs) {
-  ensureDirSync(path3.dirname(lockPath));
-  try {
-    const fd = (0, import_fs7.openSync)(
-      lockPath,
-      import_fs7.constants.O_CREAT | import_fs7.constants.O_EXCL | import_fs7.constants.O_WRONLY,
-      384
-    );
-    try {
-      const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-      (0, import_fs7.writeSync)(fd, payload, null, "utf-8");
-    } catch (writeErr) {
-      try {
-        (0, import_fs7.closeSync)(fd);
-      } catch {
-      }
-      try {
-        (0, import_fs7.unlinkSync)(lockPath);
-      } catch {
-      }
-      throw writeErr;
-    }
-    return { fd, path: lockPath };
-  } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
-      if (isLockStale2(lockPath, staleLockMs)) {
-        try {
-          (0, import_fs7.unlinkSync)(lockPath);
-        } catch {
-        }
-        try {
-          const fd = (0, import_fs7.openSync)(
-            lockPath,
-            import_fs7.constants.O_CREAT | import_fs7.constants.O_EXCL | import_fs7.constants.O_WRONLY,
-            384
-          );
-          try {
-            const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-            (0, import_fs7.writeSync)(fd, payload, null, "utf-8");
-          } catch (writeErr) {
-            try {
-              (0, import_fs7.closeSync)(fd);
-            } catch {
-            }
-            try {
-              (0, import_fs7.unlinkSync)(lockPath);
-            } catch {
-            }
-            throw writeErr;
-          }
-          return { fd, path: lockPath };
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    }
-    throw err;
-  }
-}
-function acquireFileLockSync(lockPath, opts) {
-  const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS2;
-  const timeoutMs = opts?.timeoutMs ?? 0;
-  const retryDelayMs = opts?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const handle = tryAcquireSync(lockPath, staleLockMs);
-  if (handle || timeoutMs <= 0) return handle;
-  const deadline = Date.now() + timeoutMs;
-  const sharedBuf = new SharedArrayBuffer(4);
-  const sharedArr = new Int32Array(sharedBuf);
-  while (Date.now() < deadline) {
-    const waitMs = Math.min(retryDelayMs, deadline - Date.now());
-    try {
-      Atomics.wait(sharedArr, 0, 0, waitMs);
-    } catch {
-      const waitUntil = Date.now() + waitMs;
-      while (Date.now() < waitUntil) {
-      }
-    }
-    const retryHandle = tryAcquireSync(lockPath, staleLockMs);
-    if (retryHandle) return retryHandle;
-  }
-  return null;
-}
-function releaseFileLockSync(handle) {
-  try {
-    (0, import_fs7.closeSync)(handle.fd);
-  } catch {
-  }
-  try {
-    (0, import_fs7.unlinkSync)(handle.path);
-  } catch {
-  }
-}
-function withFileLockSync(lockPath, fn, opts) {
-  const handle = acquireFileLockSync(lockPath, opts);
-  if (!handle) {
-    throw new Error(`Failed to acquire file lock: ${lockPath}`);
-  }
-  try {
-    return fn();
-  } finally {
-    releaseFileLockSync(handle);
-  }
-}
-
-// src/team/team-registration.ts
 function configPath(teamName) {
   const result = (0, import_path9.join)(getClaudeConfigDir(), "teams", sanitizeName(teamName), "config.json");
   validateResolvedPath(result, (0, import_path9.join)(getClaudeConfigDir(), "teams"));
