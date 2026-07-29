@@ -45,7 +45,7 @@ describe('worker recovery activation gate', () => {
       readyPath,
       activatePath,
       runPath,
-      providerArgv: [process.execPath, '-e', 'process.exit(0)'],
+      providerArgv: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 350)'],
       launchAttempt,
       cwd,
       timeoutMs: 1_000,
@@ -62,6 +62,25 @@ describe('worker recovery activation gate', () => {
     });
   });
 
+  it('does not publish launched evidence for a provider that exits immediately', async () => {
+    const readyPath = join(cwd, 'early-exit-ready.json');
+    const activatePath = join(cwd, 'early-exit-activate.json');
+    const runPath = join(cwd, 'early-exit-run.json');
+    const launchAttempt = await acceptedAttempt('worker-1', '%9', 'recovery-early-exit', 9, 'attempt-early-exit');
+    const record = { recovery_id: 'recovery-early-exit', worker_name: 'worker-1', replacement_generation: 9,
+      pane_attempt_id: 'attempt-early-exit', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
+    writeFileSync(activatePath, JSON.stringify(record));
+    writeFileSync(runPath, JSON.stringify(record));
+
+    await expect(runWorkerActivationGate({
+      recoveryId: 'recovery-early-exit', workerName: 'worker-1', replacementGeneration: 9, paneAttemptId: 'attempt-early-exit',
+      readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', 'process.exit(7)'],
+      launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
+    })).resolves.toEqual({ outcome: 'ran', exitCode: 7, signal: null });
+    expect(existsSync(`${runPath}.launched`)).toBe(false);
+    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: 7 });
+  });
   it('does not publish launched evidence when the provider executable cannot spawn', async () => {
     const readyPath = join(cwd, 'failed-ready.json');
     const activatePath = join(cwd, 'failed-activate.json');

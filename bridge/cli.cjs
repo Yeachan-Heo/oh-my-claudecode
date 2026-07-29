@@ -33055,10 +33055,10 @@ async function readJsonFileState(filePath) {
   }
 }
 async function writeAtomic(filePath, data) {
-  const { writeFile: writeFile12 } = await import("fs/promises");
+  const { writeFile: writeFile13 } = await import("fs/promises");
   await (0, import_promises6.mkdir)((0, import_path83.dirname)(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeFile12(tmpPath, data, "utf-8");
+  await writeFile13(tmpPath, data, "utf-8");
   const { rename: rename6 } = await import("fs/promises");
   await rename6(tmpPath, filePath);
 }
@@ -33580,9 +33580,9 @@ function diffSnapshots(prev, current) {
 }
 async function cleanupTeamState(teamName, cwd2) {
   const root2 = absPath(cwd2, TeamPaths.root(teamName));
-  const { rm: rm6 } = await import("fs/promises");
+  const { rm: rm7 } = await import("fs/promises");
   try {
-    await rm6(root2, { recursive: true, force: true });
+    await rm7(root2, { recursive: true, force: true });
   } catch {
   }
 }
@@ -41734,6 +41734,7 @@ var init_worker_activation_gate = __esm({
     "use strict";
     import_promises19 = require("node:fs/promises");
     init_worker_launch_ack();
+    init_process_utils();
   }
 });
 
@@ -43517,6 +43518,12 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           sequence: continuation.sequence,
           resumePayload: continuation.payload
         })).join("\n\n") : "Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.";
+        const inboxPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+          await ensureFence();
+          await composeInitialInbox(input.teamName, sagaInput2.workerName, instruction, input.cwd);
+          return true;
+        });
+        if (!inboxPublished.ok || !inboxPublished.value) throw new Error("worker_activation_failed");
         const record2 = {
           recovery_id: sagaInput2.recoveryId,
           worker_name: sagaInput2.workerName,
@@ -43529,17 +43536,31 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         const launchedPath = `${pending.gate.runPath}.launched`;
         let launched = await waitForRecoveryGateRecord(launchedPath, record2, 25, 5);
         if (!launched) {
-          if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)) throw new Error("worker_activation_failed");
-          await (0, import_promises20.writeFile)(pending.gate.runPath, JSON.stringify(record2), "utf8");
+          const runPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+            await ensureFence();
+            await (0, import_promises20.writeFile)(pending.gate.runPath, JSON.stringify(record2), "utf8");
+            return true;
+          });
+          if (!runPublished.ok || !runPublished.value) throw new Error("worker_activation_failed");
           launched = await waitForRecoveryGateRecord(launchedPath, record2, 3e4);
         }
         if (!launched) throw new Error("startup_ack_timeout");
+        let providerLive = false;
+        try {
+          const launchedRecord = JSON.parse(await (0, import_promises20.readFile)(launchedPath, "utf8"));
+          providerLive = Number.isInteger(launchedRecord.provider_pid) && typeof launchedRecord.provider_start_identity === "string" && await isProcessIdentityLive(
+            launchedRecord.provider_pid,
+            launchedRecord.provider_start_identity,
+            Date.now() + 1e3
+          ) === "live";
+        } catch {
+        }
+        if (!providerLive) throw new Error("worker_activation_failed");
         if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt) || await getWorkerPaneLiveness(pending.ownership.paneId) !== "alive") {
           throw new Error("worker_activation_failed");
         }
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
-          await composeInitialInbox(input.teamName, sagaInput2.workerName, instruction, input.cwd);
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
             if (!await waitForCurrentEvidence()) return { ok: false, error: `${pending.agentType}_startup_evidence_missing` };
           } else if (!pending.promptMode) {
@@ -44143,7 +44164,7 @@ async function startTeamV2(config2) {
   };
 }
 async function writeWatchdogFailedMarker(teamName, cwd2, reason) {
-  const { writeFile: writeFile12 } = await import("fs/promises");
+  const { writeFile: writeFile13 } = await import("fs/promises");
   const marker = {
     failedAt: Date.now(),
     reason,
@@ -44152,7 +44173,7 @@ async function writeWatchdogFailedMarker(teamName, cwd2, reason) {
   const root2 = absPath(cwd2, TeamPaths.root(sanitizeTeamName(teamName)));
   const markerPath = (0, import_path94.join)(root2, "watchdog-failed.json");
   await (0, import_promises20.mkdir)(root2, { recursive: true });
-  await writeFile12(markerPath, JSON.stringify(marker, null, 2), "utf-8");
+  await writeFile13(markerPath, JSON.stringify(marker, null, 2), "utf-8");
 }
 async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd2) {
   const sanitized = sanitizeTeamName(teamName);
@@ -44844,6 +44865,7 @@ var init_runtime_v2 = __esm({
     init_process_identity_lock();
     init_worker_activation_gate();
     init_worker_launch_ack();
+    init_process_utils();
     init_runtime_flags();
     orchestratorByTeam = /* @__PURE__ */ new Map();
     CURSOR_UNSUPPORTED_REVIEW_INTENT_RE = /\b(?:review|audit|critic|critique|security|vulnerabilit|cve|owasp|xss|csrf|sqli|verdict|approval|approve|final\s+decision)\b/i;

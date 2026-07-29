@@ -153,6 +153,7 @@ import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
 import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
+import { isProcessIdentityLive } from '../platform/process-utils.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -2539,6 +2540,12 @@ export async function executeRecoverDeadWorkerV2Owner(
             resumePayload: continuation.payload,
           })).join('\n\n')
           : 'Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.';
+        const inboxPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+          await ensureFence();
+          await composeInitialInbox(input.teamName, sagaInput.workerName, instruction, input.cwd);
+          return true;
+        });
+        if (!inboxPublished.ok || !inboxPublished.value) throw new Error('worker_activation_failed');
         const record = {
           recovery_id: sagaInput.recoveryId,
           worker_name: sagaInput.workerName,
@@ -2551,18 +2558,36 @@ export async function executeRecoverDeadWorkerV2Owner(
         const launchedPath = `${pending.gate.runPath}.launched`;
         let launched = await waitForRecoveryGateRecord(launchedPath, record, 25, 5);
         if (!launched) {
-          if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)) throw new Error('worker_activation_failed');
-          await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
+          const runPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+            await ensureFence();
+            await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
+            return true;
+          });
+          if (!runPublished.ok || !runPublished.value) throw new Error('worker_activation_failed');
           launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
         }
         if (!launched) throw new Error('startup_ack_timeout');
+        let providerLive = false;
+        try {
+          const launchedRecord = JSON.parse(await readFile(launchedPath, 'utf8')) as {
+            provider_pid?: unknown;
+            provider_start_identity?: unknown;
+          };
+          providerLive = Number.isInteger(launchedRecord.provider_pid)
+            && typeof launchedRecord.provider_start_identity === 'string'
+            && await isProcessIdentityLive(
+              launchedRecord.provider_pid as number,
+              launchedRecord.provider_start_identity,
+              Date.now() + 1_000,
+            ) === 'live';
+        } catch { /* malformed or stale provider-start evidence fails closed */ }
+        if (!providerLive) throw new Error('worker_activation_failed');
         if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)
           || await getWorkerPaneLiveness(pending.ownership.paneId) !== 'alive') {
           throw new Error('worker_activation_failed');
         }
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
-          await composeInitialInbox(input.teamName, sagaInput.workerName, instruction, input.cwd);
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
             if (!await waitForCurrentEvidence()) return { ok: false as const, error: `${pending.agentType}_startup_evidence_missing` };
           } else if (!pending.promptMode) {

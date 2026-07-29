@@ -54,6 +54,12 @@ export type WorkerLaunchBootstrapResult = {
 export interface ProviderSpawnInvocation {
     command: string;
     args: string[];
+    batchScript?: string;
+}
+export interface MaterializedProviderSpawnInvocation {
+    command: string;
+    args: string[];
+    cleanup: () => Promise<void>;
 }
 export declare function prepareWorkerLaunchAttempt(input: {
     cwd: string;
@@ -97,6 +103,7 @@ export declare function withWorkerLaunchAttemptFence<T>(attempt: WorkerLaunchAtt
 }>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
+export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation): Promise<MaterializedProviderSpawnInvocation>;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;
 export {};
 //# sourceMappingURL=worker-launch-ack.d.ts.map

@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
@@ -85,6 +86,13 @@ export type WorkerLaunchBootstrapResult =
 export interface ProviderSpawnInvocation {
   command: string;
   args: string[];
+  batchScript?: string;
+}
+
+export interface MaterializedProviderSpawnInvocation {
+  command: string;
+  args: string[];
+  cleanup: () => Promise<void>;
 }
 
 type JsonReadResult = { kind: 'absent' } | { kind: 'malformed' } | { kind: 'value'; value: unknown };
@@ -533,10 +541,27 @@ export function buildProviderSpawnInvocation(
   if (platform === 'win32' && /\.(?:cmd|bat)$/i.test(command)) {
     return {
       command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
-      args: ['/d', '/s', '/c', providerArgv.map(quoteWindowsCmdArgument).join(' ')],
+      args: ['/d', '/s', '/c'],
+      batchScript: `@echo off\r\ncall ${providerArgv.map(quoteWindowsCmdArgument).join(' ')}\r\nexit /b %ERRORLEVEL%\r\n`,
     };
   }
   return { command, args };
+}
+
+export async function materializeProviderSpawnInvocation(
+  invocation: ProviderSpawnInvocation,
+): Promise<MaterializedProviderSpawnInvocation> {
+  if (!invocation.batchScript) {
+    return { command: invocation.command, args: invocation.args, cleanup: async () => {} };
+  }
+  const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
+  const wrapperPath = join(wrapperDir, 'launch.cmd');
+  await writeFile(wrapperPath, invocation.batchScript, { encoding: 'utf8', mode: 0o600 });
+  return {
+    command: invocation.command,
+    args: [...invocation.args, `"${wrapperPath}"`],
+    cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
+  };
 }
 
 async function publishProviderStarted(spec: WorkerLaunchBootstrapSpec, pid: number | undefined): Promise<boolean> {
@@ -576,21 +601,30 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
         return { outcome: 'superseded' as const };
       }
-      const invocation = buildProviderSpawnInvocation(spec.provider_argv);
+      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv));
       const child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd,
         env: providerEnv,
         stdio: 'inherit',
       });
       const completion = new Promise<WorkerLaunchBootstrapResult>(resolve => {
-        child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
-        child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
+        child.once('exit', async (exitCode, signal) => {
+          await invocation.cleanup();
+          resolve({ outcome: 'ran', exitCode, signal });
+        });
+        child.once('error', async () => {
+          await invocation.cleanup();
+          resolve({ outcome: 'provider_spawn_failed' });
+        });
       });
       const spawned = await new Promise<boolean>(resolve => {
         child.once('spawn', () => resolve(true));
         child.once('error', () => resolve(false));
       });
-      if (!spawned) return { outcome: 'provider_spawn_failed' as const };
+      if (!spawned) {
+        await invocation.cleanup();
+        return { outcome: 'provider_spawn_failed' as const };
+      }
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
         child.kill();
         await completion;

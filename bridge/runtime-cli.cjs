@@ -708,6 +708,13 @@ var init_atomic_write = __esm({
 });
 
 // src/platform/process-utils.ts
+function remainingDeadlineMs(deadlineAt) {
+  if (deadlineAt === void 0) return void 0;
+  return Math.max(0, deadlineAt - Date.now());
+}
+function isDeadlineExceeded(deadlineAt) {
+  return deadlineAt !== void 0 && remainingDeadlineMs(deadlineAt) === 0;
+}
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -719,6 +726,133 @@ function isProcessAlive(pid) {
     }
     return false;
   }
+}
+async function getProcessStartTime(pid, deadlineAt) {
+  if (!Number.isInteger(pid) || pid <= 0 || isDeadlineExceeded(deadlineAt)) return void 0;
+  if (process.platform === "win32") {
+    return getProcessStartTimeWindows(pid, deadlineAt);
+  } else if (process.platform === "darwin") {
+    return getProcessStartTimeMacOS(pid, deadlineAt);
+  } else if (process.platform === "linux") {
+    return getProcessStartTimeLinux(pid, deadlineAt);
+  }
+  return void 0;
+}
+async function getProcessStartTimeWindows(pid, deadlineAt) {
+  try {
+    const { stdout } = await execFileAsync("wmic", [
+      "process",
+      "where",
+      `ProcessId=${pid}`,
+      "get",
+      "CreationDate",
+      "/format:csv"
+    ], { timeout: Math.max(1, Math.min(5e3, remainingDeadlineMs(deadlineAt) ?? 5e3)), windowsHide: true });
+    const wmicTime = parseWmicCreationDate(stdout);
+    if (wmicTime !== void 0) return wmicTime;
+  } catch {
+  }
+  if (isDeadlineExceeded(deadlineAt)) return void 0;
+  const cimTime = await getProcessStartTimeWindowsPowerShellCim(pid, deadlineAt);
+  if (cimTime !== void 0) return cimTime;
+  return isDeadlineExceeded(deadlineAt) ? void 0 : getProcessStartTimeWindowsPowerShellProcess(pid, deadlineAt);
+}
+function parseWmicCreationDate(stdout) {
+  const lines = stdout.trim().split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return void 0;
+  const candidate = lines.find((line) => /,\d{14}/.test(line)) ?? lines[1];
+  const match = candidate.match(/,(\d{14})/);
+  if (!match) return void 0;
+  const d = match[1];
+  const date = new Date(
+    parseInt(d.slice(0, 4), 10),
+    parseInt(d.slice(4, 6), 10) - 1,
+    parseInt(d.slice(6, 8), 10),
+    parseInt(d.slice(8, 10), 10),
+    parseInt(d.slice(10, 12), 10),
+    parseInt(d.slice(12, 14), 10)
+  );
+  const value = date.getTime();
+  return Number.isNaN(value) ? void 0 : value;
+}
+function parseWindowsEpochMilliseconds(stdout) {
+  const match = stdout.trim().match(/-?\d+/);
+  if (!match) return void 0;
+  const value = parseInt(match[0], 10);
+  return Number.isFinite(value) ? value : void 0;
+}
+async function getProcessStartTimeWindowsPowerShellCim(pid, deadlineAt) {
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction Stop; if ($p -and $p.CreationDate) { [DateTimeOffset]$p.CreationDate | ForEach-Object { $_.ToUnixTimeMilliseconds() } }`
+      ],
+      { timeout: Math.max(1, Math.min(5e3, remainingDeadlineMs(deadlineAt) ?? 5e3)), windowsHide: true }
+    );
+    return parseWindowsEpochMilliseconds(stdout);
+  } catch {
+    return void 0;
+  }
+}
+async function getProcessStartTimeWindowsPowerShellProcess(pid, deadlineAt) {
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.StartTime) { [DateTimeOffset]$p.StartTime | ForEach-Object { $_.ToUnixTimeMilliseconds() } }`
+      ],
+      { timeout: Math.max(1, Math.min(5e3, remainingDeadlineMs(deadlineAt) ?? 5e3)), windowsHide: true }
+    );
+    return parseWindowsEpochMilliseconds(stdout);
+  } catch {
+    return void 0;
+  }
+}
+async function getProcessStartTimeMacOS(pid, deadlineAt) {
+  try {
+    const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="], {
+      env: { ...process.env, LC_ALL: "C" },
+      timeout: Math.max(1, Math.min(5e3, remainingDeadlineMs(deadlineAt) ?? 5e3)),
+      windowsHide: true
+    });
+    const date = new Date(stdout.trim());
+    return isNaN(date.getTime()) ? void 0 : date.getTime();
+  } catch {
+    return void 0;
+  }
+}
+async function getProcessStartTimeLinux(pid, deadlineAt) {
+  if (isDeadlineExceeded(deadlineAt)) return void 0;
+  try {
+    const stat2 = await fsPromises.readFile(`/proc/${pid}/stat`, "utf8");
+    const closeParen = stat2.lastIndexOf(")");
+    if (closeParen === -1) return void 0;
+    const fields = stat2.substring(closeParen + 2).split(" ");
+    const startTime = parseInt(fields[19], 10);
+    return isNaN(startTime) ? void 0 : startTime;
+  } catch {
+    return void 0;
+  }
+}
+async function getProcessStartIdentity(pid, deadlineAt) {
+  const startTime = await getProcessStartTime(pid, deadlineAt);
+  return startTime === void 0 || isDeadlineExceeded(deadlineAt) ? null : String(startTime);
+}
+async function isProcessIdentityLive(pid, expectedStartIdentity, deadlineAt) {
+  if (!Number.isInteger(pid) || pid <= 0 || !expectedStartIdentity || isDeadlineExceeded(deadlineAt)) {
+    return isDeadlineExceeded(deadlineAt) ? "unknown" : "dead";
+  }
+  if (!isProcessAlive(pid)) return "dead";
+  const identity = await getProcessStartIdentity(pid, deadlineAt);
+  if (identity === null) return isProcessAlive(pid) ? "unknown" : "dead";
+  return identity === expectedStartIdentity ? "live" : "mismatch";
 }
 var import_child_process4, import_util2, fsPromises, execFileAsync;
 var init_process_utils = __esm({
@@ -1232,10 +1366,30 @@ function buildProviderSpawnInvocation(providerArgv, platform = process.platform,
   if (platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
     return {
       command: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
-      args: ["/d", "/s", "/c", providerArgv.map(quoteWindowsCmdArgument).join(" ")]
+      args: ["/d", "/s", "/c"],
+      batchScript: `@echo off\r
+call ${providerArgv.map(quoteWindowsCmdArgument).join(" ")}\r
+exit /b %ERRORLEVEL%\r
+`
     };
   }
   return { command, args };
+}
+async function materializeProviderSpawnInvocation(invocation) {
+  if (!invocation.batchScript) {
+    return { command: invocation.command, args: invocation.args, cleanup: async () => {
+    } };
+  }
+  const wrapperDir = await (0, import_promises.mkdtemp)((0, import_node_path.join)((0, import_node_os.tmpdir)(), "omc-provider-"));
+  const wrapperPath = (0, import_node_path.join)(wrapperDir, "launch.cmd");
+  await (0, import_promises.writeFile)(wrapperPath, invocation.batchScript, { encoding: "utf8", mode: 384 });
+  return {
+    command: invocation.command,
+    args: [...invocation.args, `"${wrapperPath}"`],
+    cleanup: async () => {
+      await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true });
+    }
+  };
 }
 async function publishProviderStarted(spec, pid) {
   const record = {
@@ -1273,21 +1427,30 @@ async function runWorkerLaunchBootstrap(value) {
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
         return { outcome: "superseded" };
       }
-      const invocation = buildProviderSpawnInvocation(spec.provider_argv);
+      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv));
       const child = (0, import_node_child_process.spawn)(invocation.command, invocation.args, {
         cwd: spec.cwd,
         env: providerEnv,
         stdio: "inherit"
       });
       const completion = new Promise((resolve8) => {
-        child.once("exit", (exitCode, signal) => resolve8({ outcome: "ran", exitCode, signal }));
-        child.once("error", () => resolve8({ outcome: "provider_spawn_failed" }));
+        child.once("exit", async (exitCode, signal) => {
+          await invocation.cleanup();
+          resolve8({ outcome: "ran", exitCode, signal });
+        });
+        child.once("error", async () => {
+          await invocation.cleanup();
+          resolve8({ outcome: "provider_spawn_failed" });
+        });
       });
       const spawned = await new Promise((resolve8) => {
         child.once("spawn", () => resolve8(true));
         child.once("error", () => resolve8(false));
       });
-      if (!spawned) return { outcome: "provider_spawn_failed" };
+      if (!spawned) {
+        await invocation.cleanup();
+        return { outcome: "provider_spawn_failed" };
+      }
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
         child.kill();
         await completion;
@@ -1310,7 +1473,7 @@ async function runWorkerLaunchBootstrap(value) {
     return { outcome: "provider_spawn_failed" };
   }
 }
-var import_node_child_process, import_node_crypto2, import_node_fs, import_promises, import_node_path, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS;
+var import_node_child_process, import_node_crypto2, import_node_fs, import_promises, import_node_path, import_node_os, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS;
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
@@ -1319,6 +1482,7 @@ var init_worker_launch_ack = __esm({
     import_node_fs = require("node:fs");
     import_promises = require("node:fs/promises");
     import_node_path = require("node:path");
+    import_node_os = require("node:os");
     init_state_paths();
     init_atomic_write();
     init_file_lock();
@@ -3401,10 +3565,10 @@ async function readJsonFileState(filePath) {
   }
 }
 async function writeAtomic(filePath, data) {
-  const { writeFile: writeFile10 } = await import("fs/promises");
+  const { writeFile: writeFile11 } = await import("fs/promises");
   await (0, import_promises6.mkdir)((0, import_path19.dirname)(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeFile10(tmpPath, data, "utf-8");
+  await writeFile11(tmpPath, data, "utf-8");
   const { rename: rename6 } = await import("fs/promises");
   await rename6(tmpPath, filePath);
 }
@@ -3782,9 +3946,9 @@ async function saveTeamConfig(config, cwd, expectedRevision) {
 }
 async function cleanupTeamState(teamName, cwd) {
   const root = absPath(cwd, TeamPaths.root(teamName));
-  const { rm: rm5 } = await import("fs/promises");
+  const { rm: rm6 } = await import("fs/promises");
   try {
-    await rm5(root, { recursive: true, force: true });
+    await rm6(root, { recursive: true, force: true });
   } catch {
   }
 }
@@ -6616,7 +6780,7 @@ var import_node_child_process2 = require("node:child_process");
 
 // src/lib/worktree-cleanup-safety.ts
 var import_node_fs2 = require("node:fs");
-var import_node_os = require("node:os");
+var import_node_os2 = require("node:os");
 var import_node_path2 = require("node:path");
 function realpathOrResolve(path4) {
   try {
@@ -6635,7 +6799,7 @@ function assertSafeBoundary(path4, label) {
   }
   const resolved = realpathOrResolve(trimmed);
   const root = (0, import_node_path2.parse)(resolved).root;
-  const home = realpathOrResolve((0, import_node_os.homedir)());
+  const home = realpathOrResolve((0, import_node_os2.homedir)());
   if (resolved === root) {
     throw new Error(`${label}_is_filesystem_root:${resolved}`);
   }
@@ -10852,6 +11016,7 @@ var import_node_child_process6 = require("node:child_process");
 var import_promises14 = require("node:fs/promises");
 var import_node_path10 = require("node:path");
 init_worker_launch_ack();
+init_process_utils();
 async function writeAtomic3(path4, value) {
   await (0, import_promises14.mkdir)((0, import_node_path10.dirname)(path4), { recursive: true });
   const temporary = `${path4}.tmp.${process.pid}.${Date.now()}`;
@@ -10895,22 +11060,59 @@ async function runWorkerActivationGate(gate) {
       OMC_RECOVERY_GATE_SPEC_B64: _encodedRecoveryGateSpec,
       ...providerProcessEnv
     } = process.env;
-    const invocation = buildProviderSpawnInvocation(gate.providerArgv);
+    const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv));
     const child = (0, import_node_child_process6.spawn)(invocation.command, invocation.args, {
       cwd: gate.cwd,
       env: { ...providerProcessEnv, ...gate.env },
       stdio: "inherit"
     });
+    let settled = false;
     const completion = new Promise((resolve8) => {
-      child.once("exit", (exitCode, signal) => resolve8({ outcome: "ran", exitCode, signal }));
-      child.once("error", () => resolve8({ outcome: "provider_spawn_failed" }));
+      const finish = async (result, terminal) => {
+        if (settled) return;
+        settled = true;
+        try {
+          await writeAtomic3(`${gate.runPath}.terminal`, {
+            ...expected,
+            provider_pid: child.pid ?? null,
+            ...terminal,
+            written_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        } catch {
+        }
+        await invocation.cleanup();
+        resolve8(result);
+      };
+      child.once("exit", (exitCode, signal) => {
+        void finish({ outcome: "ran", exitCode, signal }, { outcome: "exit", exit_code: exitCode, signal });
+      });
+      child.once("error", () => {
+        void finish({ outcome: "provider_spawn_failed" }, { outcome: "error" });
+      });
     });
     const spawned = await new Promise((resolve8) => {
       child.once("spawn", () => resolve8(true));
       child.once("error", () => resolve8(false));
     });
-    if (!spawned) return { outcome: "provider_spawn_failed" };
-    await writeAtomic3(`${gate.runPath}.launched`, { ...expected, written_at: (/* @__PURE__ */ new Date()).toISOString() });
+    if (!spawned) {
+      await invocation.cleanup();
+      return { outcome: "provider_spawn_failed" };
+    }
+    await new Promise((resolve8) => setTimeout(resolve8, 150));
+    if (settled) return await completion;
+    const providerPid = child.pid;
+    const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
+    if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+      child.kill();
+      await completion;
+      return { outcome: "provider_spawn_failed" };
+    }
+    await writeAtomic3(`${gate.runPath}.launched`, {
+      ...expected,
+      provider_pid: providerPid,
+      provider_start_identity: providerStartIdentity,
+      written_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
     return { completion };
   });
   if (!fenced.ok) return { outcome: "superseded" };
@@ -10923,6 +11125,7 @@ async function runWorkerActivationGate(gate) {
 
 // src/team/runtime-v2.ts
 init_worker_launch_ack();
+init_process_utils();
 function hasRequiredRecoveryPaneIdentities(result) {
   if (result.outcome !== "recovered" && result.outcome !== "already_running") return true;
   return Boolean(result.newPaneId.trim()) && (result.outcome !== "recovered" || Boolean(result.oldPaneId?.trim()));
@@ -12635,6 +12838,12 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           sequence: continuation.sequence,
           resumePayload: continuation.payload
         })).join("\n\n") : "Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.";
+        const inboxPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+          await ensureFence();
+          await composeInitialInbox(input.teamName, sagaInput2.workerName, instruction, input.cwd);
+          return true;
+        });
+        if (!inboxPublished.ok || !inboxPublished.value) throw new Error("worker_activation_failed");
         const record = {
           recovery_id: sagaInput2.recoveryId,
           worker_name: sagaInput2.workerName,
@@ -12647,17 +12856,31 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         const launchedPath = `${pending.gate.runPath}.launched`;
         let launched = await waitForRecoveryGateRecord(launchedPath, record, 25, 5);
         if (!launched) {
-          if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)) throw new Error("worker_activation_failed");
-          await (0, import_promises15.writeFile)(pending.gate.runPath, JSON.stringify(record), "utf8");
+          const runPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+            await ensureFence();
+            await (0, import_promises15.writeFile)(pending.gate.runPath, JSON.stringify(record), "utf8");
+            return true;
+          });
+          if (!runPublished.ok || !runPublished.value) throw new Error("worker_activation_failed");
           launched = await waitForRecoveryGateRecord(launchedPath, record, 3e4);
         }
         if (!launched) throw new Error("startup_ack_timeout");
+        let providerLive = false;
+        try {
+          const launchedRecord = JSON.parse(await (0, import_promises15.readFile)(launchedPath, "utf8"));
+          providerLive = Number.isInteger(launchedRecord.provider_pid) && typeof launchedRecord.provider_start_identity === "string" && await isProcessIdentityLive(
+            launchedRecord.provider_pid,
+            launchedRecord.provider_start_identity,
+            Date.now() + 1e3
+          ) === "live";
+        } catch {
+        }
+        if (!providerLive) throw new Error("worker_activation_failed");
         if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt) || await getWorkerPaneLiveness(pending.ownership.paneId) !== "alive") {
           throw new Error("worker_activation_failed");
         }
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
-          await composeInitialInbox(input.teamName, sagaInput2.workerName, instruction, input.cwd);
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
             if (!await waitForCurrentEvidence()) return { ok: false, error: `${pending.agentType}_startup_evidence_missing` };
           } else if (!pending.promptMode) {

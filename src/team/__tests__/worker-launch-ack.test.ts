@@ -13,6 +13,7 @@ import {
   runWorkerLaunchBootstrap,
   revokeWorkerLaunchAttempt,
   buildProviderSpawnInvocation,
+  materializeProviderSpawnInvocation,
 } from '../worker-launch-ack.js';
 
 let cwd = '';
@@ -326,22 +327,24 @@ describe('worker launch acknowledgement', () => {
     });
   });
 
-  it('routes native Windows batch shims through COMSPEC without changing POSIX argv', () => {
+  it('routes native Windows batch shims through a percent-safe temporary wrapper without changing POSIX argv', async () => {
     const providerArgv = [
       'C:\\Program Files\\Codex\\codex.cmd',
       '--label=100% ready',
       'say "hello" & continue',
     ];
 
-    expect(buildProviderSpawnInvocation(providerArgv, 'win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' })).toEqual({
+    const windowsInvocation = buildProviderSpawnInvocation(providerArgv, 'win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' });
+    expect(windowsInvocation).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
-      args: [
-        '/d',
-        '/s',
-        '/c',
-        '"C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "say ""hello"" & continue"',
-      ],
+      args: ['/d', '/s', '/c'],
+      batchScript: '@echo off\r\ncall "C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "say ""hello"" & continue"\r\nexit /b %ERRORLEVEL%\r\n',
     });
+    const materialized = await materializeProviderSpawnInvocation(windowsInvocation);
+    const wrapperPath = materialized.args[3]!.slice(1, -1);
+    await expect(readFile(wrapperPath, 'utf8')).resolves.toBe(windowsInvocation.batchScript);
+    await materialized.cleanup();
+    await expect(readFile(wrapperPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(buildProviderSpawnInvocation(providerArgv, 'linux')).toEqual({
       command: providerArgv[0],
       args: providerArgv.slice(1),

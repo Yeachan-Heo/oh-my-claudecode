@@ -180,6 +180,10 @@ describe('recovery pane rollback evidence', () => {
     const teamName = 'idle-gemini-team';
     const requestId = 'idle-gemini-request';
     const recoveryId = 'idle-gemini-recovery';
+    const inboxPath = absPath(cwd, TeamPaths.inbox(teamName, 'worker-1'));
+    const providerObservedPath = join(cwd, 'provider-observed-inbox.txt');
+    mkdirSync(join(inboxPath, '..'), { recursive: true });
+    writeFileSync(inboxPath, 'STALE PRE-RECOVERY INBOX', 'utf8');
     const serviceDescriptor = {
       schema_version: 1,
       service_generation: 1,
@@ -197,7 +201,13 @@ describe('recovery pane rollback evidence', () => {
         name: 'worker-1',
         index: 1,
         worker_cli: 'gemini',
-        launch_descriptor: { schema_version: 1, provider: 'gemini', model: null, binary: process.execPath, args: ['-e', 'process.exit(0)'] },
+        launch_descriptor: {
+          schema_version: 1,
+          provider: 'gemini',
+          model: null,
+          binary: process.execPath,
+          args: ['-e', `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(providerObservedPath)},fs.readFileSync(${JSON.stringify(inboxPath)},'utf8'));setTimeout(()=>process.exit(0),1500)`],
+        },
         pane_id: '%1',
         replacement_generation: 1,
         working_dir: cwd,
@@ -308,6 +318,8 @@ describe('recovery pane rollback evidence', () => {
         replacement_generation: 2,
         launch_attempt_id: expectedLaunchAttemptId,
       });
+      expect(readFileSync(providerObservedPath, 'utf8')).toContain('Recovery completed for this idle worker.');
+      expect(readFileSync(providerObservedPath, 'utf8')).not.toContain('STALE PRE-RECOVERY INBOX');
       const followupRequestId = 'idle-gemini-followup-request';
       const followupRecoveryId = 'idle-gemini-followup-recovery';
       reserveRecoveryRequest(cwd, followupRequestId, {

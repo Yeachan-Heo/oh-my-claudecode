@@ -2,7 +2,8 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { buildProviderSpawnInvocation, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from './worker-launch-ack.js';
+import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from './worker-launch-ack.js';
+import { getProcessStartIdentity, isProcessAlive } from '../platform/process-utils.js';
 export interface RecoveryActivationGate {
   recoveryId: string;
   workerName: string;
@@ -33,7 +34,7 @@ interface GateRecord {
   written_at: string;
 }
 
-async function writeAtomic(path: string, value: GateRecord): Promise<void> {
+async function writeAtomic(path: string, value: object): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
   await writeFile(temporary, JSON.stringify(value), 'utf8');
@@ -89,22 +90,57 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       OMC_RECOVERY_GATE_SPEC_B64: _encodedRecoveryGateSpec,
       ...providerProcessEnv
     } = process.env;
-    const invocation = buildProviderSpawnInvocation(gate.providerArgv);
+    const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv));
     const child = spawn(invocation.command, invocation.args, {
       cwd: gate.cwd,
       env: { ...providerProcessEnv, ...gate.env },
       stdio: 'inherit',
     });
+    let settled = false;
     const completion = new Promise<RecoveryActivationGateResult>(resolve => {
-      child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
-      child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
+      const finish = async (
+        result: RecoveryActivationGateResult,
+        terminal: Record<string, unknown>,
+      ) => {
+        if (settled) return;
+        settled = true;
+        try {
+          await writeAtomic(`${gate.runPath}.terminal`, { ...expected, provider_pid: child.pid ?? null, ...terminal,
+            written_at: new Date().toISOString() });
+        } catch { /* owner may have already cleaned terminal attempt state */ }
+        await invocation.cleanup();
+        resolve(result);
+      };
+      child.once('exit', (exitCode, signal) => {
+        void finish({ outcome: 'ran', exitCode, signal }, { outcome: 'exit', exit_code: exitCode, signal });
+      });
+      child.once('error', () => {
+        void finish({ outcome: 'provider_spawn_failed' }, { outcome: 'error' });
+      });
     });
     const spawned = await new Promise<boolean>(resolve => {
       child.once('spawn', () => resolve(true));
       child.once('error', () => resolve(false));
     });
-    if (!spawned) return { outcome: 'provider_spawn_failed' as const };
-    await writeAtomic(`${gate.runPath}.launched`, { ...expected, written_at: new Date().toISOString() });
+    if (!spawned) {
+      await invocation.cleanup();
+      return { outcome: 'provider_spawn_failed' as const };
+    }
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (settled) return await completion;
+    const providerPid = child.pid;
+    const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
+    if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+      child.kill();
+      await completion;
+      return { outcome: 'provider_spawn_failed' as const };
+    }
+    await writeAtomic(`${gate.runPath}.launched`, {
+      ...expected,
+      provider_pid: providerPid,
+      provider_start_identity: providerStartIdentity,
+      written_at: new Date().toISOString(),
+    });
     return { completion };
   });
   if (!fenced.ok) return { outcome: 'superseded' };
