@@ -915,6 +915,25 @@ describe('runtime v2 startup inbox dispatch', () => {
 
 
 
+  it('fails closed when a distinct split pane is not a member of the provider target', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-foreign-split-'));
+    mocks.workerPaneBelongsToProviderTarget
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['codex'],
+      tasks: [{ subject: 'Dispatch test', description: 'Reject foreign split pane' }],
+      cwd,
+    })).rejects.toThrow('worker_pane_membership_unverified:%2');
+
+    expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+  });
+
   it('aborts startup without persisting a live worker when launch acknowledgement fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-start-delivery-fail-'));
     mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('worker_start_ack_ack_timeout:worker-1:%2:attempt'));

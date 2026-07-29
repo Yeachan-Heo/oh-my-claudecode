@@ -437,6 +437,41 @@ describe('recovery pane rollback evidence', () => {
       split: { commandSucceeded: false, provider: 'tmux', rawOutput: '%orphan', stderr: 'transport interrupted', paneId: null } });
   });
 
+  it('records a valid recovery split that loses provider-target membership before activation', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-membership-loss-'));
+    const teamName = 'membership-loss-team';
+    const requestId = 'membership-loss-request';
+    const recoveryId = 'membership-loss-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%9',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    paneMocks.getWorkerLiveness.mockResolvedValue('dead');
+    paneMocks.workerPaneBelongsToProviderTarget
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    paneMocks.splitTeamWorkerPaneWithEvidence.mockResolvedValueOnce({ commandSucceeded: true, provider: 'tmux',
+      splitTarget: '%9', direction: 'right', rawOutput: '%10\n', stderr: '', paneId: '%10' });
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'worker_activation_failed', recoveryId });
+    expect(paneMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(paneMocks.killTeamPane).not.toHaveBeenCalled();
+    const evidenceRoot = absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`);
+    const evidenceFiles = readdirSync(evidenceRoot);
+    expect(evidenceFiles).toHaveLength(1);
+    const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
+    expect(evidence).toMatchObject({ reason: 'pane_membership_unverified', unaddressable: true,
+      split: { provider: 'tmux', paneId: '%10' } });
+  });
+
   it('never launches or kills when recovery split aliases the leader pane', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-leader-alias-'));
     const teamName = 'leader-alias-team';

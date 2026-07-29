@@ -42246,7 +42246,7 @@ async function spawnV2Worker(opts) {
     provider: ownershipResult.ownership.provider,
     providerTarget: ownershipResult.ownership.providerTarget,
     paneId: ownershipResult.ownership.paneId
-  })) throw new Error("worker_pane_membership_unverified");
+  })) throw new Error(`worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`);
   const ownership = ownershipResult.ownership;
   const paneId = ownership.paneId;
   const usePromptMode = isPromptModeAgent(opts.agentType);
@@ -43359,7 +43359,16 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           provider: ownershipResult.ownership.provider,
           providerTarget: ownershipResult.ownership.providerTarget,
           paneId: ownershipResult.ownership.paneId
-        })) return { ok: false, error: "worker_activation_failed" };
+        })) {
+          await recordUnaddressableRecoveryPaneFailure(
+            input,
+            sagaInput2.recoveryId,
+            paneAttemptId,
+            "pane_membership_unverified",
+            split
+          );
+          return { ok: false, error: "worker_activation_failed" };
+        }
         let pending;
         try {
           pending = await buildRecoveryPaneContext(
