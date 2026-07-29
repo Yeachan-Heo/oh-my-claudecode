@@ -60,6 +60,7 @@ describe('worker launch acknowledgement', () => {
 
   it('revokes a timed-out attempt and treats a later acknowledgement as losing evidence', async () => {
     const launchAttempt = await attempt();
+    const providerMarker = join(cwd, 'provider-ran');
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
       timeoutMs: 20,
       pollIntervalMs: 5,
@@ -67,10 +68,11 @@ describe('worker launch acknowledgement', () => {
 
     const spec = buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'process.exit(99)'],
+      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
       cwd,
     );
     await expect(runWorkerLaunchBootstrap(spec)).resolves.toEqual({ outcome: 'revoked' });
+    await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
 
     const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
