@@ -218,6 +218,7 @@ export declare function paneLooksReady(captured: string): boolean;
 export interface WaitForPaneReadyOptions {
     timeoutMs?: number;
     pollIntervalMs?: number;
+    attemptAlreadyFenced?: boolean;
 }
 export declare function waitForPaneReady(paneId: string, opts?: WaitForPaneReadyOptions): Promise<boolean>;
 export type StartupPaneReadyResult = {
@@ -227,7 +228,9 @@ export type StartupPaneReadyResult = {
     reason: 'attempt_inactive' | 'ownership_mismatch' | 'copy_mode' | 'copy_mode_unknown' | 'capture_failed' | 'selector_unsupported' | 'selector_persistent' | 'pane_busy' | 'readiness_timeout';
 };
 export declare function waitForStartupPaneReady(context: StartupPaneContext, opts?: WaitForPaneReadyOptions): Promise<StartupPaneReadyResult>;
-export declare function deliverStartupInbox(context: StartupPaneContext, message: string): Promise<{
+export declare function deliverStartupInbox(context: StartupPaneContext, message: string, options?: {
+    attemptAlreadyFenced?: boolean;
+}): Promise<{
     ok: true;
     kind: 'attempted_unconfirmed';
 } | {

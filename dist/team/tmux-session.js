@@ -623,7 +623,12 @@ export function buildWorkerStartCommand(config) {
         : config.envVars;
     const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
     if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
-        const envPrefix = Object.entries(envVars)
+        const windowsEnvVars = { ...envVars };
+        if (windowsEnvVars.OMC_WORKER_LAUNCH_SPEC) {
+            windowsEnvVars.OMC_WORKER_LAUNCH_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_WORKER_LAUNCH_SPEC, 'utf8').toString('base64');
+            delete windowsEnvVars.OMC_WORKER_LAUNCH_SPEC;
+        }
+        const envPrefix = Object.entries(windowsEnvVars)
             .map(([key, value]) => {
             assertSafeEnvKey(key);
             return `set "${key}=${escapeForCmdSet(value)}"`;
@@ -1326,11 +1331,11 @@ async function sendLiteralPaneText(paneId, text) {
     }
     await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', text]);
 }
-async function startupContextIsActive(context) {
+async function startupContextIsActive(context, attemptAlreadyFenced = false) {
     return context.ownership.paneId === context.attempt.pane_id
         && context.provider === context.attempt.provider
         && await isWorkerLaunchAttemptAccepted(context.attempt)
-        && await isWorkerLaunchAttemptCurrent(context.attempt);
+        && (attemptAlreadyFenced || await isWorkerLaunchAttemptCurrent(context.attempt));
 }
 export async function waitForStartupPaneReady(context, opts = {}) {
     if (context.ownership.paneId !== context.attempt.pane_id || context.provider !== context.attempt.provider) {
@@ -1341,7 +1346,7 @@ export async function waitForStartupPaneReady(context, opts = {}) {
     const deadline = Date.now() + timeoutMs;
     const handledSelectors = new Set();
     while (Date.now() < deadline) {
-        if (!await startupContextIsActive(context))
+        if (!await startupContextIsActive(context, opts.attemptAlreadyFenced))
             return { ok: false, reason: 'attempt_inactive' };
         const copyMode = await paneCopyModeObservation(context.ownership.paneId);
         if (copyMode === null)
@@ -1375,10 +1380,10 @@ export async function waitForStartupPaneReady(context, opts = {}) {
     }
     return { ok: false, reason: 'readiness_timeout' };
 }
-export async function deliverStartupInbox(context, message) {
+export async function deliverStartupInbox(context, message, options = {}) {
     if (message.length > 200)
         return { ok: false, reason: 'message_too_long' };
-    const ready = await waitForStartupPaneReady(context);
+    const ready = await waitForStartupPaneReady(context, { attemptAlreadyFenced: options.attemptAlreadyFenced });
     if (!ready.ok)
         return { ok: false, reason: ready.reason };
     try {

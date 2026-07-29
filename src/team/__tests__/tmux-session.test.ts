@@ -217,10 +217,10 @@ describe('buildWorkerStartCommand', () => {
     });
 
     expect(cmd).toContain('C:\\Windows\\System32\\cmd.exe /d /s /c');
-    const marker = 'set "OMC_WORKER_LAUNCH_SPEC=';
+    const marker = 'set "OMC_WORKER_LAUNCH_SPEC_B64=';
     const encodedStart = cmd.indexOf(marker) + marker.length;
     const encodedEnd = cmd.indexOf('" &&', encodedStart);
-    const decodedSpec = cmd.slice(encodedStart, encodedEnd).replace(/""/g, '"').replace(/%%/g, '%');
+    const decodedSpec = Buffer.from(cmd.slice(encodedStart, encodedEnd), 'base64').toString('utf8');
     const spec = JSON.parse(decodedSpec);
     expect(spec.provider_argv).toEqual([
       'C:\\Program Files\\Codex\\codex.exe',
@@ -229,6 +229,8 @@ describe('buildWorkerStartCommand', () => {
       '--title="quoted"',
     ]);
     expect(cmd).not.toContain('100% ready %USERPROFILE%');
+    expect(cmd).not.toContain('pane_id=%%2');
+    expect(cmd).not.toContain('OMC_WORKER_LAUNCH_SPEC=');
   });
 
   it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {

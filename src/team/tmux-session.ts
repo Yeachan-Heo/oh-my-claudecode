@@ -786,7 +786,12 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
 
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
-    const envPrefix = Object.entries(envVars)
+    const windowsEnvVars = { ...envVars };
+    if (windowsEnvVars.OMC_WORKER_LAUNCH_SPEC) {
+      windowsEnvVars.OMC_WORKER_LAUNCH_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_WORKER_LAUNCH_SPEC, 'utf8').toString('base64');
+      delete windowsEnvVars.OMC_WORKER_LAUNCH_SPEC;
+    }
+    const envPrefix = Object.entries(windowsEnvVars)
       .map(([key, value]) => {
         assertSafeEnvKey(key);
         return `set "${key}=${escapeForCmdSet(value)}"`;
@@ -1591,6 +1596,7 @@ export function paneLooksReady(captured: string): boolean {
 export interface WaitForPaneReadyOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
+  attemptAlreadyFenced?: boolean;
 }
 
 export async function waitForPaneReady(
@@ -1654,11 +1660,11 @@ async function sendLiteralPaneText(paneId: string, text: string): Promise<void> 
   await tmuxExecAsync(['send-keys', '-t', paneId, '-l', '--', text]);
 }
 
-async function startupContextIsActive(context: StartupPaneContext): Promise<boolean> {
+async function startupContextIsActive(context: StartupPaneContext, attemptAlreadyFenced = false): Promise<boolean> {
   return context.ownership.paneId === context.attempt.pane_id
     && context.provider === context.attempt.provider
     && await isWorkerLaunchAttemptAccepted(context.attempt)
-    && await isWorkerLaunchAttemptCurrent(context.attempt);
+    && (attemptAlreadyFenced || await isWorkerLaunchAttemptCurrent(context.attempt));
 }
 
 export async function waitForStartupPaneReady(
@@ -1674,7 +1680,7 @@ export async function waitForStartupPaneReady(
   const handledSelectors = new Set<PaneTrustPromptKind>();
 
   while (Date.now() < deadline) {
-    if (!await startupContextIsActive(context)) return { ok: false, reason: 'attempt_inactive' };
+    if (!await startupContextIsActive(context, opts.attemptAlreadyFenced)) return { ok: false, reason: 'attempt_inactive' };
     const copyMode = await paneCopyModeObservation(context.ownership.paneId);
     if (copyMode === null) return { ok: false, reason: 'copy_mode_unknown' };
     if (copyMode) return { ok: false, reason: 'copy_mode' };
@@ -1704,9 +1710,10 @@ export async function waitForStartupPaneReady(
 export async function deliverStartupInbox(
   context: StartupPaneContext,
   message: string,
+  options: { attemptAlreadyFenced?: boolean } = {},
 ): Promise<{ ok: true; kind: 'attempted_unconfirmed' } | { ok: false; reason: string }> {
   if (message.length > 200) return { ok: false, reason: 'message_too_long' };
-  const ready = await waitForStartupPaneReady(context);
+  const ready = await waitForStartupPaneReady(context, { attemptAlreadyFenced: options.attemptAlreadyFenced });
   if (!ready.ok) return { ok: false, reason: ready.reason };
   try {
     await sendLiteralPaneText(context.ownership.paneId, message);

@@ -570,7 +570,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
   const decision = await waitForBootstrapDecision(spec);
   if (decision === 'timeout') return { outcome: 'decision_timeout' };
   if (decision === 'revoked') return { outcome: 'revoked' };
-  const { OMC_WORKER_LAUNCH_SPEC: _launchSpec, ...providerEnv } = process.env;
+  const { OMC_WORKER_LAUNCH_SPEC: _launchSpec, OMC_WORKER_LAUNCH_SPEC_B64: _encodedLaunchSpec, ...providerEnv } = process.env;
   try {
     const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {

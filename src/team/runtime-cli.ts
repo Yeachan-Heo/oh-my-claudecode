@@ -1203,7 +1203,10 @@ async function runRecoveryGateFromEnvironment(): Promise<void> {
 }
 
 export async function runWorkerLaunchFromEnvironment(): Promise<void> {
-  const raw = process.env.OMC_WORKER_LAUNCH_SPEC;
+  const raw = process.env.OMC_WORKER_LAUNCH_SPEC
+    ?? (process.env.OMC_WORKER_LAUNCH_SPEC_B64
+      ? Buffer.from(process.env.OMC_WORKER_LAUNCH_SPEC_B64, 'base64').toString('utf8')
+      : undefined);
   if (!raw) throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
   let spec: unknown;
   try {
