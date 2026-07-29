@@ -147,7 +147,7 @@ describe('buildWorkerStartCommand', () => {
 
     expect(cmd).toBe(
       'C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
-      '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1""'
+      '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1"" & exit /b'
     );
     expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
   });
@@ -345,7 +345,7 @@ describe('buildWorkerStartCommand', () => {
 
     expect(cmd).toBe(
       'C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
-      '"C:\\Program Files\\OpenAI\\Codex\\codex.exe" "--full-auto""'
+      '"C:\\Program Files\\OpenAI\\Codex\\codex.exe" "--full-auto"" & exit /b'
     );
   });
 

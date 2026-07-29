@@ -640,7 +640,7 @@ export function buildWorkerStartCommand(config) {
             .join(' && ');
         const launch = launchWords.map(part => `"${escapeForCmdSet(part)}"`).join(' ');
         const cmdBody = envPrefix ? `${envPrefix} && ${launch}` : launch;
-        return `${shell} /d /s /c "${cmdBody}"`;
+        return `${shell} /d /s /c "${cmdBody}" & exit /b`;
     }
     const envAssignments = Object.entries(envVars).map(([key, value]) => {
         assertSafeEnvKey(key);

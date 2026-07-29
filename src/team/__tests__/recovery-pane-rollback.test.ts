@@ -75,20 +75,29 @@ afterEach(() => {
 
 async function expectRecoveryLockReleased(teamName: string, workerName: string, suffix: string): Promise<void> {
   const requestId = `${suffix}-followup-request`;
+  const followupRecoveryId = `${suffix}-followup-recovery`;
   reserveRecoveryRequest(cwd, requestId, {
     operation: 'recover-worker',
     workspaceHash: createHash('sha256').update(cwd).digest('hex'),
     teamName,
     workerName,
-  }, `${suffix}-followup-recovery`);
+  }, followupRecoveryId);
   let timeout: NodeJS.Timeout | undefined;
-  await expect(Promise.race([
+  const followup = await Promise.race([
     executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName, requestId }),
     new Promise<never>((_, reject) => {
       timeout = setTimeout(() => reject(new Error('recovery lock remained held after terminal failure')), 2_000);
     }),
-  ])).resolves.toBeDefined();
+  ]);
   if (timeout) clearTimeout(timeout);
+  expect(followup).toMatchObject({
+    outcome: 'failed',
+    committed: false,
+    error: 'team_mutation_busy',
+    recoveryId: followupRecoveryId,
+  });
+  const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
+  expect(config.active_recovery?.recovery_id).not.toBe(followupRecoveryId);
 }
 
 describe('recovery pane rollback evidence', () => {
@@ -329,7 +338,7 @@ describe('recovery pane rollback evidence', () => {
       await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
         .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
       expect(bootstrapResult).toBeDefined();
-      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: null, signal: null });
+      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
       expect(existsSync(launchedPath)).toBe(true);
       expect(JSON.parse(readFileSync(launchedPath, 'utf8'))).toMatchObject({
         recovery_id: recoveryId,

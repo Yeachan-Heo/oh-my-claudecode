@@ -501,8 +501,6 @@ export async function runWorkerLaunchBootstrap(value) {
                 await completion;
                 return { outcome: 'provider_spawn_failed' };
             }
-            if (spec.release_after_spawn)
-                return { outcome: 'ran', exitCode: null, signal: null };
             return { completion };
         });
         if ('completion' in launched) {
