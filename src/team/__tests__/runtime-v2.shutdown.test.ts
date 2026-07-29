@@ -244,7 +244,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 });
 
-    expect(tmuxMocks.killWorkerPanes).toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%42'], undefined, { sessionMode: 'split-pane' });
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
@@ -287,7 +287,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 });
 
-    expect(tmuxMocks.killWorkerPanes).toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%44'], undefined, { sessionMode: 'split-pane' });
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
@@ -323,12 +323,12 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       resize_hook_target: null,
       next_task_id: 1,
     }, null, 2), 'utf-8');
-    tmuxMocks.killWorkerPanes.mockRejectedValueOnce(new Error('tmux unavailable'));
+    tmuxMocks.killTeamSession.mockRejectedValueOnce(new Error('tmux unavailable'));
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 });
 
-    expect(tmuxMocks.killWorkerPanes).toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%43'], undefined, { sessionMode: 'split-pane' });
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
