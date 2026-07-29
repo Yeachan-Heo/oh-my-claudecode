@@ -252,6 +252,13 @@ describe('worker launch acknowledgement', () => {
     const bootstrap = runWorkerLaunchBootstrap(spec);
     await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
     await bootstrap;
+    const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8'));
+    expect(started).toMatchObject({
+      kind: 'worker_launch_provider_started',
+      attempt_id: launchAttempt.attempt_id,
+      pane_id: '%22',
+      provider: 'codex',
+    });
 
     await expect(loadCurrentWorkerLaunchAttempt({
       cwd,
