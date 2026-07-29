@@ -852,20 +852,22 @@ describe('prunePluginDuplicateAgents', () => {
 
     mkdirSync(agentsDir, { recursive: true });
     const candidatePath = join(agentsDir, 'architect.md');
+    const replacementTarget = join(tempDir, 'replacement-architect.md');
     writeFileSync(candidatePath, historicalAgent('architect.md'));
+    writeFileSync(replacementTarget, 'replacement target\n');
 
     let candidateStats = 0;
     fsMocks.lstatSync.mockImplementation(path => {
       if (String(path) === candidatePath && ++candidateStats === 2) {
         rmSync(candidatePath);
-        mkdirSync(candidatePath);
+        symlinkSync(replacementTarget, candidatePath);
       }
       return actualFs.lstatSync(path);
     });
 
     try {
       expect(prune(log)).toEqual([]);
-      expect(actualFs.lstatSync(candidatePath).isDirectory()).toBe(true);
+      expect(actualFs.lstatSync(candidatePath).isSymbolicLink()).toBe(true);
     } finally {
       fsMocks.lstatSync.mockImplementation(actualFs.lstatSync);
     }
