@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { buildProviderSpawnInvocation } from './worker-launch-ack.js';
+import { buildProviderSpawnInvocation, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from './worker-launch-ack.js';
 export interface RecoveryActivationGate {
   recoveryId: string;
   workerName: string;
@@ -11,6 +11,7 @@ export interface RecoveryActivationGate {
   readyPath: string;
   activatePath: string;
   runPath: string;
+  launchAttempt?: WorkerLaunchAttempt;
   providerArgv: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
@@ -20,7 +21,7 @@ export interface RecoveryActivationGate {
 
 export type RecoveryActivationGateResult =
   | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' };
+  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'superseded' };
 
 interface GateRecord {
   recovery_id: string;
@@ -57,6 +58,12 @@ export async function waitForRecoveryGateRecord(path: string, expected: Omit<Gat
  */
 export async function runWorkerActivationGate(gate: RecoveryActivationGate): Promise<RecoveryActivationGateResult> {
   if (gate.providerArgv.length === 0 || !gate.providerArgv[0]) return { outcome: 'invalid_provider_argv' };
+  const launchContext = gate.launchAttempt?.context;
+  if (!gate.launchAttempt || launchContext?.kind !== 'recovery'
+    || gate.launchAttempt.worker_name !== gate.workerName
+    || launchContext.recovery_id !== gate.recoveryId
+    || launchContext.replacement_generation !== gate.replacementGeneration
+    || launchContext.pane_attempt_id !== gate.paneAttemptId) return { outcome: 'superseded' };
   const expected: GateRecord = {
     recovery_id: gate.recoveryId,
     worker_name: gate.workerName,
@@ -71,21 +78,29 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
   // This marker proves the pane is gated and can be safely adopted by the owner.
   await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
   if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
-  const invocation = buildProviderSpawnInvocation(gate.providerArgv);
-  const child = spawn(invocation.command, invocation.args, {
-    cwd: gate.cwd,
-    env: { ...process.env, ...gate.env },
-    stdio: 'inherit',
+  const fenced = await withWorkerLaunchAttemptFence(gate.launchAttempt, async () => {
+    const invocation = buildProviderSpawnInvocation(gate.providerArgv);
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: gate.cwd,
+      env: { ...process.env, ...gate.env },
+      stdio: 'inherit',
+    });
+    const completion = new Promise<RecoveryActivationGateResult>(resolve => {
+      child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
+      child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
+    });
+    const spawned = await new Promise<boolean>(resolve => {
+      child.once('spawn', () => resolve(true));
+      child.once('error', () => resolve(false));
+    });
+    if (!spawned) return { outcome: 'provider_spawn_failed' as const };
+    await writeAtomic(`${gate.runPath}.launched`, { ...expected, written_at: new Date().toISOString() });
+    return { completion };
   });
-  const completion = new Promise<RecoveryActivationGateResult>(resolve => {
-    child.once('exit', (exitCode, signal) => resolve({ outcome: 'ran', exitCode, signal }));
-    child.once('error', () => resolve({ outcome: 'provider_spawn_failed' }));
-  });
-  const spawned = await new Promise<boolean>(resolve => {
-    child.once('spawn', () => resolve(true));
-    child.once('error', () => resolve(false));
-  });
-  if (!spawned) return { outcome: 'provider_spawn_failed' };
-  await writeAtomic(`${gate.runPath}.launched`, { ...expected, written_at: new Date().toISOString() });
-  return completion;
+  if (!fenced.ok) return { outcome: 'superseded' };
+  if ('completion' in fenced.value) {
+    if (!fenced.value.completion) return { outcome: 'provider_spawn_failed' };
+    return await fenced.value.completion;
+  }
+  return fenced.value;
 }

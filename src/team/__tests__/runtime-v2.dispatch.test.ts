@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   autoStartupEvidence: true,
   nextStartupTaskId: 1,
   nextSplitPaneId: 2,
+  workerPaneBelongsToProviderTarget: vi.fn(async () => true),
 }));
 
 const mergeMocks = vi.hoisted(() => ({
@@ -100,6 +101,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     sendToWorker: mocks.sendToWorker,
     waitForPaneReady: mocks.waitForPaneReady,
     applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+    workerPaneBelongsToProviderTarget: mocks.workerPaneBelongsToProviderTarget,
     killWorkerPanes: mocks.killWorkerPanes,
     killTeamSession: mocks.killTeamSession,
     resolveSplitPaneWorkerPaneIds: mocks.resolveSplitPaneWorkerPaneIds,
@@ -1086,32 +1088,35 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects fresh task and status evidence from another launch attempt', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-wrong-attempt-evidence-'));
+  it.each(['claim', 'status'] as const)('rejects fresh wrong-attempt %s evidence in isolation', async evidenceKind => {
+    cwd = await mkdtemp(join(tmpdir(), `omc-runtime-v2-wrong-attempt-${evidenceKind}-`));
     mocks.autoStartupEvidence = false;
 
     mocks.sendToWorker.mockImplementation(async () => {
-      const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
-      const task = JSON.parse(await readFile(taskPath, 'utf-8'));
-      await writeFile(taskPath, JSON.stringify({
-        ...task,
-        status: 'in_progress',
-        owner: 'worker-1',
-        claim: {
+      if (evidenceKind === 'claim') {
+        const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+        const task = JSON.parse(await readFile(taskPath, 'utf-8'));
+        await writeFile(taskPath, JSON.stringify({
+          ...task,
+          status: 'in_progress',
           owner: 'worker-1',
-          token: 'orphan-token',
-          leased_until: '2099-01-01T00:00:00.000Z',
+          claim: {
+            owner: 'worker-1',
+            token: 'orphan-token',
+            leased_until: '2099-01-01T00:00:00.000Z',
+            launch_attempt_id: 'attempt-worker-orphan',
+          },
+        }, null, 2), 'utf-8');
+      } else {
+        const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+        await mkdir(workerDir, { recursive: true });
+        await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+          state: 'working',
+          current_task_id: '1',
           launch_attempt_id: 'attempt-worker-orphan',
-        },
-      }, null, 2), 'utf-8');
-      const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
-      await mkdir(workerDir, { recursive: true });
-      await writeFile(join(workerDir, 'status.json'), JSON.stringify({
-        state: 'working',
-        current_task_id: '1',
-        launch_attempt_id: 'attempt-worker-orphan',
-        updated_at: new Date().toISOString(),
-      }, null, 2), 'utf-8');
+          updated_at: new Date().toISOString(),
+        }, null, 2), 'utf-8');
+      }
       return true;
     });
 

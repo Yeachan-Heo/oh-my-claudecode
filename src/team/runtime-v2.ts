@@ -86,6 +86,7 @@ import {
   getWorkerLiveness,
   captureTeamPane,
   splitTeamWorkerPaneWithEvidence,
+  workerPaneBelongsToProviderTarget,
   type StartupPaneContext,
   type WorkerPaneConfig,
   type WorkerPaneLiveness,
@@ -151,7 +152,7 @@ import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, 
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
-import { loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -943,6 +944,12 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? opts.leaderPaneId
     : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
+  const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+  if (!await workerPaneBelongsToProviderTarget({
+    provider: launchProvider,
+    providerTarget: opts.sessionName,
+    paneId: splitTarget,
+  })) throw new Error('worker_pane_split_target_unverified');
   const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
   const ownershipResult = proveWorkerPaneOwnership(split, {
     providerTarget: opts.sessionName,
@@ -952,6 +959,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   if (!ownershipResult.ok) {
     return { paneId: null, startupAssigned: false, startupFailureReason: `pane_identity_${ownershipResult.reason}` };
   }
+  if (!await workerPaneBelongsToProviderTarget({
+    provider: ownershipResult.ownership.provider,
+    providerTarget: ownershipResult.ownership.providerTarget,
+    paneId: ownershipResult.ownership.paneId,
+  })) throw new Error('worker_pane_membership_unverified');
   const ownership = ownershipResult.ownership;
   const paneId = ownership.paneId;
   const usePromptMode = isPromptModeAgent(opts.agentType);
@@ -2019,10 +2031,18 @@ export async function executeRecoverDeadWorkerV2Owner(
       return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_descriptor_unresolvable'));
     }
     if (!owner.config.tmux_session) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
-    try {
-      await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
-    } catch {
-      return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+    if (owner.config.tmux_session.startsWith('cmux:')) {
+      if (!owner.config.leader_pane_id || !await workerPaneBelongsToProviderTarget({
+        provider: 'cmux',
+        providerTarget: owner.config.tmux_session,
+        paneId: owner.config.leader_pane_id,
+      })) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+    } else {
+      try {
+        await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
+      } catch {
+        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+      }
     }
 
 
@@ -2077,6 +2097,18 @@ export async function executeRecoverDeadWorkerV2Owner(
               provider: launchDescriptor.provider,
             });
             if (!currentLaunch) return 'unknown';
+            if (!config.leader_pane_id) return 'unknown';
+            const adopted = await adoptWorkerPaneOwnership({
+              provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+              providerTarget: config.tmux_session!,
+              paneId: currentLaunch.pane_id,
+              leaderPaneId: config.leader_pane_id,
+              reservedPaneIds: config.workers
+                .filter(candidate => candidate.name !== input.workerName)
+                .map(candidate => candidate.pane_id)
+                .filter((paneId): paneId is string => Boolean(paneId)),
+            });
+            if (!adopted.ok) return 'unknown';
             const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id);
             if (currentLaunch.context?.kind === 'recovery') {
               return currentLaunch.context.recovery_id === recoveryId
@@ -2087,6 +2119,7 @@ export async function executeRecoverDeadWorkerV2Owner(
             if (currentLaunch.context?.kind !== 'initial' || currentLiveness !== 'alive' || !currentWorker) {
               return currentLiveness;
             }
+            if (!await isWorkerLaunchAttemptCurrent(currentLaunch)) return 'unknown';
             const reconciled: TeamConfig = {
               ...config,
               workers: config.workers.map(candidate => candidate.name === input.workerName
@@ -2281,6 +2314,12 @@ export async function executeRecoverDeadWorkerV2Owner(
         const splitTarget = livePaneIds.at(-1) ?? leaderPaneId;
         const splitDirection = livePaneIds.length > 0 ? 'down' as const : 'right' as const;
         const workerCwd = currentWorker.working_dir ?? input.cwd;
+        const recoveryProvider = owner.config.tmux_session!.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+        if (!await workerPaneBelongsToProviderTarget({
+          provider: recoveryProvider,
+          providerTarget: owner.config.tmux_session!,
+          paneId: splitTarget,
+        })) return { ok: false, error: 'worker_activation_failed' };
         const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
         const ownershipResult = proveWorkerPaneOwnership(split, {
           providerTarget: owner.config.tmux_session!,
@@ -2297,6 +2336,11 @@ export async function executeRecoverDeadWorkerV2Owner(
           );
           return { ok: false, error: 'spawn_failed' };
         }
+        if (!await workerPaneBelongsToProviderTarget({
+          provider: ownershipResult.ownership.provider,
+          providerTarget: ownershipResult.ownership.providerTarget,
+          paneId: ownershipResult.ownership.paneId,
+        })) return { ok: false, error: 'worker_activation_failed' };
         let pending: PendingRecoveryPane;
         try {
           pending = await buildRecoveryPaneContext(

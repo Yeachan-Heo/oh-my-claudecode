@@ -185,6 +185,12 @@ export declare function adoptWorkerPaneOwnership(input: {
     reservedPaneIds: readonly string[];
     dependencies?: MailboxTargetOwnershipDependencies;
 }): Promise<WorkerPaneOwnershipResult>;
+export declare function workerPaneBelongsToProviderTarget(input: {
+    provider: WorkerPaneSplitEvidence['provider'];
+    providerTarget: string;
+    paneId: string;
+    dependencies?: MailboxTargetOwnershipDependencies;
+}): Promise<boolean>;
 export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<WorkerPaneSplitEvidence>;
 export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;

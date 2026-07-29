@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   applyMainVerticalLayout: vi.fn(),
   tmuxExecAsync: vi.fn(),
   queueInboxInstruction: vi.fn(),
+  workerPaneBelongsToProviderTarget: vi.fn(async () => true),
 }));
 
 const modelContractMocks = vi.hoisted(() => ({
@@ -46,6 +47,7 @@ vi.mock('../tmux-session.js', async importOriginal => ({
   paneHasActiveTask: vi.fn(() => false),
   paneLooksReady: vi.fn(() => true),
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
+  workerPaneBelongsToProviderTarget: mocks.workerPaneBelongsToProviderTarget,
 }));
 
 vi.mock('../model-contract.js', () => ({

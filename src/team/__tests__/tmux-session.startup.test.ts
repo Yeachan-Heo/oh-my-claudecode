@@ -151,7 +151,10 @@ describe('worker pane startup safety', () => {
       leaderPaneId: '%1',
       reservedPaneIds: [],
       dependencies: {
-        tmuxExec: vi.fn(async () => ({ stdout: '%9\n', stderr: '' })),
+        tmuxExec: vi.fn(async args => {
+          expect(args).toEqual(['list-panes', '-t', 'startup:0', '-F', '#{pane_id}']);
+          return { stdout: '%9\n', stderr: '' };
+        }),
         cmuxExec: vi.fn(),
       },
     });
@@ -164,7 +167,10 @@ describe('worker pane startup safety', () => {
       leaderPaneId: '%1',
       reservedPaneIds: [],
       dependencies: {
-        tmuxExec: vi.fn(async () => ({ stdout: '%8\n', stderr: '' })),
+        tmuxExec: vi.fn(async args => {
+          expect(args).toEqual(['list-panes', '-t', 'startup:0', '-F', '#{pane_id}']);
+          return { stdout: '%8\n', stderr: '' };
+        }),
         cmuxExec: vi.fn(),
       },
     })).resolves.toEqual({ ok: false, reason: 'pane_foreign' });

@@ -23,6 +23,7 @@ import {
   awaitWorkerLaunchAcknowledgement,
   buildWorkerLaunchBootstrapSpec,
   isWorkerLaunchAttemptAccepted,
+  isWorkerLaunchAttemptCurrent,
   prepareWorkerLaunchAttempt,
   revokeWorkerLaunchAttempt,
   type WorkerLaunchAttempt,
@@ -1071,6 +1072,22 @@ export async function adoptWorkerPaneOwnership(input: {
   };
 }
 
+export async function workerPaneBelongsToProviderTarget(input: {
+  provider: WorkerPaneSplitEvidence['provider'];
+  providerTarget: string;
+  paneId: string;
+  dependencies?: MailboxTargetOwnershipDependencies;
+}): Promise<boolean> {
+  const membership = await verifyTeamTargetOwnership({
+    provider: input.provider,
+    providerTarget: input.providerTarget,
+    recipient: 'worker',
+    recipientRole: 'worker',
+    paneId: input.paneId,
+  }, input.dependencies);
+  return membership.kind === 'owned';
+}
+
 export async function splitTeamWorkerPaneWithEvidence(
   splitTarget: string,
   direction: 'right' | 'down',
@@ -1380,12 +1397,17 @@ export async function spawnOwnedWorkerInPane(
     ...(config.launchContext ? { context: config.launchContext } : {}),
   });
   try {
+    const launchEnv: Record<string, string> = {
+      ...config.envVars,
+      OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+    };
+    if (launchEnv.OMC_RECOVERY_GATE_SPEC) {
+      const gate = JSON.parse(launchEnv.OMC_RECOVERY_GATE_SPEC) as Record<string, unknown>;
+      launchEnv.OMC_RECOVERY_GATE_SPEC = JSON.stringify({ ...gate, launchAttempt: attempt });
+    }
     await spawnWorkerInPane(sessionName, ownership.paneId, {
       ...config,
-      envVars: {
-        ...config.envVars,
-        OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
-      },
+      envVars: launchEnv,
       launchAttempt: attempt,
     });
     return { ownership, attempt, provider: config.provider };
@@ -1460,17 +1482,19 @@ export async function killTeamPane(paneId: string): Promise<void> {
 }
 
 export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promise<void> {
-  if (ownership.source === 'adopted') {
-    const membership = await verifyTeamTargetOwnership({
-      provider: ownership.provider,
-      providerTarget: ownership.providerTarget,
-      recipient: 'worker',
-      recipientRole: 'worker',
-      paneId: ownership.paneId,
-    });
-    if (membership.kind !== 'owned') throw new Error('owned_pane_membership_unverified');
+  const membership = await verifyTeamTargetOwnership({
+    provider: ownership.provider,
+    providerTarget: ownership.providerTarget,
+    recipient: 'worker',
+    recipientRole: 'worker',
+    paneId: ownership.paneId,
+  });
+  if (membership.kind !== 'owned') throw new Error('owned_pane_membership_unverified');
+  if (ownership.provider === 'cmux') {
+    await cmuxCloseSurface(ownership.paneId);
+    return;
   }
-  await killTeamPane(ownership.paneId);
+  await tmuxExecAsync(['kill-pane', '-t', ownership.paneId]);
 }
 
 type PaneTrustPromptKind = 'directory' | 'codex_hooks';
@@ -1632,7 +1656,8 @@ async function sendLiteralPaneText(paneId: string, text: string): Promise<void> 
 async function startupContextIsActive(context: StartupPaneContext): Promise<boolean> {
   return context.ownership.paneId === context.attempt.pane_id
     && context.provider === context.attempt.provider
-    && await isWorkerLaunchAttemptAccepted(context.attempt);
+    && await isWorkerLaunchAttemptAccepted(context.attempt)
+    && await isWorkerLaunchAttemptCurrent(context.attempt);
 }
 
 export async function waitForStartupPaneReady(

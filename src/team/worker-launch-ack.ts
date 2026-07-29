@@ -279,27 +279,34 @@ export async function loadCurrentWorkerLaunchAttempt(input: {
   provider: CliAgentType;
 }): Promise<WorkerLaunchAttempt | null> {
   const currentPath = absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName));
-  const current = await readJson(currentPath);
-  if (current.kind !== 'value' || !isValidIdentity(current.value)) return null;
-  const record = current.value as WorkerLaunchIdentity & { runtime_cli_path?: unknown; context?: unknown };
-  if (record.team_name !== input.teamName || record.worker_name !== input.workerName
-    || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
-    || (record.context !== undefined && !isValidLaunchContext(record.context))) return null;
-  const attempt = await loadWorkerLaunchAttempt({
-    cwd: input.cwd,
-    teamName: input.teamName,
-    workerName: input.workerName,
-    paneId: record.pane_id,
-    provider: input.provider,
-    attemptId: record.attempt_id,
-    runtimeCliPath: record.runtime_cli_path,
-  });
-  if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)
-    || !await isWorkerLaunchProviderStarted(attempt)) return null;
-  return {
-    ...attempt,
-    ...(record.context ? { context: record.context } : {}),
-  };
+  try {
+    return await withFileLock(lockPathFor(currentPath), async () => {
+      const current = await readJson(currentPath);
+      if (current.kind !== 'value' || !isValidIdentity(current.value)) return null;
+      const record = current.value as WorkerLaunchIdentity & { runtime_cli_path?: unknown; context?: unknown };
+      if (record.team_name !== input.teamName || record.worker_name !== input.workerName
+        || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
+        || (record.context !== undefined && !isValidLaunchContext(record.context))) return null;
+      const attempt = await loadWorkerLaunchAttempt({
+        cwd: input.cwd,
+        teamName: input.teamName,
+        workerName: input.workerName,
+        paneId: record.pane_id,
+        provider: input.provider,
+        attemptId: record.attempt_id,
+        runtimeCliPath: record.runtime_cli_path,
+      });
+      if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)
+        || !await isWorkerLaunchProviderStarted(attempt)
+        || !await isCurrentLaunchIdentity(currentPath, attempt)) return null;
+      return {
+        ...attempt,
+        ...(record.context ? { context: record.context } : {}),
+      };
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function buildWorkerLaunchBootstrapSpec(
@@ -419,6 +426,29 @@ export async function isWorkerLaunchAttemptAccepted(attempt: WorkerLaunchAttempt
     && identityMatches(decision.value, attempt)
     && (decision.value as Partial<WorkerLaunchDecision>).kind === 'worker_launch_decision'
     && (decision.value as Partial<WorkerLaunchDecision>).decision === 'accepted';
+}
+
+export async function isWorkerLaunchAttemptCurrent(attempt: WorkerLaunchAttempt): Promise<boolean> {
+  try {
+    return await withFileLock(lockPathFor(attempt.currentPath), () => isCurrentLaunchIdentity(attempt.currentPath, attempt));
+  } catch {
+    return false;
+  }
+}
+
+export async function withWorkerLaunchAttemptFence<T>(
+  attempt: WorkerLaunchAttempt,
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  try {
+    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+        || !await isWorkerLaunchAttemptAccepted(attempt)) return { ok: false as const };
+      return { ok: true as const, value: await fn() };
+    });
+  } catch {
+    return { ok: false };
+  }
 }
 
 export async function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean> {
@@ -575,6 +605,6 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
     }
     return launched;
   } catch {
-    return { outcome: 'superseded' };
+    return { outcome: 'provider_spawn_failed' };
   }
 }

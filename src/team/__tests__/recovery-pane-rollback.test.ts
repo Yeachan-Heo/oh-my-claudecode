@@ -13,6 +13,19 @@ const paneMocks = vi.hoisted(() => ({
   spawnOwnedWorkerInPane: vi.fn(),
   killTeamPane: vi.fn(async (_paneId: string) => { throw new Error('pane still alive'); }),
   killOwnedWorkerPane: vi.fn(),
+  workerPaneBelongsToProviderTarget: vi.fn(async () => true),
+  adoptWorkerPaneOwnership: vi.fn(async (input: { provider: 'tmux' | 'cmux'; providerTarget: string; paneId: string }) => ({
+    ok: true as const,
+    ownership: {
+      provider: input.provider,
+      providerTarget: input.providerTarget,
+      paneId: input.paneId,
+      splitTarget: '',
+      direction: 'right' as const,
+      source: 'adopted' as const,
+      evidence: { commandSucceeded: true, provider: input.provider, splitTarget: '', direction: 'right' as const, rawOutput: '', stderr: '', paneId: input.paneId },
+    },
+  })),
 }));
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => ({
@@ -250,7 +263,19 @@ describe('recovery pane rollback evidence', () => {
         runtimeCliPath: config.launchBootstrapPath,
         context: config.launchContext,
       });
-      process.env.OMC_RECOVERY_GATE_SPEC = config.envVars.OMC_RECOVERY_GATE_SPEC;
+      const gateSpec = JSON.parse(config.envVars.OMC_RECOVERY_GATE_SPEC);
+      expect(gateSpec).toMatchObject({
+        recoveryId,
+        workerName: 'worker-1',
+        replacementGeneration: 2,
+        paneAttemptId: config.launchContext?.pane_attempt_id,
+      });
+      expect(config.launchContext).toMatchObject({
+        kind: 'recovery',
+        recovery_id: recoveryId,
+        replacement_generation: 2,
+      });
+      process.env.OMC_RECOVERY_GATE_SPEC = JSON.stringify({ ...gateSpec, launchAttempt: attempt });
       process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = attempt.attempt_id;
       const spec = buildWorkerLaunchBootstrapSpec(
         attempt,

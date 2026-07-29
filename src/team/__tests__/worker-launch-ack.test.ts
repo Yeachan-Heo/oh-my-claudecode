@@ -204,8 +204,37 @@ describe('worker launch acknowledgement', () => {
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
   });
 
+  it('keeps an accepted decision terminal when revocation arrives later', async () => {
+    const launchAttempt = await attempt();
+    const providerMarker = join(cwd, 'accepted-provider-ran');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      cwd,
+    ));
+
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: true });
+    await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
+    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
+    const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
+    expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
+  });
+
   it('prevents an older acknowledged attempt from releasing a provider after supersession', async () => {
-    const olderAttempt = await attempt();
+    cwd = await mkdtemp(join(tmpdir(), 'omc-worker-launch-recovery-generation-'));
+    const olderAttempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: 'launch-team',
+      workerName: 'worker-1',
+      paneId: '%2',
+      provider: 'codex',
+      runtimeCliPath: '/runtime-cli.cjs',
+      context: { kind: 'recovery', recovery_id: 'recovery-old', replacement_generation: 1, pane_attempt_id: 'pane-old' },
+    });
     const providerMarker = join(cwd, 'superseded-provider-ran');
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       olderAttempt,
@@ -219,7 +248,7 @@ describe('worker launch acknowledgement', () => {
       paneId: '%3',
       provider: olderAttempt.provider,
       runtimeCliPath: olderAttempt.runtimeCliPath,
-      context: { kind: 'initial' },
+      context: { kind: 'recovery', recovery_id: 'recovery-new', replacement_generation: 2, pane_attempt_id: 'pane-new' },
     });
 
     await expect(awaitWorkerLaunchAcknowledgement(olderAttempt, {
@@ -230,6 +259,12 @@ describe('worker launch acknowledgement', () => {
     await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(isWorkerLaunchAttemptAccepted(olderAttempt)).resolves.toBe(false);
     await expect(isWorkerLaunchAttemptAccepted(newerAttempt)).resolves.toBe(false);
+    const current = JSON.parse(await readFile(newerAttempt.currentPath, 'utf8'));
+    expect(current).toMatchObject({
+      attempt_id: newerAttempt.attempt_id,
+      pane_id: '%3',
+      context: { kind: 'recovery', recovery_id: 'recovery-new', replacement_generation: 2, pane_attempt_id: 'pane-new' },
+    });
   });
 
   it('reloads the accepted current recovery launch with its durable context', async () => {

@@ -174,30 +174,38 @@ export async function loadWorkerLaunchAttempt(input) {
 }
 export async function loadCurrentWorkerLaunchAttempt(input) {
     const currentPath = absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName));
-    const current = await readJson(currentPath);
-    if (current.kind !== 'value' || !isValidIdentity(current.value))
+    try {
+        return await withFileLock(lockPathFor(currentPath), async () => {
+            const current = await readJson(currentPath);
+            if (current.kind !== 'value' || !isValidIdentity(current.value))
+                return null;
+            const record = current.value;
+            if (record.team_name !== input.teamName || record.worker_name !== input.workerName
+                || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
+                || (record.context !== undefined && !isValidLaunchContext(record.context)))
+                return null;
+            const attempt = await loadWorkerLaunchAttempt({
+                cwd: input.cwd,
+                teamName: input.teamName,
+                workerName: input.workerName,
+                paneId: record.pane_id,
+                provider: input.provider,
+                attemptId: record.attempt_id,
+                runtimeCliPath: record.runtime_cli_path,
+            });
+            if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)
+                || !await isWorkerLaunchProviderStarted(attempt)
+                || !await isCurrentLaunchIdentity(currentPath, attempt))
+                return null;
+            return {
+                ...attempt,
+                ...(record.context ? { context: record.context } : {}),
+            };
+        });
+    }
+    catch {
         return null;
-    const record = current.value;
-    if (record.team_name !== input.teamName || record.worker_name !== input.workerName
-        || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
-        || (record.context !== undefined && !isValidLaunchContext(record.context)))
-        return null;
-    const attempt = await loadWorkerLaunchAttempt({
-        cwd: input.cwd,
-        teamName: input.teamName,
-        workerName: input.workerName,
-        paneId: record.pane_id,
-        provider: input.provider,
-        attemptId: record.attempt_id,
-        runtimeCliPath: record.runtime_cli_path,
-    });
-    if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)
-        || !await isWorkerLaunchProviderStarted(attempt))
-        return null;
-    return {
-        ...attempt,
-        ...(record.context ? { context: record.context } : {}),
-    };
+    }
 }
 export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd) {
     return {
@@ -300,6 +308,27 @@ export async function isWorkerLaunchAttemptAccepted(attempt) {
         && identityMatches(decision.value, attempt)
         && decision.value.kind === 'worker_launch_decision'
         && decision.value.decision === 'accepted';
+}
+export async function isWorkerLaunchAttemptCurrent(attempt) {
+    try {
+        return await withFileLock(lockPathFor(attempt.currentPath), () => isCurrentLaunchIdentity(attempt.currentPath, attempt));
+    }
+    catch {
+        return false;
+    }
+}
+export async function withWorkerLaunchAttemptFence(attempt, fn) {
+    try {
+        return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+                || !await isWorkerLaunchAttemptAccepted(attempt))
+                return { ok: false };
+            return { ok: true, value: await fn() };
+        });
+    }
+    catch {
+        return { ok: false };
+    }
 }
 export async function isWorkerLaunchProviderStarted(attempt) {
     const started = await readJson(attempt.startedPath);
@@ -457,7 +486,7 @@ export async function runWorkerLaunchBootstrap(value) {
         return launched;
     }
     catch {
-        return { outcome: 'superseded' };
+        return { outcome: 'provider_spawn_failed' };
     }
 }
 //# sourceMappingURL=worker-launch-ack.js.map

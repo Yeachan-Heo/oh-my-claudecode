@@ -85,6 +85,13 @@ export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAt
     pollIntervalMs?: number;
 }): Promise<WorkerLaunchAcceptance>;
 export declare function isWorkerLaunchAttemptAccepted(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function isWorkerLaunchAttemptCurrent(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function withWorkerLaunchAttemptFence<T>(attempt: WorkerLaunchAttempt, fn: () => Promise<T>): Promise<{
+    ok: true;
+    value: T;
+} | {
+    ok: false;
+}>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;

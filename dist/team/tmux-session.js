@@ -15,7 +15,7 @@ import { validateTeamName } from './team-name.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
 import { configureTmuxClipboardForSession, configureTmuxClipboardForSessionAsync } from '../cli/tmux-clipboard.js';
-import { awaitWorkerLaunchAcknowledgement, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, prepareWorkerLaunchAttempt, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
+import { awaitWorkerLaunchAcknowledgement, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, isWorkerLaunchAttemptCurrent, prepareWorkerLaunchAttempt, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
 const TMUX_SESSION_PREFIX = 'omc-team';
@@ -835,6 +835,16 @@ export async function adoptWorkerPaneOwnership(input) {
         ownership: { ...proved.ownership, source: 'adopted' },
     };
 }
+export async function workerPaneBelongsToProviderTarget(input) {
+    const membership = await verifyTeamTargetOwnership({
+        provider: input.provider,
+        providerTarget: input.providerTarget,
+        recipient: 'worker',
+        recipientRole: 'worker',
+        paneId: input.paneId,
+    }, input.dependencies);
+    return membership.kind === 'owned';
+}
 export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd) {
     const provider = isCmuxContext() ? 'cmux' : 'tmux';
     try {
@@ -1102,12 +1112,17 @@ export async function spawnOwnedWorkerInPane(sessionName, ownership, config) {
         ...(config.launchContext ? { context: config.launchContext } : {}),
     });
     try {
+        const launchEnv = {
+            ...config.envVars,
+            OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+        };
+        if (launchEnv.OMC_RECOVERY_GATE_SPEC) {
+            const gate = JSON.parse(launchEnv.OMC_RECOVERY_GATE_SPEC);
+            launchEnv.OMC_RECOVERY_GATE_SPEC = JSON.stringify({ ...gate, launchAttempt: attempt });
+        }
         await spawnWorkerInPane(sessionName, ownership.paneId, {
             ...config,
-            envVars: {
-                ...config.envVars,
-                OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
-            },
+            envVars: launchEnv,
             launchAttempt: attempt,
         });
         return { ownership, attempt, provider: config.provider };
@@ -1166,18 +1181,20 @@ export async function killTeamPane(paneId) {
     await tmuxExecAsync(['kill-pane', '-t', paneId]);
 }
 export async function killOwnedWorkerPane(ownership) {
-    if (ownership.source === 'adopted') {
-        const membership = await verifyTeamTargetOwnership({
-            provider: ownership.provider,
-            providerTarget: ownership.providerTarget,
-            recipient: 'worker',
-            recipientRole: 'worker',
-            paneId: ownership.paneId,
-        });
-        if (membership.kind !== 'owned')
-            throw new Error('owned_pane_membership_unverified');
+    const membership = await verifyTeamTargetOwnership({
+        provider: ownership.provider,
+        providerTarget: ownership.providerTarget,
+        recipient: 'worker',
+        recipientRole: 'worker',
+        paneId: ownership.paneId,
+    });
+    if (membership.kind !== 'owned')
+        throw new Error('owned_pane_membership_unverified');
+    if (ownership.provider === 'cmux') {
+        await cmuxCloseSurface(ownership.paneId);
+        return;
     }
-    await killTeamPane(ownership.paneId);
+    await tmuxExecAsync(['kill-pane', '-t', ownership.paneId]);
 }
 function detectPaneTrustPromptKind(captured) {
     const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
@@ -1313,7 +1330,8 @@ async function sendLiteralPaneText(paneId, text) {
 async function startupContextIsActive(context) {
     return context.ownership.paneId === context.attempt.pane_id
         && context.provider === context.attempt.provider
-        && await isWorkerLaunchAttemptAccepted(context.attempt);
+        && await isWorkerLaunchAttemptAccepted(context.attempt)
+        && await isWorkerLaunchAttemptCurrent(context.attempt);
 }
 export async function waitForStartupPaneReady(context, opts = {}) {
     if (context.ownership.paneId !== context.attempt.pane_id || context.provider !== context.attempt.provider) {

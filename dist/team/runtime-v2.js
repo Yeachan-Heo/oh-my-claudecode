@@ -30,7 +30,7 @@ import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { buildValidatedWorkerLaunchDescriptor, validateWorkerLaunchDescriptor, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform, } from './model-contract.js';
-import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, } from './tmux-session.js';
+import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToProviderTarget, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
@@ -56,7 +56,7 @@ import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity } from './team-owner-epoch.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { waitForRecoveryGateRecord } from './worker-activation-gate.js';
-import { loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
 let runtimeOwnerRecoveryClient;
 /** Runtime integration point; production may bind its owner client after startup. */
 export function setRuntimeOwnerRecoveryClient(client) {
@@ -603,6 +603,13 @@ async function spawnV2Worker(opts) {
         ? opts.leaderPaneId
         : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
     const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
+    const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' : 'tmux';
+    if (!await workerPaneBelongsToProviderTarget({
+        provider: launchProvider,
+        providerTarget: opts.sessionName,
+        paneId: splitTarget,
+    }))
+        throw new Error('worker_pane_split_target_unverified');
     const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
     const ownershipResult = proveWorkerPaneOwnership(split, {
         providerTarget: opts.sessionName,
@@ -612,6 +619,12 @@ async function spawnV2Worker(opts) {
     if (!ownershipResult.ok) {
         return { paneId: null, startupAssigned: false, startupFailureReason: `pane_identity_${ownershipResult.reason}` };
     }
+    if (!await workerPaneBelongsToProviderTarget({
+        provider: ownershipResult.ownership.provider,
+        providerTarget: ownershipResult.ownership.providerTarget,
+        paneId: ownershipResult.ownership.paneId,
+    }))
+        throw new Error('worker_pane_membership_unverified');
     const ownership = ownershipResult.ownership;
     const paneId = ownership.paneId;
     const usePromptMode = isPromptModeAgent(opts.agentType);
@@ -1538,11 +1551,21 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
         }
         if (!owner.config.tmux_session)
             return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
-        try {
-            await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
+        if (owner.config.tmux_session.startsWith('cmux:')) {
+            if (!owner.config.leader_pane_id || !await workerPaneBelongsToProviderTarget({
+                provider: 'cmux',
+                providerTarget: owner.config.tmux_session,
+                paneId: owner.config.leader_pane_id,
+            }))
+                return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
         }
-        catch {
-            return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+        else {
+            try {
+                await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
+            }
+            catch {
+                return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+            }
         }
         const replacementGeneration = existingAttempt && worker.recovery_id === recoveryId
             && typeof worker.replacement_generation === 'number'
@@ -1591,6 +1614,20 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         });
                         if (!currentLaunch)
                             return 'unknown';
+                        if (!config.leader_pane_id)
+                            return 'unknown';
+                        const adopted = await adoptWorkerPaneOwnership({
+                            provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+                            providerTarget: config.tmux_session,
+                            paneId: currentLaunch.pane_id,
+                            leaderPaneId: config.leader_pane_id,
+                            reservedPaneIds: config.workers
+                                .filter(candidate => candidate.name !== input.workerName)
+                                .map(candidate => candidate.pane_id)
+                                .filter((paneId) => Boolean(paneId)),
+                        });
+                        if (!adopted.ok)
+                            return 'unknown';
                         const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id);
                         if (currentLaunch.context?.kind === 'recovery') {
                             return currentLaunch.context.recovery_id === recoveryId
@@ -1601,6 +1638,8 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         if (currentLaunch.context?.kind !== 'initial' || currentLiveness !== 'alive' || !currentWorker) {
                             return currentLiveness;
                         }
+                        if (!await isWorkerLaunchAttemptCurrent(currentLaunch))
+                            return 'unknown';
                         const reconciled = {
                             ...config,
                             workers: config.workers.map(candidate => candidate.name === input.workerName
@@ -1782,6 +1821,13 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                 const splitTarget = livePaneIds.at(-1) ?? leaderPaneId;
                 const splitDirection = livePaneIds.length > 0 ? 'down' : 'right';
                 const workerCwd = currentWorker.working_dir ?? input.cwd;
+                const recoveryProvider = owner.config.tmux_session.startsWith('cmux:') ? 'cmux' : 'tmux';
+                if (!await workerPaneBelongsToProviderTarget({
+                    provider: recoveryProvider,
+                    providerTarget: owner.config.tmux_session,
+                    paneId: splitTarget,
+                }))
+                    return { ok: false, error: 'worker_activation_failed' };
                 const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
                 const ownershipResult = proveWorkerPaneOwnership(split, {
                     providerTarget: owner.config.tmux_session,
@@ -1792,6 +1838,12 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                     await recordUnaddressableRecoveryPaneFailure(input, sagaInput.recoveryId, paneAttemptId, `pane_identity_${ownershipResult.reason}`, split);
                     return { ok: false, error: 'spawn_failed' };
                 }
+                if (!await workerPaneBelongsToProviderTarget({
+                    provider: ownershipResult.ownership.provider,
+                    providerTarget: ownershipResult.ownership.providerTarget,
+                    paneId: ownershipResult.ownership.paneId,
+                }))
+                    return { ok: false, error: 'worker_activation_failed' };
                 let pending;
                 try {
                     pending = await buildRecoveryPaneContext(input, sagaInput, currentWorker, launchDescriptor, ownershipResult.ownership, paneAttemptId);
