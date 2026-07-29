@@ -1046,7 +1046,13 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     startupContext.attempt.attempt_id,
     attempts,
   );
-  const dispatchOutcome = await queueInboxInstruction({
+  const fencedDispatch = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+    if (!await workerPaneBelongsToProviderTarget({
+      provider: startupContext.ownership.provider,
+      providerTarget: startupContext.ownership.providerTarget,
+      paneId: startupContext.ownership.paneId,
+    })) return { ok: false as const, reason: 'worker_pane_membership_unverified' };
+    return queueInboxInstruction({
     teamName: opts.teamName,
     workerName: opts.workerName,
     workerIndex: opts.workerIndex + 1,
@@ -1065,13 +1071,13 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
           : { ok: false, transport: 'prompt_stdin' as const, reason: `${opts.agentType}_startup_evidence_missing` };
       }
 
-      const attempted = await deliverStartupInbox(startupContext, triggerMessage);
+      const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
       if (!attempted.ok) {
         return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
       }
       let settled = await waitForCurrentEvidence(opts.agentType === 'claude' ? 6 : 12);
       for (let attempt = 1; !settled && opts.agentType === 'claude' && attempt <= 4; attempt++) {
-        if (!await retryStartupInboxSubmit(startupContext, triggerMessage)) break;
+        if (!await retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })) break;
         settled = await waitForCurrentEvidence();
       }
       return settled
@@ -1079,7 +1085,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
         : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
     },
     deps: { writeWorkerInbox },
+    });
   });
+  const dispatchOutcome = fencedDispatch.ok
+    ? fencedDispatch.value
+    : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
     try {
       await killOwnedWorkerPane(ownership);
@@ -2937,11 +2947,16 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
       ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName) : undefined;
     const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
-    const promptArgs = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
-      ? getPromptModeArgs(assignment.agentType, generatePromptModeStartupPrompt(sanitized, workerName,
-        worktree ? '$OMC_TEAM_STATE_ROOT' : undefined, outputContract)) : [];
     const binary = resolvedBinaryPaths[assignment.agentType];
     if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
+    const startupPrompt = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
+      ? generatePromptModeStartupPrompt(sanitized, workerName,
+        worktree ? '$OMC_TEAM_STATE_ROOT' : undefined, outputContract)
+      : undefined;
+    const transportPrompt = startupPrompt && process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
+      ? startupPrompt.replace(/\s*\r?\n\s*/g, ' ')
+      : startupPrompt;
+    const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
     const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
       teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
       model: effectiveModel,

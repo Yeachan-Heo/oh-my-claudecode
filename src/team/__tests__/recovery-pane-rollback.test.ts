@@ -179,7 +179,7 @@ describe('recovery pane rollback evidence', () => {
     });
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'process.exit(0)'],
+      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'],
       cwd,
     ));
     await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });

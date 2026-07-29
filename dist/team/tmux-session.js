@@ -1404,8 +1404,8 @@ export async function deliverStartupInbox(context, message, options = {}) {
         return { ok: false, reason: 'startup_send_failed' };
     }
 }
-export async function retryStartupInboxSubmit(context, message) {
-    if (!await startupContextIsActive(context))
+export async function retryStartupInboxSubmit(context, message, options = {}) {
+    if (!await startupContextIsActive(context, options.attemptAlreadyFenced))
         return false;
     const copyMode = await paneCopyModeObservation(context.ownership.paneId);
     if (copyMode !== false)

@@ -3388,77 +3388,6 @@ var init_tmux_clipboard = __esm({
   }
 });
 
-// src/lib/atomic-write.ts
-import * as fs from "fs/promises";
-import * as fsSync from "fs";
-import * as path from "path";
-import * as crypto from "crypto";
-function ensureDirSync(dir) {
-  if (fsSync.existsSync(dir)) {
-    return;
-  }
-  try {
-    fsSync.mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code === "EEXIST") {
-      return;
-    }
-    throw err;
-  }
-}
-async function atomicWriteJson2(filePath, data) {
-  const dir = path.dirname(filePath);
-  const base = path.basename(filePath);
-  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
-  let success = false;
-  try {
-    ensureDirSync(dir);
-    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
-    const fd = await fs.open(tempPath, "wx", 384);
-    try {
-      let offset = 0;
-      while (offset < jsonContent.length) {
-        const { bytesWritten } = await fd.write(
-          jsonContent,
-          offset,
-          jsonContent.length - offset,
-          offset
-        );
-        if (bytesWritten === 0) {
-          throw new Error("Failed to write complete JSON payload");
-        }
-        offset += bytesWritten;
-      }
-      await fd.sync();
-    } finally {
-      await fd.close();
-    }
-    await fs.rename(tempPath, filePath);
-    success = true;
-    try {
-      const dirFd = await fs.open(dir, "r");
-      try {
-        await dirFd.sync();
-      } finally {
-        await dirFd.close();
-      }
-    } catch {
-    }
-  } finally {
-    if (!success) {
-      await fs.unlink(tempPath).catch(() => {
-      });
-    }
-  }
-}
-var ATOMIC_BATCH_MAX_CONTENT_BYTES;
-var init_atomic_write = __esm({
-  "src/lib/atomic-write.ts"() {
-    "use strict";
-    ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
-  }
-});
-
 // src/platform/process-utils.ts
 import { execFileSync as execFileSync4, execFile as execFile2 } from "child_process";
 import { promisify as promisify2 } from "util";
@@ -3614,6 +3543,77 @@ var init_process_utils = __esm({
   "src/platform/process-utils.ts"() {
     "use strict";
     execFileAsync = promisify2(execFile2);
+  }
+});
+
+// src/lib/atomic-write.ts
+import * as fs from "fs/promises";
+import * as fsSync from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
+async function atomicWriteJson2(filePath, data) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
+  let success = false;
+  try {
+    ensureDirSync(dir);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
+    const fd = await fs.open(tempPath, "wx", 384);
+    try {
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    await fs.rename(tempPath, filePath);
+    success = true;
+    try {
+      const dirFd = await fs.open(dir, "r");
+      try {
+        await dirFd.sync();
+      } finally {
+        await dirFd.close();
+      }
+    } catch {
+    }
+  } finally {
+    if (!success) {
+      await fs.unlink(tempPath).catch(() => {
+      });
+    }
+  }
+}
+var ATOMIC_BATCH_MAX_CONTENT_BYTES;
+var init_atomic_write = __esm({
+  "src/lib/atomic-write.ts"() {
+    "use strict";
+    ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
   }
 });
 
@@ -4088,6 +4088,7 @@ var WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
+    init_process_utils();
     init_state_paths();
     init_atomic_write();
     init_file_lock();
@@ -5371,8 +5372,8 @@ async function deliverStartupInbox(context, message, options = {}) {
     return { ok: false, reason: "startup_send_failed" };
   }
 }
-async function retryStartupInboxSubmit(context, message) {
-  if (!await startupContextIsActive(context)) return false;
+async function retryStartupInboxSubmit(context, message, options = {}) {
+  if (!await startupContextIsActive(context, options.attemptAlreadyFenced)) return false;
   const copyMode = await paneCopyModeObservation(context.ownership.paneId);
   if (copyMode !== false) return false;
   const observation = await capturePaneObservation(context.ownership.paneId, { operation: "startup-submit-retry" });
@@ -12644,35 +12645,43 @@ async function spawnV2Worker(opts) {
     startupContext.attempt.attempt_id,
     attempts
   );
-  const dispatchOutcome = await queueInboxInstruction({
-    teamName: opts.teamName,
-    workerName: opts.workerName,
-    workerIndex: opts.workerIndex + 1,
-    paneId,
-    inbox: instruction,
-    triggerMessage: inboxTriggerMessage,
-    cwd: opts.cwd,
-    transportPreference: usePromptMode ? "prompt_stdin" : "transport_direct",
-    fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === "hook_preferred_with_fallback",
-    inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
-    notify: async (_target, triggerMessage) => {
-      if (usePromptMode) {
-        const settled2 = await waitForCurrentEvidence();
-        return settled2 ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: `${opts.agentType}_startup_evidence_missing` };
-      }
-      const attempted = await deliverStartupInbox(startupContext, triggerMessage);
-      if (!attempted.ok) {
-        return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
-      }
-      let settled = await waitForCurrentEvidence(opts.agentType === "claude" ? 6 : 12);
-      for (let attempt = 1; !settled && opts.agentType === "claude" && attempt <= 4; attempt++) {
-        if (!await retryStartupInboxSubmit(startupContext, triggerMessage)) break;
-        settled = await waitForCurrentEvidence();
-      }
-      return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
-    },
-    deps: { writeWorkerInbox }
+  const fencedDispatch = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+    if (!await workerPaneBelongsToProviderTarget({
+      provider: startupContext.ownership.provider,
+      providerTarget: startupContext.ownership.providerTarget,
+      paneId: startupContext.ownership.paneId
+    })) return { ok: false, reason: "worker_pane_membership_unverified" };
+    return queueInboxInstruction({
+      teamName: opts.teamName,
+      workerName: opts.workerName,
+      workerIndex: opts.workerIndex + 1,
+      paneId,
+      inbox: instruction,
+      triggerMessage: inboxTriggerMessage,
+      cwd: opts.cwd,
+      transportPreference: usePromptMode ? "prompt_stdin" : "transport_direct",
+      fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === "hook_preferred_with_fallback",
+      inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
+      notify: async (_target, triggerMessage) => {
+        if (usePromptMode) {
+          const settled2 = await waitForCurrentEvidence();
+          return settled2 ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: `${opts.agentType}_startup_evidence_missing` };
+        }
+        const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
+        if (!attempted.ok) {
+          return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
+        }
+        let settled = await waitForCurrentEvidence(opts.agentType === "claude" ? 6 : 12);
+        for (let attempt = 1; !settled && opts.agentType === "claude" && attempt <= 4; attempt++) {
+          if (!await retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })) break;
+          settled = await waitForCurrentEvidence();
+        }
+        return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
+      },
+      deps: { writeWorkerInbox }
+    });
   });
+  const dispatchOutcome = fencedDispatch.ok ? fencedDispatch.value : { ok: false, reason: "worker_launch_attempt_superseded" };
   if (!dispatchOutcome.ok) {
     try {
       await killOwnedWorkerPane(ownership);
@@ -14150,14 +14159,16 @@ async function startTeamV2(config) {
     const worktree = workerWorktrees.get(workerName);
     const outputFile = taskIndex !== void 0 && assignment.role && shouldInjectContract(assignment.role, assignment.agentType) ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName) : void 0;
     const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : void 0;
-    const promptArgs = taskIndex !== void 0 && isPromptModeAgent(assignment.agentType) ? getPromptModeArgs(assignment.agentType, generatePromptModeStartupPrompt(
+    const binary = resolvedBinaryPaths[assignment.agentType];
+    if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
+    const startupPrompt = taskIndex !== void 0 && isPromptModeAgent(assignment.agentType) ? generatePromptModeStartupPrompt(
       sanitized,
       workerName,
       worktree ? "$OMC_TEAM_STATE_ROOT" : void 0,
       outputContract
-    )) : [];
-    const binary = resolvedBinaryPaths[assignment.agentType];
-    if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
+    ) : void 0;
+    const transportPrompt = startupPrompt && process.platform === "win32" && /\.(?:cmd|bat)$/i.test(binary) ? startupPrompt.replace(/\s*\r?\n\s*/g, " ") : startupPrompt;
+    const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
     const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
       teamName: sanitized,
       workerName,

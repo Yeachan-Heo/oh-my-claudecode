@@ -1735,8 +1735,12 @@ export async function deliverStartupInbox(
   }
 }
 
-export async function retryStartupInboxSubmit(context: StartupPaneContext, message: string): Promise<boolean> {
-  if (!await startupContextIsActive(context)) return false;
+export async function retryStartupInboxSubmit(
+  context: StartupPaneContext,
+  message: string,
+  options: { attemptAlreadyFenced?: boolean } = {},
+): Promise<boolean> {
+  if (!await startupContextIsActive(context, options.attemptAlreadyFenced)) return false;
   const copyMode = await paneCopyModeObservation(context.ownership.paneId);
   if (copyMode !== false) return false;
   const observation = await capturePaneObservation(context.ownership.paneId, { operation: 'startup-submit-retry' });

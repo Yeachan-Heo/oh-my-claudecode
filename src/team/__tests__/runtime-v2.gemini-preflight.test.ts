@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   workerPaneBelongsToProviderTarget: vi.fn(async () => true),
 }));
 
+const launchMocks = vi.hoisted(() => ({
+  withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
+}));
+
 const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn((agentType?: string, config?: { resolvedBinaryPath?: string }) => [config?.resolvedBinaryPath ?? agentType ?? 'claude']),
   resolveValidatedBinaryPath: vi.fn((agentType?: string) => {
@@ -32,6 +36,11 @@ const modelContractMocks = vi.hoisted(() => ({
   }),
   validateWorkerLaunchDescriptor: vi.fn((value: unknown) => value),
 }));
+
+vi.mock('../worker-launch-ack.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../worker-launch-ack.js')>();
+  return { ...actual, withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence };
+});
 
 vi.mock('../../cli/tmux-utils.js', () => ({
   tmuxExecAsync: mocks.tmuxExecAsync,

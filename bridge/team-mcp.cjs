@@ -18233,6 +18233,24 @@ function resolveTmuxBinaryPath() {
   return "tmux";
 }
 
+// src/platform/process-utils.ts
+var import_child_process3 = require("child_process");
+var import_util6 = require("util");
+var fsPromises = __toESM(require("fs/promises"), 1);
+var execFileAsync = (0, import_util6.promisify)(import_child_process3.execFile);
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
 // src/team/state-paths.ts
 var import_node_crypto = require("node:crypto");
 var import_path4 = require("path");
@@ -18349,26 +18367,6 @@ var path3 = __toESM(require("path"), 1);
 // src/platform/index.ts
 var path2 = __toESM(require("path"), 1);
 var import_fs2 = require("fs");
-
-// src/platform/process-utils.ts
-var import_child_process3 = require("child_process");
-var import_util6 = require("util");
-var fsPromises = __toESM(require("fs/promises"), 1);
-var execFileAsync = (0, import_util6.promisify)(import_child_process3.execFile);
-function isProcessAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
-      return true;
-    }
-    return false;
-  }
-}
-
-// src/platform/index.ts
 var PLATFORM = process.platform;
 
 // src/lib/file-lock.ts

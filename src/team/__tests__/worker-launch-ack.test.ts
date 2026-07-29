@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   buildProviderSpawnInvocation,
   materializeProviderSpawnInvocation,
 } from '../worker-launch-ack.js';
+import { isProcessAlive } from '../../platform/process-utils.js';
 
 let cwd = '';
 
@@ -40,7 +41,7 @@ describe('worker launch acknowledgement', () => {
     const launchAttempt = await attempt();
     const spec = buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', ' '],
+      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 100)'],
       cwd,
     );
 
@@ -117,7 +118,7 @@ describe('worker launch acknowledgement', () => {
     const launchAttempt = await attempt();
     const spec = buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'process.exit(0)'],
+      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'],
       cwd,
     );
     const first = runWorkerLaunchBootstrap(spec);
@@ -150,11 +151,39 @@ describe('worker launch acknowledgement', () => {
     })).resolves.toBeNull();
   });
 
+  it('terminates a started provider process tree when durable start publication fails', async () => {
+    const launchAttempt = await attempt();
+    await mkdir(launchAttempt.startedPath);
+    const pidMarker = join(cwd, 'provider-tree-pids.json');
+    const providerScript = [
+      "const fs=require('node:fs')",
+      "const cp=require('node:child_process')",
+      "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
+      `fs.writeFileSync(${JSON.stringify(pidMarker)},JSON.stringify({parent:process.pid,child:child.pid}))`,
+      'setInterval(()=>{},1000)',
+    ].join(';');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', providerScript],
+      cwd,
+    ));
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: true });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
+    const pids = JSON.parse(await readFile(pidMarker, 'utf8')) as { parent: number; child: number };
+    await vi.waitFor(() => {
+      expect(isProcessAlive(pids.parent)).toBe(false);
+      expect(isProcessAlive(pids.child)).toBe(false);
+    }, { timeout: 2_000, interval: 20 });
+  });
+
   it('reloads an accepted attempt only for the exact pane and provider identity', async () => {
     const launchAttempt = await attempt();
     const spec = buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'process.exit(0)'],
+      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'],
       cwd,
     );
     const bootstrap = runWorkerLaunchBootstrap(spec);
@@ -304,7 +333,7 @@ describe('worker launch acknowledgement', () => {
         pane_attempt_id: 'pane-attempt-current',
       },
     });
-    const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'process.exit(0)'], cwd);
+    const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'], cwd);
     const bootstrap = runWorkerLaunchBootstrap(spec);
     await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
     await bootstrap;
@@ -357,6 +386,14 @@ describe('worker launch acknowledgement', () => {
       command: providerArgv[0],
       args: providerArgv.slice(1),
     });
+  });
+
+  it('rejects CRLF-bearing native Windows batch arguments before materializing a wrapper', () => {
+    expect(() => buildProviderSpawnInvocation(
+      ['C:\\Tools\\provider.cmd', '--prompt=line one\r\nwhoami'],
+      'win32',
+      { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    )).toThrow('worker_launch_provider_argv_invalid');
   });
 
 });

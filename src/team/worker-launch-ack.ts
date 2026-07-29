@@ -5,6 +5,7 @@ import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'nod
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
@@ -528,6 +529,7 @@ async function waitForBootstrapDecision(spec: WorkerLaunchBootstrapSpec): Promis
 }
 
 function quoteWindowsCmdArgument(value: string): string {
+  if (/[\r\n]/.test(value)) throw new Error('worker_launch_provider_argv_invalid');
   return `"${value.replace(/%/g, '%%').replace(/"/g, '""')}"`;
 }
 
@@ -606,34 +608,67 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         cwd: spec.cwd,
         env: providerEnv,
         stdio: 'inherit',
+        detached: process.platform !== 'win32',
       });
+      let settled = false;
+      let providerStartIdentity: string | null = null;
       const completion = new Promise<WorkerLaunchBootstrapResult>(resolve => {
         child.once('exit', async (exitCode, signal) => {
+          settled = true;
           await invocation.cleanup();
           resolve({ outcome: 'ran', exitCode, signal });
         });
         child.once('error', async () => {
+          settled = true;
           await invocation.cleanup();
           resolve({ outcome: 'provider_spawn_failed' });
         });
       });
+      const terminateProvider = async () => {
+        if (child.pid && providerStartIdentity) {
+          await terminateOwnedProcessTree({
+            pid: child.pid,
+            expectedStartIdentity: providerStartIdentity,
+            deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+            force: true,
+          });
+        } else {
+          child.kill();
+        }
+        await completion;
+      };
       const spawned = await new Promise<boolean>(resolve => {
         child.once('spawn', () => resolve(true));
         child.once('error', () => resolve(false));
       });
       if (!spawned) {
-        await invocation.cleanup();
+        await completion;
+        return { outcome: 'provider_spawn_failed' as const };
+      }
+      if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
+      if (settled) return { completion };
+      providerStartIdentity = child.pid ? await getProcessStartIdentity(child.pid) : null;
+      if (!child.pid || !providerStartIdentity || !isProcessAlive(child.pid)) {
+        await terminateProvider();
         return { outcome: 'provider_spawn_failed' as const };
       }
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
-        child.kill();
-        await completion;
+        await terminateProvider();
         return { outcome: 'superseded' as const };
       }
-      if (!await publishProviderStarted(spec, child.pid)) {
-        child.kill();
-        await completion;
+      try {
+        if (!await publishProviderStarted(spec, child.pid)) {
+          await terminateProvider();
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+      } catch {
+        await terminateProvider();
         return { outcome: 'provider_spawn_failed' as const };
+      }
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
+        await terminateProvider();
+        await unlink(spec.started_path).catch(() => {});
+        return { outcome: 'superseded' as const };
       }
       return { completion };
     });

@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   workerPaneBelongsToProviderTarget: vi.fn(async () => true),
 }));
 
+const launchMocks = vi.hoisted(() => ({
+  withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
+}));
+
 const mergeMocks = vi.hoisted(() => ({
   startMergeOrchestrator: vi.fn(),
   recoverFromRestart: vi.fn(async () => undefined),
@@ -89,6 +93,11 @@ vi.mock('../model-contract.js', () => ({
   assertHeadlessSupported: () => {},
   isHeadlessSupportedOnPlatform: () => true,
 }));
+
+vi.mock('../worker-launch-ack.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../worker-launch-ack.js')>();
+  return { ...actual, withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence };
+});
 
 vi.mock('../tmux-session.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../tmux-session.js')>();
@@ -1019,6 +1028,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
 
   it('rejects a stale task claim that predates the current startup trigger', async () => {

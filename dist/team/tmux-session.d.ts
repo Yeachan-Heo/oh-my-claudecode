@@ -237,7 +237,9 @@ export declare function deliverStartupInbox(context: StartupPaneContext, message
     ok: false;
     reason: string;
 }>;
-export declare function retryStartupInboxSubmit(context: StartupPaneContext, message: string): Promise<boolean>;
+export declare function retryStartupInboxSubmit(context: StartupPaneContext, message: string, options?: {
+    attemptAlreadyFenced?: boolean;
+}): Promise<boolean>;
 export declare function shouldAttemptAdaptiveRetry(args: {
     paneBusy: boolean;
     latestCapture: string | null;

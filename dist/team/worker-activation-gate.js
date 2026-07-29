@@ -64,6 +64,7 @@ export async function runWorkerActivationGate(gate) {
             cwd: gate.cwd,
             env: { ...providerProcessEnv, ...gate.env },
             stdio: 'inherit',
+            detached: process.platform !== 'win32',
         });
         let settled = false;
         let providerPid;
