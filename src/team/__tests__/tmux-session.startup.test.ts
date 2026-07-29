@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
+const processMocks = vi.hoisted(() => ({
+  isProcessIdentityLive: vi.fn(async () => 'live' as 'live' | 'dead' | 'mismatch' | 'unknown'),
+}));
+vi.mock('../../platform/process-utils.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../platform/process-utils.js')>(),
+  isProcessIdentityLive: processMocks.isProcessIdentityLive,
+}));
 
 const tmuxState = vi.hoisted(() => ({
   args: [] as string[][],
@@ -18,10 +25,37 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
     ...actual,
     tmuxExecAsync: vi.fn(async (args: string[]) => {
       tmuxState.args.push(args);
+      if (args[0] === 'kill-pane') tmuxState.paneStatus = '1 cmd\n';
+      if (args[0] === 'list-panes') return { stdout: '%2\n', stderr: '' };
       if (args[0] === 'capture-pane') {
         const next = tmuxState.captures.length > 1 ? tmuxState.captures.shift() : tmuxState.captures[0];
         if (next instanceof Error) throw next;
         return { stdout: next ?? '', stderr: '' };
+      }
+      if (args[0] === 'send-keys' && args.includes('-l')) {
+        const command = String(args.at(-1) ?? '');
+        const encoded = command.match(/OMC_WORKER_LAUNCH_SPEC_B64(?:=|=")'?([A-Za-z0-9+/=]+)/)?.[1];
+        const raw = command.match(/OMC_WORKER_LAUNCH_SPEC='([^']+)'/)?.[1];
+        if (encoded || raw) {
+          const spec = JSON.parse(encoded ? Buffer.from(encoded, 'base64').toString('utf8') : raw!);
+          tmuxState.activeAttempt = {
+            schema_version: spec.schema_version,
+            attempt_id: spec.attempt_id,
+            nonce: spec.nonce,
+            team_name: spec.team_name,
+            worker_name: spec.worker_name,
+            pane_id: spec.pane_id,
+            provider: spec.provider,
+            created_at: spec.created_at,
+            currentPath: spec.current_path,
+            expectedPath: spec.expected_path,
+            ackPath: spec.ack_path,
+            decisionPath: spec.decision_path,
+            startedPath: spec.started_path,
+            runtimeCliPath: '/runtime-cli.js',
+            context: spec.context,
+          };
+        }
       }
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && tmuxState.activeAttempt) {
         const attempt = tmuxState.activeAttempt;
@@ -71,6 +105,7 @@ import {
   adoptWorkerPaneOwnership,
   proveWorkerPaneOwnership,
   spawnWorkerInPane,
+  spawnOwnedWorkerInPane,
   retryStartupInboxSubmit,
   type StartupPaneContext,
   type WorkerPaneOwnership,
@@ -89,6 +124,7 @@ beforeEach(() => {
   tmuxState.paneStatus = '0 cmd\n';
   tmuxState.activeAttempt = null;
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  processMocks.isProcessIdentityLive.mockResolvedValue('live');
 });
 
 afterEach(async () => {
@@ -96,6 +132,7 @@ afterEach(async () => {
   delete process.env.MSYSTEM;
   delete process.env.MINGW_PREFIX;
   delete process.env.COMSPEC;
+  delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   if (cwd) await rm(cwd, { recursive: true, force: true });
   cwd = '';
 });
@@ -341,4 +378,30 @@ describe('worker pane startup safety', () => {
     expect(diagnostic.length).toBeLessThan(500);
     stderr.mockRestore();
   });
+  it('retires an accepted launch and verifies pane cleanup when provider handoff fails', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-startup-handoff-cleanup-'));
+    process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
+    processMocks.isProcessIdentityLive.mockResolvedValue('dead');
+
+    await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/codex',
+      cwd,
+      provider: 'codex',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    })).rejects.toThrow('worker_start_provider_failed');
+
+    expect(tmuxState.args).toContainEqual(['kill-pane', '-t', '%2']);
+    const attemptsRoot = join(cwd, '.omc/state/team/startup-team/workers/worker-1/launch-attempts');
+    const files = await readdir(attemptsRoot, { recursive: true });
+    expect(files.some(file => String(file).endsWith('decision.json.retired'))).toBe(true);
+    expect(tmuxState.paneStatus).toBe('1 cmd\n');
+    delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  });
+
 });

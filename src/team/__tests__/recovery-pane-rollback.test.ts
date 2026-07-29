@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isProcessAlive } from '../../platform/process-utils.js';
 
 const paneMocks = vi.hoisted(() => ({
   getWorkerLiveness: vi.fn(),
@@ -57,10 +58,13 @@ import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import {
   awaitWorkerLaunchAcknowledgement,
+  awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
   prepareWorkerLaunchAttempt,
   loadCurrentWorkerLaunchAttempt,
   runWorkerLaunchBootstrap,
+  retireWorkerLaunchAttempt,
+  terminateWorkerLaunchProvider,
 } from '../worker-launch-ack.js';
 
 const launchMetadata = { worker_cli: 'claude' as const,
@@ -179,11 +183,11 @@ describe('recovery pane rollback evidence', () => {
     });
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'],
+      [process.execPath, '-e', 'setInterval(()=>{},1000)'],
       cwd,
     ));
     await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
-    await bootstrap;
+    await expect(awaitWorkerLaunchProviderStarted(launchAttempt, { timeoutMs: 10_000, pollIntervalMs: 5 })).resolves.toBe(true);
     await expect(loadCurrentWorkerLaunchAttempt({
       cwd,
       teamName,
@@ -201,6 +205,50 @@ describe('recovery pane rollback evidence', () => {
       operational_state: 'active',
     });
     expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    await expect(retireWorkerLaunchAttempt(launchAttempt, 'test_cleanup')).resolves.toBe(true);
+    await expect(terminateWorkerLaunchProvider(launchAttempt)).resolves.toBe(true);
+    await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+  });
+
+  it('terminates the dead-pane provider before allocating a replacement pane', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-old-provider-retirement-'));
+    const teamName = 'old-provider-team';
+    const requestId = 'old-provider-request';
+    const recoveryId = 'old-provider-recovery';
+    const oldAttempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%1',
+      provider: 'claude', runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      oldAttempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd,
+    ));
+    await expect(awaitWorkerLaunchAcknowledgement(oldAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+      .resolves.toEqual({ ok: true });
+    await expect(awaitWorkerLaunchProviderStarted(oldAttempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
+      .resolves.toBe(true);
+    const oldPid = JSON.parse(readFileSync(oldAttempt.startedPath, 'utf8')).pid as number;
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, launch_attempt_id: oldAttempt.attempt_id,
+        pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%9',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    paneMocks.getWorkerLiveness.mockResolvedValue('dead');
+    paneMocks.splitTeamWorkerPaneWithEvidence.mockImplementationOnce(async () => {
+      expect(isProcessAlive(oldPid)).toBe(false);
+      return { commandSucceeded: true, provider: 'tmux' as const, splitTarget: '%9', direction: 'right' as const,
+        rawOutput: '', stderr: '', paneId: null };
+    });
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', recoveryId });
+    await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+    expect(isProcessAlive(oldPid)).toBe(false);
+    expect(existsSync(`${oldAttempt.decisionPath}.retired`)).toBe(true);
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalledTimes(1);
   });
 
   it('completes an idle Gemini recovery without requiring fabricated progress evidence', async () => {

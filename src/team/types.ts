@@ -306,7 +306,7 @@ export type RecoverDeadWorkerV2Error =
   | 'worker_liveness_unknown' | 'recovery_checkpoint_missing' | 'recovery_checkpoint_malformed'
   | 'recovery_checkpoint_ambiguous' | 'recovery_checkpoint_stale' | 'task_requeue_failed'
   | 'launch_metadata_incomplete' | 'launch_descriptor_unresolvable' | 'spawn_failed'
-  | 'startup_ack_timeout' | 'worker_activation_failed' | 'auto_merge_unavailable'
+  | 'startup_ack_timeout' | 'worker_activation_failed' | 'worker_cleanup_incomplete' | 'auto_merge_unavailable'
   | 'stale_state_revision' | 'config_commit_failed';
 
 export interface RecoverDeadWorkerV2OutcomeBase {

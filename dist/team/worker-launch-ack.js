@@ -395,23 +395,47 @@ export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) 
     }
     return false;
 }
+async function readValidProviderStarted(attempt) {
+    const started = await readJson(attempt.startedPath);
+    if ((await readJson(`${attempt.startedPath}.terminal`)).kind !== 'absent')
+        return null;
+    if (started.kind !== 'value')
+        return null;
+    const record = started.value;
+    return identityMatches(record, attempt)
+        && record.kind === 'worker_launch_provider_started'
+        && Number.isSafeInteger(record.pid)
+        && record.pid > 0
+        && typeof record.process_start_identity === 'string'
+        && record.process_start_identity.trim().length > 0
+        && typeof record.written_at === 'string'
+        && Number.isFinite(Date.parse(record.written_at))
+        ? record
+        : null;
+}
 export async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
     const timeoutMs = options.timeoutMs ?? resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
     const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        if (await isWorkerLaunchProviderStarted(attempt)) {
+        const published = await readValidProviderStarted(attempt);
+        if (published)
             try {
-                const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => (await isCurrentLaunchIdentity(attempt.currentPath, attempt)
-                    && await isWorkerLaunchAttemptAccepted(attempt)
-                    && await isWorkerLaunchProviderStarted(attempt)));
+                const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => {
+                    if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+                        || !await isWorkerLaunchAttemptAccepted(attempt))
+                        return false;
+                    const started = await readValidProviderStarted(attempt);
+                    if (!started)
+                        return false;
+                    return await isProcessIdentityLive(started.pid, started.process_start_identity, deadline) === 'live';
+                });
                 if (handedOff)
                     return true;
             }
             catch {
                 // Bootstrap still owns the launch fence; retry within the bounded window.
             }
-        }
         if ((await readJson(`${attempt.decisionPath}.retired`)).kind !== 'absent')
             return false;
         await sleep(pollIntervalMs);
@@ -419,15 +443,7 @@ export async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
     return false;
 }
 export async function isWorkerLaunchProviderStarted(attempt) {
-    const started = await readJson(attempt.startedPath);
-    const record = started.kind === 'value' ? started.value : null;
-    return Boolean(record
-        && identityMatches(record, attempt)
-        && record.kind === 'worker_launch_provider_started'
-        && Number.isSafeInteger(record.pid)
-        && typeof record.process_start_identity === 'string'
-        && typeof record.written_at === 'string'
-        && Number.isFinite(Date.parse(record.written_at)));
+    return (await readValidProviderStarted(attempt)) !== null;
 }
 function isValidBootstrapSpec(value) {
     if (!isValidIdentity(value))
@@ -495,7 +511,7 @@ export function buildProviderSpawnInvocation(providerArgv, platform = process.pl
     if (platform === 'win32' && /\.(?:cmd|bat)$/i.test(command)) {
         return {
             command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
-            args: ['/d', '/s', '/c'],
+            args: ['/d', '/v:off', '/s', '/c'],
             batchScript: `@echo off\r\n${providerArgv.map(quoteWindowsCmdArgument).join(' ')}\r\n`,
         };
     }
@@ -563,17 +579,29 @@ export async function runWorkerLaunchBootstrap(value) {
                 cwd: spec.cwd,
                 env: providerEnv,
                 stdio: 'inherit',
+                detached: process.platform !== 'win32',
             });
             let settled = false;
             let providerStartIdentity = null;
             const completion = new Promise(resolve => {
                 child.once('exit', async (exitCode, signal) => {
                     settled = true;
+                    if (child.pid && process.platform !== 'win32') {
+                        await killProcessTree(child.pid, 'SIGKILL');
+                    }
+                    await atomicWriteJson(`${spec.started_path}.terminal`, {
+                        ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'exit',
+                        pid: child.pid ?? null, exit_code: exitCode, signal, written_at: new Date().toISOString(),
+                    }).catch(() => undefined);
                     await invocation.cleanup();
                     resolve({ outcome: 'ran', exitCode, signal });
                 });
                 child.once('error', async () => {
                     settled = true;
+                    await atomicWriteJson(`${spec.started_path}.terminal`, {
+                        ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error',
+                        pid: child.pid ?? null, written_at: new Date().toISOString(),
+                    }).catch(() => undefined);
                     await invocation.cleanup();
                     resolve({ outcome: 'provider_spawn_failed' });
                 });
@@ -606,6 +634,17 @@ export async function runWorkerLaunchBootstrap(value) {
                 });
                 return terminated && completed;
             };
+            const cleanupSignals = ['SIGHUP', 'SIGINT', 'SIGTERM'];
+            const onBootstrapSignal = () => { void terminateProvider(); };
+            const ownsSignalLifecycle = Boolean(process.env.OMC_WORKER_LAUNCH_SPEC || process.env.OMC_WORKER_LAUNCH_SPEC_B64);
+            if (ownsSignalLifecycle) {
+                for (const signal of cleanupSignals)
+                    process.once(signal, onBootstrapSignal);
+                void completion.finally(() => {
+                    for (const signal of cleanupSignals)
+                        process.removeListener(signal, onBootstrapSignal);
+                });
+            }
             const spawned = await new Promise(resolve => {
                 child.once('spawn', () => resolve(true));
                 child.once('error', () => resolve(false));

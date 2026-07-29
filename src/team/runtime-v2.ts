@@ -1021,12 +1021,31 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   try {
     startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
   } catch (error) {
-    await killOwnedWorkerPane(ownership).catch(() => undefined);
     throw error;
   }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
     `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
-  await applyMainVerticalLayout(opts.sessionName);
+  const cleanupStartedLaunch = async (reason: string): Promise<void> => {
+    const retired = await retireWorkerLaunchAttempt(startupContext.attempt, reason).catch(() => false);
+    const providerStopped = retired
+      && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
+    let paneDead = false;
+    try {
+      await killOwnedWorkerPane(ownership);
+      paneDead = await getWorkerPaneLiveness(paneId) === 'dead';
+    } catch {
+      paneDead = false;
+    }
+    if (!providerStopped || !paneDead) {
+      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+    }
+  };
+  try {
+    await applyMainVerticalLayout(opts.sessionName);
+  } catch (error) {
+    await cleanupStartedLaunch('startup_layout_failed');
+    throw error;
+  }
 
   const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(
     opts.teamName,
@@ -1037,7 +1056,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     startupContext.attempt.attempt_id,
     attempts,
   );
-  const fencedDispatch = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+  const fencedDispatch = await (async () => {
+    try {
+      return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
     if (!await workerPaneBelongsToProviderTarget({
       provider: startupContext.ownership.provider,
       providerTarget: startupContext.ownership.providerTarget,
@@ -1077,22 +1098,17 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     },
     deps: { writeWorkerInbox },
     });
-  });
+      });
+    } catch (error) {
+      await cleanupStartedLaunch('startup_dispatch_exception');
+      throw error;
+    }
+  })();
   const dispatchOutcome = fencedDispatch.ok
     ? fencedDispatch.value
     : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
-    const retired = await retireWorkerLaunchAttempt(startupContext.attempt, 'startup_dispatch_failed').catch(() => false);
-    const providerStopped = retired
-      && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
-    try {
-      await killOwnedWorkerPane(ownership);
-    } catch {
-      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-    }
-    if (!providerStopped || await getWorkerPaneLiveness(paneId) !== 'dead') {
-      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-    }
+    await cleanupStartedLaunch('startup_dispatch_failed');
     return {
       paneId,
       startupAssigned: false,
@@ -2351,6 +2367,25 @@ export async function executeRecoverDeadWorkerV2Owner(
           }
         }
 
+        let priorLaunch = currentLaunch;
+        if (!priorLaunch && currentWorker.launch_attempt_id && currentWorker.pane_id) {
+          priorLaunch = await loadWorkerLaunchAttempt({
+            cwd: input.cwd,
+            teamName: input.teamName,
+            workerName: sagaInput.workerName,
+            paneId: currentWorker.pane_id,
+            provider: launchDescriptor.provider,
+            attemptId: currentWorker.launch_attempt_id,
+            runtimeCliPath,
+          });
+        }
+        if (priorLaunch) {
+          const retired = await retireWorkerLaunchAttempt(priorLaunch, 'recovery_replacement');
+          if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
+            return { ok: false, error: 'worker_cleanup_incomplete' };
+          }
+        }
+
         try {
           const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
           const sameProviderPath = process.platform === 'win32'
@@ -2840,27 +2875,16 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       missingBinaryReasons.push({ agentType: provider, reason });
     }
   }
+  if (missingBinaryReasons.length > 0) {
+    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
+    throw new Error(`cli_binary_preflight_failed:${missing}`);
+  }
 
   // Create state directories
   await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
   await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
   await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
 
-  // Emit bounded diagnostics for unavailable snapshot providers. They are never
-  // substituted or resolved through PATH at launch time.
-  const missingBinaryLogFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.startTeamV2 cli_binary_missing event failed',
-  );
-  for (const { agentType, reason } of missingBinaryReasons) {
-    process.stderr.write(
-      `[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} — provider route unavailable\n`,
-    );
-    await appendTeamEvent(sanitized, {
-      type: 'team_leader_nudge',
-      worker: 'leader-fixed',
-      reason: `cli_binary_missing:${agentType}:${reason}`,
-    }, leaderCwd).catch(missingBinaryLogFailure);
-  }
 
   // Write task files
   for (let i = 0; i < config.tasks.length; i++) {
@@ -4033,7 +4057,11 @@ export async function shutdownTeamV2(
     .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
   const providerCleanupFailures: string[] = [];
   for (const worker of config.workers) {
-    if (!worker.launch_attempt_id || !worker.pane_id) continue;
+    if (!worker.pane_id) continue;
+    if (!worker.launch_attempt_id) {
+      providerCleanupFailures.push(worker.name);
+      continue;
+    }
     const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
     if (!provider) {
       providerCleanupFailures.push(worker.name);

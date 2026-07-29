@@ -64,6 +64,7 @@ export async function runWorkerActivationGate(gate) {
             cwd: gate.cwd,
             env: { ...providerProcessEnv, ...gate.env },
             stdio: 'inherit',
+            detached: process.platform !== 'win32',
         });
         let settled = false;
         let providerPid;
@@ -73,6 +74,9 @@ export async function runWorkerActivationGate(gate) {
                 if (settled)
                     return;
                 settled = true;
+                if (child.pid && process.platform !== 'win32') {
+                    await killProcessTree(child.pid, 'SIGKILL');
+                }
                 try {
                     await writeAtomic(`${gate.runPath}.terminal`, { ...expected, provider_pid: child.pid ?? null, ...terminal,
                         written_at: new Date().toISOString() });
@@ -116,6 +120,17 @@ export async function runWorkerActivationGate(gate) {
             });
             return terminated && completed;
         };
+        const cleanupSignals = ['SIGHUP', 'SIGINT', 'SIGTERM'];
+        const onGateSignal = () => { void terminateProvider(); };
+        const ownsSignalLifecycle = Boolean(process.env.OMC_RECOVERY_GATE_SPEC || process.env.OMC_RECOVERY_GATE_SPEC_B64);
+        if (ownsSignalLifecycle) {
+            for (const signal of cleanupSignals)
+                process.once(signal, onGateSignal);
+            void completion.finally(() => {
+                for (const signal of cleanupSignals)
+                    process.removeListener(signal, onGateSignal);
+            });
+        }
         const spawned = await new Promise(resolve => {
             child.once('spawn', () => resolve(true));
             child.once('error', () => resolve(false));

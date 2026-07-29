@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'fs/promises';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import type { CliAgentType } from '../model-contract.js';
@@ -14,6 +15,8 @@ const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn(),
   getWorkerEnv: vi.fn(),
   validateWorkerLaunchDescriptor: vi.fn((value: unknown) => value),
+  clearResolvedPathCache: vi.fn(),
+  resolveValidatedBinaryPath: vi.fn((agentType: string) => `/usr/bin/${agentType}`),
 }));
 
 const teamOpsMocks = vi.hoisted(() => ({
@@ -38,7 +41,17 @@ const tmuxSessionMocks = vi.hoisted(() => ({
   isWorkerAlive: vi.fn(),
   getWorkerLiveness: vi.fn(),
   killWorkerPanes: vi.fn(),
-  buildWorkerStartCommand: vi.fn(() => 'start-worker'),
+  adoptWorkerPaneOwnership: vi.fn(async (input: { paneId: string; providerTarget: string; leaderPaneId: string }) => ({
+    ok: true as const,
+    ownership: { provider: 'tmux' as const, providerTarget: input.providerTarget, paneId: input.paneId,
+      splitTarget: '', leaderPaneId: input.leaderPaneId, reservedPaneIds: [], source: 'adopted' as const },
+  })),
+  spawnOwnedWorkerInPane: vi.fn(async (_session: string, ownership: { paneId: string }, cfg: { provider: string }) => ({
+    ownership,
+    provider: cfg.provider,
+    attempt: { attempt_id: `attempt-${ownership.paneId}`, currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' },
+  })),
+  killOwnedWorkerPane: vi.fn(),
   waitForPaneReady: vi.fn(),
 }));
 
@@ -51,6 +64,12 @@ const gitWorktreeMocks = vi.hoisted(() => ({
   prepareWorkerWorktreeForRemoval: vi.fn(),
 }));
 
+const workerLaunchMocks = vi.hoisted(() => ({
+  loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
+  retireWorkerLaunchAttempt: vi.fn(async () => true),
+  terminateWorkerLaunchProvider: vi.fn(async () => true),
+}));
+
 vi.mock('../../cli/tmux-utils.js', () => ({
   tmuxExec: tmuxUtilsMocks.tmuxExec,
   tmuxSpawn: tmuxUtilsMocks.tmuxSpawn,
@@ -58,6 +77,8 @@ vi.mock('../../cli/tmux-utils.js', () => ({
 
 vi.mock('../model-contract.js', () => ({
   buildWorkerArgv: modelContractMocks.buildWorkerArgv,
+  clearResolvedPathCache: modelContractMocks.clearResolvedPathCache,
+  resolveValidatedBinaryPath: modelContractMocks.resolveValidatedBinaryPath,
   getWorkerEnv: modelContractMocks.getWorkerEnv,
   validateWorkerLaunchDescriptor: modelContractMocks.validateWorkerLaunchDescriptor,
   assertHeadlessSupported: () => {},
@@ -85,7 +106,9 @@ vi.mock('../tmux-session.js', () => ({
   isWorkerAlive: tmuxSessionMocks.isWorkerAlive,
   getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
   killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
-  buildWorkerStartCommand: tmuxSessionMocks.buildWorkerStartCommand,
+  adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
+  spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
+  killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
   waitForPaneReady: tmuxSessionMocks.waitForPaneReady,
 }));
 
@@ -98,11 +121,20 @@ vi.mock('../git-worktree.js', () => ({
   prepareWorkerWorktreeForRemoval: gitWorktreeMocks.prepareWorkerWorktreeForRemoval,
 }));
 
+vi.mock('../runtime-owner-client.js', () => ({ resolveRuntimeCliPath: () => '/runtime-cli.js' }));
+vi.mock('../worker-launch-ack.js', () => workerLaunchMocks);
+
 import { scaleDown, scaleUp } from '../scaling.js';
 
 describe('scaleUp launch config', () => {
   let cwd: string;
   let config: TeamConfig;
+  const launchMetadata = {
+    worker_cli: 'codex' as const,
+    launch_attempt_id: 'attempt-1',
+    launch_descriptor: { schema_version: 1 as const, provider: 'codex' as const, model: null,
+      binary: '/usr/bin/codex', args: [] },
+  };
 
   function makeConfig(overrides: Partial<TeamConfig> = {}): TeamConfig {
     const base: TeamConfig = {
@@ -208,21 +240,26 @@ describe('scaleUp launch config', () => {
       teamName: 'demo-team',
       workerName: 'worker-1',
       cwd: resolve(cwd),
+      resolvedBinaryPath: workerArgv[0],
     });
-    expect(tmuxSessionMocks.buildWorkerStartCommand).toHaveBeenCalledWith(expect.objectContaining({
-      teamName: 'demo-team',
-      workerName: 'worker-1',
-      launchBinary: workerArgv[0],
-      launchArgs: workerArgv.slice(1),
-      cwd: resolve(cwd),
-      envVars: expect.objectContaining({
-        OMC_TEAM_WORKER: 'demo-team/worker-1',
-        OMC_TEAM_NAME: 'demo-team',
-        OMC_WORKER_AGENT_TYPE: agentType,
-        OMC_TEAM_STATE_ROOT: `${resolve(cwd)}/.omc/state/team/demo-team`,
-        OMC_TEAM_LEADER_CWD: resolve(cwd),
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith(
+      'demo-session:0',
+      expect.objectContaining({ paneId: '%12', providerTarget: 'demo-session:0' }),
+      expect.objectContaining({
+        teamName: 'demo-team',
+        workerName: 'worker-1',
+        launchBinary: workerArgv[0],
+        launchArgs: workerArgv.slice(1),
+        provider: agentType,
+        envVars: expect.objectContaining({
+          OMC_TEAM_WORKER: 'demo-team/worker-1',
+          OMC_TEAM_NAME: 'demo-team',
+          OMC_WORKER_AGENT_TYPE: agentType,
+          OMC_TEAM_STATE_ROOT: `${resolve(cwd)}/.omc/state/team/demo-team`,
+          OMC_TEAM_LEADER_CWD: resolve(cwd),
+        }),
       }),
-    }));
+    );
     const reservation = monitorMocks.saveTeamConfigAtRevision.mock.calls
       .map(([candidate]) => candidate as TeamConfig)
       .find(candidate => candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting'));
@@ -237,6 +274,21 @@ describe('scaleUp launch config', () => {
       const candidate = monitorMocks.saveTeamConfigAtRevision.mock.calls[index]?.[0] as TeamConfig;
       return candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting');
     })!).toBeLessThan(tmuxUtilsMocks.tmuxSpawn.mock.invocationCallOrder[splitIndex]!);
+  });
+
+  it.each([
+    ["relative", "Resolved CLI binary 'codex' to relative path"],
+    ["untrusted", "Resolved CLI binary 'codex' to untrusted location: /tmp/shadow/codex"],
+    ["missing", "CLI binary 'codex' not found in PATH"],
+  ])('fails %s scale-up provider preflight before worker side effects', async (_case, reason) => {
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementationOnce(() => { throw new Error(reason); });
+    const result = await scaleUp('demo-team', 1, 'codex', [{ subject: 'demo', description: 'demo task' }], cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+    expect(result).toEqual({ ok: false, error: `Failed strict provider preflight for worker-1 (codex): ${reason}` });
+    expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    expect(gitWorktreeMocks.ensureWorkerWorktree).not.toHaveBeenCalled();
+    expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
+    expect(existsSync(join(resolve(cwd), '.omc', 'state', 'team', 'demo-team', 'workers', 'worker-1'))).toBe(false);
   });
 
   it('rejects scale-up before external effects when recovery is already reserved', async () => {
@@ -283,9 +335,7 @@ describe('scaleUp launch config', () => {
       created: true,
       reused: false,
     });
-    tmuxSessionMocks.buildWorkerStartCommand.mockImplementationOnce(() => {
-      throw new Error('boom');
-    });
+    tmuxSessionMocks.spawnOwnedWorkerInPane.mockRejectedValueOnce(new Error('boom'));
 
     const result = await scaleUp(
       'demo-team',
@@ -334,7 +384,7 @@ describe('scaleUp launch config', () => {
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Failed to install worker overlay') });
     expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-1', resolve(cwd));
-    expect(tmuxSessionMocks.buildWorkerStartCommand).not.toHaveBeenCalled();
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
   });
 
   it('restores managed overlays for reused worktrees during scale-down without deleting them', async () => {
@@ -346,7 +396,7 @@ describe('scaleUp launch config', () => {
       worker_count: 2,
       max_workers: 20,
       workers: [
-        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'reuse'), worktree_created: false },
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'reuse'), worktree_created: false, ...launchMetadata },
         { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [], pane_id: '%2' },
       ],
       created_at: new Date().toISOString(),
@@ -373,6 +423,12 @@ describe('scaleUp launch config', () => {
     expect(result).toMatchObject({ ok: true, removedWorkers: ['worker-1'], newWorkerCount: 1 });
     expect(gitWorktreeMocks.prepareWorkerWorktreeForRemoval).toHaveBeenCalledWith('demo-team', 'worker-1', resolve(cwd), join(resolve(cwd), 'reuse'));
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+    expect(workerLaunchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt_id: 'attempt-loaded' }),
+      'scale_down',
+    );
+    expect(workerLaunchMocks.retireWorkerLaunchAttempt.mock.invocationCallOrder[0])
+      .toBeLessThan(tmuxSessionMocks.killOwnedWorkerPane.mock.invocationCallOrder[0]!);
   });
 
 
@@ -386,7 +442,7 @@ describe('scaleUp launch config', () => {
       worker_count: 2,
       max_workers: 20,
       workers: [
-        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'reuse'), worktree_created: false },
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'reuse'), worktree_created: false, ...launchMetadata },
         { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [], pane_id: '%2' },
       ],
       created_at: new Date().toISOString(),
@@ -427,7 +483,7 @@ describe('scaleUp launch config', () => {
       worker_count: 2,
       max_workers: 20,
       workers: [
-        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'created'), worktree_created: true },
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', worktree_path: join(resolve(cwd), 'created'), worktree_created: true, ...launchMetadata },
         { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [], pane_id: '%2' },
       ],
       created_at: new Date().toISOString(),
@@ -452,7 +508,7 @@ describe('scaleUp launch config', () => {
     );
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('still alive') });
-    expect(tmuxSessionMocks.killWorkerPanes).toHaveBeenCalled();
+    expect(tmuxSessionMocks.killOwnedWorkerPane).toHaveBeenCalled();
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
     expect(monitorMocks.saveTeamConfig).not.toHaveBeenCalled();
   });

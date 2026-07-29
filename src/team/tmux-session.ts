@@ -26,6 +26,8 @@ import {
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchAttemptCurrent,
   prepareWorkerLaunchAttempt,
+  retireWorkerLaunchAttempt,
+  terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
   type WorkerLaunchAttempt,
   type WorkerLaunchContext,
@@ -1426,7 +1428,19 @@ export async function spawnOwnedWorkerInPane(
     });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
-    await revokeWorkerLaunchAttempt(attempt, 'launch_failed').catch(() => undefined);
+    const retired = await retireWorkerLaunchAttempt(attempt, 'launch_failed').catch(() => false);
+    const providerStopped = retired
+      && await terminateWorkerLaunchProvider(attempt).catch(() => false);
+    let paneDead = false;
+    try {
+      await killOwnedWorkerPane(ownership);
+      paneDead = await getWorkerLiveness(ownership.paneId) === 'dead';
+    } catch {
+      paneDead = false;
+    }
+    if (!providerStopped || !paneDead) {
+      throw new Error(`worker_launch_cleanup_unverified:${config.workerName}:${ownership.paneId}`);
+    }
     throw error;
   }
 }

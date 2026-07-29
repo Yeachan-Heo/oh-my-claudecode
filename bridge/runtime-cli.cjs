@@ -570,40 +570,18 @@ async function killProcessTreeWindows(pid, force) {
     return false;
   }
 }
-function listProcessTreeUnix(rootPid) {
-  try {
-    const rows = (0, import_child_process4.execFileSync)("ps", ["-eo", "pid=,ppid="], { encoding: "utf8", timeout: 2e3 });
-    const children = /* @__PURE__ */ new Map();
-    for (const line of rows.split("\n")) {
-      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
-      if (!match) continue;
-      const pid = Number(match[1]);
-      const ppid = Number(match[2]);
-      const siblings = children.get(ppid) ?? [];
-      siblings.push(pid);
-      children.set(ppid, siblings);
-    }
-    const ordered = [];
-    const visit = (pid) => {
-      for (const child of children.get(pid) ?? []) visit(child);
-      ordered.push(pid);
-    };
-    visit(rootPid);
-    return ordered;
-  } catch {
-    return [rootPid];
-  }
-}
 function killProcessTreeUnix(pid, signal) {
-  let signalled = false;
-  for (const targetPid of listProcessTreeUnix(pid)) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
     try {
-      process.kill(targetPid, signal);
-      signalled = true;
+      process.kill(pid, signal);
+      return true;
     } catch {
+      return !isProcessAlive(pid);
     }
   }
-  return signalled || !isProcessAlive(pid);
 }
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -1457,17 +1435,32 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   }
   return false;
 }
+async function readValidProviderStarted(attempt) {
+  const started = await readJson(attempt.startedPath);
+  if ((await readJson(`${attempt.startedPath}.terminal`)).kind !== "absent") return null;
+  if (started.kind !== "value") return null;
+  const record = started.value;
+  return identityMatches(record, attempt) && record.kind === "worker_launch_provider_started" && Number.isSafeInteger(record.pid) && record.pid > 0 && typeof record.process_start_identity === "string" && record.process_start_identity.trim().length > 0 && typeof record.written_at === "string" && Number.isFinite(Date.parse(record.written_at)) ? record : null;
+}
 async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
   const timeoutMs = options.timeoutMs ?? resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isWorkerLaunchProviderStarted(attempt)) {
-      try {
-        const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => await isCurrentLaunchIdentity(attempt.currentPath, attempt) && await isWorkerLaunchAttemptAccepted(attempt) && await isWorkerLaunchProviderStarted(attempt));
-        if (handedOff) return true;
-      } catch {
-      }
+    const published = await readValidProviderStarted(attempt);
+    if (published) try {
+      const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => {
+        if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt) || !await isWorkerLaunchAttemptAccepted(attempt)) return false;
+        const started = await readValidProviderStarted(attempt);
+        if (!started) return false;
+        return await isProcessIdentityLive(
+          started.pid,
+          started.process_start_identity,
+          deadline
+        ) === "live";
+      });
+      if (handedOff) return true;
+    } catch {
     }
     if ((await readJson(`${attempt.decisionPath}.retired`)).kind !== "absent") return false;
     await sleep2(pollIntervalMs);
@@ -1475,9 +1468,7 @@ async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
   return false;
 }
 async function isWorkerLaunchProviderStarted(attempt) {
-  const started = await readJson(attempt.startedPath);
-  const record = started.kind === "value" ? started.value : null;
-  return Boolean(record && identityMatches(record, attempt) && record.kind === "worker_launch_provider_started" && Number.isSafeInteger(record.pid) && typeof record.process_start_identity === "string" && typeof record.written_at === "string" && Number.isFinite(Date.parse(record.written_at)));
+  return await readValidProviderStarted(attempt) !== null;
 }
 function isValidBootstrapSpec(value) {
   if (!isValidIdentity(value)) return false;
@@ -1526,7 +1517,7 @@ function buildProviderSpawnInvocation(providerArgv, platform = process.platform,
   if (platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
     return {
       command: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
-      args: ["/d", "/s", "/c"],
+      args: ["/d", "/v:off", "/s", "/c"],
       batchScript: `@echo off\r
 ${providerArgv.map(quoteWindowsCmdArgument).join(" ")}\r
 `
@@ -1591,18 +1582,38 @@ async function runWorkerLaunchBootstrap(value) {
       const child = (0, import_node_child_process.spawn)(invocation.command, invocation.args, {
         cwd: spec.cwd,
         env: providerEnv,
-        stdio: "inherit"
+        stdio: "inherit",
+        detached: process.platform !== "win32"
       });
       let settled = false;
       let providerStartIdentity = null;
       const completion = new Promise((resolve8) => {
         child.once("exit", async (exitCode, signal) => {
           settled = true;
+          if (child.pid && process.platform !== "win32") {
+            await killProcessTree(child.pid, "SIGKILL");
+          }
+          await atomicWriteJson(`${spec.started_path}.terminal`, {
+            ...identityOf(spec),
+            kind: "worker_launch_provider_terminal",
+            outcome: "exit",
+            pid: child.pid ?? null,
+            exit_code: exitCode,
+            signal,
+            written_at: (/* @__PURE__ */ new Date()).toISOString()
+          }).catch(() => void 0);
           await invocation.cleanup();
           resolve8({ outcome: "ran", exitCode, signal });
         });
         child.once("error", async () => {
           settled = true;
+          await atomicWriteJson(`${spec.started_path}.terminal`, {
+            ...identityOf(spec),
+            kind: "worker_launch_provider_terminal",
+            outcome: "error",
+            pid: child.pid ?? null,
+            written_at: (/* @__PURE__ */ new Date()).toISOString()
+          }).catch(() => void 0);
           await invocation.cleanup();
           resolve8({ outcome: "provider_spawn_failed" });
         });
@@ -1632,6 +1643,17 @@ async function runWorkerLaunchBootstrap(value) {
         });
         return terminated && completed;
       };
+      const cleanupSignals = ["SIGHUP", "SIGINT", "SIGTERM"];
+      const onBootstrapSignal = () => {
+        void terminateProvider();
+      };
+      const ownsSignalLifecycle = Boolean(process.env.OMC_WORKER_LAUNCH_SPEC || process.env.OMC_WORKER_LAUNCH_SPEC_B64);
+      if (ownsSignalLifecycle) {
+        for (const signal of cleanupSignals) process.once(signal, onBootstrapSignal);
+        void completion.finally(() => {
+          for (const signal of cleanupSignals) process.removeListener(signal, onBootstrapSignal);
+        });
+      }
       const spawned = await new Promise((resolve8) => {
         child.once("spawn", () => resolve8(true));
         child.once("error", () => resolve8(false));
@@ -2752,7 +2774,18 @@ async function spawnOwnedWorkerInPane(sessionName2, ownership, config) {
     });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
-    await revokeWorkerLaunchAttempt(attempt, "launch_failed").catch(() => void 0);
+    const retired = await retireWorkerLaunchAttempt(attempt, "launch_failed").catch(() => false);
+    const providerStopped = retired && await terminateWorkerLaunchProvider(attempt).catch(() => false);
+    let paneDead = false;
+    try {
+      await killOwnedWorkerPane(ownership);
+      paneDead = await getWorkerLiveness(ownership.paneId) === "dead";
+    } catch {
+      paneDead = false;
+    }
+    if (!providerStopped || !paneDead) {
+      throw new Error(`worker_launch_cleanup_unverified:${config.workerName}:${ownership.paneId}`);
+    }
     throw error;
   }
 }
@@ -4503,6 +4536,7 @@ __export(runtime_cli_exports, {
   buildTerminalCliResult: () => buildTerminalCliResult,
   checkWatchdogFailedMarker: () => checkWatchdogFailedMarker,
   classifyAllDeadRecoveryEvidence: () => classifyAllDeadRecoveryEvidence,
+  createRuntimeStartupShutdownBarrier: () => createRuntimeStartupShutdownBarrier,
   fenceAllDeadRecoveryExpiry: () => fenceAllDeadRecoveryExpiry,
   finalizeRuntimeShutdown: () => finalizeRuntimeShutdown,
   getTerminalStatus: () => getTerminalStatus,
@@ -11275,7 +11309,8 @@ async function runWorkerActivationGate(gate) {
     const child = (0, import_node_child_process6.spawn)(invocation.command, invocation.args, {
       cwd: gate.cwd,
       env: { ...providerProcessEnv, ...gate.env },
-      stdio: "inherit"
+      stdio: "inherit",
+      detached: process.platform !== "win32"
     });
     let settled = false;
     let providerPid;
@@ -11284,6 +11319,9 @@ async function runWorkerActivationGate(gate) {
       const finish = async (result, terminal) => {
         if (settled) return;
         settled = true;
+        if (child.pid && process.platform !== "win32") {
+          await killProcessTree(child.pid, "SIGKILL");
+        }
         try {
           await writeAtomic3(`${gate.runPath}.terminal`, {
             ...expected,
@@ -11328,6 +11366,17 @@ async function runWorkerActivationGate(gate) {
       });
       return terminated && completed;
     };
+    const cleanupSignals = ["SIGHUP", "SIGINT", "SIGTERM"];
+    const onGateSignal = () => {
+      void terminateProvider();
+    };
+    const ownsSignalLifecycle = Boolean(process.env.OMC_RECOVERY_GATE_SPEC || process.env.OMC_RECOVERY_GATE_SPEC_B64);
+    if (ownsSignalLifecycle) {
+      for (const signal of cleanupSignals) process.once(signal, onGateSignal);
+      void completion.finally(() => {
+        for (const signal of cleanupSignals) process.removeListener(signal, onGateSignal);
+      });
+    }
     const spawned = await new Promise((resolve8) => {
       child.once("spawn", () => resolve8(true));
       child.once("error", () => resolve8(false));
@@ -11860,11 +11909,29 @@ async function spawnV2Worker(opts) {
   try {
     startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
   } catch (error) {
-    await killOwnedWorkerPane(ownership).catch(() => void 0);
     throw error;
   }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
-  await applyMainVerticalLayout(opts.sessionName);
+  const cleanupStartedLaunch = async (reason) => {
+    const retired = await retireWorkerLaunchAttempt(startupContext.attempt, reason).catch(() => false);
+    const providerStopped = retired && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
+    let paneDead = false;
+    try {
+      await killOwnedWorkerPane(ownership);
+      paneDead = await getWorkerPaneLiveness(paneId) === "dead";
+    } catch {
+      paneDead = false;
+    }
+    if (!providerStopped || !paneDead) {
+      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+    }
+  };
+  try {
+    await applyMainVerticalLayout(opts.sessionName);
+  } catch (error) {
+    await cleanupStartedLaunch("startup_layout_failed");
+    throw error;
+  }
   const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(
     opts.teamName,
     opts.workerName,
@@ -11874,54 +11941,52 @@ async function spawnV2Worker(opts) {
     startupContext.attempt.attempt_id,
     attempts
   );
-  const fencedDispatch = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-    if (!await workerPaneBelongsToProviderTarget({
-      provider: startupContext.ownership.provider,
-      providerTarget: startupContext.ownership.providerTarget,
-      paneId: startupContext.ownership.paneId
-    })) return { ok: false, reason: "worker_pane_membership_unverified" };
-    return queueInboxInstruction({
-      teamName: opts.teamName,
-      workerName: opts.workerName,
-      workerIndex: opts.workerIndex + 1,
-      paneId,
-      inbox: instruction,
-      triggerMessage: inboxTriggerMessage,
-      cwd: opts.cwd,
-      transportPreference: usePromptMode ? "prompt_stdin" : "transport_direct",
-      fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === "hook_preferred_with_fallback",
-      inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
-      notify: async (_target, triggerMessage) => {
-        if (usePromptMode) {
-          const settled2 = await waitForCurrentEvidence();
-          return settled2 ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: `${opts.agentType}_startup_evidence_missing` };
-        }
-        const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
-        if (!attempted.ok) {
-          return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
-        }
-        let settled = await waitForCurrentEvidence(opts.agentType === "claude" ? 6 : 12);
-        for (let attempt = 1; !settled && opts.agentType === "claude" && attempt <= 4; attempt++) {
-          if (!await retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })) break;
-          settled = await waitForCurrentEvidence();
-        }
-        return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
-      },
-      deps: { writeWorkerInbox }
-    });
-  });
+  const fencedDispatch = await (async () => {
+    try {
+      return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
+        if (!await workerPaneBelongsToProviderTarget({
+          provider: startupContext.ownership.provider,
+          providerTarget: startupContext.ownership.providerTarget,
+          paneId: startupContext.ownership.paneId
+        })) return { ok: false, reason: "worker_pane_membership_unverified" };
+        return queueInboxInstruction({
+          teamName: opts.teamName,
+          workerName: opts.workerName,
+          workerIndex: opts.workerIndex + 1,
+          paneId,
+          inbox: instruction,
+          triggerMessage: inboxTriggerMessage,
+          cwd: opts.cwd,
+          transportPreference: usePromptMode ? "prompt_stdin" : "transport_direct",
+          fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === "hook_preferred_with_fallback",
+          inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
+          notify: async (_target, triggerMessage) => {
+            if (usePromptMode) {
+              const settled2 = await waitForCurrentEvidence();
+              return settled2 ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: `${opts.agentType}_startup_evidence_missing` };
+            }
+            const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
+            if (!attempted.ok) {
+              return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
+            }
+            let settled = await waitForCurrentEvidence(opts.agentType === "claude" ? 6 : 12);
+            for (let attempt = 1; !settled && opts.agentType === "claude" && attempt <= 4; attempt++) {
+              if (!await retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })) break;
+              settled = await waitForCurrentEvidence();
+            }
+            return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
+          },
+          deps: { writeWorkerInbox }
+        });
+      });
+    } catch (error) {
+      await cleanupStartedLaunch("startup_dispatch_exception");
+      throw error;
+    }
+  })();
   const dispatchOutcome = fencedDispatch.ok ? fencedDispatch.value : { ok: false, reason: "worker_launch_attempt_superseded" };
   if (!dispatchOutcome.ok) {
-    const retired = await retireWorkerLaunchAttempt(startupContext.attempt, "startup_dispatch_failed").catch(() => false);
-    const providerStopped = retired && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
-    try {
-      await killOwnedWorkerPane(ownership);
-    } catch {
-      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-    }
-    if (!providerStopped || await getWorkerPaneLiveness(paneId) !== "dead") {
-      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-    }
+    await cleanupStartedLaunch("startup_dispatch_failed");
     return {
       paneId,
       startupAssigned: false,
@@ -12891,6 +12956,24 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             return ready ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false } : { ok: false, error: "startup_ack_timeout" };
           }
         }
+        let priorLaunch = currentLaunch;
+        if (!priorLaunch && currentWorker.launch_attempt_id && currentWorker.pane_id) {
+          priorLaunch = await loadWorkerLaunchAttempt({
+            cwd: input.cwd,
+            teamName: input.teamName,
+            workerName: sagaInput2.workerName,
+            paneId: currentWorker.pane_id,
+            provider: launchDescriptor.provider,
+            attemptId: currentWorker.launch_attempt_id,
+            runtimeCliPath
+          });
+        }
+        if (priorLaunch) {
+          const retired = await retireWorkerLaunchAttempt(priorLaunch, "recovery_replacement");
+          if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
+            return { ok: false, error: "worker_cleanup_incomplete" };
+          }
+        }
         try {
           const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
           const sameProviderPath = process.platform === "win32" ? currentProviderPath.toLowerCase() === launchDescriptor.binary.toLowerCase() : currentProviderPath === launchDescriptor.binary;
@@ -13310,23 +13393,13 @@ async function startTeamV2(config) {
       missingBinaryReasons.push({ agentType: provider, reason });
     }
   }
+  if (missingBinaryReasons.length > 0) {
+    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(";");
+    throw new Error(`cli_binary_preflight_failed:${missing}`);
+  }
   await (0, import_promises15.mkdir)(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
   await (0, import_promises15.mkdir)(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
   await (0, import_promises15.mkdir)((0, import_path25.join)(getOmcRoot(leaderCwd), "state", "team", sanitized, "mailbox"), { recursive: true });
-  const missingBinaryLogFailure = createSwallowedErrorLogger(
-    "team.runtime-v2.startTeamV2 cli_binary_missing event failed"
-  );
-  for (const { agentType, reason } of missingBinaryReasons) {
-    process.stderr.write(
-      `[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} \u2014 provider route unavailable
-`
-    );
-    await appendTeamEvent(sanitized, {
-      type: "team_leader_nudge",
-      worker: "leader-fixed",
-      reason: `cli_binary_missing:${agentType}:${reason}`
-    }, leaderCwd).catch(missingBinaryLogFailure);
-  }
   for (let i = 0; i < config.tasks.length; i++) {
     const taskId = String(i + 1);
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
@@ -14267,7 +14340,11 @@ Then exit your session.
   const recordedWorkerPaneIds = config.workers.map((w) => w.pane_id).filter((p) => typeof p === "string" && p.trim().length > 0);
   const providerCleanupFailures = [];
   for (const worker of config.workers) {
-    if (!worker.launch_attempt_id || !worker.pane_id) continue;
+    if (!worker.pane_id) continue;
+    if (!worker.launch_attempt_id) {
+      providerCleanupFailures.push(worker.name);
+      continue;
+    }
     const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
     if (!provider) {
       providerCleanupFailures.push(worker.name);
@@ -14924,6 +15001,28 @@ async function finalizeRuntimeShutdown(runtime, useV2, collectOutput, shutdown, 
   await publishOutput(output);
   return output;
 }
+function createRuntimeStartupShutdownBarrier() {
+  let settled = false;
+  let requested = false;
+  let resolveCompletion;
+  const completion = new Promise((resolve8) => {
+    resolveCompletion = resolve8;
+  });
+  return {
+    requestShutdown: () => {
+      requested = true;
+    },
+    settleStartup: () => {
+      if (settled) return;
+      settled = true;
+      resolveCompletion();
+    },
+    waitForStartup: async () => {
+      if (!settled) await completion;
+    },
+    isShutdownRequested: () => requested
+  };
+}
 async function main() {
   const startTime = Date.now();
   const logLeaderNudgeEventFailure = createSwallowedErrorLogger(
@@ -14984,7 +15083,9 @@ async function main() {
   let runtime = null;
   let finalStatus = "failed";
   let pollActive = true;
+  const startupShutdown = createRuntimeStartupShutdownBarrier();
   async function doShutdown(status) {
+    await startupShutdown.waitForStartup();
     pollActive = false;
     finalStatus = status;
     const output = await finalizeRuntimeShutdown(
@@ -15034,10 +15135,12 @@ async function main() {
     process.exit(result.exitCode);
   }
   process.on("SIGINT", () => {
+    startupShutdown.requestShutdown();
     process.stderr.write("[runtime-cli] Received SIGINT, shutting down...\n");
     doShutdown("failed").catch(() => process.exit(1));
   });
   process.on("SIGTERM", () => {
+    startupShutdown.requestShutdown();
     process.stderr.write("[runtime-cli] Received SIGTERM, shutting down...\n");
     doShutdown("failed").catch(() => process.exit(1));
   });
@@ -15071,8 +15174,12 @@ async function main() {
   } catch (err) {
     process.stderr.write(`[runtime-cli] startTeam failed: ${err}
 `);
-    process.exit(1);
+    if (!startupShutdown.isShutdownRequested()) process.exit(1);
+    return;
+  } finally {
+    startupShutdown.settleStartup();
   }
+  if (startupShutdown.isShutdownRequested()) return;
   const jobId = process.env.OMC_JOB_ID;
   const expectedTaskCount = tasks.length;
   let mismatchStreak = 0;
@@ -15390,6 +15497,7 @@ if (require.main === module) {
   buildTerminalCliResult,
   checkWatchdogFailedMarker,
   classifyAllDeadRecoveryEvidence,
+  createRuntimeStartupShutdownBarrier,
   fenceAllDeadRecoveryExpiry,
   finalizeRuntimeShutdown,
   getTerminalStatus,

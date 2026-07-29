@@ -13,20 +13,22 @@ import { join, resolve } from 'path';
 import { mkdir, readFile, rm } from 'fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { tmuxExec, tmuxSpawn } from '../cli/tmux-utils.js';
-import { buildWorkerArgv, getWorkerEnv as getModelWorkerEnv, resolveClaudeWorkerModel, assertHeadlessSupported, validateWorkerLaunchDescriptor, } from './model-contract.js';
+import { tmuxSpawn } from '../cli/tmux-utils.js';
+import { buildWorkerArgv, clearResolvedPathCache, getWorkerEnv as getModelWorkerEnv, resolveClaudeWorkerModel, assertHeadlessSupported, resolveValidatedBinaryPath, validateWorkerLaunchDescriptor, } from './model-contract.js';
 import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
 import { routeTaskToRole } from './role-router.js';
 import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, writeAtomic, } from './team-ops.js';
 import { withScalingLock, migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
-import { sanitizeName, getWorkerLiveness, killWorkerPanes, buildWorkerStartCommand, waitForPaneReady, } from './tmux-session.js';
+import { adoptWorkerPaneOwnership, sanitizeName, getWorkerLiveness, killOwnedWorkerPane, spawnOwnedWorkerInPane, waitForPaneReady, } from './tmux-session.js';
 import { TeamPaths, absPath } from './state-paths.js';
 import { writeWorkerOverlay } from './worker-bootstrap.js';
 import { ensureWorkerWorktree, installWorktreeRootAgents, prepareWorkerWorktreeForRemoval, removeWorkerWorktree, restoreWorktreeRootAgents, } from './git-worktree.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
+import { resolveRuntimeCliPath } from './runtime-owner-client.js';
+import { loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -213,6 +215,8 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         const pendingIdentities = new Set();
         const reservedWorkerNames = new Set();
         const reservedLaunchDescriptors = new Map();
+        const launchContexts = new Map();
+        const paneOwnerships = new Map();
         const cleanupScaledWorkerWorktree = (workerName, created) => {
             if (created) {
                 removeWorkerWorktree(sanitized, workerName, leaderCwd);
@@ -228,16 +232,21 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             const cleanupFailures = orphanFailure ? [orphanFailure] : [];
             const cleanedWorktrees = new Set();
             const cleanupPane = async (candidate, label) => {
+                const launch = launchContexts.get(candidate);
+                const ownership = paneOwnerships.get(candidate);
+                const providerStopped = !launch || (await retireWorkerLaunchAttempt(launch.attempt, 'scale_up_rollback').catch(() => false)
+                    && await terminateWorkerLaunchProvider(launch.attempt).catch(() => false));
+                if (!ownership) {
+                    cleanupFailures.push(`${label}:pane_ownership_unverified:${candidate}`);
+                    return;
+                }
                 for (let attempt = 0; attempt < 2; attempt++) {
-                    try {
-                        tmuxExec(['kill-pane', '-t', candidate], { stdio: 'pipe' });
-                    }
-                    catch { /* verify below */ }
+                    await killOwnedWorkerPane(ownership).catch(() => undefined);
                     const liveness = await getWorkerLiveness(candidate).catch(() => 'unknown');
-                    if (liveness === 'dead')
+                    if (liveness === 'dead' && providerStopped)
                         return;
                 }
-                cleanupFailures.push(`${label}:pane:${candidate}`);
+                cleanupFailures.push(`${label}:${providerStopped ? 'pane' : 'provider'}:${candidate}`);
             };
             const cleanupIdentity = async (workerName) => {
                 const workerDir = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
@@ -383,27 +392,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             if (splitTargetError) {
                 return await rollbackScaleUp(splitTargetError);
             }
-            pendingIdentities.add(workerName);
             try {
-                // Track the exact prospective worktree path before creation so a partial
-                // ensureWorkerWorktree failure remains independently cleanable.
-                const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
-                await mkdir(workerDirPath, { recursive: true });
-                let worktree = null;
-                if (worktreeMode !== 'disabled') {
-                    const pending = { workerName, created: true,
-                        path: join(getOmcRoot(leaderCwd), 'team', sanitized, 'worktrees', workerName) };
-                    pendingWorktrees.push(pending);
-                    worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
-                        mode: worktreeMode,
-                        requireCleanLeader: true,
-                    });
-                    if (worktree) {
-                        pending.created = worktree.created;
-                        pending.path = worktree.path;
-                    }
-                }
-                const workerCwd = worktree?.path ?? leaderCwd;
                 // Resolve per-worker provider/model from the team's routing snapshot
                 // (Option E stickiness — snapshot is immutable, never re-resolved).
                 // Worker's inferred role comes from the owned-task `role` field when all
@@ -444,52 +433,46 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     // Honor Bedrock/Vertex default-model resolution for non-routed claude workers.
                     workerModel = resolveClaudeWorkerModel(env);
                 }
-                // AC-8: try the resolved provider first; on trust-path / not-found
-                // failure, emit a loud warning and retry with the snapshot's Claude
-                // fallback tuple. Aborting the scale_up silently would mask a missing
-                // CLI, so we only rollback if even the fallback cannot be built.
-                const tryBuildLaunch = (agentType, model) => {
-                    // Platform guard (parity with startTeamV2 preflight): a headless-unsupported
-                    // provider (e.g. antigravity on Windows) throws here so scale-up falls back
-                    // to the routed Claude fallback instead of spawning an unusable primary.
-                    assertHeadlessSupported(agentType);
-                    const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
+                let launchBinary;
+                try {
+                    assertHeadlessSupported(workerAgentType);
+                    clearResolvedPathCache();
+                    launchBinary = resolveValidatedBinaryPath(workerAgentType);
+                }
+                catch (error) {
+                    return await rollbackScaleUp(`Failed strict provider preflight for ${workerName} (${workerAgentType}): ${error instanceof Error ? error.message : String(error)}`);
+                }
+                pendingIdentities.add(workerName);
+                const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
+                await mkdir(workerDirPath, { recursive: true });
+                let worktree = null;
+                if (worktreeMode !== 'disabled') {
+                    const pending = { workerName, created: true,
+                        path: join(getOmcRoot(leaderCwd), 'team', sanitized, 'worktrees', workerName) };
+                    pendingWorktrees.push(pending);
+                    worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+                        mode: worktreeMode,
+                        requireCleanLeader: true,
+                    });
+                    if (worktree) {
+                        pending.created = worktree.created;
+                        pending.path = worktree.path;
+                    }
+                }
+                const workerCwd = worktree?.path ?? leaderCwd;
+                let launchArgs;
+                try {
+                    const [, ...args] = buildWorkerArgv(workerAgentType, {
                         teamName: sanitized,
                         workerName,
                         cwd: workerCwd,
-                        ...(model ? { model } : {}),
+                        resolvedBinaryPath: launchBinary,
+                        ...(workerModel ? { model: workerModel } : {}),
                     });
-                    return { launchBinary, launchArgs };
-                };
-                let launchBinary;
-                let launchArgs;
-                try {
-                    ({ launchBinary, launchArgs } = tryBuildLaunch(workerAgentType, workerModel));
+                    launchArgs = args;
                 }
-                catch (primaryError) {
-                    const primaryReason = primaryError instanceof Error ? primaryError.message : String(primaryError);
-                    const fallbackPair = routedPair?.fallback;
-                    const fallbackProvider = fallbackPair
-                        ? fallbackPair.provider
-                        : 'claude';
-                    const fallbackModel = fallbackPair?.model;
-                    process.stderr.write(`[team/scaling] cli_binary_missing:${workerAgentType}: ${primaryReason} — falling back to ${fallbackProvider} (AC-8)\n`);
-                    await teamAppendEvent(sanitized, {
-                        type: 'team_leader_nudge',
-                        worker: 'leader-fixed',
-                        reason: `cli_binary_missing:${workerAgentType}:${primaryReason}:fallback=${fallbackProvider}`,
-                    }, leaderCwd);
-                    try {
-                        ({ launchBinary, launchArgs } = tryBuildLaunch(fallbackProvider, fallbackModel));
-                        workerAgentType = fallbackProvider;
-                        workerModel = fallbackModel;
-                    }
-                    catch (fallbackError) {
-                        const fallbackReason = fallbackError instanceof Error
-                            ? fallbackError.message
-                            : String(fallbackError);
-                        return await rollbackScaleUp(`Failed to resolve worker launch config for ${workerName} (primary=${workerAgentType}: ${primaryReason}; fallback=${fallbackProvider}: ${fallbackReason})`);
-                    }
+                catch (error) {
+                    return await rollbackScaleUp(`Failed strict provider argv construction for ${workerName} (${workerAgentType}): ${error instanceof Error ? error.message : String(error)}`);
                 }
                 let launchDescriptor;
                 try {
@@ -548,24 +531,10 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                         return await rollbackScaleUp(`Failed to install worker overlay for ${workerName}: ${reason}`);
                     }
                 }
-                let cmd;
-                try {
-                    cmd = buildWorkerStartCommand({
-                        teamName: sanitized,
-                        workerName,
-                        envVars: extraEnv,
-                        launchArgs: [...launchDescriptor.args],
-                        launchBinary: launchDescriptor.binary,
-                        cwd: workerCwd,
-                    });
-                }
-                catch (error) {
-                    const reason = error instanceof Error ? error.message : String(error);
-                    return await rollbackScaleUp(`Failed to build worker start command for ${workerName}: ${reason}`);
-                }
-                // Split from the rightmost worker pane or the leader pane
+                // Allocate an empty pane first so the exact pane identity can be bound to
+                // the durable launch attempt before any provider command executes.
                 const result = tmuxSpawn([
-                    'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', workerCwd, cmd,
+                    'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', workerCwd,
                 ]);
                 if (result.status !== 0) {
                     return await rollbackScaleUp(`Failed to create tmux pane for ${workerName}: ${(result.stderr || '').trim()}`);
@@ -574,6 +543,36 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 if (!paneId || !paneId.startsWith('%')) {
                     return await rollbackScaleUp(`Failed to capture pane ID for ${workerName}`, undefined, `unaddressable_spawned_pane:${(result.stdout || '').trim() || '<missing>'}`);
                 }
+                const ownershipResult = await adoptWorkerPaneOwnership({
+                    provider: 'tmux',
+                    providerTarget: config.tmux_session,
+                    paneId,
+                    leaderPaneId: config.leader_pane_id ?? '',
+                    reservedPaneIds: config.workers.map(worker => worker.pane_id).filter((id) => Boolean(id)),
+                });
+                if (!ownershipResult.ok) {
+                    return await rollbackScaleUp(`Failed to prove pane ownership for ${workerName}: ${ownershipResult.reason}`, undefined, `unaddressable_spawned_pane:${paneId}`);
+                }
+                paneOwnerships.set(paneId, ownershipResult.ownership);
+                let startupContext;
+                try {
+                    startupContext = await spawnOwnedWorkerInPane(config.tmux_session, ownershipResult.ownership, {
+                        teamName: sanitized,
+                        workerName,
+                        envVars: extraEnv,
+                        launchArgs: [...launchDescriptor.args],
+                        launchBinary: launchDescriptor.binary,
+                        cwd: workerCwd,
+                        provider: workerAgentType,
+                        launchBootstrapPath: resolveRuntimeCliPath(),
+                        launchStateCwd: leaderCwd,
+                        launchContext: { kind: 'initial' },
+                    });
+                }
+                catch (error) {
+                    return await rollbackScaleUp(`Failed durable worker launch for ${workerName}: ${error instanceof Error ? error.message : String(error)}`, paneId);
+                }
+                launchContexts.set(paneId, startupContext);
                 // Get PID
                 let panePid;
                 try {
@@ -595,6 +594,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     operational_state: 'active',
                     pid: panePid,
                     pane_id: paneId,
+                    launch_attempt_id: startupContext.attempt.attempt_id,
                     working_dir: workerCwd,
                     team_state_root: teamStateRoot,
                     ...(worktree ? {
@@ -858,22 +858,54 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             await markScaleDownFailed('scale_down_fence_lost_before_effects');
             return { ok: false, error: 'team_mutation_busy' };
         }
-        // Phase 3: Kill tmux panes after workers have had a chance to drain.
-        const targetPaneIds = targetWorkers
-            .map((w) => w.pane_id)
-            .filter((paneId) => typeof paneId === 'string' && paneId.trim().length > 0);
-        try {
-            await killWorkerPanes({
-                paneIds: targetPaneIds,
-                leaderPaneId: config.leader_pane_id ?? undefined,
-                teamName: sanitized,
-                cwd: leaderCwd,
+        // Phase 3: Retire and terminate each exact provider before destructive pane cleanup.
+        for (const worker of targetWorkers) {
+            const paneId = worker.pane_id;
+            const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+            if (!provider || !worker.launch_attempt_id) {
+                const reason = `provider_cleanup_unverified:missing_launch_identity:${worker.name}`;
+                await markScaleDownFailed(reason);
+                return { ok: false, error: reason };
+            }
+            const ownershipResult = await adoptWorkerPaneOwnership({
+                provider: 'tmux',
+                providerTarget: config.tmux_session,
+                paneId,
+                leaderPaneId: config.leader_pane_id ?? '',
+                reservedPaneIds: config.workers
+                    .filter(candidate => candidate.name !== worker.name)
+                    .map(candidate => candidate.pane_id)
+                    .filter((id) => Boolean(id)),
             });
-        }
-        catch (error) {
-            const reason = `pane_cleanup_failed:${error instanceof Error ? error.message : String(error)}`;
-            await markScaleDownFailed(reason);
-            return { ok: false, error: reason };
+            if (!ownershipResult.ok) {
+                const reason = `pane_cleanup_failed:${worker.name}:${ownershipResult.reason}`;
+                await markScaleDownFailed(reason);
+                return { ok: false, error: reason };
+            }
+            const attempt = await loadWorkerLaunchAttempt({
+                cwd: leaderCwd,
+                teamName: sanitized,
+                workerName: worker.name,
+                paneId,
+                provider,
+                attemptId: worker.launch_attempt_id,
+                runtimeCliPath: resolveRuntimeCliPath(),
+            });
+            if (!attempt
+                || !await retireWorkerLaunchAttempt(attempt, 'scale_down')
+                || !await terminateWorkerLaunchProvider(attempt)) {
+                const reason = `provider_cleanup_unverified:${worker.name}`;
+                await markScaleDownFailed(reason);
+                return { ok: false, error: reason };
+            }
+            try {
+                await killOwnedWorkerPane(ownershipResult.ownership);
+            }
+            catch (error) {
+                const reason = `pane_cleanup_failed:${worker.name}:${error instanceof Error ? error.message : String(error)}`;
+                await markScaleDownFailed(reason);
+                return { ok: false, error: reason };
+            }
         }
         const liveness = await Promise.all(targetWorkers.map(async (w) => (w.pane_id ? [w.name, await getWorkerLiveness(w.pane_id)] : [w.name, 'unknown'])));
         const aliveNames = liveness.filter(([, state]) => state === 'alive').map(([name]) => name);

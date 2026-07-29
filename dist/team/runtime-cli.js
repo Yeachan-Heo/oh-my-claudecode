@@ -684,6 +684,26 @@ export async function finalizeRuntimeShutdown(runtime, useV2, collectOutput, shu
     await publishOutput(output);
     return output;
 }
+export function createRuntimeStartupShutdownBarrier() {
+    let settled = false;
+    let requested = false;
+    let resolveCompletion;
+    const completion = new Promise(resolve => { resolveCompletion = resolve; });
+    return {
+        requestShutdown: () => { requested = true; },
+        settleStartup: () => {
+            if (settled)
+                return;
+            settled = true;
+            resolveCompletion();
+        },
+        waitForStartup: async () => {
+            if (!settled)
+                await completion;
+        },
+        isShutdownRequested: () => requested,
+    };
+}
 async function main() {
     const startTime = Date.now();
     const logLeaderNudgeEventFailure = createSwallowedErrorLogger('team.runtime-cli main appendTeamEvent failed');
@@ -737,7 +757,9 @@ async function main() {
     let runtime = null;
     let finalStatus = 'failed';
     let pollActive = true;
+    const startupShutdown = createRuntimeStartupShutdownBarrier();
     async function doShutdown(status) {
+        await startupShutdown.waitForStartup();
         pollActive = false;
         finalStatus = status;
         const output = await finalizeRuntimeShutdown(runtime, useV2, async () => buildCliOutput(stateRoot, teamName, finalStatus, workerCount, startTime), async () => {
@@ -778,10 +800,12 @@ async function main() {
     }
     // Register signal handlers before poll loop
     process.on('SIGINT', () => {
+        startupShutdown.requestShutdown();
         process.stderr.write('[runtime-cli] Received SIGINT, shutting down...\n');
         doShutdown('failed').catch(() => process.exit(1));
     });
     process.on('SIGTERM', () => {
+        startupShutdown.requestShutdown();
         process.stderr.write('[runtime-cli] Received SIGTERM, shutting down...\n');
         doShutdown('failed').catch(() => process.exit(1));
     });
@@ -819,8 +843,15 @@ async function main() {
     }
     catch (err) {
         process.stderr.write(`[runtime-cli] startTeam failed: ${err}\n`);
-        process.exit(1);
+        if (!startupShutdown.isShutdownRequested())
+            process.exit(1);
+        return;
     }
+    finally {
+        startupShutdown.settleStartup();
+    }
+    if (startupShutdown.isShutdownRequested())
+        return;
     // Persist pane IDs so MCP server can clean up explicitly via omc_run_team_cleanup.
     const jobId = process.env.OMC_JOB_ID;
     const expectedTaskCount = tasks.length;

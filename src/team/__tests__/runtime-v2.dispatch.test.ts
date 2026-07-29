@@ -969,6 +969,26 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(persisted.workers[0].assigned_tasks).toEqual([]);
   });
 
+  it('retires the exact provider when layout fails after launch handoff', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-layout-failure-'));
+    mocks.applyMainVerticalLayout.mockRejectedValueOnce(new Error('layout failed'));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Layout failure cleanup' }],
+      cwd,
+    })).rejects.toThrow('layout failed');
+    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
+      'startup_layout_failed',
+    );
+    expect(launchMocks.terminateWorkerLaunchProvider).toHaveBeenCalled();
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
+  });
+
   it('tears down the owned worker launch when startup readiness fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-ready-'));
     mocks.deliverStartupInbox.mockResolvedValueOnce({ ok: false, reason: 'readiness_timeout' });

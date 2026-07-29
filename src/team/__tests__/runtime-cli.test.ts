@@ -23,6 +23,7 @@ import {
   writeResultArtifact,
   runPersistentRecoveryOwnerLoop,
   finalizeRuntimeShutdown,
+  createRuntimeStartupShutdownBarrier,
   runWorkerLaunchFromEnvironment,
   selectRuntimeCliMode,
 } from '../runtime-cli.js';
@@ -91,6 +92,19 @@ describe('runtime-cli legacy watchdog shutdown', () => {
     );
     expect(stopWatchdog).not.toHaveBeenCalled();
   });
+  it('holds signal-triggered shutdown until startup ownership settles', async () => {
+    const barrier = createRuntimeStartupShutdownBarrier();
+    barrier.requestShutdown();
+    let released = false;
+    const waiting = barrier.waitForStartup().then(() => { released = true; });
+    await Promise.resolve();
+    expect(barrier.isShutdownRequested()).toBe(true);
+    expect(released).toBe(false);
+    barrier.settleStartup();
+    await waiting;
+    expect(released).toBe(true);
+  });
+
 });
 
 describe('runtime-cli auto-merge compatibility', () => {

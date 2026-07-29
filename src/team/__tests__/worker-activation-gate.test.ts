@@ -82,6 +82,35 @@ describe('worker recovery activation gate', () => {
     expect(existsSync(`${runPath}.launched`)).toBe(false);
     expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: exitCode });
   });
+  it('kills recovery provider descendants when the root exits immediately', async () => {
+    const readyPath = join(cwd, 'early-child-ready.json');
+    const activatePath = join(cwd, 'early-child-activate.json');
+    const runPath = join(cwd, 'early-child-run.json');
+    const childPidPath = join(cwd, 'early-child.pid');
+    const launchAttempt = await acceptedAttempt('worker-1', '%9', 'recovery-early-child', 9, 'attempt-early-child');
+    const record = { recovery_id: 'recovery-early-child', worker_name: 'worker-1', replacement_generation: 9,
+      pane_attempt_id: 'attempt-early-child', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
+    writeFileSync(activatePath, JSON.stringify(record));
+    writeFileSync(runPath, JSON.stringify(record));
+    const script = [
+      "const fs=require('node:fs')",
+      "const cp=require('node:child_process')",
+      "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});child.unref()",
+      `fs.writeFileSync(${JSON.stringify(childPidPath)},String(child.pid))`,
+    ].join(';');
+
+    await expect(runWorkerActivationGate({
+      recoveryId: 'recovery-early-child', workerName: 'worker-1', replacementGeneration: 9, paneAttemptId: 'attempt-early-child',
+      readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', script],
+      launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
+    })).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    const childPid = Number(readFileSync(childPidPath, 'utf8'));
+    await expect.poll(() => isProcessAlive(childPid), { timeout: 2_000, interval: 20 }).toBe(false);
+    expect(isProcessAlive(process.pid)).toBe(true);
+    expect(existsSync(`${runPath}.launched`)).toBe(false);
+  });
+
   it('does not publish launched evidence when the provider executable cannot spawn', async () => {
     const readyPath = join(cwd, 'failed-ready.json');
     const activatePath = join(cwd, 'failed-activate.json');

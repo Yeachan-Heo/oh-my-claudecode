@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { isProcessAlive } from '../../platform/process-utils.js';
+import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec,
+  prepareWorkerLaunchAttempt, runWorkerLaunchBootstrap } from '../worker-launch-ack.js';
 
 type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void;
 type ExecCallback = (err: Error | null, stdout: string, stderr: string) => void;
@@ -83,7 +87,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     }
   });
 
-  it('kills only recorded ownership-proven split-pane workers when pane metadata is stale', async () => {
+  it('kills the owned pane but preserves state when provider launch identity is missing', async () => {
     const teamName = 'pane-cleanup-team';
     const teamRoot = `.omc/state/team/${teamName}`;
 
@@ -117,6 +121,36 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
 
     expect(killPaneTargets).toEqual(['%2']);
     expect(killPaneTargets).not.toContain('%1');
+    await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).resolves.toContain('pane-cleanup-team');
+  });
+  it('retires and terminates the exact provider before removing pane state', async () => {
+    const teamName = 'provider-cleanup-team';
+    const teamRoot = `.omc/state/team/${teamName}`;
+    const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%2',
+      provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' } });
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      attempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd,
+    ));
+    await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+      .resolves.toEqual({ ok: true });
+    await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
+      .resolves.toBe(true);
+    const providerPid = JSON.parse(await readFile(attempt.startedPath, 'utf8')).pid as number;
+    await writeJson(cwd, `${teamRoot}/config.json`, {
+      name: teamName, task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive', worker_count: 1, max_workers: 20,
+      workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%2',
+        worker_cli: 'claude', launch_attempt_id: attempt.attempt_id,
+        launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: process.execPath, args: [] } }],
+      created_at: new Date().toISOString(), tmux_session: 'leader-session:0', tmux_window_owned: false,
+      next_task_id: 1, leader_pane_id: '%1', hud_pane_id: null, resize_hook_name: null, resize_hook_target: null,
+    });
+
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
+    await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
+    await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+    expect(isProcessAlive(providerPid)).toBe(false);
+    expect(tmuxCalls.findIndex(args => args[0] === 'kill-pane' && args[2] === '%2')).toBeGreaterThanOrEqual(0);
     await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
+
 });

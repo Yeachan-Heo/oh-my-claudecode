@@ -144,4 +144,26 @@ describe('runtime-v2 Gemini preflight routing', () => {
     expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
     expect(modelContractMocks.buildWorkerArgv).not.toHaveBeenCalled();
   });
+  it('fails a routed-only provider before state or session side effects', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'routed-provider-preflight-'));
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+      if (agentType === 'gemini') throw new Error("Resolved CLI binary 'gemini' to untrusted location: /tmp/shadow/gemini");
+      return `/usr/bin/${agentType ?? 'claude'}`;
+    });
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'routed-preflight-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Review code', description: 'Review code', role: 'executor' }],
+      cwd,
+      pluginConfig: { team: { roleRouting: { executor: { provider: 'gemini' } } } } as any,
+    })).rejects.toThrow("cli_binary_preflight_failed:gemini:Resolved CLI binary 'gemini' to untrusted location");
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    await expect(import('node:fs/promises').then(fs => fs.access(join(cwd, '.omc', 'state', 'team', 'routed-preflight-team'))))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
 });
