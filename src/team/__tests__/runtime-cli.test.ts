@@ -105,6 +105,18 @@ describe('runtime-cli legacy watchdog shutdown', () => {
     expect(released).toBe(true);
   });
 
+  it('does not publish a terminal result when shutdown cleanup fails', async () => {
+    const phases: string[] = [];
+    await expect(finalizeRuntimeShutdown(
+      null,
+      true,
+      async () => { phases.push('collect'); return { status: 'failed' }; },
+      async () => { phases.push('shutdown'); throw new Error('team_shutdown_provider_cleanup_unverified:worker-1'); },
+      async () => { phases.push('publish'); },
+    )).rejects.toThrow('team_shutdown_provider_cleanup_unverified:worker-1');
+    expect(phases).toEqual(['collect', 'shutdown']);
+  });
+
 });
 
 describe('runtime-cli auto-merge compatibility', () => {

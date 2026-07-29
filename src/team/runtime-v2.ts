@@ -154,6 +154,7 @@ import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadW
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
 import {
   isWorkerLaunchAttemptCurrent,
+  isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
   retireWorkerLaunchAttempt,
@@ -2385,7 +2386,9 @@ export async function executeRecoverDeadWorkerV2Owner(
               attemptId: currentWorker.launch_attempt_id,
               runtimeCliPath,
             });
-            if (!persistedLaunch) return { ok: false, error: 'worker_cleanup_incomplete' };
+            if (!persistedLaunch || !await isWorkerLaunchAttemptAccepted(persistedLaunch)) {
+              return { ok: false, error: 'worker_cleanup_incomplete' };
+            }
             priorLaunches.push(persistedLaunch);
           }
         } else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
@@ -4089,6 +4092,7 @@ export async function shutdownTeamV2(
       runtimeCliPath: resolveRuntimeCliPath(),
     });
     if (!attempt
+      || !await isWorkerLaunchAttemptAccepted(attempt)
       || !await retireWorkerLaunchAttempt(attempt, 'team_shutdown')
       || !await terminateWorkerLaunchProvider(attempt)) {
       providerCleanupFailures.push(worker.name);

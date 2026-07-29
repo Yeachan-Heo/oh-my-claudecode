@@ -56,7 +56,7 @@ import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity } from './team-owner-epoch.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { waitForRecoveryGateRecord } from './worker-activation-gate.js';
-import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider, withWorkerLaunchAttemptFence, } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptCurrent, isWorkerLaunchAttemptAccepted, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider, withWorkerLaunchAttemptFence, } from './worker-launch-ack.js';
 import { isProcessIdentityLive } from '../platform/process-utils.js';
 let runtimeOwnerRecoveryClient;
 /** Runtime integration point; production may bind its owner client after startup. */
@@ -1886,8 +1886,9 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                             attemptId: currentWorker.launch_attempt_id,
                             runtimeCliPath,
                         });
-                        if (!persistedLaunch)
+                        if (!persistedLaunch || !await isWorkerLaunchAttemptAccepted(persistedLaunch)) {
                             return { ok: false, error: 'worker_cleanup_incomplete' };
+                        }
                         priorLaunches.push(persistedLaunch);
                     }
                 }
@@ -3443,6 +3444,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             runtimeCliPath: resolveRuntimeCliPath(),
         });
         if (!attempt
+            || !await isWorkerLaunchAttemptAccepted(attempt)
             || !await retireWorkerLaunchAttempt(attempt, 'team_shutdown')
             || !await terminateWorkerLaunchProvider(attempt)) {
             providerCleanupFailures.push(worker.name);

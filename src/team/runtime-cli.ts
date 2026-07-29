@@ -860,8 +860,9 @@ async function main(): Promise<void> {
   let finalStatus: 'completed' | 'failed' = 'failed';
   let pollActive = true;
   const startupShutdown = createRuntimeStartupShutdownBarrier();
+  let shutdownInFlight: Promise<void> | null = null;
 
-  async function doShutdown(status: 'completed' | 'failed'): Promise<void> {
+  async function performShutdown(status: 'completed' | 'failed'): Promise<void> {
     await startupShutdown.waitForStartup();
     pollActive = false;
     finalStatus = status;
@@ -889,6 +890,7 @@ async function main(): Promise<void> {
           }
         } catch (err) {
           process.stderr.write(`[runtime-cli] shutdown error: ${err}\n`);
+          throw err;
         }
       },
       async publishedOutput => {
@@ -906,6 +908,10 @@ async function main(): Promise<void> {
 
     // 4. Exit
     process.exit(status === 'completed' ? 0 : 1);
+  }
+  function doShutdown(status: 'completed' | 'failed'): Promise<void> {
+    if (!shutdownInFlight) shutdownInFlight = performShutdown(status);
+    return shutdownInFlight;
   }
 
   function exitWithoutShutdown(phase: TerminalPhaseResult): void {

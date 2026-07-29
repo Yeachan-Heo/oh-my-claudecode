@@ -13823,7 +13823,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               attemptId: currentWorker.launch_attempt_id,
               runtimeCliPath
             });
-            if (!persistedLaunch) return { ok: false, error: "worker_cleanup_incomplete" };
+            if (!persistedLaunch || !await isWorkerLaunchAttemptAccepted(persistedLaunch)) {
+              return { ok: false, error: "worker_cleanup_incomplete" };
+            }
             priorLaunches.push(persistedLaunch);
           }
         } else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
@@ -15243,7 +15245,7 @@ Then exit your session.
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath()
     });
-    if (!attempt || !await retireWorkerLaunchAttempt(attempt, "team_shutdown") || !await terminateWorkerLaunchProvider(attempt)) {
+    if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt) || !await retireWorkerLaunchAttempt(attempt, "team_shutdown") || !await terminateWorkerLaunchProvider(attempt)) {
       providerCleanupFailures.push(worker.name);
     }
   }

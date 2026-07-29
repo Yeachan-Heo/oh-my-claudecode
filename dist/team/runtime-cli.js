@@ -758,7 +758,8 @@ async function main() {
     let finalStatus = 'failed';
     let pollActive = true;
     const startupShutdown = createRuntimeStartupShutdownBarrier();
-    async function doShutdown(status) {
+    let shutdownInFlight = null;
+    async function performShutdown(status) {
         await startupShutdown.waitForStartup();
         pollActive = false;
         finalStatus = status;
@@ -775,6 +776,7 @@ async function main() {
             }
             catch (err) {
                 process.stderr.write(`[runtime-cli] shutdown error: ${err}\n`);
+                throw err;
             }
         }, async (publishedOutput) => {
             const finishedAt = new Date().toISOString();
@@ -789,6 +791,11 @@ async function main() {
         process.stdout.write(JSON.stringify(output) + '\n');
         // 4. Exit
         process.exit(status === 'completed' ? 0 : 1);
+    }
+    function doShutdown(status) {
+        if (!shutdownInFlight)
+            shutdownInFlight = performShutdown(status);
+        return shutdownInFlight;
     }
     function exitWithoutShutdown(phase) {
         pollActive = false;

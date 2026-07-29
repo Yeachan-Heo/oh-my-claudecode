@@ -110,6 +110,9 @@ async function attachPersistedPriorLaunch(teamName: string, configPath: string):
   const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
   const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: worker.name, paneId: '%1',
     provider, runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
+  const expected = JSON.parse(readFileSync(attempt.expectedPath, 'utf8'));
+  writeFileSync(attempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }));
+  await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
   worker.pane_id = '%1';
   worker.launch_attempt_id = attempt.attempt_id;
   writeFileSync(configPath, JSON.stringify(config));

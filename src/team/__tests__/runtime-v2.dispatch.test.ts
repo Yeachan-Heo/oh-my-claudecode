@@ -35,6 +35,8 @@ const launchMocks = vi.hoisted(() => ({
   withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
+  loadWorkerLaunchAttempt: vi.fn(async () => ({})),
+  isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
 }));
 
 const mergeMocks = vi.hoisted(() => ({
@@ -105,6 +107,8 @@ vi.mock('../worker-launch-ack.js', async (importOriginal) => {
     withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence,
     retireWorkerLaunchAttempt: launchMocks.retireWorkerLaunchAttempt,
     terminateWorkerLaunchProvider: launchMocks.terminateWorkerLaunchProvider,
+    loadWorkerLaunchAttempt: launchMocks.loadWorkerLaunchAttempt,
+    isWorkerLaunchAttemptAccepted: launchMocks.isWorkerLaunchAttemptAccepted,
   };
 });
 
@@ -185,6 +189,16 @@ describe('runtime v2 startup inbox dispatch', () => {
     cadenceMocks.installCommitCadence.mockReset();
     cadenceMocks.startFallbackPoller.mockReset();
     cadenceMocks.uninstallCommitCadence.mockReset();
+    launchMocks.withWorkerLaunchAttemptFence.mockReset();
+    launchMocks.withWorkerLaunchAttemptFence.mockImplementation(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() }));
+    launchMocks.retireWorkerLaunchAttempt.mockReset();
+    launchMocks.retireWorkerLaunchAttempt.mockResolvedValue(true);
+    launchMocks.terminateWorkerLaunchProvider.mockReset();
+    launchMocks.terminateWorkerLaunchProvider.mockResolvedValue(true);
+    launchMocks.loadWorkerLaunchAttempt.mockReset();
+    launchMocks.loadWorkerLaunchAttempt.mockResolvedValue({});
+    launchMocks.isWorkerLaunchAttemptAccepted.mockReset();
+    launchMocks.isWorkerLaunchAttemptAccepted.mockResolvedValue(true);
 
     mocks.createTeamSession.mockResolvedValue({
       sessionName: 'dispatch-session',

@@ -12974,7 +12974,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               attemptId: currentWorker.launch_attempt_id,
               runtimeCliPath
             });
-            if (!persistedLaunch) return { ok: false, error: "worker_cleanup_incomplete" };
+            if (!persistedLaunch || !await isWorkerLaunchAttemptAccepted(persistedLaunch)) {
+              return { ok: false, error: "worker_cleanup_incomplete" };
+            }
             priorLaunches.push(persistedLaunch);
           }
         } else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
@@ -14371,7 +14373,7 @@ Then exit your session.
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath()
     });
-    if (!attempt || !await retireWorkerLaunchAttempt(attempt, "team_shutdown") || !await terminateWorkerLaunchProvider(attempt)) {
+    if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt) || !await retireWorkerLaunchAttempt(attempt, "team_shutdown") || !await terminateWorkerLaunchProvider(attempt)) {
       providerCleanupFailures.push(worker.name);
     }
   }
@@ -15096,7 +15098,8 @@ async function main() {
   let finalStatus = "failed";
   let pollActive = true;
   const startupShutdown = createRuntimeStartupShutdownBarrier();
-  async function doShutdown(status) {
+  let shutdownInFlight = null;
+  async function performShutdown(status) {
     await startupShutdown.waitForStartup();
     pollActive = false;
     finalStatus = status;
@@ -15123,6 +15126,7 @@ async function main() {
         } catch (err) {
           process.stderr.write(`[runtime-cli] shutdown error: ${err}
 `);
+          throw err;
         }
       },
       async (publishedOutput) => {
@@ -15137,6 +15141,10 @@ async function main() {
     );
     process.stdout.write(JSON.stringify(output) + "\n");
     process.exit(status === "completed" ? 0 : 1);
+  }
+  function doShutdown(status) {
+    if (!shutdownInFlight) shutdownInFlight = performShutdown(status);
+    return shutdownInFlight;
   }
   function exitWithoutShutdown(phase) {
     pollActive = false;
