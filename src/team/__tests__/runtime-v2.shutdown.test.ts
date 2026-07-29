@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createWorkerWorktree } from '../git-worktree.js';
+import { prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
 
 const tmuxMocks = vi.hoisted(() => ({
   killWorkerPanes: vi.fn(async () => undefined),
@@ -213,6 +214,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const teamRoot = join(repoDir, '.omc', 'state', 'team', teamName);
     mkdirSync(teamRoot, { recursive: true });
     const worktree = createWorkerWorktree(teamName, 'worker-live', repoDir);
+    const launchAttempt = await prepareWorkerLaunchAttempt({ cwd: repoDir, teamName, workerName: 'worker-live', paneId: '%42',
+      provider: 'claude', runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
     writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
       name: teamName,
       task: 'demo',
@@ -226,6 +229,9 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         role: 'executor',
         assigned_tasks: [],
         pane_id: '%42',
+        worker_cli: 'claude',
+        launch_attempt_id: launchAttempt.attempt_id,
+        launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/bin/echo', args: [] },
         working_dir: worktree.path,
         team_state_root: teamRoot,
         worktree_path: worktree.path,
@@ -256,6 +262,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const teamRoot = join(repoDir, '.omc', 'state', 'team', teamName);
     mkdirSync(teamRoot, { recursive: true });
     const worktree = createWorkerWorktree(teamName, 'worker-unknown', repoDir);
+    const launchAttempt = await prepareWorkerLaunchAttempt({ cwd: repoDir, teamName, workerName: 'worker-unknown', paneId: '%44',
+      provider: 'claude', runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
     writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
       name: teamName,
       task: 'demo',
@@ -269,6 +277,9 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         role: 'executor',
         assigned_tasks: [],
         pane_id: '%44',
+        worker_cli: 'claude',
+        launch_attempt_id: launchAttempt.attempt_id,
+        launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/bin/echo', args: [] },
         working_dir: worktree.path,
         team_state_root: teamRoot,
         worktree_path: worktree.path,
@@ -297,6 +308,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const teamRoot = join(repoDir, '.omc', 'state', 'team', teamName);
     mkdirSync(teamRoot, { recursive: true });
     const worktree = createWorkerWorktree(teamName, 'worker-kill-fails', repoDir);
+    const launchAttempt = await prepareWorkerLaunchAttempt({ cwd: repoDir, teamName, workerName: 'worker-kill-fails', paneId: '%43',
+      provider: 'claude', runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
     writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
       name: teamName,
       task: 'demo',
@@ -310,6 +323,9 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         role: 'executor',
         assigned_tasks: [],
         pane_id: '%43',
+        worker_cli: 'claude',
+        launch_attempt_id: launchAttempt.attempt_id,
+        launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/bin/echo', args: [] },
         working_dir: worktree.path,
         team_state_root: teamRoot,
         worktree_path: worktree.path,

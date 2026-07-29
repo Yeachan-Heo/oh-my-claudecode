@@ -104,6 +104,17 @@ async function expectRecoveryLockReleased(teamName: string, workerName: string, 
   expect(config.active_recovery?.recovery_id).not.toBe(followupRecoveryId);
 }
 
+async function attachPersistedPriorLaunch(teamName: string, configPath: string): Promise<void> {
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  const worker = config.workers[0];
+  const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+  const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: worker.name, paneId: '%1',
+    provider, runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'initial' } });
+  worker.pane_id = '%1';
+  worker.launch_attempt_id = attempt.attempt_id;
+  writeFileSync(configPath, JSON.stringify(config));
+}
+
 describe('recovery pane rollback evidence', () => {
   it('retains the attempt and publishes durable evidence when pane cleanup cannot be verified', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-orphan-'));
@@ -116,7 +127,7 @@ describe('recovery pane rollback evidence', () => {
     writeFileSync(configPath, JSON.stringify({
       name: teamName,
       worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: workerCwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: workerCwd }],
       agent_type: 'claude',
       created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`,
@@ -124,6 +135,7 @@ describe('recovery pane rollback evidence', () => {
       state_revision: 1,
       leader_pane_id: '%leader',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValueOnce('dead').mockResolvedValue('alive');
@@ -208,6 +220,33 @@ describe('recovery pane rollback evidence', () => {
     await expect(retireWorkerLaunchAttempt(launchAttempt, 'test_cleanup')).resolves.toBe(true);
     await expect(terminateWorkerLaunchProvider(launchAttempt)).resolves.toBe(true);
     await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+  });
+
+  it('preserves the prior pane and rejects recovery when its launch cannot be identified', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-missing-prior-launch-'));
+    const teamName = 'missing-prior-launch-team';
+    const requestId = 'missing-prior-launch-request';
+    const recoveryId = 'missing-prior-launch-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    paneMocks.getWorkerLiveness.mockResolvedValue('dead');
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    expect(paneMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(paneMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(persisted.workers[0].pane_id).toBe('%1');
+    expect(persisted.active_recovery).toMatchObject({ recovery_id: recoveryId, worker_name: 'worker-1' });
   });
 
   it('terminates the dead-pane provider before allocating a replacement pane', async () => {
@@ -307,12 +346,13 @@ describe('recovery pane rollback evidence', () => {
       permissions_snapshot: { approval_mode: 'default', sandbox_mode: 'workspace-write', network_access: false },
       tmux_session: `${teamName}:0`,
       worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, role: 'gemini', assigned_tasks: [], worker_cli: 'gemini', pane_id: '%1' }],
+      workers: [{ name: 'worker-1', index: 1, role: 'gemini', assigned_tasks: [], worker_cli: 'gemini' }],
       next_task_id: 1,
       created_at: new Date().toISOString(),
       leader_pane_id: '%0',
       service_descriptor: serviceDescriptor,
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, {
       operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'),
@@ -430,10 +470,11 @@ describe('recovery pane rollback evidence', () => {
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, JSON.stringify({
       name: teamName, worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
       agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
       lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValue('dead');
@@ -464,10 +505,11 @@ describe('recovery pane rollback evidence', () => {
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, JSON.stringify({
       name: teamName, worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
       agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
       lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValue('dead');
@@ -495,10 +537,11 @@ describe('recovery pane rollback evidence', () => {
     writeFileSync(configPath, JSON.stringify({
       name: teamName,
       worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
       agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
       lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%9',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValue('dead');
@@ -536,6 +579,7 @@ describe('recovery pane rollback evidence', () => {
       agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
       lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%9',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValue('dead');
@@ -556,7 +600,7 @@ describe('recovery pane rollback evidence', () => {
     writeFileSync(configPath, JSON.stringify({
       name: teamName,
       worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
       agent_type: 'claude',
       created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`,
@@ -564,6 +608,7 @@ describe('recovery pane rollback evidence', () => {
       state_revision: 1,
       leader_pane_id: '%9',
     }));
+    await attachPersistedPriorLaunch(teamName, configPath);
     reserveRecoveryRequest(cwd, requestId, {
       operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'),

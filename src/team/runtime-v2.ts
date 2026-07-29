@@ -1396,6 +1396,7 @@ export async function finalizeRecoveryOwnerResult(
       'worker_liveness_unknown',
       'runtime_owner_unavailable',
       'runtime_owner_fence_lost',
+      'worker_cleanup_incomplete',
     ].includes(result.error));
   if (transientFailure) {
     const pending = await deps.readRevisionedConfig(input.teamName, input.cwd);
@@ -2367,19 +2368,30 @@ export async function executeRecoverDeadWorkerV2Owner(
           }
         }
 
-        let priorLaunch = currentLaunch;
-        if (!priorLaunch && currentWorker.launch_attempt_id && currentWorker.pane_id) {
-          priorLaunch = await loadWorkerLaunchAttempt({
-            cwd: input.cwd,
-            teamName: input.teamName,
-            workerName: sagaInput.workerName,
-            paneId: currentWorker.pane_id,
-            provider: launchDescriptor.provider,
-            attemptId: currentWorker.launch_attempt_id,
-            runtimeCliPath,
-          });
+        const priorLaunches = currentLaunch ? [currentLaunch] : [];
+        if (currentWorker.launch_attempt_id) {
+          if (!currentWorker.pane_id) return { ok: false, error: 'worker_cleanup_incomplete' };
+          if (currentLaunch?.attempt_id === currentWorker.launch_attempt_id) {
+            if (currentLaunch.pane_id !== currentWorker.pane_id) {
+              return { ok: false, error: 'worker_cleanup_incomplete' };
+            }
+          } else {
+            const persistedLaunch = await loadWorkerLaunchAttempt({
+              cwd: input.cwd,
+              teamName: input.teamName,
+              workerName: sagaInput.workerName,
+              paneId: currentWorker.pane_id,
+              provider: launchDescriptor.provider,
+              attemptId: currentWorker.launch_attempt_id,
+              runtimeCliPath,
+            });
+            if (!persistedLaunch) return { ok: false, error: 'worker_cleanup_incomplete' };
+            priorLaunches.push(persistedLaunch);
+          }
+        } else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
+          return { ok: false, error: 'worker_cleanup_incomplete' };
         }
-        if (priorLaunch) {
+        for (const priorLaunch of priorLaunches) {
           const retired = await retireWorkerLaunchAttempt(priorLaunch, 'recovery_replacement');
           if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
             return { ok: false, error: 'worker_cleanup_incomplete' };
@@ -4082,6 +4094,11 @@ export async function shutdownTeamV2(
       providerCleanupFailures.push(worker.name);
     }
   }
+  if (providerCleanupFailures.length > 0) {
+    process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
+    await finalizeAutoMerge();
+    return;
+  }
 
   try {
     const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');
@@ -4149,11 +4166,6 @@ export async function shutdownTeamV2(
       await finalizeAutoMerge();
       return;
     }
-  }
-  if (providerCleanupFailures.length > 0) {
-    process.stderr.write(`[team/runtime-v2] preserving worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
-    await finalizeAutoMerge();
-    return;
   }
 
   // 5. Ralph completion logging

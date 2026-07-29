@@ -13074,7 +13074,8 @@ async function finalizeRecoveryOwnerResult(input, recoveryId, result, deps = {
     "stale_state_revision",
     "worker_liveness_unknown",
     "runtime_owner_unavailable",
-    "runtime_owner_fence_lost"
+    "runtime_owner_fence_lost",
+    "worker_cleanup_incomplete"
   ].includes(result.error);
   if (transientFailure) {
     const pending = await deps.readRevisionedConfig(input.teamName, input.cwd);
@@ -13805,19 +13806,30 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             return ready ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false } : { ok: false, error: "startup_ack_timeout" };
           }
         }
-        let priorLaunch = currentLaunch;
-        if (!priorLaunch && currentWorker.launch_attempt_id && currentWorker.pane_id) {
-          priorLaunch = await loadWorkerLaunchAttempt({
-            cwd: input.cwd,
-            teamName: input.teamName,
-            workerName: sagaInput2.workerName,
-            paneId: currentWorker.pane_id,
-            provider: launchDescriptor.provider,
-            attemptId: currentWorker.launch_attempt_id,
-            runtimeCliPath
-          });
+        const priorLaunches = currentLaunch ? [currentLaunch] : [];
+        if (currentWorker.launch_attempt_id) {
+          if (!currentWorker.pane_id) return { ok: false, error: "worker_cleanup_incomplete" };
+          if (currentLaunch?.attempt_id === currentWorker.launch_attempt_id) {
+            if (currentLaunch.pane_id !== currentWorker.pane_id) {
+              return { ok: false, error: "worker_cleanup_incomplete" };
+            }
+          } else {
+            const persistedLaunch = await loadWorkerLaunchAttempt({
+              cwd: input.cwd,
+              teamName: input.teamName,
+              workerName: sagaInput2.workerName,
+              paneId: currentWorker.pane_id,
+              provider: launchDescriptor.provider,
+              attemptId: currentWorker.launch_attempt_id,
+              runtimeCliPath
+            });
+            if (!persistedLaunch) return { ok: false, error: "worker_cleanup_incomplete" };
+            priorLaunches.push(persistedLaunch);
+          }
+        } else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
+          return { ok: false, error: "worker_cleanup_incomplete" };
         }
-        if (priorLaunch) {
+        for (const priorLaunch of priorLaunches) {
           const retired = await retireWorkerLaunchAttempt(priorLaunch, "recovery_replacement");
           if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
             return { ok: false, error: "worker_cleanup_incomplete" };
@@ -15235,6 +15247,12 @@ Then exit your session.
       providerCleanupFailures.push(worker.name);
     }
   }
+  if (providerCleanupFailures.length > 0) {
+    process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
+`);
+    await finalizeAutoMerge();
+    return;
+  }
   try {
     const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2, resolveSplitPaneWorkerPaneIds: resolveSplitPaneWorkerPaneIds2, getWorkerLiveness: getWorkerLiveness2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
     const ownsWindow = config.tmux_window_owned === true;
@@ -15292,12 +15310,6 @@ Then exit your session.
       await finalizeAutoMerge();
       return;
     }
-  }
-  if (providerCleanupFailures.length > 0) {
-    process.stderr.write(`[team/runtime-v2] preserving worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
-`);
-    await finalizeAutoMerge();
-    return;
   }
   if (ralph) {
     const finalTasks = await listTasksFromFiles(sanitized, cwd).catch(() => []);

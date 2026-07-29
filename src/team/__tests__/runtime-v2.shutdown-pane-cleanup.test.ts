@@ -87,7 +87,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     }
   });
 
-  it('kills the owned pane but preserves state when provider launch identity is missing', async () => {
+  it('preserves the owned pane and state when provider launch identity is missing', async () => {
     const teamName = 'pane-cleanup-team';
     const teamRoot = `.omc/state/team/${teamName}`;
 
@@ -119,8 +119,8 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
       .filter((args) => args[0] === 'kill-pane')
       .map((args) => args[2]);
 
-    expect(killPaneTargets).toEqual(['%2']);
-    expect(killPaneTargets).not.toContain('%1');
+    expect(killPaneTargets).toEqual([]);
+    expect(tmuxCalls.some(args => args[0] === 'kill-window' || args[0] === 'kill-session')).toBe(false);
     await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).resolves.toContain('pane-cleanup-team');
   });
   it('retires and terminates the exact provider before removing pane state', async () => {
