@@ -17222,7 +17222,12 @@ function isOmcPluginLookalike(pluginId) {
   return pluginId.toLowerCase().includes(OMC_PLUGIN_MANIFEST_NAME);
 }
 function resolveInstalledOmcPluginRoots() {
-  const explicitRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim() || process.env.CLAUDE_PLUGIN_ROOT?.trim();
+  const omcPluginRoot = process.env[OMC_PLUGIN_ROOT_ENV]?.trim();
+  const claudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim();
+  if (omcPluginRoot && claudePluginRoot && (0, import_path58.resolve)(omcPluginRoot) !== (0, import_path58.resolve)(claudePluginRoot)) {
+    return { mode: "unknown", roots: [], cleanupAllowed: false };
+  }
+  const explicitRoot = omcPluginRoot || claudePluginRoot;
   if (explicitRoot) {
     return { mode: "plugin", roots: [explicitRoot], cleanupAllowed: true };
   }

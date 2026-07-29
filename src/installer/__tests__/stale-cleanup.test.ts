@@ -9,6 +9,19 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+const fsMocks = vi.hoisted(() => ({
+  lstatSync: vi.fn(),
+}));
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  fsMocks.lstatSync.mockImplementation(actual.lstatSync);
+  return {
+    ...actual,
+    lstatSync: fsMocks.lstatSync,
+  };
+});
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -160,6 +173,41 @@ describe('cleanupStaleAgents', () => {
     } finally {
       if (originalPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
       else process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+  });
+
+  it('fails closed when explicit OMC and Claude plugin roots conflict', async () => {
+    const originalOmcRoot = process.env.OMC_PLUGIN_ROOT;
+    const originalClaudeRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      const omcRoot = join(tempDir, 'omc-plugin-root');
+      const claudeRoot = join(tempDir, 'claude-plugin-root');
+      createPluginRoot(omcRoot, { 'architect.md': historicalAgent('architect.md') });
+      createPluginRoot(claudeRoot, { 'architect.md': Buffer.from('conflicting active architect\n') });
+      process.env.OMC_PLUGIN_ROOT = omcRoot;
+      process.env.CLAUDE_PLUGIN_ROOT = claudeRoot;
+
+      vi.resetModules();
+      const {
+        cleanupStaleAgents: cleanup,
+        prunePluginDuplicateAgents: prune,
+        getInstalledOmcPluginRoots,
+        AGENTS_DIR: agentsDir,
+      } = await import('../index.js');
+      mkdirSync(agentsDir, { recursive: true });
+      writeFileSync(join(agentsDir, 'build-fixer.md'), historicalAgent('build-fixer.md'));
+      writeFileSync(join(agentsDir, 'architect.md'), historicalAgent('architect.md'));
+
+      expect(getInstalledOmcPluginRoots()).toEqual([]);
+      expect(cleanup(log)).toEqual([]);
+      expect(prune(log)).toEqual([]);
+      expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(true);
+      expect(existsSync(join(agentsDir, 'architect.md'))).toBe(true);
+    } finally {
+      if (originalOmcRoot === undefined) delete process.env.OMC_PLUGIN_ROOT;
+      else process.env.OMC_PLUGIN_ROOT = originalOmcRoot;
+      if (originalClaudeRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = originalClaudeRoot;
     }
   });
 
@@ -370,6 +418,32 @@ describe('cleanupStaleAgents', () => {
     expect(cleanup(log)).toEqual([]);
     expect(existsSync(join(agentsDir, 'build-fixer.md'))).toBe(true);
     expect(existsSync(join(agentsDir, 'deep-executor.md'))).toBe(true);
+  });
+
+  it('preserves authenticated bytes changed during unlink revalidation', async () => {
+    vi.resetModules();
+    const { cleanupStaleAgents: cleanup, AGENTS_DIR: agentsDir } = await import('../index.js');
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+
+    mkdirSync(agentsDir, { recursive: true });
+    const candidatePath = join(agentsDir, 'build-fixer.md');
+    const divergent = sameLengthByteDivergence(historicalAgent('build-fixer.md'));
+    writeFileSync(candidatePath, historicalAgent('build-fixer.md'));
+
+    let candidateStats = 0;
+    fsMocks.lstatSync.mockImplementation(path => {
+      if (String(path) === candidatePath && ++candidateStats === 2) {
+        writeFileSync(candidatePath, divergent);
+      }
+      return actualFs.lstatSync(path);
+    });
+
+    try {
+      expect(cleanup(log)).toEqual([]);
+      expect(readFileSync(candidatePath)).toEqual(divergent);
+    } finally {
+      fsMocks.lstatSync.mockImplementation(actualFs.lstatSync);
+    }
   });
 
   it('returns empty array when agents directory does not exist', () => {
@@ -768,6 +842,32 @@ describe('prunePluginDuplicateAgents', () => {
     } finally {
       if (originalPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
       else process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+    }
+  });
+
+  it('preserves a candidate that becomes non-regular during unlink revalidation', async () => {
+    vi.resetModules();
+    const { prunePluginDuplicateAgents: prune, AGENTS_DIR: agentsDir } = await import('../index.js');
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+
+    mkdirSync(agentsDir, { recursive: true });
+    const candidatePath = join(agentsDir, 'architect.md');
+    writeFileSync(candidatePath, historicalAgent('architect.md'));
+
+    let candidateStats = 0;
+    fsMocks.lstatSync.mockImplementation(path => {
+      if (String(path) === candidatePath && ++candidateStats === 2) {
+        rmSync(candidatePath);
+        mkdirSync(candidatePath);
+      }
+      return actualFs.lstatSync(path);
+    });
+
+    try {
+      expect(prune(log)).toEqual([]);
+      expect(actualFs.lstatSync(candidatePath).isDirectory()).toBe(true);
+    } finally {
+      fsMocks.lstatSync.mockImplementation(actualFs.lstatSync);
     }
   });
   it('preserves current-name custom frontmatter and byte-divergent historical content', async () => {
