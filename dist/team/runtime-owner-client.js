@@ -312,7 +312,7 @@ function ownerAvailability(cwd, teamName) {
         return 'unknown';
     }
 }
-function resolveRuntimeCliPath() {
+export function resolveRuntimeCliPath() {
     if (process.env.OMC_RUNTIME_CLI_PATH)
         return process.env.OMC_RUNTIME_CLI_PATH;
     if (typeof __dirname !== 'undefined' && __dirname) {

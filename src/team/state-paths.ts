@@ -69,6 +69,18 @@ export const TeamPaths = {
   shutdownAck: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
 
+  workerLaunchAttemptRoot: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
+
+  workerLaunchExpected: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
+
+  workerLaunchAck: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
+
+  workerLaunchDecision: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
+
   mailbox: (teamName: string, workerName: string) =>
     `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
 

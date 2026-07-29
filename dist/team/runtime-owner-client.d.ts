@@ -44,6 +44,7 @@ export declare const recoveryOwnerBootstrapTestHooks: {
     hasLiveOrUnknownCandidate: typeof hasLiveOrUnknownBootstrapCandidate;
 };
 export declare function parseRecoveryIntent(raw: string): RecoveryIntentRecord;
+export declare function resolveRuntimeCliPath(): string;
 export declare function isExpectedRecoveryOwnerSuccessor(owner: ReturnType<typeof readLatestOwnerEpoch>, expectedEpoch: number, childPid: number, childProcessStartedAt: string | null, fenceOk: boolean, expectedNonce?: string): boolean;
 /** Durable admission/replay client. The injected owner alone performs recovery effects. */
 export declare function createRecoveryOwnerClient(dispatch: RecoveryOwnerDispatch, timing?: {

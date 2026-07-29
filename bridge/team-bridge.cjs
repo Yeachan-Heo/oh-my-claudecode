@@ -398,7 +398,7 @@ var import_fs3 = require("fs");
 var import_crypto2 = require("crypto");
 var import_child_process3 = require("child_process");
 var import_util2 = require("util");
-var import_path5 = require("path");
+var import_path6 = require("path");
 var import_promises = __toESM(require("fs/promises"), 1);
 
 // src/cli/tmux-utils.ts
@@ -457,58 +457,9 @@ function resolveTmuxBinaryPath() {
   return "tmux";
 }
 
-// src/team/tmux-session.ts
-var execFileAsync = (0, import_util2.promisify)(import_child_process3.execFile);
-var TMUX_SESSION_PREFIX = "omc-team";
-function sanitizeName(name) {
-  const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
-  if (sanitized.length === 0) {
-    throw new Error(`Invalid name: "${name}" contains no valid characters (alphanumeric or hyphen)`);
-  }
-  if (sanitized.length < 2) {
-    throw new Error(`Invalid name: "${name}" too short after sanitization (minimum 2 characters)`);
-  }
-  return sanitized.slice(0, 50);
-}
-function sessionName(teamName, workerName) {
-  return `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${sanitizeName(workerName)}`;
-}
-function killSession(teamName, workerName) {
-  const name = sessionName(teamName, workerName);
-  try {
-    tmuxExec(["kill-session", "-t", name], { stripTmux: true, stdio: "pipe", timeout: 5e3 });
-  } catch {
-  }
-}
-
-// src/platform/index.ts
-var path = __toESM(require("path"), 1);
-var import_fs4 = require("fs");
-
-// src/platform/process-utils.ts
-var import_child_process4 = require("child_process");
-var import_util3 = require("util");
-var fsPromises = __toESM(require("fs/promises"), 1);
-var execFileAsync2 = (0, import_util3.promisify)(import_child_process4.execFile);
-function isProcessAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
-      return true;
-    }
-    return false;
-  }
-}
-
-// src/platform/index.ts
-var PLATFORM = process.platform;
-
 // src/team/state-paths.ts
 var import_node_crypto = require("node:crypto");
-var import_path6 = require("path");
+var import_path5 = require("path");
 function normalizeTaskFileStem(taskId) {
   const trimmed = String(taskId).trim().replace(/\.json$/i, "");
   if (/^task-\d+$/.test(trimmed)) return trimmed;
@@ -529,6 +480,10 @@ var TeamPaths = {
   ready: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/.ready`,
   overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
   shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
+  workerLaunchAttemptRoot: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
+  workerLaunchExpected: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
+  workerLaunchAck: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
+  workerLaunchDecision: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
   mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
   mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
   dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
@@ -587,16 +542,65 @@ var TeamPaths = {
 };
 function getTaskStoragePath(cwd, teamName, taskId) {
   if (taskId !== void 0) {
-    return (0, import_path6.join)(cwd, TeamPaths.taskFile(teamName, taskId));
+    return (0, import_path5.join)(cwd, TeamPaths.taskFile(teamName, taskId));
   }
-  return (0, import_path6.join)(cwd, TeamPaths.tasks(teamName));
+  return (0, import_path5.join)(cwd, TeamPaths.tasks(teamName));
 }
 function getLegacyTaskStoragePath(claudeConfigDir, teamName, taskId) {
   if (taskId !== void 0) {
-    return (0, import_path6.join)(claudeConfigDir, "tasks", teamName, `${taskId}.json`);
+    return (0, import_path5.join)(claudeConfigDir, "tasks", teamName, `${taskId}.json`);
   }
-  return (0, import_path6.join)(claudeConfigDir, "tasks", teamName);
+  return (0, import_path5.join)(claudeConfigDir, "tasks", teamName);
 }
+
+// src/team/tmux-session.ts
+var execFileAsync = (0, import_util2.promisify)(import_child_process3.execFile);
+var TMUX_SESSION_PREFIX = "omc-team";
+function sanitizeName(name) {
+  const sanitized = name.replace(/[^a-zA-Z0-9-]/g, "");
+  if (sanitized.length === 0) {
+    throw new Error(`Invalid name: "${name}" contains no valid characters (alphanumeric or hyphen)`);
+  }
+  if (sanitized.length < 2) {
+    throw new Error(`Invalid name: "${name}" too short after sanitization (minimum 2 characters)`);
+  }
+  return sanitized.slice(0, 50);
+}
+function sessionName(teamName, workerName) {
+  return `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}-${sanitizeName(workerName)}`;
+}
+function killSession(teamName, workerName) {
+  const name = sessionName(teamName, workerName);
+  try {
+    tmuxExec(["kill-session", "-t", name], { stripTmux: true, stdio: "pipe", timeout: 5e3 });
+  } catch {
+  }
+}
+
+// src/platform/index.ts
+var path = __toESM(require("path"), 1);
+var import_fs4 = require("fs");
+
+// src/platform/process-utils.ts
+var import_child_process4 = require("child_process");
+var import_util3 = require("util");
+var fsPromises = __toESM(require("fs/promises"), 1);
+var execFileAsync2 = (0, import_util3.promisify)(import_child_process4.execFile);
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && e.code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
+}
+
+// src/platform/index.ts
+var PLATFORM = process.platform;
 
 // src/team/task-file-ops.ts
 var DEFAULT_STALE_LOCK_MS = 3e4;
@@ -1320,8 +1324,8 @@ function matchGlob(pattern, path4) {
   return pi === pattern.length;
 }
 function isPathAllowed(permissions, filePath, workingDirectory) {
-  const absPath = (0, import_node_path2.resolve)(workingDirectory, filePath);
-  const relPath = (0, import_node_path2.relative)(workingDirectory, absPath);
+  const absPath2 = (0, import_node_path2.resolve)(workingDirectory, filePath);
+  const relPath = (0, import_node_path2.relative)(workingDirectory, absPath2);
   if (relPath.startsWith("..")) return false;
   for (const pattern of permissions.deniedPaths) {
     if (matchGlob(pattern, relPath)) return false;
@@ -1365,8 +1369,8 @@ function findPermissionViolations(changedPaths, permissions, cwd) {
   const violations = [];
   for (const filePath of changedPaths) {
     if (!isPathAllowed(permissions, filePath, cwd)) {
-      const absPath = (0, import_node_path2.resolve)(cwd, filePath);
-      const relPath = (0, import_node_path2.relative)(cwd, absPath);
+      const absPath2 = (0, import_node_path2.resolve)(cwd, filePath);
+      const relPath = (0, import_node_path2.relative)(cwd, absPath2);
       let reason;
       if (relPath.startsWith("..")) {
         reason = `Path escapes working directory: ${relPath}`;

@@ -152,6 +152,81 @@ describe('buildWorkerStartCommand', () => {
     expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
   });
 
+  it('preserves POSIX argv-style exec while routing launch through the acknowledgement bootstrap', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    vi.stubEnv('SHELL', '/bin/bash');
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 't/w' },
+      launchBinary: '/opt/codex/bin/codex',
+      launchArgs: ['--label', 'worker one'],
+      cwd: '/tmp/team workspace',
+      provider: 'codex',
+      launchAttempt: {
+        schema_version: 1,
+        attempt_id: '11111111-1111-4111-8111-111111111111',
+        nonce: '22222222-2222-4222-8222-222222222222',
+        team_name: 't',
+        worker_name: 'w',
+        pane_id: '%2',
+        provider: 'codex',
+        created_at: '2026-01-01T00:00:00.000Z',
+        expectedPath: '/tmp/expected.json',
+        ackPath: '/tmp/ack.json',
+        decisionPath: '/tmp/decision.json',
+        runtimeCliPath: '/opt/omc/runtime-cli.cjs',
+      },
+    });
+
+    expect(cmd).toContain("OMC_WORKER_LAUNCH_SPEC='");
+    expect(cmd).toContain("exec \"$@\"");
+    expect(cmd).toContain("'--worker-launch'");
+    expect(cmd).toContain("'/opt/omc/runtime-cli.cjs'");
+  });
+
+  it('preserves native Windows percent and quote escaping inside the bootstrap specification', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_TEAM_WORKER: 't/w' },
+      launchBinary: 'C:\\Program Files\\Codex\\codex.exe',
+      launchArgs: ['--label', '100% ready %USERPROFILE%', '--title="quoted"'],
+      cwd: 'C:\\team workspace',
+      provider: 'codex',
+      launchAttempt: {
+        schema_version: 1,
+        attempt_id: '11111111-1111-4111-8111-111111111111',
+        nonce: '22222222-2222-4222-8222-222222222222',
+        team_name: 't',
+        worker_name: 'w',
+        pane_id: '%2',
+        provider: 'codex',
+        created_at: '2026-01-01T00:00:00.000Z',
+        expectedPath: 'C:\\state\\expected.json',
+        ackPath: 'C:\\state\\ack.json',
+        decisionPath: 'C:\\state\\decision.json',
+        runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
+      },
+    });
+
+    expect(cmd).toContain('C:\\Windows\\System32\\cmd.exe /d /s /c');
+    const marker = 'set "OMC_WORKER_LAUNCH_SPEC=';
+    const encodedStart = cmd.indexOf(marker) + marker.length;
+    const encodedEnd = cmd.indexOf('" &&', encodedStart);
+    const decodedSpec = cmd.slice(encodedStart, encodedEnd).replace(/""/g, '"').replace(/%%/g, '%');
+    const spec = JSON.parse(decodedSpec);
+    expect(spec.provider_argv).toEqual([
+      'C:\\Program Files\\Codex\\codex.exe',
+      '--label',
+      '100% ready %USERPROFILE%',
+      '--title="quoted"',
+    ]);
+    expect(cmd).not.toContain('100% ready %USERPROFILE%');
+  });
+
   it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');

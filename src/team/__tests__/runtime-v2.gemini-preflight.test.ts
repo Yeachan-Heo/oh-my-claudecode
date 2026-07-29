@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 const mocks = vi.hoisted(() => ({
   createTeamSession: vi.fn(),
   spawnWorkerInPane: vi.fn(),
+  spawnOwnedWorkerInPane: vi.fn(),
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
   applyMainVerticalLayout: vi.fn(),
@@ -35,15 +36,16 @@ vi.mock('../../cli/tmux-utils.js', () => ({
   tmuxExecAsync: mocks.tmuxExecAsync,
 }));
 
-vi.mock('../tmux-session.js', () => ({
+vi.mock('../tmux-session.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../tmux-session.js')>(),
   createTeamSession: mocks.createTeamSession,
   spawnWorkerInPane: mocks.spawnWorkerInPane,
+  spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
   sendToWorker: mocks.sendToWorker,
   waitForPaneReady: mocks.waitForPaneReady,
   paneHasActiveTask: vi.fn(() => false),
   paneLooksReady: vi.fn(() => true),
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
-  splitTeamWorkerPane: vi.fn(async () => '%2'),
 }));
 
 vi.mock('../model-contract.js', () => ({
@@ -77,6 +79,19 @@ describe('runtime-v2 Gemini preflight routing', () => {
       sessionMode: 'split-pane',
     });
     mocks.spawnWorkerInPane.mockResolvedValue(undefined);
+    mocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName: string, ownership: { paneId: string }, config: { teamName: string; workerName: string; provider: string }) => {
+      await mocks.spawnWorkerInPane(sessionName, ownership.paneId, config);
+      return {
+        ownership,
+        provider: config.provider,
+        attempt: {
+          attempt_id: '11111111-1111-4111-8111-111111111111',
+          team_name: config.teamName,
+          worker_name: config.workerName,
+          pane_id: ownership.paneId,
+        },
+      };
+    });
     mocks.waitForPaneReady.mockResolvedValue(true);
     mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
     mocks.tmuxExecAsync.mockImplementation(async (args: string[]) => {

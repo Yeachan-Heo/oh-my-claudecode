@@ -71,8 +71,27 @@ import {
   resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform,
 } from './model-contract.js';
 import {
-  createTeamSession, spawnWorkerInPane, sendToWorker, killTeamSession,
-  waitForPaneReady, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, sendTeamPaneKey, splitTeamWorkerPane, splitTeamWorkerPaneWithEvidence, type WorkerPaneConfig, type WorkerPaneLiveness, type WorkerPaneSplitEvidence, type TeamSessionMode,
+  createTeamSession,
+  spawnOwnedWorkerInPane,
+  deliverStartupInbox,
+  retryStartupInboxSubmit,
+  proveWorkerPaneOwnership,
+  adoptWorkerPaneOwnership,
+  killOwnedWorkerPane,
+  redactBoundedDiagnostic,
+  killTeamSession,
+  paneHasActiveTask,
+  paneLooksReady,
+  applyMainVerticalLayout,
+  getWorkerLiveness,
+  captureTeamPane,
+  splitTeamWorkerPaneWithEvidence,
+  type StartupPaneContext,
+  type WorkerPaneConfig,
+  type WorkerPaneLiveness,
+  type WorkerPaneOwnership,
+  type WorkerPaneSplitEvidence,
+  type TeamSessionMode,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -82,7 +101,7 @@ import {
   generatePromptModeStartupPrompt,
   renderRecoveryContinuationInstruction,
 } from './worker-bootstrap.js';
-import { queueInboxInstruction, type DispatchOutcome } from './mcp-comm.js';
+import { queueInboxInstruction } from './mcp-comm.js';
 import {
   cleanupTeamWorktrees,
   inspectTeamWorktreeCleanupSafety,
@@ -124,7 +143,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { isMatchingRecoveryFinal, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation, readRecoveryResult, writeRecoveryFinal, type RecoveryDurableOutcome } from './recovery-request-store.js';
 
-import { parseRecoveryIntent, type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
+import { parseRecoveryIntent, resolveRuntimeCliPath, type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
 import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-ops.js';
@@ -132,6 +151,7 @@ import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, 
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
+import { loadWorkerLaunchAttempt } from './worker-launch-ack.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -756,37 +776,6 @@ function buildV2TaskInstruction(
 // ---------------------------------------------------------------------------
 
 
-async function notifyStartupInbox(
-  sessionName: string,
-  paneId: string,
-  message: string,
-): Promise<DispatchOutcome> {
-  // Startup inbox triggers are only safe to type once after readiness. If the
-  // pane still rejects the send (for example Claude is showing a startup
-  // banner), repeated tmux send-keys calls append duplicate trigger text.
-  const notified = await notifyPaneWithRetry(sessionName, paneId, message, 1);
-  return notified
-    ? { ok: true, transport: 'tmux_send_keys', reason: 'worker_pane_notified' }
-    : { ok: false, transport: 'tmux_send_keys', reason: 'worker_notify_failed' };
-}
-
-async function notifyPaneWithRetry(
-  sessionName: string,
-  paneId: string,
-  message: string,
-  maxAttempts = 6,
-  retryDelayMs = 350,
-): Promise<boolean> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (await sendToWorker(sessionName, paneId, message)) {
-      return true;
-    }
-    if (attempt < maxAttempts) {
-      await new Promise(r => setTimeout(r, retryDelayMs));
-    }
-  }
-  return false;
-}
 
 interface SpawnV2WorkerOptions {
   sessionName: string;
@@ -816,6 +805,7 @@ interface SpawnV2WorkerResult {
   paneId: string | null;
   startupAssigned: boolean;
   startupFailureReason?: string;
+  launchAttemptId?: string;
   /**
    * Set when the CLI-worker output contract (AC-7) was injected. The
    * completion handler reads this file to parse the structured verdict.
@@ -823,37 +813,78 @@ interface SpawnV2WorkerResult {
   outputFile?: string;
 }
 
+interface WorkerStartupBaseline {
+  taskFingerprint: string | null;
+  statusFingerprint: string;
+}
+
+function workerTaskStartupFingerprint(task: TeamTask): string {
+  return JSON.stringify({
+    owner: task.owner ?? null,
+    status: task.status,
+    version: task.version ?? null,
+    claimOwner: task.claim?.owner ?? null,
+    claimToken: task.claim?.token ?? null,
+  });
+}
+
+function workerStatusStartupFingerprint(status: WorkerStatus): string {
+  return JSON.stringify({
+    state: status.state,
+    currentTaskId: status.current_task_id ?? null,
+    reason: status.reason ?? null,
+    updatedAt: status.updated_at,
+  });
+}
+
 function hasWorkerStatusProgress(status: WorkerStatus, taskId: string): boolean {
   if (status.current_task_id === taskId) return true;
   return ['working', 'blocked', 'done', 'failed'].includes(status.state);
 }
 
-async function hasWorkerTaskClaimEvidence(
-  teamName: string,
-  workerName: string,
-  cwd: string,
-  taskId: string,
-): Promise<boolean> {
+async function readWorkerStartupTask(teamName: string, taskId: string, cwd: string): Promise<TeamTask | null> {
   try {
-    const raw = await readFile(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), 'utf-8');
-    const task = JSON.parse(raw) as TeamTask;
-    return task.owner === workerName && ['in_progress', 'completed', 'failed'].includes(task.status);
+    return JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), 'utf-8')) as TeamTask;
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function hasWorkerStartupEvidence(
+async function captureWorkerStartupBaseline(
   teamName: string,
   workerName: string,
   taskId: string,
   cwd: string,
-): Promise<boolean> {
-  const [hasClaimEvidence, status] = await Promise.all([
-    hasWorkerTaskClaimEvidence(teamName, workerName, cwd, taskId),
+): Promise<WorkerStartupBaseline> {
+  const [task, status] = await Promise.all([
+    readWorkerStartupTask(teamName, taskId, cwd),
     readWorkerStatus(teamName, workerName, cwd),
   ]);
-  return hasClaimEvidence || hasWorkerStatusProgress(status, taskId);
+  return {
+    taskFingerprint: task ? workerTaskStartupFingerprint(task) : null,
+    statusFingerprint: workerStatusStartupFingerprint(status),
+  };
+}
+
+async function hasCurrentWorkerStartupEvidence(
+  teamName: string,
+  workerName: string,
+  taskId: string,
+  cwd: string,
+  baseline: WorkerStartupBaseline,
+): Promise<boolean> {
+  const [task, status] = await Promise.all([
+    readWorkerStartupTask(teamName, taskId, cwd),
+    readWorkerStatus(teamName, workerName, cwd),
+  ]);
+  const currentClaim = Boolean(task
+    && task.owner === workerName
+    && ['in_progress', 'completed', 'failed'].includes(task.status)
+    && workerTaskStartupFingerprint(task) !== baseline.taskFingerprint);
+  const currentStatus = status.current_task_id === taskId
+    && ['working', 'blocked', 'done', 'failed'].includes(status.state)
+    && workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
+  return currentClaim || currentStatus;
 }
 
 async function waitForWorkerStartupEvidence(
@@ -861,16 +892,29 @@ async function waitForWorkerStartupEvidence(
   workerName: string,
   taskId: string,
   cwd: string,
+  baseline: WorkerStartupBaseline,
   attempts = 3,
   delayMs = 250,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (await hasWorkerStartupEvidence(teamName, workerName, taskId, cwd)) {
-      return true;
-    }
-    if (attempt < attempts) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+    if (await hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline)) return true;
+    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  return false;
+}
+
+async function waitForWorkerStatusTransition(
+  teamName: string,
+  workerName: string,
+  cwd: string,
+  baselineFingerprint: string,
+  attempts = 12,
+  delayMs = 250,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const status = await readWorkerStatus(teamName, workerName, cwd);
+    if (status.state !== 'unknown' && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
+    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   return false;
 }
@@ -880,22 +924,22 @@ async function waitForWorkerStartupEvidence(
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
 async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerResult> {
-  // Split new pane off the last existing pane (or leader if first worker)
   const splitTarget = opts.existingWorkerPaneIds.length === 0
     ? opts.leaderPaneId
-    : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
+    : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
-
-  const paneId = await splitTeamWorkerPane(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
-  if (!paneId) {
-    return { paneId: null, startupAssigned: false, startupFailureReason: 'pane_id_missing' };
+  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
+  const ownershipResult = proveWorkerPaneOwnership(split, {
+    leaderPaneId: opts.leaderPaneId,
+    reservedPaneIds: opts.existingWorkerPaneIds,
+  });
+  if (!ownershipResult.ok) {
+    return { paneId: null, startupAssigned: false, startupFailureReason: `pane_identity_${ownershipResult.reason}` };
   }
-
+  const ownership = ownershipResult.ownership;
+  const paneId = ownership.paneId;
   const usePromptMode = isPromptModeAgent(opts.agentType);
 
-  // AC-7: render the CLI-worker output contract when a reviewer-style role
-  // is routed to an external provider (codex/gemini/grok). Claude workers speak
-  // through the team messaging API and do not use the verdict-file contract.
   const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
   const outputFile = injectContract && opts.role
     ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName)
@@ -903,20 +947,20 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const cliOutputContract = injectContract && opts.role && outputFile
     ? renderCliWorkerOutputContract(opts.role, outputFile)
     : undefined;
-
-  // Build v2 task instruction (CLI API, NO done.json)
   const instruction = buildV2TaskInstruction(
     opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract,
   );
   const instructionStateRoot = opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : undefined;
-  const inboxTriggerMessage = generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot);
+  const startupBaseline = await captureWorkerStartupBaseline(
+    opts.teamName, opts.workerName, opts.taskId, opts.cwd,
+  );
+
   if (usePromptMode) {
     await composeInitialInbox(
       opts.teamName, opts.workerName, instruction, opts.cwd, cliOutputContract,
     );
   }
 
-  // Build env and launch command
   const envVars = {
     ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType),
     OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
@@ -948,25 +992,22 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     launchBinary: launchDescriptor.binary,
     launchArgs: [...launchDescriptor.args],
     cwd: opts.workerCwd ?? opts.cwd,
+    provider: opts.agentType,
+    launchBootstrapPath: resolveRuntimeCliPath(),
   };
-
-  await spawnWorkerInPane(opts.sessionName, paneId, paneConfig);
-
-  // Apply layout
+  const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
+    `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
   await applyMainVerticalLayout(opts.sessionName);
 
-  // For interactive agents, wait for pane readiness before dispatching startup inbox.
-  if (!usePromptMode) {
-    const paneReady = await waitForPaneReady(paneId);
-    if (!paneReady) {
-      return {
-        paneId,
-        startupAssigned: false,
-        startupFailureReason: 'worker_pane_not_ready',
-      };
-    }
-  }
-
+  const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(
+    opts.teamName,
+    opts.workerName,
+    opts.taskId,
+    opts.cwd,
+    startupBaseline,
+    attempts,
+  );
   const dispatchOutcome = await queueInboxInstruction({
     teamName: opts.teamName,
     workerName: opts.workerName,
@@ -977,103 +1018,56 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     cwd: opts.cwd,
     transportPreference: usePromptMode ? 'prompt_stdin' : 'transport_direct',
     fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
-    inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}`,
+    inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
     notify: async (_target, triggerMessage) => {
       if (usePromptMode) {
-        return { ok: true, transport: 'prompt_stdin', reason: 'prompt_mode_launch_args' };
+        const settled = await waitForCurrentEvidence();
+        return settled
+          ? { ok: true, transport: 'prompt_stdin' as const, reason: 'prompt_mode_worker_confirmed' }
+          : { ok: false, transport: 'prompt_stdin' as const, reason: `${opts.agentType}_startup_evidence_missing` };
       }
-      if (opts.agentType === 'gemini') {
-        const confirmed = await notifyPaneWithRetry(opts.sessionName, paneId, '1');
-        if (!confirmed) {
-          return { ok: false, transport: 'tmux_send_keys', reason: 'worker_notify_failed:trust-confirm' };
-        }
-        await new Promise(r => setTimeout(r, 800));
+
+      const attempted = await deliverStartupInbox(startupContext, triggerMessage);
+      if (!attempted.ok) {
+        return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
       }
-      return notifyStartupInbox(opts.sessionName, paneId, triggerMessage);
+      let settled = await waitForCurrentEvidence(opts.agentType === 'claude' ? 6 : 12);
+      for (let attempt = 1; !settled && opts.agentType === 'claude' && attempt <= 4; attempt++) {
+        if (!await retryStartupInboxSubmit(startupContext, triggerMessage)) break;
+        settled = await waitForCurrentEvidence();
+      }
+      return settled
+        ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
+        : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
     },
-    deps: {
-      writeWorkerInbox,
-    },
+    deps: { writeWorkerInbox },
   });
   if (!dispatchOutcome.ok) {
     return {
       paneId,
       startupAssigned: false,
       startupFailureReason: dispatchOutcome.reason,
+      launchAttemptId: startupContext.attempt.attempt_id,
     };
-  }
-
-  if (opts.agentType === 'claude') {
-    let settled = await waitForWorkerStartupEvidence(
-      opts.teamName,
-      opts.workerName,
-      opts.taskId,
-      opts.cwd,
-      6,
-    );
-    // Claude Code v2.1.x sometimes swallows the Enter key sent immediately
-    // after a fresh pane reports ready — the TUI is still binding input
-    // handlers, so the dispatch message lands in the input buffer but is
-    // never submitted. By the time the evidence wait above finishes, the
-    // TUI is reliably accepting input. Resubmit Enter directly (the prompt
-    // is still sitting in the input buffer) and re-check evidence. Bounded
-    // retries so a truly hung worker still fails fast.
-    for (let attempt = 1; !settled && attempt <= 4; attempt++) {
-      try {
-        await sendTeamPaneKey(paneId, 'Enter');
-      } catch {
-        break;
-      }
-      settled = await waitForWorkerStartupEvidence(
-        opts.teamName,
-        opts.workerName,
-        opts.taskId,
-        opts.cwd,
-        12,
-      );
-    }
-    if (!settled) {
-      return {
-        paneId,
-        startupAssigned: false,
-        startupFailureReason: 'claude_startup_evidence_missing',
-      };
-    }
-  }
-
-  if (usePromptMode) {
-    const settled = await waitForWorkerStartupEvidence(
-      opts.teamName,
-      opts.workerName,
-      opts.taskId,
-      opts.cwd,
-    );
-    if (!settled) {
-      return {
-        paneId,
-        startupAssigned: false,
-        startupFailureReason: `${opts.agentType}_startup_evidence_missing`,
-      };
-    }
   }
 
   return {
     paneId,
     startupAssigned: true,
+    launchAttemptId: startupContext.attempt.attempt_id,
     ...(outputFile ? { outputFile } : {}),
   };
 }
 
 
 interface PendingRecoveryPane {
-  paneId: string;
+  ownership: WorkerPaneOwnership;
   paneAttemptId: string;
-  sessionName: string;
-  config: TeamConfig;
   worker: WorkerInfo;
   agentType: CliAgentType;
   gate: RecoveryActivationGate;
   promptMode: boolean;
+  startupContext?: StartupPaneContext;
 }
 
 interface RecoveryAttemptSecret {
@@ -1118,8 +1112,8 @@ async function recordRecoveryPaneRollbackFailure(
   const handle = await open(candidate, 'wx', 0o600);
   try {
     await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
-      request_id: input.requestId, recovery_id: recoveryId, pane_id: pending.paneId,
-      pane_attempt_id: pending.paneAttemptId, reason, liveness, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+      request_id: input.requestId, recovery_id: recoveryId, pane_id: pending.ownership.paneId,
+      pane_attempt_id: pending.paneAttemptId, reason: redactBoundedDiagnostic(reason, 500), liveness, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
     await handle.sync();
   } finally { await handle.close(); }
   try { await link(candidate, path); } finally { await unlink(candidate).catch(() => undefined); }
@@ -1138,10 +1132,15 @@ async function recordUnaddressableRecoveryPaneFailure(
   const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
   await mkdir(join(path, '..'), { recursive: true });
   const handle = await open(candidate, 'wx', 0o600);
+  const boundedSplit = split ? {
+    ...split,
+    rawOutput: redactBoundedDiagnostic(split.rawOutput, 500),
+    stderr: redactBoundedDiagnostic(split.stderr, 500),
+  } : null;
   try {
     await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
       request_id: input.requestId, recovery_id: recoveryId, pane_id: null, pane_attempt_id: paneAttemptId,
-      reason, liveness: 'unknown', unaddressable: true, split, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+      reason: redactBoundedDiagnostic(reason, 500), liveness: 'unknown', unaddressable: true, split: boundedSplit, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
     await handle.sync();
   } finally { await handle.close(); }
   try { await link(candidate, path); } finally { await unlink(candidate).catch(() => undefined); }
@@ -1154,11 +1153,10 @@ async function cleanupRecoveryPaneAttempt(
   pending: PendingRecoveryPane,
   reason: string,
 ): Promise<boolean> {
-  const { killTeamPane } = await import('./tmux-session.js');
   let liveness: WorkerPaneLiveness = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
-    await killTeamPane(pending.paneId).catch(() => undefined);
-    liveness = await getWorkerLiveness(pending.paneId).catch(() => 'unknown' as const);
+    await killOwnedWorkerPane(pending.ownership).catch(() => undefined);
+    liveness = await getWorkerLiveness(pending.ownership.paneId).catch(() => 'unknown' as const);
     if (liveness === 'dead') {
       pendingRecoveryPanes.delete(recoveryId);
       return true;
@@ -1168,15 +1166,14 @@ async function cleanupRecoveryPaneAttempt(
   return false;
 }
 
-function buildRecoveryPaneContext(
+async function buildRecoveryPaneContext(
   input: RecoverDeadWorkerOwnerInput,
   sagaInput: RecoverySagaInput,
-  config: TeamConfig,
   worker: WorkerInfo,
   descriptor: WorkerLaunchDescriptor,
-  paneId: string,
+  ownership: WorkerPaneOwnership,
   paneAttemptId: string,
-): PendingRecoveryPane {
+): Promise<PendingRecoveryPane> {
   const agentType = descriptor.provider;
   const workerCwd = worker.working_dir ?? input.cwd;
   const promptMode = isPromptModeAgent(agentType);
@@ -1194,7 +1191,28 @@ function buildRecoveryPaneContext(
     runPath: absPath(input.cwd, TeamPaths.recoveryRun(input.teamName, sagaInput.recoveryId, paneAttemptId)),
     providerArgv: [descriptor.binary, ...descriptor.args], cwd: workerCwd, env: providerEnv, timeoutMs: 300_000,
   };
-  return { paneId, paneAttemptId, sessionName: config.tmux_session, config, worker, agentType, gate, promptMode };
+  let startupContext: StartupPaneContext | undefined;
+  if (worker.launch_attempt_id) {
+    const attempt = await loadWorkerLaunchAttempt({
+      cwd: input.cwd,
+      teamName: input.teamName,
+      workerName: sagaInput.workerName,
+      paneId: ownership.paneId,
+      provider: agentType,
+      attemptId: worker.launch_attempt_id,
+      runtimeCliPath: resolveRuntimeCliPath(),
+    });
+    if (attempt) startupContext = { ownership, attempt, provider: agentType };
+  }
+  return {
+    ownership,
+    paneAttemptId,
+    worker,
+    agentType,
+    gate,
+    promptMode,
+    ...(startupContext ? { startupContext } : {}),
+  };
 }
 
 function recoveryError(
@@ -1905,7 +1923,7 @@ export async function prepareRecoveryOwnerBootstrap(
 ): Promise<void> {
   const bootstrap = input.bootstrap;
   if (!bootstrap) throw new Error('runtime_owner_bootstrap_fence_lost');
-  let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions);
+  const owner = await ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions);
   if (owner.fence.epoch !== bootstrap.expectedEpoch
     || owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch
     || owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce) {
@@ -2072,66 +2090,117 @@ export async function executeRecoverDeadWorkerV2Owner(
         const config = await ensureFence();
         const currentWorker = config.workers.find(candidate => candidate.name === sagaInput.workerName);
         if (!currentWorker) return { ok: false, error: 'worker_not_found' };
-        const committedPane = resolveCommittedRecoveryPaneAttempt(existingAttempt, sagaInput.recoveryId, sagaInput.replacementGeneration, currentWorker);
+        const reservedPaneIds = config.workers
+          .filter(candidate => candidate.name !== sagaInput.workerName)
+          .map(candidate => candidate.pane_id)
+          .filter((paneId): paneId is string => Boolean(paneId));
+        const leaderPaneId = config.leader_pane_id ?? '';
+        if (!leaderPaneId) return { ok: false, error: 'spawn_failed' };
+        const committedPane = resolveCommittedRecoveryPaneAttempt(
+          existingAttempt,
+          sagaInput.recoveryId,
+          sagaInput.replacementGeneration,
+          currentWorker,
+        );
         if (committedPane) {
           const committedPaneLiveness = await getWorkerPaneLiveness(committedPane.paneId);
           if (committedPaneLiveness === 'unknown') return { ok: false, error: 'runtime_owner_unavailable' };
           if (committedPaneLiveness === 'alive') {
-          let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-          if (!pending) {
-            try {
-              pending = buildRecoveryPaneContext(input, sagaInput, config, currentWorker, launchDescriptor, committedPane.paneId, committedPane.paneAttemptId);
-              pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
-            } catch {
-              return { ok: false, error: 'launch_descriptor_unresolvable' };
+            let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+            if (!pending) {
+              const adopted = adoptWorkerPaneOwnership({
+                provider: committedPane.paneId.startsWith('%') ? 'tmux' : 'cmux',
+                paneId: committedPane.paneId,
+                leaderPaneId,
+                reservedPaneIds,
+              });
+              if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
+              try {
+                pending = await buildRecoveryPaneContext(
+                  input,
+                  sagaInput,
+                  currentWorker,
+                  launchDescriptor,
+                  adopted.ownership,
+                  committedPane.paneAttemptId,
+                );
+                if (!pending.startupContext) return { ok: false, error: 'worker_activation_failed' };
+                pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
+              } catch {
+                return { ok: false, error: 'launch_descriptor_unresolvable' };
+              }
             }
+            const expected = {
+              recovery_id: sagaInput.recoveryId,
+              worker_name: sagaInput.workerName,
+              replacement_generation: sagaInput.replacementGeneration,
+              pane_attempt_id: committedPane.paneAttemptId,
+            };
+            const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, expected, 1_000);
+            const manifest = await readTeamManifest(input.teamName, input.cwd);
+            const projected = manifest?.workers.find(candidate => candidate.name === sagaInput.workerName);
+            const projectedSameAttempt = projected?.pane_id === committedPane.paneId
+              && projected.pane_attempt_id === committedPane.paneAttemptId
+              && projected.recovery_id === sagaInput.recoveryId
+              && projected.replacement_generation === sagaInput.replacementGeneration;
+            if (!ready || !projectedSameAttempt) return { ok: false, error: 'worker_activation_failed' };
+            return {
+              ok: true,
+              paneId: pending.ownership.paneId,
+              paneAttemptId: pending.paneAttemptId,
+              committed: true,
+              stateRevision: config.state_revision ?? 0,
+              manifestSync: 'synced',
+            };
           }
-          const expected = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
-            replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: committedPane.paneAttemptId };
-          const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, expected, 1_000);
-          const manifest = await readTeamManifest(input.teamName, input.cwd);
-          const projected = manifest?.workers.find(candidate => candidate.name === sagaInput.workerName);
-          const projectedSameAttempt = projected?.pane_id === committedPane.paneId
-            && projected.pane_attempt_id === committedPane.paneAttemptId
-            && projected.recovery_id === sagaInput.recoveryId
-            && projected.replacement_generation === sagaInput.replacementGeneration;
-          if (!ready || !projectedSameAttempt) return { ok: false, error: 'worker_activation_failed' };
-          return { ok: true, paneId: pending.paneId, paneAttemptId: pending.paneAttemptId, committed: true,
-            stateRevision: config.state_revision ?? 0, manifestSync: 'synced' };
         }
-          }
+
         const paneAttemptId = randomUUID();
-        let prepared: PendingRecoveryPane;
-        try {
-          prepared = buildRecoveryPaneContext(input, sagaInput, config, currentWorker, launchDescriptor, '', paneAttemptId);
-          if (!process.argv[1]) throw new Error('runtime_cli_path_missing');
-        } catch {
-          return { ok: false, error: 'launch_descriptor_unresolvable' };
-        }
         const livePaneIds: string[] = [];
         for (const candidate of config.workers) {
           if (!candidate.pane_id || candidate.name === sagaInput.workerName) continue;
           if (await getWorkerPaneLiveness(candidate.pane_id) === 'alive') livePaneIds.push(candidate.pane_id);
         }
-        const splitTarget = livePaneIds.at(-1) ?? config.leader_pane_id ?? '';
-        if (!splitTarget) return { ok: false, error: 'spawn_failed' };
+        const splitTarget = livePaneIds.at(-1) ?? leaderPaneId;
         const splitDirection = livePaneIds.length > 0 ? 'down' as const : 'right' as const;
-        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, prepared.gate.cwd);
-        if (!split.paneId) {
-          await recordUnaddressableRecoveryPaneFailure(input, sagaInput.recoveryId, paneAttemptId,
-            split.commandSucceeded ? 'unaddressable_spawned_pane' : 'split_command_uncertain', split);
+        const workerCwd = currentWorker.working_dir ?? input.cwd;
+        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
+        const ownershipResult = proveWorkerPaneOwnership(split, { leaderPaneId, reservedPaneIds });
+        if (!ownershipResult.ok) {
+          await recordUnaddressableRecoveryPaneFailure(
+            input,
+            sagaInput.recoveryId,
+            paneAttemptId,
+            `pane_identity_${ownershipResult.reason}`,
+            split,
+          );
           return { ok: false, error: 'spawn_failed' };
         }
-        const pending = { ...prepared, paneId: split.paneId };
+        let pending: PendingRecoveryPane;
+        try {
+          pending = await buildRecoveryPaneContext(
+            input,
+            sagaInput,
+            currentWorker,
+            launchDescriptor,
+            ownershipResult.ownership,
+            paneAttemptId,
+          );
+        } catch {
+          return { ok: false, error: 'launch_descriptor_unresolvable' };
+        }
         pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
         try {
-          await spawnWorkerInPane(config.tmux_session, pending.paneId, {
+          const runtimeCliPath = resolveRuntimeCliPath();
+          pending.startupContext = await spawnOwnedWorkerInPane(config.tmux_session, pending.ownership, {
             teamName: input.teamName,
             workerName: sagaInput.workerName,
             envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(pending.gate) },
             launchBinary: process.execPath,
-            launchArgs: [process.argv[1], '--recovery-gate'],
+            launchArgs: [runtimeCliPath, '--recovery-gate'],
             cwd: pending.gate.cwd,
+            provider: pending.agentType,
+            launchBootstrapPath: runtimeCliPath,
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput.recoveryId,
@@ -2140,12 +2209,20 @@ export async function executeRecoverDeadWorkerV2Owner(
             pane_attempt_id: paneAttemptId,
           }, 30_000);
           if (!ready) throw new Error('startup_ack_timeout');
-          return { ok: true, paneId: pending.paneId, paneAttemptId, committed: false };
+          return { ok: true, paneId: pending.ownership.paneId, paneAttemptId, committed: false };
         } catch (error) {
-          await cleanupRecoveryPaneAttempt(input, sagaInput.recoveryId, pending,
-            error instanceof Error ? error.message : 'spawn_failed');
-          return { ok: false, error: error instanceof Error && error.message === 'startup_ack_timeout'
-            ? 'startup_ack_timeout' : 'spawn_failed' };
+          await cleanupRecoveryPaneAttempt(
+            input,
+            sagaInput.recoveryId,
+            pending,
+            error instanceof Error ? error.message : 'spawn_failed',
+          );
+          return {
+            ok: false,
+            error: error instanceof Error && error.message === 'startup_ack_timeout'
+              ? 'startup_ack_timeout'
+              : 'spawn_failed',
+          };
         }
       },
       persistActive: async (sagaInput, paneId) => {
@@ -2155,8 +2232,15 @@ export async function executeRecoverDeadWorkerV2Owner(
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
         if (!pending) throw new Error('worker_activation_failed');
         const nextWorkers = current.config.workers.map(candidate => candidate.name === sagaInput.workerName
-          ? { ...candidate, pane_id: paneId, pane_attempt_id: pending.paneAttemptId, recovery_id: sagaInput.recoveryId,
-            replacement_generation: sagaInput.replacementGeneration, operational_state: 'active' as const }
+          ? {
+              ...candidate,
+              pane_id: paneId,
+              pane_attempt_id: pending.paneAttemptId,
+              recovery_id: sagaInput.recoveryId,
+              replacement_generation: sagaInput.replacementGeneration,
+              operational_state: 'active' as const,
+              ...(pending.startupContext ? { launch_attempt_id: pending.startupContext.attempt.attempt_id } : {}),
+            }
           : candidate);
         const nextRevision = current.stateRevision + 1;
         const next: TeamConfig = {
@@ -2209,7 +2293,30 @@ export async function executeRecoverDeadWorkerV2Owner(
       writeRun: async (sagaInput, paneAttemptId, continuations) => {
         await ensureFence();
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending || pending.paneAttemptId !== paneAttemptId) throw new Error('worker_activation_failed');
+        if (!pending || pending.paneAttemptId !== paneAttemptId || !pending.startupContext) {
+          throw new Error('worker_activation_failed');
+        }
+        const primaryTaskId = continuations[0]?.taskId;
+        const startupBaseline = primaryTaskId
+          ? await captureWorkerStartupBaseline(input.teamName, sagaInput.workerName, primaryTaskId, input.cwd)
+          : null;
+        const statusBaseline = startupBaseline?.statusFingerprint
+          ?? workerStatusStartupFingerprint(await readWorkerStatus(input.teamName, sagaInput.workerName, input.cwd));
+        const waitForCurrentEvidence = () => primaryTaskId && startupBaseline
+          ? waitForWorkerStartupEvidence(
+              input.teamName,
+              sagaInput.workerName,
+              primaryTaskId,
+              input.cwd,
+              startupBaseline,
+              12,
+            )
+          : waitForWorkerStatusTransition(
+              input.teamName,
+              sagaInput.workerName,
+              input.cwd,
+              statusBaseline,
+            );
         const instruction = continuations.length > 0
           ? continuations.map(continuation => renderRecoveryContinuationInstruction({
             teamName: input.teamName,
@@ -2222,29 +2329,48 @@ export async function executeRecoverDeadWorkerV2Owner(
           })).join('\n\n')
           : 'Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.';
         await composeInitialInbox(input.teamName, sagaInput.workerName, instruction, input.cwd);
-        const record = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
-          replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId, written_at: new Date().toISOString() };
+        const record = {
+          recovery_id: sagaInput.recoveryId,
+          worker_name: sagaInput.workerName,
+          replacement_generation: sagaInput.replacementGeneration,
+          pane_attempt_id: paneAttemptId,
+          written_at: new Date().toISOString(),
+        };
         const launchedPath = `${pending.gate.runPath}.launched`;
         if (!existsSync(launchedPath)) {
           await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
           const launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
           if (!launched) throw new Error('startup_ack_timeout');
         }
-        if (!pending.promptMode) {
-          if (!await waitForPaneReady(pending.paneId)) throw new Error('startup_ack_timeout');
+        if (pending.promptMode) {
+          if (!await waitForCurrentEvidence()) throw new Error(`${pending.agentType}_startup_evidence_missing`);
+        } else {
+          const recoveryTriggerMessage = `${generateTriggerMessage(
+            input.teamName,
+            sagaInput.workerName,
+            pending.worker.worktree_path ? '$OMC_TEAM_STATE_ROOT' : undefined,
+          )} [launch:${pending.startupContext.attempt.attempt_id.slice(0, 12)}]`;
           const outcome = await queueInboxInstruction({
             teamName: input.teamName,
             workerName: sagaInput.workerName,
             workerIndex: pending.worker.index,
-            paneId: pending.paneId,
+            paneId: pending.ownership.paneId,
             inbox: instruction,
-            triggerMessage: generateTriggerMessage(input.teamName, sagaInput.workerName,
-              pending.worker.worktree_path ? '$OMC_TEAM_STATE_ROOT' : undefined),
+            triggerMessage: recoveryTriggerMessage,
             cwd: input.cwd,
             transportPreference: 'transport_direct',
             fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
-            inboxCorrelationKey: `recovery:${sagaInput.recoveryId}`,
-            notify: async (_target, triggerMessage) => notifyStartupInbox(pending.sessionName, pending.paneId, triggerMessage),
+            inboxCorrelationKey: `recovery:${sagaInput.recoveryId}:${pending.startupContext.attempt.attempt_id}`,
+            notify: async (_target, triggerMessage) => {
+              const attempted = await deliverStartupInbox(pending.startupContext!, triggerMessage);
+              if (!attempted.ok) {
+                return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
+              }
+              const settled = await waitForCurrentEvidence();
+              return settled
+                ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
+                : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
+            },
             deps: { writeWorkerInbox },
           });
           if (!outcome.ok) throw new Error(outcome.reason ?? 'worker_notify_failed');
@@ -2778,6 +2904,9 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
         workerInfo.pane_id = workerLaunch.paneId;
         workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
         workerInfo.worker_cli = prepared.agentType;
+        if (workerLaunch.launchAttemptId) {
+          workerInfo.launch_attempt_id = workerLaunch.launchAttemptId;
+        }
         if (workerLaunch.outputFile) {
           workerInfo.output_file = workerLaunch.outputFile;
         }

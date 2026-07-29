@@ -105,6 +105,7 @@ export declare function readTaskOutputFallback(outputsDir: string, teamName: str
  * the team and publish that immutable snapshot. Shutdown may remove v1 state.
  */
 export declare function finalizeRuntimeShutdown<T>(runtime: Pick<TeamRuntime, 'stopWatchdog'> | null, useV2: boolean, collectOutput: () => Promise<T>, shutdown: () => Promise<void>, publishOutput: (output: T) => Promise<void>): Promise<T>;
+export declare function runWorkerLaunchFromEnvironment(): Promise<void>;
 /** Detached durable recovery-owner entry point. It remains the persistent v2 owner until its fence or team lifecycle is lost. */
 export declare function runRecoveryOwnerFromEnvironment(): Promise<void>;
 export {};

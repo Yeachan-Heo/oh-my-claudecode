@@ -1,4 +1,6 @@
 import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbox-notification-guard.js';
+import type { CliAgentType } from './model-contract.js';
+import { type WorkerLaunchAttempt } from './worker-launch-ack.js';
 export type TeamMultiplexerContext = 'tmux' | 'cmux' | 'none';
 export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): TeamMultiplexerContext;
 /**
@@ -62,6 +64,9 @@ export interface WorkerPaneConfig {
     /** @deprecated Prefer launchBinary + launchArgs for safe argv handling */
     launchCmd?: string;
     cwd: string;
+    provider?: CliAgentType;
+    launchBootstrapPath?: string;
+    launchAttempt?: WorkerLaunchAttempt;
 }
 export declare function getDefaultShell(): string;
 /** Shell + rc file pair used for worker pane launch */
@@ -84,6 +89,7 @@ export declare function resolveSupportedShellAffinity(shellPath?: string): Worke
  *   5. Fallback: /bin/sh
  */
 export declare function buildWorkerLaunchSpec(shellPath?: string): WorkerLaunchSpec;
+export declare function redactBoundedDiagnostic(error: unknown, maxLength?: number): string;
 export interface WaitForShellReadyOptions {
     timeoutMs?: number;
     pollIntervalMs?: number;
@@ -142,6 +148,36 @@ export interface WorkerPaneSplitEvidence {
     stderr: string;
     paneId: string | null;
 }
+export interface WorkerPaneOwnership {
+    provider: WorkerPaneSplitEvidence['provider'];
+    paneId: string;
+    splitTarget: string;
+    leaderPaneId: string;
+    reservedPaneIds: readonly string[];
+}
+export type WorkerPaneOwnershipResult = {
+    ok: true;
+    ownership: WorkerPaneOwnership;
+} | {
+    ok: false;
+    reason: 'split_failed' | 'pane_id_missing' | 'pane_id_malformed' | 'leader_alias' | 'split_target_alias' | 'reserved_worker_alias';
+};
+export interface StartupPaneContext {
+    ownership: WorkerPaneOwnership;
+    attempt: WorkerLaunchAttempt;
+    provider: CliAgentType;
+}
+export declare function proveWorkerPaneOwnership(evidence: WorkerPaneSplitEvidence, constraints: {
+    leaderPaneId: string;
+    reservedPaneIds: readonly string[];
+    requireNewFromSplitTarget?: boolean;
+}): WorkerPaneOwnershipResult;
+export declare function adoptWorkerPaneOwnership(input: {
+    provider: WorkerPaneSplitEvidence['provider'];
+    paneId: string;
+    leaderPaneId: string;
+    reservedPaneIds: readonly string[];
+}): WorkerPaneOwnershipResult;
 export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<WorkerPaneSplitEvidence>;
 export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;
@@ -151,9 +187,18 @@ export declare function createTeamSession(teamName: string, workerCount: number,
  * Worker startup: env OMC_TEAM_WORKER={teamName}/workerName shell -lc "exec agentCmd"
  */
 export declare function spawnWorkerInPane(sessionName: string, paneId: string, config: WorkerPaneConfig): Promise<void>;
+export declare function spawnOwnedWorkerInPane(sessionName: string, ownership: WorkerPaneOwnership, config: WorkerPaneConfig): Promise<StartupPaneContext>;
+export type PaneCaptureObservation = {
+    ok: true;
+    captured: string;
+} | {
+    ok: false;
+    error: string;
+};
 export declare function captureTeamPane(paneId: string): Promise<string>;
 export declare function sendTeamPaneKey(paneId: string, key: string): Promise<void>;
 export declare function killTeamPane(paneId: string): Promise<void>;
+export declare function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promise<void>;
 export declare function paneHasTrustPrompt(captured: string): boolean;
 export declare function paneHasActiveTask(captured: string): boolean;
 export declare function paneLooksReady(captured: string): boolean;
@@ -162,6 +207,21 @@ export interface WaitForPaneReadyOptions {
     pollIntervalMs?: number;
 }
 export declare function waitForPaneReady(paneId: string, opts?: WaitForPaneReadyOptions): Promise<boolean>;
+export type StartupPaneReadyResult = {
+    ok: true;
+} | {
+    ok: false;
+    reason: 'attempt_inactive' | 'ownership_mismatch' | 'copy_mode' | 'copy_mode_unknown' | 'capture_failed' | 'selector_unsupported' | 'selector_persistent' | 'pane_busy' | 'readiness_timeout';
+};
+export declare function waitForStartupPaneReady(context: StartupPaneContext, opts?: WaitForPaneReadyOptions): Promise<StartupPaneReadyResult>;
+export declare function deliverStartupInbox(context: StartupPaneContext, message: string): Promise<{
+    ok: true;
+    kind: 'attempted_unconfirmed';
+} | {
+    ok: false;
+    reason: string;
+}>;
+export declare function retryStartupInboxSubmit(context: StartupPaneContext, message: string): Promise<boolean>;
 export declare function shouldAttemptAdaptiveRetry(args: {
     paneBusy: boolean;
     latestCapture: string | null;

@@ -483,6 +483,7 @@ export interface WorkerInfo {
   recovery_id?: string;
   replacement_generation?: number;
   pane_attempt_id?: string;
+  launch_attempt_id?: string;
   operational_state?: 'starting' | 'active' | 'dead' | 'stopped';
   launch_descriptor?: WorkerLaunchDescriptor;
 }

@@ -408,7 +408,7 @@ function ownerAvailability(cwd: string, teamName: string): OwnerAvailability {
   }
 }
 
-function resolveRuntimeCliPath(): string {
+export function resolveRuntimeCliPath(): string {
   if (process.env.OMC_RUNTIME_CLI_PATH) return process.env.OMC_RUNTIME_CLI_PATH;
   if (typeof __dirname !== 'undefined' && __dirname) {
     return basename(__dirname) === 'bridge'

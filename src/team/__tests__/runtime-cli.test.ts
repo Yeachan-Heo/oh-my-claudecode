@@ -23,6 +23,7 @@ import {
   writeResultArtifact,
   runPersistentRecoveryOwnerLoop,
   finalizeRuntimeShutdown,
+  runWorkerLaunchFromEnvironment,
 } from '../runtime-cli.js';
 import { aliasActiveRecoveryRequest, canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest, writeRecoveryFinal } from '../recovery-request-store.js';
 import { absPath, TeamPaths } from '../state-paths.js';
@@ -98,6 +99,17 @@ describe('runtime-cli auto-merge compatibility', () => {
 
   it('allows v1 runtime when auto-merge is not requested', () => {
     expect(() => assertAutoMergeRuntimeSupported(false, false)).not.toThrow();
+  });
+});
+
+describe('runtime-cli worker launch bootstrap', () => {
+  it('rejects malformed launch JSON without echoing its secret payload', async () => {
+    process.env.OMC_WORKER_LAUNCH_SPEC = '{"provider_argv":["codex","--token","SUPERSECRET"],';
+    try {
+      await expect(runWorkerLaunchFromEnvironment()).rejects.toThrow('worker_launch_invalid_spec_json');
+    } finally {
+      delete process.env.OMC_WORKER_LAUNCH_SPEC;
+    }
   });
 });
 

@@ -19,6 +19,7 @@ import { parseRecoveryIntent, setRuntimeOwnerDispatch } from './runtime-owner-cl
 import { absPath, TeamPaths } from './state-paths.js';
 import { canonicalRecoveryPayloadHash, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation } from './recovery-request-store.js';
 import { runWorkerActivationGate } from './worker-activation-gate.js';
+import { runWorkerLaunchBootstrap } from './worker-launch-ack.js';
 import { readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { checkOwnerFence, currentProcessStartIdentity, requireOwnerProcessIdentity } from './team-owner-epoch.js';
@@ -1057,6 +1058,24 @@ async function runRecoveryGateFromEnvironment() {
         process.kill(process.pid, result.signal);
     process.exit(result.exitCode ?? 0);
 }
+export async function runWorkerLaunchFromEnvironment() {
+    const raw = process.env.OMC_WORKER_LAUNCH_SPEC;
+    if (!raw)
+        throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
+    let spec;
+    try {
+        spec = JSON.parse(raw);
+    }
+    catch {
+        throw new Error('worker_launch_invalid_spec_json');
+    }
+    const result = await runWorkerLaunchBootstrap(spec);
+    if (result.outcome !== 'ran')
+        throw new Error(`worker_launch_${result.outcome}`);
+    if (result.signal)
+        process.kill(process.pid, result.signal);
+    process.exit(result.exitCode ?? 0);
+}
 /** Detached durable recovery-owner entry point. It remains the persistent v2 owner until its fence or team lifecycle is lost. */
 export async function runRecoveryOwnerFromEnvironment() {
     const raw = process.env.OMC_RECOVERY_OWNER_INPUT;
@@ -1103,7 +1122,8 @@ export async function runRecoveryOwnerFromEnvironment() {
 if (require.main === module) {
     const entry = process.env.OMC_RECOVERY_OWNER_INPUT
         ? runRecoveryOwnerFromEnvironment
-        : process.argv.includes('--recovery-gate') ? runRecoveryGateFromEnvironment : main;
+        : process.argv.includes('--worker-launch') ? runWorkerLaunchFromEnvironment
+            : process.argv.includes('--recovery-gate') ? runRecoveryGateFromEnvironment : main;
     entry().catch(err => {
         process.stderr.write(`[runtime-cli] Fatal error: ${err}\n`);
         process.exit(1);
