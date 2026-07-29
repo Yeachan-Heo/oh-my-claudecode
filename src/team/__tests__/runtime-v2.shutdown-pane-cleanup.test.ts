@@ -83,7 +83,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     }
   });
 
-  it('kills discovered split-pane worker panes beyond stale recorded pane metadata', async () => {
+  it('kills only recorded ownership-proven split-pane workers when pane metadata is stale', async () => {
     const teamName = 'pane-cleanup-team';
     const teamRoot = `.omc/state/team/${teamName}`;
 
@@ -115,7 +115,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
       .filter((args) => args[0] === 'kill-pane')
       .map((args) => args[2]);
 
-    expect(killPaneTargets).toEqual(['%2', '%3']);
+    expect(killPaneTargets).toEqual(['%2']);
     expect(killPaneTargets).not.toContain('%1');
     await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
