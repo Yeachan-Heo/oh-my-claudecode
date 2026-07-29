@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { buildProviderSpawnInvocation } from './worker-launch-ack.js';
 export interface RecoveryActivationGate {
   recoveryId: string;
   workerName: string;
@@ -70,7 +71,8 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
   // This marker proves the pane is gated and can be safely adopted by the owner.
   await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
   if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
-  const child = spawn(gate.providerArgv[0], gate.providerArgv.slice(1), {
+  const invocation = buildProviderSpawnInvocation(gate.providerArgv);
+  const child = spawn(invocation.command, invocation.args, {
     cwd: gate.cwd,
     env: { ...process.env, ...gate.env },
     stdio: 'inherit',

@@ -8,8 +8,11 @@ import {
   buildWorkerLaunchBootstrapSpec,
   isWorkerLaunchAttemptAccepted,
   loadWorkerLaunchAttempt,
+  loadCurrentWorkerLaunchAttempt,
   prepareWorkerLaunchAttempt,
   runWorkerLaunchBootstrap,
+  revokeWorkerLaunchAttempt,
+  buildProviderSpawnInvocation,
 } from '../worker-launch-ack.js';
 
 let cwd = '';
@@ -170,4 +173,100 @@ describe('worker launch acknowledgement', () => {
       runtimeCliPath: '/runtime-cli.cjs',
     })).resolves.toBeNull();
   });
+  it('keeps revocation terminal when a valid acknowledgement already exists', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({
+      ...expected,
+      kind: 'worker_launch_ack',
+      written_at: new Date().toISOString(),
+    }), 'utf8');
+
+    await expect(revokeWorkerLaunchAttempt(launchAttempt, 'timeout')).resolves.toBe(true);
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 50,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
+    await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
+  });
+
+  it('revokes before provider release when ownership persistence fails', async () => {
+    const launchAttempt = await attempt();
+    const providerMarker = join(cwd, 'provider-ran');
+    const spec = buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      cwd,
+    );
+    const bootstrap = runWorkerLaunchBootstrap(spec);
+
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+      beforeAccept: async () => { throw new Error('persist failed'); },
+    })).resolves.toEqual({ ok: false, reason: 'acceptance_persist_failed' });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
+    await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reloads the accepted current recovery launch with its durable context', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-worker-launch-current-'));
+    const launchAttempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: 'launch-team',
+      workerName: 'worker-1',
+      paneId: '%22',
+      provider: 'codex',
+      runtimeCliPath: '/runtime-cli.cjs',
+      context: {
+        kind: 'recovery',
+        recovery_id: 'recovery-current',
+        replacement_generation: 2,
+        pane_attempt_id: 'pane-attempt-current',
+      },
+    });
+    const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'process.exit(0)'], cwd);
+    const bootstrap = runWorkerLaunchBootstrap(spec);
+    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+    await bootstrap;
+
+    await expect(loadCurrentWorkerLaunchAttempt({
+      cwd,
+      teamName: 'launch-team',
+      workerName: 'worker-1',
+      provider: 'codex',
+    })).resolves.toMatchObject({
+      attempt_id: launchAttempt.attempt_id,
+      pane_id: '%22',
+      context: {
+        kind: 'recovery',
+        recovery_id: 'recovery-current',
+        replacement_generation: 2,
+        pane_attempt_id: 'pane-attempt-current',
+      },
+    });
+  });
+
+  it('routes native Windows batch shims through COMSPEC without changing POSIX argv', () => {
+    const providerArgv = [
+      'C:\\Program Files\\Codex\\codex.cmd',
+      '--label=100% ready',
+      'say "hello" & continue',
+    ];
+
+    expect(buildProviderSpawnInvocation(providerArgv, 'win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' })).toEqual({
+      command: 'C:\\Windows\\System32\\cmd.exe',
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        '"C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "say ""hello"" & continue"',
+      ],
+    });
+    expect(buildProviderSpawnInvocation(providerArgv, 'linux')).toEqual({
+      command: providerArgv[0],
+      args: providerArgv.slice(1),
+    });
+  });
+
 });

@@ -26,6 +26,7 @@ import {
   prepareWorkerLaunchAttempt,
   revokeWorkerLaunchAttempt,
   type WorkerLaunchAttempt,
+  type WorkerLaunchContext,
 } from './worker-launch-ack.js';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -432,6 +433,8 @@ export interface WorkerPaneConfig {
   provider?: CliAgentType;
   launchBootstrapPath?: string;
   launchStateCwd?: string;
+  launchContext?: WorkerLaunchContext;
+  beforeLaunchAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
   launchAttempt?: WorkerLaunchAttempt;
 }
 
@@ -1270,7 +1273,9 @@ export async function spawnWorkerInPane(
   const fingerprint = commandFingerprint(startCmd);
   const requireAcknowledgement = async (): Promise<void> => {
     if (!config.launchAttempt) return;
-    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
+    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt, {
+      beforeAccept: config.beforeLaunchAccept,
+    });
     if (!accepted.ok) {
       throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
     }
@@ -1354,9 +1359,17 @@ export async function spawnOwnedWorkerInPane(
     paneId: ownership.paneId,
     provider: config.provider,
     runtimeCliPath: config.launchBootstrapPath,
+    ...(config.launchContext ? { context: config.launchContext } : {}),
   });
   try {
-    await spawnWorkerInPane(sessionName, ownership.paneId, { ...config, launchAttempt: attempt });
+    await spawnWorkerInPane(sessionName, ownership.paneId, {
+      ...config,
+      envVars: {
+        ...config.envVars,
+        OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+      },
+      launchAttempt: attempt,
+    });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
     await revokeWorkerLaunchAttempt(attempt, 'launch_failed').catch(() => undefined);

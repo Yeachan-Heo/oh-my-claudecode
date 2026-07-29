@@ -30,7 +30,7 @@ export { getContract, isCliAvailable as isCliAvailableForAgent, validateCliAvail
 shouldLoadShellRc, validateCliBinaryPath, resolveCliBinaryPath, clearResolvedPathCache, } from './model-contract.js';
 export { detectCli, detectAllClis } from './cli-detection.js';
 export { generateWorkerOverlay, composeInitialInbox, appendToInbox, getWorkerEnv, ensureWorkerStateDir, writeWorkerOverlay, } from './worker-bootstrap.js';
-export { prepareWorkerLaunchAttempt, loadWorkerLaunchAttempt, buildWorkerLaunchBootstrapSpec, revokeWorkerLaunchAttempt, awaitWorkerLaunchAcknowledgement, isWorkerLaunchAttemptAccepted, runWorkerLaunchBootstrap, } from './worker-launch-ack.js';
+export { prepareWorkerLaunchAttempt, loadWorkerLaunchAttempt, loadCurrentWorkerLaunchAttempt, buildWorkerLaunchBootstrapSpec, revokeWorkerLaunchAttempt, awaitWorkerLaunchAcknowledgement, isWorkerLaunchAttemptAccepted, runWorkerLaunchBootstrap, buildProviderSpawnInvocation, } from './worker-launch-ack.js';
 // tmux-comm
 export { sendTmuxTrigger, queueInboxInstruction, queueDirectMessage, queueBroadcastMessage, readMailbox, } from './tmux-comm.js';
 // Deprecated backward-compat exports for older layout APIs.

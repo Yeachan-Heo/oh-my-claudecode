@@ -223,15 +223,19 @@ export type {
   WorkerLaunchBootstrapSpec,
   WorkerLaunchAcceptance,
   WorkerLaunchBootstrapResult,
+  WorkerLaunchContext,
+  ProviderSpawnInvocation,
 } from './worker-launch-ack.js';
 export {
   prepareWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
+  loadCurrentWorkerLaunchAttempt,
   buildWorkerLaunchBootstrapSpec,
   revokeWorkerLaunchAttempt,
   awaitWorkerLaunchAcknowledgement,
   isWorkerLaunchAttemptAccepted,
   runWorkerLaunchBootstrap,
+  buildProviderSpawnInvocation,
 } from './worker-launch-ack.js';
 
 // tmux-comm

@@ -87,6 +87,8 @@ describe('worker-bootstrap', () => {
       expect(overlay).toContain('Read $OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
       expect(overlay).toContain('Write to $OMC_TEAM_STATE_ROOT/workers/worker-1/status.json');
       expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/shutdown-ack.json');
+      expect(overlay).toContain('OMC_WORKER_LAUNCH_ATTEMPT_ID');
+      expect(overlay).toContain('"launch_attempt_id": "<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>"');
       expect(overlay).not.toContain('$OMC_TEAM_STATE_ROOT/team/test-team');
     });
 

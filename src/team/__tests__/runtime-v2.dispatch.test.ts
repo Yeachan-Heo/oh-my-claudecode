@@ -174,28 +174,46 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.autoStartupEvidence = true;
     mocks.nextStartupTaskId = 1;
     mocks.nextSplitPaneId = 2;
-    mocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName: string, ownership: { paneId: string }, config: { teamName: string; workerName: string; provider: string }) => {
-      await mocks.spawnWorkerInPane(sessionName, ownership.paneId, config);
+    mocks.spawnOwnedWorkerInPane.mockImplementation(async (
+      sessionName: string,
+      ownership: { paneId: string },
+      config: {
+        teamName: string;
+        workerName: string;
+        provider: string;
+        envVars?: Record<string, string>;
+        beforeLaunchAccept?: (attempt: unknown) => Promise<void>;
+      },
+    ) => {
+      const attempt = {
+        schema_version: 1,
+        attempt_id: `attempt-${config.workerName}`,
+        nonce: `nonce-${config.workerName}`,
+        team_name: config.teamName,
+        worker_name: config.workerName,
+        pane_id: ownership.paneId,
+        provider: config.provider,
+        created_at: new Date().toISOString(),
+        expectedPath: '/tmp/expected.json',
+        ackPath: '/tmp/ack.json',
+        decisionPath: '/tmp/decision.json',
+        runtimeCliPath: '/tmp/runtime-cli.cjs',
+      };
+      await mocks.spawnWorkerInPane(sessionName, ownership.paneId, {
+        ...config,
+        envVars: {
+          ...config.envVars,
+          OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+        },
+      });
+      await config.beforeLaunchAccept?.(attempt);
       return {
         ownership,
         provider: config.provider,
-        attempt: {
-          schema_version: 1,
-          attempt_id: `attempt-${config.workerName}`,
-          nonce: `nonce-${config.workerName}`,
-          team_name: config.teamName,
-          worker_name: config.workerName,
-          pane_id: ownership.paneId,
-          provider: config.provider,
-          created_at: new Date().toISOString(),
-          expectedPath: '/tmp/expected.json',
-          ackPath: '/tmp/ack.json',
-          decisionPath: '/tmp/decision.json',
-          runtimeCliPath: '/tmp/runtime-cli.cjs',
-        },
+        attempt,
       };
     });
-    mocks.deliverStartupInbox.mockImplementation(async (context: { attempt: { team_name: string; worker_name: string }; ownership: { paneId: string } }, message: string) => {
+    mocks.deliverStartupInbox.mockImplementation(async (context: { attempt: { attempt_id: string; team_name: string; worker_name: string }; ownership: { paneId: string } }, message: string) => {
       const sent = await mocks.sendToWorker('', context.ownership.paneId, message);
       if (!sent) return { ok: false, reason: 'startup_send_failed' };
       if (mocks.autoStartupEvidence) {
@@ -206,6 +224,7 @@ describe('runtime v2 startup inbox dispatch', () => {
           state: 'working',
           current_task_id: taskId,
           updated_at: new Date().toISOString(),
+          launch_attempt_id: context.attempt.attempt_id,
         }), 'utf8');
       }
       return { ok: true, kind: 'attempted_unconfirmed' };
@@ -1069,6 +1088,49 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects fresh task and status evidence from another launch attempt', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-wrong-attempt-evidence-'));
+    mocks.autoStartupEvidence = false;
+
+    mocks.sendToWorker.mockImplementation(async () => {
+      const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+      const task = JSON.parse(await readFile(taskPath, 'utf-8'));
+      await writeFile(taskPath, JSON.stringify({
+        ...task,
+        status: 'in_progress',
+        owner: 'worker-1',
+        claim: {
+          owner: 'worker-1',
+          token: 'orphan-token',
+          leased_until: '2099-01-01T00:00:00.000Z',
+          launch_attempt_id: 'attempt-worker-orphan',
+        },
+      }, null, 2), 'utf-8');
+      const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+      await mkdir(workerDir, { recursive: true });
+      await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+        state: 'working',
+        current_task_id: '1',
+        launch_attempt_id: 'attempt-worker-orphan',
+        updated_at: new Date().toISOString(),
+      }, null, 2), 'utf-8');
+      return true;
+    });
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Reject wrong-attempt evidence' }],
+      cwd,
+    });
+
+    expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+    const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+    expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+  });
+
   it('accepts Claude startup once the worker claims the task', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-claude-evidence-claim-'));
     mocks.autoStartupEvidence = false;
@@ -1081,6 +1143,12 @@ describe('runtime v2 startup inbox dispatch', () => {
         ...existing,
         status: 'in_progress',
         owner: 'worker-1',
+        claim: {
+          owner: 'worker-1',
+          token: 'current-token',
+          leased_until: '2099-01-01T00:00:00.000Z',
+          launch_attempt_id: 'attempt-worker-1',
+        },
       }, null, 2), 'utf-8');
       return true;
     });
@@ -1110,6 +1178,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         state: 'working',
         current_task_id: '1',
         updated_at: new Date().toISOString(),
+        launch_attempt_id: 'attempt-worker-1',
       }, null, 2), 'utf-8');
       return true;
     });
@@ -1194,7 +1263,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-gemini-prompt-'));
 
     modelContractMocks.isPromptModeAgent.mockImplementation((agentType?: string) => agentType === 'gemini');
-    mocks.spawnWorkerInPane.mockImplementation(async () => {
+    mocks.spawnWorkerInPane.mockImplementation(async (_sessionName: string, _paneId: string, config: { envVars?: Record<string, string> }) => {
       const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
       const canonicalTaskPath = join(taskDir, 'task-1.json');
       const legacyTaskPath = join(taskDir, '1.json');
@@ -1209,6 +1278,12 @@ describe('runtime v2 startup inbox dispatch', () => {
         ...existing,
         status: 'in_progress',
         owner: 'worker-1',
+        claim: {
+          owner: 'worker-1',
+          token: 'gemini-current-token',
+          leased_until: '2099-01-01T00:00:00.000Z',
+          launch_attempt_id: config.envVars?.OMC_WORKER_LAUNCH_ATTEMPT_ID,
+        },
       }, null, 2), 'utf-8');
     });
 

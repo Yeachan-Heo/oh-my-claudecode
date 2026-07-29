@@ -290,6 +290,38 @@ describe("npm package bin surface regression", () => {
     )).not.toThrow();
   });
 
+  it("typechecks a supported root import from a clean tarball install", () => {
+    const consumerRoot = join(fixtureRootCache!, "clean-type-consumer");
+    mkdirSync(consumerRoot, { recursive: true });
+    writeFileSync(join(consumerRoot, "package.json"), JSON.stringify({ type: "module", private: true }));
+    execFileSync(
+      "npm",
+      ["install", tarballPathCache!, "--ignore-scripts", "--no-audit", "--no-fund"],
+      { cwd: consumerRoot, stdio: "pipe" },
+    );
+    writeFileSync(
+      join(consumerRoot, "index.ts"),
+      `import { recoverDeadWorkerV2 } from ${JSON.stringify(packedPackageFixture.packageJson.name!)};\nvoid recoverDeadWorkerV2;\n`,
+    );
+    writeFileSync(join(consumerRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        strict: true,
+        skipLibCheck: true,
+        noEmit: true,
+      },
+      include: ["index.ts"],
+    }));
+
+    expect(() => execFileSync(
+      process.execPath,
+      [join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumerRoot, "tsconfig.json")],
+      { cwd: consumerRoot, stdio: "pipe" },
+    )).not.toThrow();
+  });
+
   it("rebuilds recovery CLI surfaces from source without committed bundles", () => {
     expect(packedPackageFixture.startedWithoutGeneratedBundles).toBe(true);
 

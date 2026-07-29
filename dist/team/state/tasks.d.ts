@@ -22,6 +22,7 @@ interface ClaimTaskDeps extends TaskReadDeps {
     isTerminalTaskStatus: (status: TeamTaskStatus) => boolean;
     taskFilePath: (teamName: string, taskId: string, cwd: string) => string;
     writeAtomic: (path: string, data: string) => Promise<void>;
+    launchAttemptId?: string;
 }
 export declare function claimTask(taskId: string, workerName: string, expectedVersion: number | null, deps: ClaimTaskDeps): Promise<ClaimTaskResult>;
 interface TransitionDeps extends ClaimTaskDeps {

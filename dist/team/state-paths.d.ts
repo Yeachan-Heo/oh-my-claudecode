@@ -35,6 +35,7 @@ export declare const TeamPaths: {
     readonly overlay: (teamName: string, workerName: string) => string;
     readonly shutdownAck: (teamName: string, workerName: string) => string;
     readonly workerLaunchAttemptRoot: (teamName: string, workerName: string, attemptId: string) => string;
+    readonly workerLaunchCurrent: (teamName: string, workerName: string) => string;
     readonly workerLaunchExpected: (teamName: string, workerName: string, attemptId: string) => string;
     readonly workerLaunchAck: (teamName: string, workerName: string, attemptId: string) => string;
     readonly workerLaunchDecision: (teamName: string, workerName: string, attemptId: string) => string;

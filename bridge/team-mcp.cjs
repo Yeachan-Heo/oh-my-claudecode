@@ -18257,6 +18257,7 @@ var TeamPaths = {
   overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
   shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
   workerLaunchAttemptRoot: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
+  workerLaunchCurrent: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/current.json`,
   workerLaunchExpected: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
   workerLaunchAck: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
   workerLaunchDecision: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
@@ -18319,6 +18320,26 @@ var TeamPaths = {
 function absPath(cwd, relativePath) {
   return (0, import_path4.isAbsolute)(relativePath) ? relativePath : (0, import_path4.join)(cwd, relativePath);
 }
+
+// src/lib/atomic-write.ts
+var fs = __toESM(require("fs/promises"), 1);
+var fsSync = __toESM(require("fs"), 1);
+var path = __toESM(require("path"), 1);
+var crypto = __toESM(require("crypto"), 1);
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
+var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
 
 // src/team/tmux-session.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -19207,7 +19228,7 @@ var import_node_child_process = require("node:child_process");
 // src/team/fs-utils.ts
 var import_fs5 = require("fs");
 var import_path8 = require("path");
-function atomicWriteJson(filePath, data, mode = 384) {
+function atomicWriteJson2(filePath, data, mode = 384) {
   const dir = (0, import_path8.dirname)(filePath);
   if (!(0, import_fs5.existsSync)(dir)) (0, import_fs5.mkdirSync)(dir, { recursive: true, mode: 448 });
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
@@ -19332,26 +19353,6 @@ function validateWorktreeRemovalTarget(options) {
 // src/lib/file-lock.ts
 var import_fs7 = require("fs");
 var path3 = __toESM(require("path"), 1);
-
-// src/lib/atomic-write.ts
-var fs2 = __toESM(require("fs/promises"), 1);
-var fsSync = __toESM(require("fs"), 1);
-var path = __toESM(require("path"), 1);
-var crypto = __toESM(require("crypto"), 1);
-function ensureDirSync(dir) {
-  if (fsSync.existsSync(dir)) {
-    return;
-  }
-  try {
-    fsSync.mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code === "EEXIST") {
-      return;
-    }
-    throw err;
-  }
-}
-var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
 
 // src/platform/index.ts
 var path2 = __toESM(require("path"), 1);
@@ -19663,7 +19664,7 @@ function writeMetadata(repoRoot, teamName, entries) {
   const metaPath = getMetadataPath(repoRoot, teamName);
   validateResolvedPath(metaPath, (0, import_node_path2.join)(getOmcRoot(repoRoot), "state", "team"));
   ensureDirWithMode((0, import_node_path2.join)(getOmcRoot(repoRoot), "state", "team", sanitizeName(teamName)));
-  atomicWriteJson(metaPath, entries);
+  atomicWriteJson2(metaPath, entries);
 }
 function forgetMetadataUnlocked(repoRoot, teamName, workerName) {
   const existing = readMetadata(repoRoot, teamName).filter((entry) => entry.workerName !== workerName);

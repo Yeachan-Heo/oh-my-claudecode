@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { buildProviderSpawnInvocation } from './worker-launch-ack.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
     const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -45,7 +46,8 @@ export async function runWorkerActivationGate(gate) {
     await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
     if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs))
         return { outcome: 'run_timeout' };
-    const child = spawn(gate.providerArgv[0], gate.providerArgv.slice(1), {
+    const invocation = buildProviderSpawnInvocation(gate.providerArgv);
+    const child = spawn(invocation.command, invocation.args, {
         cwd: gate.cwd,
         env: { ...process.env, ...gate.env },
         stdio: 'inherit',

@@ -54,7 +54,12 @@ export async function claimTask(taskId, workerName, expectedVersion, deps) {
             ...v,
             status: 'in_progress',
             owner: workerName,
-            claim: { owner: workerName, token: claimToken, leased_until: new Date(Date.now() + 15 * 60 * 1000).toISOString() },
+            claim: {
+                owner: workerName,
+                token: claimToken,
+                leased_until: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                ...(deps.launchAttemptId ? { launch_attempt_id: deps.launchAttemptId } : {}),
+            },
             version: v.version + 1,
         };
         await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));

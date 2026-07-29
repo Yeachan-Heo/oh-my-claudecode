@@ -1012,7 +1012,9 @@ export async function spawnWorkerInPane(sessionName, paneId, config) {
     const requireAcknowledgement = async () => {
         if (!config.launchAttempt)
             return;
-        const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
+        const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt, {
+            beforeAccept: config.beforeLaunchAccept,
+        });
         if (!accepted.ok) {
             throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
         }
@@ -1079,9 +1081,17 @@ export async function spawnOwnedWorkerInPane(sessionName, ownership, config) {
         paneId: ownership.paneId,
         provider: config.provider,
         runtimeCliPath: config.launchBootstrapPath,
+        ...(config.launchContext ? { context: config.launchContext } : {}),
     });
     try {
-        await spawnWorkerInPane(sessionName, ownership.paneId, { ...config, launchAttempt: attempt });
+        await spawnWorkerInPane(sessionName, ownership.paneId, {
+            ...config,
+            envVars: {
+                ...config.envVars,
+                OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+            },
+            launchAttempt: attempt,
+        });
         return { ownership, attempt, provider: config.provider };
     }
     catch (error) {

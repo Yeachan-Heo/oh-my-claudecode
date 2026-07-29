@@ -10,11 +10,20 @@ interface WorkerLaunchIdentity {
     provider: CliAgentType;
     created_at: string;
 }
+export type WorkerLaunchContext = {
+    kind: 'initial';
+} | {
+    kind: 'recovery';
+    recovery_id: string;
+    replacement_generation: number;
+    pane_attempt_id: string;
+};
 export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
     expectedPath: string;
     ackPath: string;
     decisionPath: string;
     runtimeCliPath: string;
+    context?: WorkerLaunchContext;
 }
 export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
     expected_path: string;
@@ -28,7 +37,7 @@ export type WorkerLaunchAcceptance = {
     ok: true;
 } | {
     ok: false;
-    reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid';
+    reason: 'ack_timeout' | 'ack_malformed' | 'ack_mismatch' | 'decision_conflict' | 'expected_record_invalid' | 'acceptance_persist_failed';
 };
 export type WorkerLaunchBootstrapResult = {
     outcome: 'ran';
@@ -37,6 +46,10 @@ export type WorkerLaunchBootstrapResult = {
 } | {
     outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'provider_spawn_failed';
 };
+export interface ProviderSpawnInvocation {
+    command: string;
+    args: string[];
+}
 export declare function prepareWorkerLaunchAttempt(input: {
     cwd: string;
     teamName: string;
@@ -44,6 +57,7 @@ export declare function prepareWorkerLaunchAttempt(input: {
     paneId: string;
     provider: CliAgentType;
     runtimeCliPath: string;
+    context?: WorkerLaunchContext;
 }): Promise<WorkerLaunchAttempt>;
 export declare function loadWorkerLaunchAttempt(input: {
     cwd: string;
@@ -54,13 +68,21 @@ export declare function loadWorkerLaunchAttempt(input: {
     attemptId: string;
     runtimeCliPath: string;
 }): Promise<WorkerLaunchAttempt | null>;
+export declare function loadCurrentWorkerLaunchAttempt(input: {
+    cwd: string;
+    teamName: string;
+    workerName: string;
+    provider: CliAgentType;
+}): Promise<WorkerLaunchAttempt | null>;
 export declare function buildWorkerLaunchBootstrapSpec(attempt: WorkerLaunchAttempt, providerArgv: string[], cwd: string): WorkerLaunchBootstrapSpec;
 export declare function revokeWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
 export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;
     pollIntervalMs?: number;
+    beforeAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
 }): Promise<WorkerLaunchAcceptance>;
 export declare function isWorkerLaunchAttemptAccepted(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;
 export {};
 //# sourceMappingURL=worker-launch-ack.d.ts.map

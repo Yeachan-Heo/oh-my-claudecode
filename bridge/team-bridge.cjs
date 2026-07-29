@@ -481,6 +481,7 @@ var TeamPaths = {
   overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
   shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
   workerLaunchAttemptRoot: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
+  workerLaunchCurrent: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/current.json`,
   workerLaunchExpected: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
   workerLaunchAck: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
   workerLaunchDecision: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
@@ -553,6 +554,26 @@ function getLegacyTaskStoragePath(claudeConfigDir, teamName, taskId) {
   return (0, import_path5.join)(claudeConfigDir, "tasks", teamName);
 }
 
+// src/lib/atomic-write.ts
+var fs = __toESM(require("fs/promises"), 1);
+var fsSync = __toESM(require("fs"), 1);
+var path = __toESM(require("path"), 1);
+var crypto = __toESM(require("crypto"), 1);
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
+var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
+
 // src/team/tmux-session.ts
 var execFileAsync = (0, import_util2.promisify)(import_child_process3.execFile);
 var TMUX_SESSION_PREFIX = "omc-team";
@@ -578,7 +599,7 @@ function killSession(teamName, workerName) {
 }
 
 // src/platform/index.ts
-var path = __toESM(require("path"), 1);
+var path2 = __toESM(require("path"), 1);
 var import_fs4 = require("fs");
 
 // src/platform/process-utils.ts
@@ -998,28 +1019,6 @@ var import_path9 = require("path");
 // src/lib/file-lock.ts
 var import_fs7 = require("fs");
 var path3 = __toESM(require("path"), 1);
-
-// src/lib/atomic-write.ts
-var fs2 = __toESM(require("fs/promises"), 1);
-var fsSync = __toESM(require("fs"), 1);
-var path2 = __toESM(require("path"), 1);
-var crypto = __toESM(require("crypto"), 1);
-function ensureDirSync(dir) {
-  if (fsSync.existsSync(dir)) {
-    return;
-  }
-  try {
-    fsSync.mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code === "EEXIST") {
-      return;
-    }
-    throw err;
-  }
-}
-var ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
-
-// src/lib/file-lock.ts
 var DEFAULT_STALE_LOCK_MS2 = 3e4;
 var DEFAULT_RETRY_DELAY_MS = 50;
 function isLockStale2(lockPath, staleLockMs) {

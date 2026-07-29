@@ -345,6 +345,7 @@ export async function teamClaimTask(teamName, taskId, workerName, expectedVersio
         isTerminalTaskStatus: isTerminalTeamTaskStatus,
         taskFilePath: (tn, tid, c) => canonicalTaskFilePath(tn, tid, c),
         writeAtomic,
+        launchAttemptId: process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID,
     });
 }
 export async function teamTransitionTaskStatus(teamName, taskId, from, to, claimToken, cwd, terminalData) {

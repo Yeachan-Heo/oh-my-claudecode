@@ -13,6 +13,7 @@ const paneMocks = vi.hoisted(() => ({
   spawnOwnedWorkerInPane: vi.fn(),
   killTeamPane: vi.fn(async (_paneId: string) => { throw new Error('pane still alive'); }),
   killOwnedWorkerPane: vi.fn(),
+  isPromptModeAgent: vi.fn(() => false),
 }));
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => ({
@@ -29,7 +30,7 @@ vi.mock('../model-contract.js', async importOriginal => ({
   resolveValidatedBinaryPath: vi.fn(() => '/bin/echo'),
   buildWorkerArgv: vi.fn(() => ['/bin/echo']),
   getWorkerEnv: vi.fn(() => ({})),
-  isPromptModeAgent: vi.fn(() => false),
+  isPromptModeAgent: paneMocks.isPromptModeAgent,
 }));
 
 paneMocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName: string, ownership: { paneId: string }, config: unknown) => {
@@ -43,6 +44,13 @@ paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: str
 import { reserveRecoveryRequest } from '../recovery-request-store.js';
 import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
 import { absPath, TeamPaths } from '../state-paths.js';
+import {
+  awaitWorkerLaunchAcknowledgement,
+  buildWorkerLaunchBootstrapSpec,
+  prepareWorkerLaunchAttempt,
+  loadCurrentWorkerLaunchAttempt,
+  runWorkerLaunchBootstrap,
+} from '../worker-launch-ack.js';
 
 const launchMetadata = { worker_cli: 'claude' as const,
   launch_descriptor: { schema_version: 1 as const, provider: 'claude' as const, model: null,
@@ -51,6 +59,7 @@ const launchMetadata = { worker_cli: 'claude' as const,
 let cwd = '';
 afterEach(() => {
   vi.clearAllMocks();
+  paneMocks.isPromptModeAgent.mockImplementation(() => false);
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -95,6 +104,175 @@ describe('recovery pane rollback evidence', () => {
     const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
     expect(evidence).toMatchObject({ schema_version: 1, team_name: teamName, worker_name: 'worker-1',
       request_id: requestId, recovery_id: recoveryId, pane_id: '%2', reason: 'spawn failed --api-key=<redacted> after pane creation', liveness: 'alive' });
+  });
+
+  it('reconciles an accepted initial launch pointer before treating the worker as already running', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'omc-recovery-initial-pointer-'));
+    const teamName = 'initial-pointer-team';
+    const requestId = 'initial-pointer-request';
+    const recoveryId = 'initial-pointer-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude',
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active',
+      state_revision: 1,
+      leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, {
+      operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName,
+      workerName: 'worker-1',
+    }, recoveryId);
+    const launchAttempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName,
+      workerName: 'worker-1',
+      paneId: '%9',
+      provider: 'claude',
+      runtimeCliPath: '/runtime-cli.cjs',
+      context: { kind: 'initial' },
+    });
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', 'process.exit(0)'],
+      cwd,
+    ));
+    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+    await bootstrap;
+    await expect(loadCurrentWorkerLaunchAttempt({
+      cwd,
+      teamName,
+      workerName: 'worker-1',
+      provider: 'claude',
+    })).resolves.toMatchObject({ attempt_id: launchAttempt.attempt_id, pane_id: '%9', context: { kind: 'initial' } });
+    paneMocks.getWorkerLiveness.mockResolvedValue('alive');
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'already_running', committed: true, newPaneId: '%9' });
+    const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(persisted.workers[0]).toMatchObject({
+      pane_id: '%9',
+      launch_attempt_id: launchAttempt.attempt_id,
+      operational_state: 'active',
+    });
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+  });
+
+  it('completes an idle Gemini recovery without requiring fabricated progress evidence', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'omc-recovery-idle-gemini-'));
+    const teamName = 'idle-gemini-team';
+    const requestId = 'idle-gemini-request';
+    const recoveryId = 'idle-gemini-recovery';
+    const serviceDescriptor = {
+      schema_version: 1,
+      service_generation: 1,
+      service_attempt_id: 'service-attempt',
+      workspace_root: cwd,
+      auto_merge_enabled: false,
+      cadence_policy: 'disabled',
+    };
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      worker_count: 1,
+      workers: [{
+        name: 'worker-1',
+        index: 1,
+        worker_cli: 'gemini',
+        launch_descriptor: { schema_version: 1, provider: 'gemini', model: null, binary: process.execPath, args: [] },
+        pane_id: '%1',
+        replacement_generation: 1,
+        working_dir: cwd,
+      }],
+      agent_type: 'gemini',
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active',
+      state_revision: 1,
+      leader_pane_id: '%0',
+      service_descriptor: serviceDescriptor,
+    }));
+    writeFileSync(absPath(cwd, TeamPaths.manifest(teamName)), JSON.stringify({
+      schema_version: 2,
+      name: teamName,
+      state_revision: 1,
+      task: 'test',
+      leader: { session_id: 'leader', worker_id: 'leader-fixed', role: 'leader' },
+      policy: { display_mode: 'split_pane', worker_launch_mode: 'interactive', dispatch_mode: 'hook_preferred_with_fallback', dispatch_ack_timeout_ms: 15000 },
+      governance: { delegation_only: false, plan_approval_required: false, nested_teams_allowed: false, one_team_per_leader_session: true, cleanup_requires_all_workers_inactive: true },
+      permissions_snapshot: { approval_mode: 'default', sandbox_mode: 'workspace-write', network_access: false },
+      tmux_session: `${teamName}:0`,
+      worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, role: 'gemini', assigned_tasks: [], worker_cli: 'gemini', pane_id: '%1' }],
+      next_task_id: 1,
+      created_at: new Date().toISOString(),
+      leader_pane_id: '%0',
+      service_descriptor: serviceDescriptor,
+    }));
+    reserveRecoveryRequest(cwd, requestId, {
+      operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName,
+      workerName: 'worker-1',
+    }, recoveryId);
+    paneMocks.isPromptModeAgent.mockImplementation((provider?: string) => provider === 'gemini');
+    paneMocks.getWorkerLiveness.mockResolvedValueOnce('dead').mockResolvedValue('alive');
+
+    paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (
+      _sessionName: string,
+      ownership: { paneId: string },
+      config: { envVars: Record<string, string>; provider: string },
+    ) => {
+      const gate = JSON.parse(config.envVars.OMC_RECOVERY_GATE_SPEC) as {
+        recoveryId: string;
+        workerName: string;
+        replacementGeneration: number;
+        paneAttemptId: string;
+        readyPath: string;
+        runPath: string;
+      };
+      const record = {
+        recovery_id: gate.recoveryId,
+        worker_name: gate.workerName,
+        replacement_generation: gate.replacementGeneration,
+        pane_attempt_id: gate.paneAttemptId,
+        written_at: new Date().toISOString(),
+      };
+      mkdirSync(join(gate.readyPath, '..'), { recursive: true });
+      writeFileSync(gate.readyPath, JSON.stringify(record));
+      writeFileSync(`${gate.readyPath}.adoption-ready`, JSON.stringify(record));
+      mkdirSync(join(gate.runPath, '..'), { recursive: true });
+      writeFileSync(`${gate.runPath}.launched`, JSON.stringify(record));
+      return {
+        ownership,
+        provider: config.provider,
+        attempt: {
+          schema_version: 1,
+          attempt_id: 'attempt-idle-gemini',
+          nonce: 'nonce-idle-gemini',
+          team_name: teamName,
+          worker_name: 'worker-1',
+          pane_id: ownership.paneId,
+          provider: config.provider,
+          created_at: new Date().toISOString(),
+          expectedPath: '/tmp/expected.json',
+          ackPath: '/tmp/ack.json',
+          decisionPath: '/tmp/decision.json',
+          runtimeCliPath: '/tmp/runtime-cli.cjs',
+        },
+      };
+    });
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
   });
 
   it('publishes durable orphan evidence when split succeeds without a parseable pane id', async () => {

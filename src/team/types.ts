@@ -189,6 +189,7 @@ export interface TeamTaskClaim {
   owner: string;
   token: string;
   leased_until: string;
+  launch_attempt_id?: string;
 }
 
 /** Base team task matching OMX shape */
@@ -745,6 +746,7 @@ export interface WorkerStatus {
   state: 'idle' | 'working' | 'blocked' | 'done' | 'failed' | 'draining' | 'unknown';
   current_task_id?: string;
   reason?: string;
+  launch_attempt_id?: string;
   updated_at: string;
 }
 

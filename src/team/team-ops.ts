@@ -506,6 +506,7 @@ export async function teamClaimTask(
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
     taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
+    launchAttemptId: process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID,
   });
 }
 

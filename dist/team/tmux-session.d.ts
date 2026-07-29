@@ -1,6 +1,6 @@
 import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbox-notification-guard.js';
 import type { CliAgentType } from './model-contract.js';
-import { type WorkerLaunchAttempt } from './worker-launch-ack.js';
+import { type WorkerLaunchAttempt, type WorkerLaunchContext } from './worker-launch-ack.js';
 export type TeamMultiplexerContext = 'tmux' | 'cmux' | 'none';
 export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): TeamMultiplexerContext;
 /**
@@ -67,6 +67,8 @@ export interface WorkerPaneConfig {
     provider?: CliAgentType;
     launchBootstrapPath?: string;
     launchStateCwd?: string;
+    launchContext?: WorkerLaunchContext;
+    beforeLaunchAccept?: (attempt: WorkerLaunchAttempt) => Promise<void>;
     launchAttempt?: WorkerLaunchAttempt;
 }
 export declare function getDefaultShell(): string;

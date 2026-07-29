@@ -72,6 +72,9 @@ export const TeamPaths = {
   workerLaunchAttemptRoot: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
 
+  workerLaunchCurrent: (teamName: string, workerName: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/current.json`,
+
   workerLaunchExpected: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
 

@@ -151,7 +151,7 @@ import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, 
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
-import { loadWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -825,6 +825,7 @@ function workerTaskStartupFingerprint(task: TeamTask): string {
     version: task.version ?? null,
     claimOwner: task.claim?.owner ?? null,
     claimToken: task.claim?.token ?? null,
+    claimLaunchAttemptId: task.claim?.launch_attempt_id ?? null,
   });
 }
 
@@ -834,6 +835,7 @@ function workerStatusStartupFingerprint(status: WorkerStatus): string {
     currentTaskId: status.current_task_id ?? null,
     reason: status.reason ?? null,
     updatedAt: status.updated_at,
+    launchAttemptId: status.launch_attempt_id ?? null,
   });
 }
 
@@ -872,6 +874,7 @@ async function hasCurrentWorkerStartupEvidence(
   taskId: string,
   cwd: string,
   baseline: WorkerStartupBaseline,
+  launchAttemptId: string,
 ): Promise<boolean> {
   const [task, status] = await Promise.all([
     readWorkerStartupTask(teamName, taskId, cwd),
@@ -880,9 +883,11 @@ async function hasCurrentWorkerStartupEvidence(
   const currentClaim = Boolean(task
     && task.owner === workerName
     && ['in_progress', 'completed', 'failed'].includes(task.status)
+    && task.claim?.launch_attempt_id === launchAttemptId
     && workerTaskStartupFingerprint(task) !== baseline.taskFingerprint);
   const currentStatus = status.current_task_id === taskId
     && ['working', 'blocked', 'done', 'failed'].includes(status.state)
+    && status.launch_attempt_id === launchAttemptId
     && workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
   return currentClaim || currentStatus;
 }
@@ -893,11 +898,12 @@ async function waitForWorkerStartupEvidence(
   taskId: string,
   cwd: string,
   baseline: WorkerStartupBaseline,
+  launchAttemptId: string,
   attempts = 3,
   delayMs = 250,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (await hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline)) return true;
+    if (await hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, launchAttemptId)) return true;
     if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   return false;
@@ -908,12 +914,14 @@ async function waitForWorkerStatusTransition(
   workerName: string,
   cwd: string,
   baselineFingerprint: string,
+  launchAttemptId: string,
   attempts = 12,
   delayMs = 250,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const status = await readWorkerStatus(teamName, workerName, cwd);
-    if (status.state !== 'unknown' && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
+    if (status.state !== 'unknown' && status.launch_attempt_id === launchAttemptId
+      && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
     if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   return false;
@@ -1002,8 +1010,15 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     provider: opts.agentType,
     launchBootstrapPath: resolveRuntimeCliPath(),
     launchStateCwd: opts.cwd,
+    launchContext: { kind: 'initial' },
   };
-  const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  let startupContext: StartupPaneContext;
+  try {
+    startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  } catch (error) {
+    await killOwnedWorkerPane(ownership).catch(() => undefined);
+    throw error;
+  }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
     `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
   await applyMainVerticalLayout(opts.sessionName);
@@ -1014,6 +1029,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     opts.taskId,
     opts.cwd,
     startupBaseline,
+    startupContext.attempt.attempt_id,
     attempts,
   );
   const dispatchOutcome = await queueInboxInstruction({
@@ -2015,6 +2031,15 @@ export async function executeRecoverDeadWorkerV2Owner(
       : (worker.replacement_generation ?? 0) + 1;
     const attempt = await readOrCreateRecoveryAttempt(input, recoveryId, replacementGeneration);
     const originalPaneId = existingAttempt?.original_pane_id ?? worker.pane_id;
+    const sagaInput: RecoverySagaInput = {
+      requestId: input.requestId,
+      recoveryId,
+      teamName: input.teamName,
+      workerName: input.workerName,
+      replacementGeneration: attempt.replacement_generation,
+      adoptionToken: attempt.adoption_token,
+      originalPaneId,
+    };
 
 
 
@@ -2043,7 +2068,40 @@ export async function executeRecoverDeadWorkerV2Owner(
           && currentWorker.replacement_generation === attempt.replacement_generation
           && Boolean(currentWorker.pane_id && currentWorker.pane_attempt_id);
         if (!committedReplacement) {
-          if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId) return 'unknown';
+          if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId) {
+            const currentLaunch = await loadCurrentWorkerLaunchAttempt({
+              cwd: input.cwd,
+              teamName: input.teamName,
+              workerName: input.workerName,
+              provider: launchDescriptor.provider,
+            });
+            if (!currentLaunch) return 'unknown';
+            const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id);
+            if (currentLaunch.context?.kind === 'recovery') {
+              return currentLaunch.context.recovery_id === recoveryId
+                && currentLaunch.context.replacement_generation === attempt.replacement_generation
+                ? 'dead'
+                : 'unknown';
+            }
+            if (currentLaunch.context?.kind !== 'initial' || currentLiveness !== 'alive' || !currentWorker) {
+              return currentLiveness;
+            }
+            const reconciled: TeamConfig = {
+              ...config,
+              workers: config.workers.map(candidate => candidate.name === input.workerName
+                ? {
+                  ...candidate,
+                  pane_id: currentLaunch.pane_id,
+                  launch_attempt_id: currentLaunch.attempt_id,
+                  worker_cli: currentLaunch.provider,
+                  operational_state: 'active' as const,
+                }
+                : candidate),
+            };
+            await saveTeamConfig(reconciled, input.cwd, config.state_revision);
+            sagaInput.originalPaneId = currentLaunch.pane_id;
+            return 'alive';
+          }
           return getWorkerPaneLiveness(originalPaneId);
         }
 
@@ -2163,6 +2221,54 @@ export async function executeRecoverDeadWorkerV2Owner(
           }
         }
 
+        const runtimeCliPath = resolveRuntimeCliPath();
+        const currentLaunch = await loadCurrentWorkerLaunchAttempt({
+          cwd: input.cwd,
+          teamName: input.teamName,
+          workerName: sagaInput.workerName,
+          provider: launchDescriptor.provider,
+        });
+        if (currentLaunch) {
+          const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id).catch(() => 'unknown' as const);
+          if (currentLiveness !== 'dead') {
+            const context = currentLaunch.context;
+            if (context?.kind !== 'recovery' || context.recovery_id !== sagaInput.recoveryId
+              || context.replacement_generation !== sagaInput.replacementGeneration) {
+              return { ok: false, error: 'worker_activation_failed' };
+            }
+            const adopted = adoptWorkerPaneOwnership({
+              provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+              paneId: currentLaunch.pane_id,
+              leaderPaneId,
+              reservedPaneIds,
+            });
+            if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
+            const resumed = await buildRecoveryPaneContext(
+              input,
+              sagaInput,
+              currentWorker,
+              launchDescriptor,
+              adopted.ownership,
+              context.pane_attempt_id,
+            );
+            resumed.startupContext = {
+              ownership: adopted.ownership,
+              attempt: currentLaunch,
+              provider: launchDescriptor.provider,
+            };
+            pendingRecoveryPanes.set(sagaInput.recoveryId, resumed);
+            const ready = await waitForRecoveryGateRecord(resumed.gate.readyPath, {
+              recovery_id: sagaInput.recoveryId,
+              worker_name: sagaInput.workerName,
+              replacement_generation: sagaInput.replacementGeneration,
+              pane_attempt_id: context.pane_attempt_id,
+            }, 5_000);
+            return ready
+              ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false }
+              : { ok: false, error: 'startup_ack_timeout' };
+          }
+        }
+
         const paneAttemptId = randomUUID();
         const livePaneIds: string[] = [];
         for (const candidate of config.workers) {
@@ -2199,7 +2305,6 @@ export async function executeRecoverDeadWorkerV2Owner(
         }
         pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
         try {
-          const runtimeCliPath = resolveRuntimeCliPath();
           pending.startupContext = await spawnOwnedWorkerInPane(config.tmux_session, pending.ownership, {
             teamName: input.teamName,
             workerName: sagaInput.workerName,
@@ -2210,6 +2315,12 @@ export async function executeRecoverDeadWorkerV2Owner(
             provider: pending.agentType,
             launchBootstrapPath: runtimeCliPath,
             launchStateCwd: input.cwd,
+            launchContext: {
+              kind: 'recovery',
+              recovery_id: sagaInput.recoveryId,
+              replacement_generation: sagaInput.replacementGeneration,
+              pane_attempt_id: paneAttemptId,
+            },
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput.recoveryId,
@@ -2305,6 +2416,7 @@ export async function executeRecoverDeadWorkerV2Owner(
         if (!pending || pending.paneAttemptId !== paneAttemptId || !pending.startupContext) {
           throw new Error('worker_activation_failed');
         }
+        const startupAttemptId = pending.startupContext.attempt.attempt_id;
         const primaryTaskId = continuations[0]?.taskId;
         const startupBaseline = primaryTaskId
           ? await captureWorkerStartupBaseline(input.teamName, sagaInput.workerName, primaryTaskId, input.cwd)
@@ -2318,6 +2430,7 @@ export async function executeRecoverDeadWorkerV2Owner(
               primaryTaskId,
               input.cwd,
               startupBaseline,
+              startupAttemptId,
               12,
             )
           : waitForWorkerStatusTransition(
@@ -2325,6 +2438,7 @@ export async function executeRecoverDeadWorkerV2Owner(
               sagaInput.workerName,
               input.cwd,
               statusBaseline,
+              startupAttemptId,
             );
         const instruction = continuations.length > 0
           ? continuations.map(continuation => renderRecoveryContinuationInstruction({
@@ -2394,15 +2508,6 @@ export async function executeRecoverDeadWorkerV2Owner(
       },
     };
 
-    const sagaInput: RecoverySagaInput = {
-      requestId: input.requestId,
-      recoveryId,
-      teamName: input.teamName,
-      workerName: input.workerName,
-      replacementGeneration: attempt.replacement_generation,
-      adoptionToken: attempt.adoption_token,
-      originalPaneId,
-    };
     const result = await runRecoverySaga(sagaInput, deps);
 
     return finalizeRecoveryOwnerResult(input, recoveryId, result);
@@ -2888,6 +2993,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
 
     const prepared = preparedLaunches.get(wName);
     if (!prepared) continue;
+    const workerInfo = workersInfo[workerIndex];
+    if (!workerInfo) continue;
     const workerLaunch = await spawnV2Worker({
       sessionName,
       leaderPaneId,
@@ -2900,16 +3007,15 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       task,
       taskId,
       cwd: leaderCwd,
-      workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
-      worktreePath: workersInfo[workerIndex]?.worktree_path,
+      workerCwd: workerInfo.working_dir ?? leaderCwd,
+      worktreePath: workerInfo.worktree_path,
       autoMerge: Boolean(config.autoMerge),
       ...(prepared.role ? { role: prepared.role } : {}),
     });
 
     if (workerLaunch.paneId) {
       workerPaneIds.push(workerLaunch.paneId);
-      const workerInfo = workersInfo[workerIndex];
-      if (workerInfo) {
+      {
         workerInfo.pane_id = workerLaunch.paneId;
         workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
         workerInfo.worker_cli = prepared.agentType;

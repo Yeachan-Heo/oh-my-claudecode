@@ -361,6 +361,7 @@ var init_state_paths = __esm({
       overlay: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`,
       shutdownAck: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/shutdown-ack.json`,
       workerLaunchAttemptRoot: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}`,
+      workerLaunchCurrent: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/current.json`,
       workerLaunchExpected: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/expected.json`,
       workerLaunchAck: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/ack.json`,
       workerLaunchDecision: (teamName, workerName, attemptId) => `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
@@ -1432,7 +1433,12 @@ async function claimTask(taskId, workerName, expectedVersion, deps) {
       ...v,
       status: "in_progress",
       owner: workerName,
-      claim: { owner: workerName, token: claimToken, leased_until: new Date(Date.now() + 15 * 60 * 1e3).toISOString() },
+      claim: {
+        owner: workerName,
+        token: claimToken,
+        leased_until: new Date(Date.now() + 15 * 60 * 1e3).toISOString(),
+        ...deps.launchAttemptId ? { launch_attempt_id: deps.launchAttemptId } : {}
+      },
       version: v.version + 1
     };
     await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
@@ -2204,7 +2210,8 @@ async function teamClaimTask(teamName, taskId, workerName, expectedVersion, cwd)
     normalizeTask,
     isTerminalTaskStatus: isTerminalTeamTaskStatus,
     taskFilePath: (tn, tid, c) => canonicalTaskFilePath(tn, tid, c),
-    writeAtomic: writeAtomic3
+    writeAtomic: writeAtomic3,
+    launchAttemptId: process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID
   });
 }
 async function teamTransitionTaskStatus(teamName, taskId, from, to, claimToken, cwd, terminalData) {
@@ -3380,11 +3387,82 @@ var init_tmux_clipboard = __esm({
   }
 });
 
+// src/lib/atomic-write.ts
+import * as fs from "fs/promises";
+import * as fsSync from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
+function ensureDirSync(dir) {
+  if (fsSync.existsSync(dir)) {
+    return;
+  }
+  try {
+    fsSync.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      return;
+    }
+    throw err;
+  }
+}
+async function atomicWriteJson2(filePath, data) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
+  let success = false;
+  try {
+    ensureDirSync(dir);
+    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
+    const fd = await fs.open(tempPath, "wx", 384);
+    try {
+      let offset = 0;
+      while (offset < jsonContent.length) {
+        const { bytesWritten } = await fd.write(
+          jsonContent,
+          offset,
+          jsonContent.length - offset,
+          offset
+        );
+        if (bytesWritten === 0) {
+          throw new Error("Failed to write complete JSON payload");
+        }
+        offset += bytesWritten;
+      }
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    await fs.rename(tempPath, filePath);
+    success = true;
+    try {
+      const dirFd = await fs.open(dir, "r");
+      try {
+        await dirFd.sync();
+      } finally {
+        await dirFd.close();
+      }
+    } catch {
+    }
+  } finally {
+    if (!success) {
+      await fs.unlink(tempPath).catch(() => {
+      });
+    }
+  }
+}
+var ATOMIC_BATCH_MAX_CONTENT_BYTES;
+var init_atomic_write = __esm({
+  "src/lib/atomic-write.ts"() {
+    "use strict";
+    ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
+  }
+});
+
 // src/team/worker-launch-ack.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
-import { existsSync as existsSync9 } from "node:fs";
-import { link as link2, mkdir as mkdir5, open as open2, readFile as readFile6, unlink as unlink2 } from "node:fs/promises";
-import { dirname as dirname9 } from "node:path";
+import { randomUUID as randomUUID7 } from "node:crypto";
+import { existsSync as existsSync10 } from "node:fs";
+import { link as link2, mkdir as mkdir5, open as open3, readFile as readFile7, unlink as unlink3 } from "node:fs/promises";
+import { dirname as dirname10 } from "node:path";
 function sleep(ms) {
   return new Promise((resolve7) => setTimeout(resolve7, ms));
 }
@@ -3407,6 +3485,12 @@ function isValidIdentity(value) {
   const record = value;
   return record.schema_version === WORKER_LAUNCH_SCHEMA_VERSION && isUuid(record.attempt_id) && isUuid(record.nonce) && isExactText(record.team_name) && isExactText(record.worker_name) && isExactText(record.pane_id) && isProvider(record.provider) && typeof record.created_at === "string" && Number.isFinite(Date.parse(record.created_at));
 }
+function isValidLaunchContext(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value;
+  if (record.kind === "initial") return true;
+  return record.kind === "recovery" && isExactText(record.recovery_id) && Number.isSafeInteger(record.replacement_generation) && Number(record.replacement_generation) >= 1 && isExactText(record.pane_attempt_id);
+}
 function identityOf(attempt) {
   return {
     schema_version: attempt.schema_version,
@@ -3421,16 +3505,16 @@ function identityOf(attempt) {
 }
 async function readJson(path4) {
   try {
-    return { kind: "value", value: JSON.parse(await readFile6(path4, "utf8")) };
+    return { kind: "value", value: JSON.parse(await readFile7(path4, "utf8")) };
   } catch (error) {
     if (error.code === "ENOENT") return { kind: "absent" };
     return { kind: "malformed" };
   }
 }
 async function writeExclusiveAtomic(path4, value) {
-  await mkdir5(dirname9(path4), { recursive: true });
-  const candidate = `${path4}.candidate.${process.pid}.${randomUUID6()}`;
-  const handle = await open2(candidate, "wx", 384);
+  await mkdir5(dirname10(path4), { recursive: true });
+  const candidate = `${path4}.candidate.${process.pid}.${randomUUID7()}`;
+  const handle = await open3(candidate, "wx", 384);
   try {
     await handle.writeFile(JSON.stringify(value), "utf8");
     await handle.sync();
@@ -3440,7 +3524,7 @@ async function writeExclusiveAtomic(path4, value) {
   try {
     await link2(candidate, path4);
   } finally {
-    await unlink2(candidate).catch(() => void 0);
+    await unlink3(candidate).catch(() => void 0);
   }
 }
 function resolvePositiveInteger(value, fallback) {
@@ -3448,11 +3532,11 @@ function resolvePositiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 async function prepareWorkerLaunchAttempt(input) {
-  const attemptId = randomUUID6();
+  const attemptId = randomUUID7();
   const identity = {
     schema_version: WORKER_LAUNCH_SCHEMA_VERSION,
     attempt_id: attemptId,
-    nonce: randomUUID6(),
+    nonce: randomUUID7(),
     team_name: input.teamName,
     worker_name: input.workerName,
     pane_id: input.paneId,
@@ -3464,12 +3548,26 @@ async function prepareWorkerLaunchAttempt(input) {
     expectedPath: absPath(input.cwd, TeamPaths.workerLaunchExpected(input.teamName, input.workerName, attemptId)),
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, attemptId)),
-    runtimeCliPath: input.runtimeCliPath
+    runtimeCliPath: input.runtimeCliPath,
+    ...input.context ? { context: input.context } : {}
   };
-  if (existsSync9(attempt.expectedPath) || existsSync9(attempt.ackPath) || existsSync9(attempt.decisionPath)) {
+  if (existsSync10(attempt.expectedPath) || existsSync10(attempt.ackPath) || existsSync10(attempt.decisionPath)) {
     throw new Error("worker_launch_attempt_path_conflict");
   }
   await writeExclusiveAtomic(attempt.expectedPath, identity);
+  try {
+    await atomicWriteJson2(
+      absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName)),
+      {
+        ...identity,
+        runtime_cli_path: input.runtimeCliPath,
+        ...input.context ? { context: input.context } : {}
+      }
+    );
+  } catch (error) {
+    await unlink3(attempt.expectedPath).catch(() => void 0);
+    throw error;
+  }
   return attempt;
 }
 async function loadWorkerLaunchAttempt(input) {
@@ -3484,6 +3582,27 @@ async function loadWorkerLaunchAttempt(input) {
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, input.attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, input.attemptId)),
     runtimeCliPath: input.runtimeCliPath
+  };
+}
+async function loadCurrentWorkerLaunchAttempt(input) {
+  const currentPath = absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName));
+  const current = await readJson(currentPath);
+  if (current.kind !== "value" || !isValidIdentity(current.value)) return null;
+  const record = current.value;
+  if (record.team_name !== input.teamName || record.worker_name !== input.workerName || record.provider !== input.provider || !isExactText(record.runtime_cli_path) || record.context !== void 0 && !isValidLaunchContext(record.context)) return null;
+  const attempt = await loadWorkerLaunchAttempt({
+    cwd: input.cwd,
+    teamName: input.teamName,
+    workerName: input.workerName,
+    paneId: record.pane_id,
+    provider: input.provider,
+    attemptId: record.attempt_id,
+    runtimeCliPath: record.runtime_cli_path
+  });
+  if (!attempt || !await isWorkerLaunchAttemptAccepted(attempt)) return null;
+  return {
+    ...attempt,
+    ...record.context ? { context: record.context } : {}
   };
 }
 function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd) {
@@ -3526,11 +3645,16 @@ function acknowledgementResult(value, attempt) {
   if (record.kind !== "worker_launch_ack" || typeof record.written_at !== "string" || !Number.isFinite(Date.parse(record.written_at))) return { ok: false, reason: "ack_malformed" };
   return identityMatches(record, attempt) ? null : { ok: false, reason: "ack_mismatch" };
 }
-async function acceptObservedAcknowledgement(attempt, read) {
+async function acceptObservedAcknowledgement(attempt, read, beforeAccept) {
   if (read.kind === "absent") return null;
   if (read.kind === "malformed") return { ok: false, reason: "ack_malformed" };
   const invalid = acknowledgementResult(read.value, attempt);
   if (invalid) return invalid;
+  try {
+    await beforeAccept?.(attempt);
+  } catch {
+    return { ok: false, reason: "acceptance_persist_failed" };
+  }
   return await publishDecision(attempt, "accepted", "ack_valid") ? { ok: true } : { ok: false, reason: "decision_conflict" };
 }
 async function awaitWorkerLaunchAcknowledgement(attempt, options = {}) {
@@ -3542,13 +3666,13 @@ async function awaitWorkerLaunchAcknowledgement(attempt, options = {}) {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath));
+    const result = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath), options.beforeAccept);
     if (result) {
       return result.ok ? result : rejectWorkerLaunchAttempt(attempt, result.reason);
     }
     await sleep(pollIntervalMs);
   }
-  const finalResult = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath));
+  const finalResult = await acceptObservedAcknowledgement(attempt, await readJson(attempt.ackPath), options.beforeAccept);
   if (finalResult) {
     return finalResult.ok ? finalResult : rejectWorkerLaunchAttempt(attempt, finalResult.reason);
   }
@@ -3563,6 +3687,7 @@ var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
     init_state_paths();
+    init_atomic_write();
     WORKER_LAUNCH_SCHEMA_VERSION = 1;
     DEFAULT_ACK_TIMEOUT_MS = 8e3;
     DEFAULT_POLL_INTERVAL_MS = 25;
@@ -3619,12 +3744,12 @@ __export(tmux_session_exports, {
   waitForPaneReady: () => waitForPaneReady,
   waitForStartupPaneReady: () => waitForStartupPaneReady
 });
-import { existsSync as existsSync10 } from "fs";
+import { existsSync as existsSync11 } from "fs";
 import { createHash as createHash6 } from "crypto";
 import { execFile as execFile2 } from "child_process";
 import { promisify as promisify2 } from "util";
-import { join as join9, basename as basename5, isAbsolute as isAbsolute4, win32 } from "path";
-import fs from "fs/promises";
+import { join as join10, basename as basename6, isAbsolute as isAbsolute4, win32 } from "path";
+import fs2 from "fs/promises";
 function detectTeamMultiplexerContext(env = process.env) {
   if (env.TMUX) return "tmux";
   if (env.CMUX_SURFACE_ID) return "cmux";
@@ -3896,7 +4021,7 @@ function getDefaultShell() {
     return process.env.COMSPEC || "cmd.exe";
   }
   const shell = process.env.SHELL || "/bin/bash";
-  const name = basename5(shell.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "");
+  const name = basename6(shell.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "");
   if (!SUPPORTED_POSIX_SHELLS.has(name)) {
     return "/bin/sh";
   }
@@ -3906,7 +4031,7 @@ function pathEntries(envPath) {
   return (envPath ?? "").split(process.platform === "win32" ? ";" : ":").map((entry) => entry.trim()).filter(Boolean);
 }
 function pathCandidateNames(candidatePath) {
-  const base = basename5(candidatePath.replace(/\\/g, "/"));
+  const base = basename6(candidatePath.replace(/\\/g, "/"));
   const bare = base.replace(/\.(exe|cmd|bat)$/i, "");
   if (process.platform === "win32") {
     return Array.from(/* @__PURE__ */ new Set([`${bare}.exe`, `${bare}.cmd`, `${bare}.bat`, bare]));
@@ -3916,15 +4041,15 @@ function pathCandidateNames(candidatePath) {
 function resolveShellFromPath(candidatePath) {
   for (const dir of pathEntries(process.env.PATH)) {
     for (const name of pathCandidateNames(candidatePath)) {
-      const full = join9(dir, name);
-      if (existsSync10(full)) return full;
+      const full = join10(dir, name);
+      if (existsSync11(full)) return full;
     }
   }
   return null;
 }
 function resolveShellFromCandidates(paths, rcFile) {
   for (const p of paths) {
-    if (existsSync10(p)) return { shell: p, rcFile };
+    if (existsSync11(p)) return { shell: p, rcFile };
     const resolvedFromPath = resolveShellFromPath(p);
     if (resolvedFromPath) return { shell: resolvedFromPath, rcFile };
   }
@@ -3932,9 +4057,9 @@ function resolveShellFromCandidates(paths, rcFile) {
 }
 function resolveSupportedShellAffinity(shellPath) {
   if (!shellPath) return null;
-  const name = basename5(shellPath.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "");
+  const name = basename6(shellPath.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "");
   if (name !== "zsh" && name !== "bash") return null;
-  if (!existsSync10(shellPath)) return null;
+  if (!existsSync11(shellPath)) return null;
   const home = process.env.HOME ?? "";
   const rcFile = home ? `${home}/.${name}rc` : null;
   return { shell: shellPath, rcFile };
@@ -3967,7 +4092,7 @@ function logWorkerSpawnDiagnostic(message) {
 `);
 }
 function paneCurrentCommandLooksReady(command) {
-  const normalized = basename5(command.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "").toLowerCase();
+  const normalized = basename6(command.replace(/\\/g, "/")).replace(/\.(exe|cmd|bat)$/i, "").toLowerCase();
   return SUPPORTED_POSIX_SHELLS.has(normalized) || ["cmd", "powershell", "pwsh", "nu", "elvish"].includes(normalized);
 }
 async function getPaneCurrentCommandStatus(paneId) {
@@ -4072,7 +4197,7 @@ function escapeForCmdSet(value) {
   return value.replace(/(["%])/g, "$1$1");
 }
 function shellNameFromPath(shellPath) {
-  const shellName = basename5(shellPath.replace(/\\/g, "/"));
+  const shellName = basename6(shellPath.replace(/\\/g, "/"));
   return shellName.replace(/\.(exe|cmd|bat)$/i, "");
 }
 function shellEscape(value) {
@@ -4501,7 +4626,9 @@ async function spawnWorkerInPane(sessionName2, paneId, config) {
   const fingerprint = commandFingerprint(startCmd);
   const requireAcknowledgement = async () => {
     if (!config.launchAttempt) return;
-    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
+    const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt, {
+      beforeAccept: config.beforeLaunchAccept
+    });
     if (!accepted.ok) {
       throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
     }
@@ -4571,10 +4698,18 @@ async function spawnOwnedWorkerInPane(sessionName2, ownership, config) {
     workerName: config.workerName,
     paneId: ownership.paneId,
     provider: config.provider,
-    runtimeCliPath: config.launchBootstrapPath
+    runtimeCliPath: config.launchBootstrapPath,
+    ...config.launchContext ? { context: config.launchContext } : {}
   });
   try {
-    await spawnWorkerInPane(sessionName2, ownership.paneId, { ...config, launchAttempt: attempt });
+    await spawnWorkerInPane(sessionName2, ownership.paneId, {
+      ...config,
+      envVars: {
+        ...config.envVars,
+        OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id
+      },
+      launchAttempt: attempt
+    });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
     await revokeWorkerLaunchAttempt(attempt, "launch_failed").catch(() => void 0);
@@ -4962,9 +5097,9 @@ async function isWorkerAlive(paneId) {
 async function killWorkerPanes(opts) {
   const { paneIds, leaderPaneId, teamName, cwd, graceMs = 1e4 } = opts;
   if (!paneIds.length) return;
-  const shutdownPath = join9(getOmcRoot(cwd), "state", "team", teamName, "shutdown.json");
+  const shutdownPath = join10(getOmcRoot(cwd), "state", "team", teamName, "shutdown.json");
   try {
-    await fs.writeFile(shutdownPath, JSON.stringify({ requestedAt: Date.now() }));
+    await fs2.writeFile(shutdownPath, JSON.stringify({ requestedAt: Date.now() }));
     const aliveChecks = await Promise.all(paneIds.map((id) => isWorkerAlive(id)));
     if (aliveChecks.some((alive) => alive)) {
       await sleep2(graceMs);
@@ -5099,7 +5234,7 @@ var init_swallowed_error = __esm({
 
 // src/team/mcp-comm.ts
 import { realpathSync as realpathSync3 } from "node:fs";
-import { basename as basename6, dirname as dirname10, join as join10 } from "node:path";
+import { basename as basename7, dirname as dirname11, join as join11 } from "node:path";
 function isConfirmedNotification(outcome) {
   if (!outcome.ok) return false;
   if (outcome.transport !== "hook") return true;
@@ -5125,7 +5260,7 @@ function canonicalNotificationLockIdentity(lockPath) {
     return realpathSync3(lockPath);
   } catch {
     try {
-      return join10(realpathSync3(dirname10(lockPath)), basename6(lockPath));
+      return join11(realpathSync3(dirname11(lockPath)), basename7(lockPath));
     } catch {
       return lockPath;
     }
@@ -5591,27 +5726,27 @@ var init_mcp_comm = __esm({
 
 // src/agents/utils.ts
 import { readFileSync as readFileSync4 } from "fs";
-import { join as join11, dirname as dirname11, basename as basename7, resolve as resolve3, relative as relative3, isAbsolute as isAbsolute5 } from "path";
+import { join as join12, dirname as dirname12, basename as basename8, resolve as resolve3, relative as relative3, isAbsolute as isAbsolute5 } from "path";
 import { fileURLToPath } from "url";
 function getPackageDir() {
   if (typeof __dirname !== "undefined" && __dirname) {
-    const currentDirName = basename7(__dirname);
-    const parentDirName = basename7(dirname11(__dirname));
+    const currentDirName = basename8(__dirname);
+    const parentDirName = basename8(dirname12(__dirname));
     if (currentDirName === "bridge") {
-      return join11(__dirname, "..");
+      return join12(__dirname, "..");
     }
     if (currentDirName === "agents" && (parentDirName === "src" || parentDirName === "dist")) {
-      return join11(__dirname, "..", "..");
+      return join12(__dirname, "..", "..");
     }
   }
   try {
     const __filename = fileURLToPath(import.meta.url);
-    const __dirname2 = dirname11(__filename);
-    const currentDirName = basename7(__dirname2);
+    const __dirname2 = dirname12(__filename);
+    const currentDirName = basename8(__dirname2);
     if (currentDirName === "bridge") {
-      return join11(__dirname2, "..");
+      return join12(__dirname2, "..");
     }
-    return join11(__dirname2, "..", "..");
+    return join12(__dirname2, "..", "..");
   } catch {
   }
   return process.cwd();
@@ -5632,8 +5767,8 @@ function loadAgentPrompt(agentName) {
   } catch {
   }
   try {
-    const agentsDir = join11(getPackageDir(), "agents");
-    const agentPath = join11(agentsDir, `${agentName}.md`);
+    const agentsDir = join12(getPackageDir(), "agents");
+    const agentPath = join12(agentsDir, `${agentName}.md`);
     const resolvedPath = resolve3(agentPath);
     const resolvedAgentsDir = resolve3(agentsDir);
     const rel = relative3(resolvedAgentsDir, resolvedPath);
@@ -5673,27 +5808,27 @@ var init_skininthegamebros_guidance = __esm({
 
 // src/agents/prompt-helpers.ts
 import { readdirSync as readdirSync3 } from "fs";
-import { join as join12, dirname as dirname12, basename as basename8 } from "path";
+import { join as join13, dirname as dirname13, basename as basename9 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function getPackageDir2() {
   if (typeof __dirname !== "undefined" && __dirname) {
-    const currentDirName = basename8(__dirname);
-    const parentDirName = basename8(dirname12(__dirname));
+    const currentDirName = basename9(__dirname);
+    const parentDirName = basename9(dirname13(__dirname));
     if (currentDirName === "bridge") {
-      return join12(__dirname, "..");
+      return join13(__dirname, "..");
     }
     if (currentDirName === "agents" && (parentDirName === "src" || parentDirName === "dist")) {
-      return join12(__dirname, "..", "..");
+      return join13(__dirname, "..", "..");
     }
   }
   try {
     const __filename = fileURLToPath2(import.meta.url);
-    const __dirname2 = dirname12(__filename);
-    const currentDirName = basename8(__dirname2);
+    const __dirname2 = dirname13(__filename);
+    const currentDirName = basename9(__dirname2);
     if (currentDirName === "bridge") {
-      return join12(__dirname2, "..");
+      return join13(__dirname2, "..");
     }
-    return join12(__dirname2, "..", "..");
+    return join13(__dirname2, "..", "..");
   } catch {
   }
   return process.cwd();
@@ -5708,9 +5843,9 @@ function getValidAgentRoles() {
   } catch {
   }
   try {
-    const agentsDir = join12(getPackageDir2(), "agents");
+    const agentsDir = join13(getPackageDir2(), "agents");
     const files = readdirSync3(agentsDir);
-    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => basename8(f, ".md")).sort();
+    _cachedRoles = files.filter((f) => f.endsWith(".md")).map((f) => basename9(f, ".md")).sort();
   } catch (err) {
     console.error("[prompt-injection] CRITICAL: Could not scan agents/ directory for role discovery:", err);
     _cachedRoles = [];
@@ -5780,20 +5915,20 @@ var init_omc_cli_rendering = __esm({
 });
 
 // src/utils/paths.ts
-import { join as join13 } from "path";
-import { existsSync as existsSync11, readFileSync as readFileSync5, readdirSync as readdirSync4, statSync, unlinkSync as unlinkSync4, rmSync, symlinkSync } from "fs";
+import { join as join14 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync5, readdirSync as readdirSync4, statSync, unlinkSync as unlinkSync5, rmSync, symlinkSync } from "fs";
 import { homedir as homedir3 } from "os";
 function getConfigDir() {
   if (process.platform === "win32") {
-    return process.env.APPDATA || join13(homedir3(), "AppData", "Roaming");
+    return process.env.APPDATA || join14(homedir3(), "AppData", "Roaming");
   }
-  return process.env.XDG_CONFIG_HOME || join13(homedir3(), ".config");
+  return process.env.XDG_CONFIG_HOME || join14(homedir3(), ".config");
 }
 function getStateDir() {
   if (process.platform === "win32") {
-    return process.env.LOCALAPPDATA || join13(homedir3(), "AppData", "Local");
+    return process.env.LOCALAPPDATA || join14(homedir3(), "AppData", "Local");
   }
-  return process.env.XDG_STATE_HOME || join13(homedir3(), ".local", "state");
+  return process.env.XDG_STATE_HOME || join14(homedir3(), ".local", "state");
 }
 function prefersXdgOmcDirs() {
   return process.platform !== "win32" && process.platform !== "darwin";
@@ -5805,20 +5940,20 @@ function getUserHomeDir() {
   return process.env.HOME || homedir3();
 }
 function getLegacyOmcDir() {
-  return join13(getUserHomeDir(), ".omc");
+  return join14(getUserHomeDir(), ".omc");
 }
 function getGlobalOmcStateRoot() {
   const explicitRoot = process.env.OMC_HOME?.trim();
   if (explicitRoot) {
-    return join13(explicitRoot, "state");
+    return join14(explicitRoot, "state");
   }
   if (prefersXdgOmcDirs()) {
-    return join13(getStateDir(), "omc");
+    return join14(getStateDir(), "omc");
   }
-  return join13(getLegacyOmcDir(), "state");
+  return join14(getLegacyOmcDir(), "state");
 }
 function getGlobalOmcStatePath(...segments) {
-  return join13(getGlobalOmcStateRoot(), ...segments);
+  return join14(getGlobalOmcStateRoot(), ...segments);
 }
 var STALE_THRESHOLD_MS;
 var init_paths = __esm({
@@ -6283,8 +6418,8 @@ var init_delegation_routing = __esm({
 });
 
 // src/config/loader.ts
-import { readFileSync as readFileSync6, existsSync as existsSync12 } from "fs";
-import { join as join14, dirname as dirname13 } from "path";
+import { readFileSync as readFileSync6, existsSync as existsSync13 } from "fs";
+import { join as join15, dirname as dirname14 } from "path";
 function buildDefaultConfig() {
   const defaultTierModels = getDefaultTierModels();
   return {
@@ -6450,12 +6585,12 @@ function buildDefaultConfig() {
 function getConfigPaths() {
   const userConfigDir = getConfigDir();
   return {
-    user: join14(userConfigDir, "claude-omc", "config.jsonc"),
-    project: join14(process.cwd(), ".claude", "omc.jsonc")
+    user: join15(userConfigDir, "claude-omc", "config.jsonc"),
+    project: join15(process.cwd(), ".claude", "omc.jsonc")
   };
 }
 function loadJsoncFile(path4) {
-  if (!existsSync12(path4)) {
+  if (!existsSync13(path4)) {
     return null;
   }
   try {
@@ -7558,15 +7693,15 @@ var init_delegation_enforcer = __esm({
 });
 
 // src/lib/security-config.ts
-import { existsSync as existsSync13, readFileSync as readFileSync7 } from "fs";
-import { join as join15 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync7 } from "fs";
+import { join as join16 } from "path";
 function loadSecurityFromConfigFiles() {
   const paths = [
-    join15(process.cwd(), ".claude", "omc.jsonc"),
-    join15(getConfigDir(), "claude-omc", "config.jsonc")
+    join16(process.cwd(), ".claude", "omc.jsonc"),
+    join16(getConfigDir(), "claude-omc", "config.jsonc")
   ];
   for (const configPath of paths) {
-    if (!existsSync13(configPath)) continue;
+    if (!existsSync14(configPath)) continue;
     try {
       const content = readFileSync7(configPath, "utf-8");
       const parsed = parseJsonc(content);
@@ -7996,9 +8131,9 @@ var init_model_contract = __esm({
 
 // src/team/worker-bootstrap.ts
 import { mkdir as mkdir6, writeFile as writeFile3, appendFile as appendFile2 } from "fs/promises";
-import { join as join16, dirname as dirname14 } from "path";
+import { join as join17, dirname as dirname15 } from "path";
 function buildInstructionPath(...parts) {
-  return join16(...parts).replaceAll("\\", "/");
+  return join17(...parts).replaceAll("\\", "/");
 }
 function buildTeamStateInstructionPath(teamName, instructionStateRoot, ...teamRelativeParts) {
   const baseParts = instructionStateRoot === DEFAULT_INSTRUCTION_STATE_ROOT ? [instructionStateRoot, "team", teamName] : [instructionStateRoot];
@@ -8145,6 +8280,7 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
 - **Worker**: ${workerName}
 - **Agent Type**: ${agentType}
 - **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName}
+- **Launch Attempt**: read the exact value from \0OMC_WORKER_LAUNCH_ATTEMPT_ID\0 and preserve it in status updates and task claims.
 
 ## Your Tasks
 ${taskList}
@@ -8173,9 +8309,10 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
 - **Inbox**: Read ${inboxPath} for new instructions
 - **Status**: Write to ${statusPath}:
   \`\`\`json
-  {"state": "idle", "updated_at": "<ISO timestamp>"}
+  {"state": "idle", "launch_attempt_id": "<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>", "updated_at": "<ISO timestamp>"}
   \`\`\`
   States: "idle" | "working" | "blocked" | "done" | "failed"
+  Every startup status MUST include the exact current \0launch_attempt_id\0; evidence without it belongs to another attempt and is ignored.
 - **Heartbeat**: Update ${heartbeatPath} every few minutes:
   \`\`\`json
   {"pid":<pid>,"last_turn_at":"<ISO timestamp>","turn_count":<n>,"alive":true}
@@ -8220,8 +8357,8 @@ ${bootstrapInstructions}
 ` : ""}`;
 }
 async function composeInitialInbox(teamName, workerName, content, cwd, cliOutputContract) {
-  const inboxPath = join16(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
-  await mkdir6(dirname14(inboxPath), { recursive: true });
+  const inboxPath = join17(cwd, `.omc/state/team/${teamName}/workers/${workerName}/inbox.md`);
+  await mkdir6(dirname15(inboxPath), { recursive: true });
   const finalContent = cliOutputContract && !content.includes(cliOutputContract) ? `${content}
 ${cliOutputContract}` : content;
   await writeFile3(inboxPath, finalContent, "utf-8");
@@ -8229,27 +8366,27 @@ ${cliOutputContract}` : content;
 async function appendToInbox(teamName, workerName, message, cwd) {
   const safeTeam = sanitizeName(teamName);
   const safeWorker = sanitizeName(workerName);
-  const inboxPath = join16(cwd, `.omc/state/team/${safeTeam}/workers/${safeWorker}/inbox.md`);
+  const inboxPath = join17(cwd, `.omc/state/team/${safeTeam}/workers/${safeWorker}/inbox.md`);
   validateResolvedPath(inboxPath, cwd);
-  await mkdir6(dirname14(inboxPath), { recursive: true });
+  await mkdir6(dirname15(inboxPath), { recursive: true });
   await appendFile2(inboxPath, `
 
 ---
 ${message}`, "utf-8");
 }
 async function ensureWorkerStateDir(teamName, workerName, cwd) {
-  const workerDir = join16(cwd, `.omc/state/team/${teamName}/workers/${workerName}`);
+  const workerDir = join17(cwd, `.omc/state/team/${teamName}/workers/${workerName}`);
   await mkdir6(workerDir, { recursive: true });
-  const mailboxDir = join16(cwd, `.omc/state/team/${teamName}/mailbox`);
+  const mailboxDir = join17(cwd, `.omc/state/team/${teamName}/mailbox`);
   await mkdir6(mailboxDir, { recursive: true });
-  const tasksDir = join16(cwd, `.omc/state/team/${teamName}/tasks`);
+  const tasksDir = join17(cwd, `.omc/state/team/${teamName}/tasks`);
   await mkdir6(tasksDir, { recursive: true });
 }
 async function writeWorkerOverlay(params) {
   const { teamName, workerName, cwd } = params;
   const overlay = generateWorkerOverlay(params);
-  const overlayPath = join16(cwd, `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`);
-  await mkdir6(dirname14(overlayPath), { recursive: true });
+  const overlayPath = join17(cwd, `.omc/state/team/${teamName}/workers/${workerName}/AGENTS.md`);
+  await mkdir6(dirname15(overlayPath), { recursive: true });
   await writeFile3(overlayPath, overlay, "utf-8");
   return overlayPath;
 }
@@ -8267,9 +8404,9 @@ var init_worker_bootstrap = __esm({
 });
 
 // src/lib/worktree-cleanup-safety.ts
-import { existsSync as existsSync14, lstatSync, realpathSync as realpathSync4 } from "node:fs";
+import { existsSync as existsSync15, lstatSync, realpathSync as realpathSync4 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { isAbsolute as isAbsolute7, join as join17, parse as parse2, relative as relative4, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute7, join as join18, parse as parse2, relative as relative4, resolve as resolve4 } from "node:path";
 function realpathOrResolve(path4) {
   try {
     return realpathSync4(path4);
@@ -8316,7 +8453,7 @@ function validateWorktreeRemovalTarget(options) {
     throw new Error(`worktree_path_suspicious:${rawCandidate}`);
   }
   const lexicalPath = resolve4(rawCandidate);
-  if (!existsSync14(lexicalPath)) {
+  if (!existsSync15(lexicalPath)) {
     if (requireExisting) {
       throw new Error(`worktree_path_missing:${lexicalPath}`);
     }
@@ -8341,8 +8478,8 @@ function validateWorktreeRemovalTarget(options) {
       throw new Error(`worktree_path_is_main_repo:${resolvedPath}`);
     }
   }
-  if (existsSync14(join17(resolvedPath, ".git"))) {
-    const gitStat = lstatSync(join17(resolvedPath, ".git"));
+  if (existsSync15(join18(resolvedPath, ".git"))) {
+    const gitStat = lstatSync(join18(resolvedPath, ".git"));
     if (gitStat.isDirectory()) {
       throw new Error(`worktree_path_is_main_repo:${resolvedPath}`);
     }
@@ -8352,77 +8489,6 @@ function validateWorktreeRemovalTarget(options) {
 var init_worktree_cleanup_safety = __esm({
   "src/lib/worktree-cleanup-safety.ts"() {
     "use strict";
-  }
-});
-
-// src/lib/atomic-write.ts
-import * as fs2 from "fs/promises";
-import * as fsSync from "fs";
-import * as path from "path";
-import * as crypto from "crypto";
-function ensureDirSync(dir) {
-  if (fsSync.existsSync(dir)) {
-    return;
-  }
-  try {
-    fsSync.mkdirSync(dir, { recursive: true });
-  } catch (err) {
-    if (err.code === "EEXIST") {
-      return;
-    }
-    throw err;
-  }
-}
-async function atomicWriteJson2(filePath, data) {
-  const dir = path.dirname(filePath);
-  const base = path.basename(filePath);
-  const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
-  let success = false;
-  try {
-    ensureDirSync(dir);
-    const jsonContent = Buffer.from(JSON.stringify(data, null, 2), "utf-8");
-    const fd = await fs2.open(tempPath, "wx", 384);
-    try {
-      let offset = 0;
-      while (offset < jsonContent.length) {
-        const { bytesWritten } = await fd.write(
-          jsonContent,
-          offset,
-          jsonContent.length - offset,
-          offset
-        );
-        if (bytesWritten === 0) {
-          throw new Error("Failed to write complete JSON payload");
-        }
-        offset += bytesWritten;
-      }
-      await fd.sync();
-    } finally {
-      await fd.close();
-    }
-    await fs2.rename(tempPath, filePath);
-    success = true;
-    try {
-      const dirFd = await fs2.open(dir, "r");
-      try {
-        await dirFd.sync();
-      } finally {
-        await dirFd.close();
-      }
-    } catch {
-    }
-  } finally {
-    if (!success) {
-      await fs2.unlink(tempPath).catch(() => {
-      });
-    }
-  }
-}
-var ATOMIC_BATCH_MAX_CONTENT_BYTES;
-var init_atomic_write = __esm({
-  "src/lib/atomic-write.ts"() {
-    "use strict";
-    ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
   }
 });
 
@@ -11747,6 +11813,7 @@ async function waitForRecoveryGateRecord(path4, expected, timeoutMs, pollInterva
 var init_worker_activation_gate = __esm({
   "src/team/worker-activation-gate.ts"() {
     "use strict";
+    init_worker_launch_ack();
   }
 });
 
@@ -12180,7 +12247,8 @@ function workerTaskStartupFingerprint(task) {
     status: task.status,
     version: task.version ?? null,
     claimOwner: task.claim?.owner ?? null,
-    claimToken: task.claim?.token ?? null
+    claimToken: task.claim?.token ?? null,
+    claimLaunchAttemptId: task.claim?.launch_attempt_id ?? null
   });
 }
 function workerStatusStartupFingerprint(status) {
@@ -12188,7 +12256,8 @@ function workerStatusStartupFingerprint(status) {
     state: status.state,
     currentTaskId: status.current_task_id ?? null,
     reason: status.reason ?? null,
-    updatedAt: status.updated_at
+    updatedAt: status.updated_at,
+    launchAttemptId: status.launch_attempt_id ?? null
   });
 }
 function hasWorkerStatusProgress(status, taskId) {
@@ -12212,26 +12281,26 @@ async function captureWorkerStartupBaseline(teamName, workerName, taskId, cwd) {
     statusFingerprint: workerStatusStartupFingerprint(status)
   };
 }
-async function hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline) {
+async function hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, launchAttemptId) {
   const [task, status] = await Promise.all([
     readWorkerStartupTask(teamName, taskId, cwd),
     readWorkerStatus(teamName, workerName, cwd)
   ]);
-  const currentClaim = Boolean(task && task.owner === workerName && ["in_progress", "completed", "failed"].includes(task.status) && workerTaskStartupFingerprint(task) !== baseline.taskFingerprint);
-  const currentStatus = status.current_task_id === taskId && ["working", "blocked", "done", "failed"].includes(status.state) && workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
+  const currentClaim = Boolean(task && task.owner === workerName && ["in_progress", "completed", "failed"].includes(task.status) && task.claim?.launch_attempt_id === launchAttemptId && workerTaskStartupFingerprint(task) !== baseline.taskFingerprint);
+  const currentStatus = status.current_task_id === taskId && ["working", "blocked", "done", "failed"].includes(status.state) && status.launch_attempt_id === launchAttemptId && workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
   return currentClaim || currentStatus;
 }
-async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, attempts = 3, delayMs = 250) {
+async function waitForWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, launchAttemptId, attempts = 3, delayMs = 250) {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (await hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline)) return true;
+    if (await hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, launchAttemptId)) return true;
     if (attempt < attempts) await new Promise((resolve7) => setTimeout(resolve7, delayMs));
   }
   return false;
 }
-async function waitForWorkerStatusTransition(teamName, workerName, cwd, baselineFingerprint, attempts = 12, delayMs = 250) {
+async function waitForWorkerStatusTransition(teamName, workerName, cwd, baselineFingerprint, launchAttemptId, attempts = 12, delayMs = 250) {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const status = await readWorkerStatus(teamName, workerName, cwd);
-    if (status.state !== "unknown" && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
+    if (status.state !== "unknown" && status.launch_attempt_id === launchAttemptId && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
     if (attempt < attempts) await new Promise((resolve7) => setTimeout(resolve7, delayMs));
   }
   return false;
@@ -12308,9 +12377,16 @@ async function spawnV2Worker(opts) {
     cwd: opts.workerCwd ?? opts.cwd,
     provider: opts.agentType,
     launchBootstrapPath: resolveRuntimeCliPath(),
-    launchStateCwd: opts.cwd
+    launchStateCwd: opts.cwd,
+    launchContext: { kind: "initial" }
   };
-  const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  let startupContext;
+  try {
+    startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  } catch (error) {
+    await killOwnedWorkerPane(ownership).catch(() => void 0);
+    throw error;
+  }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
   await applyMainVerticalLayout(opts.sessionName);
   const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(
@@ -12319,6 +12395,7 @@ async function spawnV2Worker(opts) {
     opts.taskId,
     opts.cwd,
     startupBaseline,
+    startupContext.attempt.attempt_id,
     attempts
   );
   const dispatchOutcome = await queueInboxInstruction({
@@ -13063,6 +13140,15 @@ async function executeRecoverDeadWorkerV2Owner(input) {
     const replacementGeneration = existingAttempt && worker.recovery_id === recoveryId && typeof worker.replacement_generation === "number" ? worker.replacement_generation : (worker.replacement_generation ?? 0) + 1;
     const attempt = await readOrCreateRecoveryAttempt(input, recoveryId, replacementGeneration);
     const originalPaneId = existingAttempt?.original_pane_id ?? worker.pane_id;
+    const sagaInput = {
+      requestId: input.requestId,
+      recoveryId,
+      teamName: input.teamName,
+      workerName: input.workerName,
+      replacementGeneration: attempt.replacement_generation,
+      adoptionToken: attempt.adoption_token,
+      originalPaneId
+    };
     const ensureFence = async () => {
       requireOwnerFence(input.cwd, input.teamName, owner.fence);
       const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
@@ -13079,7 +13165,35 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         const currentWorker = config.workers.find((candidate) => candidate.name === input.workerName);
         const committedReplacement = existingAttempt?.recovery_id === recoveryId && currentWorker?.recovery_id === recoveryId && currentWorker.replacement_generation === attempt.replacement_generation && Boolean(currentWorker.pane_id && currentWorker.pane_attempt_id);
         if (!committedReplacement) {
-          if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId) return "unknown";
+          if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId) {
+            const currentLaunch = await loadCurrentWorkerLaunchAttempt({
+              cwd: input.cwd,
+              teamName: input.teamName,
+              workerName: input.workerName,
+              provider: launchDescriptor.provider
+            });
+            if (!currentLaunch) return "unknown";
+            const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id);
+            if (currentLaunch.context?.kind === "recovery") {
+              return currentLaunch.context.recovery_id === recoveryId && currentLaunch.context.replacement_generation === attempt.replacement_generation ? "dead" : "unknown";
+            }
+            if (currentLaunch.context?.kind !== "initial" || currentLiveness !== "alive" || !currentWorker) {
+              return currentLiveness;
+            }
+            const reconciled = {
+              ...config,
+              workers: config.workers.map((candidate) => candidate.name === input.workerName ? {
+                ...candidate,
+                pane_id: currentLaunch.pane_id,
+                launch_attempt_id: currentLaunch.attempt_id,
+                worker_cli: currentLaunch.provider,
+                operational_state: "active"
+              } : candidate)
+            };
+            await saveTeamConfig(reconciled, input.cwd, config.state_revision);
+            sagaInput.originalPaneId = currentLaunch.pane_id;
+            return "alive";
+          }
           return getWorkerPaneLiveness(originalPaneId);
         }
         committedReplacementLiveness = await getWorkerPaneLiveness(currentWorker?.pane_id);
@@ -13188,6 +13302,50 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             };
           }
         }
+        const runtimeCliPath = resolveRuntimeCliPath();
+        const currentLaunch = await loadCurrentWorkerLaunchAttempt({
+          cwd: input.cwd,
+          teamName: input.teamName,
+          workerName: sagaInput2.workerName,
+          provider: launchDescriptor.provider
+        });
+        if (currentLaunch) {
+          const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id).catch(() => "unknown");
+          if (currentLiveness !== "dead") {
+            const context = currentLaunch.context;
+            if (context?.kind !== "recovery" || context.recovery_id !== sagaInput2.recoveryId || context.replacement_generation !== sagaInput2.replacementGeneration) {
+              return { ok: false, error: "worker_activation_failed" };
+            }
+            const adopted = adoptWorkerPaneOwnership({
+              provider: currentLaunch.pane_id.startsWith("%") ? "tmux" : "cmux",
+              paneId: currentLaunch.pane_id,
+              leaderPaneId,
+              reservedPaneIds
+            });
+            if (!adopted.ok) return { ok: false, error: "worker_activation_failed" };
+            const resumed = await buildRecoveryPaneContext(
+              input,
+              sagaInput2,
+              currentWorker,
+              launchDescriptor,
+              adopted.ownership,
+              context.pane_attempt_id
+            );
+            resumed.startupContext = {
+              ownership: adopted.ownership,
+              attempt: currentLaunch,
+              provider: launchDescriptor.provider
+            };
+            pendingRecoveryPanes.set(sagaInput2.recoveryId, resumed);
+            const ready = await waitForRecoveryGateRecord(resumed.gate.readyPath, {
+              recovery_id: sagaInput2.recoveryId,
+              worker_name: sagaInput2.workerName,
+              replacement_generation: sagaInput2.replacementGeneration,
+              pane_attempt_id: context.pane_attempt_id
+            }, 5e3);
+            return ready ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false } : { ok: false, error: "startup_ack_timeout" };
+          }
+        }
         const paneAttemptId = randomUUID11();
         const livePaneIds = [];
         for (const candidate of config.workers) {
@@ -13224,7 +13382,6 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         }
         pendingRecoveryPanes.set(sagaInput2.recoveryId, pending);
         try {
-          const runtimeCliPath = resolveRuntimeCliPath();
           pending.startupContext = await spawnOwnedWorkerInPane(config.tmux_session, pending.ownership, {
             teamName: input.teamName,
             workerName: sagaInput2.workerName,
@@ -13234,7 +13391,13 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             cwd: pending.gate.cwd,
             provider: pending.agentType,
             launchBootstrapPath: runtimeCliPath,
-            launchStateCwd: input.cwd
+            launchStateCwd: input.cwd,
+            launchContext: {
+              kind: "recovery",
+              recovery_id: sagaInput2.recoveryId,
+              replacement_generation: sagaInput2.replacementGeneration,
+              pane_attempt_id: paneAttemptId
+            }
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput2.recoveryId,
@@ -13335,6 +13498,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         if (!pending || pending.paneAttemptId !== paneAttemptId || !pending.startupContext) {
           throw new Error("worker_activation_failed");
         }
+        const startupAttemptId = pending.startupContext.attempt.attempt_id;
         const primaryTaskId = continuations[0]?.taskId;
         const startupBaseline = primaryTaskId ? await captureWorkerStartupBaseline(input.teamName, sagaInput2.workerName, primaryTaskId, input.cwd) : null;
         const statusBaseline = startupBaseline?.statusFingerprint ?? workerStatusStartupFingerprint(await readWorkerStatus(input.teamName, sagaInput2.workerName, input.cwd));
@@ -13344,12 +13508,14 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           primaryTaskId,
           input.cwd,
           startupBaseline,
+          startupAttemptId,
           12
         ) : waitForWorkerStatusTransition(
           input.teamName,
           sagaInput2.workerName,
           input.cwd,
-          statusBaseline
+          statusBaseline,
+          startupAttemptId
         );
         const instruction = continuations.length > 0 ? continuations.map((continuation) => renderRecoveryContinuationInstruction({
           teamName: input.teamName,
@@ -13413,15 +13579,6 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         const cleaned = await cleanupRecoveryPaneAttempt(input, recoveryId, pending, "recovery_saga_rollback");
         if (!cleaned) throw new Error("worker_cleanup_incomplete");
       }
-    };
-    const sagaInput = {
-      requestId: input.requestId,
-      recoveryId,
-      teamName: input.teamName,
-      workerName: input.workerName,
-      replacementGeneration: attempt.replacement_generation,
-      adoptionToken: attempt.adoption_token,
-      originalPaneId
     };
     const result = await runRecoverySaga(sagaInput, deps);
     return finalizeRecoveryOwnerResult(input, recoveryId, result);
@@ -13843,6 +14000,8 @@ async function startTeamV2(config) {
       if (!task || workerIndex < 0) continue;
       const prepared = preparedLaunches.get(wName);
       if (!prepared) continue;
+      const workerInfo = workersInfo[workerIndex];
+      if (!workerInfo) continue;
       const workerLaunch = await spawnV2Worker({
         sessionName: sessionName2,
         leaderPaneId,
@@ -13855,15 +14014,14 @@ async function startTeamV2(config) {
         task,
         taskId,
         cwd: leaderCwd,
-        workerCwd: workersInfo[workerIndex]?.working_dir ?? leaderCwd,
-        worktreePath: workersInfo[workerIndex]?.worktree_path,
+        workerCwd: workerInfo.working_dir ?? leaderCwd,
+        worktreePath: workerInfo.worktree_path,
         autoMerge: Boolean(config.autoMerge),
         ...prepared.role ? { role: prepared.role } : {}
       });
       if (workerLaunch.paneId) {
         workerPaneIds.push(workerLaunch.paneId);
-        const workerInfo = workersInfo[workerIndex];
-        if (workerInfo) {
+        {
           workerInfo.pane_id = workerLaunch.paneId;
           workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
           workerInfo.worker_cli = prepared.agentType;
