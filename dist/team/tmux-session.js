@@ -15,7 +15,7 @@ import { validateTeamName } from './team-name.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
 import { configureTmuxClipboardForSession, configureTmuxClipboardForSessionAsync } from '../cli/tmux-clipboard.js';
-import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, isWorkerLaunchAttemptCurrent, prepareWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, isWorkerLaunchAttemptCurrent, prepareWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
 const TMUX_SESSION_PREFIX = 'omc-team';
@@ -1139,20 +1139,17 @@ export async function spawnOwnedWorkerInPane(sessionName, ownership, config) {
         return { ownership, attempt, provider: config.provider };
     }
     catch (error) {
-        const retired = await retireWorkerLaunchAttempt(attempt, 'launch_failed').catch(() => false);
-        const providerStopped = retired
-            && await terminateWorkerLaunchProvider(attempt).catch(() => false);
-        let paneDead = false;
-        try {
-            await killOwnedWorkerPane(ownership);
-            paneDead = await getWorkerLiveness(ownership.paneId) === 'dead';
-        }
-        catch {
-            paneDead = false;
-        }
-        if (!providerStopped || !paneDead) {
+        const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'launch_failed', async () => {
+            try {
+                await killOwnedWorkerPane(ownership);
+                return await getWorkerLiveness(ownership.paneId) === 'dead';
+            }
+            catch {
+                return false;
+            }
+        }).catch(() => false);
+        if (!cleaned)
             throw new Error(`worker_launch_cleanup_unverified:${config.workerName}:${ownership.paneId}`);
-        }
         throw error;
     }
 }

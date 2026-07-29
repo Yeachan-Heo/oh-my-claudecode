@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readSessionEndFrame } from './lib/stdin.mjs';
+import { isMainThread } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -23,4 +24,4 @@ export async function runSessionEndHook() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void runSessionEndHook();
+if (!isMainThread || (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))) void runSessionEndHook();

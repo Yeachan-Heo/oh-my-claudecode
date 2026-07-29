@@ -78,6 +78,7 @@ import {
   proveWorkerPaneOwnership,
   adoptWorkerPaneOwnership,
   killOwnedWorkerPane,
+  verifyTeamTargetOwnership,
   redactBoundedDiagnostic,
   killTeamSession,
   paneHasActiveTask,
@@ -158,6 +159,7 @@ import {
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
   retireWorkerLaunchAttempt,
+  retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
   withWorkerLaunchAttemptFence,
 } from './worker-launch-ack.js';
@@ -525,7 +527,7 @@ export interface ShutdownOptionsV2 {
 export type ShutdownTeamV2Result =
   | { outcome: 'cleaned' }
   | { outcome: 'preserved'; reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worktrees_preserved'; workers: string[] }
-  | { outcome: 'failed'; reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed'; detail: string };
+  | { outcome: 'failed'; reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed' | 'state_cleanup_failed'; detail: string };
 
 interface ShutdownGateCounts {
   total: number;
@@ -3911,7 +3913,7 @@ export async function shutdownTeamV2(
     );
   };
   let ownedShutdownNonce: string | null = null;
-  let config = await withProcessIdentityFileLock(lifecycleLock, async () => {
+  let config: TeamConfig | null = await withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await migrateTeamConfigRevision(sanitized, cwd);
     if (!current) return null;
     if (current.config.active_recovery) throw new Error(`shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`);
@@ -3920,8 +3922,17 @@ export async function shutdownTeamV2(
       throw new Error(`shutdown_blocked:active_scale_up:${current.config.active_scale_up.operation_id}`);
 
     }
-    if (current.config.lifecycle_state === 'stopped' || current.config.lifecycle_state === 'shutting_down') return current.config;
-    await assertShutdownGate(current.config);
+    if (current.config.lifecycle_state === 'shutting_down') {
+      const attempt = current.config.shutdown_attempt;
+      if (!attempt || !Number.isInteger(attempt.pid) || attempt.pid <= 0 || !attempt.process_started_at) {
+        throw new Error('shutdown_fence_unowned');
+      }
+      if (!isProcessIdentityDead({ pid: attempt.pid, process_started_at: attempt.process_started_at })) {
+        throw new Error('shutdown_in_progress');
+      }
+    } else if (current.config.lifecycle_state !== 'stopped') {
+      await assertShutdownGate(current.config);
+    }
     const processStartedAt = currentProcessStartIdentity();
     if (!processStartedAt) throw new Error('process_start_identity_unavailable');
     ownedShutdownNonce = randomUUID();
@@ -3934,9 +3945,10 @@ export async function shutdownTeamV2(
   });
   const revalidateShutdownFence = async (): Promise<TeamConfig> => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
-    if (!current || !['shutting_down', 'stopped'].includes(current.config.lifecycle_state ?? '') || current.config.active_recovery
-      || current.config.active_scale_up) {
-
+    const attempt = current?.config.shutdown_attempt;
+    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
+      || current.config.active_scale_up || !attempt || attempt.nonce !== ownedShutdownNonce
+      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
       throw new Error(current?.config.active_recovery
         ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
     }
@@ -3944,13 +3956,13 @@ export async function shutdownTeamV2(
   });
   const commitStoppedFence = async (): Promise<void> => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
-    if (!current || !['shutting_down', 'stopped'].includes(current.config.lifecycle_state ?? '') || current.config.active_recovery
-      || current.config.active_scale_up) {
-
+    const attempt = current?.config.shutdown_attempt;
+    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
+      || current.config.active_scale_up || !attempt || attempt.nonce !== ownedShutdownNonce
+      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
       throw new Error(current?.config.active_recovery
         ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
     }
-    if (current.config.lifecycle_state === 'stopped') return;
     const stopped = { ...current.config, lifecycle_state: 'stopped' as const, shutdown_attempt: undefined,
       state_revision: current.stateRevision + 1 };
     if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd)) throw new Error('stale_state_revision');
@@ -4003,11 +4015,13 @@ export async function shutdownTeamV2(
     // root AGENTS backups live under the scoped state tree, so use non-mutating
     // inspection and preserve state whenever any worktree recovery evidence exists.
     const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
-    if (cleanupSafety.hasEvidence) {
+    if (cleanupSafety.hasEvidence || existsSync(absPath(cwd, TeamPaths.root(sanitized)))) {
       process.stderr.write('[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n');
       return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
     }
-    await cleanupTeamState(sanitized, cwd);
+    if (!await cleanupTeamState(sanitized, cwd)) {
+      return { outcome: 'failed', reason: 'state_cleanup_failed', detail: 'team state removal failed' };
+    }
     return { outcome: 'cleaned' };
   }
 
@@ -4082,13 +4096,24 @@ export async function shutdownTeamV2(
     .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
   const providerCleanupFailures: string[] = [];
   for (const worker of config.workers) {
-    if (!worker.pane_id) continue;
-    if (!worker.launch_attempt_id) {
+    if (!worker.pane_id || !worker.launch_attempt_id) {
       providerCleanupFailures.push(worker.name);
       continue;
     }
     const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
-    if (!provider) {
+    if (!provider || !config.tmux_session) {
+      providerCleanupFailures.push(worker.name);
+      continue;
+    }
+    const ownership = await adoptWorkerPaneOwnership({
+      provider: worker.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+      providerTarget: config.tmux_session,
+      paneId: worker.pane_id,
+      leaderPaneId: config.leader_pane_id ?? '',
+      reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
+        .map(candidate => candidate.pane_id).filter((paneId): paneId is string => Boolean(paneId)),
+    });
+    if (!ownership.ok) {
       providerCleanupFailures.push(worker.name);
       continue;
     }
@@ -4101,12 +4126,14 @@ export async function shutdownTeamV2(
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath(),
     });
-    if (!attempt
-      || !await isWorkerLaunchAttemptAccepted(attempt)
-      || !await retireWorkerLaunchAttempt(attempt, 'team_shutdown')
-      || !await terminateWorkerLaunchProvider(attempt)) {
-      providerCleanupFailures.push(worker.name);
-    }
+    if (!attempt || !await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'team_shutdown', async () => {
+      try {
+        await killOwnedWorkerPane(ownership.ownership);
+        return true;
+      } catch {
+        return false;
+      }
+    })) providerCleanupFailures.push(worker.name);
   }
   if (providerCleanupFailures.length > 0) {
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
@@ -4115,46 +4142,38 @@ export async function shutdownTeamV2(
   }
 
   try {
-    const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');
+    const {
+      killWorkerPanes: _legacyKillWorkerPanes,
+      killTeamSession: killOwnedTeamSession,
+      resolveSplitPaneWorkerPaneIds: _legacyResolveSplitPaneWorkerPaneIds,
+      getWorkerLiveness: probeWorkerLiveness,
+    } = await import('./tmux-session.js');
     const ownsWindow = config.tmux_window_owned === true;
-    const workerPaneIds = ownsWindow
-      ? recordedWorkerPaneIds
-      : await resolveSplitPaneWorkerPaneIds(
-        config.tmux_session,
-        recordedWorkerPaneIds,
-        config.leader_pane_id ?? undefined,
-      );
+    const workerPaneIds = recordedWorkerPaneIds;
     const splitPaneMode = Boolean(config.tmux_session && !ownsWindow && config.tmux_session.includes(':'));
-    if (splitPaneMode) {
-      await killTeamSession(
-        config.tmux_session!,
-        workerPaneIds,
-        config.leader_pane_id ?? undefined,
-        { sessionMode: 'split-pane' },
-      );
-    } else {
-      await killWorkerPanes({
-        paneIds: workerPaneIds,
-        leaderPaneId: config.leader_pane_id ?? undefined,
-        teamName: sanitized,
-        cwd,
-      });
-      if (config.tmux_session && (ownsWindow || !config.tmux_session.includes(':'))) {
-        const sessionMode = ownsWindow
-          ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
-          : 'detached-session';
-        await killTeamSession(
-          config.tmux_session,
-          workerPaneIds,
-          config.leader_pane_id ?? undefined,
-          { sessionMode },
-        );
+    if (!splitPaneMode && config.tmux_session) {
+      if (!config.leader_pane_id) {
+        await finalizeAutoMerge();
+        return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
       }
+      const leaderOwnership = await verifyTeamTargetOwnership({
+        provider: config.leader_pane_id.startsWith('%') ? 'tmux' : 'cmux',
+        providerTarget: config.tmux_session,
+        recipient: 'leader-fixed', recipientRole: 'leader', paneId: config.leader_pane_id,
+      });
+      if (leaderOwnership.kind !== 'owned') {
+        await finalizeAutoMerge();
+        return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+      }
+      const sessionMode = ownsWindow
+        ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
+        : 'detached-session';
+      await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, { sessionMode });
     }
     const paneById = new Map(config.workers
       .filter((w) => typeof w.pane_id === 'string' && w.pane_id.trim().length > 0)
       .map((w) => [w.pane_id as string, w.name]));
-    const liveness = await Promise.all(workerPaneIds.map(async (paneId) => [paneId, await getWorkerLiveness(paneId)] as const));
+    const liveness = await Promise.all(workerPaneIds.map(async (paneId) => [paneId, await probeWorkerLiveness(paneId)] as const));
     const aliveWorkers = liveness
       .filter(([, state]) => state === 'alive')
       .map(([paneId]) => paneById.get(paneId) ?? paneId);
@@ -4215,7 +4234,9 @@ export async function shutdownTeamV2(
     process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
   }
   if (preservedWorktrees === 0) {
-    await cleanupTeamState(sanitized, cwd);
+    if (!await cleanupTeamState(sanitized, cwd)) {
+      return { outcome: 'failed', reason: 'state_cleanup_failed', detail: 'team state removal failed' };
+    }
   } else {
     process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
   }

@@ -250,8 +250,35 @@ export async function gracefulKill(
   return isProcessAlive(pid) ? 'failed' : 'forced';
 }
 
+async function getProcessStartIdentityWindows(pid: number, deadlineAt?: number): Promise<string | null> {
+  for (const command of [
+    `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`,
+    `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction Stop; if ($p -and $p.CreationDate) { ([DateTime]$p.CreationDate).ToUniversalTime().Ticks }`,
+  ]) {
+    try {
+      const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], {
+        timeout: Math.max(1, Math.min(5000, remainingDeadlineMs(deadlineAt) ?? 5000)), windowsHide: true,
+      });
+      const ticks = stdout.trim().match(/^\d+$/)?.[0];
+      if (ticks) return `ticks:${ticks}`;
+    } catch { /* try the next exact Windows identity source */ }
+    if (isDeadlineExceeded(deadlineAt)) return null;
+  }
+  try {
+    const { stdout } = await execFileAsync('wmic', [
+      'process', 'where', `ProcessId=${pid}`, 'get', 'CreationDate', '/format:csv',
+    ], { timeout: Math.max(1, Math.min(5000, remainingDeadlineMs(deadlineAt) ?? 5000)), windowsHide: true });
+    const match = stdout.match(/(\d{14}\.\d{6}[+-]\d{3})/);
+    return match ? `dmtf:${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Stable PID-reuse identity suitable for a durable worker manifest. */
 export async function getProcessStartIdentity(pid: number, deadlineAt?: number): Promise<string | null> {
+  if (!Number.isInteger(pid) || pid <= 0 || isDeadlineExceeded(deadlineAt)) return null;
+  if (process.platform === 'win32') return getProcessStartIdentityWindows(pid, deadlineAt);
   const startTime = await getProcessStartTime(pid, deadlineAt);
   return startTime === undefined || isDeadlineExceeded(deadlineAt) ? null : String(startTime);
 }

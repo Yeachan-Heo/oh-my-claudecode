@@ -103,6 +103,7 @@ export declare function withWorkerLaunchAttemptFence<T>(attempt: WorkerLaunchAtt
     ok: false;
 }>;
 export declare function retireWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
+export declare function retireAndCleanupCurrentWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string, cleanup: () => Promise<boolean>): Promise<boolean>;
 export declare function terminateWorkerLaunchProvider(attempt: WorkerLaunchAttempt, timeoutMs?: number): Promise<boolean>;
 export declare function awaitWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;

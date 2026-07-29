@@ -5,6 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createWorkerWorktree } from '../git-worktree.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
+import { currentProcessStartIdentity } from '../team-owner-epoch.js';
 
 const tmuxMocks = vi.hoisted(() => ({
   killWorkerPanes: vi.fn(async () => undefined),
@@ -12,6 +13,12 @@ const tmuxMocks = vi.hoisted(() => ({
   resolveSplitPaneWorkerPaneIds: vi.fn(async (_session: string | undefined, paneIds: string[]) => paneIds),
   isWorkerAlive: vi.fn(async () => false),
   getWorkerLiveness: vi.fn(async () => 'dead'),
+  adoptWorkerPaneOwnership: vi.fn(async (input: { provider: string; providerTarget: string; paneId: string }) => ({
+    ok: true as const,
+    ownership: { provider: input.provider, providerTarget: input.providerTarget, paneId: input.paneId },
+  })),
+  killOwnedWorkerPane: vi.fn(async () => undefined),
+  verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' as const })),
 }));
 
 vi.mock('../tmux-session.js', async (importOriginal) => {
@@ -23,6 +30,9 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     resolveSplitPaneWorkerPaneIds: tmuxMocks.resolveSplitPaneWorkerPaneIds,
     isWorkerAlive: tmuxMocks.isWorkerAlive,
     getWorkerLiveness: tmuxMocks.getWorkerLiveness,
+    adoptWorkerPaneOwnership: tmuxMocks.adoptWorkerPaneOwnership,
+    killOwnedWorkerPane: tmuxMocks.killOwnedWorkerPane,
+    verifyTeamTargetOwnership: tmuxMocks.verifyTeamTargetOwnership,
   };
 
 
@@ -36,6 +46,8 @@ async function prepareAcceptedLaunch(cwd: string, teamName: string, workerName: 
   const expected = JSON.parse(readFileSync(attempt.expectedPath, 'utf8'));
   writeFileSync(attempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }));
   await awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 });
+  writeFileSync(`${attempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+    kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true, written_at: new Date().toISOString() }));
   return attempt;
 }
 
@@ -51,6 +63,12 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     tmuxMocks.isWorkerAlive.mockResolvedValue(false);
     tmuxMocks.getWorkerLiveness.mockReset();
     tmuxMocks.getWorkerLiveness.mockResolvedValue('dead');
+    tmuxMocks.adoptWorkerPaneOwnership.mockImplementation(async (input: { provider: string; providerTarget: string; paneId: string }) => ({
+      ok: true as const,
+      ownership: { provider: input.provider, providerTarget: input.providerTarget, paneId: input.paneId },
+    }));
+    tmuxMocks.killOwnedWorkerPane.mockResolvedValue(undefined);
+    tmuxMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'owned' });
     repoDir = mkdtempSync(join(tmpdir(), 'omc-runtime-v2-shutdown-'));
     execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir, stdio: 'pipe' });
@@ -260,7 +278,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       outcome: 'preserved', reason: 'worker_panes_alive', workers: ['worker-live'],
     });
 
-    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%42'], undefined, { sessionMode: 'split-pane' });
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
@@ -309,7 +327,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: ['worker-unknown'],
     });
 
-    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%44'], undefined, { sessionMode: 'split-pane' });
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
@@ -343,7 +361,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       }],
       created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`,
-      leader_pane_id: null,
+      leader_pane_id: '%1',
+      tmux_window_owned: true,
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
@@ -356,7 +375,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       outcome: 'failed', reason: 'tmux_cleanup_failed', detail: 'tmux unavailable',
     });
 
-    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, ['%43'], undefined, { sessionMode: 'split-pane' });
+    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, [], '%1', { sessionMode: 'dedicated-window' });
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
   });
@@ -479,7 +498,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       worker_count: 1, max_workers: 20,
       workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%77' }],
       created_at: now, tmux_session: `${teamName}:0`, lifecycle_state: 'shutting_down', state_revision: 5,
-      shutdown_attempt: { nonce: 'force-owner', pid: process.pid, process_started_at: 'owner-start', state_revision: 5, created_at: now },
+      shutdown_attempt: { nonce: 'force-owner', pid: process.pid, process_started_at: currentProcessStartIdentity(), state_revision: 5, created_at: now },
       next_task_id: 1,
     }));
     writeFileSync(join(workerRoot, 'shutdown-ack.json'), JSON.stringify({
@@ -488,7 +507,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 25 }))
-      .rejects.toThrow('shutdown_rejected_fence_lost:worker-1:still working');
+      .rejects.toThrow('shutdown_in_progress');
 
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
     expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();

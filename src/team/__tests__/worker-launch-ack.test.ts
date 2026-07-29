@@ -15,6 +15,7 @@ import {
   prepareWorkerLaunchAttempt,
   runWorkerLaunchBootstrap,
   retireWorkerLaunchAttempt,
+  retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
   buildProviderSpawnInvocation,
@@ -232,6 +233,40 @@ describe('worker launch acknowledgement', () => {
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
     const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
     expect(decision).toMatchObject({ decision: 'revoked', reason: 'ack_malformed' });
+  });
+
+  it('does not clean a superseded or expected-only current launch attempt', async () => {
+    const accepted = await attempt();
+    await writeFile(accepted.ackPath, JSON.stringify({
+      schema_version: accepted.schema_version, attempt_id: accepted.attempt_id, nonce: accepted.nonce,
+      team_name: accepted.team_name, worker_name: accepted.worker_name, pane_id: accepted.pane_id,
+      provider: accepted.provider, created_at: accepted.created_at, kind: 'worker_launch_ack', written_at: new Date().toISOString(),
+    }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(accepted, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await expect(retireWorkerLaunchAttempt(accepted, 'superseded')).resolves.toBe(true);
+    const successor = await prepareWorkerLaunchAttempt({
+      cwd, teamName: accepted.team_name, workerName: accepted.worker_name, paneId: '%3',
+      provider: accepted.provider, runtimeCliPath: accepted.runtimeCliPath,
+    });
+    const cleanup = vi.fn(async () => true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(accepted, 'stale_cleanup', cleanup)).resolves.toBe(false);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(successor, 'expected_only_cleanup', cleanup)).resolves.toBe(false);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a reused provider PID as cleaned without terminal descendant proof', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(launchAttempt.startedPath, JSON.stringify({ ...expected, kind: 'worker_launch_provider_started',
+      pid: process.pid, process_start_identity: 'stale-reused-identity', written_at: new Date().toISOString() }), 'utf8');
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(false);
+    expect(isProcessAlive(process.pid)).toBe(true);
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true, written_at: new Date().toISOString() }), 'utf8');
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(true);
+    expect(isProcessAlive(process.pid)).toBe(true);
   });
 
   it('rejects replay when the acknowledgement path is already owned', async () => {
@@ -556,7 +591,7 @@ describe('worker launch acknowledgement', () => {
     expect(windowsInvocation).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
       args: ['/d', '/v:off', '/s', '/c'],
-      batchScript: '@echo off\r\n"C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "--home=%%USERPROFILE%%" "--encoded=%%25" "say ""hello"" & continue" "--literal=bang! caret^"\r\n',
+      batchScript: '@echo off\r\nstart "" /wait /b "C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "--home=%%USERPROFILE%%" "--encoded=%%25" "say ""hello"" & continue" "--literal=bang! caret^"\r\n',
     });
     const materialized = await materializeProviderSpawnInvocation(windowsInvocation);
     const wrapperPath = materialized.args[4]!.slice(1, -1);
@@ -576,8 +611,29 @@ describe('worker launch acknowledgement', () => {
       .toMatchObject({ command: 'cmd.exe', args: ['/d', '/v:off', '/s', '/c'], batchScript: expect.stringContaining('codex.exe') });
   });
 
-  it.runIf(process.platform === 'win32')('round-trips native cmd arguments through a real batch shim', async () => {
-    const providerPath = join(cwd, 'provider.cmd');
+  it.runIf(process.platform === 'win32')('distinguishes provider starts created within the same wall-clock second', async () => {
+    const first = spawn(process.execPath, ['-e', 'setTimeout(()=>{},5000)']);
+    const second = spawn(process.execPath, ['-e', 'setTimeout(()=>{},5000)']);
+    await Promise.all([
+      new Promise<void>((resolve, reject) => { first.once('spawn', resolve); first.once('error', reject); }),
+      new Promise<void>((resolve, reject) => { second.once('spawn', resolve); second.once('error', reject); }),
+    ]);
+    try {
+      const [firstIdentity, secondIdentity] = await Promise.all([
+        getProcessStartIdentity(first.pid!), getProcessStartIdentity(second.pid!),
+      ]);
+      expect(firstIdentity).toMatch(/^(dmtf|ticks):/);
+      expect(secondIdentity).toMatch(/^(dmtf|ticks):/);
+      expect(firstIdentity).not.toBe(secondIdentity);
+    } finally {
+      first.kill('SIGKILL');
+      second.kill('SIGKILL');
+    }
+  });
+
+  it.runIf(process.platform === 'win32').each(['cmd', 'bat'])('round-trips native .%s arguments through a real batch shim', async (extension) => {
+    cwd = await mkdtemp(join(tmpdir(), `worker-launch-native-${extension}-`));
+    const providerPath = join(cwd, `provider.${extension}`);
     const outputPath = join(cwd, 'argv.json');
     await writeFile(providerPath, `@echo off\r\n"${process.execPath}" -e "require('fs').writeFileSync(process.argv[1],JSON.stringify(process.argv.slice(2)))" %*\r\n`, 'utf8');
     const payload = ['100% ready', '%USERPROFILE%', 'bang!', 'caret^', 'say "hello" & continue', 'two words'];
@@ -599,6 +655,7 @@ describe('worker launch acknowledgement', () => {
   });
 
   it.runIf(process.platform === 'win32')('keeps a supervisor root alive until an early-exit provider tree is terminated', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'worker-launch-native-supervisor-'));
     const providerPath = join(cwd, 'early-provider.cmd');
     const childPidPath = join(cwd, 'early-provider-child.pid');
     await writeFile(providerPath, `@echo off\r\n"${process.execPath}" -e "const fs=require('fs'),cp=require('child_process');const c=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(c.pid));c.unref()" "${childPidPath}"\r\n`, 'utf8');

@@ -93,6 +93,23 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     teamCleanupMocks.shutdownTeam.mockResolvedValue(undefined);
   });
 
+  it('records missing team config as preserved instead of deleting ownership evidence', async () => {
+    const sessionId = 'pid-1632-missing-config';
+    const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(teamSessionDir, { recursive: true });
+    fs.writeFileSync(path.join(teamSessionDir, 'team-state.json'), JSON.stringify({
+      active: true, session_id: sessionId, team_name: 'missing-config-team', current_phase: 'team-exec',
+    }), 'utf-8');
+    teamCleanupMocks.teamReadConfig.mockResolvedValue(null);
+
+    await expect(cleanupSessionOwnedTeams(tmpDir, sessionId)).resolves.toEqual({
+      attempted: ['missing-config-team'], cleaned: [],
+      failed: [{ teamName: 'missing-config-team', error: 'team-shutdown-preserved:config_missing_cleanup_evidence' }],
+    });
+    expect(teamCleanupMocks.teamCleanup).not.toHaveBeenCalled();
+    expect(teamCleanupMocks.shutdownTeamV2).not.toHaveBeenCalled();
+  });
+
   it('force-shuts down a session-owned runtime-v2 team from session team state', async () => {
     const sessionId = 'pid-1632-v2';
     const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);

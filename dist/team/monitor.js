@@ -768,9 +768,10 @@ export async function cleanupTeamState(teamName, cwd) {
     const { rm } = await import('fs/promises');
     try {
         await rm(root, { recursive: true, force: true });
+        return true;
     }
     catch {
-        // Ignore cleanup errors
+        return false;
     }
 }
 //# sourceMappingURL=monitor.js.map

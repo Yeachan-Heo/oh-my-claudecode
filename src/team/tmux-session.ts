@@ -26,8 +26,7 @@ import {
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchAttemptCurrent,
   prepareWorkerLaunchAttempt,
-  retireWorkerLaunchAttempt,
-  terminateWorkerLaunchProvider,
+  retireAndCleanupCurrentWorkerLaunchAttempt,
   revokeWorkerLaunchAttempt,
   type WorkerLaunchAttempt,
   type WorkerLaunchContext,
@@ -1428,19 +1427,15 @@ export async function spawnOwnedWorkerInPane(
     });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
-    const retired = await retireWorkerLaunchAttempt(attempt, 'launch_failed').catch(() => false);
-    const providerStopped = retired
-      && await terminateWorkerLaunchProvider(attempt).catch(() => false);
-    let paneDead = false;
-    try {
-      await killOwnedWorkerPane(ownership);
-      paneDead = await getWorkerLiveness(ownership.paneId) === 'dead';
-    } catch {
-      paneDead = false;
-    }
-    if (!providerStopped || !paneDead) {
-      throw new Error(`worker_launch_cleanup_unverified:${config.workerName}:${ownership.paneId}`);
-    }
+    const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'launch_failed', async () => {
+      try {
+        await killOwnedWorkerPane(ownership);
+        return await getWorkerLiveness(ownership.paneId) === 'dead';
+      } catch {
+        return false;
+      }
+    }).catch(() => false);
+    if (!cleaned) throw new Error(`worker_launch_cleanup_unverified:${config.workerName}:${ownership.paneId}`);
     throw error;
   }
 }

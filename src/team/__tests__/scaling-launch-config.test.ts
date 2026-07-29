@@ -69,6 +69,7 @@ const workerLaunchMocks = vi.hoisted(() => ({
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
+  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
 }));
 
 vi.mock('../../cli/tmux-utils.js', () => ({
@@ -163,6 +164,7 @@ describe('scaleUp launch config', () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-launch-config-'));
 
     vi.clearAllMocks();
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup());
     monitorMocks.currentConfig = null;
 
     monitorMocks.withScalingLock.mockImplementation(async (
@@ -424,11 +426,12 @@ describe('scaleUp launch config', () => {
     expect(result).toMatchObject({ ok: true, removedWorkers: ['worker-1'], newWorkerCount: 1 });
     expect(gitWorktreeMocks.prepareWorkerWorktreeForRemoval).toHaveBeenCalledWith('demo-team', 'worker-1', resolve(cwd), join(resolve(cwd), 'reuse'));
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
-    expect(workerLaunchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+    expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-loaded' }),
       'scale_down',
+      expect.any(Function),
     );
-    expect(workerLaunchMocks.retireWorkerLaunchAttempt.mock.invocationCallOrder[0])
+    expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mock.invocationCallOrder[0])
       .toBeLessThan(tmuxSessionMocks.killOwnedWorkerPane.mock.invocationCallOrder[0]!);
   });
 
@@ -446,13 +449,13 @@ describe('scaleUp launch config', () => {
     teamOpsMocks.teamReadConfig.mockResolvedValue(current);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
     tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
-    workerLaunchMocks.isWorkerLaunchAttemptAccepted.mockResolvedValueOnce(false);
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockResolvedValueOnce(false);
 
     const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-1'], drainTimeoutMs: 0 },
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
 
     expect(result).toMatchObject({ ok: false, error: 'provider_cleanup_unverified:worker-1' });
-    expect(workerLaunchMocks.retireWorkerLaunchAttempt).not.toHaveBeenCalled();
+    expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalled();
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     expect(monitorMocks.currentConfig?.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
   });

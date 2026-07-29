@@ -206,10 +206,12 @@ function resolveWorkerTarget(resolution, extraArgs) {
 }
 
 function resolveTrustedSessionEndTarget(resolution, extraArgs) {
-  const trustedRoot = resolution.trustedPluginRoot ?? canonicalPluginRoot(dirname(dirname(resolution.targetPath)));
+  const trustedRoot = resolution.trustedPluginRoot;
   if (!trustedRoot || extraArgs.length !== 0) return null;
   try {
     const canonicalTarget = normalizedComparisonPath(resolution.targetPath);
+    const canonicalRoot = normalizedComparisonPath(trustedRoot);
+    if (!isContainedBy(canonicalRoot, canonicalTarget)) return null;
     const expectedTargets = ['session-end.mjs', 'wiki-session-end.mjs']
       .map(script => normalizedComparisonPath(join(trustedRoot, 'scripts', script)));
     if (!expectedTargets.includes(canonicalTarget)) return null;
@@ -220,24 +222,6 @@ function resolveTrustedSessionEndTarget(resolution, extraArgs) {
   }
 }
 
-async function runTrustedSessionEnd(targetPath, timeoutMs, manifestHook) {
-  const timer = setTimeout(() => {
-    writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
-    process.exit(0);
-  }, timeoutMs);
-  try {
-    const hook = await import(pathToFileURL(targetPath).href);
-    const run = basename(targetPath) === 'wiki-session-end.mjs'
-      ? hook.runWikiSessionEndHook
-      : hook.runSessionEndHook;
-    if (typeof run === 'function') await run();
-    return 0;
-  } catch {
-    return 0;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 function writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs) {
   const message = `[run.cjs] Hook ${basename(targetPath)} timed out after ${timeoutMs}ms; exiting fail-open.\n`;
@@ -446,8 +430,8 @@ if (require.main === module) {
     } else {
       const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
       if (sessionEndManifestHook) {
-        const timeoutMs = resolveGenericTimeoutMs(sessionEndManifestHook);
-        runTrustedSessionEnd(resolution.targetPath, timeoutMs, sessionEndManifestHook).then(status => {
+        const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), 300);
+        runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
           process.exitCode = status;
         });
       } else {
@@ -470,5 +454,4 @@ module.exports = {
   runGenericChild,
   DEFAULT_GENERIC_TIMEOUT_MS,
   resolveTrustedSessionEndTarget,
-  runTrustedSessionEnd,
 };

@@ -879,12 +879,13 @@ export function diffSnapshots(
 // State cleanup
 // ---------------------------------------------------------------------------
 
-export async function cleanupTeamState(teamName: string, cwd: string): Promise<void> {
+export async function cleanupTeamState(teamName: string, cwd: string): Promise<boolean> {
   const root = absPath(cwd, TeamPaths.root(teamName));
   const { rm } = await import('fs/promises');
   try {
     await rm(root, { recursive: true, force: true });
+    return true;
   } catch {
-    // Ignore cleanup errors
+    return false;
   }
 }

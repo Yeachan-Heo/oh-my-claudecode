@@ -108,7 +108,7 @@ export type ShutdownTeamV2Result = {
     workers: string[];
 } | {
     outcome: 'failed';
-    reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed';
+    reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed' | 'state_cleanup_failed';
     detail: string;
 };
 /**

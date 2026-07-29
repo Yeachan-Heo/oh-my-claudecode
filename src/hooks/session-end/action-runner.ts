@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import type { OpenClawRoutingSnapshot, SessionEndActionName, SessionEndActionState, SessionEndJobV1 } from './cleanup-manifest.js';
-import { getProcessStartIdentity, killProcessTree } from '../../platform/process-utils.js';
+import { getProcessStartIdentity, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 import { markSessionEndActionRunner, readSessionEndJob } from './cleanup-manifest.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 
@@ -65,19 +65,29 @@ export async function runSessionEndAction(context: ActionRunContext, _execute: (
     let deadlineTermination: Promise<void> | undefined;
     let resolveTermination!: () => void;
     const terminationFinished = new Promise<void>((resolve) => { resolveTermination = resolve; });
+    let identity: string | null = null;
     const terminate = async (): Promise<void> => {
       const postKillWait = new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
         timer.unref();
       });
-      await Promise.race([Promise.resolve(killProcessTree(child.pid!, 'SIGKILL')).catch(() => false), postKillWait]);
+      if (identity) {
+        await Promise.race([terminateOwnedProcessTree({
+          pid: child.pid!, expectedStartIdentity: identity,
+          deadlineAt: new Date(context.deadlineAt + POST_KILL_SETTLE_MS).toISOString(), force: true,
+        }).catch(() => 'unknown' as const), postKillWait]);
+      }
       await Promise.race([childExit, postKillWait]);
     };
+    identity = await getProcessStartIdentity(child.pid!, context.deadlineAt);
+    if (!identity) {
+      child.kill('SIGKILL');
+      await Promise.race([childExit, new Promise<void>(resolve => setTimeout(resolve, POST_KILL_SETTLE_MS))]);
+      return { code: 'runner-identity-unavailable', completed: false };
+    }
     const timeout = setTimeout(() => {
       deadlineTermination ??= terminate().finally(resolveTermination);
     }, Math.max(1, context.deadlineAt - Date.now()));
-    const identity = await getProcessStartIdentity(child.pid!, context.deadlineAt);
-    if (!identity) { clearTimeout(timeout); await terminate(); return { code: 'runner-identity-unavailable', completed: false }; }
     if (settled) { clearTimeout(timeout); return { code: exitCode === null ? 'runner-deadline' : `runner-exit-${exitCode}`, completed: false }; }
     atomicWriteJsonSync(path.join(runPath, 'control.json'), { jobId: context.job.jobId, action: context.actionName, attempt: context.action.attempts, runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, runner: { pid: child.pid, processStartIdentity: identity }, deadlineAt: new Date(context.deadlineAt).toISOString(), idempotencyKey: context.action.idempotencyKey });
     atomicWriteJsonSync(path.join(runPath, 'arm.json'), { runnerNonce: context.runnerNonce, ownerNonce: context.ownerNonce, armedAt: new Date().toISOString() });

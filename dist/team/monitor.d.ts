@@ -58,5 +58,5 @@ export interface DerivedEvent {
  * O(N) where N = max(task count, worker count).
  */
 export declare function diffSnapshots(prev: TeamMonitorSnapshotState, current: TeamMonitorSnapshotState): DerivedEvent[];
-export declare function cleanupTeamState(teamName: string, cwd: string): Promise<void>;
+export declare function cleanupTeamState(teamName: string, cwd: string): Promise<boolean>;
 //# sourceMappingURL=monitor.d.ts.map

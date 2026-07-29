@@ -73,6 +73,7 @@ export async function runWorkerActivationGate(gate) {
         let providerStartIdentity = null;
         let supervisedExitCode = null;
         let supervisorTimer;
+        let terminationResult = null;
         let finishCompletion;
         const completion = new Promise(resolve => {
             const finish = async (result, terminal) => {
@@ -81,8 +82,6 @@ export async function runWorkerActivationGate(gate) {
                 settled = true;
                 if (supervisorTimer)
                     clearInterval(supervisorTimer);
-                if (child.pid)
-                    await killProcessTree(child.pid, 'SIGKILL');
                 try {
                     await writeAtomic(`${gate.runPath}.terminal`, { ...expected, provider_pid: child.pid ?? null, ...terminal,
                         written_at: new Date().toISOString() });
@@ -92,39 +91,45 @@ export async function runWorkerActivationGate(gate) {
                 resolve(result);
             };
             finishCompletion = finish;
-            child.once('exit', (exitCode, signal) => {
+            child.once('exit', async (exitCode, signal) => {
                 const effectiveExitCode = supervisedExitCode ?? exitCode;
                 const effectiveSignal = supervisedExitCode === null ? signal : null;
-                void finish({ outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }, { outcome: 'exit', exit_code: effectiveExitCode, signal: effectiveSignal });
+                let cleanupVerified = terminationResult ? await terminationResult === 'terminated' : false;
+                if (!terminationResult && process.platform !== 'win32' && child.pid) {
+                    cleanupVerified = await killProcessTree(child.pid, 'SIGKILL');
+                    if (!cleanupVerified) {
+                        try {
+                            process.kill(-child.pid, 0);
+                        }
+                        catch (error) {
+                            cleanupVerified = error.code === 'ESRCH';
+                        }
+                    }
+                }
+                await finish(cleanupVerified
+                    ? { outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }
+                    : { outcome: 'provider_cleanup_unverified' }, { outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
+                    exit_code: effectiveExitCode, signal: effectiveSignal });
             });
             child.once('error', () => {
-                void finish({ outcome: 'provider_spawn_failed' }, { outcome: 'error' });
+                void finish({ outcome: 'provider_spawn_failed' }, { outcome: 'error', cleanup_verified: false });
             });
         });
         const terminateProvider = async () => {
-            if (settled)
-                return true;
-            let terminated = false;
-            if (providerPid && providerStartIdentity) {
-                const result = await terminateOwnedProcessTree({
-                    pid: providerPid,
-                    expectedStartIdentity: providerStartIdentity,
-                    deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-                    force: true,
-                });
-                terminated = result === 'terminated' || result === 'already-dead' || result === 'identity-mismatch';
-            }
-            else if (child.pid) {
-                terminated = await killProcessTree(child.pid, 'SIGKILL');
-            }
-            else {
-                terminated = child.kill();
-            }
+            if (settled || !providerPid || !providerStartIdentity)
+                return false;
+            terminationResult ??= terminateOwnedProcessTree({
+                pid: providerPid,
+                expectedStartIdentity: providerStartIdentity,
+                deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+                force: true,
+            });
+            const terminated = await terminationResult === 'terminated';
             const completed = await new Promise(resolve => {
                 const timer = setTimeout(() => resolve(false), 2_000);
-                void completion.then(() => {
+                void completion.then(result => {
                     clearTimeout(timer);
-                    resolve(true);
+                    resolve(result.outcome !== 'provider_cleanup_unverified');
                 });
             });
             return terminated && completed;
@@ -185,12 +190,9 @@ export async function runWorkerActivationGate(gate) {
                         if (!Number.isSafeInteger(exitCode))
                             return;
                         supervisedExitCode = exitCode;
-                        const termination = await terminateOwnedProcessTree({
-                            pid: providerPid, expectedStartIdentity: providerStartIdentity,
-                            deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
-                        });
-                        if (termination !== 'terminated' && !settled) {
-                            await finishCompletion({ outcome: 'provider_cleanup_unverified' }, { outcome: 'cleanup_unverified', exit_code: exitCode, signal: null });
+                        const cleaned = await terminateProvider();
+                        if (!cleaned && !settled) {
+                            await finishCompletion({ outcome: 'provider_cleanup_unverified' }, { outcome: 'cleanup_unverified', cleanup_verified: false, exit_code: exitCode, signal: null });
                         }
                     }).catch(() => undefined).finally(() => { pollingCompletion = false; });
                 }, pollIntervalMs);

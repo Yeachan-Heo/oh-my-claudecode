@@ -3,7 +3,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
-import { getProcessStartIdentity, killProcessTree } from '../../platform/process-utils.js';
+import { getProcessStartIdentity, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 import { markSessionEndActionRunner, readSessionEndJob } from './cleanup-manifest.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 const RUNNER_ARG = '--omc-session-end-action-runner';
@@ -61,23 +61,29 @@ export async function runSessionEndAction(context, _execute) {
         let deadlineTermination;
         let resolveTermination;
         const terminationFinished = new Promise((resolve) => { resolveTermination = resolve; });
+        let identity = null;
         const terminate = async () => {
             const postKillWait = new Promise((resolve) => {
                 const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
                 timer.unref();
             });
-            await Promise.race([Promise.resolve(killProcessTree(child.pid, 'SIGKILL')).catch(() => false), postKillWait]);
+            if (identity) {
+                await Promise.race([terminateOwnedProcessTree({
+                        pid: child.pid, expectedStartIdentity: identity,
+                        deadlineAt: new Date(context.deadlineAt + POST_KILL_SETTLE_MS).toISOString(), force: true,
+                    }).catch(() => 'unknown'), postKillWait]);
+            }
             await Promise.race([childExit, postKillWait]);
         };
+        identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
+        if (!identity) {
+            child.kill('SIGKILL');
+            await Promise.race([childExit, new Promise(resolve => setTimeout(resolve, POST_KILL_SETTLE_MS))]);
+            return { code: 'runner-identity-unavailable', completed: false };
+        }
         const timeout = setTimeout(() => {
             deadlineTermination ??= terminate().finally(resolveTermination);
         }, Math.max(1, context.deadlineAt - Date.now()));
-        const identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
-        if (!identity) {
-            clearTimeout(timeout);
-            await terminate();
-            return { code: 'runner-identity-unavailable', completed: false };
-        }
         if (settled) {
             clearTimeout(timeout);
             return { code: exitCode === null ? 'runner-deadline' : `runner-exit-${exitCode}`, completed: false };

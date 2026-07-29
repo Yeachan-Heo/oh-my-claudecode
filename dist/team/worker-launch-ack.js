@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import { absPath, TeamPaths } from './state-paths.js';
@@ -363,10 +363,46 @@ export async function retireWorkerLaunchAttempt(attempt, reason) {
         return false;
     }
 }
+export async function retireAndCleanupCurrentWorkerLaunchAttempt(attempt, reason, cleanup) {
+    const retiredPath = `${attempt.decisionPath}.retired`;
+    try {
+        return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+                || !await isWorkerLaunchAttemptAccepted(attempt))
+                return false;
+            const existing = await readJson(retiredPath);
+            if (existing.kind === 'value') {
+                if (!identityMatches(existing.value, attempt))
+                    return false;
+            }
+            else if (existing.kind === 'malformed') {
+                return false;
+            }
+            else {
+                await writeExclusiveAtomic(retiredPath, {
+                    ...identityOf(attempt), kind: 'worker_launch_retired', reason, written_at: new Date().toISOString(),
+                });
+            }
+            if (!await terminateWorkerLaunchProvider(attempt) || !await cleanup())
+                return false;
+            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt))
+                return false;
+            await unlink(attempt.currentPath);
+            return true;
+        }, { timeoutMs: 10_000, retryDelayMs: 10 });
+    }
+    catch {
+        return false;
+    }
+}
 export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) {
+    const terminal = await readJson(`${attempt.startedPath}.terminal`);
+    const terminalCleanupVerified = terminal.kind === 'value'
+        && identityMatches(terminal.value, attempt)
+        && terminal.value.cleanup_verified === true;
     const started = await readJson(attempt.startedPath);
     if (started.kind === 'absent')
-        return true;
+        return terminalCleanupVerified;
     if (started.kind !== 'value')
         return false;
     const record = started.value;
@@ -382,8 +418,8 @@ export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) 
         deadlineAt,
         force: true,
     });
-    if (result !== 'terminated' && result !== 'already-dead' && result !== 'identity-mismatch')
-        return false;
+    if (result !== 'terminated')
+        return terminalCleanupVerified;
     const deadline = Date.parse(deadlineAt);
     while (Date.now() < deadline) {
         const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
@@ -514,10 +550,12 @@ export function buildProviderSpawnInvocation(providerArgv, platform = process.pl
     if (!command)
         throw new Error('worker_launch_provider_argv_missing');
     if (platform === 'win32') {
+        const renderedProvider = providerArgv.map(quoteWindowsCmdArgument).join(' ');
+        const waitsForBatchProvider = ['.cmd', '.bat'].includes(extname(command).toLowerCase());
         return {
             command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
             args: ['/d', '/v:off', '/s', '/c'],
-            batchScript: `@echo off\r\n${providerArgv.map(quoteWindowsCmdArgument).join(' ')}\r\n`,
+            batchScript: `@echo off\r\n${waitsForBatchProvider ? 'start "" /wait /b ' : ''}${renderedProvider}\r\n`,
         };
     }
     return { command, args };
@@ -598,6 +636,7 @@ export async function runWorkerLaunchBootstrap(value) {
             let providerStartIdentity = null;
             let supervisedExitCode = null;
             let supervisorTimer;
+            let terminationResult = null;
             let resolveCompletion;
             const completion = new Promise(resolve => {
                 resolveCompletion = resolve;
@@ -609,14 +648,27 @@ export async function runWorkerLaunchBootstrap(value) {
                         clearInterval(supervisorTimer);
                     const effectiveExitCode = supervisedExitCode ?? exitCode;
                     const effectiveSignal = supervisedExitCode === null ? signal : null;
-                    if (child.pid)
-                        await killProcessTree(child.pid, 'SIGKILL');
+                    let cleanupVerified = terminationResult ? await terminationResult === 'terminated' : false;
+                    if (!terminationResult && process.platform !== 'win32' && child.pid) {
+                        cleanupVerified = await killProcessTree(child.pid, 'SIGKILL');
+                        if (!cleanupVerified) {
+                            try {
+                                process.kill(-child.pid, 0);
+                            }
+                            catch (error) {
+                                cleanupVerified = error.code === 'ESRCH';
+                            }
+                        }
+                    }
                     await atomicWriteJson(`${spec.started_path}.terminal`, {
-                        ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'exit',
+                        ...identityOf(spec), kind: 'worker_launch_provider_terminal',
+                        outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
                         pid: child.pid ?? null, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
                     await invocation.cleanup();
-                    resolve({ outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal });
+                    resolve(cleanupVerified
+                        ? { outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }
+                        : { outcome: 'provider_cleanup_unverified' });
                 });
                 child.once('error', async () => {
                     if (settled)
@@ -625,7 +677,7 @@ export async function runWorkerLaunchBootstrap(value) {
                     if (supervisorTimer)
                         clearInterval(supervisorTimer);
                     await atomicWriteJson(`${spec.started_path}.terminal`, {
-                        ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error',
+                        ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error', cleanup_verified: false,
                         pid: child.pid ?? null, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
                     await invocation.cleanup();
@@ -633,29 +685,20 @@ export async function runWorkerLaunchBootstrap(value) {
                 });
             });
             const terminateProvider = async () => {
-                if (settled)
-                    return true;
-                let terminated = false;
-                if (child.pid && providerStartIdentity) {
-                    const result = await terminateOwnedProcessTree({
-                        pid: child.pid,
-                        expectedStartIdentity: providerStartIdentity,
-                        deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-                        force: true,
-                    });
-                    terminated = result === 'terminated' || result === 'already-dead' || result === 'identity-mismatch';
-                }
-                else if (child.pid) {
-                    terminated = await killProcessTree(child.pid, 'SIGKILL');
-                }
-                else {
-                    terminated = child.kill();
-                }
+                if (settled || !child.pid || !providerStartIdentity)
+                    return false;
+                terminationResult ??= terminateOwnedProcessTree({
+                    pid: child.pid,
+                    expectedStartIdentity: providerStartIdentity,
+                    deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+                    force: true,
+                });
+                const terminated = await terminationResult === 'terminated';
                 const completed = await new Promise(resolve => {
                     const timer = setTimeout(() => resolve(false), 2_000);
-                    void completion.then(() => {
+                    void completion.then(result => {
                         clearTimeout(timer);
-                        resolve(true);
+                        resolve(result.outcome !== 'provider_cleanup_unverified');
                     });
                 });
                 return terminated && completed;
@@ -736,16 +779,13 @@ export async function runWorkerLaunchBootstrap(value) {
                         if (!Number.isSafeInteger(exitCode))
                             return;
                         supervisedExitCode = exitCode;
-                        const termination = await terminateOwnedProcessTree({
-                            pid: child.pid, expectedStartIdentity: providerStartIdentity,
-                            deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
-                        });
-                        if (termination !== 'terminated' && !settled) {
+                        const cleaned = await terminateProvider();
+                        if (!cleaned && !settled) {
                             settled = true;
                             if (supervisorTimer)
                                 clearInterval(supervisorTimer);
                             await atomicWriteJson(`${spec.started_path}.terminal`, {
-                                ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'cleanup_unverified',
+                                ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'cleanup_unverified', cleanup_verified: false,
                                 pid: child.pid ?? null, exit_code: exitCode, signal: null, written_at: new Date().toISOString(),
                             }).catch(() => undefined);
                             await invocation.cleanup();

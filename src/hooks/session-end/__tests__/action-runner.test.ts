@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 const processUtils = vi.hoisted(() => ({
   getProcessStartIdentity: vi.fn(),
-  killProcessTree: vi.fn(async () => true),
+  terminateOwnedProcessTree: vi.fn(async (): Promise<'terminated' | 'unknown'> => 'terminated'),
 }));
 const manifest = vi.hoisted(() => ({ markSessionEndActionRunner: vi.fn(() => ({})) }));
 
@@ -69,11 +69,13 @@ describe('SessionEnd action runner', () => {
     childProcess.spawn.mockReturnValue(child);
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
     let finishKill!: () => void;
-    processUtils.killProcessTree.mockImplementation(() => new Promise<boolean>((resolve) => { finishKill = () => resolve(true); }));
+    processUtils.terminateOwnedProcessTree.mockImplementation(() => new Promise<'terminated'>((resolve) => { finishKill = () => resolve('terminated'); }));
     const result = runSessionEndAction({ ...context(directory), deadlineAt: Date.now() + 10 }, async () => undefined);
 
     await vi.advanceTimersByTimeAsync(10);
-    expect(processUtils.killProcessTree).toHaveBeenCalledWith(12347, 'SIGKILL');
+    expect(processUtils.terminateOwnedProcessTree).toHaveBeenCalledWith(expect.objectContaining({
+      pid: 12347, expectedStartIdentity: 'identity', force: true,
+    }));
     child.emit('exit', 0);
     let settled = false;
     void result.then(() => { settled = true; });
@@ -91,13 +93,15 @@ describe('SessionEnd action runner', () => {
     const child = Object.assign(new EventEmitter(), { pid: 12348, unref: vi.fn() });
     childProcess.spawn.mockReturnValue(child);
     processUtils.getProcessStartIdentity.mockResolvedValue('identity');
-    processUtils.killProcessTree.mockResolvedValue(false);
+    processUtils.terminateOwnedProcessTree.mockResolvedValue('unknown');
 
     const result = runSessionEndAction({ ...context(directory), deadlineAt: Date.now() + 10 }, async () => undefined);
     await vi.advanceTimersByTimeAsync(10 + 250);
 
     await expect(result).resolves.toEqual({ code: 'runner-deadline', completed: false });
-    expect(processUtils.killProcessTree).toHaveBeenCalledWith(12348, 'SIGKILL');
+    expect(processUtils.terminateOwnedProcessTree).toHaveBeenCalledWith(expect.objectContaining({
+      pid: 12348, expectedStartIdentity: 'identity', force: true,
+    }));
     expect(child.unref).toHaveBeenCalledOnce();
   });
 

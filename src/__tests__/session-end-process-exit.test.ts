@@ -35,7 +35,7 @@ function runUntilClose(
     const startedAt = Date.now();
     const child = spawn(process.execPath, [RUN_CJS, script], {
       cwd,
-      env: { ...process.env, ...extraEnv, CLAUDE_CONFIG_DIR: join(cwd, '.claude') },
+      env: { ...process.env, ...extraEnv, CLAUDE_PLUGIN_ROOT: REPO_ROOT, CLAUDE_CONFIG_DIR: join(cwd, '.claude') },
       stdio: ['pipe', 'ignore', 'ignore'],
       windowsHide: true,
     });
@@ -117,6 +117,17 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
   it.each(SESSION_END_SCRIPTS)('%s exits with no bytes and an open stdin pipe', async (_name, script) => {
     const result = await runUntilClose(script, createProject(), undefined);
     expectPromptExit(result);
+  });
+
+  it.skipIf(!HAS_GENERATED_DIST).each(SESSION_END_SCRIPTS)('%s terminates a live manifest-lock contender within the foreground ceiling', async (_name, script) => {
+    const cwd = createProject();
+    const sessionId = `live-manifest-lock-${_name}`;
+    const jobsDir = join(cwd, '.omc', 'state', 'session-end-jobs');
+    mkdirSync(jobsDir, { recursive: true });
+    writeFileSync(join(jobsDir, `${sessionId}.json.lock`), JSON.stringify({
+      pid: process.pid, processStartIdentity: null, nonce: 'live-owner', createdAt: new Date().toISOString(),
+    }));
+    expectPromptExit(await runUntilClose(script, cwd, validSessionEndInput(cwd, sessionId)));
   });
 
   it.skipIf(!HAS_GENERATED_DIST).each(SESSION_END_SCRIPTS)('%s exits after promptly closed valid SessionEnd JSON with configured adapters', async (_name, script) => {

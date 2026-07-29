@@ -378,7 +378,7 @@ describe('worker pane startup safety', () => {
     expect(diagnostic.length).toBeLessThan(500);
     stderr.mockRestore();
   });
-  it('retires an accepted launch and verifies pane cleanup when provider handoff fails', async () => {
+  it('retires an accepted launch but preserves the pane when provider cleanup is unverified', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-startup-handoff-cleanup-'));
     process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
     processMocks.isProcessIdentityLive.mockResolvedValue('dead');
@@ -394,13 +394,13 @@ describe('worker pane startup safety', () => {
       launchBootstrapPath: '/runtime-cli.js',
       launchStateCwd: cwd,
       launchContext: { kind: 'initial' },
-    })).rejects.toThrow('worker_start_provider_failed');
+    })).rejects.toThrow('worker_launch_cleanup_unverified');
 
-    expect(tmuxState.args).toContainEqual(['kill-pane', '-t', '%2']);
+    expect(tmuxState.args).not.toContainEqual(['kill-pane', '-t', '%2']);
     const attemptsRoot = join(cwd, '.omc/state/team/startup-team/workers/worker-1/launch-attempts');
     const files = await readdir(attemptsRoot, { recursive: true });
     expect(files.some(file => String(file).endsWith('decision.json.retired'))).toBe(true);
-    expect(tmuxState.paneStatus).toBe('1 cmd\n');
+    expect(tmuxState.paneStatus).toBe('0 cmd\n');
     delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   });
 

@@ -594,8 +594,7 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
         try {
             const config = await teamReadConfig(teamName, directory);
             if (!config || typeof config !== 'object') {
-                await teamCleanup(teamName, directory);
-                cleaned.push(teamName);
+                failed.push({ teamName, error: 'team-shutdown-preserved:config_missing_cleanup_evidence' });
                 return;
             }
             if (Array.isArray(config.workers)) {

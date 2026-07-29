@@ -720,8 +720,7 @@ export async function cleanupSessionOwnedTeams(
     try {
       const config = await teamReadConfig(teamName, directory) as unknown;
       if (!config || typeof config !== 'object') {
-        await teamCleanup(teamName, directory);
-        cleaned.push(teamName);
+        failed.push({ teamName, error: 'team-shutdown-preserved:config_missing_cleanup_evidence' });
         return;
       }
 

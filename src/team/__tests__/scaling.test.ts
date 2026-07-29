@@ -87,6 +87,7 @@ const workerLaunchMocks = vi.hoisted(() => ({
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
+  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
 }));
 
 vi.mock('../../cli/tmux-utils.js', () => ({

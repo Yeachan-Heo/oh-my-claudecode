@@ -28,7 +28,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
 import { resolveRuntimeCliPath } from './runtime-owner-client.js';
-import { isWorkerLaunchAttemptAccepted, loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
+import { loadWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -891,19 +891,26 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 attemptId: worker.launch_attempt_id,
                 runtimeCliPath: resolveRuntimeCliPath(),
             });
-            if (!attempt
-                || !await isWorkerLaunchAttemptAccepted(attempt)
-                || !await retireWorkerLaunchAttempt(attempt, 'scale_down')
-                || !await terminateWorkerLaunchProvider(attempt)) {
+            if (!attempt) {
                 const reason = `provider_cleanup_unverified:${worker.name}`;
                 await markScaleDownFailed(reason);
                 return { ok: false, error: reason };
             }
-            try {
-                await killOwnedWorkerPane(ownershipResult.ownership);
-            }
-            catch (error) {
-                const reason = `pane_cleanup_failed:${worker.name}:${error instanceof Error ? error.message : String(error)}`;
+            let paneCleanupError = null;
+            const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'scale_down', async () => {
+                try {
+                    await killOwnedWorkerPane(ownershipResult.ownership);
+                    return true;
+                }
+                catch (error) {
+                    paneCleanupError = error instanceof Error ? error.message : String(error);
+                    return false;
+                }
+            });
+            if (!cleaned) {
+                const reason = paneCleanupError
+                    ? `pane_cleanup_failed:${worker.name}:${paneCleanupError}`
+                    : `provider_cleanup_unverified:${worker.name}`;
                 await markScaleDownFailed(reason);
                 return { ok: false, error: reason };
             }
