@@ -113,7 +113,8 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     });
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
-    await shutdownTeamV2(teamName, cwd, { timeoutMs: 0 });
+    await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0 }))
+      .rejects.toThrow('team_shutdown_provider_cleanup_unverified:worker-1');
 
     const killPaneTargets = tmuxCalls
       .filter((args) => args[0] === 'kill-pane')

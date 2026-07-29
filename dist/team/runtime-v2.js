@@ -3451,7 +3451,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     if (providerCleanupFailures.length > 0) {
         process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
         await finalizeAutoMerge();
-        return;
+        throw new Error(`team_shutdown_provider_cleanup_unverified:${providerCleanupFailures.join(',')}`);
     }
     try {
         const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');

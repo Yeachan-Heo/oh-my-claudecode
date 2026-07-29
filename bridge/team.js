@@ -15251,7 +15251,7 @@ Then exit your session.
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
 `);
     await finalizeAutoMerge();
-    return;
+    throw new Error(`team_shutdown_provider_cleanup_unverified:${providerCleanupFailures.join(",")}`);
   }
   try {
     const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2, resolveSplitPaneWorkerPaneIds: resolveSplitPaneWorkerPaneIds2, getWorkerLiveness: getWorkerLiveness2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
