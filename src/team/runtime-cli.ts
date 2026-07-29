@@ -1193,7 +1193,10 @@ async function main(): Promise<void> {
 }
 
 async function runRecoveryGateFromEnvironment(): Promise<void> {
-  const raw = process.env.OMC_RECOVERY_GATE_SPEC;
+  const raw = process.env.OMC_RECOVERY_GATE_SPEC
+    ?? (process.env.OMC_RECOVERY_GATE_SPEC_B64
+      ? Buffer.from(process.env.OMC_RECOVERY_GATE_SPEC_B64, 'base64').toString('utf8')
+      : undefined);
   if (!raw) throw new Error('OMC_RECOVERY_GATE_SPEC is required');
   const gate = JSON.parse(raw) as RecoveryActivationGate;
   const result = await runWorkerActivationGate(gate);

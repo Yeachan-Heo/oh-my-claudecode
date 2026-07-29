@@ -4528,6 +4528,10 @@ function buildWorkerStartCommand(config) {
       windowsEnvVars.OMC_WORKER_LAUNCH_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_WORKER_LAUNCH_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_WORKER_LAUNCH_SPEC;
     }
+    if (windowsEnvVars.OMC_RECOVERY_GATE_SPEC) {
+      windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
+      delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
+    }
     const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
       assertSafeEnvKey(key);
       return `set "${key}=${escapeForCmdSet(value)}"`;
@@ -13310,8 +13314,11 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               if (!latest) return false;
               const latestWorker = latest.config.workers.find((candidate) => candidate.name === input.workerName);
               if (!latestWorker) return false;
+              const nextRevision = latest.stateRevision + 1;
               const next = {
                 ...latest.config,
+                state_revision: nextRevision,
+                active_recovery: latest.config.active_recovery ? { ...latest.config.active_recovery, state_revision: nextRevision, updated_at: (/* @__PURE__ */ new Date()).toISOString() } : void 0,
                 workers: latest.config.workers.map((candidate) => candidate.name === input.workerName ? {
                   ...candidate,
                   pane_id: currentLaunch.pane_id,

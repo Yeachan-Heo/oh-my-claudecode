@@ -241,6 +241,20 @@ describe('worker launch acknowledgement', () => {
       [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
       cwd,
     ));
+    let acknowledged: Record<string, unknown> | undefined;
+    for (let index = 0; index < 200 && !acknowledged; index++) {
+      try {
+        acknowledged = JSON.parse(await readFile(olderAttempt.ackPath, 'utf8'));
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    }
+    expect(acknowledged).toMatchObject({
+      attempt_id: olderAttempt.attempt_id,
+      nonce: olderAttempt.nonce,
+      pane_id: olderAttempt.pane_id,
+      kind: 'worker_launch_ack',
+    });
     const newerAttempt = await prepareWorkerLaunchAttempt({
       cwd,
       teamName: olderAttempt.team_name,

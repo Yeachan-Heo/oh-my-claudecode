@@ -1887,6 +1887,10 @@ function buildWorkerStartCommand(config) {
       windowsEnvVars.OMC_WORKER_LAUNCH_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_WORKER_LAUNCH_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_WORKER_LAUNCH_SPEC;
     }
+    if (windowsEnvVars.OMC_RECOVERY_GATE_SPEC) {
+      windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
+      delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
+    }
     const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
       assertSafeEnvKey(key);
       return `set "${key}=${escapeForCmdSet(value)}"`;
@@ -10886,10 +10890,15 @@ async function runWorkerActivationGate(gate) {
   await writeAtomic3(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: (/* @__PURE__ */ new Date()).toISOString() });
   if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: "run_timeout" };
   const fenced = await withWorkerLaunchAttemptFence(gate.launchAttempt, async () => {
+    const {
+      OMC_RECOVERY_GATE_SPEC: _recoveryGateSpec,
+      OMC_RECOVERY_GATE_SPEC_B64: _encodedRecoveryGateSpec,
+      ...providerProcessEnv
+    } = process.env;
     const invocation = buildProviderSpawnInvocation(gate.providerArgv);
     const child = (0, import_node_child_process6.spawn)(invocation.command, invocation.args, {
       cwd: gate.cwd,
-      env: { ...process.env, ...gate.env },
+      env: { ...providerProcessEnv, ...gate.env },
       stdio: "inherit"
     });
     const completion = new Promise((resolve8) => {
@@ -12238,8 +12247,11 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               if (!latest) return false;
               const latestWorker = latest.config.workers.find((candidate) => candidate.name === input.workerName);
               if (!latestWorker) return false;
+              const nextRevision = latest.stateRevision + 1;
               const next = {
                 ...latest.config,
+                state_revision: nextRevision,
+                active_recovery: latest.config.active_recovery ? { ...latest.config.active_recovery, state_revision: nextRevision, updated_at: (/* @__PURE__ */ new Date()).toISOString() } : void 0,
                 workers: latest.config.workers.map((candidate) => candidate.name === input.workerName ? {
                   ...candidate,
                   pane_id: currentLaunch.pane_id,
@@ -14770,7 +14782,7 @@ async function main() {
   }
 }
 async function runRecoveryGateFromEnvironment() {
-  const raw = process.env.OMC_RECOVERY_GATE_SPEC;
+  const raw = process.env.OMC_RECOVERY_GATE_SPEC ?? (process.env.OMC_RECOVERY_GATE_SPEC_B64 ? Buffer.from(process.env.OMC_RECOVERY_GATE_SPEC_B64, "base64").toString("utf8") : void 0);
   if (!raw) throw new Error("OMC_RECOVERY_GATE_SPEC is required");
   const gate = JSON.parse(raw);
   const result = await runWorkerActivationGate(gate);

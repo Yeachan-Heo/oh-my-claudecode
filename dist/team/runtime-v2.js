@@ -1646,8 +1646,13 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                             const latestWorker = latest.config.workers.find(candidate => candidate.name === input.workerName);
                             if (!latestWorker)
                                 return false;
+                            const nextRevision = latest.stateRevision + 1;
                             const next = {
                                 ...latest.config,
+                                state_revision: nextRevision,
+                                active_recovery: latest.config.active_recovery
+                                    ? { ...latest.config.active_recovery, state_revision: nextRevision, updated_at: new Date().toISOString() }
+                                    : undefined,
                                 workers: latest.config.workers.map(candidate => candidate.name === input.workerName
                                     ? {
                                         ...candidate,

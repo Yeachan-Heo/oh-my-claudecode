@@ -84,10 +84,15 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
   await writeAtomic(`${gate.readyPath}.adoption-ready`, { ...expected, written_at: new Date().toISOString() });
   if (!await waitForRecoveryGateRecord(gate.runPath, expected, timeoutMs, pollIntervalMs)) return { outcome: 'run_timeout' };
   const fenced = await withWorkerLaunchAttemptFence(gate.launchAttempt, async () => {
+    const {
+      OMC_RECOVERY_GATE_SPEC: _recoveryGateSpec,
+      OMC_RECOVERY_GATE_SPEC_B64: _encodedRecoveryGateSpec,
+      ...providerProcessEnv
+    } = process.env;
     const invocation = buildProviderSpawnInvocation(gate.providerArgv);
     const child = spawn(invocation.command, invocation.args, {
       cwd: gate.cwd,
-      env: { ...process.env, ...gate.env },
+      env: { ...providerProcessEnv, ...gate.env },
       stdio: 'inherit',
     });
     const completion = new Promise<RecoveryActivationGateResult>(resolve => {

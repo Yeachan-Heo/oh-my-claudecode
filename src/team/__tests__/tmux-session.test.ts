@@ -222,6 +222,7 @@ describe('buildWorkerStartCommand', () => {
     const encodedEnd = cmd.indexOf('" &&', encodedStart);
     const decodedSpec = Buffer.from(cmd.slice(encodedStart, encodedEnd), 'base64').toString('utf8');
     const spec = JSON.parse(decodedSpec);
+    expect(spec.pane_id).toBe('%2');
     expect(spec.provider_argv).toEqual([
       'C:\\Program Files\\Codex\\codex.exe',
       '--label',
@@ -283,6 +284,29 @@ describe('buildWorkerStartCommand', () => {
     expect(cmd).toContain('"--token=abc%%25"');
     expect(cmd).not.toContain('literal%USERPROFILE%token%25');
   });
+  it('base64-encodes recovery gate launch identities for native Windows cmd', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    const gate = { recoveryId: 'recovery-1', launchAttempt: { attempt_id: 'attempt-1', nonce: 'nonce-1', pane_id: '%2' } };
+
+    const cmd = buildWorkerStartCommand({
+      teamName: 't',
+      workerName: 'w',
+      envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(gate) },
+      launchBinary: 'C:\\Program Files\\nodejs\\node.exe',
+      launchArgs: ['C:\\omc\\runtime-cli.cjs', '--recovery-gate'],
+      cwd: 'C:\\repo',
+    });
+
+    const marker = 'set "OMC_RECOVERY_GATE_SPEC_B64=';
+    const encodedStart = cmd.indexOf(marker) + marker.length;
+    const encodedEnd = cmd.indexOf('" &&', encodedStart);
+    expect(JSON.parse(Buffer.from(cmd.slice(encodedStart, encodedEnd), 'base64').toString('utf8')))
+      .toMatchObject({ launchAttempt: { pane_id: '%2' } });
+    expect(cmd).not.toContain('OMC_RECOVERY_GATE_SPEC=');
+    expect(cmd).not.toContain('pane_id=%%2');
+  });
+
 
   it('does not cmd-escape percent signs on MSYS Windows worker startup', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');

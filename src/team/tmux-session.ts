@@ -791,6 +791,10 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
       windowsEnvVars.OMC_WORKER_LAUNCH_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_WORKER_LAUNCH_SPEC, 'utf8').toString('base64');
       delete windowsEnvVars.OMC_WORKER_LAUNCH_SPEC;
     }
+    if (windowsEnvVars.OMC_RECOVERY_GATE_SPEC) {
+      windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, 'utf8').toString('base64');
+      delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
+    }
     const envPrefix = Object.entries(windowsEnvVars)
       .map(([key, value]) => {
         assertSafeEnvKey(key);

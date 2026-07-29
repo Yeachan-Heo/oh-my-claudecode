@@ -55,6 +55,11 @@ describe('worker recovery activation gate', () => {
     expect(existsSync(readyPath)).toBe(true);
     expect(existsSync(`${readyPath}.adoption-ready`)).toBe(true);
     expect(existsSync(`${runPath}.launched`)).toBe(true);
+    expect(JSON.parse(readFileSync(`${runPath}.launched`, 'utf8'))).toMatchObject({
+      launch_attempt_id: launchAttempt.attempt_id,
+      launch_nonce: launchAttempt.nonce,
+      pane_attempt_id: 'attempt-a',
+    });
   });
 
   it('does not publish launched evidence when the provider executable cannot spawn', async () => {
@@ -75,6 +80,37 @@ describe('worker recovery activation gate', () => {
     })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     expect(existsSync(`${runPath}.launched`)).toBe(false);
   });
+  it.each([
+    ['launch_attempt_id', 'wrong-attempt'],
+    ['launch_nonce', 'wrong-nonce'],
+  ] as const)('rejects recovery markers when only %s differs', async (field, replacement) => {
+    const readyPath = join(cwd, `${field}-ready.json`);
+    const activatePath = join(cwd, `${field}-activate.json`);
+    const runPath = join(cwd, `${field}-run.json`);
+    const providerMarker = join(cwd, `${field}-provider-ran`);
+    const launchAttempt = await acceptedAttempt('worker-1', '%7', 'recovery-exact', 8, 'attempt-exact');
+    const record = {
+      recovery_id: 'recovery-exact', worker_name: 'worker-1', replacement_generation: 8,
+      pane_attempt_id: 'attempt-exact', launch_attempt_id: launchAttempt.attempt_id,
+      launch_nonce: launchAttempt.nonce, written_at: new Date().toISOString(),
+      [field]: replacement,
+    };
+    writeFileSync(activatePath, JSON.stringify(record));
+    writeFileSync(runPath, JSON.stringify(record));
+
+    await expect(runWorkerActivationGate({
+      recoveryId: 'recovery-exact', workerName: 'worker-1', replacementGeneration: 8, paneAttemptId: 'attempt-exact',
+      readyPath, activatePath, runPath,
+      providerArgv: [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      launchAttempt,
+      cwd,
+      timeoutMs: 50,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ outcome: 'activation_timeout' });
+    expect(existsSync(providerMarker)).toBe(false);
+    expect(existsSync(`${runPath}.launched`)).toBe(false);
+  });
+
   it('rejects a stale recovery gate before the provider can run', async () => {
     const readyPath = join(cwd, 'stale-ready.json');
     const activatePath = join(cwd, 'stale-activate.json');
