@@ -61,11 +61,12 @@ describe('recovery pane rollback evidence', () => {
     const requestId = 'orphan-request';
     const recoveryId = 'orphan-recovery';
     const configPath = absPath(cwd, TeamPaths.config(teamName));
+    const workerCwd = join(cwd, 'worker-worktree');
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, JSON.stringify({
       name: teamName,
       worker_count: 1,
-      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: workerCwd }],
       agent_type: 'claude',
       created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`,
@@ -82,6 +83,11 @@ describe('recovery pane rollback evidence', () => {
 
     expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
     expect(paneMocks.spawnWorkerInPane).toHaveBeenCalled();
+    expect(paneMocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith(
+      `${teamName}:0`,
+      expect.objectContaining({ paneId: '%2' }),
+      expect.objectContaining({ cwd: workerCwd, launchStateCwd: cwd }),
+    );
     expect(paneMocks.killTeamPane).toHaveBeenCalledTimes(2);
     const evidenceRoot = absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`);
     const evidenceFiles = readdirSync(evidenceRoot);

@@ -432,6 +432,33 @@ describe('plugin shipping surface transaction', () => {
     expect(result.stdout).toContain('plugin shipping surface PR check verified');
   });
 
+  it('accepts a declaration counterpart reached from a base-owned declaration export', () => {
+    const fixture = createFixture();
+    writeJson(join(fixture.root, 'package.json'), {
+      name: 'fixture-plugin',
+      version: '1.0.0',
+      type: 'module',
+      main: './dist/index.js',
+      types: './dist/public.d.ts',
+      bin: { fixture: './bridge/cli.cjs' },
+      files: ['dist/index.js', 'dist/public.d.ts', 'bridge/claude-md-coordinator.cjs'],
+    });
+    writeFileSync(join(fixture.root, 'dist', 'public.d.ts'), "export * from './runtime.js';\n");
+    git(fixture.root, ['add', 'package.json']);
+    git(fixture.root, ['add', '-f', '--', 'dist/public.d.ts']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'declare public type entrypoint']);
+    const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();
+
+    writeFileSync(join(fixture.root, 'dist', 'runtime.d.ts'), 'export declare const fixture: true;\n');
+    git(fixture.root, ['add', '-f', '--', 'dist/runtime.d.ts']);
+    git(fixture.root, ['commit', '--quiet', '-m', 'add generated declaration counterpart']);
+
+    const result = run(fixture.root, 'check-pr', '--base', base);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('plugin shipping surface PR check verified');
+  });
+
   it('rejects a PR diff with an out-of-closure generated artifact', () => {
     const fixture = createFixture();
     const base = git(fixture.root, ['rev-parse', 'HEAD']).trim();

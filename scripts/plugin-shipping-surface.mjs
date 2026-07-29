@@ -412,10 +412,11 @@ function moduleReferences(source, repoPath) {
 function resolveLocalReference(root, importer, specifier) {
   const base = resolve(dirname(join(root, importer)), specifier);
   if (!isInside(realpathSync(root), base)) fail(`runtime import escapes package root: ${importer} -> ${specifier}`);
-  const candidates = [base];
+  const candidates = [];
   if (isDeclarationPath(importer) && MODULE_EXTENSIONS.has(extname(base))) {
     candidates.push(`${base.slice(0, -extname(base).length)}${DECLARATION_EXTENSION}`);
   }
+  candidates.push(base);
   if (!extname(base)) {
     for (const extension of RESOLVABLE_EXTENSIONS) candidates.push(`${base}${extension}`);
     for (const extension of RESOLVABLE_EXTENSIONS) candidates.push(join(base, `index${extension}`));

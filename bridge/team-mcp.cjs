@@ -18507,6 +18507,9 @@ function detectPaneTrustPromptKind(captured) {
   if (hasHookReview && hasHookTrustChoice && hasHookConfirm) return "codex_hooks";
   return null;
 }
+function paneHasTrustPrompt(captured) {
+  return detectPaneTrustPromptKind(captured) !== null;
+}
 function paneHasClaudeStartupBanner(captured) {
   const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trim()).filter((line) => line.length > 0).slice(-20);
   const lastPromptIndex = lines.findLastIndex(paneLineLooksLikeIdlePrompt);
@@ -18540,6 +18543,7 @@ function paneLooksReady(captured) {
   if (content === "") return false;
   const lines = content.split("\n").map((line) => line.replace(/\r/g, "").trimEnd()).filter((line) => line.trim() !== "");
   if (lines.length === 0) return false;
+  if (paneHasTrustPrompt(content)) return true;
   if (paneIsBootstrapping(content)) return false;
   const lastLine = lines[lines.length - 1];
   if (paneLineLooksLikeIdlePrompt(lastLine)) return true;

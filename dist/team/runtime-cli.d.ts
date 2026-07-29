@@ -108,5 +108,7 @@ export declare function finalizeRuntimeShutdown<T>(runtime: Pick<TeamRuntime, 's
 export declare function runWorkerLaunchFromEnvironment(): Promise<void>;
 /** Detached durable recovery-owner entry point. It remains the persistent v2 owner until its fence or team lifecycle is lost. */
 export declare function runRecoveryOwnerFromEnvironment(): Promise<void>;
+export type RuntimeCliMode = 'worker-launch' | 'recovery-gate' | 'recovery-owner' | 'main';
+export declare function selectRuntimeCliMode(argv?: readonly string[], env?: NodeJS.ProcessEnv): RuntimeCliMode;
 export {};
 //# sourceMappingURL=runtime-cli.d.ts.map

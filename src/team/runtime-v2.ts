@@ -919,6 +919,13 @@ async function waitForWorkerStatusTransition(
   return false;
 }
 
+export function promptModeRecoveryRequiresProgressEvidence(
+  promptMode: boolean,
+  continuationCount: number,
+): boolean {
+  return promptMode && continuationCount > 0;
+}
+
 /**
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
@@ -994,6 +1001,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     cwd: opts.workerCwd ?? opts.cwd,
     provider: opts.agentType,
     launchBootstrapPath: resolveRuntimeCliPath(),
+    launchStateCwd: opts.cwd,
   };
   const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
@@ -2201,6 +2209,7 @@ export async function executeRecoverDeadWorkerV2Owner(
             cwd: pending.gate.cwd,
             provider: pending.agentType,
             launchBootstrapPath: runtimeCliPath,
+            launchStateCwd: input.cwd,
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput.recoveryId,
@@ -2342,9 +2351,9 @@ export async function executeRecoverDeadWorkerV2Owner(
           const launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
           if (!launched) throw new Error('startup_ack_timeout');
         }
-        if (pending.promptMode) {
+        if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
           if (!await waitForCurrentEvidence()) throw new Error(`${pending.agentType}_startup_evidence_missing`);
-        } else {
+        } else if (!pending.promptMode) {
           const recoveryTriggerMessage = `${generateTriggerMessage(
             input.teamName,
             sagaInput.workerName,

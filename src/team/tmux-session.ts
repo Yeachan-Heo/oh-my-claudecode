@@ -431,6 +431,7 @@ export interface WorkerPaneConfig {
   cwd: string;
   provider?: CliAgentType;
   launchBootstrapPath?: string;
+  launchStateCwd?: string;
   launchAttempt?: WorkerLaunchAttempt;
 }
 
@@ -1345,8 +1346,9 @@ export async function spawnOwnedWorkerInPane(
 ): Promise<StartupPaneContext> {
   if (!config.provider) throw new Error('worker_launch_provider_missing');
   if (!config.launchBootstrapPath) throw new Error('worker_launch_bootstrap_path_missing');
+  if (!config.launchStateCwd) throw new Error('worker_launch_state_cwd_missing');
   const attempt = await prepareWorkerLaunchAttempt({
-    cwd: config.cwd,
+    cwd: config.launchStateCwd,
     teamName: config.teamName,
     workerName: config.workerName,
     paneId: ownership.paneId,
@@ -1512,6 +1514,7 @@ export function paneLooksReady(captured: string): boolean {
     .map(line => line.replace(/\r/g, '').trimEnd())
     .filter(line => line.trim() !== '');
   if (lines.length === 0) return false;
+  if (paneHasTrustPrompt(content)) return true;
   if (paneIsBootstrapping(content)) return false;
 
   const lastLine = lines[lines.length - 1]!;

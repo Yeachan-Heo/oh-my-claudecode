@@ -24,6 +24,7 @@ import {
   runPersistentRecoveryOwnerLoop,
   finalizeRuntimeShutdown,
   runWorkerLaunchFromEnvironment,
+  selectRuntimeCliMode,
 } from '../runtime-cli.js';
 import { aliasActiveRecoveryRequest, canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest, writeRecoveryFinal } from '../recovery-request-store.js';
 import { absPath, TeamPaths } from '../state-paths.js';
@@ -110,6 +111,14 @@ describe('runtime-cli worker launch bootstrap', () => {
     } finally {
       delete process.env.OMC_WORKER_LAUNCH_SPEC;
     }
+  });
+
+  it('prioritizes explicit worker launch and recovery gate modes over inherited owner state', () => {
+    const inheritedOwner = { OMC_RECOVERY_OWNER_INPUT: '{"requestId":"stale"}' };
+
+    expect(selectRuntimeCliMode(['node', 'runtime-cli.cjs', '--worker-launch'], inheritedOwner)).toBe('worker-launch');
+    expect(selectRuntimeCliMode(['node', 'runtime-cli.cjs', '--recovery-gate'], inheritedOwner)).toBe('recovery-gate');
+    expect(selectRuntimeCliMode(['node', 'runtime-cli.cjs'], inheritedOwner)).toBe('recovery-owner');
   });
 });
 

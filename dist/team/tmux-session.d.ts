@@ -66,6 +66,7 @@ export interface WorkerPaneConfig {
     cwd: string;
     provider?: CliAgentType;
     launchBootstrapPath?: string;
+    launchStateCwd?: string;
     launchAttempt?: WorkerLaunchAttempt;
 }
 export declare function getDefaultShell(): string;

@@ -157,6 +157,7 @@ export interface StartTeamV2Config {
      */
     autoMerge?: boolean;
 }
+export declare function promptModeRecoveryRequiresProgressEvidence(promptMode: boolean, continuationCount: number): boolean;
 interface RecoveryOwnerFinalizationDeps {
     readRevisionedConfig: (teamName: string, cwd: string) => Promise<{
         config: TeamConfig;

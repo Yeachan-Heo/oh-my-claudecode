@@ -586,6 +586,9 @@ async function waitForWorkerStatusTransition(teamName, workerName, cwd, baseline
     }
     return false;
 }
+export function promptModeRecoveryRequiresProgressEvidence(promptMode, continuationCount) {
+    return promptMode && continuationCount > 0;
+}
 /**
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
@@ -650,6 +653,7 @@ async function spawnV2Worker(opts) {
         cwd: opts.workerCwd ?? opts.cwd,
         provider: opts.agentType,
         launchBootstrapPath: resolveRuntimeCliPath(),
+        launchStateCwd: opts.cwd,
     };
     const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
     const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
@@ -1704,6 +1708,7 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         cwd: pending.gate.cwd,
                         provider: pending.agentType,
                         launchBootstrapPath: runtimeCliPath,
+                        launchStateCwd: input.cwd,
                     });
                     const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
                         recovery_id: sagaInput.recoveryId,
@@ -1832,11 +1837,11 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                     if (!launched)
                         throw new Error('startup_ack_timeout');
                 }
-                if (pending.promptMode) {
+                if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
                     if (!await waitForCurrentEvidence())
                         throw new Error(`${pending.agentType}_startup_evidence_missing`);
                 }
-                else {
+                else if (!pending.promptMode) {
                     const recoveryTriggerMessage = `${generateTriggerMessage(input.teamName, sagaInput.workerName, pending.worker.worktree_path ? '$OMC_TEAM_STATE_ROOT' : undefined)} [launch:${pending.startupContext.attempt.attempt_id.slice(0, 12)}]`;
                     const outcome = await queueInboxInstruction({
                         teamName: input.teamName,

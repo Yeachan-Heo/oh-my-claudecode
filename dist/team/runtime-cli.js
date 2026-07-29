@@ -1119,11 +1119,21 @@ export async function runRecoveryOwnerFromEnvironment() {
         bootstrap,
     }, { expectedEpoch });
 }
+export function selectRuntimeCliMode(argv = process.argv, env = process.env) {
+    if (argv.includes('--worker-launch'))
+        return 'worker-launch';
+    if (argv.includes('--recovery-gate'))
+        return 'recovery-gate';
+    if (env.OMC_RECOVERY_OWNER_INPUT)
+        return 'recovery-owner';
+    return 'main';
+}
 if (require.main === module) {
-    const entry = process.env.OMC_RECOVERY_OWNER_INPUT
-        ? runRecoveryOwnerFromEnvironment
-        : process.argv.includes('--worker-launch') ? runWorkerLaunchFromEnvironment
-            : process.argv.includes('--recovery-gate') ? runRecoveryGateFromEnvironment : main;
+    const mode = selectRuntimeCliMode();
+    const entry = mode === 'worker-launch' ? runWorkerLaunchFromEnvironment
+        : mode === 'recovery-gate' ? runRecoveryGateFromEnvironment
+            : mode === 'recovery-owner' ? runRecoveryOwnerFromEnvironment
+                : main;
     entry().catch(err => {
         process.stderr.write(`[runtime-cli] Fatal error: ${err}\n`);
         process.exit(1);

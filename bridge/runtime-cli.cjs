@@ -1876,8 +1876,9 @@ async function spawnWorkerInPane(sessionName2, paneId, config) {
 async function spawnOwnedWorkerInPane(sessionName2, ownership, config) {
   if (!config.provider) throw new Error("worker_launch_provider_missing");
   if (!config.launchBootstrapPath) throw new Error("worker_launch_bootstrap_path_missing");
+  if (!config.launchStateCwd) throw new Error("worker_launch_state_cwd_missing");
   const attempt = await prepareWorkerLaunchAttempt({
-    cwd: config.cwd,
+    cwd: config.launchStateCwd,
     teamName: config.teamName,
     workerName: config.workerName,
     paneId: ownership.paneId,
@@ -1990,6 +1991,7 @@ function paneLooksReady(captured) {
   if (content === "") return false;
   const lines = content.split("\n").map((line) => line.replace(/\r/g, "").trimEnd()).filter((line) => line.trim() !== "");
   if (lines.length === 0) return false;
+  if (paneHasTrustPrompt(content)) return true;
   if (paneIsBootstrapping(content)) return false;
   const lastLine = lines[lines.length - 1];
   if (paneLineLooksLikeIdlePrompt(lastLine)) return true;
@@ -3924,6 +3926,7 @@ __export(runtime_cli_exports, {
   runPersistentRecoveryOwnerLoop: () => runPersistentRecoveryOwnerLoop,
   runRecoveryOwnerFromEnvironment: () => runRecoveryOwnerFromEnvironment,
   runWorkerLaunchFromEnvironment: () => runWorkerLaunchFromEnvironment,
+  selectRuntimeCliMode: () => selectRuntimeCliMode,
   updateAllDeadRecoveryGrace: () => updateAllDeadRecoveryGrace,
   writeResultArtifact: () => writeResultArtifact
 });
@@ -11090,6 +11093,9 @@ async function waitForWorkerStatusTransition(teamName, workerName2, cwd, baselin
   }
   return false;
 }
+function promptModeRecoveryRequiresProgressEvidence(promptMode, continuationCount) {
+  return promptMode && continuationCount > 0;
+}
 async function spawnV2Worker(opts) {
   const splitTarget = opts.existingWorkerPaneIds.length === 0 ? opts.leaderPaneId : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? "right" : "down";
@@ -11158,7 +11164,8 @@ async function spawnV2Worker(opts) {
     launchArgs: [...launchDescriptor.args],
     cwd: opts.workerCwd ?? opts.cwd,
     provider: opts.agentType,
-    launchBootstrapPath: resolveRuntimeCliPath()
+    launchBootstrapPath: resolveRuntimeCliPath(),
+    launchStateCwd: opts.cwd
   };
   const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
@@ -12086,7 +12093,8 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             launchArgs: [runtimeCliPath, "--recovery-gate"],
             cwd: pending.gate.cwd,
             provider: pending.agentType,
-            launchBootstrapPath: runtimeCliPath
+            launchBootstrapPath: runtimeCliPath,
+            launchStateCwd: input.cwd
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput2.recoveryId,
@@ -12226,9 +12234,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           const launched = await waitForRecoveryGateRecord(launchedPath, record, 3e4);
           if (!launched) throw new Error("startup_ack_timeout");
         }
-        if (pending.promptMode) {
+        if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
           if (!await waitForCurrentEvidence()) throw new Error(`${pending.agentType}_startup_evidence_missing`);
-        } else {
+        } else if (!pending.promptMode) {
           const recoveryTriggerMessage = `${generateTriggerMessage(
             input.teamName,
             sagaInput2.workerName,
@@ -14409,8 +14417,15 @@ async function runRecoveryOwnerFromEnvironment() {
     bootstrap
   }, { expectedEpoch });
 }
+function selectRuntimeCliMode(argv = process.argv, env = process.env) {
+  if (argv.includes("--worker-launch")) return "worker-launch";
+  if (argv.includes("--recovery-gate")) return "recovery-gate";
+  if (env.OMC_RECOVERY_OWNER_INPUT) return "recovery-owner";
+  return "main";
+}
 if (require.main === module) {
-  const entry = process.env.OMC_RECOVERY_OWNER_INPUT ? runRecoveryOwnerFromEnvironment : process.argv.includes("--worker-launch") ? runWorkerLaunchFromEnvironment : process.argv.includes("--recovery-gate") ? runRecoveryGateFromEnvironment : main;
+  const mode = selectRuntimeCliMode();
+  const entry = mode === "worker-launch" ? runWorkerLaunchFromEnvironment : mode === "recovery-gate" ? runRecoveryGateFromEnvironment : mode === "recovery-owner" ? runRecoveryOwnerFromEnvironment : main;
   entry().catch((err) => {
     process.stderr.write(`[runtime-cli] Fatal error: ${err}
 `);
@@ -14438,6 +14453,7 @@ if (require.main === module) {
   runPersistentRecoveryOwnerLoop,
   runRecoveryOwnerFromEnvironment,
   runWorkerLaunchFromEnvironment,
+  selectRuntimeCliMode,
   updateAllDeadRecoveryGrace,
   writeResultArtifact
 });

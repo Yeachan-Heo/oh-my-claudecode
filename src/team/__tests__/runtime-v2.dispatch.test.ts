@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 
 import { listDispatchRequests } from '../dispatch-queue.js';
+import { promptModeRecoveryRequiresProgressEvidence } from '../runtime-v2.js';
 
 const mocks = vi.hoisted(() => ({
   createTeamSession: vi.fn(),
@@ -121,6 +122,11 @@ describe('runtime v2 startup inbox dispatch', () => {
   let cwd: string;
   const originalCwd = process.cwd();
 
+  it('does not require progress evidence for an idle prompt-mode recovery', () => {
+    expect(promptModeRecoveryRequiresProgressEvidence(true, 0)).toBe(false);
+    expect(promptModeRecoveryRequiresProgressEvidence(true, 1)).toBe(true);
+    expect(promptModeRecoveryRequiresProgressEvidence(false, 0)).toBe(false);
+  });
   beforeEach(() => {
     vi.resetModules();
     mocks.createTeamSession.mockReset();
@@ -507,6 +513,14 @@ describe('runtime v2 startup inbox dispatch', () => {
       worktree_detached: false,
       worktree_created: true,
     });
+    expect(mocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith(
+      'dispatch-session',
+      expect.objectContaining({ paneId: '%2' }),
+      expect.objectContaining({
+        cwd: join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1'),
+        launchStateCwd: cwd,
+      }),
+    );
 
     const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
     const manifestPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json');

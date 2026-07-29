@@ -529,6 +529,18 @@ describe('pane readiness startup banners', () => {
     expect(paneLooksReady(capture)).toBe(false);
   });
 
+  it('treats an exact directory trust selector as ready for legacy delivery', () => {
+    const capture = [
+      'Do you trust the contents of this directory?',
+      '› 1. Yes, continue',
+      '  2. No, quit',
+    ].join('\n');
+
+    expect(paneHasTrustPrompt(capture)).toBe(true);
+    expect(paneLooksReady(capture)).toBe(true);
+    expect(paneHasActiveTask(capture)).toBe(false);
+  });
+
   it('detects Codex CLI hook-trust review screen as a trust prompt', () => {
     const capture = [
       '  Hooks need review',

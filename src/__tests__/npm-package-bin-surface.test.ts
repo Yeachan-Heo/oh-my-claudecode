@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -246,6 +247,47 @@ describe("npm package bin surface regression", () => {
         relativePath,
       ).toBe(sha256(join(committedSnapshotCache!, relativePath)));
     }
+  });
+
+  it("typechecks the packed team declaration closure with skipLibCheck disabled", () => {
+    const consumerRoot = join(fixtureRootCache!, "type-consumer");
+    const consumerModules = join(consumerRoot, "node_modules");
+    const packageName = packedPackageFixture.packageJson.name!;
+    mkdirSync(consumerModules, { recursive: true });
+    symlinkSync(
+      packedPackageFixture.extractedPackageRoot,
+      join(consumerModules, packageName),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    symlinkSync(
+      join(PACKAGE_ROOT, "node_modules"),
+      join(packedPackageFixture.extractedPackageRoot, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    writeFileSync(join(consumerRoot, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      join(consumerRoot, "index.ts"),
+      `import { recoverDeadWorkerV2 } from ${JSON.stringify(`./node_modules/${packageName}/dist/team/index.js`)};\nvoid recoverDeadWorkerV2;\n`,
+    );
+    writeFileSync(join(consumerRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        strict: true,
+        skipLibCheck: false,
+        noEmit: true,
+        types: ["node"],
+        typeRoots: [join(PACKAGE_ROOT, "node_modules", "@types")],
+      },
+      include: ["index.ts"],
+    }));
+
+    expect(() => execFileSync(
+      process.execPath,
+      [join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumerRoot, "tsconfig.json")],
+      { cwd: consumerRoot, stdio: "pipe" },
+    )).not.toThrow();
   });
 
   it("rebuilds recovery CLI surfaces from source without committed bundles", () => {
