@@ -179,6 +179,12 @@ describe('worker launch acknowledgement', () => {
       attemptId: launchAttempt.attempt_id,
       runtimeCliPath: '/runtime-cli.cjs',
     })).resolves.toBeNull();
+    await expect(loadCurrentWorkerLaunchAttempt({
+      cwd,
+      teamName: 'launch-team',
+      workerName: 'worker-1',
+      provider: 'claude',
+    })).resolves.toBeNull();
   });
   it('keeps revocation terminal when it races a valid acknowledgement', async () => {
     const launchAttempt = await attempt();
@@ -331,6 +337,8 @@ describe('worker launch acknowledgement', () => {
     const providerArgv = [
       'C:\\Program Files\\Codex\\codex.cmd',
       '--label=100% ready',
+      '--home=%USERPROFILE%',
+      '--encoded=%25',
       'say "hello" & continue',
     ];
 
@@ -338,7 +346,7 @@ describe('worker launch acknowledgement', () => {
     expect(windowsInvocation).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
       args: ['/d', '/s', '/c'],
-      batchScript: '@echo off\r\ncall "C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "say ""hello"" & continue"\r\nexit /b %ERRORLEVEL%\r\n',
+      batchScript: '@echo off\r\n"C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "--home=%%USERPROFILE%%" "--encoded=%%25" "say ""hello"" & continue"\r\n',
     });
     const materialized = await materializeProviderSpawnInvocation(windowsInvocation);
     const wrapperPath = materialized.args[3]!.slice(1, -1);

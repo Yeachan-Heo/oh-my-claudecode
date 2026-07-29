@@ -407,7 +407,7 @@ export function buildProviderSpawnInvocation(providerArgv, platform = process.pl
         return {
             command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
             args: ['/d', '/s', '/c'],
-            batchScript: `@echo off\r\ncall ${providerArgv.map(quoteWindowsCmdArgument).join(' ')}\r\nexit /b %ERRORLEVEL%\r\n`,
+            batchScript: `@echo off\r\n${providerArgv.map(quoteWindowsCmdArgument).join(' ')}\r\n`,
         };
     }
     return { command, args };

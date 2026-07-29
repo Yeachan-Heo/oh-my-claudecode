@@ -73,6 +73,24 @@ afterEach(() => {
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
+async function expectRecoveryLockReleased(teamName: string, workerName: string, suffix: string): Promise<void> {
+  const requestId = `${suffix}-followup-request`;
+  reserveRecoveryRequest(cwd, requestId, {
+    operation: 'recover-worker',
+    workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+    teamName,
+    workerName,
+  }, `${suffix}-followup-recovery`);
+  let timeout: NodeJS.Timeout | undefined;
+  await expect(Promise.race([
+    executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName, requestId }),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('recovery lock remained held after terminal failure')), 2_000);
+    }),
+  ])).resolves.toBeDefined();
+  if (timeout) clearTimeout(timeout);
+}
+
 describe('recovery pane rollback evidence', () => {
   it('retains the attempt and publishes durable evidence when pane cleanup cannot be verified', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-orphan-'));
@@ -114,6 +132,7 @@ describe('recovery pane rollback evidence', () => {
     const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
     expect(evidence).toMatchObject({ schema_version: 1, team_name: teamName, worker_name: 'worker-1',
       request_id: requestId, recovery_id: recoveryId, pane_id: '%2', reason: 'spawn failed --api-key=<redacted> after pane creation', liveness: 'alive' });
+    await expectRecoveryLockReleased(teamName, 'worker-1', 'cleanup-failure');
   });
 
   it('reconciles an accepted initial launch pointer before treating the worker as already running', async () => {
@@ -376,6 +395,7 @@ describe('recovery pane rollback evidence', () => {
       request_id: requestId, recovery_id: recoveryId, pane_id: null, reason: 'pane_identity_pane_id_missing',
       liveness: 'unknown', unaddressable: true,
       split: { commandSucceeded: true, provider: 'tmux', rawOutput: 'not-a-pane', paneId: null } });
+    await expectRecoveryLockReleased(teamName, 'worker-1', 'unaddressable-split');
   });
 
   it('persists failed split stdout and stderr as durable recovery orphan evidence', async () => {
@@ -448,6 +468,7 @@ describe('recovery pane rollback evidence', () => {
 
     expect(paneMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
     expect(paneMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    expect(paneMocks.killTeamPane).not.toHaveBeenCalled();
     const evidenceRoot = absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`);
     const evidenceFiles = readdirSync(evidenceRoot);
     expect(evidenceFiles).toHaveLength(1);

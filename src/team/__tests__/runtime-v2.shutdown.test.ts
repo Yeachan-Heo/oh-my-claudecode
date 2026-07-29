@@ -355,6 +355,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force }))
       .rejects.toThrow('shutdown_blocked:active_recovery:recovery-active');
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(existsSync(configPath)).toBe(true);
     expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
   });
@@ -377,6 +378,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force: true }))
       .rejects.toThrow('invalid_persisted_state');
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({ lifecycle_state: 'active', state_revision: 4 });
   });
 
@@ -404,6 +406,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force: true }))
       .rejects.toThrow('shutdown_blocked:active_scale_down:scale-down-active');
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
   });
 
@@ -429,6 +432,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       .rejects.toThrow('shutdown_rejected:worker-1:still working');
 
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(persisted.lifecycle_state).toBe('active');
     expect(persisted.state_revision).toBe(6);
@@ -459,6 +463,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       .rejects.toThrow('shutdown_rejected_fence_lost:worker-1:still working');
 
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(persisted.lifecycle_state).toBe('shutting_down');
     expect(persisted.state_revision).toBe(5);
@@ -488,6 +493,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       .rejects.toThrow('shutdown_gate_blocked:pending=1,blocked=0,in_progress=0,failed=0');
 
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(persisted.lifecycle_state).toBe('active');
     expect(persisted.state_revision).toBe(4);

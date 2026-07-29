@@ -1368,8 +1368,7 @@ function buildProviderSpawnInvocation(providerArgv, platform = process.platform,
       command: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
       args: ["/d", "/s", "/c"],
       batchScript: `@echo off\r
-call ${providerArgv.map(quoteWindowsCmdArgument).join(" ")}\r
-exit /b %ERRORLEVEL%\r
+${providerArgv.map(quoteWindowsCmdArgument).join(" ")}\r
 `
     };
   }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { runWorkerActivationGate } from '../worker-activation-gate.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
+import { isProcessAlive } from '../../platform/process-utils.js';
 
 let cwd: string;
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'recovery-gate-')); });
@@ -62,7 +63,7 @@ describe('worker recovery activation gate', () => {
     });
   });
 
-  it('does not publish launched evidence for a provider that exits immediately', async () => {
+  it.each([0, 7])('does not publish launched evidence for a provider that exits immediately with code %s', async exitCode => {
     const readyPath = join(cwd, 'early-exit-ready.json');
     const activatePath = join(cwd, 'early-exit-activate.json');
     const runPath = join(cwd, 'early-exit-run.json');
@@ -75,11 +76,11 @@ describe('worker recovery activation gate', () => {
 
     await expect(runWorkerActivationGate({
       recoveryId: 'recovery-early-exit', workerName: 'worker-1', replacementGeneration: 9, paneAttemptId: 'attempt-early-exit',
-      readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', 'process.exit(7)'],
+      readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', `process.exit(${exitCode})`],
       launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
-    })).resolves.toEqual({ outcome: 'ran', exitCode: 7, signal: null });
+    })).resolves.toEqual({ outcome: 'ran', exitCode, signal: null });
     expect(existsSync(`${runPath}.launched`)).toBe(false);
-    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: 7 });
+    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: exitCode });
   });
   it('does not publish launched evidence when the provider executable cannot spawn', async () => {
     const readyPath = join(cwd, 'failed-ready.json');
@@ -112,13 +113,17 @@ describe('worker recovery activation gate', () => {
     writeFileSync(runPath, JSON.stringify(record));
     mkdirSync(`${runPath}.launched`);
 
+    const startedAt = Date.now();
     await expect(runWorkerActivationGate({
       recoveryId: 'recovery-marker-failure', workerName: 'worker-1', replacementGeneration: 10,
       paneAttemptId: 'attempt-marker-failure', readyPath, activatePath, runPath,
       providerArgv: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 5000)'],
       launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
     })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
-    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit' });
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    const terminal = JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'));
+    expect(terminal).toMatchObject({ outcome: 'exit' });
+    expect(isProcessAlive(terminal.provider_pid)).toBe(false);
   });
 
   it.each([
