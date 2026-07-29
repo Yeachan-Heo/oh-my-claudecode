@@ -234,7 +234,7 @@ describe('recovery pane rollback evidence', () => {
           provider: 'gemini',
           model: null,
           binary: process.execPath,
-          args: ['-e', `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(providerObservedPath)},fs.readFileSync(${JSON.stringify(inboxPath)},'utf8'));setTimeout(()=>process.exit(0),1500)`],
+          args: ['-e', `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(providerObservedPath)},fs.readFileSync(${JSON.stringify(inboxPath)},'utf8'));setTimeout(()=>process.exit(0),5000)`],
         },
         pane_id: '%1',
         replacement_generation: 1,
