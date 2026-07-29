@@ -35632,7 +35632,7 @@ async function loadCurrentWorkerLaunchAttempt(input) {
     return null;
   }
 }
-function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2) {
+function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2, options = {}) {
   return {
     ...identityOf(attempt),
     current_path: attempt.currentPath,
@@ -35642,7 +35642,8 @@ function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2) {
     started_path: attempt.startedPath,
     provider_argv: [...providerArgv],
     cwd: cwd2,
-    decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS)
+    decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
+    release_after_spawn: options.releaseAfterSpawn === true
   };
 }
 async function publishDecision(attempt, decision, reason) {
@@ -35720,6 +35721,16 @@ async function isWorkerLaunchAttemptCurrent(attempt) {
     return await withFileLock(lockPathFor(attempt.currentPath), () => isCurrentLaunchIdentity(attempt.currentPath, attempt));
   } catch {
     return false;
+  }
+}
+async function withWorkerLaunchAttemptFence(attempt, fn) {
+  try {
+    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt) || !await isWorkerLaunchAttemptAccepted(attempt)) return { ok: false };
+      return { ok: true, value: await fn() };
+    });
+  } catch {
+    return { ok: false };
   }
 }
 async function isWorkerLaunchProviderStarted(attempt) {
@@ -35829,7 +35840,7 @@ function isCmuxContext() {
   return detectTeamMultiplexerContext() === "cmux";
 }
 function isCmuxSurfaceTarget(value) {
-  return isCmuxContext() && typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync5("cmux", args, { encoding: "utf-8" });
@@ -36292,7 +36303,8 @@ function buildWorkerStartCommand(config2) {
     OMC_WORKER_LAUNCH_SPEC: JSON.stringify(buildWorkerLaunchBootstrapSpec(
       config2.launchAttempt,
       providerLaunchWords,
-      config2.cwd
+      config2.cwd,
+      { releaseAfterSpawn: Boolean(config2.envVars?.OMC_RECOVERY_GATE_SPEC) }
     ))
   } : config2.envVars;
   const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== "1";
@@ -36468,8 +36480,7 @@ async function workerPaneBelongsToProviderTarget(input) {
   }, input.dependencies);
   return membership.kind === "owned";
 }
-async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd2) {
-  const provider = isCmuxContext() ? "cmux" : "tmux";
+async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd2, provider = isCmuxContext() ? "cmux" : "tmux") {
   try {
     if (provider === "cmux") {
       const splitResult2 = await cmuxSplitSurface(splitTarget, direction, cwd2);
@@ -37214,27 +37225,27 @@ function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
   }
   return [...unique];
 }
-async function resolveSplitPaneWorkerPaneIds(sessionName2, recordedPaneIds, leaderPaneId) {
-  const resolved = dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
-  if (!sessionName2.includes(":")) return resolved;
-  try {
-    const paneResult = await tmuxCmdAsync(["list-panes", "-t", sessionName2, "-F", "#{pane_id}"]);
-    return dedupeWorkerPaneIds(
-      [...resolved, ...paneResult.stdout.split("\n").map((paneId) => paneId.trim())],
-      leaderPaneId
-    );
-  } catch {
-    return resolved;
-  }
+async function resolveSplitPaneWorkerPaneIds(_sessionName, recordedPaneIds, leaderPaneId) {
+  return dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
 }
 async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, options = {}) {
   const sessionMode = options.sessionMode ?? (sessionName2.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
     if (!workerPaneIds?.length) return;
+    const provider = sessionName2.startsWith("cmux:") ? "cmux" : "tmux";
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
-        await killTeamPane(id);
+        const membership = await verifyTeamTargetOwnership({
+          provider,
+          providerTarget: sessionName2,
+          recipient: "worker",
+          recipientRole: "worker",
+          paneId: id
+        });
+        if (membership.kind !== "owned") continue;
+        if (provider === "cmux") await cmuxCloseSurface(id);
+        else await tmuxExecAsync(["kill-pane", "-t", id]);
       } catch {
       }
     }
@@ -41701,7 +41712,7 @@ async function waitForRecoveryGateRecord(path25, expected, timeoutMs, pollInterv
   while (Date.now() < deadline) {
     try {
       const value = JSON.parse(await (0, import_promises19.readFile)(path25, "utf8"));
-      if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id) return true;
+      if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id && value.launch_attempt_id === expected.launch_attempt_id && value.launch_nonce === expected.launch_nonce) return true;
     } catch {
     }
     await new Promise((resolve33) => setTimeout(resolve33, pollIntervalMs));
@@ -42211,7 +42222,7 @@ async function spawnV2Worker(opts) {
     providerTarget: opts.sessionName,
     paneId: splitTarget
   })) throw new Error("worker_pane_split_target_unverified");
-  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
+  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd, launchProvider);
   const ownershipResult = proveWorkerPaneOwnership(split, {
     providerTarget: opts.sessionName,
     leaderPaneId: opts.leaderPaneId,
@@ -43210,7 +43221,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               recovery_id: sagaInput2.recoveryId,
               worker_name: sagaInput2.workerName,
               replacement_generation: sagaInput2.replacementGeneration,
-              pane_attempt_id: committedPane.paneAttemptId
+              pane_attempt_id: committedPane.paneAttemptId,
+              launch_attempt_id: pending2.startupContext.attempt.attempt_id,
+              launch_nonce: pending2.startupContext.attempt.nonce
             };
             const ready = await waitForRecoveryGateRecord(pending2.gate.readyPath, expected, 1e3);
             const manifest = await readTeamManifest(input.teamName, input.cwd);
@@ -43267,7 +43280,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
               recovery_id: sagaInput2.recoveryId,
               worker_name: sagaInput2.workerName,
               replacement_generation: sagaInput2.replacementGeneration,
-              pane_attempt_id: context.pane_attempt_id
+              pane_attempt_id: context.pane_attempt_id,
+              launch_attempt_id: currentLaunch.attempt_id,
+              launch_nonce: currentLaunch.nonce
             }, 5e3);
             return ready ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false } : { ok: false, error: "startup_ack_timeout" };
           }
@@ -43287,7 +43302,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           providerTarget: owner.config.tmux_session,
           paneId: splitTarget
         })) return { ok: false, error: "worker_activation_failed" };
-        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
+        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd, recoveryProvider);
         const ownershipResult = proveWorkerPaneOwnership(split, {
           providerTarget: owner.config.tmux_session,
           leaderPaneId,
@@ -43344,7 +43359,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             recovery_id: sagaInput2.recoveryId,
             worker_name: sagaInput2.workerName,
             replacement_generation: sagaInput2.replacementGeneration,
-            pane_attempt_id: paneAttemptId
+            pane_attempt_id: paneAttemptId,
+            launch_attempt_id: pending.startupContext.attempt.attempt_id,
+            launch_nonce: pending.startupContext.attempt.nonce
           }, 3e4);
           if (!ready) throw new Error("startup_ack_timeout");
           return { ok: true, paneId: pending.ownership.paneId, paneAttemptId, committed: false };
@@ -43366,7 +43383,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
         if (!current) throw new Error("invalid_persisted_state");
         const pending = pendingRecoveryPanes.get(sagaInput2.recoveryId);
-        if (!pending) throw new Error("worker_activation_failed");
+        if (!pending?.startupContext) throw new Error("worker_activation_failed");
         const nextWorkers = current.config.workers.map((candidate) => candidate.name === sagaInput2.workerName ? {
           ...candidate,
           pane_id: paneId,
@@ -43383,7 +43400,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           state_revision: nextRevision,
           active_recovery: current.config.active_recovery ? { ...current.config.active_recovery, phase: "active", state_revision: nextRevision, updated_at: (/* @__PURE__ */ new Date()).toISOString() } : current.config.active_recovery
         };
-        if (!await saveTeamConfigAtRevision(next, current.stateRevision, input.cwd)) throw new Error("stale_state_revision");
+        const persisted = await withWorkerLaunchAttemptFence(pending.startupContext.attempt, () => saveTeamConfigAtRevision(next, current.stateRevision, input.cwd));
+        if (!persisted.ok) throw new Error("worker_activation_failed");
+        if (!persisted.value) throw new Error("stale_state_revision");
         const manifestSync = await resolveCommittedRecoveryManifestSync(
           () => readTeamManifest(input.teamName, input.cwd),
           {
@@ -43400,20 +43419,29 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         await ensureFence();
         const pending = pendingRecoveryPanes.get(sagaInput2.recoveryId);
         if (!pending || pending.paneAttemptId !== paneAttemptId) return { ok: false, error: "worker_activation_failed" };
+        if (!pending.startupContext || !await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: "worker_activation_failed" };
+        }
         const record2 = {
           recovery_id: sagaInput2.recoveryId,
           worker_name: sagaInput2.workerName,
           replacement_generation: sagaInput2.replacementGeneration,
           pane_attempt_id: paneAttemptId,
+          launch_attempt_id: pending.startupContext.attempt.attempt_id,
+          launch_nonce: pending.startupContext.attempt.nonce,
           written_at: (/* @__PURE__ */ new Date()).toISOString()
         };
         await (0, import_promises20.mkdir)((0, import_path94.join)(pending.gate.activatePath, ".."), { recursive: true });
         await (0, import_promises20.writeFile)(pending.gate.activatePath, JSON.stringify(record2), "utf8");
         const adoptedReady = await waitForRecoveryGateRecord(`${pending.gate.readyPath}.adoption-ready`, record2, 3e4);
-        return adoptedReady ? { ok: true } : { ok: false, error: "worker_activation_failed" };
+        return adoptedReady && await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt) ? { ok: true } : { ok: false, error: "worker_activation_failed" };
       },
       adoptAll: async (sagaInput2, proof, taskIds) => {
         await ensureFence();
+        const pending = pendingRecoveryPanes.get(sagaInput2.recoveryId);
+        if (!pending?.startupContext || !await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: "worker_activation_failed" };
+        }
         const results = await teamAdoptRecoveryReservations(input.teamName, input.cwd, taskIds, sagaInput2.workerName, proof);
         const failed = results.find((result2) => !result2.ok);
         if (failed && !failed.ok) {
@@ -43426,6 +43454,9 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           payload: result2.checkpoint.resume_payload,
           claimToken: result2.claimToken
         }));
+        if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: "worker_activation_failed" };
+        }
         return { ok: true, continuations };
       },
       repairServices: async () => {
@@ -43473,13 +43504,20 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           worker_name: sagaInput2.workerName,
           replacement_generation: sagaInput2.replacementGeneration,
           pane_attempt_id: paneAttemptId,
+          launch_attempt_id: pending.startupContext.attempt.attempt_id,
+          launch_nonce: pending.startupContext.attempt.nonce,
           written_at: (/* @__PURE__ */ new Date()).toISOString()
         };
         const launchedPath = `${pending.gate.runPath}.launched`;
-        if (!(0, import_fs77.existsSync)(launchedPath)) {
+        let launched = await waitForRecoveryGateRecord(launchedPath, record2, 25, 5);
+        if (!launched) {
+          if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) throw new Error("worker_activation_failed");
           await (0, import_promises20.writeFile)(pending.gate.runPath, JSON.stringify(record2), "utf8");
-          const launched = await waitForRecoveryGateRecord(launchedPath, record2, 3e4);
-          if (!launched) throw new Error("startup_ack_timeout");
+          launched = await waitForRecoveryGateRecord(launchedPath, record2, 3e4);
+        }
+        if (!launched) throw new Error("startup_ack_timeout");
+        if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt) || await getWorkerPaneLiveness(pending.ownership.paneId) !== "alive") {
+          throw new Error("worker_activation_failed");
         }
         if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
           if (!await waitForCurrentEvidence()) throw new Error(`${pending.agentType}_startup_evidence_missing`);

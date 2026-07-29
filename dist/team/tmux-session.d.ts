@@ -191,7 +191,7 @@ export declare function workerPaneBelongsToProviderTarget(input: {
     paneId: string;
     dependencies?: MailboxTargetOwnershipDependencies;
 }): Promise<boolean>;
-export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<WorkerPaneSplitEvidence>;
+export declare function splitTeamWorkerPaneWithEvidence(splitTarget: string, direction: 'right' | 'down', cwd: string, provider?: WorkerPaneSplitEvidence['provider']): Promise<WorkerPaneSplitEvidence>;
 export declare function splitTeamWorkerPane(splitTarget: string, direction: 'right' | 'down', cwd: string): Promise<string | null>;
 export declare function createTeamSession(teamName: string, workerCount: number, cwd: string, options?: CreateTeamSessionOptions): Promise<TeamSession>;
 /**
@@ -276,7 +276,7 @@ export declare function killWorkerPanes(opts: {
     cwd: string;
     graceMs?: number;
 }): Promise<void>;
-export declare function resolveSplitPaneWorkerPaneIds(sessionName: string, recordedPaneIds?: string[], leaderPaneId?: string): Promise<string[]>;
+export declare function resolveSplitPaneWorkerPaneIds(_sessionName: string, recordedPaneIds?: string[], leaderPaneId?: string): Promise<string[]>;
 /**
  * Kill the team tmux session or just the worker panes, depending on how the
  * team was created.

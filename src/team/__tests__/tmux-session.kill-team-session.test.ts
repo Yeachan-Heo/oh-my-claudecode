@@ -109,14 +109,20 @@ describe('killTeamSession safeguards', () => {
     expect(mocked.execCalls.some((args) => args[0] === 'kill-pane')).toBe(false);
   });
 
-  it('discovers additional split-pane worker panes from the recorded team target', async () => {
+  it('uses only recorded worker panes during split-pane shutdown', async () => {
     mocked.listedPanes = '%10\n%11\n%12\n';
 
     const paneIds = await resolveSplitPaneWorkerPaneIds('leader-session:0', ['%11'], '%10');
 
-    expect(paneIds).toEqual(['%11', '%12']);
-    expect(mocked.execCalls.some((args) =>
-      args[0] === 'list-panes' && args.includes('leader-session:0'),
-    )).toBe(true);
+    expect(paneIds).toEqual(['%11']);
+    expect(mocked.execCalls.some((args) => args[0] === 'list-panes')).toBe(false);
+  });
+
+  it('preserves a recorded worker pane when target membership cannot be proven', async () => {
+    mocked.listedPanes = '%10\n';
+
+    await killTeamSession('leader-session:0', ['%11'], '%10');
+
+    expect(mocked.execCalls.some((args) => args[0] === 'kill-pane' && args.includes('%11'))).toBe(false);
   });
 });

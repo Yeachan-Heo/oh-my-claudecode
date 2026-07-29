@@ -82,7 +82,7 @@ function isCmuxContext(): boolean {
 }
 
 function isCmuxSurfaceTarget(value: string | undefined): value is string {
-  return isCmuxContext() && typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
+  return typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
 }
 
 async function cmuxExecAsync(args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -779,6 +779,7 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
           config.launchAttempt,
           providerLaunchWords,
           config.cwd,
+          { releaseAfterSpawn: Boolean(config.envVars?.OMC_RECOVERY_GATE_SPEC) },
         )),
       }
     : config.envVars;
@@ -1092,8 +1093,8 @@ export async function splitTeamWorkerPaneWithEvidence(
   splitTarget: string,
   direction: 'right' | 'down',
   cwd: string,
+  provider: WorkerPaneSplitEvidence['provider'] = isCmuxContext() ? 'cmux' : 'tmux',
 ): Promise<WorkerPaneSplitEvidence> {
-  const provider = isCmuxContext() ? 'cmux' as const : 'tmux' as const;
   try {
     if (provider === 'cmux') {
       const splitResult = await cmuxSplitSurface(splitTarget, direction, cwd);
@@ -2026,22 +2027,11 @@ function dedupeWorkerPaneIds(paneIds: Array<string | undefined>, leaderPaneId?: 
 }
 
 export async function resolveSplitPaneWorkerPaneIds(
-  sessionName: string,
+  _sessionName: string,
   recordedPaneIds?: string[],
   leaderPaneId?: string,
 ): Promise<string[]> {
-  const resolved = dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
-  if (!sessionName.includes(':')) return resolved;
-
-  try {
-    const paneResult = await tmuxCmdAsync(['list-panes', '-t', sessionName, '-F', '#{pane_id}']);
-    return dedupeWorkerPaneIds(
-      [...resolved, ...paneResult.stdout.split('\n').map((paneId) => paneId.trim())],
-      leaderPaneId,
-    );
-  } catch {
-    return resolved;
-  }
+  return dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
 }
 
 /**
@@ -2063,11 +2053,21 @@ export async function killTeamSession(
 
   if (sessionMode === 'split-pane') {
     if (!workerPaneIds?.length) return;
+    const provider = sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
-        await killTeamPane(id);
-      } catch { /* already gone */ }
+        const membership = await verifyTeamTargetOwnership({
+          provider,
+          providerTarget: sessionName,
+          recipient: 'worker',
+          recipientRole: 'worker',
+          paneId: id,
+        });
+        if (membership.kind !== 'owned') continue;
+        if (provider === 'cmux') await cmuxCloseSurface(id);
+        else await tmuxExecAsync(['kill-pane', '-t', id]);
+      } catch { /* preserve unverified or already-gone panes */ }
     }
     return;
   }

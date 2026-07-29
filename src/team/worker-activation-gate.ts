@@ -28,6 +28,8 @@ interface GateRecord {
   worker_name: string;
   replacement_generation: number;
   pane_attempt_id: string;
+  launch_attempt_id: string;
+  launch_nonce: string;
   written_at: string;
 }
 
@@ -44,7 +46,8 @@ export async function waitForRecoveryGateRecord(path: string, expected: Omit<Gat
     try {
       const value = JSON.parse(await readFile(path, 'utf8')) as Partial<GateRecord>;
       if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name
-        && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id) return true;
+        && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id
+        && value.launch_attempt_id === expected.launch_attempt_id && value.launch_nonce === expected.launch_nonce) return true;
     } catch { /* absent or incomplete publication; keep waiting */ }
     await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
   }
@@ -69,6 +72,8 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
     worker_name: gate.workerName,
     replacement_generation: gate.replacementGeneration,
     pane_attempt_id: gate.paneAttemptId,
+    launch_attempt_id: gate.launchAttempt.attempt_id,
+    launch_nonce: gate.launchAttempt.nonce,
     written_at: new Date().toISOString(),
   };
   const timeoutMs = gate.timeoutMs ?? 30_000;

@@ -207,7 +207,7 @@ export async function loadCurrentWorkerLaunchAttempt(input) {
         return null;
     }
 }
-export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd) {
+export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd, options = {}) {
     return {
         ...identityOf(attempt),
         current_path: attempt.currentPath,
@@ -218,6 +218,7 @@ export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd) {
         provider_argv: [...providerArgv],
         cwd,
         decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
+        release_after_spawn: options.releaseAfterSpawn === true,
     };
 }
 async function publishDecision(attempt, decision, reason) {
@@ -356,6 +357,7 @@ function isValidBootstrapSpec(value) {
         && typeof spec.cwd === 'string'
         && spec.cwd.length > 0
         && Number.isSafeInteger(spec.decision_timeout_ms)
+        && typeof spec.release_after_spawn === 'boolean'
         && Number(spec.decision_timeout_ms) > 0;
 }
 async function publishAcknowledgement(spec) {
@@ -476,6 +478,8 @@ export async function runWorkerLaunchBootstrap(value) {
                 await completion;
                 return { outcome: 'provider_spawn_failed' };
             }
+            if (spec.release_after_spawn)
+                return { outcome: 'ran', exitCode: null, signal: null };
             return { completion };
         });
         if ('completion' in launched) {

@@ -152,7 +152,7 @@ import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, 
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
-import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -950,7 +950,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     providerTarget: opts.sessionName,
     paneId: splitTarget,
   })) throw new Error('worker_pane_split_target_unverified');
-  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd);
+  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd, launchProvider);
   const ownershipResult = proveWorkerPaneOwnership(split, {
     providerTarget: opts.sessionName,
     leaderPaneId: opts.leaderPaneId,
@@ -2236,6 +2236,8 @@ export async function executeRecoverDeadWorkerV2Owner(
               worker_name: sagaInput.workerName,
               replacement_generation: sagaInput.replacementGeneration,
               pane_attempt_id: committedPane.paneAttemptId,
+              launch_attempt_id: pending.startupContext!.attempt.attempt_id,
+              launch_nonce: pending.startupContext!.attempt.nonce,
             };
             const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, expected, 1_000);
             const manifest = await readTeamManifest(input.teamName, input.cwd);
@@ -2298,6 +2300,8 @@ export async function executeRecoverDeadWorkerV2Owner(
               worker_name: sagaInput.workerName,
               replacement_generation: sagaInput.replacementGeneration,
               pane_attempt_id: context.pane_attempt_id,
+              launch_attempt_id: currentLaunch.attempt_id,
+              launch_nonce: currentLaunch.nonce,
             }, 5_000);
             return ready
               ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false }
@@ -2320,7 +2324,7 @@ export async function executeRecoverDeadWorkerV2Owner(
           providerTarget: owner.config.tmux_session!,
           paneId: splitTarget,
         })) return { ok: false, error: 'worker_activation_failed' };
-        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd);
+        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd, recoveryProvider);
         const ownershipResult = proveWorkerPaneOwnership(split, {
           providerTarget: owner.config.tmux_session!,
           leaderPaneId,
@@ -2378,6 +2382,8 @@ export async function executeRecoverDeadWorkerV2Owner(
             worker_name: sagaInput.workerName,
             replacement_generation: sagaInput.replacementGeneration,
             pane_attempt_id: paneAttemptId,
+            launch_attempt_id: pending.startupContext!.attempt.attempt_id,
+            launch_nonce: pending.startupContext!.attempt.nonce,
           }, 30_000);
           if (!ready) throw new Error('startup_ack_timeout');
           return { ok: true, paneId: pending.ownership.paneId, paneAttemptId, committed: false };
@@ -2401,7 +2407,7 @@ export async function executeRecoverDeadWorkerV2Owner(
         const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
         if (!current) throw new Error('invalid_persisted_state');
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending) throw new Error('worker_activation_failed');
+        if (!pending?.startupContext) throw new Error('worker_activation_failed');
         const nextWorkers = current.config.workers.map(candidate => candidate.name === sagaInput.workerName
           ? {
               ...candidate,
@@ -2422,7 +2428,11 @@ export async function executeRecoverDeadWorkerV2Owner(
             ? { ...current.config.active_recovery, phase: 'active', state_revision: nextRevision, updated_at: new Date().toISOString() }
             : current.config.active_recovery,
         };
-        if (!await saveTeamConfigAtRevision(next, current.stateRevision, input.cwd)) throw new Error('stale_state_revision');
+        const persisted = await withWorkerLaunchAttemptFence(pending.startupContext.attempt, () => (
+          saveTeamConfigAtRevision(next, current.stateRevision, input.cwd)
+        ));
+        if (!persisted.ok) throw new Error('worker_activation_failed');
+        if (!persisted.value) throw new Error('stale_state_revision');
         const manifestSync = await resolveCommittedRecoveryManifestSync(
           () => readTeamManifest(input.teamName, input.cwd),
           { workerName: sagaInput.workerName, paneId, paneAttemptId: pending.paneAttemptId,
@@ -2434,15 +2444,27 @@ export async function executeRecoverDeadWorkerV2Owner(
         await ensureFence();
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
         if (!pending || pending.paneAttemptId !== paneAttemptId) return { ok: false, error: 'worker_activation_failed' };
+        if (!pending.startupContext || !await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: 'worker_activation_failed' };
+        }
         const record = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
-          replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId, written_at: new Date().toISOString() };
+          replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId,
+          launch_attempt_id: pending.startupContext.attempt.attempt_id,
+          launch_nonce: pending.startupContext.attempt.nonce,
+          written_at: new Date().toISOString() };
         await mkdir(join(pending.gate.activatePath, '..'), { recursive: true });
         await writeFile(pending.gate.activatePath, JSON.stringify(record), 'utf8');
         const adoptedReady = await waitForRecoveryGateRecord(`${pending.gate.readyPath}.adoption-ready`, record, 30_000);
-        return adoptedReady ? { ok: true } : { ok: false, error: 'worker_activation_failed' };
+        return adoptedReady && await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)
+          ? { ok: true }
+          : { ok: false, error: 'worker_activation_failed' };
       },
       adoptAll: async (sagaInput, proof, taskIds) => {
         await ensureFence();
+        const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
+        if (!pending?.startupContext || !await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: 'worker_activation_failed' };
+        }
         const results = await teamAdoptRecoveryReservations(input.teamName, input.cwd, taskIds, sagaInput.workerName, proof);
         const failed = results.find(result => !result.ok);
         if (failed && !failed.ok) {
@@ -2454,6 +2476,9 @@ export async function executeRecoverDeadWorkerV2Owner(
           .filter((result): result is Extract<TaskRecoveryAdoptionResult, { ok: true }> => result.ok)
           .map(result => ({ taskId: result.task.id, taskVersion: result.task.version ?? 1,
             sequence: result.checkpoint.sequence, payload: result.checkpoint.resume_payload, claimToken: result.claimToken }));
+        if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
+          return { ok: false, error: 'worker_activation_failed' };
+        }
         return { ok: true, continuations };
       },
       repairServices: async () => {
@@ -2508,13 +2533,21 @@ export async function executeRecoverDeadWorkerV2Owner(
           worker_name: sagaInput.workerName,
           replacement_generation: sagaInput.replacementGeneration,
           pane_attempt_id: paneAttemptId,
+          launch_attempt_id: pending.startupContext.attempt.attempt_id,
+          launch_nonce: pending.startupContext.attempt.nonce,
           written_at: new Date().toISOString(),
         };
         const launchedPath = `${pending.gate.runPath}.launched`;
-        if (!existsSync(launchedPath)) {
+        let launched = await waitForRecoveryGateRecord(launchedPath, record, 25, 5);
+        if (!launched) {
+          if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) throw new Error('worker_activation_failed');
           await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
-          const launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
-          if (!launched) throw new Error('startup_ack_timeout');
+          launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
+        }
+        if (!launched) throw new Error('startup_ack_timeout');
+        if (!await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)
+          || await getWorkerPaneLiveness(pending.ownership.paneId) !== 'alive') {
+          throw new Error('worker_activation_failed');
         }
         if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
           if (!await waitForCurrentEvidence()) throw new Error(`${pending.agentType}_startup_evidence_missing`);

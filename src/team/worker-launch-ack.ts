@@ -71,6 +71,7 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
   provider_argv: string[];
   cwd: string;
   decision_timeout_ms: number;
+  release_after_spawn: boolean;
 }
 
 export type WorkerLaunchAcceptance =
@@ -313,6 +314,7 @@ export function buildWorkerLaunchBootstrapSpec(
   attempt: WorkerLaunchAttempt,
   providerArgv: string[],
   cwd: string,
+  options: { releaseAfterSpawn?: boolean } = {},
 ): WorkerLaunchBootstrapSpec {
   return {
     ...identityOf(attempt),
@@ -324,6 +326,7 @@ export function buildWorkerLaunchBootstrapSpec(
     provider_argv: [...providerArgv],
     cwd,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
+    release_after_spawn: options.releaseAfterSpawn === true,
   };
 }
 
@@ -477,6 +480,7 @@ function isValidBootstrapSpec(value: unknown): value is WorkerLaunchBootstrapSpe
     && typeof spec.cwd === 'string'
     && spec.cwd.length > 0
     && Number.isSafeInteger(spec.decision_timeout_ms)
+    && typeof spec.release_after_spawn === 'boolean'
     && Number(spec.decision_timeout_ms) > 0;
 }
 
@@ -597,6 +601,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         await completion;
         return { outcome: 'provider_spawn_failed' as const };
       }
+      if (spec.release_after_spawn) return { outcome: 'ran' as const, exitCode: null, signal: null };
       return { completion };
     });
     if ('completion' in launched) {

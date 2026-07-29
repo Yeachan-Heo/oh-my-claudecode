@@ -18498,16 +18498,8 @@ function withFileLockSync(lockPath, fn, opts) {
 // src/team/tmux-session.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var execFileAsync2 = (0, import_util7.promisify)(import_child_process4.execFile);
-function detectTeamMultiplexerContext(env = process.env) {
-  if (env.TMUX) return "tmux";
-  if (env.CMUX_SURFACE_ID) return "cmux";
-  return "none";
-}
-function isCmuxContext() {
-  return detectTeamMultiplexerContext() === "cmux";
-}
 function isCmuxSurfaceTarget(value) {
-  return isCmuxContext() && typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
+  return typeof value === "string" && value.trim().length > 0 && !value.trim().startsWith("%");
 }
 async function cmuxExecAsync(args) {
   const result = await execFileAsync2("cmux", args, { encoding: "utf-8" });
@@ -18606,6 +18598,98 @@ async function cmuxCaptureSurface(surfaceId) {
 }
 async function cmuxCloseSurface(surfaceId) {
   await cmuxExecAsync(["close-surface", "--surface", surfaceId]);
+}
+var TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+var TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+function isExactOpaqueCmuxIdentifier(value) {
+  return typeof value === "string" && value.length > 0 && value === value.trim() && !/[\x00-\x1f\x7f\s]/.test(value);
+}
+function parseCmuxResourceIds(output, collectionName) {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return null;
+  }
+  const entries = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed[collectionName]) ? parsed[collectionName] : null;
+  if (!entries) return null;
+  const ids = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const id = entry.id;
+    if (!isExactOpaqueCmuxIdentifier(id)) return null;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+var defaultMailboxTargetOwnershipDependencies = {
+  tmuxExec: (args) => tmuxExecAsync(args),
+  cmuxExec: cmuxExecAsync
+};
+async function verifyTeamTargetOwnership(target, dependencies = defaultMailboxTargetOwnershipDependencies) {
+  const expectedProvider = target.providerTarget.startsWith("cmux:") ? "cmux" : "tmux";
+  if (target.provider !== expectedProvider) return { kind: "provider_mismatch" };
+  if (target.provider === "tmux") {
+    if (typeof target.providerTarget !== "string" || target.providerTarget.length === 0 || target.providerTarget !== target.providerTarget.trim() || !TMUX_MAILBOX_TARGET.test(target.providerTarget) || !TMUX_MAILBOX_PANE_ID.test(target.paneId)) {
+      return { kind: "unavailable" };
+    }
+    try {
+      const result = await dependencies.tmuxExec([
+        "list-panes",
+        "-t",
+        target.providerTarget,
+        "-F",
+        "#{pane_id}"
+      ]);
+      const paneIds = [];
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const paneId = line.trim();
+        if (!paneId) continue;
+        if (!TMUX_MAILBOX_PANE_ID.test(paneId)) return { kind: "unavailable" };
+        if (!paneIds.includes(paneId)) paneIds.push(paneId);
+      }
+      if (paneIds.length === 0) return { kind: "unavailable" };
+      return paneIds.includes(target.paneId) ? { kind: "owned", provider: "tmux", providerTarget: target.providerTarget, paneId: target.paneId } : { kind: "foreign" };
+    } catch {
+      return { kind: "unavailable" };
+    }
+  }
+  const workspace = target.providerTarget.slice("cmux:".length);
+  if (!isExactOpaqueCmuxIdentifier(workspace) || !isExactOpaqueCmuxIdentifier(target.paneId) || TMUX_MAILBOX_PANE_ID.test(target.paneId)) {
+    return { kind: "unavailable" };
+  }
+  try {
+    const panes = parseCmuxResourceIds(
+      (await dependencies.cmuxExec(["--json", "list-panes", "--workspace", workspace])).stdout,
+      "panes"
+    );
+    if (!panes || panes.length === 0) return { kind: "unavailable" };
+    for (const pane of panes) {
+      const surfaces = parseCmuxResourceIds(
+        (await dependencies.cmuxExec([
+          "--json",
+          "list-pane-surfaces",
+          "--workspace",
+          workspace,
+          "--pane",
+          pane
+        ])).stdout,
+        "surfaces"
+      );
+      if (!surfaces) return { kind: "unavailable" };
+      if (surfaces.includes(target.paneId)) {
+        return {
+          kind: "owned",
+          provider: "cmux",
+          providerTarget: target.providerTarget,
+          paneId: target.paneId
+        };
+      }
+    }
+    return { kind: "foreign" };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }
 function redactBoundedDiagnostic(error2, maxLength = 240) {
   const raw = error2 instanceof Error ? error2.message : String(error2);
@@ -18910,10 +18994,20 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options
   const sessionMode = options.sessionMode ?? (sessionName.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
     if (!workerPaneIds?.length) return;
+    const provider = sessionName.startsWith("cmux:") ? "cmux" : "tmux";
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
-        await killTeamPane(id);
+        const membership = await verifyTeamTargetOwnership({
+          provider,
+          providerTarget: sessionName,
+          recipient: "worker",
+          recipientRole: "worker",
+          paneId: id
+        });
+        if (membership.kind !== "owned") continue;
+        if (provider === "cmux") await cmuxCloseSurface(id);
+        else await tmuxExecAsync(["kill-pane", "-t", id]);
       } catch {
       }
     }

@@ -26,6 +26,8 @@ interface GateRecord {
     worker_name: string;
     replacement_generation: number;
     pane_attempt_id: string;
+    launch_attempt_id: string;
+    launch_nonce: string;
     written_at: string;
 }
 export declare function waitForRecoveryGateRecord(path: string, expected: Omit<GateRecord, 'written_at'>, timeoutMs: number, pollIntervalMs?: number): Promise<boolean>;

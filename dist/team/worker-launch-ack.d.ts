@@ -36,6 +36,7 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
     provider_argv: string[];
     cwd: string;
     decision_timeout_ms: number;
+    release_after_spawn: boolean;
 }
 export type WorkerLaunchAcceptance = {
     ok: true;
@@ -78,7 +79,9 @@ export declare function loadCurrentWorkerLaunchAttempt(input: {
     workerName: string;
     provider: CliAgentType;
 }): Promise<WorkerLaunchAttempt | null>;
-export declare function buildWorkerLaunchBootstrapSpec(attempt: WorkerLaunchAttempt, providerArgv: string[], cwd: string): WorkerLaunchBootstrapSpec;
+export declare function buildWorkerLaunchBootstrapSpec(attempt: WorkerLaunchAttempt, providerArgv: string[], cwd: string, options?: {
+    releaseAfterSpawn?: boolean;
+}): WorkerLaunchBootstrapSpec;
 export declare function revokeWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
 export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;

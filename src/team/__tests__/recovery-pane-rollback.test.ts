@@ -281,6 +281,7 @@ describe('recovery pane rollback evidence', () => {
         attempt,
         [config.launchBinary, ...config.launchArgs],
         config.cwd,
+        { releaseAfterSpawn: true },
       );
       bootstrapResult = runWorkerLaunchBootstrap(spec);
       const accepted = await awaitWorkerLaunchAcknowledgement(attempt, {
@@ -295,7 +296,7 @@ describe('recovery pane rollback evidence', () => {
       await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
         .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
       expect(bootstrapResult).toBeDefined();
-      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: null, signal: null });
     } finally {
       if (previousGateSpec === undefined) delete process.env.OMC_RECOVERY_GATE_SPEC;
       else process.env.OMC_RECOVERY_GATE_SPEC = previousGateSpec;

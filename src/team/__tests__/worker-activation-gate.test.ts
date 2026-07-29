@@ -31,12 +31,12 @@ describe('worker recovery activation gate', () => {
     const readyPath = join(cwd, 'ready.json');
     const activatePath = join(cwd, 'activate.json');
     const runPath = join(cwd, 'run.json');
+    const launchAttempt = await acceptedAttempt('worker-1', '%2', 'recovery-a', 2, 'attempt-a');
     const record = { recovery_id: 'recovery-a', worker_name: 'worker-1', replacement_generation: 2,
-      pane_attempt_id: 'attempt-a', written_at: new Date().toISOString() };
+      pane_attempt_id: 'attempt-a', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
     writeFileSync(activatePath, JSON.stringify(record));
     writeFileSync(runPath, JSON.stringify(record));
-
-    const launchAttempt = await acceptedAttempt('worker-1', '%2', 'recovery-a', 2, 'attempt-a');
     await expect(runWorkerActivationGate({
       recoveryId: 'recovery-a',
       workerName: 'worker-1',
@@ -61,12 +61,12 @@ describe('worker recovery activation gate', () => {
     const readyPath = join(cwd, 'failed-ready.json');
     const activatePath = join(cwd, 'failed-activate.json');
     const runPath = join(cwd, 'failed-run.json');
+    const launchAttempt = await acceptedAttempt('worker-1', '%3', 'recovery-b', 3, 'attempt-b');
     const record = { recovery_id: 'recovery-b', worker_name: 'worker-1', replacement_generation: 3,
-      pane_attempt_id: 'attempt-b', written_at: new Date().toISOString() };
+      pane_attempt_id: 'attempt-b', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
     writeFileSync(activatePath, JSON.stringify(record));
     writeFileSync(runPath, JSON.stringify(record));
-
-    const launchAttempt = await acceptedAttempt('worker-1', '%3', 'recovery-b', 3, 'attempt-b');
     await expect(runWorkerActivationGate({
       recoveryId: 'recovery-b', workerName: 'worker-1', replacementGeneration: 3, paneAttemptId: 'attempt-b',
       readyPath, activatePath, runPath, providerArgv: [join(cwd, 'missing-provider')], cwd,
@@ -81,7 +81,7 @@ describe('worker recovery activation gate', () => {
     const runPath = join(cwd, 'stale-run.json');
     const providerMarker = join(cwd, 'stale-provider-ran');
     const record = { recovery_id: 'recovery-stale', worker_name: 'worker-1', replacement_generation: 4,
-      pane_attempt_id: 'attempt-stale', written_at: new Date().toISOString() };
+      pane_attempt_id: 'attempt-stale', launch_attempt_id: 'stale-launch', launch_nonce: 'stale-nonce', written_at: new Date().toISOString() };
     writeFileSync(activatePath, JSON.stringify(record));
     writeFileSync(runPath, JSON.stringify(record));
     const launchAttempt = await acceptedAttempt('worker-1', '%4', 'recovery-current', 5, 'attempt-current');
@@ -95,6 +95,46 @@ describe('worker recovery activation gate', () => {
       timeoutMs: 1_000,
       pollIntervalMs: 5,
     })).resolves.toEqual({ outcome: 'superseded' });
+    expect(existsSync(providerMarker)).toBe(false);
+    expect(existsSync(`${runPath}.launched`)).toBe(false);
+  });
+
+  it('blocks a gate superseded after activation but before provider spawn', async () => {
+    const readyPath = join(cwd, 'superseded-ready.json');
+    const activatePath = join(cwd, 'superseded-activate.json');
+    const runPath = join(cwd, 'superseded-run.json');
+    const providerMarker = join(cwd, 'superseded-provider-ran');
+    const launchAttempt = await acceptedAttempt('worker-1', '%5', 'recovery-old', 6, 'attempt-old');
+    const record = { recovery_id: 'recovery-old', worker_name: 'worker-1', replacement_generation: 6,
+      pane_attempt_id: 'attempt-old', launch_attempt_id: launchAttempt.attempt_id, launch_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() };
+    writeFileSync(activatePath, JSON.stringify(record));
+
+    const gate = runWorkerActivationGate({
+      recoveryId: 'recovery-old', workerName: 'worker-1', replacementGeneration: 6, paneAttemptId: 'attempt-old',
+      readyPath, activatePath, runPath,
+      providerArgv: [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      launchAttempt,
+      cwd,
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    });
+    for (let index = 0; index < 200 && !existsSync(`${readyPath}.adoption-ready`); index++) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(existsSync(`${readyPath}.adoption-ready`)).toBe(true);
+    await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: launchAttempt.team_name,
+      workerName: launchAttempt.worker_name,
+      paneId: '%6',
+      provider: launchAttempt.provider,
+      runtimeCliPath: launchAttempt.runtimeCliPath,
+      context: { kind: 'recovery', recovery_id: 'recovery-new', replacement_generation: 7, pane_attempt_id: 'attempt-new' },
+    });
+    writeFileSync(runPath, JSON.stringify(record));
+
+    await expect(gate).resolves.toEqual({ outcome: 'superseded' });
     expect(existsSync(providerMarker)).toBe(false);
     expect(existsSync(`${runPath}.launched`)).toBe(false);
   });

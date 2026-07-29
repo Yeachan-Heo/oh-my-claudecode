@@ -60,7 +60,7 @@ function isCmuxContext() {
     return detectTeamMultiplexerContext() === 'cmux';
 }
 function isCmuxSurfaceTarget(value) {
-    return isCmuxContext() && typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
+    return typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
 }
 async function cmuxExecAsync(args) {
     const result = await execFileAsync('cmux', args, { encoding: 'utf-8' });
@@ -618,7 +618,7 @@ export function buildWorkerStartCommand(config) {
     const envVars = config.launchAttempt
         ? {
             ...config.envVars,
-            OMC_WORKER_LAUNCH_SPEC: JSON.stringify(buildWorkerLaunchBootstrapSpec(config.launchAttempt, providerLaunchWords, config.cwd)),
+            OMC_WORKER_LAUNCH_SPEC: JSON.stringify(buildWorkerLaunchBootstrapSpec(config.launchAttempt, providerLaunchWords, config.cwd, { releaseAfterSpawn: Boolean(config.envVars?.OMC_RECOVERY_GATE_SPEC) })),
         }
         : config.envVars;
     const shouldSourceRc = process.env.OMC_TEAM_NO_RC !== '1';
@@ -845,8 +845,7 @@ export async function workerPaneBelongsToProviderTarget(input) {
     }, input.dependencies);
     return membership.kind === 'owned';
 }
-export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd) {
-    const provider = isCmuxContext() ? 'cmux' : 'tmux';
+export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd, provider = isCmuxContext() ? 'cmux' : 'tmux') {
     try {
         if (provider === 'cmux') {
             const splitResult = await cmuxSplitSurface(splitTarget, direction, cwd);
@@ -1674,17 +1673,8 @@ function dedupeWorkerPaneIds(paneIds, leaderPaneId) {
     }
     return [...unique];
 }
-export async function resolveSplitPaneWorkerPaneIds(sessionName, recordedPaneIds, leaderPaneId) {
-    const resolved = dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
-    if (!sessionName.includes(':'))
-        return resolved;
-    try {
-        const paneResult = await tmuxCmdAsync(['list-panes', '-t', sessionName, '-F', '#{pane_id}']);
-        return dedupeWorkerPaneIds([...resolved, ...paneResult.stdout.split('\n').map((paneId) => paneId.trim())], leaderPaneId);
-    }
-    catch {
-        return resolved;
-    }
+export async function resolveSplitPaneWorkerPaneIds(_sessionName, recordedPaneIds, leaderPaneId) {
+    return dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
 }
 /**
  * Kill the team tmux session or just the worker panes, depending on how the
@@ -1700,13 +1690,26 @@ export async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, 
     if (sessionMode === 'split-pane') {
         if (!workerPaneIds?.length)
             return;
+        const provider = sessionName.startsWith('cmux:') ? 'cmux' : 'tmux';
         for (const id of workerPaneIds) {
             if (id === leaderPaneId)
                 continue;
             try {
-                await killTeamPane(id);
+                const membership = await verifyTeamTargetOwnership({
+                    provider,
+                    providerTarget: sessionName,
+                    recipient: 'worker',
+                    recipientRole: 'worker',
+                    paneId: id,
+                });
+                if (membership.kind !== 'owned')
+                    continue;
+                if (provider === 'cmux')
+                    await cmuxCloseSurface(id);
+                else
+                    await tmuxExecAsync(['kill-pane', '-t', id]);
             }
-            catch { /* already gone */ }
+            catch { /* preserve unverified or already-gone panes */ }
         }
         return;
     }
