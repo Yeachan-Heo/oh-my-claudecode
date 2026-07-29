@@ -247,7 +247,9 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
         return;
     }
     if (isRuntimeV2Config(config)) {
-        await shutdownTeamV2(teamName, cwd);
+        const shutdown = await shutdownTeamV2(teamName, cwd);
+        if (shutdown.outcome !== 'cleaned')
+            throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
         return;
     }
     if (isLegacyRuntimeConfig(config)) {

@@ -28,7 +28,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
 import { resolveRuntimeCliPath } from './runtime-owner-client.js';
-import { loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptAccepted, loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -892,6 +892,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 runtimeCliPath: resolveRuntimeCliPath(),
             });
             if (!attempt
+                || !await isWorkerLaunchAttemptAccepted(attempt)
                 || !await retireWorkerLaunchAttempt(attempt, 'scale_down')
                 || !await terminateWorkerLaunchProvider(attempt)) {
                 const reason = `provider_cleanup_unverified:${worker.name}`;

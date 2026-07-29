@@ -768,7 +768,10 @@ async function main() {
                 return;
             try {
                 if (useV2) {
-                    await shutdownTeamV2(runtime.teamName, runtime.cwd, { force: true });
+                    const shutdown = await shutdownTeamV2(runtime.teamName, runtime.cwd, { force: true });
+                    if (shutdown.outcome !== 'cleaned') {
+                        throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
+                    }
                 }
                 else {
                     await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, 2_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);

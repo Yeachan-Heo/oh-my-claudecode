@@ -726,8 +726,12 @@ export async function cleanupSessionOwnedTeams(
       }
 
       if (Array.isArray((config as { workers?: unknown[] }).workers)) {
-        await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-        cleaned.push(teamName);
+        const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
+        if (shutdown.outcome === 'cleaned') {
+          cleaned.push(teamName);
+        } else {
+          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
+        }
         return;
       }
 

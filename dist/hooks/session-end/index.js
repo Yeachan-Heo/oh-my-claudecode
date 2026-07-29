@@ -599,8 +599,13 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
                 return;
             }
             if (Array.isArray(config.workers)) {
-                await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-                cleaned.push(teamName);
+                const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
+                if (shutdown.outcome === 'cleaned') {
+                    cleaned.push(teamName);
+                }
+                else {
+                    failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
+                }
                 return;
             }
             if (Array.isArray(config.agentTypes)) {

@@ -4178,6 +4178,7 @@ async function readValidProviderStarted(attempt) {
   if ((await readJson(`${attempt.startedPath}.terminal`)).kind !== "absent") return null;
   if (started.kind !== "value") return null;
   const record = started.value;
+  if (record.supervisor_completion_path !== void 0 && (typeof record.supervisor_completion_path !== "string" || record.supervisor_completion_path.trim().length === 0 || existsSync10(record.supervisor_completion_path))) return null;
   return identityMatches(record, attempt) && record.kind === "worker_launch_provider_started" && Number.isSafeInteger(record.pid) && record.pid > 0 && typeof record.process_start_identity === "string" && record.process_start_identity.trim().length > 0 && typeof record.written_at === "string" && Number.isFinite(Date.parse(record.written_at)) ? record : null;
 }
 async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
@@ -14094,7 +14095,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
         let providerLive = false;
         try {
           const launchedRecord = JSON.parse(await readFile14(launchedPath, "utf8"));
-          providerLive = Number.isInteger(launchedRecord.provider_pid) && typeof launchedRecord.provider_start_identity === "string" && await isProcessIdentityLive(
+          providerLive = Number.isInteger(launchedRecord.provider_pid) && typeof launchedRecord.provider_start_identity === "string" && (launchedRecord.supervisor_completion_path === void 0 || typeof launchedRecord.supervisor_completion_path === "string" && launchedRecord.supervisor_completion_path.trim().length > 0 && !existsSync25(launchedRecord.supervisor_completion_path)) && await isProcessIdentityLive(
             launchedRecord.provider_pid,
             launchedRecord.provider_start_identity,
             Date.now() + 1e3
@@ -15158,10 +15159,10 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
     const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
     if (cleanupSafety.hasEvidence) {
       process.stderr.write("[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n");
-      return;
+      return { outcome: "preserved", reason: "config_missing_cleanup_evidence", workers: [] };
     }
     await cleanupTeamState(sanitized, cwd);
-    return;
+    return { outcome: "cleaned" };
   }
   if (force) {
     await appendTeamEvent(sanitized, {
@@ -15253,7 +15254,7 @@ Then exit your session.
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
 `);
     await finalizeAutoMerge();
-    throw new Error(`team_shutdown_provider_cleanup_unverified:${providerCleanupFailures.join(",")}`);
+    return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: providerCleanupFailures };
   }
   try {
     const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2, resolveSplitPaneWorkerPaneIds: resolveSplitPaneWorkerPaneIds2, getWorkerLiveness: getWorkerLiveness2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
@@ -15295,14 +15296,14 @@ Then exit your session.
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
       await finalizeAutoMerge();
-      return;
+      return { outcome: "preserved", reason: "worker_panes_alive", workers: aliveWorkers };
     }
     const unknownWorkers = liveness.filter(([, state]) => state === "unknown").map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (unknownWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(", ")}
 `);
       await finalizeAutoMerge();
-      return;
+      return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: unknownWorkers };
     }
   } catch (err) {
     process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}
@@ -15310,7 +15311,7 @@ Then exit your session.
     if (recordedWorkerPaneIds.length > 0) {
       process.stderr.write("[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n");
       await finalizeAutoMerge();
-      return;
+      return { outcome: "failed", reason: "tmux_cleanup_failed", detail: err instanceof Error ? err.message : String(err) };
     }
   }
   if (ralph) {
@@ -15327,11 +15328,13 @@ Then exit your session.
   await finalizeAutoMerge();
   await commitStoppedFence();
   let preservedWorktrees = 0;
+  let worktreeCleanupFailure = null;
   try {
     const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
     preservedWorktrees = worktreeCleanup.preserved.length;
   } catch (err) {
     preservedWorktrees = 1;
+    worktreeCleanupFailure = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}
 `);
   }
@@ -15341,6 +15344,9 @@ Then exit your session.
     process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup
 `);
   }
+  if (worktreeCleanupFailure) return { outcome: "failed", reason: "worktree_cleanup_failed", detail: worktreeCleanupFailure };
+  if (preservedWorktrees > 0) return { outcome: "preserved", reason: "worktrees_preserved", workers: [] };
+  return { outcome: "cleaned" };
 }
 async function resumeTeamV2(teamName, cwd) {
   const sanitized = sanitizeTeamName(teamName);
@@ -15903,7 +15909,8 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
     return;
   }
   if (isRuntimeV2Config(config)) {
-    await shutdownTeamV2(teamName, cwd);
+    const shutdown = await shutdownTeamV2(teamName, cwd);
+    if (shutdown.outcome !== "cleaned") throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
     return;
   }
   if (isLegacyRuntimeConfig(config)) {
@@ -17439,7 +17446,8 @@ async function teamShutdownByName(teamName, options = {}) {
   const runtimeV2 = await Promise.resolve().then(() => (init_runtime_v2(), runtime_v2_exports));
   if (runtimeV2.isRuntimeV2Enabled()) {
     const config = await readTeamConfig(teamName, cwd);
-    await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
+    const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
+    if (shutdown.outcome !== "cleaned") throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
     return {
       teamName,
       shutdown: true,

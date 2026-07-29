@@ -919,7 +919,7 @@ describe('team cli', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     mocks.isRuntimeV2Enabled.mockReturnValue(true);
-    mocks.shutdownTeamV2.mockResolvedValue(undefined);
+    mocks.shutdownTeamV2.mockResolvedValue({ outcome: 'cleaned' });
 
     const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-v2-shutdown-'));
     const root = join(cwd, '.omc', 'state', 'team', 'beta-team');

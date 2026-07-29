@@ -747,7 +747,9 @@ async function handleTeamShutdown(teamName, cwd, force) {
     const { isRuntimeV2Enabled } = await import('../../team/runtime-v2.js');
     if (isRuntimeV2Enabled()) {
         const { shutdownTeamV2 } = await import('../../team/runtime-v2.js');
-        await shutdownTeamV2(teamName, cwd, { force });
+        const shutdown = await shutdownTeamV2(teamName, cwd, { force });
+        if (shutdown.outcome !== 'cleaned')
+            throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
         console.log(`Team shutdown complete: ${teamName}`);
         return;
     }

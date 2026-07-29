@@ -2144,6 +2144,10 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                     const launchedRecord = JSON.parse(await readFile(launchedPath, 'utf8'));
                     providerLive = Number.isInteger(launchedRecord.provider_pid)
                         && typeof launchedRecord.provider_start_identity === 'string'
+                        && (launchedRecord.supervisor_completion_path === undefined
+                            || (typeof launchedRecord.supervisor_completion_path === 'string'
+                                && launchedRecord.supervisor_completion_path.trim().length > 0
+                                && !existsSync(launchedRecord.supervisor_completion_path)))
                         && await isProcessIdentityLive(launchedRecord.provider_pid, launchedRecord.provider_start_identity, Date.now() + 1_000) === 'live';
                 }
                 catch { /* malformed or stale provider-start evidence fails closed */ }
@@ -3352,10 +3356,10 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
         if (cleanupSafety.hasEvidence) {
             process.stderr.write('[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n');
-            return;
+            return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
         }
         await cleanupTeamState(sanitized, cwd);
-        return;
+        return { outcome: 'cleaned' };
     }
     if (force) {
         await appendTeamEvent(sanitized, {
@@ -3453,7 +3457,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     if (providerCleanupFailures.length > 0) {
         process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
         await finalizeAutoMerge();
-        throw new Error(`team_shutdown_provider_cleanup_unverified:${providerCleanupFailures.join(',')}`);
+        return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: providerCleanupFailures };
     }
     try {
         const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');
@@ -3490,7 +3494,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(', ')}
 `);
             await finalizeAutoMerge();
-            return;
+            return { outcome: 'preserved', reason: 'worker_panes_alive', workers: aliveWorkers };
         }
         const unknownWorkers = liveness
             .filter(([, state]) => state === 'unknown')
@@ -3499,7 +3503,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(', ')}
 `);
             await finalizeAutoMerge();
-            return;
+            return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: unknownWorkers };
         }
     }
     catch (err) {
@@ -3507,7 +3511,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         if (recordedWorkerPaneIds.length > 0) {
             process.stderr.write('[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n');
             await finalizeAutoMerge();
-            return;
+            return { outcome: 'failed', reason: 'tmux_cleanup_failed', detail: err instanceof Error ? err.message : String(err) };
         }
     }
     // 5. Ralph completion logging
@@ -3531,12 +3535,14 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     // team state directory too; it contains the metadata and root AGENTS.md backups
     // needed for a later safe cleanup attempt.
     let preservedWorktrees = 0;
+    let worktreeCleanupFailure = null;
     try {
         const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
         preservedWorktrees = worktreeCleanup.preserved.length;
     }
     catch (err) {
         preservedWorktrees = 1;
+        worktreeCleanupFailure = err instanceof Error ? err.message : String(err);
         process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
     }
     if (preservedWorktrees === 0) {
@@ -3545,6 +3551,11 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     else {
         process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
     }
+    if (worktreeCleanupFailure)
+        return { outcome: 'failed', reason: 'worktree_cleanup_failed', detail: worktreeCleanupFailure };
+    if (preservedWorktrees > 0)
+        return { outcome: 'preserved', reason: 'worktrees_preserved', workers: [] };
+    return { outcome: 'cleaned' };
 }
 // ---------------------------------------------------------------------------
 // resumeTeam — reconstruct runtime from persisted state

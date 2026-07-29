@@ -154,6 +154,6 @@ describe('team governance enforcement', () => {
       created_at: new Date().toISOString(),
     });
 
-    await expect(shutdownTeamV2(teamName, cwd)).resolves.toBeUndefined();
+    await expect(shutdownTeamV2(teamName, cwd)).resolves.toEqual({ outcome: 'cleaned' });
   });
 });

@@ -66,6 +66,7 @@ const gitWorktreeMocks = vi.hoisted(() => ({
 
 const workerLaunchMocks = vi.hoisted(() => ({
   loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
+  isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
 }));
@@ -432,6 +433,29 @@ describe('scaleUp launch config', () => {
   });
 
 
+
+  it('preserves pane and state when scale-down launch ownership is not accepted', async () => {
+    const current = makeConfig({
+      worker_count: 2,
+      next_worker_index: 3,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1', ...launchMetadata },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [], pane_id: '%2' },
+      ],
+    });
+    teamOpsMocks.teamReadConfig.mockResolvedValue(current);
+    teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+    workerLaunchMocks.isWorkerLaunchAttemptAccepted.mockResolvedValueOnce(false);
+
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-1'], drainTimeoutMs: 0 },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toMatchObject({ ok: false, error: 'provider_cleanup_unverified:worker-1' });
+    expect(workerLaunchMocks.retireWorkerLaunchAttempt).not.toHaveBeenCalled();
+    expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    expect(monitorMocks.currentConfig?.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+  });
 
   it('keeps reused worktree worker tracked if post-drain cleanup safety fails', async () => {
     const config = {

@@ -680,7 +680,8 @@ export async function teamShutdownByName(teamName: string, options: { cwd?: stri
   const runtimeV2 = await import('../team/runtime-v2.js');
   if (runtimeV2.isRuntimeV2Enabled()) {
     const config = await readTeamConfig(teamName, cwd);
-    await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
+    const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
+    if (shutdown.outcome !== 'cleaned') throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
     return {
       teamName,
       shutdown: true,

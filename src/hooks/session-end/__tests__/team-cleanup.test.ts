@@ -24,7 +24,7 @@ const teamCleanupMocks = vi.hoisted(() => ({
   teamReadManifest: vi.fn(async () => null),
   teamReadConfig: vi.fn(async () => null),
   teamCleanup: vi.fn(async () => undefined),
-  shutdownTeamV2: vi.fn(async () => undefined),
+  shutdownTeamV2: vi.fn(async () => ({ outcome: 'cleaned' as const })),
   shutdownTeam: vi.fn(async () => undefined),
 }));
 
@@ -89,7 +89,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     teamCleanupMocks.teamReadManifest.mockResolvedValue(null);
     teamCleanupMocks.teamReadConfig.mockResolvedValue(null);
     teamCleanupMocks.teamCleanup.mockResolvedValue(undefined);
-    teamCleanupMocks.shutdownTeamV2.mockResolvedValue(undefined);
+    teamCleanupMocks.shutdownTeamV2.mockResolvedValue({ outcome: 'cleaned' });
     teamCleanupMocks.shutdownTeam.mockResolvedValue(undefined);
   });
 
@@ -115,6 +115,23 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       { force: true, timeoutMs: 0 },
     );
     expect(teamCleanupMocks.shutdownTeam).not.toHaveBeenCalled();
+  });
+
+  it('records a preserved runtime-v2 shutdown as incomplete cleanup', async () => {
+    const sessionId = 'pid-1632-v2-preserved';
+    const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(teamSessionDir, { recursive: true });
+    fs.writeFileSync(path.join(teamSessionDir, 'team-state.json'),
+      JSON.stringify({ active: true, session_id: sessionId, team_name: 'preserved-team' }), 'utf-8');
+    teamCleanupMocks.teamReadConfig.mockResolvedValue({ workers: [{ name: 'worker-1', pane_id: '%1' }] } as never);
+    teamCleanupMocks.shutdownTeamV2.mockResolvedValueOnce({
+      outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'],
+    } as never);
+
+    await expect(cleanupSessionOwnedTeams(tmpDir, sessionId)).resolves.toMatchObject({
+      cleaned: [],
+      failed: [{ teamName: 'preserved-team', error: 'team-shutdown-preserved:provider_cleanup_unverified' }],
+    });
   });
 
   it('force-shuts down a legacy runtime team referenced by the ending session', async () => {

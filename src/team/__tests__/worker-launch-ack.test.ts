@@ -20,7 +20,7 @@ import {
   buildProviderSpawnInvocation,
   materializeProviderSpawnInvocation,
 } from '../worker-launch-ack.js';
-import { isProcessAlive } from '../../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 
 let cwd = '';
 
@@ -115,6 +115,24 @@ describe('worker launch acknowledgement', () => {
       timeoutMs: 50,
       pollIntervalMs: 5,
     })).resolves.toBe(false);
+  });
+
+  it('rejects supervised provider-start evidence after its completion marker exists', async () => {
+    const launchAttempt = await attempt();
+    const identity = await getProcessStartIdentity(process.pid);
+    const completionPath = join(cwd, 'provider-exit.txt');
+    const base = {
+      schema_version: launchAttempt.schema_version, attempt_id: launchAttempt.attempt_id, nonce: launchAttempt.nonce,
+      team_name: launchAttempt.team_name, worker_name: launchAttempt.worker_name, pane_id: launchAttempt.pane_id,
+      provider: launchAttempt.provider, created_at: launchAttempt.created_at,
+    };
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...base, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(completionPath, '0\r\n', 'utf8');
+    await writeFile(launchAttempt.startedPath, JSON.stringify({ ...base, kind: 'worker_launch_provider_started',
+      pid: process.pid, process_start_identity: identity, supervisor_completion_path: completionPath,
+      written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchProviderStarted(launchAttempt, { timeoutMs: 50, pollIntervalMs: 5 })).resolves.toBe(false);
   });
 
   it('rejects a provider that exits after publishing start evidence but before handoff', async () => {
@@ -545,10 +563,17 @@ describe('worker launch acknowledgement', () => {
     await expect(readFile(wrapperPath, 'utf8')).resolves.toBe(windowsInvocation.batchScript);
     await materialized.cleanup();
     await expect(readFile(wrapperPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const supervised = await materializeProviderSpawnInvocation(windowsInvocation, { superviseWindowsTree: true });
+    expect(supervised.completionPath).toBeTruthy();
+    await expect(readFile(supervised.args[4]!.slice(1, -1), 'utf8')).resolves.toContain(':omc_hold');
+    await expect(readFile(supervised.args[4]!.slice(1, -1), 'utf8')).resolves.toContain('provider-exit.txt');
+    await supervised.cleanup();
     expect(buildProviderSpawnInvocation(providerArgv, 'linux')).toEqual({
       command: providerArgv[0],
       args: providerArgv.slice(1),
     });
+    expect(buildProviderSpawnInvocation(['C:\\Tools\\codex.exe', '--version'], 'win32', { ComSpec: 'cmd.exe' }))
+      .toMatchObject({ command: 'cmd.exe', args: ['/d', '/v:off', '/s', '/c'], batchScript: expect.stringContaining('codex.exe') });
   });
 
   it.runIf(process.platform === 'win32')('round-trips native cmd arguments through a real batch shim', async () => {
@@ -571,6 +596,25 @@ describe('worker launch acknowledgement', () => {
     const wrapperPath = invocation.args[4]!.slice(1, -1);
     await invocation.cleanup();
     await expect(readFile(wrapperPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.runIf(process.platform === 'win32')('keeps a supervisor root alive until an early-exit provider tree is terminated', async () => {
+    const providerPath = join(cwd, 'early-provider.cmd');
+    const childPidPath = join(cwd, 'early-provider-child.pid');
+    await writeFile(providerPath, `@echo off\r\n"${process.execPath}" -e "const fs=require('fs'),cp=require('child_process');const c=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(c.pid));c.unref()" "${childPidPath}"\r\n`, 'utf8');
+    const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(
+      [providerPath], 'win32', { ComSpec: process.env.ComSpec ?? process.env.COMSPEC ?? 'cmd.exe' },
+    ), { superviseWindowsTree: true });
+    const supervisor = spawn(invocation.command, invocation.args, { stdio: 'ignore', windowsHide: true });
+    await expect.poll(async () => invocation.completionPath ? await readFile(invocation.completionPath, 'utf8').catch(() => '') : '').toMatch(/0/);
+    const childPid = Number(await readFile(childPidPath, 'utf8'));
+    expect(isProcessAlive(childPid)).toBe(true);
+    const identity = await getProcessStartIdentity(supervisor.pid!);
+    expect(identity).toBeTruthy();
+    await expect(terminateOwnedProcessTree({ pid: supervisor.pid!, expectedStartIdentity: identity!,
+      deadlineAt: new Date(Date.now() + 5_000).toISOString(), force: true })).resolves.toBe('terminated');
+    await expect.poll(() => isProcessAlive(childPid), { timeout: 2_000, interval: 20 }).toBe(false);
+    await invocation.cleanup();
   });
 
   it('rejects CRLF-bearing native Windows batch arguments before materializing a wrapper', () => {

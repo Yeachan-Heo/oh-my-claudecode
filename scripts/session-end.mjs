@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { readSessionEndFrame } from './lib/stdin.mjs';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const fallback = { continue: true, suppressOutput: true };
 
-async function main() {
+export async function runSessionEndHook() {
   const frame = await readSessionEndFrame();
 
   if (frame.status !== 'ok') {
@@ -21,4 +23,4 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void runSessionEndHook();
