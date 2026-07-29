@@ -715,6 +715,23 @@ function remainingDeadlineMs(deadlineAt) {
 function isDeadlineExceeded(deadlineAt) {
   return deadlineAt !== void 0 && remainingDeadlineMs(deadlineAt) === 0;
 }
+function parseDeadline(deadlineAt) {
+  const value = Date.parse(deadlineAt);
+  return Number.isFinite(value) ? value : void 0;
+}
+function killProcessTreeUnix(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -853,6 +870,33 @@ async function isProcessIdentityLive(pid, expectedStartIdentity, deadlineAt) {
   const identity = await getProcessStartIdentity(pid, deadlineAt);
   if (identity === null) return isProcessAlive(pid) ? "unknown" : "dead";
   return identity === expectedStartIdentity ? "live" : "mismatch";
+}
+async function terminateOwnedProcessTree(options) {
+  const deadline = parseDeadline(options.deadlineAt);
+  if (deadline === void 0 || isDeadlineExceeded(deadline)) return "deadline-exceeded";
+  const liveness = await isProcessIdentityLive(options.pid, options.expectedStartIdentity, deadline);
+  if (liveness === "dead") return "already-dead";
+  if (liveness === "mismatch") return "identity-mismatch";
+  if (liveness === "unknown") {
+    return isDeadlineExceeded(deadline) ? "deadline-exceeded" : "unknown";
+  }
+  if (isDeadlineExceeded(deadline)) return "deadline-exceeded";
+  if (process.platform !== "win32") {
+    return killProcessTreeUnix(options.pid, options.force ? "SIGKILL" : "SIGTERM") ? "terminated" : isProcessAlive(options.pid) ? "unknown" : "already-dead";
+  }
+  const timeout = remainingDeadlineMs(deadline);
+  if (!timeout) return "deadline-exceeded";
+  try {
+    const args = ["/T", "/PID", String(options.pid)];
+    if (options.force) args.unshift("/F");
+    await execFileAsync("taskkill.exe", args, { windowsHide: true, timeout });
+    return "terminated";
+  } catch (error) {
+    if (isDeadlineExceeded(deadline)) return "deadline-exceeded";
+    const status = error.status;
+    if (status === 128 || !isProcessAlive(options.pid)) return "already-dead";
+    return "unknown";
+  }
 }
 var import_child_process4, import_util2, fsPromises, execFileAsync;
 var init_process_utils = __esm({
@@ -11065,6 +11109,8 @@ async function runWorkerActivationGate(gate) {
       stdio: "inherit"
     });
     let settled = false;
+    let providerPid;
+    let providerStartIdentity = null;
     const completion = new Promise((resolve8) => {
       const finish = async (result, terminal) => {
         if (settled) return;
@@ -11088,6 +11134,19 @@ async function runWorkerActivationGate(gate) {
         void finish({ outcome: "provider_spawn_failed" }, { outcome: "error" });
       });
     });
+    const terminateProvider = async () => {
+      if (providerPid && providerStartIdentity) {
+        await terminateOwnedProcessTree({
+          pid: providerPid,
+          expectedStartIdentity: providerStartIdentity,
+          deadlineAt: new Date(Date.now() + 2e3).toISOString(),
+          force: true
+        });
+      } else {
+        child.kill();
+      }
+      await completion;
+    };
     const spawned = await new Promise((resolve8) => {
       child.once("spawn", () => resolve8(true));
       child.once("error", () => resolve8(false));
@@ -11100,11 +11159,10 @@ async function runWorkerActivationGate(gate) {
     try {
       await new Promise((resolve8) => setTimeout(resolve8, 150));
       if (settled) return await completion;
-      const providerPid = child.pid;
-      const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
+      providerPid = child.pid;
+      providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
       if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
-        child.kill();
-        await completion;
+        await terminateProvider();
         return { outcome: "provider_spawn_failed" };
       }
       await writeAtomic3(`${gate.runPath}.launched`, {
@@ -11115,8 +11173,7 @@ async function runWorkerActivationGate(gate) {
       });
       return { completion };
     } catch {
-      child.kill();
-      await completion;
+      await terminateProvider();
       return { outcome: "provider_spawn_failed" };
     }
   });
@@ -11677,6 +11734,14 @@ async function spawnV2Worker(opts) {
     deps: { writeWorkerInbox }
   });
   if (!dispatchOutcome.ok) {
+    try {
+      await killOwnedWorkerPane(ownership);
+    } catch {
+      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+    }
+    if (await getWorkerPaneLiveness(paneId) !== "dead") {
+      throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+    }
     return {
       paneId,
       startupAssigned: false,

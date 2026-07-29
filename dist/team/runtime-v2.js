@@ -723,6 +723,15 @@ async function spawnV2Worker(opts) {
         deps: { writeWorkerInbox },
     });
     if (!dispatchOutcome.ok) {
+        try {
+            await killOwnedWorkerPane(ownership);
+        }
+        catch {
+            throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+        }
+        if (await getWorkerPaneLiveness(paneId) !== 'dead') {
+            throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
+        }
         return {
             paneId,
             startupAssigned: false,

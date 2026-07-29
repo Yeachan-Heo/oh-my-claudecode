@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
     const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -66,6 +66,8 @@ export async function runWorkerActivationGate(gate) {
             stdio: 'inherit',
         });
         let settled = false;
+        let providerPid;
+        let providerStartIdentity = null;
         const completion = new Promise(resolve => {
             const finish = async (result, terminal) => {
                 if (settled)
@@ -86,6 +88,20 @@ export async function runWorkerActivationGate(gate) {
                 void finish({ outcome: 'provider_spawn_failed' }, { outcome: 'error' });
             });
         });
+        const terminateProvider = async () => {
+            if (providerPid && providerStartIdentity) {
+                await terminateOwnedProcessTree({
+                    pid: providerPid,
+                    expectedStartIdentity: providerStartIdentity,
+                    deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+                    force: true,
+                });
+            }
+            else {
+                child.kill();
+            }
+            await completion;
+        };
         const spawned = await new Promise(resolve => {
             child.once('spawn', () => resolve(true));
             child.once('error', () => resolve(false));
@@ -101,11 +117,10 @@ export async function runWorkerActivationGate(gate) {
             await new Promise(resolve => setTimeout(resolve, 150));
             if (settled)
                 return await completion;
-            const providerPid = child.pid;
-            const providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
+            providerPid = child.pid;
+            providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
             if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
-                child.kill();
-                await completion;
+                await terminateProvider();
                 return { outcome: 'provider_spawn_failed' };
             }
             await writeAtomic(`${gate.runPath}.launched`, {
@@ -117,8 +132,7 @@ export async function runWorkerActivationGate(gate) {
             return { completion };
         }
         catch {
-            child.kill();
-            await completion;
+            await terminateProvider();
             return { outcome: 'provider_spawn_failed' };
         }
     });
