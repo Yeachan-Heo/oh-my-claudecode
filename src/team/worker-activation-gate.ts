@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from './worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
 export interface RecoveryActivationGate {
   recoveryId: string;
   workerName: string;
@@ -22,7 +22,7 @@ export interface RecoveryActivationGate {
 
 export type RecoveryActivationGateResult =
   | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'superseded' };
+  | { outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'provider_cleanup_unverified' | 'superseded' };
 
 interface GateRecord {
   recovery_id: string;
@@ -95,7 +95,6 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       cwd: gate.cwd,
       env: { ...providerProcessEnv, ...gate.env },
       stdio: 'inherit',
-      detached: process.platform !== 'win32',
     });
     let settled = false;
     let providerPid: number | undefined;
@@ -121,18 +120,30 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
         void finish({ outcome: 'provider_spawn_failed' }, { outcome: 'error' });
       });
     });
-    const terminateProvider = async () => {
+    const terminateProvider = async (): Promise<boolean> => {
+      if (settled) return true;
+      let terminated = false;
       if (providerPid && providerStartIdentity) {
-        await terminateOwnedProcessTree({
+        const result = await terminateOwnedProcessTree({
           pid: providerPid,
           expectedStartIdentity: providerStartIdentity,
           deadlineAt: new Date(Date.now() + 2_000).toISOString(),
           force: true,
         });
+        terminated = result === 'terminated' || result === 'already-dead' || result === 'identity-mismatch';
+      } else if (child.pid) {
+        terminated = await killProcessTree(child.pid, 'SIGKILL');
       } else {
-        child.kill();
+        terminated = child.kill();
       }
-      await completion;
+      const completed = await new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), 2_000);
+        void completion.then(() => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+      return terminated && completed;
     };
     const spawned = await new Promise<boolean>(resolve => {
       child.once('spawn', () => resolve(true));
@@ -151,7 +162,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       providerPid = child.pid;
       providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
       if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
-        await terminateProvider();
+        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
       await writeAtomic(`${gate.runPath}.launched`, {
@@ -162,7 +173,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       });
       return { completion };
     } catch {
-      await terminateProvider();
+      if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
       return { outcome: 'provider_spawn_failed' as const };
     }
   });

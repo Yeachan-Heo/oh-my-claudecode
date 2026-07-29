@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
 
 const launchMocks = vi.hoisted(() => ({
   withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
+  retireWorkerLaunchAttempt: vi.fn(async () => true),
+  terminateWorkerLaunchProvider: vi.fn(async () => true),
 }));
 
 const mergeMocks = vi.hoisted(() => ({
@@ -52,6 +54,7 @@ const cadenceMocks = vi.hoisted(() => ({
 const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn((_agentType: string, _config: unknown) => ['/usr/bin/claude']),
   resolveValidatedBinaryPath: vi.fn(() => '/usr/bin/claude'),
+  clearResolvedPathCache: vi.fn(),
   getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'dispatch-team/worker-1' })),
   isPromptModeAgent: vi.fn(() => false),
   getPromptModeArgs: vi.fn((_agentType: string, instruction: string) => [instruction]),
@@ -84,6 +87,7 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
 vi.mock('../model-contract.js', () => ({
   buildWorkerArgv: modelContractMocks.buildWorkerArgv,
   resolveValidatedBinaryPath: modelContractMocks.resolveValidatedBinaryPath,
+  clearResolvedPathCache: modelContractMocks.clearResolvedPathCache,
   getWorkerEnv: modelContractMocks.getWorkerEnv,
   isPromptModeAgent: modelContractMocks.isPromptModeAgent,
   getPromptModeArgs: modelContractMocks.getPromptModeArgs,
@@ -96,7 +100,12 @@ vi.mock('../model-contract.js', () => ({
 
 vi.mock('../worker-launch-ack.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../worker-launch-ack.js')>();
-  return { ...actual, withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence };
+  return {
+    ...actual,
+    withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence,
+    retireWorkerLaunchAttempt: launchMocks.retireWorkerLaunchAttempt,
+    terminateWorkerLaunchProvider: launchMocks.terminateWorkerLaunchProvider,
+  };
 });
 
 vi.mock('../tmux-session.js', async (importOriginal) => {
@@ -960,7 +969,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(persisted.workers[0].assigned_tasks).toEqual([]);
   });
 
-  it('does not auto-kill a worker pane when startup readiness fails', async () => {
+  it('tears down the owned worker launch when startup readiness fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-ready-'));
     mocks.deliverStartupInbox.mockResolvedValueOnce({ ok: false, reason: 'readiness_timeout' });
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -976,9 +985,10 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(runtime.config.workers[0]?.pane_id).toBe('%2');
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
 
-  it('does not auto-kill a worker pane when startup notification fails', async () => {
+  it('tears down the owned worker launch when startup notification fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-notify-'));
     mocks.sendToWorker.mockResolvedValue(false);
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -994,12 +1004,30 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(runtime.config.workers[0]?.pane_id).toBe('%2');
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
 
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.status).toBe('failed');
     expect(requests[0]?.last_reason).toBe('worker_notify_failed:startup_send_failed');
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when exact provider process cleanup cannot be verified', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-provider-cleanup-unverified-'));
+    mocks.sendToWorker.mockResolvedValue(false);
+    launchMocks.terminateWorkerLaunchProvider.mockResolvedValueOnce(false);
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Reject unverified provider cleanup' }],
+      cwd,
+    })).rejects.toThrow('worker_startup_cleanup_unverified:worker-1:%2');
+    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalled();
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
   });
 
   it('requires Claude startup evidence without resending the startup inbox', async () => {
@@ -1048,6 +1076,13 @@ describe('runtime v2 startup inbox dispatch', () => {
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
+      'startup_dispatch_failed',
+    );
+    expect(launchMocks.terminateWorkerLaunchProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
+    );
   });
 
   it('rejects a stale task claim that predates the current startup trigger', async () => {

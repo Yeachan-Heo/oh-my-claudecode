@@ -29,7 +29,7 @@ import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovern
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
-import { buildValidatedWorkerLaunchDescriptor, validateWorkerLaunchDescriptor, getContract, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, isHeadlessSupportedOnPlatform, } from './model-contract.js';
+import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, } from './model-contract.js';
 import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToProviderTarget, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
@@ -56,7 +56,7 @@ import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity } from './team-owner-epoch.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { waitForRecoveryGateRecord } from './worker-activation-gate.js';
-import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
+import { isWorkerLaunchAttemptCurrent, loadCurrentWorkerLaunchAttempt, loadWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider, withWorkerLaunchAttemptFence, } from './worker-launch-ack.js';
 import { isProcessIdentityLive } from '../platform/process-utils.js';
 let runtimeOwnerRecoveryClient;
 /** Runtime integration point; production may bind its owner client after startup. */
@@ -402,10 +402,9 @@ export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, 
     if (!pair) {
         return { agentType: fallbackAgent, model: '', role: canonical };
     }
-    // AC-8 fallback: if primary provider's CLI binary is missing, swap to the
-    // Claude fallback (same tier + same agent) pre-baked in the snapshot.
-    const primaryProvider = pair.primary.provider;
-    const chosen = resolvedBinaryPaths[primaryProvider] ? pair.primary : pair.fallback;
+    // A routed provider is authoritative. Missing or untrusted binaries fail later
+    // before any worker launch instead of silently changing provider identity.
+    const chosen = pair.primary;
     return {
         agentType: chosen.provider,
         model: chosen.model,
@@ -418,25 +417,10 @@ function sanitizeTeamName(name) {
         throw new Error(`Invalid team name: "${name}" produces empty slug after sanitization`);
     return sanitized;
 }
-function shouldUseLaunchTimeCliResolution(reason) {
-    return /untrusted location|relative path/i.test(reason);
-}
 function resolvePreflightBinaryPath(agentType) {
-    // Treat a platform-unsupported headless provider (e.g. antigravity on Windows)
-    // as unavailable during preflight, so role routing falls back cleanly to Claude
-    // instead of recording the binary and failing mid-spawn. Throws here are caught
-    // by startTeamV2's preflight loop and recorded as missingBinaryReasons.
     assertHeadlessSupported(agentType);
-    try {
-        return { path: resolveValidatedBinaryPath(agentType), degraded: false };
-    }
-    catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        if (shouldUseLaunchTimeCliResolution(reason)) {
-            return { path: getContract(agentType).binary, degraded: true, reason };
-        }
-        throw err;
-    }
+    clearResolvedPathCache();
+    return { path: resolveValidatedBinaryPath(agentType) };
 }
 // ---------------------------------------------------------------------------
 // Helper: check worker liveness via tmux pane
@@ -734,13 +718,16 @@ async function spawnV2Worker(opts) {
         ? fencedDispatch.value
         : { ok: false, reason: 'worker_launch_attempt_superseded' };
     if (!dispatchOutcome.ok) {
+        const retired = await retireWorkerLaunchAttempt(startupContext.attempt, 'startup_dispatch_failed').catch(() => false);
+        const providerStopped = retired
+            && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
         try {
             await killOwnedWorkerPane(ownership);
         }
         catch {
             throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
         }
-        if (await getWorkerPaneLiveness(paneId) !== 'dead') {
+        if (!providerStopped || await getWorkerPaneLiveness(paneId) !== 'dead') {
             throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
         }
         return {
@@ -820,19 +807,31 @@ async function recordUnaddressableRecoveryPaneFailure(input, recoveryId, paneAtt
     return path;
 }
 async function cleanupRecoveryPaneAttempt(input, recoveryId, pending, reason) {
+    let providerStopped = true;
+    if (pending.startupContext) {
+        const retired = await retireWorkerLaunchAttempt(pending.startupContext.attempt, reason).catch(() => false);
+        providerStopped = retired
+            && await terminateWorkerLaunchProvider(pending.startupContext.attempt).catch(() => false);
+    }
     let liveness = 'unknown';
     for (let attempt = 0; attempt < 2; attempt++) {
         await killOwnedWorkerPane(pending.ownership).catch(() => undefined);
         liveness = await getWorkerLiveness(pending.ownership.paneId).catch(() => 'unknown');
-        if (liveness === 'dead') {
+        if (liveness === 'dead' && providerStopped) {
             pendingRecoveryPanes.delete(recoveryId);
             return true;
         }
     }
-    await recordRecoveryPaneRollbackFailure(input, recoveryId, pending, reason, liveness);
+    await recordRecoveryPaneRollbackFailure(input, recoveryId, pending, providerStopped ? reason : `${reason}:provider_cleanup_unverified`, liveness);
     return false;
 }
 async function buildRecoveryPaneContext(input, sagaInput, worker, descriptor, ownership, paneAttemptId) {
+    const currentProviderPath = resolvePreflightBinaryPath(descriptor.provider).path;
+    const sameProviderPath = process.platform === 'win32'
+        ? currentProviderPath.toLowerCase() === descriptor.binary.toLowerCase()
+        : currentProviderPath === descriptor.binary;
+    if (!sameProviderPath)
+        throw new Error('provider path changed');
     const agentType = descriptor.provider;
     const workerCwd = worker.working_dir ?? input.cwd;
     const promptMode = isPromptModeAgent(agentType);
@@ -1849,6 +1848,17 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                             : { ok: false, error: 'startup_ack_timeout' };
                     }
                 }
+                try {
+                    const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
+                    const sameProviderPath = process.platform === 'win32'
+                        ? currentProviderPath.toLowerCase() === launchDescriptor.binary.toLowerCase()
+                        : currentProviderPath === launchDescriptor.binary;
+                    if (!sameProviderPath)
+                        throw new Error('provider path changed');
+                }
+                catch {
+                    return { ok: false, error: 'launch_descriptor_unresolvable' };
+                }
                 const paneAttemptId = randomUUID();
                 const livePaneIds = [];
                 for (const candidate of config.workers) {
@@ -2243,22 +2253,9 @@ export async function startTeamV2(config) {
     }
     const workspaceMode = worktreeMode === 'disabled' ? 'single' : 'worktree';
     // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
-    // AC-8: missing/untrusted binaries fall back to the snapshot's Claude tuple at
-    // spawn time; emit a loud warning naming the binary so operators can fix it.
-    // Rewrite headless-unsupported direct workers (e.g. antigravity on Windows) to
-    // the Claude fallback up front, BEFORE any team state or tmux session is created.
-    // Direct launches like `omc team 1:antigravity` flow through `agentTypes` as the
-    // round-robin fallbackAgent for resolveTaskAssignment, so without this they would
-    // pass the unsupported provider through and only fail mid-spawn. (Role-routed
-    // primaries are handled separately by resolvePreflightBinaryPath's guard.)
-    const declaredAgentTypes = config.agentTypes;
-    const agentTypes = declaredAgentTypes.map((t) => {
-        if (!isHeadlessSupportedOnPlatform(t)) {
-            process.stderr.write(`[team/runtime-v2] ${t} headless mode is unsupported on this platform — using claude fallback for direct workers\n`);
-            return 'claude';
-        }
-        return t;
-    });
+    // Unsupported, relative, missing, or untrusted providers fail before any team
+    // state or multiplexer side effect is created.
+    const agentTypes = config.agentTypes;
     const resolvedBinaryPaths = {};
     const missingBinaryReasons = [];
     for (const agentType of [...new Set(agentTypes)]) {
@@ -2270,9 +2267,12 @@ export async function startTeamV2(config) {
             missingBinaryReasons.push({ agentType, reason });
         }
     }
-    // Best-effort resolve extra providers referenced by the routing snapshot
-    // (codex/gemini/grok/cursor critic, reviewer, etc.). Missing binaries are tolerated —
-    // the spawn path falls back to the snapshot's Claude fallback (AC-8).
+    if (missingBinaryReasons.length > 0) {
+        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
+        throw new Error(`cli_binary_preflight_failed:${missing}`);
+    }
+    // Resolve extra providers referenced by routing snapshots. A selected route
+    // without an exact validated path fails before worker launch.
     for (const { primary } of Object.values(resolvedRouting)) {
         const provider = primary.provider;
         if (resolvedBinaryPaths[provider])
@@ -2287,28 +2287,15 @@ export async function startTeamV2(config) {
             missingBinaryReasons.push({ agentType: provider, reason });
         }
     }
-    // AC-8: guarantee at least the Claude fallback CLI is resolvable. If every
-    // declared provider is unavailable AND Claude is not resolvable either, the
-    // caller gets a loud error rather than a silently-broken team.
-    if (!resolvedBinaryPaths.claude) {
-        try {
-            resolvedBinaryPaths.claude = resolveValidatedBinaryPath('claude');
-        }
-        catch {
-            // Keep going — startup will emit warnings below and spawnV2Worker may
-            // still succeed if Claude is resolvable via PATH at exec time.
-        }
-    }
     // Create state directories
     await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
     await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
     await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
-    // AC-8: emit a loud team-event warning naming every missing/untrusted CLI
-    // binary so the leader surfaces the fallback decision instead of silently
-    // swapping providers.
+    // Emit bounded diagnostics for unavailable snapshot providers. They are never
+    // substituted or resolved through PATH at launch time.
     const missingBinaryLogFailure = createSwallowedErrorLogger('team.runtime-v2.startTeamV2 cli_binary_missing event failed');
     for (const { agentType, reason } of missingBinaryReasons) {
-        process.stderr.write(`[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} — falling back to claude snapshot (AC-8)\n`);
+        process.stderr.write(`[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} — provider route unavailable\n`);
         await appendTeamEvent(sanitized, {
             type: 'team_leader_nudge',
             worker: 'leader-fixed',
@@ -3388,6 +3375,30 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     const recordedWorkerPaneIds = config.workers
         .map((w) => w.pane_id)
         .filter((p) => typeof p === 'string' && p.trim().length > 0);
+    const providerCleanupFailures = [];
+    for (const worker of config.workers) {
+        if (!worker.launch_attempt_id || !worker.pane_id)
+            continue;
+        const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+        if (!provider) {
+            providerCleanupFailures.push(worker.name);
+            continue;
+        }
+        const attempt = await loadWorkerLaunchAttempt({
+            cwd,
+            teamName: sanitized,
+            workerName: worker.name,
+            paneId: worker.pane_id,
+            provider,
+            attemptId: worker.launch_attempt_id,
+            runtimeCliPath: resolveRuntimeCliPath(),
+        });
+        if (!attempt
+            || !await retireWorkerLaunchAttempt(attempt, 'team_shutdown')
+            || !await terminateWorkerLaunchProvider(attempt)) {
+            providerCleanupFailures.push(worker.name);
+        }
+    }
     try {
         const { killWorkerPanes, killTeamSession, resolveSplitPaneWorkerPaneIds, getWorkerLiveness } = await import('./tmux-session.js');
         const ownsWindow = config.tmux_window_owned === true;
@@ -3442,6 +3453,11 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             await finalizeAutoMerge();
             return;
         }
+    }
+    if (providerCleanupFailures.length > 0) {
+        process.stderr.write(`[team/runtime-v2] preserving worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
+        await finalizeAutoMerge();
+        return;
     }
     // 5. Ralph completion logging
     if (ralph) {

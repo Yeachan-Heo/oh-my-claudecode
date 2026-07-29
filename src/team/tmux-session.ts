@@ -21,6 +21,7 @@ import type { MailboxNotificationTarget, MailboxTargetOwnership } from './mailbo
 import type { CliAgentType } from './model-contract.js';
 import {
   awaitWorkerLaunchAcknowledgement,
+  awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchAttemptCurrent,
@@ -1323,6 +1324,9 @@ export async function spawnWorkerInPane(
     const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
     if (!accepted.ok) {
       throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
+    }
+    if (!await awaitWorkerLaunchProviderStarted(config.launchAttempt)) {
+      throw new Error(`worker_start_provider_failed:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
     }
   };
 

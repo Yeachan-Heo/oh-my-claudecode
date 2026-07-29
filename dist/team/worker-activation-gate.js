@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
     const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -64,7 +64,6 @@ export async function runWorkerActivationGate(gate) {
             cwd: gate.cwd,
             env: { ...providerProcessEnv, ...gate.env },
             stdio: 'inherit',
-            detached: process.platform !== 'win32',
         });
         let settled = false;
         let providerPid;
@@ -90,18 +89,32 @@ export async function runWorkerActivationGate(gate) {
             });
         });
         const terminateProvider = async () => {
+            if (settled)
+                return true;
+            let terminated = false;
             if (providerPid && providerStartIdentity) {
-                await terminateOwnedProcessTree({
+                const result = await terminateOwnedProcessTree({
                     pid: providerPid,
                     expectedStartIdentity: providerStartIdentity,
                     deadlineAt: new Date(Date.now() + 2_000).toISOString(),
                     force: true,
                 });
+                terminated = result === 'terminated' || result === 'already-dead' || result === 'identity-mismatch';
+            }
+            else if (child.pid) {
+                terminated = await killProcessTree(child.pid, 'SIGKILL');
             }
             else {
-                child.kill();
+                terminated = child.kill();
             }
-            await completion;
+            const completed = await new Promise(resolve => {
+                const timer = setTimeout(() => resolve(false), 2_000);
+                void completion.then(() => {
+                    clearTimeout(timer);
+                    resolve(true);
+                });
+            });
+            return terminated && completed;
         };
         const spawned = await new Promise(resolve => {
             child.once('spawn', () => resolve(true));
@@ -121,7 +134,8 @@ export async function runWorkerActivationGate(gate) {
             providerPid = child.pid;
             providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
             if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
-                await terminateProvider();
+                if (!await terminateProvider())
+                    return { outcome: 'provider_cleanup_unverified' };
                 return { outcome: 'provider_spawn_failed' };
             }
             await writeAtomic(`${gate.runPath}.launched`, {
@@ -133,7 +147,8 @@ export async function runWorkerActivationGate(gate) {
             return { completion };
         }
         catch {
-            await terminateProvider();
+            if (!await terminateProvider())
+                return { outcome: 'provider_cleanup_unverified' };
             return { outcome: 'provider_spawn_failed' };
         }
     });

@@ -22,7 +22,7 @@ function parseDeadline(deadlineAt) {
  * Kill a process and optionally its entire process tree.
  *
  * On Windows: Uses taskkill /T for tree kill, /F for force
- * On Unix: Uses negative PID for process group, falls back to direct kill
+ * On Unix: Snapshots descendants and kills leaves before the owned root
  */
 export async function killProcessTree(pid, signal = 'SIGTERM') {
     if (!Number.isInteger(pid) || pid <= 0)
@@ -54,20 +54,45 @@ async function killProcessTreeWindows(pid, force) {
         return false;
     }
 }
-function killProcessTreeUnix(pid, signal) {
+function listProcessTreeUnix(rootPid) {
     try {
-        process.kill(-pid, signal);
-        return true;
+        const rows = execFileSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8', timeout: 2_000 });
+        const children = new Map();
+        for (const line of rows.split('\n')) {
+            const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+            if (!match)
+                continue;
+            const pid = Number(match[1]);
+            const ppid = Number(match[2]);
+            const siblings = children.get(ppid) ?? [];
+            siblings.push(pid);
+            children.set(ppid, siblings);
+        }
+        const ordered = [];
+        const visit = (pid) => {
+            for (const child of children.get(pid) ?? [])
+                visit(child);
+            ordered.push(pid);
+        };
+        visit(rootPid);
+        return ordered;
     }
     catch {
+        return [rootPid];
+    }
+}
+function killProcessTreeUnix(pid, signal) {
+    let signalled = false;
+    for (const targetPid of listProcessTreeUnix(pid)) {
         try {
-            process.kill(pid, signal);
-            return true;
+            process.kill(targetPid, signal);
+            signalled = true;
         }
         catch {
-            return false;
+            // The process may have exited between the snapshot and signal.
         }
     }
+    return signalled || !isProcessAlive(pid);
 }
 /**
  * Check if a process is alive.

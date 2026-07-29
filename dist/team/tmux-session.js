@@ -15,7 +15,7 @@ import { validateTeamName } from './team-name.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
 import { configureTmuxClipboardForSession, configureTmuxClipboardForSessionAsync } from '../cli/tmux-clipboard.js';
-import { awaitWorkerLaunchAcknowledgement, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, isWorkerLaunchAttemptCurrent, prepareWorkerLaunchAttempt, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, isWorkerLaunchAttemptAccepted, isWorkerLaunchAttemptCurrent, prepareWorkerLaunchAttempt, revokeWorkerLaunchAttempt, } from './worker-launch-ack.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
 const TMUX_SESSION_PREFIX = 'omc-team';
@@ -1053,6 +1053,9 @@ export async function spawnWorkerInPane(sessionName, paneId, config) {
         const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
         if (!accepted.ok) {
             throw new Error(`worker_start_ack_${accepted.reason}:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
+        }
+        if (!await awaitWorkerLaunchProviderStarted(config.launchAttempt)) {
+            throw new Error(`worker_start_provider_failed:${config.workerName}:${paneId}:${config.launchAttempt.attempt_id.slice(0, 12)}`);
         }
     };
     logWorkerSpawnDiagnostic(`worker start delivery begin session=${sessionName} pane=${paneId} ` +

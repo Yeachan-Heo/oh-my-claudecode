@@ -25,6 +25,7 @@ const modelContractMocks = vi.hoisted(() => ({
     if (agentType === 'gemini') throw new Error('Resolved CLI binary \'gemini\' to untrusted location: /tmp/gemini');
     return `/usr/bin/${agentType ?? 'claude'}`;
   }),
+  clearResolvedPathCache: vi.fn(),
   getContract: vi.fn((agentType?: string) => ({ binary: agentType ?? 'claude' })),
   getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'issue2675-team/worker-1' })),
   isPromptModeAgent: vi.fn(() => false),
@@ -62,6 +63,7 @@ vi.mock('../tmux-session.js', async importOriginal => ({
 vi.mock('../model-contract.js', () => ({
   buildWorkerArgv: modelContractMocks.buildWorkerArgv,
   resolveValidatedBinaryPath: modelContractMocks.resolveValidatedBinaryPath,
+  clearResolvedPathCache: modelContractMocks.clearResolvedPathCache,
   getContract: modelContractMocks.getContract,
   getWorkerEnv: modelContractMocks.getWorkerEnv,
   isPromptModeAgent: modelContractMocks.isPromptModeAgent,
@@ -118,11 +120,16 @@ describe('runtime-v2 Gemini preflight routing', () => {
     if (cwd) await rm(cwd, { recursive: true, force: true });
   });
 
-  it('keeps an explicitly routed gemini lane on gemini when strict preflight path probing false-negatives', async () => {
+  it.each([
+    ["untrusted absolute", "Resolved CLI binary 'gemini' to untrusted location: /tmp/shadow/gemini"],
+    ["relative", "Resolved CLI binary 'gemini' to relative path: ./gemini"],
+    ["missing", "CLI binary not found: gemini"],
+  ])('fails before launch for a %s provider path', async (_case, reason) => {
     cwd = await mkdtemp(join(tmpdir(), 'issue2675-repro-'));
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementationOnce(() => { throw new Error(reason); });
     const { startTeamV2 } = await import('../runtime-v2.js');
 
-    const runtime = await startTeamV2({
+    await expect(startTeamV2({
       teamName: 'issue2675-team',
       workerCount: 1,
       agentTypes: ['gemini'],
@@ -131,16 +138,10 @@ describe('runtime-v2 Gemini preflight routing', () => {
       pluginConfig: {
         team: { roleRouting: { executor: { provider: 'gemini' } } },
       } as any,
-    });
+    })).rejects.toThrow(`cli_binary_preflight_failed:gemini:${reason}`);
 
-    expect(runtime.config.workers[0]?.worker_cli).toBe('gemini');
-    expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
-      'gemini',
-      expect.objectContaining({
-        teamName: 'issue2675-team',
-        workerName: 'worker-1',
-        resolvedBinaryPath: 'gemini',
-      }),
-    );
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(modelContractMocks.buildWorkerArgv).not.toHaveBeenCalled();
   });
 });

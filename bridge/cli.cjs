@@ -6612,18 +6612,40 @@ async function killProcessTreeWindows(pid, force) {
     return false;
   }
 }
-function killProcessTreeUnix(pid, signal) {
+function listProcessTreeUnix(rootPid) {
   try {
-    process.kill(-pid, signal);
-    return true;
+    const rows = (0, import_child_process7.execFileSync)("ps", ["-eo", "pid=,ppid="], { encoding: "utf8", timeout: 2e3 });
+    const children = /* @__PURE__ */ new Map();
+    for (const line of rows.split("\n")) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      const ppid = Number(match[2]);
+      const siblings = children.get(ppid) ?? [];
+      siblings.push(pid);
+      children.set(ppid, siblings);
+    }
+    const ordered = [];
+    const visit = (pid) => {
+      for (const child of children.get(pid) ?? []) visit(child);
+      ordered.push(pid);
+    };
+    visit(rootPid);
+    return ordered;
   } catch {
+    return [rootPid];
+  }
+}
+function killProcessTreeUnix(pid, signal) {
+  let signalled = false;
+  for (const targetPid of listProcessTreeUnix(pid)) {
     try {
-      process.kill(pid, signal);
-      return true;
+      process.kill(targetPid, signal);
+      signalled = true;
     } catch {
-      return false;
     }
   }
+  return signalled || !isProcessAlive(pid);
 }
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -35116,6 +35138,9 @@ function resolveCliBinaryPath(binary) {
   resolvedPathCache.set(binary, resolvedPath);
   return resolvedPath;
 }
+function clearResolvedPathCache() {
+  resolvedPathCache.clear();
+}
 function shouldUseClaudeBareMode(env2 = process.env) {
   return typeof env2.ANTHROPIC_API_KEY === "string" && env2.ANTHROPIC_API_KEY.trim().length > 0;
 }
@@ -35733,10 +35758,77 @@ async function withWorkerLaunchAttemptFence(attempt, fn) {
     return { ok: false };
   }
 }
+async function retireWorkerLaunchAttempt(attempt, reason) {
+  const retiredPath = `${attempt.decisionPath}.retired`;
+  try {
+    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      const existing = await readJson2(retiredPath);
+      if (existing.kind === "value") {
+        if (!identityMatches(existing.value, attempt)) return false;
+      } else if (existing.kind === "malformed") {
+        return false;
+      } else {
+        await writeExclusiveAtomic(retiredPath, {
+          ...identityOf(attempt),
+          kind: "worker_launch_retired",
+          reason,
+          written_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      if (await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
+        await (0, import_promises11.unlink)(attempt.currentPath).catch(() => {
+        });
+      }
+      return true;
+    }, { timeoutMs: 5e3, retryDelayMs: 10 });
+  } catch {
+    return false;
+  }
+}
+async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
+  const started = await readJson2(attempt.startedPath);
+  if (started.kind === "absent") return true;
+  if (started.kind !== "value") return false;
+  const record2 = started.value;
+  if (!identityMatches(record2, attempt) || record2.kind !== "worker_launch_provider_started" || !Number.isSafeInteger(record2.pid) || typeof record2.process_start_identity !== "string") return false;
+  const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
+  const result = await terminateOwnedProcessTree({
+    pid: record2.pid,
+    expectedStartIdentity: record2.process_start_identity,
+    deadlineAt,
+    force: true
+  });
+  if (result !== "terminated" && result !== "already-dead" && result !== "identity-mismatch") return false;
+  const deadline = Date.parse(deadlineAt);
+  while (Date.now() < deadline) {
+    const liveness = await isProcessIdentityLive(record2.pid, record2.process_start_identity, deadline);
+    if (liveness === "dead" || liveness === "mismatch") return true;
+    if (liveness === "unknown") return false;
+    await sleep4(20);
+  }
+  return false;
+}
+async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
+  const timeoutMs = options.timeoutMs ?? resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isWorkerLaunchProviderStarted(attempt)) {
+      try {
+        const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => await isCurrentLaunchIdentity(attempt.currentPath, attempt) && await isWorkerLaunchAttemptAccepted(attempt) && await isWorkerLaunchProviderStarted(attempt));
+        if (handedOff) return true;
+      } catch {
+      }
+    }
+    if ((await readJson2(`${attempt.decisionPath}.retired`)).kind !== "absent") return false;
+    await sleep4(pollIntervalMs);
+  }
+  return false;
+}
 async function isWorkerLaunchProviderStarted(attempt) {
   const started = await readJson2(attempt.startedPath);
   const record2 = started.kind === "value" ? started.value : null;
-  return Boolean(record2 && identityMatches(record2, attempt) && record2.kind === "worker_launch_provider_started" && (record2.pid === null || Number.isSafeInteger(record2.pid)) && typeof record2.written_at === "string" && Number.isFinite(Date.parse(record2.written_at)));
+  return Boolean(record2 && identityMatches(record2, attempt) && record2.kind === "worker_launch_provider_started" && Number.isSafeInteger(record2.pid) && typeof record2.process_start_identity === "string" && typeof record2.written_at === "string" && Number.isFinite(Date.parse(record2.written_at)));
 }
 var import_node_crypto6, import_node_fs7, import_promises11, import_node_path9, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS;
 var init_worker_launch_ack = __esm({
@@ -36722,6 +36814,9 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
     const accepted = await awaitWorkerLaunchAcknowledgement(config2.launchAttempt);
     if (!accepted.ok) {
       throw new Error(`worker_start_ack_${accepted.reason}:${config2.workerName}:${paneId}:${config2.launchAttempt.attempt_id.slice(0, 12)}`);
+    }
+    if (!await awaitWorkerLaunchProviderStarted(config2.launchAttempt)) {
+      throw new Error(`worker_start_provider_failed:${config2.workerName}:${paneId}:${config2.launchAttempt.attempt_id.slice(0, 12)}`);
     }
   };
   logWorkerSpawnDiagnostic(
@@ -42060,8 +42155,7 @@ function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolve
   if (!pair) {
     return { agentType: fallbackAgent, model: "", role: canonical };
   }
-  const primaryProvider = pair.primary.provider;
-  const chosen = resolvedBinaryPaths[primaryProvider] ? pair.primary : pair.fallback;
+  const chosen = pair.primary;
   return {
     agentType: chosen.provider,
     model: chosen.model,
@@ -42073,20 +42167,10 @@ function sanitizeTeamName(name) {
   if (!sanitized) throw new Error(`Invalid team name: "${name}" produces empty slug after sanitization`);
   return sanitized;
 }
-function shouldUseLaunchTimeCliResolution(reason) {
-  return /untrusted location|relative path/i.test(reason);
-}
 function resolvePreflightBinaryPath(agentType) {
   assertHeadlessSupported(agentType);
-  try {
-    return { path: resolveValidatedBinaryPath(agentType), degraded: false };
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    if (shouldUseLaunchTimeCliResolution(reason)) {
-      return { path: getContract(agentType).binary, degraded: true, reason };
-    }
-    throw err;
-  }
+  clearResolvedPathCache();
+  return { path: resolveValidatedBinaryPath(agentType) };
 }
 async function getWorkerPaneLiveness(paneId) {
   if (!paneId) return "unknown";
@@ -42364,12 +42448,14 @@ async function spawnV2Worker(opts) {
   });
   const dispatchOutcome = fencedDispatch.ok ? fencedDispatch.value : { ok: false, reason: "worker_launch_attempt_superseded" };
   if (!dispatchOutcome.ok) {
+    const retired = await retireWorkerLaunchAttempt(startupContext.attempt, "startup_dispatch_failed").catch(() => false);
+    const providerStopped = retired && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
     try {
       await killOwnedWorkerPane(ownership);
     } catch {
       throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
     }
-    if (await getWorkerPaneLiveness(paneId) !== "dead") {
+    if (!providerStopped || await getWorkerPaneLiveness(paneId) !== "dead") {
       throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
     }
     return {
@@ -42461,19 +42547,33 @@ async function recordUnaddressableRecoveryPaneFailure(input, recoveryId, paneAtt
   return path25;
 }
 async function cleanupRecoveryPaneAttempt(input, recoveryId, pending, reason) {
+  let providerStopped = true;
+  if (pending.startupContext) {
+    const retired = await retireWorkerLaunchAttempt(pending.startupContext.attempt, reason).catch(() => false);
+    providerStopped = retired && await terminateWorkerLaunchProvider(pending.startupContext.attempt).catch(() => false);
+  }
   let liveness = "unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
     await killOwnedWorkerPane(pending.ownership).catch(() => void 0);
     liveness = await getWorkerLiveness(pending.ownership.paneId).catch(() => "unknown");
-    if (liveness === "dead") {
+    if (liveness === "dead" && providerStopped) {
       pendingRecoveryPanes.delete(recoveryId);
       return true;
     }
   }
-  await recordRecoveryPaneRollbackFailure(input, recoveryId, pending, reason, liveness);
+  await recordRecoveryPaneRollbackFailure(
+    input,
+    recoveryId,
+    pending,
+    providerStopped ? reason : `${reason}:provider_cleanup_unverified`,
+    liveness
+  );
   return false;
 }
 async function buildRecoveryPaneContext(input, sagaInput, worker, descriptor, ownership, paneAttemptId) {
+  const currentProviderPath = resolvePreflightBinaryPath(descriptor.provider).path;
+  const sameProviderPath = process.platform === "win32" ? currentProviderPath.toLowerCase() === descriptor.binary.toLowerCase() : currentProviderPath === descriptor.binary;
+  if (!sameProviderPath) throw new Error("provider path changed");
   const agentType = descriptor.provider;
   const workerCwd = worker.working_dir ?? input.cwd;
   const promptMode = isPromptModeAgent(agentType);
@@ -43324,6 +43424,13 @@ async function executeRecoverDeadWorkerV2Owner(input) {
             return ready ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false } : { ok: false, error: "startup_ack_timeout" };
           }
         }
+        try {
+          const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
+          const sameProviderPath = process.platform === "win32" ? currentProviderPath.toLowerCase() === launchDescriptor.binary.toLowerCase() : currentProviderPath === launchDescriptor.binary;
+          if (!sameProviderPath) throw new Error("provider path changed");
+        } catch {
+          return { ok: false, error: "launch_descriptor_unresolvable" };
+        }
         const paneAttemptId = (0, import_node_crypto9.randomUUID)();
         const livePaneIds = [];
         for (const candidate of config2.workers) {
@@ -43710,17 +43817,7 @@ async function startTeamV2(config2) {
     }
   }
   const workspaceMode = worktreeMode === "disabled" ? "single" : "worktree";
-  const declaredAgentTypes = config2.agentTypes;
-  const agentTypes = declaredAgentTypes.map((t) => {
-    if (!isHeadlessSupportedOnPlatform(t)) {
-      process.stderr.write(
-        `[team/runtime-v2] ${t} headless mode is unsupported on this platform \u2014 using claude fallback for direct workers
-`
-      );
-      return "claude";
-    }
-    return t;
-  });
+  const agentTypes = config2.agentTypes;
   const resolvedBinaryPaths = {};
   const missingBinaryReasons = [];
   for (const agentType of [...new Set(agentTypes)]) {
@@ -43730,6 +43827,10 @@ async function startTeamV2(config2) {
       const reason = err instanceof Error ? err.message : String(err);
       missingBinaryReasons.push({ agentType, reason });
     }
+  }
+  if (missingBinaryReasons.length > 0) {
+    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(";");
+    throw new Error(`cli_binary_preflight_failed:${missing}`);
   }
   for (const { primary } of Object.values(resolvedRouting)) {
     const provider = primary.provider;
@@ -43742,12 +43843,6 @@ async function startTeamV2(config2) {
       missingBinaryReasons.push({ agentType: provider, reason });
     }
   }
-  if (!resolvedBinaryPaths.claude) {
-    try {
-      resolvedBinaryPaths.claude = resolveValidatedBinaryPath("claude");
-    } catch {
-    }
-  }
   await (0, import_promises20.mkdir)(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
   await (0, import_promises20.mkdir)(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
   await (0, import_promises20.mkdir)((0, import_path94.join)(getOmcRoot(leaderCwd), "state", "team", sanitized, "mailbox"), { recursive: true });
@@ -43756,7 +43851,7 @@ async function startTeamV2(config2) {
   );
   for (const { agentType, reason } of missingBinaryReasons) {
     process.stderr.write(
-      `[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} \u2014 falling back to claude snapshot (AC-8)
+      `[team/runtime-v2] cli_binary_missing:${agentType}: ${reason} \u2014 provider route unavailable
 `
     );
     await appendTeamEvent(sanitized, {
@@ -44726,6 +44821,27 @@ Then exit your session.
   }
   config2 = await revalidateShutdownFence();
   const recordedWorkerPaneIds = config2.workers.map((w) => w.pane_id).filter((p) => typeof p === "string" && p.trim().length > 0);
+  const providerCleanupFailures = [];
+  for (const worker of config2.workers) {
+    if (!worker.launch_attempt_id || !worker.pane_id) continue;
+    const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+    if (!provider) {
+      providerCleanupFailures.push(worker.name);
+      continue;
+    }
+    const attempt = await loadWorkerLaunchAttempt({
+      cwd: cwd2,
+      teamName: sanitized,
+      workerName: worker.name,
+      paneId: worker.pane_id,
+      provider,
+      attemptId: worker.launch_attempt_id,
+      runtimeCliPath: resolveRuntimeCliPath()
+    });
+    if (!attempt || !await retireWorkerLaunchAttempt(attempt, "team_shutdown") || !await terminateWorkerLaunchProvider(attempt)) {
+      providerCleanupFailures.push(worker.name);
+    }
+  }
   try {
     const { killWorkerPanes: killWorkerPanes2, killTeamSession: killTeamSession2, resolveSplitPaneWorkerPaneIds: resolveSplitPaneWorkerPaneIds2, getWorkerLiveness: getWorkerLiveness2 } = await Promise.resolve().then(() => (init_tmux_session(), tmux_session_exports));
     const ownsWindow = config2.tmux_window_owned === true;
@@ -44783,6 +44899,12 @@ Then exit your session.
       await finalizeAutoMerge();
       return;
     }
+  }
+  if (providerCleanupFailures.length > 0) {
+    process.stderr.write(`[team/runtime-v2] preserving worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
+`);
+    await finalizeAutoMerge();
+    return;
   }
   if (ralph) {
     const finalTasks = await listTasksFromFiles(sanitized, cwd2).catch(() => []);

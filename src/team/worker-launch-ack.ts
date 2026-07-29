@@ -5,7 +5,7 @@ import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'nod
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
@@ -52,6 +52,7 @@ interface WorkerLaunchProviderStarted extends WorkerLaunchIdentity {
   kind: 'worker_launch_provider_started';
   pid: number | null;
   written_at: string;
+  process_start_identity: string;
 }
 
 export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
@@ -82,7 +83,7 @@ export type WorkerLaunchAcceptance =
 
 export type WorkerLaunchBootstrapResult =
   | { outcome: 'ran'; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed' };
+  | { outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed' | 'provider_cleanup_unverified' };
 
 export interface ProviderSpawnInvocation {
   command: string;
@@ -463,13 +464,100 @@ export async function withWorkerLaunchAttemptFence<T>(
   }
 }
 
+export async function retireWorkerLaunchAttempt(
+  attempt: WorkerLaunchAttempt,
+  reason: string,
+): Promise<boolean> {
+  const retiredPath = `${attempt.decisionPath}.retired`;
+  try {
+    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      const existing = await readJson(retiredPath);
+      if (existing.kind === 'value') {
+        if (!identityMatches(existing.value as Partial<WorkerLaunchIdentity>, attempt)) return false;
+      } else if (existing.kind === 'malformed') {
+        return false;
+      } else {
+        await writeExclusiveAtomic(retiredPath, {
+          ...identityOf(attempt),
+          kind: 'worker_launch_retired',
+          reason,
+          written_at: new Date().toISOString(),
+        });
+      }
+      if (await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
+        await unlink(attempt.currentPath).catch(() => {});
+      }
+      return true;
+    }, { timeoutMs: 5_000, retryDelayMs: 10 });
+  } catch {
+    return false;
+  }
+}
+
+export async function terminateWorkerLaunchProvider(
+  attempt: WorkerLaunchAttempt,
+  timeoutMs: number = 2_000,
+): Promise<boolean> {
+  const started = await readJson(attempt.startedPath);
+  if (started.kind === 'absent') return true;
+  if (started.kind !== 'value') return false;
+  const record = started.value as Partial<WorkerLaunchProviderStarted>;
+  if (!identityMatches(record, attempt)
+    || record.kind !== 'worker_launch_provider_started'
+    || !Number.isSafeInteger(record.pid)
+    || typeof record.process_start_identity !== 'string') return false;
+  const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
+  const result = await terminateOwnedProcessTree({
+    pid: record.pid!,
+    expectedStartIdentity: record.process_start_identity,
+    deadlineAt,
+    force: true,
+  });
+  if (result !== 'terminated' && result !== 'already-dead' && result !== 'identity-mismatch') return false;
+  const deadline = Date.parse(deadlineAt);
+  while (Date.now() < deadline) {
+    const liveness = await isProcessIdentityLive(record.pid!, record.process_start_identity, deadline);
+    if (liveness === 'dead' || liveness === 'mismatch') return true;
+    if (liveness === 'unknown') return false;
+    await sleep(20);
+  }
+  return false;
+}
+
+export async function awaitWorkerLaunchProviderStarted(
+  attempt: WorkerLaunchAttempt,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isWorkerLaunchProviderStarted(attempt)) {
+      try {
+        const handedOff = await withFileLock(lockPathFor(attempt.currentPath), async () => (
+          await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+          && await isWorkerLaunchAttemptAccepted(attempt)
+          && await isWorkerLaunchProviderStarted(attempt)
+        ));
+        if (handedOff) return true;
+      } catch {
+        // Bootstrap still owns the launch fence; retry within the bounded window.
+      }
+    }
+    if ((await readJson(`${attempt.decisionPath}.retired`)).kind !== 'absent') return false;
+    await sleep(pollIntervalMs);
+  }
+  return false;
+}
+
 export async function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean> {
   const started = await readJson(attempt.startedPath);
   const record = started.kind === 'value' ? started.value as Partial<WorkerLaunchProviderStarted> : null;
   return Boolean(record
     && identityMatches(record, attempt)
     && record.kind === 'worker_launch_provider_started'
-    && (record.pid === null || Number.isSafeInteger(record.pid))
+    && Number.isSafeInteger(record.pid)
+    && typeof record.process_start_identity === 'string'
     && typeof record.written_at === 'string'
     && Number.isFinite(Date.parse(record.written_at)));
 }
@@ -566,7 +654,11 @@ export async function materializeProviderSpawnInvocation(
   };
 }
 
-async function publishProviderStarted(spec: WorkerLaunchBootstrapSpec, pid: number | undefined): Promise<boolean> {
+async function publishProviderStarted(
+  spec: WorkerLaunchBootstrapSpec,
+  pid: number | undefined,
+  processStartIdentity: string,
+): Promise<boolean> {
   const record: WorkerLaunchProviderStarted = {
     schema_version: spec.schema_version,
     attempt_id: spec.attempt_id,
@@ -578,6 +670,7 @@ async function publishProviderStarted(spec: WorkerLaunchBootstrapSpec, pid: numb
     created_at: spec.created_at,
     kind: 'worker_launch_provider_started',
     pid: Number.isSafeInteger(pid) ? pid! : null,
+    process_start_identity: processStartIdentity,
     written_at: new Date().toISOString(),
   };
   try {
@@ -600,7 +693,8 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
   const { OMC_WORKER_LAUNCH_SPEC: _launchSpec, OMC_WORKER_LAUNCH_SPEC_B64: _encodedLaunchSpec, ...providerEnv } = process.env;
   try {
     const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
-      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)
+        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
         return { outcome: 'superseded' as const };
       }
       const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv));
@@ -608,7 +702,6 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         cwd: spec.cwd,
         env: providerEnv,
         stdio: 'inherit',
-        detached: process.platform !== 'win32',
       });
       let settled = false;
       let providerStartIdentity: string | null = null;
@@ -624,18 +717,30 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           resolve({ outcome: 'provider_spawn_failed' });
         });
       });
-      const terminateProvider = async () => {
+      const terminateProvider = async (): Promise<boolean> => {
+        if (settled) return true;
+        let terminated = false;
         if (child.pid && providerStartIdentity) {
-          await terminateOwnedProcessTree({
+          const result = await terminateOwnedProcessTree({
             pid: child.pid,
             expectedStartIdentity: providerStartIdentity,
             deadlineAt: new Date(Date.now() + 2_000).toISOString(),
             force: true,
           });
+          terminated = result === 'terminated' || result === 'already-dead' || result === 'identity-mismatch';
+        } else if (child.pid) {
+          terminated = await killProcessTree(child.pid, 'SIGKILL');
         } else {
-          child.kill();
+          terminated = child.kill();
         }
-        await completion;
+        const completed = await new Promise<boolean>(resolve => {
+          const timer = setTimeout(() => resolve(false), 2_000);
+          void completion.then(() => {
+            clearTimeout(timer);
+            resolve(true);
+          });
+        });
+        return terminated && completed;
       };
       const spawned = await new Promise<boolean>(resolve => {
         child.once('spawn', () => resolve(true));
@@ -649,24 +754,26 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       if (settled) return { completion };
       providerStartIdentity = child.pid ? await getProcessStartIdentity(child.pid) : null;
       if (!child.pid || !providerStartIdentity || !isProcessAlive(child.pid)) {
-        await terminateProvider();
+        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
-      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
-        await terminateProvider();
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)
+        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
+        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'superseded' as const };
       }
       try {
-        if (!await publishProviderStarted(spec, child.pid)) {
-          await terminateProvider();
+        if (!await publishProviderStarted(spec, child.pid, providerStartIdentity)) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
           return { outcome: 'provider_spawn_failed' as const };
         }
       } catch {
-        await terminateProvider();
+        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
-      if (!await isCurrentLaunchIdentity(spec.current_path, spec)) {
-        await terminateProvider();
+      if (!await isCurrentLaunchIdentity(spec.current_path, spec)
+        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
+        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         await unlink(spec.started_path).catch(() => {});
         return { outcome: 'superseded' as const };
       }

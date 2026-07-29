@@ -6,7 +6,7 @@
  * Kill a process and optionally its entire process tree.
  *
  * On Windows: Uses taskkill /T for tree kill, /F for force
- * On Unix: Uses negative PID for process group, falls back to direct kill
+ * On Unix: Snapshots descendants and kills leaves before the owned root
  */
 export declare function killProcessTree(pid: number, signal?: NodeJS.Signals): Promise<boolean>;
 /**

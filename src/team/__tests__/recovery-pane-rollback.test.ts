@@ -39,7 +39,7 @@ vi.mock('../tmux-session.js', async importOriginal => ({
 vi.mock('../model-contract.js', async importOriginal => ({
   ...await importOriginal<typeof import('../model-contract.js')>(),
   getContract: vi.fn(() => ({})),
-  resolveValidatedBinaryPath: vi.fn(() => '/bin/echo'),
+  resolveValidatedBinaryPath: vi.fn((agentType?: string) => agentType === 'gemini' ? process.execPath : '/bin/echo'),
   buildWorkerArgv: vi.fn(() => ['/bin/echo']),
   getWorkerEnv: vi.fn(() => ({})),
 }));
@@ -470,6 +470,32 @@ describe('recovery pane rollback evidence', () => {
     const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
     expect(evidence).toMatchObject({ reason: 'pane_membership_unverified', unaddressable: true,
       split: { provider: 'tmux', paneId: '%10' } });
+  });
+
+  it('rejects a persisted provider descriptor whose validated path has changed', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-stale-provider-path-'));
+    const teamName = 'stale-provider-team';
+    const requestId = 'stale-provider-request';
+    const recoveryId = 'stale-provider-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata,
+        launch_descriptor: { ...launchMetadata.launch_descriptor, binary: '/tmp/path-shadow/claude' },
+        pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%9',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    paneMocks.getWorkerLiveness.mockResolvedValue('dead');
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'launch_descriptor_unresolvable', recoveryId });
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    expect(paneMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
   });
 
   it('never launches or kills when recovery split aliases the leader pane', async () => {

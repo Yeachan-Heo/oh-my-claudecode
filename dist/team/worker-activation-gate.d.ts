@@ -19,7 +19,7 @@ export type RecoveryActivationGateResult = {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
 } | {
-    outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'superseded';
+    outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'provider_cleanup_unverified' | 'superseded';
 };
 interface GateRecord {
     recovery_id: string;

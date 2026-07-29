@@ -5,12 +5,15 @@ import { join } from 'node:path';
 
 import {
   awaitWorkerLaunchAcknowledgement,
+  awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
   isWorkerLaunchAttemptAccepted,
   loadWorkerLaunchAttempt,
   loadCurrentWorkerLaunchAttempt,
   prepareWorkerLaunchAttempt,
   runWorkerLaunchBootstrap,
+  retireWorkerLaunchAttempt,
+  terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
   buildProviderSpawnInvocation,
   materializeProviderSpawnInvocation,
@@ -50,6 +53,10 @@ describe('worker launch acknowledgement', () => {
       timeoutMs: 2_000,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
+    await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toBe(true);
     await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(true);
 
@@ -179,6 +186,40 @@ describe('worker launch acknowledgement', () => {
     }, { timeout: 2_000, interval: 20 });
   });
 
+  it('retires and terminates the exact started provider process tree', async () => {
+    const launchAttempt = await attempt();
+    const pidMarker = join(cwd, 'started-provider-tree-pids.json');
+    const providerScript = [
+      "const fs=require('node:fs')",
+      "const cp=require('node:child_process')",
+      "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
+      `fs.writeFileSync(${JSON.stringify(pidMarker)},JSON.stringify({parent:process.pid,child:child.pid}))`,
+      'setInterval(()=>{},1000)',
+    ].join(';');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', providerScript],
+      cwd,
+    ));
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: true });
+    await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toBe(true);
+    await expect(retireWorkerLaunchAttempt(launchAttempt, 'pane_cleanup')).resolves.toBe(true);
+    await expect(terminateWorkerLaunchProvider(launchAttempt)).resolves.toBe(true);
+    await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+    const pids = JSON.parse(await readFile(pidMarker, 'utf8')) as { parent: number; child: number };
+    await vi.waitFor(() => {
+      expect(isProcessAlive(pids.parent)).toBe(false);
+      expect(isProcessAlive(pids.child)).toBe(false);
+      expect(isProcessAlive(process.pid)).toBe(true);
+    }, { timeout: 2_000, interval: 20 });
+  });
+
   it('reloads an accepted attempt only for the exact pane and provider identity', async () => {
     const launchAttempt = await attempt();
     const spec = buildWorkerLaunchBootstrapSpec(
@@ -236,6 +277,30 @@ describe('worker launch acknowledgement', () => {
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
     await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
+  });
+
+  it('prevents provider spawn after durable launch retirement wins ordering', async () => {
+    const launchAttempt = await attempt();
+    const providerMarker = join(cwd, 'retired-provider-ran');
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
+      cwd,
+    ));
+    await vi.waitFor(async () => {
+      const acknowledgement = JSON.parse(await readFile(launchAttempt.ackPath, 'utf8'));
+      expect(acknowledgement.kind).toBe('worker_launch_ack');
+    }, { timeout: 2_000, interval: 5 });
+
+    await expect(retireWorkerLaunchAttempt(launchAttempt, 'pane_cleanup')).resolves.toBe(true);
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+      timeoutMs: 2_000,
+      pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(`${launchAttempt.decisionPath}.retired`, 'utf8')).resolves.toContain('worker_launch_retired');
   });
 
   it('keeps an accepted decision terminal when revocation arrives later', async () => {
@@ -341,6 +406,7 @@ describe('worker launch acknowledgement', () => {
       attempt_id: launchAttempt.attempt_id,
       pane_id: '%22',
       provider: 'codex',
+      process_start_identity: expect.any(String),
     });
 
     await expect(loadCurrentWorkerLaunchAttempt({

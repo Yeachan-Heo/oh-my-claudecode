@@ -49,7 +49,7 @@ export type WorkerLaunchBootstrapResult = {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
 } | {
-    outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed';
+    outcome: 'invalid_spec' | 'expected_record_invalid' | 'ack_conflict' | 'decision_timeout' | 'revoked' | 'superseded' | 'provider_spawn_failed' | 'provider_cleanup_unverified';
 };
 export interface ProviderSpawnInvocation {
     command: string;
@@ -101,6 +101,12 @@ export declare function withWorkerLaunchAttemptFence<T>(attempt: WorkerLaunchAtt
 } | {
     ok: false;
 }>;
+export declare function retireWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
+export declare function terminateWorkerLaunchProvider(attempt: WorkerLaunchAttempt, timeoutMs?: number): Promise<boolean>;
+export declare function awaitWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt, options?: {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+}): Promise<boolean>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation): Promise<MaterializedProviderSpawnInvocation>;

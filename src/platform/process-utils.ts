@@ -27,7 +27,7 @@ function parseDeadline(deadlineAt: string): number | undefined {
  * Kill a process and optionally its entire process tree.
  *
  * On Windows: Uses taskkill /T for tree kill, /F for force
- * On Unix: Uses negative PID for process group, falls back to direct kill
+ * On Unix: Snapshots descendants and kills leaves before the owned root
  */
 export async function killProcessTree(
   pid: number,
@@ -61,18 +61,42 @@ async function killProcessTreeWindows(pid: number, force: boolean): Promise<bool
   }
 }
 
-function killProcessTreeUnix(pid: number, signal: NodeJS.Signals): boolean {
+function listProcessTreeUnix(rootPid: number): number[] {
   try {
-    process.kill(-pid, signal);
-    return true;
+    const rows = execFileSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8', timeout: 2_000 });
+    const children = new Map<number, number[]>();
+    for (const line of rows.split('\n')) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      const ppid = Number(match[2]);
+      const siblings = children.get(ppid) ?? [];
+      siblings.push(pid);
+      children.set(ppid, siblings);
+    }
+    const ordered: number[] = [];
+    const visit = (pid: number) => {
+      for (const child of children.get(pid) ?? []) visit(child);
+      ordered.push(pid);
+    };
+    visit(rootPid);
+    return ordered;
   } catch {
+    return [rootPid];
+  }
+}
+
+function killProcessTreeUnix(pid: number, signal: NodeJS.Signals): boolean {
+  let signalled = false;
+  for (const targetPid of listProcessTreeUnix(pid)) {
     try {
-      process.kill(pid, signal);
-      return true;
+      process.kill(targetPid, signal);
+      signalled = true;
     } catch {
-      return false;
+      // The process may have exited between the snapshot and signal.
     }
   }
+  return signalled || !isProcessAlive(pid);
 }
 
 /**

@@ -37,6 +37,20 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
           kind: 'worker_launch_ack',
           written_at: new Date().toISOString(),
         }), 'utf8');
+        await writeFile(attempt.startedPath, JSON.stringify({
+          schema_version: attempt.schema_version,
+          attempt_id: attempt.attempt_id,
+          nonce: attempt.nonce,
+          team_name: attempt.team_name,
+          worker_name: attempt.worker_name,
+          pane_id: attempt.pane_id,
+          provider: attempt.provider,
+          created_at: attempt.created_at,
+          kind: 'worker_launch_provider_started',
+          pid: process.pid,
+          process_start_identity: 'test:provider-start',
+          written_at: new Date().toISOString(),
+        }), 'utf8');
         tmuxState.activeAttempt = null;
       }
       return { stdout: '', stderr: '' };
