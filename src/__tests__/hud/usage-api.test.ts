@@ -1179,6 +1179,36 @@ describe('getUsage routing', () => {
     vi.useRealTimers();
   });
 
+  it('rehydrates scoped reset dates from serialized cache before rendering', async () => {
+    const mockedExistsSync = vi.mocked(fs.existsSync);
+    const mockedReadFileSync = vi.mocked(fs.readFileSync);
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+
+    mockedExistsSync.mockImplementation((path) => String(path).endsWith('.usage-cache-anthropic.json'));
+    mockedReadFileSync.mockImplementation((path) => {
+      if (String(path).endsWith('.usage-cache-anthropic.json')) {
+        return JSON.stringify({
+          timestamp: Date.now() - 60_000,
+          source: 'anthropic',
+          data: {
+            scopedWeeklyBuckets: [
+              { id: 'fable', label: 'Fable', percent: 61, resetsAt, isActive: true },
+            ],
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = await getUsage();
+    const bucket = result.rateLimits?.scopedWeeklyBuckets?.[0];
+
+    expect(bucket?.resetsAt).toBeInstanceOf(Date);
+    expect(stripAnsi(renderRateLimits(result.rateLimits, false)!)).toContain('fable:61%');
+    expect(stripAnsi(renderRateLimitsWithBar(result.rateLimits, 8, false)!)).toContain('fable:[');
+    expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
   it('respects configured usageApiPollIntervalMs for successful cache reuse', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-07T00:00:00Z'));

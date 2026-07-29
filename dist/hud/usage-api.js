@@ -151,6 +151,15 @@ function readCache(source) {
             if (cache.data.extraUsageResetsAt) {
                 cache.data.extraUsageResetsAt = new Date(cache.data.extraUsageResetsAt);
             }
+            if (Array.isArray(cache.data.scopedWeeklyBuckets)) {
+                for (const bucket of cache.data.scopedWeeklyBuckets) {
+                    const rawResetsAt = bucket?.resetsAt;
+                    if (rawResetsAt == null || rawResetsAt instanceof Date)
+                        continue;
+                    const parsedResetsAt = new Date(rawResetsAt);
+                    bucket.resetsAt = isNaN(parsedResetsAt.getTime()) ? null : parsedResetsAt;
+                }
+            }
         }
         return cache;
     }
@@ -857,10 +866,11 @@ export function parseUsageResponse(response, options) {
     // Per-model quotas are at the top level (flat structure)
     // e.g., response.seven_day_sonnet, response.seven_day_opus
     const sonnetResetsAt = response.seven_day_sonnet?.resets_at;
-    const result = {
-        fiveHourPercent: clamp(fiveHour),
-        fiveHourResetsAt: parseDate(response.five_hour?.resets_at),
-    };
+    const result = {};
+    if (fiveHour != null) {
+        result.fiveHourPercent = clamp(fiveHour);
+        result.fiveHourResetsAt = parseDate(response.five_hour?.resets_at);
+    }
     if (sevenDay != null) {
         result.weeklyPercent = clamp(sevenDay);
         result.weeklyResetsAt = parseDate(response.seven_day?.resets_at);

@@ -286,6 +286,14 @@ function readCache(source: 'anthropic' | 'zai' | 'minimax'): UsageCache | null {
       if (cache.data.extraUsageResetsAt) {
         cache.data.extraUsageResetsAt = new Date(cache.data.extraUsageResetsAt as unknown as string);
       }
+      if (Array.isArray(cache.data.scopedWeeklyBuckets)) {
+        for (const bucket of cache.data.scopedWeeklyBuckets) {
+          const rawResetsAt = bucket?.resetsAt as unknown;
+          if (rawResetsAt == null || rawResetsAt instanceof Date) continue;
+          const parsedResetsAt = new Date(rawResetsAt as string);
+          bucket.resetsAt = isNaN(parsedResetsAt.getTime()) ? null : parsedResetsAt;
+        }
+      }
     }
 
     return cache;
