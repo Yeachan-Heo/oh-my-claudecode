@@ -215,7 +215,7 @@ describe('worker launch acknowledgement', () => {
       provider: 'claude',
     })).resolves.toBeNull();
   });
-  it('keeps revocation terminal when it races a valid acknowledgement', async () => {
+  it('keeps revocation terminal when a valid acknowledgement is already present', async () => {
     const launchAttempt = await attempt();
     const providerMarker = join(cwd, 'revocation-race-provider-ran');
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
@@ -228,13 +228,11 @@ describe('worker launch acknowledgement', () => {
       expect(acknowledgement.kind).toBe('worker_launch_ack');
     }, { timeout: 2_000, interval: 5 });
 
-    const revocation = revokeWorkerLaunchAttempt(launchAttempt, 'timeout');
-    const acceptance = awaitWorkerLaunchAcknowledgement(launchAttempt, {
+    await expect(revokeWorkerLaunchAttempt(launchAttempt, 'timeout')).resolves.toBe(true);
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
       timeoutMs: 2_000,
       pollIntervalMs: 5,
-    });
-    await expect(revocation).resolves.toBe(true);
-    await expect(acceptance).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
+    })).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
     await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(isWorkerLaunchAttemptAccepted(launchAttempt)).resolves.toBe(false);
