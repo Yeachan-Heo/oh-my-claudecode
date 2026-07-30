@@ -81,6 +81,22 @@ function validateSplitTargetPaneInConfiguredSession(splitTarget, tmuxSession) {
 function scaleUpAttempt(config) {
     return config.active_scale_up;
 }
+/**
+ * Returns true if the active_scale_up fence blocks team mutations.
+ * A 'committed' fence proves workers were durably persisted and the
+ * release write failed; it may be safely reclaimed (cleared) by a
+ * later operation with exact operation identity verification.
+ * Historical 'effects' without commit proof always blocks — it
+ * represents ambiguous partial state that requires explicit repair.
+ */
+function scaleUpFenceBlocks(config) {
+    const attempt = config.active_scale_up;
+    if (!attempt)
+        return false;
+    if (attempt.phase === 'committed')
+        return false;
+    return true;
+}
 // ── Scale Up ──────────────────────────────────────────────────────────────────
 /**
  * Add workers to a running team mid-session.
@@ -150,7 +166,8 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 // pane, worktree, or identity effects have begun in this phase. Effects
                 // and failed attempts require explicit repair because their resources
                 // cannot be attributed safely from the durable fence alone.
-                if (existing && (existing.phase !== 'reserved' || !isProcessIdentityDead(existing))) {
+                if (existing && existing.phase !== 'committed'
+                    && (existing.phase !== 'reserved' || !isProcessIdentityDead(existing))) {
                     throw new Error('team_mutation_busy');
                 }
                 const nextRevision = current.stateRevision + 1;
@@ -642,7 +659,15 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 return await rollbackScaleUp(`Scale-up post-effect failed for ${workerName}: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
-        const committedConfig = withScaleUpFenceRevision(config, configRevision + 1);
+        // Atomically commit workers AND transition the fence to 'committed'.
+        // If the config write succeeds, the workers are durable and the fence
+        // phase proves it. If the subsequent release fails, the 'committed'
+        // phase is reconcilable — a later operation can safely clear it.
+        const committedConfig = {
+            ...withScaleUpFenceRevision(config, configRevision + 1),
+            active_scale_up: { ...scaleUpAttempt(config), phase: 'committed',
+                state_revision: configRevision + 1, updated_at: new Date().toISOString() },
+        };
         try {
             if (!await saveScaleUpConfig(committedConfig, configRevision)) {
                 return await rollbackScaleUp('Scale-up config commit lost its revision: stale_state_revision');
@@ -653,8 +678,10 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         catch (error) {
             return await rollbackScaleUp(`Scale-up config commit lost its revision: ${error instanceof Error ? error.message : String(error)}`);
         }
+        // Workers are durably committed. Best-effort release; if it fails,
+        // the 'committed' fence is reconcilable and does not block later ops.
         if (!await releaseScaleUpReservation()) {
-            return { ok: false, error: 'scale_up_fence_release_failed_after_commit' };
+            await releaseScaleUpReservation().catch(() => false);
         }
         await teamAppendEvent(sanitized, {
             type: 'team_leader_nudge',
@@ -695,7 +722,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         if (!loadedConfig) {
             return { ok: false, error: `Team ${sanitized} not found` };
         }
-        if (loadedConfig.active_recovery || scaleUpAttempt(loadedConfig))
+        if (loadedConfig.active_recovery || scaleUpFenceBlocks(loadedConfig))
             return { ok: false, error: 'team_mutation_busy' };
         let config = loadedConfig;
         // Determine which workers to remove
@@ -758,7 +785,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         try {
             config = await withProcessIdentityFileLock(lifecycleLock, async () => {
                 const current = await migrateTeamConfigRevision(sanitized, leaderCwd);
-                if (!current || current.config.active_recovery || scaleUpAttempt(current.config)
+                if (!current || current.config.active_recovery || scaleUpFenceBlocks(current.config)
                     || current.config.lifecycle_state === 'shutting_down' || current.config.lifecycle_state === 'stopped') {
                     throw new Error('team_mutation_busy');
                 }
@@ -775,7 +802,11 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 if (!processStartedAt)
                     throw new Error('process_start_identity_unavailable');
                 const nextRevision = current.stateRevision + 1;
-                const next = { ...current.config, state_revision: nextRevision, active_scale_down: {
+                const next = { ...current.config, state_revision: nextRevision,
+                    // Reconcile a committed scale-up fence: workers are provably
+                    // durable, so clearing the fence is safe and idempotent.
+                    ...(current.config.active_scale_up?.phase === 'committed' ? { active_scale_up: undefined } : {}),
+                    active_scale_down: {
                         operation_id: operationId, phase: 'draining', pid: process.pid,
                         process_started_at: processStartedAt, workers: selected.map(workerIdentity),
                         state_revision: nextRevision, created_at: now, updated_at: now,
@@ -816,7 +847,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         const reserveEffects = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
             const reservation = current?.config.active_scale_down;
-            if (!current || reservation?.operation_id !== operationId || current.config.active_recovery || scaleUpAttempt(current.config)
+            if (!current || reservation?.operation_id !== operationId || current.config.active_recovery || scaleUpFenceBlocks(current.config)
                 || !identitiesMatch(selectedNames.map(name => current.config.workers.find(worker => worker.name === name)).filter(Boolean), reservation.workers))
                 return false;
             const nextRevision = current.stateRevision + 1;
@@ -976,7 +1007,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         const removedSet = new Set(removedNames);
         const committed = await withProcessIdentityFileLock(lifecycleLock, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
-            if (!current || current.config.active_scale_down?.operation_id !== operationId || current.config.active_recovery || scaleUpAttempt(current.config))
+            if (!current || current.config.active_scale_down?.operation_id !== operationId || current.config.active_recovery || scaleUpFenceBlocks(current.config))
                 return false;
             const workers = current.config.workers.filter(worker => !removedSet.has(worker.name));
             const nextRevision = current.stateRevision + 1;

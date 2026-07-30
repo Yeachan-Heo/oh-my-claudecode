@@ -260,7 +260,7 @@ export function getProcessStartIdentitySync(pid: number): string | null {
         { encoding: 'utf8', timeout: 2000, windowsHide: true });
       if (result.status !== 0 || !result.stdout) return null;
       const time = new Date(result.stdout.trim()).getTime();
-      return Number.isNaN(time) ? null : `mac:${time}`;
+      return Number.isNaN(time) ? null : String(time);
     } catch {
       return null;
     }

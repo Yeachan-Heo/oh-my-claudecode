@@ -875,4 +875,71 @@ describe('scaleUp duplicate worker guard', () => {
     expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
   });
+
+  it('reclaims a committed scale-up fence after release write failure without duplicating workers', async () => {
+    config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_up: {
+        operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+        process_started_at: 'dead-process', state_revision: 4,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+
+    const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'reclaim committed fence' }], cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 3, nextWorkerIndex: 4 });
+    expect(config.active_scale_up).toBeUndefined();
+    // Workers are not duplicated
+    expect(config.workers.map(w => w.name)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+  });
+
+  it('does not reclaim an effects-phase fence even when the owner process is dead', async () => {
+    config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+      active_scale_up: {
+        operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+        process_started_at: 'dead-process', state_revision: 4,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+
+    const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'blocked by effects fence' }], cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toMatchObject({ ok: false });
+    expect(config.active_scale_up?.phase).toBe('effects');
+  });
+
+  it('reconciles a committed fence: scale-down passes fence gate and enters owned-worker drain', async () => {
+    config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_up: {
+        operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+        process_started_at: 'dead-process', state_revision: 4,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+
+    await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    // Positive proof: the committed fence did NOT block scale-down from
+    // entering the drain phase. The scale-down reservation was acquired
+    // (active_scale_down was written), proving the fence was reconciled.
+    expect(config.active_scale_down?.operation_id).toBeDefined();
+    // The committed scale-up fence was cleared by the scale-down reservation
+    expect(config.active_scale_up).toBeUndefined();
+    // Worker set unchanged at this point (drain hasn't completed)
+    expect(config.workers.map(w => w.name)).toEqual(['worker-1', 'worker-2']);
+    // State revision advanced past the stale fence
+    expect(config.state_revision).toBeGreaterThan(5);
+  });
 });

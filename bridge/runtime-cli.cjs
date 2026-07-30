@@ -13057,7 +13057,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
     const ensureFence = async () => {
       requireOwnerFence(input.cwd, input.teamName, owner.fence);
       const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
-      if (!current || current.config.active_scale_down || current.config.active_scale_up || current.config.active_recovery?.recovery_id !== recoveryId || current.config.active_recovery.owner_epoch !== owner.fence.epoch || current.config.active_recovery.owner_nonce !== owner.fence.nonce) {
+      if (!current || current.config.active_scale_down || current.config.active_scale_up && current.config.active_scale_up.phase !== "committed" || current.config.active_recovery?.recovery_id !== recoveryId || current.config.active_recovery.owner_epoch !== owner.fence.epoch || current.config.active_recovery.owner_nonce !== owner.fence.nonce) {
         throw new Error("runtime_owner_fence_lost");
       }
       return current.config;
@@ -14513,7 +14513,7 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
     if (!current) return null;
     if (current.config.active_recovery) throw new Error(`shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`);
     if (current.config.active_scale_down) throw new Error(`shutdown_blocked:active_scale_down:${current.config.active_scale_down.operation_id}`);
-    if (current.config.active_scale_up) {
+    if (current.config.active_scale_up && current.config.active_scale_up.phase !== "committed") {
       throw new Error(`shutdown_blocked:active_scale_up:${current.config.active_scale_up.operation_id}`);
     }
     if (current.config.lifecycle_state === "shutting_down") {
@@ -14523,6 +14523,10 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
       }
       if (!isProcessIdentityDead({ pid: attempt.pid, process_started_at: attempt.process_started_at })) {
         throw new Error("shutdown_in_progress");
+      }
+      const isAllDeadExpiry = attempt.nonce.startsWith("all-dead-expiry:") && attempt.state_revision === current.config.state_revision;
+      if (!isAllDeadExpiry) {
+        throw new Error("shutdown_fence_unowned");
       }
     } else if (current.config.lifecycle_state !== "stopped") {
       await assertShutdownGate(current.config);
@@ -14549,7 +14553,7 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
   const revalidateShutdownFence = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
     const attempt = current?.config.shutdown_attempt;
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up || !attempt || attempt.nonce !== ownedShutdownNonce || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
+    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up && current.config.active_scale_up.phase !== "committed" || !attempt || attempt.nonce !== ownedShutdownNonce || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
       throw new Error(current?.config.active_recovery ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : "shutdown_fence_lost");
     }
     return current.config;
@@ -14557,7 +14561,7 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
   const commitStoppedFence = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
     const attempt = current?.config.shutdown_attempt;
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up || !attempt || attempt.nonce !== ownedShutdownNonce || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
+    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up && current.config.active_scale_up.phase !== "committed" || !attempt || attempt.nonce !== ownedShutdownNonce || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
       throw new Error(current?.config.active_recovery ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : "shutdown_fence_lost");
     }
     const stopped = {
@@ -14570,7 +14574,7 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
   });
   const rollbackRejectedShutdownFence = async (expected) => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce) return false;
+    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== "shutting_down" || current.config.active_recovery || current.config.active_scale_up && current.config.active_scale_up.phase !== "committed" || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce) return false;
     const active = {
       ...current.config,
       lifecycle_state: "active",
@@ -14579,6 +14583,14 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
     };
     return saveTeamConfigAtRevision(active, current.stateRevision, cwd);
   });
+  const rollbackShutdownForRetry = async () => {
+    if (!config) return;
+    const rolled = await rollbackRejectedShutdownFence(config).catch(() => false);
+    if (rolled) {
+      const refreshed = await readRevisionedTeamConfig(sanitized, cwd);
+      if (refreshed) config = refreshed.config;
+    }
+  };
   const finalizeAutoMerge = async () => {
     const orchestrator = getTeamOrchestrator(sanitized);
     if (orchestrator) {
@@ -14688,8 +14700,35 @@ Then exit your session.
   const paneCleanupAlive = [];
   const paneCleanupUnknown = [];
   for (const worker of config.workers) {
-    if (!worker.pane_id || !worker.launch_attempt_id) {
+    if (!worker.pane_id) {
       providerCleanupFailures.push(worker.name);
+      continue;
+    }
+    if (!worker.launch_attempt_id) {
+      const legacyLiveness = await getWorkerLiveness(worker.pane_id);
+      if (legacyLiveness === "dead") continue;
+      const legacyOwnership = await adoptWorkerPaneOwnership({
+        provider: worker.pane_id.startsWith("%") ? "tmux" : "cmux",
+        providerTarget: config.tmux_session,
+        paneId: worker.pane_id,
+        leaderPaneId: config.leader_pane_id ?? "",
+        reservedPaneIds: config.workers.filter((candidate) => candidate.name !== worker.name).map((candidate) => candidate.pane_id).filter((paneId) => Boolean(paneId))
+      });
+      if (!legacyOwnership.ok) {
+        paneCleanupUnknown.push(worker.name);
+        continue;
+      }
+      try {
+        let lastLegacyLiveness = await getWorkerLiveness(worker.pane_id);
+        for (let attempt2 = 0; attempt2 < 2 && lastLegacyLiveness !== "dead"; attempt2++) {
+          await killOwnedWorkerPane(legacyOwnership.ownership);
+          lastLegacyLiveness = await getWorkerLiveness(worker.pane_id);
+        }
+        if (lastLegacyLiveness === "alive") paneCleanupAlive.push(worker.name);
+        else if (lastLegacyLiveness !== "dead") paneCleanupUnknown.push(worker.name);
+      } catch {
+        paneCleanupUnknown.push(worker.name);
+      }
       continue;
     }
     const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
@@ -14742,16 +14781,19 @@ Then exit your session.
     })) providerCleanupFailures.push(worker.name);
   }
   if (paneCleanupAlive.length > 0) {
+    await rollbackShutdownForRetry();
     await finalizeAutoMerge();
     return { outcome: "preserved", reason: "worker_panes_alive", workers: paneCleanupAlive };
   }
   if (paneCleanupUnknown.length > 0) {
+    await rollbackShutdownForRetry();
     await finalizeAutoMerge();
     return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: paneCleanupUnknown };
   }
   if (providerCleanupFailures.length > 0) {
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
 `);
+    await rollbackShutdownForRetry();
     await finalizeAutoMerge();
     return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: providerCleanupFailures };
   }
@@ -14767,6 +14809,7 @@ Then exit your session.
     const splitPaneMode = Boolean(config.tmux_session && !ownsWindow && config.tmux_session.includes(":"));
     if (!splitPaneMode && config.tmux_session) {
       if (!config.leader_pane_id) {
+        await rollbackShutdownForRetry();
         await finalizeAutoMerge();
         return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: ["leader-fixed"] };
       }
@@ -14778,6 +14821,7 @@ Then exit your session.
         paneId: config.leader_pane_id
       });
       if (leaderOwnership.kind !== "owned") {
+        await rollbackShutdownForRetry();
         await finalizeAutoMerge();
         return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: ["leader-fixed"] };
       }
@@ -14792,6 +14836,7 @@ Then exit your session.
     if (aliveWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
+      await rollbackShutdownForRetry();
       await finalizeAutoMerge();
       return { outcome: "preserved", reason: "worker_panes_alive", workers: aliveWorkers };
     }
@@ -14799,6 +14844,7 @@ Then exit your session.
     if (unknownWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(", ")}
 `);
+      await rollbackShutdownForRetry();
       await finalizeAutoMerge();
       return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: unknownWorkers };
     }
@@ -14807,6 +14853,7 @@ Then exit your session.
 `);
     if (recordedWorkerPaneIds.length > 0) {
       process.stderr.write("[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n");
+      await rollbackShutdownForRetry();
       await finalizeAutoMerge();
       return { outcome: "failed", reason: "tmux_cleanup_failed", detail: err instanceof Error ? err.message : String(err) };
     }
@@ -15064,11 +15111,21 @@ async function fenceAllDeadRecoveryExpiry(teamName, cwd, deadlineAt) {
     if (!current || Date.parse(current.config.all_dead_recovery?.deadline_at ?? "") !== deadlineAt || Date.now() < deadlineAt || current.config.lifecycle_state === "shutting_down" || current.config.lifecycle_state === "stopped") return false;
     if (hasPendingRecoveryAdmissionBeforeDeadline(teamName, cwd, deadlineAt) || hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadlineAt)) return false;
     const nextRevision = current.stateRevision + 1;
+    const processStartedAt = currentProcessStartIdentity();
+    if (!processStartedAt) return false;
+    const expiryNonce = `all-dead-expiry:${deadlineAt}`;
     return saveTeamConfigAtRevision(
       {
         ...current.config,
         lifecycle_state: "shutting_down",
         all_dead_recovery: void 0,
+        shutdown_attempt: {
+          nonce: expiryNonce,
+          pid: process.pid,
+          process_started_at: processStartedAt,
+          state_revision: nextRevision,
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        },
         state_revision: nextRevision
       },
       current.stateRevision,

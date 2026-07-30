@@ -353,7 +353,7 @@ export interface TeamRuntimeOwnerEpoch {
 /** Durable lifecycle fence for a scale-up operation. */
 export interface TeamScaleUpAttempt {
   operation_id: string;
-  phase: 'reserved' | 'effects' | 'failed';
+  phase: 'reserved' | 'effects' | 'committed' | 'failed';
   pid: number;
   process_started_at: string;
   state_revision: number;

@@ -300,7 +300,12 @@ export async function fenceAllDeadRecoveryExpiry(teamName: string, cwd: string, 
     if (hasPendingRecoveryAdmissionBeforeDeadline(teamName, cwd, deadlineAt)
       || hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadlineAt)) return false;
     const nextRevision = current.stateRevision + 1;
+    const processStartedAt = currentProcessStartIdentity();
+    if (!processStartedAt) return false;
+    const expiryNonce = `all-dead-expiry:${deadlineAt}`;
     return saveTeamConfigAtRevision({ ...current.config, lifecycle_state: 'shutting_down', all_dead_recovery: undefined,
+      shutdown_attempt: { nonce: expiryNonce, pid: process.pid, process_started_at: processStartedAt,
+        state_revision: nextRevision, created_at: new Date().toISOString() },
       state_revision: nextRevision },
       current.stateRevision, cwd);
   });

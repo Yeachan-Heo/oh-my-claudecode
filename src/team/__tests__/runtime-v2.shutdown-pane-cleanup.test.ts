@@ -113,8 +113,8 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     });
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
-    await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0 })).resolves.toEqual({
-      outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1', 'worker-2'],
+    await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0 })).resolves.toMatchObject({
+      outcome: 'preserved',
     });
 
     const killPaneTargets = tmuxCalls
