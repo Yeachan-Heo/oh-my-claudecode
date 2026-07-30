@@ -909,6 +909,15 @@ function mergeHookGroups(
     return [...nonOmcGroups, ...newOmcGroups];
   }
 
+  // Nothing is registered for this event yet, so this is a first-time install
+  // rather than an "already configured" state. Without this branch the empty
+  // array that was passed in is returned unchanged, which writes an empty hook
+  // list into settings.json while the log claims the event was already set up.
+  if (existingGroups.length === 0) {
+    log(`  Installed ${eventType} hook`);
+    return newOmcGroups;
+  }
+
   if (hasNonOmcHook) {
     log(`  Warning: ${eventType} hook has non-OMC hook. Skipping. Use --force-hooks to override.`);
     result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
