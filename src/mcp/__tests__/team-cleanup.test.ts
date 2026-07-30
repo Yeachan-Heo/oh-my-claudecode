@@ -48,6 +48,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // ─── killWorkerPanes ─────────────────────────────────────────────────────────
@@ -149,6 +150,7 @@ describe('killTeamSession', () => {
   });
 
   it('calls kill-session for session-mode sessions (no ":" in name)', async () => {
+    vi.stubEnv('TMUX', '');
     await killTeamSession('omc-team-myteam-worker1');
     expect(killedSessions).toContain('omc-team-myteam-worker1');
   });

@@ -670,20 +670,19 @@ async function spawnV2Worker(opts) {
     const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
         `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
     const cleanupStartedLaunch = async (reason) => {
-        const retired = await retireWorkerLaunchAttempt(startupContext.attempt, reason).catch(() => false);
-        const providerStopped = retired
-            && await terminateWorkerLaunchProvider(startupContext.attempt).catch(() => false);
-        let paneDead = false;
-        try {
-            await killOwnedWorkerPane(ownership);
-            paneDead = await getWorkerPaneLiveness(paneId) === 'dead';
-        }
-        catch {
-            paneDead = false;
-        }
-        if (!providerStopped || !paneDead) {
+        const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(startupContext.attempt, reason, async () => {
+            try {
+                if (await getWorkerPaneLiveness(paneId) === 'dead')
+                    return true;
+                await killOwnedWorkerPane(ownership);
+                return await getWorkerPaneLiveness(paneId) === 'dead';
+            }
+            catch {
+                return false;
+            }
+        }).catch(() => false);
+        if (!cleaned)
             throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-        }
     };
     try {
         await applyMainVerticalLayout(opts.sessionName);
@@ -3439,6 +3438,8 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         .map((w) => w.pane_id)
         .filter((p) => typeof p === 'string' && p.trim().length > 0);
     const providerCleanupFailures = [];
+    const paneCleanupAlive = [];
+    const paneCleanupUnknown = [];
     for (const worker of config.workers) {
         if (!worker.pane_id || !worker.launch_attempt_id) {
             providerCleanupFailures.push(worker.name);
@@ -3449,17 +3450,22 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             providerCleanupFailures.push(worker.name);
             continue;
         }
-        const ownership = await adoptWorkerPaneOwnership({
-            provider: worker.pane_id.startsWith('%') ? 'tmux' : 'cmux',
-            providerTarget: config.tmux_session,
-            paneId: worker.pane_id,
-            leaderPaneId: config.leader_pane_id ?? '',
-            reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
-                .map(candidate => candidate.pane_id).filter((paneId) => Boolean(paneId)),
-        });
-        if (!ownership.ok) {
-            providerCleanupFailures.push(worker.name);
-            continue;
+        const initialPaneLiveness = await getWorkerLiveness(worker.pane_id);
+        let paneOwnership = null;
+        if (initialPaneLiveness !== 'dead') {
+            const ownership = await adoptWorkerPaneOwnership({
+                provider: worker.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+                providerTarget: config.tmux_session,
+                paneId: worker.pane_id,
+                leaderPaneId: config.leader_pane_id ?? '',
+                reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
+                    .map(candidate => candidate.pane_id).filter((paneId) => Boolean(paneId)),
+            });
+            if (!ownership.ok) {
+                providerCleanupFailures.push(worker.name);
+                continue;
+            }
+            paneOwnership = ownership.ownership;
         }
         const attempt = await loadWorkerLaunchAttempt({
             cwd,
@@ -3472,14 +3478,37 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         });
         if (!attempt || !await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'team_shutdown', async () => {
             try {
-                await killOwnedWorkerPane(ownership.ownership);
-                return true;
+                let lastLiveness = await getWorkerLiveness(worker.pane_id);
+                if (lastLiveness === 'dead')
+                    return true;
+                if (!paneOwnership)
+                    return false;
+                for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
+                    await killOwnedWorkerPane(paneOwnership);
+                    lastLiveness = await getWorkerLiveness(worker.pane_id);
+                    if (lastLiveness === 'dead')
+                        return true;
+                }
+                if (lastLiveness === 'alive')
+                    paneCleanupAlive.push(worker.name);
+                else
+                    paneCleanupUnknown.push(worker.name);
+                return false;
             }
             catch {
+                paneCleanupUnknown.push(worker.name);
                 return false;
             }
         }))
             providerCleanupFailures.push(worker.name);
+    }
+    if (paneCleanupAlive.length > 0) {
+        await finalizeAutoMerge();
+        return { outcome: 'preserved', reason: 'worker_panes_alive', workers: paneCleanupAlive };
+    }
+    if (paneCleanupUnknown.length > 0) {
+        await finalizeAutoMerge();
+        return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: paneCleanupUnknown };
     }
     if (providerCleanupFailures.length > 0) {
         process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
@@ -3508,7 +3537,9 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             const sessionMode = ownsWindow
                 ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
                 : 'detached-session';
-            await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, { sessionMode });
+            if (!await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, { sessionMode })) {
+                throw new Error('tmux cleanup unverified');
+            }
         }
         const paneById = new Map(config.workers
             .filter((w) => typeof w.pane_id === 'string' && w.pane_id.trim().length > 0)

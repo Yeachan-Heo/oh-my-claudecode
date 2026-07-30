@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
     const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -60,7 +60,7 @@ export async function runWorkerActivationGate(gate) {
     const fenced = await withWorkerLaunchAttemptFence(gate.launchAttempt, async () => {
         const { OMC_RECOVERY_GATE_SPEC: _recoveryGateSpec, OMC_RECOVERY_GATE_SPEC_B64: _encodedRecoveryGateSpec, ...providerProcessEnv } = process.env;
         const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv), {
-            superviseWindowsTree: process.platform === 'win32',
+            superviseProcessTree: true,
         });
         const child = spawn(invocation.command, invocation.args, {
             cwd: gate.cwd,
@@ -94,18 +94,7 @@ export async function runWorkerActivationGate(gate) {
             child.once('exit', async (exitCode, signal) => {
                 const effectiveExitCode = supervisedExitCode ?? exitCode;
                 const effectiveSignal = supervisedExitCode === null ? signal : null;
-                let cleanupVerified = terminationResult ? await terminationResult === 'terminated' : false;
-                if (!terminationResult && process.platform !== 'win32' && child.pid) {
-                    cleanupVerified = await killProcessTree(child.pid, 'SIGKILL');
-                    if (!cleanupVerified) {
-                        try {
-                            process.kill(-child.pid, 0);
-                        }
-                        catch (error) {
-                            cleanupVerified = error.code === 'ESRCH';
-                        }
-                    }
-                }
+                const cleanupVerified = terminationResult ? await terminationResult === 'terminated' : false;
                 await finish(cleanupVerified
                     ? { outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }
                     : { outcome: 'provider_cleanup_unverified' }, { outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
@@ -168,6 +157,9 @@ export async function runWorkerActivationGate(gate) {
                 return { outcome: 'provider_spawn_failed' };
             }
             if (invocation.completionPath && await readFile(invocation.completionPath, 'utf8').then(() => true).catch(() => false)) {
+                const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
+                if (Number.isSafeInteger(exitCode))
+                    supervisedExitCode = exitCode;
                 if (!await terminateProvider())
                     return { outcome: 'provider_cleanup_unverified' };
                 return { outcome: 'provider_spawn_failed' };

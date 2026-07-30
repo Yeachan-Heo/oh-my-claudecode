@@ -5,7 +5,7 @@ import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'nod
 import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, killProcessTree, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
@@ -502,10 +502,18 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
   cleanup: () => Promise<boolean>,
 ): Promise<boolean> {
   const retiredPath = `${attempt.decisionPath}.retired`;
+  const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
+  const cleanupIsComplete = async (): Promise<boolean> => {
+    const completed = await readJson(cleanupCompletePath);
+    return completed.kind === 'value'
+      && identityMatches(completed.value as Partial<WorkerLaunchIdentity>, attempt)
+      && (completed.value as { kind?: unknown }).kind === 'worker_launch_cleanup_complete';
+  };
+  if (await cleanupIsComplete()) return true;
   try {
     return await withFileLock(lockPathFor(attempt.currentPath), async () => {
-      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
-        || !await isWorkerLaunchAttemptAccepted(attempt)) return false;
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)) return cleanupIsComplete();
+      if (!await isWorkerLaunchAttemptAccepted(attempt)) return false;
       const existing = await readJson(retiredPath);
       if (existing.kind === 'value') {
         if (!identityMatches(existing.value as Partial<WorkerLaunchIdentity>, attempt)) return false;
@@ -517,6 +525,14 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
         });
       }
       if (!await terminateWorkerLaunchProvider(attempt) || !await cleanup()) return false;
+      const completed = await readJson(cleanupCompletePath);
+      if (completed.kind === 'absent') {
+        await writeExclusiveAtomic(cleanupCompletePath, {
+          ...identityOf(attempt), kind: 'worker_launch_cleanup_complete', reason, written_at: new Date().toISOString(),
+        });
+      } else if (completed.kind !== 'value'
+        || !identityMatches(completed.value as Partial<WorkerLaunchIdentity>, attempt)
+        || (completed.value as { kind?: unknown }).kind !== 'worker_launch_cleanup_complete') return false;
       if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)) return false;
       await unlink(attempt.currentPath);
       return true;
@@ -526,30 +542,97 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
   }
 }
 
+function isValidProcessStartIdentity(value: unknown): value is string {
+  return typeof value === 'string' && (/^\d+$/.test(value) || /^ticks:\d+$/.test(value)
+    || /^dmtf:\d{14}\.\d{6}[+-]\d{3}$/.test(value));
+}
+
+async function readWorkerLaunchCleanupProof(
+  attempt: WorkerLaunchAttempt,
+  started?: Partial<WorkerLaunchProviderStarted>,
+): Promise<boolean> {
+  const terminal = await readJson(`${attempt.startedPath}.terminal`);
+  if (terminal.kind === 'value') {
+    const value = terminal.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>;
+    const matchesStarted = !started || (value.pid === started.pid
+      && value.process_start_identity === started.process_start_identity);
+    if (matchesStarted && identityMatches(value, attempt) && value.kind === 'worker_launch_provider_terminal'
+      && value.outcome === 'exit' && value.cleanup_verified === true
+      && Number.isSafeInteger(value.pid) && Number(value.pid) > 0
+      && isValidProcessStartIdentity(value.process_start_identity)) return true;
+  }
+  const completed = await readJson(`${attempt.startedPath}.termination-complete`);
+  if (completed.kind === 'value') {
+    const value = completed.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>;
+    const matchesStarted = !started || (value.pid === started.pid
+      && value.process_start_identity === started.process_start_identity);
+    if (matchesStarted && identityMatches(value, attempt) && value.kind === 'worker_launch_termination_complete'
+      && value.cleanup_verified === true && Number.isSafeInteger(value.pid) && Number(value.pid) > 0
+      && isValidProcessStartIdentity(value.process_start_identity)) return true;
+  }
+  return false;
+}
+
 export async function terminateWorkerLaunchProvider(
   attempt: WorkerLaunchAttempt,
   timeoutMs: number = 2_000,
 ): Promise<boolean> {
-  const terminal = await readJson(`${attempt.startedPath}.terminal`);
-  const terminalCleanupVerified = terminal.kind === 'value'
-    && identityMatches(terminal.value as Partial<WorkerLaunchIdentity>, attempt)
-    && (terminal.value as { cleanup_verified?: unknown }).cleanup_verified === true;
   const started = await readJson(attempt.startedPath);
+  const terminalCleanupVerified = await readWorkerLaunchCleanupProof(
+    attempt,
+    started.kind === 'value' ? started.value as Partial<WorkerLaunchProviderStarted> : undefined,
+  );
   if (started.kind === 'absent') return terminalCleanupVerified;
   if (started.kind !== 'value') return false;
   const record = started.value as Partial<WorkerLaunchProviderStarted>;
   if (!identityMatches(record, attempt)
     || record.kind !== 'worker_launch_provider_started'
     || !Number.isSafeInteger(record.pid)
-    || typeof record.process_start_identity !== 'string') return false;
+    || Number(record.pid) <= 0
+    || !isValidProcessStartIdentity(record.process_start_identity)) return false;
+  const terminationRequestPath = `${attempt.startedPath}.termination-request`;
+  const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
+  const existingRequest = await readJson(terminationRequestPath);
+  if (existingRequest.kind === 'absent') {
+    try {
+      await writeExclusiveAtomic(terminationRequestPath, {
+        ...identityOf(attempt), kind: 'worker_launch_termination_request', pid: record.pid,
+        process_start_identity: record.process_start_identity, written_at: new Date().toISOString(),
+      });
+    } catch {
+      return false;
+    }
+  } else {
+    const value = existingRequest.kind === 'value'
+      ? existingRequest.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>
+      : null;
+    if (!value || !identityMatches(value, attempt) || value.kind !== 'worker_launch_termination_request'
+      || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
+  }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   const result = await terminateOwnedProcessTree({
-    pid: record.pid!,
-    expectedStartIdentity: record.process_start_identity,
-    deadlineAt,
-    force: true,
+    pid: record.pid!, expectedStartIdentity: record.process_start_identity, deadlineAt, force: true,
   });
-  if (result !== 'terminated') return terminalCleanupVerified;
+  if (result === 'already-dead' || result === 'identity-mismatch') return terminalCleanupVerified;
+  if (result !== 'terminated') return false;
+  const existingComplete = await readJson(terminationCompletePath);
+  if (existingComplete.kind === 'absent') {
+    try {
+      await writeExclusiveAtomic(terminationCompletePath, {
+        ...identityOf(attempt), kind: 'worker_launch_termination_complete', cleanup_verified: true,
+        pid: record.pid, process_start_identity: record.process_start_identity, written_at: new Date().toISOString(),
+      });
+    } catch {
+      return false;
+    }
+  } else {
+    const value = existingComplete.kind === 'value'
+      ? existingComplete.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>
+      : null;
+    if (!value || !identityMatches(value, attempt) || value.kind !== 'worker_launch_termination_complete'
+      || value.cleanup_verified !== true || value.pid !== record.pid
+      || value.process_start_identity !== record.process_start_identity) return false;
+  }
   const deadline = Date.parse(deadlineAt);
   while (Date.now() < deadline) {
     const liveness = await isProcessIdentityLive(record.pid!, record.process_start_identity, deadline);
@@ -690,22 +773,52 @@ export function buildProviderSpawnInvocation(
     return {
       command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
       args: ['/d', '/v:off', '/s', '/c'],
-      batchScript: `@echo off\r\n${waitsForBatchProvider ? 'start "" /wait /b ' : ''}${renderedProvider}\r\n`,
+      batchScript: `@echo off\r\n${waitsForBatchProvider ? 'start "" /b /wait ' : ''}${renderedProvider}\r\n`,
     };
   }
   return { command, args };
 }
 
+async function awaitExternalTerminationCompletion(
+  spec: WorkerLaunchBootstrapSpec,
+  timeoutMs: number = 2_000,
+): Promise<boolean> {
+  const request = await readJson(`${spec.started_path}.termination-request`);
+  if (request.kind !== 'value' || !identityMatches(request.value as Partial<WorkerLaunchIdentity>, spec)) return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const completed = await readJson(`${spec.started_path}.termination-complete`);
+    if (completed.kind === 'value'
+      && identityMatches(completed.value as Partial<WorkerLaunchIdentity>, spec)
+      && (completed.value as { cleanup_verified?: unknown }).cleanup_verified === true) return true;
+    if (completed.kind === 'malformed') return false;
+    await sleep(10);
+  }
+  return false;
+}
+
 export async function materializeProviderSpawnInvocation(
   invocation: ProviderSpawnInvocation,
-  options: { superviseWindowsTree?: boolean } = {},
+  options: { superviseWindowsTree?: boolean; superviseProcessTree?: boolean } = {},
 ): Promise<MaterializedProviderSpawnInvocation> {
-  if (!invocation.batchScript) {
+  const superviseProcessTree = options.superviseProcessTree ?? options.superviseWindowsTree ?? false;
+  if (!invocation.batchScript && !superviseProcessTree) {
     return { command: invocation.command, args: invocation.args, cleanup: async () => {} };
   }
   const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
+  const completionPath = superviseProcessTree ? join(wrapperDir, 'provider-exit.txt') : undefined;
+  if (!invocation.batchScript) {
+    const wrapperPath = join(wrapperDir, 'launch.sh');
+    const quotedCompletion = `'${completionPath!.replace(/'/g, `'"'"'`)}'`;
+    await writeFile(wrapperPath,
+      `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`,
+      { encoding: 'utf8', mode: 0o700 });
+    return {
+      command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath,
+      cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
+    };
+  }
   const wrapperPath = join(wrapperDir, 'launch.cmd');
-  const completionPath = options.superviseWindowsTree ? join(wrapperDir, 'provider-exit.txt') : undefined;
   const completionScript = completionPath
     ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
     : '';
@@ -764,7 +877,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         return { outcome: 'superseded' as const };
       }
       const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv), {
-        superviseWindowsTree: process.platform === 'win32',
+        superviseProcessTree: true,
       });
       const child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd,
@@ -786,15 +899,9 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           if (supervisorTimer) clearInterval(supervisorTimer);
           const effectiveExitCode = supervisedExitCode ?? exitCode;
           const effectiveSignal = supervisedExitCode === null ? signal : null;
-          let cleanupVerified = terminationResult ? await terminationResult === 'terminated' : false;
-          if (!terminationResult && process.platform !== 'win32' && child.pid) {
-            cleanupVerified = await killProcessTree(child.pid, 'SIGKILL');
-            if (!cleanupVerified) {
-              try { process.kill(-child.pid, 0); } catch (error) {
-                cleanupVerified = (error as NodeJS.ErrnoException).code === 'ESRCH';
-              }
-            }
-          }
+          const cleanupVerified = terminationResult
+            ? await terminationResult === 'terminated'
+            : await awaitExternalTerminationCompletion(spec);
           await atomicWriteJson(`${spec.started_path}.terminal`, {
             ...identityOf(spec), kind: 'worker_launch_provider_terminal',
             outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
@@ -860,6 +967,8 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         return { outcome: 'provider_spawn_failed' as const };
       }
       if (invocation.completionPath && existsSync(invocation.completionPath)) {
+        const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
+        if (Number.isSafeInteger(exitCode)) supervisedExitCode = exitCode;
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
@@ -878,6 +987,8 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         return { outcome: 'provider_spawn_failed' as const };
       }
       if (invocation.completionPath && existsSync(invocation.completionPath)) {
+        const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
+        if (Number.isSafeInteger(exitCode)) supervisedExitCode = exitCode;
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         await unlink(spec.started_path).catch(() => {});
         return { outcome: 'provider_spawn_failed' as const };

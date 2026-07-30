@@ -272,9 +272,9 @@ export async function isProcessIdentityLive(pid, expectedStartIdentity, deadline
     return identity === expectedStartIdentity ? 'live' : 'mismatch';
 }
 /**
- * Terminate only a process whose durable start identity still matches. The
- * Windows path is asynchronous and receives the worker's remaining deadline,
- * preventing taskkill from holding SessionEnd for its legacy five seconds.
+ * Terminate only a process whose durable start identity still matches. Windows
+ * binds verification and tree termination to one System.Diagnostics.Process
+ * handle so a reused numeric PID is never handed to taskkill.
  */
 export async function terminateOwnedProcessTree(options) {
     const deadline = parseDeadline(options.deadlineAt);
@@ -298,18 +298,52 @@ export async function terminateOwnedProcessTree(options) {
     const timeout = remainingDeadlineMs(deadline);
     if (!timeout)
         return 'deadline-exceeded';
+    const expectedTicks = options.expectedStartIdentity.match(/^ticks:(\d+)$/)?.[1];
+    if (!expectedTicks)
+        return 'unknown';
+    const waitMs = Math.max(1, timeout);
+    const script = [
+        'Add-Type -TypeDefinition @"',
+        'using System;',
+        'using System.Runtime.InteropServices;',
+        'public static class OmcNative { [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle); }',
+        '"@',
+        `$root = [System.Diagnostics.Process]::GetProcessById(${options.pid})`,
+        `if ($root.StartTime.ToUniversalTime().Ticks -ne ${expectedTicks}) { exit 3 }`,
+        '$owned = @{}',
+        '$owned[$root.Id] = @{ Process = $root; Depth = 0 }',
+        '[void][OmcNative]::NtSuspendProcess($root.Handle)',
+        'for ($pass = 0; $pass -lt 64; $pass++) {',
+        '  $added = $false',
+        '  foreach ($row in Get-CimInstance Win32_Process) {',
+        '    $parent = [int]$row.ParentProcessId; $id = [int]$row.ProcessId',
+        '    if (-not $owned.ContainsKey($parent) -or $owned.ContainsKey($id)) { continue }',
+        '    try {',
+        '      $process = [System.Diagnostics.Process]::GetProcessById($id)',
+        '      $created = ([DateTime]$row.CreationDate).ToUniversalTime().Ticks',
+        '      if ($process.StartTime.ToUniversalTime().Ticks -ne $created) { continue }',
+        '      [void][OmcNative]::NtSuspendProcess($process.Handle)',
+        '      $owned[$id] = @{ Process = $process; Depth = ([int]$owned[$parent].Depth + 1) }',
+        '      $added = $true',
+        '    } catch {}',
+        '  }',
+        '  if (-not $added) { break }',
+        '}',
+        '$ordered = $owned.Values | Sort-Object -Property Depth -Descending',
+        'foreach ($entry in $ordered) { try { if (-not $entry.Process.HasExited) { $entry.Process.Kill() } } catch { exit 4 } }',
+        `if (-not $root.WaitForExit(${waitMs})) { exit 5 }`,
+    ].join("\n");
     try {
-        const args = ['/T', '/PID', String(options.pid)];
-        if (options.force)
-            args.unshift('/F');
-        await execFileAsync('taskkill.exe', args, { windowsHide: true, timeout });
+        await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout });
         return 'terminated';
     }
     catch (error) {
         if (isDeadlineExceeded(deadline))
             return 'deadline-exceeded';
-        const status = error.status;
-        if (status === 128 || !isProcessAlive(options.pid))
+        const status = error.status ?? error.code;
+        if (status === 3)
+            return 'identity-mismatch';
+        if (!isProcessAlive(options.pid))
             return 'already-dead';
         return 'unknown';
     }

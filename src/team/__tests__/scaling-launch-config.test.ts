@@ -431,8 +431,7 @@ describe('scaleUp launch config', () => {
       'scale_down',
       expect.any(Function),
     );
-    expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mock.invocationCallOrder[0])
-      .toBeLessThan(tmuxSessionMocks.killOwnedWorkerPane.mock.invocationCallOrder[0]!);
+    expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
   });
 
 
@@ -534,7 +533,7 @@ describe('scaleUp launch config', () => {
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
     );
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('still alive') });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('pane_still_alive') });
     expect(tmuxSessionMocks.killOwnedWorkerPane).toHaveBeenCalled();
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
     expect(monitorMocks.saveTeamConfig).not.toHaveBeenCalled();

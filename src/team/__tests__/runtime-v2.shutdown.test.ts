@@ -9,7 +9,7 @@ import { currentProcessStartIdentity } from '../team-owner-epoch.js';
 
 const tmuxMocks = vi.hoisted(() => ({
   killWorkerPanes: vi.fn(async () => undefined),
-  killTeamSession: vi.fn(async () => undefined),
+  killTeamSession: vi.fn(async () => true),
   resolveSplitPaneWorkerPaneIds: vi.fn(async (_session: string | undefined, paneIds: string[]) => paneIds),
   isWorkerAlive: vi.fn(async () => false),
   getWorkerLiveness: vi.fn(async () => 'dead'),
@@ -47,7 +47,8 @@ async function prepareAcceptedLaunch(cwd: string, teamName: string, workerName: 
   writeFileSync(attempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }));
   await awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 });
   writeFileSync(`${attempt.startedPath}.terminal`, JSON.stringify({ ...expected,
-    kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true, written_at: new Date().toISOString() }));
+    kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+    pid: 999_999, process_start_identity: '1', written_at: new Date().toISOString() }));
   return attempt;
 }
 
@@ -281,6 +282,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
+    expect(existsSync(launchAttempt.currentPath)).toBe(true);
+    expect(existsSync(`${launchAttempt.decisionPath}.retired.cleanup-complete`)).toBe(false);
   });
 
 
@@ -368,11 +371,11 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       resize_hook_target: null,
       next_task_id: 1,
     }, null, 2), 'utf-8');
-    tmuxMocks.killTeamSession.mockRejectedValueOnce(new Error('tmux unavailable'));
+    tmuxMocks.killTeamSession.mockResolvedValueOnce(false);
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 })).resolves.toEqual({
-      outcome: 'failed', reason: 'tmux_cleanup_failed', detail: 'tmux unavailable',
+      outcome: 'failed', reason: 'tmux_cleanup_failed', detail: 'tmux cleanup unverified',
     });
 
     expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, [], '%1', { sessionMode: 'dedicated-window' });

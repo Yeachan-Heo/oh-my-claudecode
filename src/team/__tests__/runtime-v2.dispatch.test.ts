@@ -35,6 +35,7 @@ const launchMocks = vi.hoisted(() => ({
   withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
+  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
   loadWorkerLaunchAttempt: vi.fn(async () => ({})),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
 }));
@@ -107,6 +108,7 @@ vi.mock('../worker-launch-ack.js', async (importOriginal) => {
     withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence,
     retireWorkerLaunchAttempt: launchMocks.retireWorkerLaunchAttempt,
     terminateWorkerLaunchProvider: launchMocks.terminateWorkerLaunchProvider,
+    retireAndCleanupCurrentWorkerLaunchAttempt: launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt,
     loadWorkerLaunchAttempt: launchMocks.loadWorkerLaunchAttempt,
     isWorkerLaunchAttemptAccepted: launchMocks.isWorkerLaunchAttemptAccepted,
   };
@@ -166,11 +168,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.killWorkerPanes.mockReset();
     mocks.killTeamSession.mockReset();
     mocks.resolveSplitPaneWorkerPaneIds.mockReset();
+    mocks.killOwnedWorkerPane.mockClear();
     mocks.getWorkerLiveness.mockReset();
     mocks.killTeamSession.mockResolvedValue(undefined);
     mocks.killWorkerPanes.mockResolvedValue(undefined);
     mocks.resolveSplitPaneWorkerPaneIds.mockImplementation(async (_session: string | undefined, paneIds: string[]) => paneIds);
-    mocks.getWorkerLiveness.mockResolvedValue('dead');
+    mocks.getWorkerLiveness.mockImplementation(async () => mocks.killOwnedWorkerPane.mock.calls.length > 0 ? 'dead' : 'alive');
     mocks.execFile.mockReset();
     mocks.spawnSync.mockReset();
     modelContractMocks.buildWorkerArgv.mockReset();
@@ -195,6 +198,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     launchMocks.retireWorkerLaunchAttempt.mockResolvedValue(true);
     launchMocks.terminateWorkerLaunchProvider.mockReset();
     launchMocks.terminateWorkerLaunchProvider.mockResolvedValue(true);
+    launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockReset();
+    launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup());
     launchMocks.loadWorkerLaunchAttempt.mockReset();
     launchMocks.loadWorkerLaunchAttempt.mockResolvedValue({});
     launchMocks.isWorkerLaunchAttemptAccepted.mockReset();
@@ -995,11 +1000,11 @@ describe('runtime v2 startup inbox dispatch', () => {
       tasks: [{ subject: 'Dispatch test', description: 'Layout failure cleanup' }],
       cwd,
     })).rejects.toThrow('layout failed');
-    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
       'startup_layout_failed',
+      expect.any(Function),
     );
-    expect(launchMocks.terminateWorkerLaunchProvider).toHaveBeenCalled();
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
   });
 
@@ -1050,7 +1055,8 @@ describe('runtime v2 startup inbox dispatch', () => {
   it('fails closed when exact provider process cleanup cannot be verified', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-provider-cleanup-unverified-'));
     mocks.sendToWorker.mockResolvedValue(false);
-    launchMocks.terminateWorkerLaunchProvider.mockResolvedValueOnce(false);
+    launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockResolvedValueOnce(false);
+    mocks.killOwnedWorkerPane.mockClear();
     const { startTeamV2 } = await import('../runtime-v2.js');
 
     await expect(startTeamV2({
@@ -1060,8 +1066,8 @@ describe('runtime v2 startup inbox dispatch', () => {
       tasks: [{ subject: 'Dispatch test', description: 'Reject unverified provider cleanup' }],
       cwd,
     })).rejects.toThrow('worker_startup_cleanup_unverified:worker-1:%2');
-    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalled();
-    expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalled();
+    expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
   });
 
   it('requires Claude startup evidence without resending the startup inbox', async () => {
@@ -1110,12 +1116,10 @@ describe('runtime v2 startup inbox dispatch', () => {
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
-    expect(launchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
       'startup_dispatch_failed',
-    );
-    expect(launchMocks.terminateWorkerLaunchProvider).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
+      expect.any(Function),
     );
   });
 

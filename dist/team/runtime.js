@@ -768,19 +768,22 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
     const effectiveWorkerPaneIds = sessionMode === 'split-pane'
         ? await resolveSplitPaneWorkerPaneIds(sessionName, workerPaneIds, leaderPaneId)
         : workerPaneIds;
-    await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode });
+    if (!await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode }))
+        return false;
     // Clean up state
     try {
-        cleanupTeamWorktrees(teamName, cwd);
+        if (cleanupTeamWorktrees(teamName, cwd).preserved.length > 0)
+            return false;
     }
     catch {
-        // best-effort: worktree cleanup is dormant in current runtime paths
+        return false;
     }
     try {
         await rm(root, { recursive: true, force: true });
+        return true;
     }
     catch {
-        // Ignore cleanup errors
+        return false;
     }
 }
 /**

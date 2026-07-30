@@ -292,6 +292,6 @@ export declare function resolveSplitPaneWorkerPaneIds(_sessionName: string, reco
  */
 export declare function killTeamSession(sessionName: string, workerPaneIds?: string[], leaderPaneId?: string, options?: {
     sessionMode?: TeamSessionMode;
-}): Promise<void>;
+}): Promise<boolean>;
 export {};
 //# sourceMappingURL=tmux-session.d.ts.map

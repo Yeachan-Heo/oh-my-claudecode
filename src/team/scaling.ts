@@ -64,7 +64,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
 import { resolveRuntimeCliPath } from './runtime-owner-client.js';
-import { loadWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, retireWorkerLaunchAttempt, terminateWorkerLaunchProvider } from './worker-launch-ack.js';
+import { loadWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt } from './worker-launch-ack.js';
 
 // ── Environment gate ──────────────────────────────────────────────────────────
 
@@ -316,20 +316,25 @@ export async function scaleUpOwned(
       const cleanupPane = async (candidate: string, label: string): Promise<void> => {
         const launch = launchContexts.get(candidate);
         const ownership = paneOwnerships.get(candidate);
-        const providerStopped = !launch || (
-          await retireWorkerLaunchAttempt(launch.attempt, 'scale_up_rollback').catch(() => false)
-          && await terminateWorkerLaunchProvider(launch.attempt).catch(() => false)
-        );
-        if (!ownership) {
+        const paneAlreadyDead = await getWorkerLiveness(candidate).catch(() => 'unknown' as const) === 'dead';
+        if (!ownership && !paneAlreadyDead) {
           cleanupFailures.push(`${label}:pane_ownership_unverified:${candidate}`);
           return;
         }
-        for (let attempt = 0; attempt < 2; attempt++) {
-          await killOwnedWorkerPane(ownership).catch(() => undefined);
-          const liveness = await getWorkerLiveness(candidate).catch(() => 'unknown' as const);
-          if (liveness === 'dead' && providerStopped) return;
-        }
-        cleanupFailures.push(`${label}:${providerStopped ? 'pane' : 'provider'}:${candidate}`);
+        const killPane = async (): Promise<boolean> => {
+          if (await getWorkerLiveness(candidate).catch(() => 'unknown' as const) === 'dead') return true;
+          if (!ownership) return false;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            await killOwnedWorkerPane(ownership).catch(() => undefined);
+            if (await getWorkerLiveness(candidate).catch(() => 'unknown' as const) === 'dead') return true;
+          }
+          return false;
+        };
+        const cleaned = launch
+          ? await retireAndCleanupCurrentWorkerLaunchAttempt(launch.attempt, 'scale_up_rollback', killPane).catch(() => false)
+          : await killPane();
+        if (cleaned) return;
+        cleanupFailures.push(`${label}:${launch ? 'provider' : 'pane'}:${candidate}`);
       };
       const cleanupIdentity = async (workerName: string): Promise<void> => {
         const workerDir = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
@@ -959,20 +964,25 @@ export async function scaleDownOwned(
         await markScaleDownFailed(reason);
         return { ok: false, error: reason };
       }
-      const ownershipResult = await adoptWorkerPaneOwnership({
-        provider: 'tmux',
-        providerTarget: config.tmux_session,
-        paneId,
-        leaderPaneId: config.leader_pane_id ?? '',
-        reservedPaneIds: config.workers
-          .filter(candidate => candidate.name !== worker.name)
-          .map(candidate => candidate.pane_id)
-          .filter((id): id is string => Boolean(id)),
-      });
-      if (!ownershipResult.ok) {
-        const reason = `pane_cleanup_failed:${worker.name}:${ownershipResult.reason}`;
-        await markScaleDownFailed(reason);
-        return { ok: false, error: reason };
+      const initialPaneLiveness = await getWorkerLiveness(paneId);
+      let paneOwnership: WorkerPaneOwnership | null = null;
+      if (initialPaneLiveness !== 'dead') {
+        const ownershipResult = await adoptWorkerPaneOwnership({
+          provider: 'tmux',
+          providerTarget: config.tmux_session,
+          paneId,
+          leaderPaneId: config.leader_pane_id ?? '',
+          reservedPaneIds: config.workers
+            .filter(candidate => candidate.name !== worker.name)
+            .map(candidate => candidate.pane_id)
+            .filter((id): id is string => Boolean(id)),
+        });
+        if (!ownershipResult.ok) {
+          const reason = `pane_cleanup_failed:${worker.name}:${ownershipResult.reason}`;
+          await markScaleDownFailed(reason);
+          return { ok: false, error: reason };
+        }
+        paneOwnership = ownershipResult.ownership;
       }
       const attempt = await loadWorkerLaunchAttempt({
         cwd: leaderCwd,
@@ -991,8 +1001,16 @@ export async function scaleDownOwned(
       let paneCleanupError: string | null = null;
       const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'scale_down', async () => {
         try {
-          await killOwnedWorkerPane(ownershipResult.ownership);
-          return true;
+          let lastLiveness: Awaited<ReturnType<typeof getWorkerLiveness>> = await getWorkerLiveness(paneId);
+          if (lastLiveness === 'dead') return true;
+          if (!paneOwnership) return false;
+          for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
+            await killOwnedWorkerPane(paneOwnership);
+            lastLiveness = await getWorkerLiveness(paneId);
+            if (lastLiveness === 'dead') return true;
+          }
+          paneCleanupError = lastLiveness === 'alive' ? 'pane_still_alive' : 'pane_liveness_unknown';
+          return false;
         } catch (error) {
           paneCleanupError = error instanceof Error ? error.message : String(error);
           return false;

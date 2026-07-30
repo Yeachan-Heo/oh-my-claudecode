@@ -72,7 +72,7 @@ describe('killTeamSession safeguards', () => {
     vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
     mocked.currentSession = 'leader-session';
 
-    await killTeamSession('leader-session');
+    await expect(killTeamSession('leader-session')).resolves.toBe(false);
 
     expect(mocked.execCalls.some((args) => args[0] === 'kill-session')).toBe(false);
   });
@@ -81,7 +81,7 @@ describe('killTeamSession safeguards', () => {
     vi.stubEnv('TMUX', '/tmp/tmux-1000/default,1,1');
     mocked.currentSession = 'leader-session';
 
-    await killTeamSession('worker-detached-session');
+    await expect(killTeamSession('worker-detached-session')).resolves.toBe(true);
 
     expect(mocked.execCalls.some((args) =>
       args[0] === 'kill-session' && args.includes('worker-detached-session'),
@@ -89,7 +89,7 @@ describe('killTeamSession safeguards', () => {
   });
 
   it('kills only worker panes in split-pane mode', async () => {
-    await killTeamSession('leader-session:0', ['%10', '%11'], '%10');
+    await expect(killTeamSession('leader-session:0', ['%10', '%11'], '%10')).resolves.toBe(true);
 
     const killPaneTargets = mocked.execCalls
       .filter((args) => args[0] === 'kill-pane')
@@ -101,7 +101,7 @@ describe('killTeamSession safeguards', () => {
   });
 
   it('kills an owned team window when session owns that window', async () => {
-    await killTeamSession('leader-session:3', ['%10', '%11'], '%10', { sessionMode: 'dedicated-window' });
+    await expect(killTeamSession('leader-session:3', ['%10', '%11'], '%10', { sessionMode: 'dedicated-window' })).resolves.toBe(true);
 
     expect(mocked.execCalls.some((args) =>
       args[0] === 'kill-window' && args.includes('leader-session:3'),
@@ -121,7 +121,7 @@ describe('killTeamSession safeguards', () => {
   it('preserves a recorded worker pane when target membership cannot be proven', async () => {
     mocked.listedPanes = '%10\n';
 
-    await killTeamSession('leader-session:0', ['%11'], '%10');
+    await expect(killTeamSession('leader-session:0', ['%11'], '%10')).resolves.toBe(false);
 
     expect(mocked.execCalls.some((args) => args[0] === 'kill-pane' && args.includes('%11'))).toBe(false);
   });

@@ -114,7 +114,8 @@ async function attachPersistedPriorLaunch(teamName: string, configPath: string):
   writeFileSync(attempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }));
   await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
   writeFileSync(`${attempt.startedPath}.terminal`, JSON.stringify({ ...expected,
-    kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true, written_at: new Date().toISOString() }));
+    kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+    pid: 999_999, process_start_identity: '1', written_at: new Date().toISOString() }));
   worker.pane_id = '%1';
   worker.launch_attempt_id = attempt.attempt_id;
   writeFileSync(configPath, JSON.stringify(config));

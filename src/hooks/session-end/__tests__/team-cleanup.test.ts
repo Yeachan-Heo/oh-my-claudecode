@@ -25,7 +25,7 @@ const teamCleanupMocks = vi.hoisted(() => ({
   teamReadConfig: vi.fn(async () => null),
   teamCleanup: vi.fn(async () => undefined),
   shutdownTeamV2: vi.fn(async () => ({ outcome: 'cleaned' as const })),
-  shutdownTeam: vi.fn(async () => undefined),
+  shutdownTeam: vi.fn(async () => true),
 }));
 
 vi.mock('../../../team/team-ops.js', async (_importOriginal) => {
@@ -90,7 +90,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     teamCleanupMocks.teamReadConfig.mockResolvedValue(null);
     teamCleanupMocks.teamCleanup.mockResolvedValue(undefined);
     teamCleanupMocks.shutdownTeamV2.mockResolvedValue({ outcome: 'cleaned' });
-    teamCleanupMocks.shutdownTeam.mockResolvedValue(undefined);
+    teamCleanupMocks.shutdownTeam.mockResolvedValue(true);
   });
 
   it('records missing team config as preserved instead of deleting ownership evidence', async () => {
@@ -180,6 +180,24 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       false,
     );
     expect(teamCleanupMocks.shutdownTeamV2).not.toHaveBeenCalled();
+  });
+
+  it('records an unverified legacy shutdown as failed instead of cleaned', async () => {
+    const sessionId = 'pid-1632-legacy-failed';
+    const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(teamSessionDir, { recursive: true });
+    fs.writeFileSync(path.join(teamSessionDir, 'team-state.json'), JSON.stringify({
+      active: true, session_id: sessionId, team_name: 'legacy-failed-team', current_phase: 'team-exec',
+    }), 'utf-8');
+    teamCleanupMocks.teamReadConfig.mockResolvedValue({
+      agentTypes: ['codex'], tmuxSession: 'legacy-failed-team:0', leaderPaneId: '%0', tmuxOwnsWindow: false,
+    } as never);
+    teamCleanupMocks.shutdownTeam.mockResolvedValueOnce(false);
+
+    await expect(cleanupSessionOwnedTeams(tmpDir, sessionId)).resolves.toEqual({
+      attempted: ['legacy-failed-team'], cleaned: [],
+      failed: [{ teamName: 'legacy-failed-team', error: 'team-shutdown-failed:legacy_cleanup_unverified' }],
+    });
   });
 
 

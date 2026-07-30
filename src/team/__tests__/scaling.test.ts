@@ -423,7 +423,7 @@ describe('scaleUp duplicate worker guard', () => {
       { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('config commit lost its revision') });
-    expect(tmuxUtilsMocks.tmuxExec).toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+    expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
     expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
     expect((config as TeamConfig & { active_scale_up?: unknown }).active_scale_up).toBeUndefined();
   });
@@ -653,7 +653,7 @@ describe('scaleUp duplicate worker guard', () => {
 
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.error).toContain('config commit lost its revision');
-    expect(tmuxUtilsMocks.tmuxExec).toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+    expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
     expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
     expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2')))).toBe(false);
     expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
@@ -676,13 +676,13 @@ describe('scaleUp duplicate worker guard', () => {
 
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.error).toContain('post-effect failed');
-    expect(tmuxUtilsMocks.tmuxExec).toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
-    expect(workerLaunchMocks.retireWorkerLaunchAttempt).toHaveBeenCalledWith(
+    expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+    expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-%12' }),
       'scale_up_rollback',
+      expect.any(Function),
     );
-    expect(workerLaunchMocks.terminateWorkerLaunchProvider).toHaveBeenCalled();
-    expect(tmuxSessionMocks.killOwnedWorkerPane).toHaveBeenCalled();
+    expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
     expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
   });

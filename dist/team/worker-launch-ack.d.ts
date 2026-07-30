@@ -113,6 +113,7 @@ export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttem
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation, options?: {
     superviseWindowsTree?: boolean;
+    superviseProcessTree?: boolean;
 }): Promise<MaterializedProviderSpawnInvocation>;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;
 export {};

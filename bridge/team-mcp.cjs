@@ -18991,8 +18991,9 @@ async function killWorkerPanes(opts) {
 async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options = {}) {
   const sessionMode = options.sessionMode ?? (sessionName.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
-    if (!workerPaneIds?.length) return;
+    if (!workerPaneIds?.length) return true;
     const provider = sessionName.startsWith("cmux:") ? "cmux" : "tmux";
+    let cleaned = true;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
@@ -19003,35 +19004,41 @@ async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, options
           recipientRole: "worker",
           paneId: id
         });
-        if (membership.kind !== "owned") continue;
+        if (membership.kind !== "owned") {
+          cleaned = false;
+          continue;
+        }
         if (provider === "cmux") await cmuxCloseSurface(id);
         else await tmuxExecAsync(["kill-pane", "-t", id]);
       } catch {
+        cleaned = false;
       }
     }
-    return;
+    return cleaned;
   }
   if (sessionMode === "dedicated-window") {
     try {
       await tmuxExecAsync(["kill-window", "-t", sessionName]);
+      return true;
     } catch {
+      return false;
     }
-    return;
   }
   const sessionTarget = sessionName.split(":")[0] ?? sessionName;
   if (process.env.OMC_TEAM_ALLOW_KILL_CURRENT_SESSION !== "1" && process.env.TMUX) {
     try {
       const current = await tmuxCmdAsync(["display-message", "-p", "#S"]);
       const currentSessionName = current.stdout.trim();
-      if (currentSessionName && currentSessionName === sessionTarget) {
-        return;
-      }
+      if (currentSessionName && currentSessionName === sessionTarget) return false;
     } catch {
+      return false;
     }
   }
   try {
     await tmuxExecAsync(["kill-session", "-t", sessionTarget]);
+    return true;
   } catch {
+    return false;
   }
 }
 

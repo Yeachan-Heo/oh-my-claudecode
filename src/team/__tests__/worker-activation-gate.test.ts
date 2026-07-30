@@ -78,7 +78,7 @@ describe('worker recovery activation gate', () => {
       recoveryId: 'recovery-early-exit', workerName: 'worker-1', replacementGeneration: 9, paneAttemptId: 'attempt-early-exit',
       readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', `process.exit(${exitCode})`],
       launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
-    })).resolves.toEqual({ outcome: 'ran', exitCode, signal: null });
+    })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     expect(existsSync(`${runPath}.launched`)).toBe(false);
     expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: exitCode });
   });
@@ -104,7 +104,7 @@ describe('worker recovery activation gate', () => {
       recoveryId: 'recovery-early-child', workerName: 'worker-1', replacementGeneration: 9, paneAttemptId: 'attempt-early-child',
       readyPath, activatePath, runPath, providerArgv: [process.execPath, '-e', script],
       launchAttempt, cwd, timeoutMs: 1_000, pollIntervalMs: 5,
-    })).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     const childPid = Number(readFileSync(childPidPath, 'utf8'));
     await expect.poll(() => isProcessAlive(childPid), { timeout: 2_000, interval: 20 }).toBe(false);
     expect(isProcessAlive(process.pid)).toBe(true);
@@ -128,7 +128,7 @@ describe('worker recovery activation gate', () => {
       timeoutMs: 1_000, pollIntervalMs: 5,
     })).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     expect(existsSync(`${runPath}.launched`)).toBe(false);
-    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'error' });
+    expect(JSON.parse(readFileSync(`${runPath}.terminal`, 'utf8'))).toMatchObject({ outcome: 'exit', exit_code: 127, cleanup_verified: true });
   });
   it('kills the provider when durable launched evidence cannot be published', async () => {
     const readyPath = join(cwd, 'marker-failure-ready.json');

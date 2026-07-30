@@ -125,7 +125,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     expect(tmuxCalls.some(args => args[0] === 'kill-window' || args[0] === 'kill-session')).toBe(false);
     await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).resolves.toContain('pane-cleanup-team');
   });
-  it('retires and terminates the exact provider before removing pane state', async () => {
+  it('retires and terminates the exact provider while accepting a proven-dead pane', async () => {
     const teamName = 'provider-cleanup-team';
     const teamRoot = `.omc/state/team/${teamName}`;
     const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%2',
@@ -151,7 +151,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
     await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
     expect(isProcessAlive(providerPid)).toBe(false);
-    expect(tmuxCalls.findIndex(args => args[0] === 'kill-pane' && args[2] === '%2')).toBeGreaterThanOrEqual(0);
+    expect(tmuxCalls.some(args => args[0] === 'kill-pane' && args[2] === '%2')).toBe(false);
     await expect(readFile(join(cwd, teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

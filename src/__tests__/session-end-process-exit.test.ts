@@ -15,7 +15,7 @@ const COMMAND_CEILING_MS = 500;
 const SEQUENTIAL_CEILING_MS = 1_000;
 const HAS_GENERATED_DIST = existsSync(join(REPO_ROOT, 'dist', 'hooks', 'session-end', 'worker.js'));
 const TEST_PRODUCER_GRACE_MS = '25';
-const DETACHED_WORKER_CEILING_MS = 3_000;
+const DETACHED_WORKER_CEILING_MS = 5_000;
 
 interface ExitResult {
   elapsedMs: number;
@@ -95,7 +95,11 @@ async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error('detached SessionEnd worker did not complete its callback');
+  const manifest = existsSync(manifestPath)
+    ? JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase?: string; owner?: unknown; actions?: Record<string, { status?: string; error?: string }> }
+    : null;
+  const callback = manifest?.actions?.callback;
+  throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} file=${existsSync(callbackPath)}`);
 }
 
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {

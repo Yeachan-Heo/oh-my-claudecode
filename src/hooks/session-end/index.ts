@@ -711,7 +711,7 @@ export async function cleanupSessionOwnedTeams(
     return { attempted, cleaned, failed };
   }
 
-  const { teamReadConfig, teamCleanup } = await import('../../team/team-ops.js');
+  const { teamReadConfig } = await import('../../team/team-ops.js');
   const { shutdownTeamV2 } = await import('../../team/runtime-v2.js');
   const { shutdownTeam } = await import('../../team/runtime.js');
 
@@ -746,13 +746,15 @@ export async function cleanupSessionOwnedTeams(
         const leaderPaneId = typeof legacyConfig.leaderPaneId === 'string' && legacyConfig.leaderPaneId.trim() !== ''
           ? legacyConfig.leaderPaneId.trim()
           : undefined;
-        await shutdownTeam(teamName, sessionName, directory, 0, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
-        cleaned.push(teamName);
+        if (await shutdownTeam(teamName, sessionName, directory, 0, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true)) {
+          cleaned.push(teamName);
+        } else {
+          failed.push({ teamName, error: 'team-shutdown-failed:legacy_cleanup_unverified' });
+        }
         return;
       }
 
-      await teamCleanup(teamName, directory);
-      cleaned.push(teamName);
+      failed.push({ teamName, error: 'team-shutdown-preserved:config_cleanup_unsupported' });
     } catch (error) {
       failed.push({
         teamName,

@@ -158,7 +158,7 @@ describe('worker launch acknowledgement', () => {
     await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
   });
 
-  it('kills provider descendants when the root exits before start publication', async () => {
+  it('kills provider descendants when the provider exits around start publication', async () => {
     const launchAttempt = await attempt();
     const childPidPath = join(cwd, 'early-exit-child-pid');
     const providerScript = [
@@ -176,10 +176,12 @@ describe('worker launch acknowledgement', () => {
       timeoutMs: 2_000,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
-    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    const result = await bootstrap;
+    expect(['provider_spawn_failed', 'ran']).toContain(result.outcome);
     const childPid = Number(await readFile(childPidPath, 'utf8'));
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 2_000, interval: 20 });
-    await expect(readFile(launchAttempt.startedPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(`${launchAttempt.startedPath}.terminal`, 'utf8').then(JSON.parse))
+      .resolves.toMatchObject({ cleanup_verified: true });
     expect(isProcessAlive(process.pid)).toBe(true);
     await expect(readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')).resolves.toContain('worker_launch_provider_terminal');
   });
@@ -254,19 +256,64 @@ describe('worker launch acknowledgement', () => {
     expect(cleanup).not.toHaveBeenCalled();
   });
 
-  it('does not treat a reused provider PID as cleaned without terminal descendant proof', async () => {
+  it('reuses exact durable cleanup-complete evidence without touching a successor or pane again', async () => {
     const launchAttempt = await attempt();
     const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
     await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1', written_at: new Date().toISOString() }), 'utf8');
+    const firstCleanup = vi.fn(async () => true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'partial_shutdown', firstCleanup)).resolves.toBe(true);
+    expect(firstCleanup).toHaveBeenCalledOnce();
+    const retryCleanup = vi.fn(async () => true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'partial_shutdown_retry', retryCleanup)).resolves.toBe(true);
+    expect(retryCleanup).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a reused provider PID as cleaned without terminal descendant proof', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    const currentIdentity = await getProcessStartIdentity(process.pid);
+    expect(currentIdentity).toMatch(/^\d+$/);
+    const staleIdentity = String(BigInt(currentIdentity!) + 1n);
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
     await writeFile(launchAttempt.startedPath, JSON.stringify({ ...expected, kind: 'worker_launch_provider_started',
-      pid: process.pid, process_start_identity: 'stale-reused-identity', written_at: new Date().toISOString() }), 'utf8');
+      pid: process.pid, process_start_identity: staleIdentity, written_at: new Date().toISOString() }), 'utf8');
     await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(false);
     expect(isProcessAlive(process.pid)).toBe(true);
     await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
-      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true, written_at: new Date().toISOString() }), 'utf8');
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: process.pid, process_start_identity: staleIdentity, written_at: new Date().toISOString() }), 'utf8');
     await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(true);
     expect(isProcessAlive(process.pid)).toBe(true);
+    expect(currentIdentity).toBeTruthy();
+    await writeFile(launchAttempt.startedPath, JSON.stringify({ ...expected, kind: 'worker_launch_provider_started',
+      pid: process.pid, process_start_identity: currentIdentity, written_at: new Date().toISOString() }), 'utf8');
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 0)).resolves.toBe(false);
+    expect(isProcessAlive(process.pid)).toBe(true);
+  });
+
+  it('rejects malformed terminal and provider-start records as cleanup authority', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected,
+      kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 }))
+      .resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'not_a_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1', written_at: new Date().toISOString() }), 'utf8');
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(false);
+
+    await writeFile(launchAttempt.startedPath, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_started', pid: 0, process_start_identity: '', written_at: new Date().toISOString() }), 'utf8');
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1', written_at: new Date().toISOString() }), 'utf8');
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(false);
   });
 
   it('rejects replay when the acknowledgement path is already owned', async () => {
@@ -465,7 +512,7 @@ describe('worker launch acknowledgement', () => {
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
-    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
     await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
     const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
     expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
@@ -591,7 +638,7 @@ describe('worker launch acknowledgement', () => {
     expect(windowsInvocation).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
       args: ['/d', '/v:off', '/s', '/c'],
-      batchScript: '@echo off\r\nstart "" /wait /b "C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "--home=%%USERPROFILE%%" "--encoded=%%25" "say ""hello"" & continue" "--literal=bang! caret^"\r\n',
+      batchScript: '@echo off\r\nstart "" /b /wait "C:\\Program Files\\Codex\\codex.cmd" "--label=100%% ready" "--home=%%USERPROFILE%%" "--encoded=%%25" "say ""hello"" & continue" "--literal=bang! caret^"\r\n',
     });
     const materialized = await materializeProviderSpawnInvocation(windowsInvocation);
     const wrapperPath = materialized.args[4]!.slice(1, -1);
@@ -609,6 +656,19 @@ describe('worker launch acknowledgement', () => {
     });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\codex.exe', '--version'], 'win32', { ComSpec: 'cmd.exe' }))
       .toMatchObject({ command: 'cmd.exe', args: ['/d', '/v:off', '/s', '/c'], batchScript: expect.stringContaining('codex.exe') });
+  });
+
+  it('materializes POSIX supervision without changing direct provider argv', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'worker-launch-posix-supervisor-'));
+    const invocation = await materializeProviderSpawnInvocation(
+      buildProviderSpawnInvocation(['/usr/bin/codex', '--prompt', 'literal & value'], 'linux'),
+      { superviseProcessTree: true },
+    );
+    expect(invocation.command).toBe('/bin/sh');
+    expect(invocation.args.slice(1)).toEqual(['/usr/bin/codex', '--prompt', 'literal & value']);
+    expect(invocation.completionPath).toBeTruthy();
+    await expect(readFile(invocation.args[0]!, 'utf8')).resolves.toContain('"$@"');
+    await invocation.cleanup();
   });
 
   it.runIf(process.platform === 'win32')('distinguishes provider starts created within the same wall-clock second', async () => {

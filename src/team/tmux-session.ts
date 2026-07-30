@@ -2075,13 +2075,14 @@ export async function killTeamSession(
   workerPaneIds?: string[],
   leaderPaneId?: string,
   options: { sessionMode?: TeamSessionMode } = {},
-): Promise<void> {
+): Promise<boolean> {
   const sessionMode = options.sessionMode
     ?? (sessionName.includes(':') ? 'split-pane' : 'detached-session');
 
   if (sessionMode === 'split-pane') {
-    if (!workerPaneIds?.length) return;
+    if (!workerPaneIds?.length) return true;
     const provider = sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+    let cleaned = true;
     for (const id of workerPaneIds) {
       if (id === leaderPaneId) continue;
       try {
@@ -2092,41 +2093,39 @@ export async function killTeamSession(
           recipientRole: 'worker',
           paneId: id,
         });
-        if (membership.kind !== 'owned') continue;
+        if (membership.kind !== 'owned') { cleaned = false; continue; }
         if (provider === 'cmux') await cmuxCloseSurface(id);
         else await tmuxExecAsync(['kill-pane', '-t', id]);
-      } catch { /* preserve unverified or already-gone panes */ }
+      } catch {
+        cleaned = false;
+      }
     }
-    return;
+    return cleaned;
   }
 
   if (sessionMode === 'dedicated-window') {
     try {
       await tmuxExecAsync(['kill-window', '-t', sessionName]);
+      return true;
     } catch {
-      // Window may already be gone.
+      return false;
     }
-    return;
   }
 
   const sessionTarget = sessionName.split(':')[0] ?? sessionName;
-
   if (process.env.OMC_TEAM_ALLOW_KILL_CURRENT_SESSION !== '1' && process.env.TMUX) {
     try {
       const current = await tmuxCmdAsync(['display-message', '-p', '#S']);
       const currentSessionName = current.stdout.trim();
-      if (currentSessionName && currentSessionName === sessionTarget) {
-        return;
-      }
+      if (currentSessionName && currentSessionName === sessionTarget) return false;
     } catch {
-      // If we cannot resolve current session safely, continue with best effort.
+      return false;
     }
   }
-
   try {
     await tmuxExecAsync(['kill-session', '-t', sessionTarget]);
+    return true;
   } catch {
-    // Session may already be dead.
+    return false;
   }
-
 }
