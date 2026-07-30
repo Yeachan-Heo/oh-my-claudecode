@@ -1891,8 +1891,48 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         priorLaunches.push(persistedLaunch);
                     }
                 }
-                else if (currentWorker.pane_id && currentLaunch?.pane_id !== currentWorker.pane_id) {
-                    return { ok: false, error: 'worker_cleanup_incomplete' };
+                else if (currentWorker.pane_id) {
+                    // Pre-upgrade workers have pane_id + launch_descriptor but no
+                    // launch_attempt_id (field did not exist on base). Ownership-safe
+                    // pane cleanup consistent with shutdown/scale-down: adopt exact
+                    // pane, kill, verify liveness. Fail closed on unknown ownership
+                    // or liveness; never raw-PID signals.
+                    const coveredByCurrentLaunch = currentLaunch?.pane_id === currentWorker.pane_id;
+                    if (!coveredByCurrentLaunch) {
+                        if (!owner.config.tmux_session) {
+                            return { ok: false, error: 'worker_cleanup_incomplete' };
+                        }
+                        const legacyPaneId = currentWorker.pane_id;
+                        const legacyLiveness = await getWorkerPaneLiveness(legacyPaneId).catch(() => 'unknown');
+                        if (legacyLiveness === 'unknown') {
+                            return { ok: false, error: 'worker_cleanup_incomplete' };
+                        }
+                        if (legacyLiveness !== 'dead') {
+                            const adopted = await adoptWorkerPaneOwnership({
+                                provider: legacyPaneId.startsWith('%') ? 'tmux' : 'cmux',
+                                providerTarget: owner.config.tmux_session,
+                                paneId: legacyPaneId,
+                                leaderPaneId,
+                                reservedPaneIds,
+                            });
+                            if (!adopted.ok) {
+                                return { ok: false, error: 'worker_cleanup_incomplete' };
+                            }
+                            try {
+                                let lastLiveness = legacyLiveness;
+                                for (let attempt = 0; attempt < 2 && lastLiveness !== 'dead'; attempt++) {
+                                    await killOwnedWorkerPane(adopted.ownership);
+                                    lastLiveness = await getWorkerPaneLiveness(legacyPaneId).catch(() => 'unknown');
+                                }
+                                if (lastLiveness !== 'dead') {
+                                    return { ok: false, error: 'worker_cleanup_incomplete' };
+                                }
+                            }
+                            catch {
+                                return { ok: false, error: 'worker_cleanup_incomplete' };
+                            }
+                        }
+                    }
                 }
                 for (const priorLaunch of priorLaunches) {
                     const retired = await retireWorkerLaunchAttempt(priorLaunch, 'recovery_replacement');

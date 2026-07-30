@@ -228,11 +228,11 @@ describe('recovery pane rollback evidence', () => {
     await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
   });
 
-  it('preserves the prior pane and rejects recovery when its launch cannot be identified', async () => {
-    cwd = mkdtempSync(join(tmpdir(), 'recovery-missing-prior-launch-'));
-    const teamName = 'missing-prior-launch-team';
-    const requestId = 'missing-prior-launch-request';
-    const recoveryId = 'missing-prior-launch-recovery';
+  it('cleans a pre-upgrade dead pane (descriptor+pane, no launch_attempt_id) and continues recovery', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-legacy-dead-pane-'));
+    const teamName = 'legacy-dead-pane-team';
+    const requestId = 'legacy-dead-pane-request';
+    const recoveryId = 'legacy-dead-pane-recovery';
     const configPath = absPath(cwd, TeamPaths.config(teamName));
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, JSON.stringify({
@@ -243,7 +243,97 @@ describe('recovery pane rollback evidence', () => {
     }));
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
-    paneMocks.getWorkerLiveness.mockResolvedValue('dead');
+    // Saga getLiveness + legacy cleanup both observe the pre-upgrade pane as dead.
+    // Replacement pane (%2) is alive so spawn-failure cleanup publishes orphan evidence.
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => (
+      paneId === '%1' ? 'dead' : 'alive'
+    ));
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'spawn_failed', recoveryId });
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
+    expect(paneMocks.spawnOwnedWorkerInPane).toHaveBeenCalled();
+    // Dead pre-upgrade pane: no ownership kill required
+    expect(paneMocks.adoptWorkerPaneOwnership).not.toHaveBeenCalledWith(
+      expect.objectContaining({ paneId: '%1' }),
+    );
+    const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(persisted.active_recovery).toMatchObject({ recovery_id: recoveryId, worker_name: 'worker-1' });
+  });
+
+  it('kills a live pre-upgrade owned pane before replacement when launch_attempt_id is absent', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-legacy-live-pane-'));
+    const teamName = 'legacy-live-pane-team';
+    const requestId = 'legacy-live-pane-request';
+    const recoveryId = 'legacy-live-pane-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    // Saga getLiveness must report dead (worker process dead) even if the pane shell is live.
+    // Legacy cleanup then kills the live owned pane; replacement uses %2.
+    let legacyKillCount = 0;
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => {
+      if (paneId === '%2') return 'alive';
+      // First saga getLiveness uses originalPaneId=%1 — report dead so recovery proceeds.
+      // Subsequent %1 checks after kill report dead; before kill report alive for cleanup path.
+      // Order: saga getLiveness(%1)=dead, legacy cleanup(%1)=alive, post-kill(%1)=dead, ...
+      return 'dead';
+    });
+    // Force the legacy cleanup branch to see a live pane by overriding only after saga starts.
+    // Use a call counter: call0 saga=dead, call1+ for %1: first live then dead after kill.
+    let call = 0;
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => {
+      if (paneId !== '%1') return 'alive';
+      call += 1;
+      if (call === 1) return 'dead'; // saga getLiveness: worker is dead
+      if (legacyKillCount === 0) return 'alive'; // legacy cleanup sees live pane shell
+      return 'dead'; // after kill
+    });
+    paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+      if (ownership.paneId === '%1') legacyKillCount += 1;
+      // Successful owned kill of the legacy pane — do not throw
+    });
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'spawn_failed', recoveryId });
+    expect(paneMocks.adoptWorkerPaneOwnership).toHaveBeenCalledWith(expect.objectContaining({
+      paneId: '%1',
+      leaderPaneId: '%leader',
+      providerTarget: `${teamName}:0`,
+    }));
+    expect(paneMocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%1' }));
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
+  });
+
+  it('fail-closes legacy recovery when pane liveness is unknown', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-legacy-unknown-liveness-'));
+    const teamName = 'legacy-unknown-liveness-team';
+    const requestId = 'legacy-unknown-liveness-request';
+    const recoveryId = 'legacy-unknown-liveness-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    // Saga must see dead to enter spawnGatedPane; legacy cleanup then sees unknown.
+    let call = 0;
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => {
+      if (paneId !== '%1') return 'alive';
+      call += 1;
+      return call === 1 ? 'dead' : 'unknown';
+    });
 
     await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
       .resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
@@ -253,6 +343,72 @@ describe('recovery pane rollback evidence', () => {
     const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(persisted.workers[0].pane_id).toBe('%1');
     expect(persisted.active_recovery).toMatchObject({ recovery_id: recoveryId, worker_name: 'worker-1' });
+  });
+
+  it('fail-closes legacy recovery when ownership adoption is rejected (foreign/alias)', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-legacy-foreign-pane-'));
+    const teamName = 'legacy-foreign-pane-team';
+    const requestId = 'legacy-foreign-pane-request';
+    const recoveryId = 'legacy-foreign-pane-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    let call = 0;
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => {
+      if (paneId !== '%1') return 'alive';
+      call += 1;
+      return call === 1 ? 'dead' : 'alive';
+    });
+    paneMocks.adoptWorkerPaneOwnership.mockResolvedValueOnce({
+      ok: false,
+      reason: 'leader_alias',
+    } as never);
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
+    expect(paneMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(persisted.workers[0].pane_id).toBe('%1');
+  });
+
+  it('fail-closes legacy recovery when owned pane kill cannot prove death', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-legacy-kill-fail-'));
+    const teamName = 'legacy-kill-fail-team';
+    const requestId = 'legacy-kill-fail-request';
+    const recoveryId = 'legacy-kill-fail-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+    let call = 0;
+    paneMocks.getWorkerLiveness.mockImplementation(async (paneId: string) => {
+      if (paneId !== '%1') return 'alive';
+      call += 1;
+      return call === 1 ? 'dead' : 'alive'; // always alive after saga → kill cannot prove death
+    });
+    paneMocks.killOwnedWorkerPane.mockResolvedValue(undefined);
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
+    expect(paneMocks.killOwnedWorkerPane).toHaveBeenCalled();
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(persisted.workers[0].pane_id).toBe('%1');
+    expect(persisted.active_recovery).toMatchObject({ recovery_id: recoveryId });
   });
 
   it('terminates the dead-pane provider before allocating a replacement pane', async () => {
