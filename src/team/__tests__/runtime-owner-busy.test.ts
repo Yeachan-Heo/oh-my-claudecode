@@ -242,4 +242,90 @@ describe('runtime owner team mutation contention', () => {
     expect(tmuxMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
   });
 
+
+  it('allows recovery past a committed scale-up fence without team_mutation_busy', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-committed-scale-up-'));
+    const teamName = 'committed-scale-up-team';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    const now = new Date().toISOString();
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1 }],
+      agent_type: 'claude', created_at: now, tmux_session: `${teamName}:0`, lifecycle_state: 'active', state_revision: 3,
+      // Durable post-commit fence after release write failure — reconcilable, non-blocking.
+      active_scale_up: {
+        operation_id: 'scale-up-committed-1', phase: 'committed', pid: 999999,
+        process_started_at: 'linux:1', state_revision: 3, created_at: now, updated_at: now,
+      },
+    }));
+    reserveRecoveryRequest(cwd, 'committed-scale-up-request', { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, 'committed-scale-up-recovery');
+
+    const result = await executeRecoverDeadWorkerV2Owner({
+      teamName, cwd, workerName: 'worker-1', requestId: 'committed-scale-up-request',
+    });
+    expect(result.recoveryId).toBe('committed-scale-up-recovery');
+    // Recovery is allowed to proceed past the fence (may fail later for other reasons).
+    if (result.outcome === 'failed') {
+      expect(result.error).not.toBe('team_mutation_busy');
+    } else {
+      expect(['recovered', 'already_running']).toContain(result.outcome);
+    }
+  });
+
+  it.each(['reserved', 'effects', 'failed'] as const)(
+    'keeps recovery blocked while scale-up fence phase is %s',
+    async (phase) => {
+      cwd = mkdtempSync(join(tmpdir(), `runtime-owner-scale-up-${phase}-`));
+      const teamName = `scale-up-${phase}-team`;
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      const now = new Date().toISOString();
+      writeFileSync(configPath, JSON.stringify({
+        name: teamName, worker_count: 1,
+        workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1 }],
+        agent_type: 'claude', created_at: now, tmux_session: `${teamName}:0`, lifecycle_state: 'active', state_revision: 3,
+        active_scale_up: {
+          operation_id: `scale-up-${phase}-1`, phase, pid: 999999,
+          process_started_at: 'linux:1', state_revision: 3, created_at: now, updated_at: now,
+          ...(phase === 'failed' ? { failure_reason: 'test' } : {}),
+        },
+      }));
+      const requestId = `scale-up-${phase}-request`;
+      const recoveryId = `scale-up-${phase}-recovery`;
+      reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, recoveryId);
+
+      await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+        .resolves.toMatchObject({ outcome: 'failed', error: 'team_mutation_busy', recoveryId });
+      expect(readRecoveryOutcome(cwd, requestId)).toBeNull();
+    },
+  );
+
+  it('does not treat non-committed phase labels as committed even if other fields look durable', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-stale-scale-up-label-'));
+    const teamName = 'stale-scale-up-label-team';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    const now = new Date().toISOString();
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1 }],
+      agent_type: 'claude', created_at: now, tmux_session: `${teamName}:0`, lifecycle_state: 'active', state_revision: 3,
+      // Foreign/stale-looking fence without the atomic committed phase proof.
+      active_scale_up: {
+        operation_id: 'foreign-op', phase: 'effects', pid: 1,
+        process_started_at: 'linux:foreign', state_revision: 3, created_at: now, updated_at: now,
+      },
+    }));
+    reserveRecoveryRequest(cwd, 'stale-label-request', { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, 'stale-label-recovery');
+
+    await expect(executeRecoverDeadWorkerV2Owner({
+      teamName, cwd, workerName: 'worker-1', requestId: 'stale-label-request',
+    })).resolves.toMatchObject({ outcome: 'failed', error: 'team_mutation_busy', recoveryId: 'stale-label-recovery' });
+  });
+
+
 });

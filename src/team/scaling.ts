@@ -162,7 +162,7 @@ function scaleUpAttempt(config: TeamConfig): TeamScaleUpAttempt | undefined {
  * Historical 'effects' without commit proof always blocks — it
  * represents ambiguous partial state that requires explicit repair.
  */
-function scaleUpFenceBlocks(config: TeamConfig): boolean {
+export function scaleUpFenceBlocks(config: TeamConfig): boolean {
   const attempt = config.active_scale_up;
   if (!attempt) return false;
   if (attempt.phase === 'committed') return false;

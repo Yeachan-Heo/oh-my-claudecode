@@ -10,6 +10,7 @@
  * - 'draining' worker status for graceful transitions during scale_down
  */
 import { type WorkerInfo } from './team-ops.js';
+import type { TeamConfig } from './types.js';
 export declare function isScalingEnabled(env?: NodeJS.ProcessEnv): boolean;
 export interface ScaleUpResult {
     ok: true;
@@ -27,6 +28,15 @@ export interface ScaleError {
     ok: false;
     error: string;
 }
+/**
+ * Returns true if the active_scale_up fence blocks team mutations.
+ * A 'committed' fence proves workers were durably persisted and the
+ * release write failed; it may be safely reclaimed (cleared) by a
+ * later operation with exact operation identity verification.
+ * Historical 'effects' without commit proof always blocks — it
+ * represents ambiguous partial state that requires explicit repair.
+ */
+export declare function scaleUpFenceBlocks(config: TeamConfig): boolean;
 /**
  * Add workers to a running team mid-session.
  *

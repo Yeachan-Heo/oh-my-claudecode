@@ -146,6 +146,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isMatchingRecoveryFinal, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation, readRecoveryResult, writeRecoveryFinal, type RecoveryDurableOutcome } from './recovery-request-store.js';
 
 import { parseRecoveryIntent, resolveRuntimeCliPath, type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
+import { scaleUpFenceBlocks } from './scaling.js';
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
 import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-ops.js';
@@ -2035,7 +2036,7 @@ export async function executeRecoverDeadWorkerV2Owner(
   let ownerBound = false;
   try {
     const beforeOwner = await readRevisionedTeamConfig(input.teamName, input.cwd);
-    if (beforeOwner?.config.active_scale_down || beforeOwner?.config.active_scale_up) {
+    if (beforeOwner?.config.active_scale_down || (beforeOwner?.config && scaleUpFenceBlocks(beforeOwner.config))) {
       return recoveryError(input, recoveryId, 'team_mutation_busy');
     }
     let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input);
@@ -2070,7 +2071,7 @@ export async function executeRecoverDeadWorkerV2Owner(
     if (owner.config.lifecycle_state === 'shutting_down' || owner.config.lifecycle_state === 'stopped') {
       return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_shutting_down'));
     }
-    if (owner.config.active_scale_down || owner.config.active_scale_up) return recoveryError(input, recoveryId, 'team_mutation_busy');
+    if (owner.config.active_scale_down || scaleUpFenceBlocks(owner.config)) return recoveryError(input, recoveryId, 'team_mutation_busy');
 
     const worker = owner.config.workers.find(candidate => candidate.name === input.workerName);
     if (!worker) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'worker_not_found'));
@@ -2120,7 +2121,7 @@ export async function executeRecoverDeadWorkerV2Owner(
       requireOwnerFence(input.cwd, input.teamName, owner.fence);
       const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
       if (!current || current.config.active_scale_down
-        || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed')
+        || scaleUpFenceBlocks(current.config)
 
         || current.config.active_recovery?.recovery_id !== recoveryId
         || current.config.active_recovery.owner_epoch !== owner.fence.epoch

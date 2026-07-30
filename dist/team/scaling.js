@@ -89,7 +89,7 @@ function scaleUpAttempt(config) {
  * Historical 'effects' without commit proof always blocks — it
  * represents ambiguous partial state that requires explicit repair.
  */
-function scaleUpFenceBlocks(config) {
+export function scaleUpFenceBlocks(config) {
     const attempt = config.active_scale_up;
     if (!attempt)
         return false;
