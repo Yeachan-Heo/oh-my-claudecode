@@ -4359,6 +4359,23 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
         written_at: (/* @__PURE__ */ new Date()).toISOString()
       });
     } catch {
+      const deadline2 = Date.parse(deadlineAt);
+      const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline2);
+      if (liveness === "dead" || liveness === "mismatch") {
+        try {
+          await writeExclusiveAtomic(terminationCompletePath, {
+            ...identityOf(attempt),
+            kind: "worker_launch_termination_complete",
+            cleanup_verified: true,
+            pid: record.pid,
+            process_start_identity: record.process_start_identity,
+            written_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }
       return false;
     }
   } else {
@@ -14408,6 +14425,44 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
   }
 }
 async function rollbackStartedNativeWorktreeStartup(args) {
+  if (args.launchedWorkers) {
+    for (const worker of args.launchedWorkers) {
+      if (!worker.launchAttemptId) continue;
+      try {
+        const attempt = await loadWorkerLaunchAttempt({
+          cwd: args.cwd,
+          teamName: args.teamName,
+          workerName: worker.name,
+          paneId: worker.paneId,
+          provider: worker.provider,
+          attemptId: worker.launchAttemptId,
+          runtimeCliPath: resolveRuntimeCliPath()
+        });
+        if (attempt) {
+          await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, "startup_rollback", async () => {
+            try {
+              return await getWorkerLiveness(worker.paneId) === "dead" || await killOwnedWorkerPane({
+                provider: worker.paneId.startsWith("%") ? "tmux" : "cmux",
+                providerTarget: args.sessionName,
+                paneId: worker.paneId,
+                splitTarget: "",
+                leaderPaneId: args.leaderPaneId ?? "",
+                reservedPaneIds: args.workerPaneIds.filter((p) => p !== worker.paneId),
+                source: "adopted"
+              }).then(async () => await getWorkerLiveness(worker.paneId) === "dead");
+            } catch {
+              return false;
+            }
+          }).catch(() => false);
+        }
+      } catch (providerCleanupError) {
+        process.stderr.write(
+          `[team/runtime-v2] startup rollback provider cleanup failed for ${worker.name}: ${providerCleanupError instanceof Error ? providerCleanupError.message : String(providerCleanupError)}
+`
+        );
+      }
+    }
+  }
   try {
     await killTeamSession(
       args.sessionName,
@@ -14759,6 +14814,7 @@ async function startTeamV2(config) {
     seenStartupWorkers.add(decision.workerName);
     if (initialStartupAllocations.length >= config.workerCount) break;
   }
+  const launchedWorkers = [];
   try {
     for (const decision of initialStartupAllocations) {
       const wName = decision.workerName;
@@ -14789,6 +14845,12 @@ async function startTeamV2(config) {
       });
       if (workerLaunch.paneId) {
         workerPaneIds.push(workerLaunch.paneId);
+        launchedWorkers.push({
+          name: wName,
+          paneId: workerLaunch.paneId,
+          ...workerLaunch.launchAttemptId ? { launchAttemptId: workerLaunch.launchAttemptId } : {},
+          provider: prepared.agentType
+        });
         {
           workerInfo.pane_id = workerLaunch.paneId;
           workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
@@ -14820,7 +14882,8 @@ async function startTeamV2(config) {
       sessionName: sessionName2,
       leaderPaneId,
       workerPaneIds,
-      sessionMode: session.sessionMode
+      sessionMode: session.sessionMode,
+      launchedWorkers
     });
     throw error;
   }
@@ -14835,7 +14898,8 @@ async function startTeamV2(config) {
       sessionName: sessionName2,
       leaderPaneId,
       workerPaneIds,
-      sessionMode: session.sessionMode
+      sessionMode: session.sessionMode,
+      launchedWorkers
     });
     throw error;
   }

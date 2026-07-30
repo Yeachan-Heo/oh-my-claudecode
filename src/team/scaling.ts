@@ -990,9 +990,47 @@ export async function scaleDownOwned(
       const paneId = worker.pane_id!;
       const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
       if (!provider || !worker.launch_attempt_id) {
-        const reason = `provider_cleanup_unverified:missing_launch_identity:${worker.name}`;
-        await markScaleDownFailed(reason);
-        return { ok: false, error: reason };
+        // Legacy workers may have pane_id but no launch_attempt_id.
+        // Attempt ownership-safe pane cleanup without provider termination.
+        if (!provider) {
+          const reason = `provider_cleanup_unverified:missing_provider:${worker.name}`;
+          await markScaleDownFailed(reason);
+          return { ok: false, error: reason };
+        }
+        const legacyLiveness = await getWorkerLiveness(paneId);
+        if (legacyLiveness === 'dead') continue;
+        const legacyOwnership = await adoptWorkerPaneOwnership({
+          provider: paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
+          providerTarget: config.tmux_session,
+          paneId,
+          leaderPaneId: config.leader_pane_id ?? '',
+          reservedPaneIds: config.workers
+            .filter(candidate => candidate.name !== worker.name)
+            .map(candidate => candidate.pane_id)
+            .filter((id): id is string => Boolean(id)),
+        });
+        if (!legacyOwnership.ok) {
+          const reason = `pane_cleanup_failed:${worker.name}:${legacyOwnership.reason}`;
+          await markScaleDownFailed(reason);
+          return { ok: false, error: reason };
+        }
+        try {
+          let lastLegacyLiveness: Awaited<ReturnType<typeof getWorkerLiveness>> = await getWorkerLiveness(paneId);
+          for (let attempt = 0; attempt < 2 && lastLegacyLiveness !== 'dead'; attempt++) {
+            await killOwnedWorkerPane(legacyOwnership.ownership);
+            lastLegacyLiveness = await getWorkerLiveness(paneId);
+          }
+          if (lastLegacyLiveness !== 'dead') {
+            const reason = `pane_cleanup_failed:${worker.name}:${lastLegacyLiveness === 'alive' ? 'pane_still_alive' : 'pane_liveness_unknown'}`;
+            await markScaleDownFailed(reason);
+            return { ok: false, error: reason };
+          }
+        } catch (cleanupError) {
+          const reason = `pane_cleanup_failed:${worker.name}:${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`;
+          await markScaleDownFailed(reason);
+          return { ok: false, error: reason };
+        }
+        continue;
       }
       const initialPaneLiveness = await getWorkerLiveness(paneId);
       let paneOwnership: WorkerPaneOwnership | null = null;

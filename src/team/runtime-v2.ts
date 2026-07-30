@@ -2806,7 +2806,41 @@ async function rollbackStartedNativeWorktreeStartup(args: {
   leaderPaneId?: string | null;
   workerPaneIds: string[];
   sessionMode: TeamSessionMode;
+  launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
 }): Promise<void> {
+  // Retire each exact launched provider BEFORE killing the team session or
+  // removing state. This ensures no detached provider survives the rollback.
+  if (args.launchedWorkers) {
+    for (const worker of args.launchedWorkers) {
+      if (!worker.launchAttemptId) continue;
+      try {
+        const attempt = await loadWorkerLaunchAttempt({
+          cwd: args.cwd, teamName: args.teamName, workerName: worker.name,
+          paneId: worker.paneId, provider: worker.provider as CliAgentType,
+          attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
+        });
+        if (attempt) {
+          await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
+            try {
+              return await getWorkerLiveness(worker.paneId) === 'dead'
+                || await killOwnedWorkerPane({
+                  provider: worker.paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
+                  providerTarget: args.sessionName, paneId: worker.paneId,
+                  splitTarget: '', leaderPaneId: args.leaderPaneId ?? '',
+                  reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId), source: 'adopted' as const,
+                }).then(async () => await getWorkerLiveness(worker.paneId) === 'dead');
+            } catch {
+              return false;
+            }
+          }).catch(() => false);
+        }
+      } catch (providerCleanupError) {
+        process.stderr.write(
+          `[team/runtime-v2] startup rollback provider cleanup failed for ${worker.name}: ${providerCleanupError instanceof Error ? providerCleanupError.message : String(providerCleanupError)}\n`,
+        );
+      }
+    }
+  }
   try {
     await killTeamSession(
       args.sessionName,
@@ -2816,8 +2850,7 @@ async function rollbackStartedNativeWorktreeStartup(args: {
     );
   } catch (killError) {
     process.stderr.write(
-      `[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}
-`,
+      `[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}\n`,
     );
   }
   await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause);
@@ -3187,6 +3220,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     if (initialStartupAllocations.length >= config.workerCount) break;
   }
 
+  const launchedWorkers: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }> = [];
   try {
     for (const decision of initialStartupAllocations) {
     const wName = decision.workerName;
@@ -3219,6 +3253,11 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
 
     if (workerLaunch.paneId) {
       workerPaneIds.push(workerLaunch.paneId);
+      launchedWorkers.push({
+        name: wName, paneId: workerLaunch.paneId,
+        ...(workerLaunch.launchAttemptId ? { launchAttemptId: workerLaunch.launchAttemptId } : {}),
+        provider: prepared.agentType,
+      });
       {
         workerInfo.pane_id = workerLaunch.paneId;
         workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
@@ -3252,6 +3291,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
+      launchedWorkers,
     });
     throw error;
   }
@@ -3269,6 +3309,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
+      launchedWorkers,
     });
     throw error;
   }

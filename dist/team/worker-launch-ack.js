@@ -496,6 +496,24 @@ export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) 
             });
         }
         catch {
+            // The completion-record write failed after a successful termination.
+            // Retry: verify the process is dead, then re-attempt the write so a
+            // later retry can safely resume from the termination-request + proven
+            // process absence. Never infer from PID absence without request identity.
+            const deadline = Date.parse(deadlineAt);
+            const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
+            if (liveness === 'dead' || liveness === 'mismatch') {
+                try {
+                    await writeExclusiveAtomic(terminationCompletePath, {
+                        ...identityOf(attempt), kind: 'worker_launch_termination_complete', cleanup_verified: true,
+                        pid: record.pid, process_start_identity: record.process_start_identity, written_at: new Date().toISOString(),
+                    });
+                    return true;
+                }
+                catch {
+                    return false;
+                }
+            }
             return false;
         }
     }
@@ -672,26 +690,32 @@ export async function materializeProviderSpawnInvocation(invocation, options = {
     }
     const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
     const completionPath = superviseProcessTree ? join(wrapperDir, 'provider-exit.txt') : undefined;
-    if (!invocation.batchScript) {
-        const wrapperPath = join(wrapperDir, 'launch.sh');
-        const quotedCompletion = `'${completionPath.replace(/'/g, `'"'"'`)}'`;
-        await writeFile(wrapperPath, `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
+    try {
+        if (!invocation.batchScript) {
+            const wrapperPath = join(wrapperDir, 'launch.sh');
+            const quotedCompletion = `'${completionPath.replace(/'/g, `'"'"'`)}'`;
+            await writeFile(wrapperPath, `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
+            return {
+                command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath,
+                cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
+            };
+        }
+        const wrapperPath = join(wrapperDir, 'launch.cmd');
+        const completionScript = completionPath
+            ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
+            : '';
+        await writeFile(wrapperPath, `${invocation.batchScript}${completionScript}`, { encoding: 'utf8', mode: 0o600 });
         return {
-            command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath,
+            command: invocation.command,
+            args: [...invocation.args, `"${wrapperPath}"`],
+            ...(completionPath ? { completionPath } : {}),
             cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
         };
     }
-    const wrapperPath = join(wrapperDir, 'launch.cmd');
-    const completionScript = completionPath
-        ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
-        : '';
-    await writeFile(wrapperPath, `${invocation.batchScript}${completionScript}`, { encoding: 'utf8', mode: 0o600 });
-    return {
-        command: invocation.command,
-        args: [...invocation.args, `"${wrapperPath}"`],
-        ...(completionPath ? { completionPath } : {}),
-        cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
-    };
+    catch (writeError) {
+        await rm(wrapperDir, { recursive: true, force: true }).catch(() => undefined);
+        throw writeError;
+    }
 }
 async function publishProviderStarted(spec, pid, processStartIdentity, supervisorCompletionPath) {
     const record = {

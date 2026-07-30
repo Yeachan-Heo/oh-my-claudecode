@@ -2261,12 +2261,45 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd, cause) {
     }
 }
 async function rollbackStartedNativeWorktreeStartup(args) {
+    // Retire each exact launched provider BEFORE killing the team session or
+    // removing state. This ensures no detached provider survives the rollback.
+    if (args.launchedWorkers) {
+        for (const worker of args.launchedWorkers) {
+            if (!worker.launchAttemptId)
+                continue;
+            try {
+                const attempt = await loadWorkerLaunchAttempt({
+                    cwd: args.cwd, teamName: args.teamName, workerName: worker.name,
+                    paneId: worker.paneId, provider: worker.provider,
+                    attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
+                });
+                if (attempt) {
+                    await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
+                        try {
+                            return await getWorkerLiveness(worker.paneId) === 'dead'
+                                || await killOwnedWorkerPane({
+                                    provider: worker.paneId.startsWith('%') ? 'tmux' : 'cmux',
+                                    providerTarget: args.sessionName, paneId: worker.paneId,
+                                    splitTarget: '', leaderPaneId: args.leaderPaneId ?? '',
+                                    reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId), source: 'adopted',
+                                }).then(async () => await getWorkerLiveness(worker.paneId) === 'dead');
+                        }
+                        catch {
+                            return false;
+                        }
+                    }).catch(() => false);
+                }
+            }
+            catch (providerCleanupError) {
+                process.stderr.write(`[team/runtime-v2] startup rollback provider cleanup failed for ${worker.name}: ${providerCleanupError instanceof Error ? providerCleanupError.message : String(providerCleanupError)}\n`);
+            }
+        }
+    }
     try {
         await killTeamSession(args.sessionName, args.workerPaneIds, args.leaderPaneId ?? undefined, { sessionMode: args.sessionMode });
     }
     catch (killError) {
-        process.stderr.write(`[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}
-`);
+        process.stderr.write(`[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}\n`);
     }
     await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause);
 }
@@ -2630,6 +2663,7 @@ export async function startTeamV2(config) {
         if (initialStartupAllocations.length >= config.workerCount)
             break;
     }
+    const launchedWorkers = [];
     try {
         for (const decision of initialStartupAllocations) {
             const wName = decision.workerName;
@@ -2663,6 +2697,11 @@ export async function startTeamV2(config) {
             });
             if (workerLaunch.paneId) {
                 workerPaneIds.push(workerLaunch.paneId);
+                launchedWorkers.push({
+                    name: wName, paneId: workerLaunch.paneId,
+                    ...(workerLaunch.launchAttemptId ? { launchAttemptId: workerLaunch.launchAttemptId } : {}),
+                    provider: prepared.agentType,
+                });
                 {
                     workerInfo.pane_id = workerLaunch.paneId;
                     workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
@@ -2694,6 +2733,7 @@ export async function startTeamV2(config) {
             leaderPaneId,
             workerPaneIds,
             sessionMode: session.sessionMode,
+            launchedWorkers,
         });
         throw error;
     }
@@ -2711,6 +2751,7 @@ export async function startTeamV2(config) {
             leaderPaneId,
             workerPaneIds,
             sessionMode: session.sessionMode,
+            launchedWorkers,
         });
         throw error;
     }
