@@ -790,9 +790,21 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                     throw new Error('team_mutation_busy');
                 }
                 const existingScaleDown = current.config.active_scale_down;
-                if (existingScaleDown && (existingScaleDown.phase !== 'draining'
-                    || !isProcessIdentityDead(existingScaleDown)))
-                    throw new Error('team_mutation_busy');
+                // Reclaim policy for scale-down fences:
+                // - draining + dead owner: safe (no effects started, or owner crashed before effects)
+                // - failed + dead owner OR same live owner: cleanup is resumable via a new draining reservation
+                // - effects (any owner): fail-closed — partial provider/pane cleanup is ambiguous
+                if (existingScaleDown) {
+                    const ownerDead = isProcessIdentityDead(existingScaleDown);
+                    const processStartedAt = currentProcessStartIdentity();
+                    const sameOwner = Boolean(processStartedAt)
+                        && existingScaleDown.pid === process.pid
+                        && existingScaleDown.process_started_at === processStartedAt;
+                    const reclaimable = (existingScaleDown.phase === 'draining' && ownerDead)
+                        || (existingScaleDown.phase === 'failed' && (ownerDead || sameOwner));
+                    if (!reclaimable)
+                        throw new Error('team_mutation_busy');
+                }
                 const selected = selectedNames.map(name => current.config.workers.find(worker => worker.name === name));
                 if (selected.some((worker) => !worker)
                     || !identitiesMatch(selected, targetWorkers.map(workerIdentity)))

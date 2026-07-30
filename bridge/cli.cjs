@@ -6770,6 +6770,20 @@ function getProcessStartIdentitySync(pid) {
   }
   return null;
 }
+function dmtfCreationDateToTicks(dmtf) {
+  const m = dmtf.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-])(\d{3})$/);
+  if (!m) return null;
+  const [, ys, ms, ds, hs, mins, ss, us, sign, off] = m;
+  const year = Number(ys), month = Number(ms), day = Number(ds);
+  const hour = Number(hs), minute = Number(mins), second = Number(ss);
+  const micros = Number(us);
+  const offsetMin = Number(off) * (sign === "-" ? -1 : 1);
+  if (![year, month, day, hour, minute, second, micros, offsetMin].every(Number.isFinite)) return null;
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(micros / 1e3)) - offsetMin * 6e4;
+  if (!Number.isFinite(utcMs)) return null;
+  const ticks = BigInt(utcMs) * 10000n + 621355968000000000n;
+  return `ticks:${ticks.toString()}`;
+}
 async function getProcessStartIdentityWindows(pid, deadlineAt) {
   for (const command of [
     `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`,
@@ -6796,7 +6810,7 @@ async function getProcessStartIdentityWindows(pid, deadlineAt) {
       "/format:csv"
     ], { timeout: Math.max(1, Math.min(5e3, remainingDeadlineMs(deadlineAt) ?? 5e3)), windowsHide: true });
     const match = stdout.match(/(\d{14}\.\d{6}[+-]\d{3})/);
-    return match ? `dmtf:${match[1]}` : null;
+    return match ? dmtfCreationDateToTicks(match[1]) : null;
   } catch {
     return null;
   }
@@ -6831,7 +6845,12 @@ async function terminateOwnedProcessTree(options) {
   }
   const timeout = remainingDeadlineMs(deadline);
   if (!timeout) return "deadline-exceeded";
-  const expectedTicks = options.expectedStartIdentity.match(/^ticks:(\d+)$/)?.[1];
+  let expectedTicks = options.expectedStartIdentity.match(/^ticks:(\d+)$/)?.[1];
+  if (!expectedTicks) {
+    const dmtf = options.expectedStartIdentity.match(/^dmtf:(.+)$/)?.[1];
+    const converted = dmtf ? dmtfCreationDateToTicks(dmtf) : null;
+    expectedTicks = converted?.match(/^ticks:(\d+)$/)?.[1];
+  }
   if (!expectedTicks) return "unknown";
   const waitMs = Math.max(1, timeout);
   const script = [
@@ -33133,6 +33152,7 @@ var init_process_identity_lock = __esm({
 // src/team/monitor.ts
 var monitor_exports = {};
 __export(monitor_exports, {
+  alignActiveFenceRevisions: () => alignActiveFenceRevisions,
   cleanupTeamState: () => cleanupTeamState,
   diffSnapshots: () => diffSnapshots,
   getTeamSummary: () => getTeamSummary,
@@ -33238,7 +33258,7 @@ function isRecoveryAttempt(value) {
   return isRecord2(value) && isNonEmptyString(value.request_id) && isNonEmptyString(value.recovery_id) && isNonEmptyString(value.worker_name) && isSafeCounter(value.owner_epoch) && value.owner_epoch > 0 && isNonEmptyString(value.owner_nonce) && ["reserved", "requeued", "ready", "active", "services_pending", "adopted", "failed"].includes(value.phase) && (value.original_pane_id === void 0 || typeof value.original_pane_id === "string") && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at);
 }
 function isScaleUpAttempt(value) {
-  return isRecord2(value) && isNonEmptyString(value.operation_id) && ["reserved", "effects", "failed"].includes(value.phase) && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at) && (value.failure_reason === void 0 || typeof value.failure_reason === "string");
+  return isRecord2(value) && isNonEmptyString(value.operation_id) && ["reserved", "effects", "committed", "failed"].includes(value.phase) && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at) && (value.failure_reason === void 0 || typeof value.failure_reason === "string");
 }
 function isScaleDownAttempt(value) {
   return isRecord2(value) && isNonEmptyString(value.operation_id) && ["draining", "effects", "failed"].includes(value.phase) && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && Array.isArray(value.workers) && value.workers.every((worker) => isRecord2(worker) && isNonEmptyString(worker.name) && (worker.pane_id === void 0 || typeof worker.pane_id === "string") && (worker.worktree_path === void 0 || typeof worker.worktree_path === "string") && (worker.worktree_created === void 0 || typeof worker.worktree_created === "boolean")) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at) && (value.failure_reason === void 0 || typeof value.failure_reason === "string");
@@ -33399,15 +33419,21 @@ async function migrateTeamConfigRevision(teamName, cwd2) {
   });
 }
 async function saveTeamConfigAtRevision(config2, expectedRevision, cwd2, afterCommit) {
-  if (!validateRevisionedTeamConfig(config2, config2.name)) throw new Error("invalid_persisted_state");
-  await assertPersistedConfigPathBinding(config2.name, cwd2);
-  return withTeamConfigMutationLock(config2.name, cwd2, async () => {
-    const current = await readRevisionedTeamConfig(config2.name, cwd2);
+  if (typeof config2.state_revision !== "number" || !Number.isSafeInteger(config2.state_revision)) {
+    throw new Error("invalid_persisted_state");
+  }
+  const aligned = alignActiveFenceRevisions(config2, config2.state_revision);
+  if (!validateRevisionedTeamConfig(aligned, aligned.name)) throw new Error("invalid_persisted_state");
+  await assertPersistedConfigPathBinding(aligned.name, cwd2);
+  return withTeamConfigMutationLock(aligned.name, cwd2, async () => {
+    const current = await readRevisionedTeamConfig(aligned.name, cwd2);
     if (!current || current.stateRevision !== expectedRevision) return false;
-    if (!validateRevisionedTeamConfig(config2, config2.name)) throw new Error("invalid_persisted_state");
-    await saveTeamConfigUnlocked(config2, cwd2);
-    const verified = await readRevisionedTeamConfig(config2.name, cwd2);
-    if (verified?.stateRevision !== config2.state_revision) return false;
+    const locked = alignActiveFenceRevisions(aligned, aligned.state_revision);
+    if (!validateRevisionedTeamConfig(locked, locked.name)) throw new Error("invalid_persisted_state");
+    await saveTeamConfigUnlocked(locked, cwd2);
+    const verified = await readRevisionedTeamConfig(locked.name, cwd2);
+    if (verified?.stateRevision !== locked.state_revision) return false;
+    Object.assign(config2, locked);
     await afterCommit?.();
     return true;
   });
@@ -42309,8 +42335,7 @@ async function removeStaleTeamCadence(teamName, expectedContexts) {
   return converged;
 }
 async function reconcileCommittedTeamServices(config2, cwd2) {
-  const scaleUp2 = config2.active_scale_up;
-  if (scaleUp2) return "repair_required";
+  if (scaleUpFenceBlocks(config2)) return "repair_required";
   const descriptor = config2.service_descriptor;
   if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation) || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root) return "repair_required";
   if (!descriptor.auto_merge_enabled) {

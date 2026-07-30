@@ -295,6 +295,62 @@ describe('team config revision transaction', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(bytes);
   });
 
+  it('accepts and round-trips a committed scale-up fence through real save/load', async () => {
+    const now = new Date().toISOString();
+    const base = initialConfig();
+    // Start from a clean revisioned config without recovery, with committed scale-up.
+    writeConfig({
+      ...base,
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'scale-up-committed',
+        phase: 'committed',
+        pid: 42,
+        process_started_at: 'linux:1',
+        state_revision: 1,
+        created_at: now,
+        updated_at: now,
+      },
+    });
+    const loaded = await readRevisionedTeamConfig(teamName, cwd);
+    expect(loaded?.config.active_scale_up?.phase).toBe('committed');
+    expect(loaded?.config.active_scale_up?.state_revision).toBe(loaded?.config.state_revision);
+
+    // Advance revision while retaining committed fence with intentionally stale fence revision.
+    // saveTeamConfigAtRevision must align all active fences to config.state_revision.
+    const nextRevision = loaded!.stateRevision + 1;
+    const advanced = {
+      ...loaded!.config,
+      state_revision: nextRevision,
+      active_recovery: {
+        request_id: 'r1', recovery_id: 'rec1', worker_name: 'worker-1',
+        owner_epoch: 1, owner_nonce: 'n1', phase: 'reserved' as const,
+        state_revision: nextRevision, created_at: now, updated_at: now,
+      },
+      active_scale_up: { ...loaded!.config.active_scale_up!, state_revision: loaded!.stateRevision },
+    };
+    await expect(saveTeamConfigAtRevision(advanced, loaded!.stateRevision, cwd)).resolves.toBe(true);
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_up?.phase).toBe('committed');
+    expect(after?.config.active_scale_up?.state_revision).toBe(after?.config.state_revision);
+    expect(after?.config.active_recovery?.state_revision).toBe(after?.config.state_revision);
+  });
+
+  it('rejects a malformed scale-up phase that is not in the canonical set', async () => {
+    const now = new Date().toISOString();
+    const bad = {
+      ...initialConfig(),
+      active_scale_up: {
+        operation_id: 'scale-up-bad', phase: 'finished', pid: 1,
+        process_started_at: 'linux:1', state_revision: 1,
+        created_at: now, updated_at: now,
+      },
+    };
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    writeFileSync(configPath, JSON.stringify(bad));
+    await expect(readRevisionedTeamConfig(teamName, cwd)).rejects.toThrow('invalid_persisted_state');
+  });
+
   it('rejects a path-mismatched persisted config before migration writes a projection', async () => {
     const configPath = absPath(cwd, TeamPaths.config(teamName));
     const bytes = JSON.stringify({ ...initialConfig(), name: 'other-team' });

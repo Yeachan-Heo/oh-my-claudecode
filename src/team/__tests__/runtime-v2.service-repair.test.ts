@@ -155,7 +155,7 @@ describe('runtime-v2 committed service reconciliation', () => {
     expect(cadenceMocks.installCommitCadence).toHaveBeenCalledTimes(2);
   });
 
-  it('does not repair services while a durable scale-up fence is active', async () => {
+  it('does not repair services while a durable non-committed scale-up fence is active', async () => {
     const scaling = config({ name: 'demo-scale-up-fence' });
     scaling.active_scale_up = {
       operation_id: 'scale-up-1', phase: 'effects', pid: 1234,
@@ -165,6 +165,17 @@ describe('runtime-v2 committed service reconciliation', () => {
     await expect(reconcileCommittedTeamServices(scaling, '/repo')).resolves.toBe('repair_required');
     expect(mergeMocks.startMergeOrchestrator).not.toHaveBeenCalled();
     expect(cadenceMocks.installCommitCadence).not.toHaveBeenCalled();
+  });
+
+  it('repairs services while only a committed scale-up fence remains', async () => {
+    const scaling = config({ name: 'demo-committed-scale-up-fence' });
+    scaling.active_scale_up = {
+      operation_id: 'scale-up-committed', phase: 'committed', pid: 1234,
+      process_started_at: 'linux:123', state_revision: scaling.state_revision ?? 1,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    await expect(reconcileCommittedTeamServices(scaling, '/repo')).resolves.toBe('synced');
+    expect(mergeMocks.startMergeOrchestrator).toHaveBeenCalled();
   });
 
   it('reports repair_required when any committed worker metadata is incomplete', async () => {

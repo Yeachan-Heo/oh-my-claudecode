@@ -9,6 +9,7 @@
  * the monitor loop.
  */
 import type { TeamConfig, TeamManifestV2, TeamMonitorSnapshotState, TeamPhaseState, WorkerStatus, WorkerHeartbeat, WorkerInfo, TeamTask, TeamSummary } from './types.js';
+export declare function alignActiveFenceRevisions(config: TeamConfig, revision: number): TeamConfig;
 /** Accept only a complete revisioned authoritative config; return null for malformed values. */
 export declare function validateRevisionedTeamConfig(value: unknown, expectedTeamName?: string): TeamConfig | null;
 /** Legacy configs predate revision authority and require the complete historical core shape. */

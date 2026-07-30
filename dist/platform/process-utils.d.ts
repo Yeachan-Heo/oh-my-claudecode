@@ -37,6 +37,8 @@ export declare function getProcessStartIdentitySync(pid: number): string | null;
  * Gracefully terminate a process with escalation.
  */
 export declare function gracefulKill(pid: number, gracePeriodMs?: number): Promise<'graceful' | 'forced' | 'failed'>;
+/** Convert a WMIC/CIM DMTF datetime to .NET ticks for a single Windows identity format. */
+export declare function dmtfCreationDateToTicks(dmtf: string): string | null;
 /** Stable PID-reuse identity suitable for a durable worker manifest. */
 export declare function getProcessStartIdentity(pid: number, deadlineAt?: number): Promise<string | null>;
 export declare function isProcessIdentityLive(pid: number, expectedStartIdentity: string, deadlineAt?: number): Promise<'live' | 'dead' | 'mismatch' | 'unknown'>;

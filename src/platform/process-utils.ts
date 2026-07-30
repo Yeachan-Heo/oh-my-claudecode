@@ -303,6 +303,27 @@ export async function gracefulKill(
   return isProcessAlive(pid) ? 'failed' : 'forced';
 }
 
+
+/** Convert a WMIC/CIM DMTF datetime to .NET ticks for a single Windows identity format. */
+export function dmtfCreationDateToTicks(dmtf: string): string | null {
+  // DMTF: yyyyMMddHHmmss.ffffff+UUU (offset in minutes)
+  const m = dmtf.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-])(\d{3})$/);
+  if (!m) return null;
+  const [, ys, ms, ds, hs, mins, ss, us, sign, off] = m;
+  const year = Number(ys), month = Number(ms), day = Number(ds);
+  const hour = Number(hs), minute = Number(mins), second = Number(ss);
+  const micros = Number(us);
+  const offsetMin = Number(off) * (sign === '-' ? -1 : 1);
+  if (![year, month, day, hour, minute, second, micros, offsetMin].every(Number.isFinite)) return null;
+  // Build UTC ms: DMTF local components adjusted by offset minutes
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(micros / 1000))
+    - offsetMin * 60_000;
+  if (!Number.isFinite(utcMs)) return null;
+  // .NET ticks: 100ns since 0001-01-01 UTC. Unix epoch is 621355968000000000 ticks.
+  const ticks = BigInt(utcMs) * 10000n + 621355968000000000n;
+  return `ticks:${ticks.toString()}`;
+}
+
 async function getProcessStartIdentityWindows(pid: number, deadlineAt?: number): Promise<string | null> {
   for (const command of [
     `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`,
@@ -322,7 +343,7 @@ async function getProcessStartIdentityWindows(pid: number, deadlineAt?: number):
       'process', 'where', `ProcessId=${pid}`, 'get', 'CreationDate', '/format:csv',
     ], { timeout: Math.max(1, Math.min(5000, remainingDeadlineMs(deadlineAt) ?? 5000)), windowsHide: true });
     const match = stdout.match(/(\d{14}\.\d{6}[+-]\d{3})/);
-    return match ? `dmtf:${match[1]}` : null;
+    return match ? dmtfCreationDateToTicks(match[1]) : null;
   } catch {
     return null;
   }
@@ -385,7 +406,13 @@ export async function terminateOwnedProcessTree(
 
   const timeout = remainingDeadlineMs(deadline);
   if (!timeout) return 'deadline-exceeded';
-  const expectedTicks = options.expectedStartIdentity.match(/^ticks:(\d+)$/)?.[1];
+  let expectedTicks = options.expectedStartIdentity.match(/^ticks:(\d+)$/)?.[1];
+  if (!expectedTicks) {
+    // Legacy manifests may still carry dmtf: identities from pre-normalization builds.
+    const dmtf = options.expectedStartIdentity.match(/^dmtf:(.+)$/)?.[1];
+    const converted = dmtf ? dmtfCreationDateToTicks(dmtf) : null;
+    expectedTicks = converted?.match(/^ticks:(\d+)$/)?.[1];
+  }
   if (!expectedTicks) return 'unknown';
   const waitMs = Math.max(1, timeout);
   const script = [

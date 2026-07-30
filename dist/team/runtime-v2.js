@@ -227,8 +227,9 @@ async function removeStaleTeamCadence(teamName, expectedContexts) {
     return converged;
 }
 export async function reconcileCommittedTeamServices(config, cwd) {
-    const scaleUp = config.active_scale_up;
-    if (scaleUp)
+    // Only truly active (non-committed) scale-up fences block service repair.
+    // A lingering phase=committed fence is reconcilable and must not wedge recovery/services.
+    if (scaleUpFenceBlocks(config))
         return 'repair_required';
     const descriptor = config.service_descriptor;
     if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation)

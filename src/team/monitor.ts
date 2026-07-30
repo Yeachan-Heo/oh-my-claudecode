@@ -163,7 +163,7 @@ function isRecoveryAttempt(value: unknown): boolean {
 }
 
 function isScaleUpAttempt(value: unknown): boolean {
-  return isRecord(value) && isNonEmptyString(value.operation_id) && ['reserved', 'effects', 'failed'].includes(value.phase as string)
+  return isRecord(value) && isNonEmptyString(value.operation_id) && ['reserved', 'effects', 'committed', 'failed'].includes(value.phase as string)
     && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision)
     && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
     && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
@@ -293,7 +293,7 @@ function hasMatchingActiveFenceRevisions(value: Record<string, unknown>): boolea
     .every(fence => fence === undefined || (isRecord(fence) && fence.state_revision === revision));
 }
 
-function alignActiveFenceRevisions(config: TeamConfig, revision: number): TeamConfig {
+export function alignActiveFenceRevisions(config: TeamConfig, revision: number): TeamConfig {
   return {
     ...config,
     ...(config.active_recovery ? { active_recovery: { ...config.active_recovery, state_revision: revision } } : {}),
@@ -416,16 +416,25 @@ export async function saveTeamConfigAtRevision(
   cwd: string,
   afterCommit?: () => Promise<void> | void,
 ): Promise<boolean> {
-  if (!validateRevisionedTeamConfig(config, config.name)) throw new Error('invalid_persisted_state');
-  await assertPersistedConfigPathBinding(config.name, cwd);
-  return withTeamConfigMutationLock(config.name, cwd, async () => {
-
-    const current = await readRevisionedTeamConfig(config.name, cwd);
+  // Canonical fence policy: every retained active fence must share config.state_revision.
+  // Align before validation so callers that advance config revision while retaining a
+  // non-blocking committed scale-up fence (or other durable fences) do not fail closed.
+  if (typeof config.state_revision !== 'number' || !Number.isSafeInteger(config.state_revision)) {
+    throw new Error('invalid_persisted_state');
+  }
+  const aligned = alignActiveFenceRevisions(config, config.state_revision);
+  if (!validateRevisionedTeamConfig(aligned, aligned.name)) throw new Error('invalid_persisted_state');
+  await assertPersistedConfigPathBinding(aligned.name, cwd);
+  return withTeamConfigMutationLock(aligned.name, cwd, async () => {
+    const current = await readRevisionedTeamConfig(aligned.name, cwd);
     if (!current || current.stateRevision !== expectedRevision) return false;
-    if (!validateRevisionedTeamConfig(config, config.name)) throw new Error('invalid_persisted_state');
-    await saveTeamConfigUnlocked(config, cwd);
-    const verified = await readRevisionedTeamConfig(config.name, cwd);
-    if (verified?.stateRevision !== config.state_revision) return false;
+    // Re-align against the still-current intended revision under the lock.
+    const locked = alignActiveFenceRevisions(aligned, aligned.state_revision!);
+    if (!validateRevisionedTeamConfig(locked, locked.name)) throw new Error('invalid_persisted_state');
+    await saveTeamConfigUnlocked(locked, cwd);
+    const verified = await readRevisionedTeamConfig(locked.name, cwd);
+    if (verified?.stateRevision !== locked.state_revision) return false;
+    Object.assign(config, locked);
     await afterCommit?.();
     return true;
   });

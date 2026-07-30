@@ -351,9 +351,9 @@ async function removeStaleTeamCadence(
 }
 
 export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: string): Promise<'synced' | 'repair_required'> {
-  const scaleUp = config.active_scale_up;
-
-  if (scaleUp) return 'repair_required';
+  // Only truly active (non-committed) scale-up fences block service repair.
+  // A lingering phase=committed fence is reconcilable and must not wedge recovery/services.
+  if (scaleUpFenceBlocks(config)) return 'repair_required';
   const descriptor = config.service_descriptor;
   if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation)
     || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root) return 'repair_required';

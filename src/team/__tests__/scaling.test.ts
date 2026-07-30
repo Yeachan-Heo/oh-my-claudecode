@@ -876,6 +876,78 @@ describe('scaleUp duplicate worker guard', () => {
     expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
   });
 
+  it('reclaims a failed scale-down fence when the owner process is dead', async () => {
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_down: {
+        operation_id: 'failed-dead-owner', phase: 'failed', pid: 999_999,
+        process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
+        state_revision: 4, failure_reason: 'pane_cleanup_failed',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+    processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+    processIdentityMocks.currentProcessStartIdentity.mockReturnValue('linux:live');
+
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    // Must not stay wedged on team_mutation_busy solely because phase is failed.
+    expect(result).not.toEqual({ ok: false, error: 'team_mutation_busy' });
+  });
+
+  it('reclaims a failed scale-down fence for the same live owner (resumable cleanup)', async () => {
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_down: {
+        operation_id: 'failed-same-owner', phase: 'failed', pid: process.pid,
+        process_started_at: 'linux:same', workers: [{ name: 'worker-2', pane_id: '%2' }],
+        state_revision: 4, failure_reason: 'pane_cleanup_failed',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+    processIdentityMocks.isProcessIdentityDead.mockReturnValue(false);
+    processIdentityMocks.currentProcessStartIdentity.mockReturnValue('linux:same');
+
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).not.toEqual({ ok: false, error: 'team_mutation_busy' });
+  });
+
+  it('does not reclaim an effects-phase scale-down fence even when the owner is dead', async () => {
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+      ],
+      active_scale_down: {
+        operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+        process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
+        state_revision: 4,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    });
+    processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true },
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+  });
+
   it('reclaims a committed scale-up fence after release write failure without duplicating workers', async () => {
     config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
       workers: [

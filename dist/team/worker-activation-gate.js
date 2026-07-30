@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence } from './worker-launch-ack.js';
-import { getProcessStartIdentity, getProcessStartIdentitySync, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentitySync, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
     const temporary = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -150,18 +150,16 @@ export async function runWorkerActivationGate(gate) {
             if (settled)
                 return await completion;
             providerPid = child.pid;
-            // Capture identity synchronously to close the PID-reuse window.
+            // Sync-only identity capture: never publish an async-only identity that
+            // may belong to a reused PID after the supervised child settled.
             providerStartIdentity = providerPid ? getProcessStartIdentitySync(providerPid) : null;
-            if (!providerStartIdentity && providerPid) {
-                providerStartIdentity = await getProcessStartIdentity(providerPid);
-                // Recheck settled and liveness after async lookup to detect PID reuse
-                if (settled || !providerPid || !isProcessAlive(providerPid)) {
-                    if (!await terminateProvider())
-                        return { outcome: 'provider_cleanup_unverified' };
-                    return { outcome: 'provider_spawn_failed' };
-                }
-            }
             if (settled || !providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+                if (!await terminateProvider())
+                    return { outcome: 'provider_cleanup_unverified' };
+                return { outcome: 'provider_spawn_failed' };
+            }
+            const reboundIdentity = getProcessStartIdentitySync(providerPid);
+            if (settled || !reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(providerPid)) {
                 if (!await terminateProvider())
                     return { outcome: 'provider_cleanup_unverified' };
                 return { outcome: 'provider_spawn_failed' };
