@@ -162,7 +162,15 @@ export async function updateAllDeadRecoveryGrace(
       all_dead_recovery: evidence === 'all_dead'
         ? { detected_at: new Date(nowMs).toISOString(), deadline_at: new Date(deadlineAt).toISOString(), state_revision: nextRevision }
         : undefined };
-    if (await saveTeamConfigAtRevision(nextConfig, current.stateRevision, cwd)) {
+    if (await saveTeamConfigAtRevision(nextConfig, current.stateRevision, cwd, undefined, {
+      ...(current.config.all_dead_recovery && evidence !== 'all_dead'
+        ? { release: { all_dead_recovery: true as const } }
+        : {}),
+      ...(current.config.all_dead_recovery && evidence === 'all_dead'
+        && current.config.all_dead_recovery.deadline_at !== nextConfig.all_dead_recovery?.deadline_at
+        ? { reclaim: { all_dead_recovery: true as const } }
+        : {}),
+    })) {
       return { deadlineAt: evidence === 'all_dead' ? deadlineAt : null, expired: false };
     }
   }
@@ -307,7 +315,10 @@ export async function fenceAllDeadRecoveryExpiry(teamName: string, cwd: string, 
       shutdown_attempt: { nonce: expiryNonce, pid: process.pid, process_started_at: processStartedAt,
         state_revision: nextRevision, created_at: new Date().toISOString() },
       state_revision: nextRevision },
-      current.stateRevision, cwd);
+      current.stateRevision, cwd, undefined, {
+        release: { all_dead_recovery: true },
+        ...(current.config.shutdown_attempt ? { reclaim: { shutdown_attempt: true as const } } : {}),
+      });
   });
 }
 

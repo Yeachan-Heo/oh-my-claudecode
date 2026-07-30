@@ -946,23 +946,48 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           resolve({ outcome: 'provider_spawn_failed' });
         });
       });
+      /**
+       * Creation-bound containment: can reap the exact ChildProcess even before a
+       * durable process-start identity exists. Never promotes raw PID to later authority.
+       */
       const terminateProvider = async (): Promise<boolean> => {
-        if (settled || !child.pid || !providerStartIdentity) return false;
-        terminationResult ??= terminateOwnedProcessTree({
-          pid: child.pid,
-          expectedStartIdentity: providerStartIdentity,
-          deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-          force: true,
-        });
-        const terminated = await terminationResult === 'terminated';
+        if (settled) return true;
+        if (child.pid && providerStartIdentity) {
+          terminationResult ??= terminateOwnedProcessTree({
+            pid: child.pid,
+            expectedStartIdentity: providerStartIdentity,
+            deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+            force: true,
+          });
+          const terminated = await terminationResult === 'terminated';
+          const completed = await new Promise<boolean>(resolve => {
+            const timer = setTimeout(() => resolve(false), 2_000);
+            void completion.then(result => {
+              clearTimeout(timer);
+              resolve(result.outcome !== 'provider_cleanup_unverified');
+            });
+          });
+          return terminated && completed;
+        }
+        // Pre-identity path: kill only via the spawn handle (and its process group
+        // when detached). This is creation-bound containment, not durable ownership.
+        try {
+          if (child.pid && process.platform !== 'win32') {
+            try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+          } else {
+            child.kill('SIGKILL');
+          }
+        } catch { /* already dead */ }
         const completed = await new Promise<boolean>(resolve => {
           const timer = setTimeout(() => resolve(false), 2_000);
-          void completion.then(result => {
+          void completion.then(() => {
             clearTimeout(timer);
-            resolve(result.outcome !== 'provider_cleanup_unverified');
+            resolve(true);
           });
+          // If already settled between kill and wait
+          if (settled) { clearTimeout(timer); resolve(true); }
         });
-        return terminated && completed;
+        return completed;
       };
       const cleanupSignals: NodeJS.Signals[] = ['SIGHUP', 'SIGINT', 'SIGTERM'];
       const onBootstrapSignal = () => { void terminateProvider(); };
@@ -981,20 +1006,21 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         await completion;
         return { outcome: 'provider_spawn_failed' as const };
       }
-      if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
-      if (settled) return { completion };
-      // Capture identity synchronously only. Async lookup after spawn is not
-      // attempt-bound: the child may exit and its PID may be reused before the
-      // await resolves, so publishing that identity would target an unrelated
-      // process. Fail closed when sync capture is unavailable.
+      // Bind identity IMMEDIATELY after spawn, before any await/yield that could
+      // race with child exit + PID reuse. Fail closed if sync identity unavailable.
       providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
       if (!child.pid || !providerStartIdentity || settled || !isProcessAlive(child.pid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
-      // Rebind after any prior awaits (release delay, etc.) before publication.
+      if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
+      if (settled) {
+        // Child settled during delay — do not publish; cleanup may already be in flight.
+        return { completion };
+      }
+      // Rebind after the delay await before any durable publication.
       const reboundIdentity = getProcessStartIdentitySync(child.pid);
-      if (settled || !reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
+      if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }

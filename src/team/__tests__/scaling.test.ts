@@ -658,7 +658,8 @@ describe('scaleUp duplicate worker guard', () => {
     expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2')))).toBe(false);
     expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
     expect(config.lifecycle_state).toBe('shutting_down');
-    expect(monitorMocks.saveTeamConfigAtRevision).toHaveBeenCalledTimes(5);
+    // Release is blocked while lifecycle is shutting_down (post-commit race guard).
+    expect(monitorMocks.saveTeamConfigAtRevision).toHaveBeenCalledTimes(4);
     expect(monitorMocks.saveTeamConfig).not.toHaveBeenCalled();
   });
 
@@ -894,11 +895,16 @@ describe('scaleUp duplicate worker guard', () => {
     processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
     processIdentityMocks.currentProcessStartIdentity.mockReturnValue('linux:live');
 
-    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true },
+    const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-1'], force: true },
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
 
-    // Must not stay wedged on team_mutation_busy solely because phase is failed.
+    // Must not stay wedged; must RESUME exact operation/targets (not retarget to worker-1).
     expect(result).not.toEqual({ ok: false, error: 'team_mutation_busy' });
+    // Durable transaction identity preserved through reclaim write
+    const saved = monitorMocks.saveTeamConfigAtRevision.mock.calls.map((c: any[]) => c[0]);
+    const resumed = saved.find((c: any) => c?.active_scale_down?.operation_id === 'failed-dead-owner');
+    expect(resumed).toBeTruthy();
+    expect(resumed.active_scale_down.workers).toEqual([{ name: 'worker-2', pane_id: '%2' }]);
   });
 
   it('reclaims a failed scale-down fence for the same live owner (resumable cleanup)', async () => {

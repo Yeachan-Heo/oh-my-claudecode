@@ -282,24 +282,39 @@ export async function gracefulKill(pid, gracePeriodMs = 5000) {
 }
 /** Convert a WMIC/CIM DMTF datetime to .NET ticks for a single Windows identity format. */
 export function dmtfCreationDateToTicks(dmtf) {
-    // DMTF: yyyyMMddHHmmss.ffffff+UUU (offset in minutes)
+    // DMTF: yyyyMMddHHmmss.ffffff+UUU (offset minutes; six fractional digits = microseconds)
     const m = dmtf.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-])(\d{3})$/);
     if (!m)
         return null;
-    const [, ys, ms, ds, hs, mins, ss, us, sign, off] = m;
-    const year = Number(ys), month = Number(ms), day = Number(ds);
+    const [, ys, mo, ds, hs, mins, ss, us, sign, off] = m;
+    const year = Number(ys), month = Number(mo), day = Number(ds);
     const hour = Number(hs), minute = Number(mins), second = Number(ss);
     const micros = Number(us);
     const offsetMin = Number(off) * (sign === '-' ? -1 : 1);
     if (![year, month, day, hour, minute, second, micros, offsetMin].every(Number.isFinite))
         return null;
-    // Build UTC ms: DMTF local components adjusted by offset minutes
-    const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(micros / 1000))
-        - offsetMin * 60_000;
-    if (!Number.isFinite(utcMs))
+    // Strict ranges — do not let JS Date normalize invalid calendar fields.
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59)
         return null;
-    // .NET ticks: 100ns since 0001-01-01 UTC. Unix epoch is 621355968000000000 ticks.
-    const ticks = BigInt(utcMs) * 10000n + 621355968000000000n;
+    if (offsetMin < -840 || offsetMin > 840)
+        return null; // valid civil TZ offsets only
+    // Whole-second UTC ms (no ms truncation of the fractional field).
+    const wholeUtcMs = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMin * 60_000;
+    if (!Number.isFinite(wholeUtcMs))
+        return null;
+    // Reject JS calendar normalization (e.g. Feb 30 → Mar 1/2).
+    // Reconstruct the wall-clock components we intended in the offset zone:
+    const localMs = wholeUtcMs + offsetMin * 60_000;
+    const local = new Date(localMs);
+    if (local.getUTCFullYear() !== year
+        || local.getUTCMonth() + 1 !== month
+        || local.getUTCDate() !== day
+        || local.getUTCHours() !== hour
+        || local.getUTCMinutes() !== minute
+        || local.getUTCSeconds() !== second)
+        return null;
+    // .NET ticks: 100ns since 0001-01-01. 1 us = 10 ticks. Preserve all 6 fractional digits.
+    const ticks = BigInt(wholeUtcMs) * 10000n + BigInt(micros) * 10n + 621355968000000000n;
     return `ticks:${ticks.toString()}`;
 }
 async function getProcessStartIdentityWindows(pid, deadlineAt) {
@@ -345,10 +360,19 @@ export async function isProcessIdentityLive(pid, expectedStartIdentity, deadline
     }
     if (!isProcessAlive(pid))
         return 'dead';
+    // Normalize legacy dmtf: identities to ticks: BEFORE comparison so Windows
+    // lookup (which returns ticks:) can match persisted pre-normalization records.
+    let expected = expectedStartIdentity;
+    if (expected.startsWith('dmtf:')) {
+        const converted = dmtfCreationDateToTicks(expected.slice('dmtf:'.length));
+        if (!converted)
+            return 'unknown'; // malformed legacy identity is not authority
+        expected = converted;
+    }
     const identity = await getProcessStartIdentity(pid, deadlineAt);
     if (identity === null)
         return isProcessAlive(pid) ? 'unknown' : 'dead';
-    return identity === expectedStartIdentity ? 'live' : 'mismatch';
+    return identity === expected ? 'live' : 'mismatch';
 }
 /**
  * Terminate only a process whose durable start identity still matches. Windows

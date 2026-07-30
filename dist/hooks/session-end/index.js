@@ -597,17 +597,12 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
                 failed.push({ teamName, error: 'team-shutdown-preserved:config_missing_cleanup_evidence' });
                 return;
             }
-            if (Array.isArray(config.workers)) {
-                const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-                if (shutdown.outcome === 'cleaned') {
-                    cleaned.push(teamName);
-                }
-                else {
-                    failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
-                }
-                return;
-            }
-            if (Array.isArray(config.agentTypes)) {
+            // Classify raw provenance: agentTypes => legacy V1, even if workers:[] was injected.
+            const hasAgentTypes = Array.isArray(config.agentTypes);
+            const workers = config.workers;
+            // V2 when workers array present and not legacy agentTypes provenance.
+            const hasV2Workers = !hasAgentTypes && Array.isArray(workers);
+            if (hasAgentTypes) {
                 const legacyConfig = config;
                 const sessionName = typeof legacyConfig.tmuxSession === 'string' && legacyConfig.tmuxSession.trim() !== ''
                     ? legacyConfig.tmuxSession.trim()
@@ -620,6 +615,16 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
                 }
                 else {
                     failed.push({ teamName, error: 'team-shutdown-failed:legacy_cleanup_unverified' });
+                }
+                return;
+            }
+            if (hasV2Workers) {
+                const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
+                if (shutdown.outcome === 'cleaned') {
+                    cleaned.push(teamName);
+                }
+                else {
+                    failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
                 }
                 return;
             }

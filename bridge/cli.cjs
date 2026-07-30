@@ -6773,15 +6773,20 @@ function getProcessStartIdentitySync(pid) {
 function dmtfCreationDateToTicks(dmtf) {
   const m = dmtf.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-])(\d{3})$/);
   if (!m) return null;
-  const [, ys, ms, ds, hs, mins, ss, us, sign, off] = m;
-  const year = Number(ys), month = Number(ms), day = Number(ds);
+  const [, ys, mo, ds, hs, mins, ss, us, sign, off] = m;
+  const year = Number(ys), month = Number(mo), day = Number(ds);
   const hour = Number(hs), minute = Number(mins), second = Number(ss);
   const micros = Number(us);
   const offsetMin = Number(off) * (sign === "-" ? -1 : 1);
   if (![year, month, day, hour, minute, second, micros, offsetMin].every(Number.isFinite)) return null;
-  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(micros / 1e3)) - offsetMin * 6e4;
-  if (!Number.isFinite(utcMs)) return null;
-  const ticks = BigInt(utcMs) * 10000n + 621355968000000000n;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  if (offsetMin < -840 || offsetMin > 840) return null;
+  const wholeUtcMs = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMin * 6e4;
+  if (!Number.isFinite(wholeUtcMs)) return null;
+  const localMs = wholeUtcMs + offsetMin * 6e4;
+  const local = new Date(localMs);
+  if (local.getUTCFullYear() !== year || local.getUTCMonth() + 1 !== month || local.getUTCDate() !== day || local.getUTCHours() !== hour || local.getUTCMinutes() !== minute || local.getUTCSeconds() !== second) return null;
+  const ticks = BigInt(wholeUtcMs) * 10000n + BigInt(micros) * 10n + 621355968000000000n;
   return `ticks:${ticks.toString()}`;
 }
 async function getProcessStartIdentityWindows(pid, deadlineAt) {
@@ -6826,9 +6831,15 @@ async function isProcessIdentityLive(pid, expectedStartIdentity, deadlineAt) {
     return isDeadlineExceeded(deadlineAt) ? "unknown" : "dead";
   }
   if (!isProcessAlive(pid)) return "dead";
+  let expected = expectedStartIdentity;
+  if (expected.startsWith("dmtf:")) {
+    const converted = dmtfCreationDateToTicks(expected.slice("dmtf:".length));
+    if (!converted) return "unknown";
+    expected = converted;
+  }
   const identity = await getProcessStartIdentity(pid, deadlineAt);
   if (identity === null) return isProcessAlive(pid) ? "unknown" : "dead";
-  return identity === expectedStartIdentity ? "live" : "mismatch";
+  return identity === expected ? "live" : "mismatch";
 }
 async function terminateOwnedProcessTree(options) {
   const deadline = parseDeadline(options.deadlineAt);
@@ -23579,8 +23590,8 @@ function formatCompactSummary(state) {
   if (state.phase === "failed") {
     return `[AUTOPILOT \u2717] Failed at ${state.phase}`;
   }
-  const phaseIndex = ["expansion", "planning", "execution", "qa", "validation"].indexOf(state.phase);
-  return `[AUTOPILOT] Phase ${phaseIndex + 1}/5: ${phase} | ${files} files`;
+  const phaseIndex2 = ["expansion", "planning", "execution", "qa", "validation"].indexOf(state.phase);
+  return `[AUTOPILOT] Phase ${phaseIndex2 + 1}/5: ${phase} | ${files} files`;
 }
 function formatFailureSummary(state, error2) {
   const lines = [
@@ -33153,6 +33164,7 @@ var init_process_identity_lock = __esm({
 var monitor_exports = {};
 __export(monitor_exports, {
   alignActiveFenceRevisions: () => alignActiveFenceRevisions,
+  assertActiveFenceOwnershipTransition: () => assertActiveFenceOwnershipTransition,
   cleanupTeamState: () => cleanupTeamState,
   diffSnapshots: () => diffSnapshots,
   getTeamSummary: () => getTeamSummary,
@@ -33246,7 +33258,7 @@ function isStringArray(value) {
 }
 function isWorkerInfo(value) {
   if (!isRecord2(value) || typeof value.name !== "string" || !WORKER_NAME_SAFE_PATTERN.test(value.name) || !isSafeCounter(value.index) || value.index < 1) return false;
-  return (value.role === void 0 || typeof value.role === "string") && (value.assigned_tasks === void 0 || isStringArray(value.assigned_tasks)) && (value.worker_cli === void 0 || ["claude", "codex", "gemini", "cursor", "grok", "antigravity"].includes(value.worker_cli)) && (value.pid === void 0 || isSafeCounter(value.pid) && value.pid > 0) && (value.pane_id === void 0 || typeof value.pane_id === "string") && (value.working_dir === void 0 || typeof value.working_dir === "string") && (value.worktree_repo_root === void 0 || typeof value.worktree_repo_root === "string") && (value.worktree_path === void 0 || typeof value.worktree_path === "string") && (value.worktree_branch === void 0 || typeof value.worktree_branch === "string") && (value.worktree_detached === void 0 || typeof value.worktree_detached === "boolean") && (value.worktree_created === void 0 || typeof value.worktree_created === "boolean") && (value.team_state_root === void 0 || typeof value.team_state_root === "string") && (value.output_file === void 0 || typeof value.output_file === "string") && (value.recovery_id === void 0 || isNonEmptyString(value.recovery_id)) && (value.replacement_generation === void 0 || isSafeCounter(value.replacement_generation)) && (value.pane_attempt_id === void 0 || isNonEmptyString(value.pane_attempt_id)) && (value.operational_state === void 0 || ["starting", "active", "dead", "stopped"].includes(value.operational_state)) && (value.launch_descriptor === void 0 || isLaunchDescriptor(value.launch_descriptor));
+  return (value.role === void 0 || typeof value.role === "string") && (value.assigned_tasks === void 0 || isStringArray(value.assigned_tasks)) && (value.worker_cli === void 0 || ["claude", "codex", "gemini", "cursor", "grok", "antigravity"].includes(value.worker_cli)) && (value.pid === void 0 || isSafeCounter(value.pid) && value.pid > 0) && (value.pane_id === void 0 || typeof value.pane_id === "string") && (value.working_dir === void 0 || typeof value.working_dir === "string") && (value.worktree_repo_root === void 0 || typeof value.worktree_repo_root === "string") && (value.worktree_path === void 0 || typeof value.worktree_path === "string") && (value.worktree_branch === void 0 || typeof value.worktree_branch === "string") && (value.worktree_detached === void 0 || typeof value.worktree_detached === "boolean") && (value.worktree_created === void 0 || typeof value.worktree_created === "boolean") && (value.team_state_root === void 0 || typeof value.team_state_root === "string") && (value.output_file === void 0 || typeof value.output_file === "string") && (value.recovery_id === void 0 || isNonEmptyString(value.recovery_id)) && (value.replacement_generation === void 0 || isSafeCounter(value.replacement_generation)) && (value.pane_attempt_id === void 0 || isNonEmptyString(value.pane_attempt_id)) && (value.operational_state === void 0 || ["starting", "active", "dead", "stopped"].includes(value.operational_state)) && (value.launch_attempt_id === void 0 || isNonEmptyString(value.launch_attempt_id)) && (value.launch_descriptor === void 0 || isLaunchDescriptor(value.launch_descriptor));
 }
 function isLaunchDescriptor(value) {
   return isRecord2(value) && value.schema_version === 1 && ["claude", "codex", "gemini", "cursor", "grok", "antigravity"].includes(value.provider) && (value.model === null || typeof value.model === "string") && isNonEmptyString(value.binary) && isStringArray(value.args);
@@ -33418,17 +33430,111 @@ async function migrateTeamConfigRevision(teamName, cwd2) {
     return { config: canonicalizeTeamConfigWorkers(current), stateRevision: 0 };
   });
 }
-async function saveTeamConfigAtRevision(config2, expectedRevision, cwd2, afterCommit) {
+function phaseIndex(phases, phase) {
+  return typeof phase === "string" ? phases.indexOf(phase) : -1;
+}
+function sameScaleOwner(a, b) {
+  return a.operation_id === b.operation_id && a.pid === b.pid && a.process_started_at === b.process_started_at;
+}
+function sameRecoveryAttempt(a, b) {
+  return a.recovery_id === b.recovery_id && a.request_id === b.request_id && a.worker_name === b.worker_name;
+}
+function sameShutdownOwner(a, b) {
+  return a.nonce === b.nonce && a.pid === b.pid && a.process_started_at === b.process_started_at;
+}
+function sameAllDead(a, b) {
+  return a.deadline_at === b.deadline_at;
+}
+function assertActiveFenceOwnershipTransition(current, proposed, options = {}) {
+  const reclaim = options.reclaim ?? {};
+  const release = options.release ?? {};
+  const checkScaleLike = (family, cur, next, phases, preserveWorkers) => {
+    if (cur && !next) {
+      if (!release[family]) throw new Error("invalid_persisted_state");
+      return;
+    }
+    if (!cur && next) return;
+    if (cur && next) {
+      if (sameScaleOwner(cur, next)) {
+        const from = phaseIndex(phases, cur.phase);
+        const to = phaseIndex(phases, next.phase);
+        if (from < 0 || to < 0 || to < from) throw new Error("invalid_persisted_state");
+        if (family === "active_scale_up" && cur.phase === "committed" && next.phase !== "committed") {
+          throw new Error("invalid_persisted_state");
+        }
+        if (preserveWorkers && JSON.stringify(cur.workers) !== JSON.stringify(next.workers)) {
+          throw new Error("invalid_persisted_state");
+        }
+        return;
+      }
+      if (!reclaim[family]) throw new Error("invalid_persisted_state");
+    }
+  };
+  checkScaleLike(
+    "active_scale_up",
+    current.active_scale_up,
+    proposed.active_scale_up,
+    SCALE_UP_PHASES,
+    false
+  );
+  checkScaleLike(
+    "active_scale_down",
+    current.active_scale_down,
+    proposed.active_scale_down,
+    SCALE_DOWN_PHASES,
+    true
+  );
+  {
+    const cur = current.active_recovery;
+    const next = proposed.active_recovery;
+    if (cur && !next) {
+      if (!release.active_recovery) throw new Error("invalid_persisted_state");
+    } else if (cur && next) {
+      if (sameRecoveryAttempt(cur, next)) {
+        const from = phaseIndex(RECOVERY_PHASES, cur.phase);
+        const to = phaseIndex(RECOVERY_PHASES, next.phase);
+        if (from < 0 || to < 0 || to < from) throw new Error("invalid_persisted_state");
+      } else if (!reclaim.active_recovery) {
+        throw new Error("invalid_persisted_state");
+      }
+    }
+  }
+  {
+    const cur = current.shutdown_attempt;
+    const next = proposed.shutdown_attempt;
+    if (cur && !next) {
+      if (!release.shutdown_attempt) throw new Error("invalid_persisted_state");
+    } else if (cur && next) {
+      if (!sameShutdownOwner(cur, next) && !reclaim.shutdown_attempt) {
+        throw new Error("invalid_persisted_state");
+      }
+    }
+  }
+  {
+    const cur = current.all_dead_recovery;
+    const next = proposed.all_dead_recovery;
+    if (cur && !next) {
+      if (!release.all_dead_recovery) throw new Error("invalid_persisted_state");
+    } else if (cur && next) {
+      if (!sameAllDead(cur, next) && !reclaim.all_dead_recovery) {
+        throw new Error("invalid_persisted_state");
+      }
+    }
+  }
+}
+async function saveTeamConfigAtRevision(config2, expectedRevision, cwd2, afterCommit, options = {}) {
   if (typeof config2.state_revision !== "number" || !Number.isSafeInteger(config2.state_revision)) {
     throw new Error("invalid_persisted_state");
   }
-  const aligned = alignActiveFenceRevisions(config2, config2.state_revision);
-  if (!validateRevisionedTeamConfig(aligned, aligned.name)) throw new Error("invalid_persisted_state");
-  await assertPersistedConfigPathBinding(aligned.name, cwd2);
-  return withTeamConfigMutationLock(aligned.name, cwd2, async () => {
-    const current = await readRevisionedTeamConfig(aligned.name, cwd2);
+  if (!validateRevisionedTeamConfig(alignActiveFenceRevisions(config2, config2.state_revision), config2.name)) {
+    throw new Error("invalid_persisted_state");
+  }
+  await assertPersistedConfigPathBinding(config2.name, cwd2);
+  return withTeamConfigMutationLock(config2.name, cwd2, async () => {
+    const current = await readRevisionedTeamConfig(config2.name, cwd2);
     if (!current || current.stateRevision !== expectedRevision) return false;
-    const locked = alignActiveFenceRevisions(aligned, aligned.state_revision);
+    assertActiveFenceOwnershipTransition(current.config, config2, options);
+    const locked = alignActiveFenceRevisions(config2, config2.state_revision);
     if (!validateRevisionedTeamConfig(locked, locked.name)) throw new Error("invalid_persisted_state");
     await saveTeamConfigUnlocked(locked, cwd2);
     const verified = await readRevisionedTeamConfig(locked.name, cwd2);
@@ -33735,7 +33841,7 @@ async function cleanupTeamState(teamName, cwd2) {
     return false;
   }
 }
-var import_fs69, import_promises6, import_path83, import_perf_hooks;
+var import_fs69, import_promises6, import_path83, import_perf_hooks, SCALE_UP_PHASES, SCALE_DOWN_PHASES, RECOVERY_PHASES;
 var init_monitor = __esm({
   "src/team/monitor.ts"() {
     "use strict";
@@ -33749,6 +33855,9 @@ var init_monitor = __esm({
     init_process_identity_lock();
     init_governance();
     init_worker_canonicalization();
+    SCALE_UP_PHASES = ["reserved", "effects", "committed", "failed"];
+    SCALE_DOWN_PHASES = ["draining", "effects", "failed"];
+    RECOVERY_PHASES = ["reserved", "requeued", "ready", "active", "services_pending", "adopted", "failed"];
   }
 });
 
@@ -34404,6 +34513,16 @@ async function teamReadConfig(teamName, cwd2) {
     readJsonSafe4(configPath)
   ]);
   if (!config2 && (0, import_node_fs6.existsSync)(configPath)) throw new Error("invalid_persisted_state");
+  if (config2 && Array.isArray(config2.agentTypes)) {
+    const agentTypes = config2.agentTypes;
+    const { workers: _drop, ...rest } = config2;
+    const rawWorkers = config2.workers;
+    return {
+      ...rest,
+      agentTypes,
+      workers: Array.isArray(rawWorkers) ? rawWorkers : []
+    };
+  }
   if (config2 && typeof config2.state_revision === "number" && Number.isSafeInteger(config2.state_revision)) {
     return canonicalizeTeamConfigWorkers(config2);
   }
@@ -37605,7 +37724,7 @@ async function resolveSplitPaneWorkerPaneIds(_sessionName, recordedPaneIds, lead
 async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, options = {}) {
   const sessionMode = options.sessionMode ?? (sessionName2.includes(":") ? "split-pane" : "detached-session");
   if (sessionMode === "split-pane") {
-    if (!workerPaneIds?.length) return true;
+    if (!workerPaneIds?.length) return false;
     const provider = sessionName2.startsWith("cmux:") ? "cmux" : "tmux";
     let cleaned = true;
     for (const id of workerPaneIds) {
@@ -43073,7 +43192,7 @@ async function finalizeRecoveryOwnerResult(input, recoveryId, result, deps = {
         if (verified && !verified.config.active_recovery && verifiedLast?.recovery_id === recoveryId && verifiedLast.request_id === input.requestId && verifiedLast.worker_name === input.workerName && verifiedLast.phase === phase && verifiedLast.state_revision === finalRevision && verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch && verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce && verified.stateRevision === finalRevision) {
           published = deps.publishFinal(input, recoveryId, result);
         }
-      });
+      }, { release: { active_recovery: true } });
     } catch {
       saved = false;
     }
@@ -45136,9 +45255,14 @@ async function shutdownTeamV2(teamName, cwd2, options = {}) {
         process_started_at: processStartedAt,
         state_revision: nextRevision,
         created_at: (/* @__PURE__ */ new Date()).toISOString()
-      }
+      },
+      // Clearing all_dead_recovery when adopting into a real shutdown attempt.
+      all_dead_recovery: void 0
     };
-    if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd2)) throw new Error("stale_state_revision");
+    if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd2, void 0, {
+      ...current.config.shutdown_attempt ? { reclaim: { shutdown_attempt: true } } : {},
+      ...current.config.all_dead_recovery ? { release: { all_dead_recovery: true } } : {}
+    })) throw new Error("stale_state_revision");
     return next;
   });
   const revalidateShutdownFence = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
@@ -45161,7 +45285,9 @@ async function shutdownTeamV2(teamName, cwd2, options = {}) {
       shutdown_attempt: void 0,
       state_revision: current.stateRevision + 1
     };
-    if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd2)) throw new Error("stale_state_revision");
+    if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd2, void 0, {
+      release: { shutdown_attempt: true }
+    })) throw new Error("stale_state_revision");
   });
   const rollbackRejectedShutdownFence = async (expected) => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd2);
@@ -45172,7 +45298,9 @@ async function shutdownTeamV2(teamName, cwd2, options = {}) {
       shutdown_attempt: void 0,
       state_revision: current.stateRevision + 1
     };
-    return saveTeamConfigAtRevision(active, current.stateRevision, cwd2);
+    return saveTeamConfigAtRevision(active, current.stateRevision, cwd2, void 0, {
+      release: { shutdown_attempt: true }
+    });
   });
   const rollbackShutdownForRetry = async () => {
     if (!config2) return false;
@@ -46379,6 +46507,12 @@ async function shutdownTeam(teamName, sessionName2, cwd2, timeoutMs = 3e4, worke
   }
   const sessionMode = ownsWindow ?? Boolean(configData?.tmuxOwnsWindow) ? sessionName2.includes(":") ? "dedicated-window" : "detached-session" : "split-pane";
   const effectiveWorkerPaneIds = sessionMode === "split-pane" ? await resolveSplitPaneWorkerPaneIds(sessionName2, workerPaneIds, leaderPaneId) : workerPaneIds;
+  if (sessionMode === "split-pane") {
+    const expectedWorkers = Number(configData?.workerCount ?? 0);
+    if (expectedWorkers > 0 && (!effectiveWorkerPaneIds || effectiveWorkerPaneIds.length === 0)) {
+      return false;
+    }
+  }
   if (!await killTeamSession(sessionName2, effectiveWorkerPaneIds, leaderPaneId, { sessionMode })) return false;
   try {
     if (cleanupTeamWorktrees(teamName, cwd2).preserved.length > 0) return false;
@@ -47791,16 +47925,10 @@ async function cleanupSessionOwnedTeams(directory, sessionId, initialTeamNames =
         failed.push({ teamName, error: "team-shutdown-preserved:config_missing_cleanup_evidence" });
         return;
       }
-      if (Array.isArray(config2.workers)) {
-        const shutdown = await shutdownTeamV22(teamName, directory, { force: true, timeoutMs: 0 });
-        if (shutdown.outcome === "cleaned") {
-          cleaned.push(teamName);
-        } else {
-          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
-        }
-        return;
-      }
-      if (Array.isArray(config2.agentTypes)) {
+      const hasAgentTypes = Array.isArray(config2.agentTypes);
+      const workers = config2.workers;
+      const hasV2Workers = !hasAgentTypes && Array.isArray(workers);
+      if (hasAgentTypes) {
         const legacyConfig = config2;
         const sessionName2 = typeof legacyConfig.tmuxSession === "string" && legacyConfig.tmuxSession.trim() !== "" ? legacyConfig.tmuxSession.trim() : `omc-team-${teamName}`;
         const leaderPaneId = typeof legacyConfig.leaderPaneId === "string" && legacyConfig.leaderPaneId.trim() !== "" ? legacyConfig.leaderPaneId.trim() : void 0;
@@ -47808,6 +47936,15 @@ async function cleanupSessionOwnedTeams(directory, sessionId, initialTeamNames =
           cleaned.push(teamName);
         } else {
           failed.push({ teamName, error: "team-shutdown-failed:legacy_cleanup_unverified" });
+        }
+        return;
+      }
+      if (hasV2Workers) {
+        const shutdown = await shutdownTeamV22(teamName, directory, { force: true, timeoutMs: 0 });
+        if (shutdown.outcome === "cleaned") {
+          cleaned.push(teamName);
+        } else {
+          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
         }
         return;
       }
@@ -100599,11 +100736,13 @@ function readTeamStateRootFromEnv(env2 = process.env) {
   const candidate = typeof env2.OMC_TEAM_STATE_ROOT === "string" && env2.OMC_TEAM_STATE_ROOT.trim() !== "" ? env2.OMC_TEAM_STATE_ROOT.trim() : typeof env2.OMX_TEAM_STATE_ROOT === "string" && env2.OMX_TEAM_STATE_ROOT.trim() !== "" ? env2.OMX_TEAM_STATE_ROOT.trim() : "";
   return candidate || null;
 }
-function isRuntimeV2Config(config2) {
-  return !!config2 && typeof config2 === "object" && Array.isArray(config2.workers);
-}
 function isLegacyRuntimeConfig(config2) {
   return !!config2 && typeof config2 === "object" && Array.isArray(config2.agentTypes);
+}
+function isRuntimeV2Config(config2) {
+  if (!config2 || typeof config2 !== "object") return false;
+  if (isLegacyRuntimeConfig(config2)) return false;
+  return Array.isArray(config2.workers);
 }
 function assertNoNativeWorktreeCleanupEvidence(teamName, cwd2) {
   const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd2);
@@ -100629,17 +100768,17 @@ async function executeTeamCleanupViaRuntime(teamName, cwd2) {
     await teamCleanup(teamName, cwd2);
     return;
   }
-  if (isRuntimeV2Config(config2)) {
-    const shutdown = await shutdownTeamV2(teamName, cwd2);
-    if (shutdown.outcome !== "cleaned") throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
-    return;
-  }
   if (isLegacyRuntimeConfig(config2)) {
     const legacyConfig = config2;
     const sessionName2 = typeof legacyConfig.tmuxSession === "string" && legacyConfig.tmuxSession.trim() !== "" ? legacyConfig.tmuxSession.trim() : `omc-team-${teamName}`;
     const leaderPaneId = typeof legacyConfig.leaderPaneId === "string" && legacyConfig.leaderPaneId.trim() !== "" ? legacyConfig.leaderPaneId.trim() : void 0;
     const cleaned = await shutdownTeam(teamName, sessionName2, cwd2, 3e4, void 0, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
     if (!cleaned) throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
+    return;
+  }
+  if (isRuntimeV2Config(config2)) {
+    const shutdown = await shutdownTeamV2(teamName, cwd2);
+    if (shutdown.outcome !== "cleaned") throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
     return;
   }
   assertNoNativeWorktreeCleanupEvidence(teamName, cwd2);

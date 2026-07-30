@@ -724,17 +724,13 @@ export async function cleanupSessionOwnedTeams(
         return;
       }
 
-      if (Array.isArray((config as { workers?: unknown[] }).workers)) {
-        const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-        if (shutdown.outcome === 'cleaned') {
-          cleaned.push(teamName);
-        } else {
-          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
-        }
-        return;
-      }
+      // Classify raw provenance: agentTypes => legacy V1, even if workers:[] was injected.
+      const hasAgentTypes = Array.isArray((config as { agentTypes?: unknown[] }).agentTypes);
+      const workers = (config as { workers?: unknown[] }).workers;
+      // V2 when workers array present and not legacy agentTypes provenance.
+      const hasV2Workers = !hasAgentTypes && Array.isArray(workers);
 
-      if (Array.isArray((config as { agentTypes?: unknown[] }).agentTypes)) {
+      if (hasAgentTypes) {
         const legacyConfig = config as {
           tmuxSession?: string;
           leaderPaneId?: string | null;
@@ -750,6 +746,16 @@ export async function cleanupSessionOwnedTeams(
           cleaned.push(teamName);
         } else {
           failed.push({ teamName, error: 'team-shutdown-failed:legacy_cleanup_unverified' });
+        }
+        return;
+      }
+
+      if (hasV2Workers) {
+        const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
+        if (shutdown.outcome === 'cleaned') {
+          cleaned.push(teamName);
+        } else {
+          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
         }
         return;
       }

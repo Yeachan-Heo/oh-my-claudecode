@@ -137,22 +137,41 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       });
     });
     const terminateProvider = async (): Promise<boolean> => {
-      if (settled || !providerPid || !providerStartIdentity) return false;
-      terminationResult ??= terminateOwnedProcessTree({
-        pid: providerPid,
-        expectedStartIdentity: providerStartIdentity,
-        deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-        force: true,
-      });
-      const terminated = await terminationResult === 'terminated';
+      if (settled) return true;
+      if (providerPid && providerStartIdentity) {
+        terminationResult ??= terminateOwnedProcessTree({
+          pid: providerPid,
+          expectedStartIdentity: providerStartIdentity,
+          deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+          force: true,
+        });
+        const terminated = await terminationResult === 'terminated';
+        const completed = await new Promise<boolean>(resolve => {
+          const timer = setTimeout(() => resolve(false), 2_000);
+          void completion.then(result => {
+            clearTimeout(timer);
+            resolve(result.outcome !== 'provider_cleanup_unverified');
+          });
+        });
+        return terminated && completed;
+      }
+      // Pre-identity creation-bound containment via the spawn handle.
+      try {
+        if (child.pid && process.platform !== 'win32') {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch { /* already dead */ }
       const completed = await new Promise<boolean>(resolve => {
         const timer = setTimeout(() => resolve(false), 2_000);
-        void completion.then(result => {
+        void completion.then(() => {
           clearTimeout(timer);
-          resolve(result.outcome !== 'provider_cleanup_unverified');
+          resolve(true);
         });
+        if (settled) { clearTimeout(timer); resolve(true); }
       });
-      return terminated && completed;
+      return completed;
     };
     const cleanupSignals: NodeJS.Signals[] = ['SIGHUP', 'SIGINT', 'SIGTERM'];
     const onGateSignal = () => { void terminateProvider(); };
@@ -176,18 +195,17 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
         : failed;
     }
     try {
-      await new Promise(resolve => setTimeout(resolve, 150));
-      if (settled) return await completion;
+      // Bind identity IMMEDIATELY after spawn, before any await that races exit/PID reuse.
       providerPid = child.pid;
-      // Sync-only identity capture: never publish an async-only identity that
-      // may belong to a reused PID after the supervised child settled.
       providerStartIdentity = providerPid ? getProcessStartIdentitySync(providerPid) : null;
-      if (settled || !providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+      if (!providerPid || !providerStartIdentity || settled || !isProcessAlive(providerPid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (settled) return await completion;
       const reboundIdentity = getProcessStartIdentitySync(providerPid);
-      if (settled || !reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(providerPid)) {
+      if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(providerPid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }

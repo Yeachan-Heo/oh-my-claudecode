@@ -1024,7 +1024,7 @@ export async function finalizeRecoveryOwnerResult(input, recoveryId, result, dep
                     && verified.stateRevision === finalRevision) {
                     published = deps.publishFinal(input, recoveryId, result);
                 }
-            });
+            }, { release: { active_recovery: true } });
         }
         catch {
             saved = false;
@@ -3387,8 +3387,13 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         const nextRevision = current.stateRevision + 1;
         const next = { ...current.config, lifecycle_state: 'shutting_down', state_revision: nextRevision,
             shutdown_attempt: { nonce: ownedShutdownNonce, pid: process.pid, process_started_at: processStartedAt,
-                state_revision: nextRevision, created_at: new Date().toISOString() } };
-        if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd))
+                state_revision: nextRevision, created_at: new Date().toISOString() },
+            // Clearing all_dead_recovery when adopting into a real shutdown attempt.
+            all_dead_recovery: undefined, };
+        if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd, undefined, {
+            ...(current.config.shutdown_attempt ? { reclaim: { shutdown_attempt: true } } : {}),
+            ...(current.config.all_dead_recovery ? { release: { all_dead_recovery: true } } : {}),
+        }))
             throw new Error('stale_state_revision');
         return next;
     });
@@ -3414,7 +3419,9 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         }
         const stopped = { ...current.config, lifecycle_state: 'stopped', shutdown_attempt: undefined,
             state_revision: current.stateRevision + 1 };
-        if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd))
+        if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd, undefined, {
+            release: { shutdown_attempt: true },
+        }))
             throw new Error('stale_state_revision');
     });
     const rollbackRejectedShutdownFence = async (expected) => withProcessIdentityFileLock(lifecycleLock, async () => {
@@ -3425,7 +3432,9 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             return false;
         const active = { ...current.config, lifecycle_state: 'active', shutdown_attempt: undefined,
             state_revision: current.stateRevision + 1 };
-        return saveTeamConfigAtRevision(active, current.stateRevision, cwd);
+        return saveTeamConfigAtRevision(active, current.stateRevision, cwd, undefined, {
+            release: { shutdown_attempt: true },
+        });
     });
     const rollbackShutdownForRetry = async () => {
         if (!config)

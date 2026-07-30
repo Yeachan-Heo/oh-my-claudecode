@@ -146,9 +146,9 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 ...(reservation ? { active_scale_up: { ...reservation, state_revision: stateRevision } } : {}),
             };
         };
-        const saveScaleUpConfig = async (next, expectedRevision) => {
+        const saveScaleUpConfig = async (next, expectedRevision, options) => {
             try {
-                return await saveTeamConfigAtRevision(next, expectedRevision, leaderCwd);
+                return await saveTeamConfigAtRevision(next, expectedRevision, leaderCwd, undefined, options);
             }
             catch {
                 return false;
@@ -176,7 +176,8 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                         process_started_at: processStartedAt, state_revision: nextRevision,
                         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
                     } };
-                if (!await saveScaleUpConfig(next, current.stateRevision))
+                // Replacing an existing fence (dead reserved, or reconciling committed) is foreign install.
+                if (!await saveScaleUpConfig(next, current.stateRevision, existing ? { reclaim: { active_scale_up: true } } : undefined))
                     throw new Error('team_mutation_busy');
                 configRevision = nextRevision;
                 return next;
@@ -191,11 +192,18 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             if (!current || !reservation || reservation.operation_id !== operationId
                 || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt)
                 return false;
+            // Never clear a committed fence or advance state while shutdown owns the team.
+            if (!failureReason && current.config.lifecycle_state && current.config.lifecycle_state !== 'active') {
+                return false;
+            }
             const nextRevision = current.stateRevision + 1;
             const next = { ...current.config, state_revision: nextRevision,
                 ...(failureReason ? { active_scale_up: { ...reservation, phase: 'failed', failure_reason: failureReason,
                         state_revision: nextRevision, updated_at: new Date().toISOString() } } : { active_scale_up: undefined }) };
-            if (!await saveScaleUpConfig(next, current.stateRevision))
+            const saveOpts = failureReason
+                ? undefined // same-owner phase transition reserved/effects/committed → failed
+                : { release: { active_scale_up: true } };
+            if (!await saveScaleUpConfig(next, current.stateRevision, saveOpts))
                 return false;
             config = next;
             configRevision = nextRevision;
@@ -248,13 +256,22 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         const rollbackScaleUp = async (error, paneId, orphanFailure) => {
             const cleanupFailures = orphanFailure ? [orphanFailure] : [];
             const cleanedWorktrees = new Set();
-            const cleanupPane = async (candidate, label) => {
+            // Preserve launch/termination evidence when provider/pane cleanup is not proven.
+            const preserveIdentity = new Set();
+            const cleanupPane = async (candidate, label, workerName) => {
                 const launch = launchContexts.get(candidate);
                 const ownership = paneOwnerships.get(candidate);
                 const paneAlreadyDead = await getWorkerLiveness(candidate).catch(() => 'unknown') === 'dead';
+                const markPreserve = () => {
+                    if (workerName)
+                        preserveIdentity.add(workerName);
+                    if (launch?.attempt?.worker_name)
+                        preserveIdentity.add(String(launch.attempt.worker_name));
+                };
                 if (!ownership && !paneAlreadyDead) {
                     cleanupFailures.push(`${label}:pane_ownership_unverified:${candidate}`);
-                    return;
+                    markPreserve();
+                    return false;
                 }
                 const killPane = async () => {
                     if (await getWorkerLiveness(candidate).catch(() => 'unknown') === 'dead')
@@ -272,10 +289,14 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     ? await retireAndCleanupCurrentWorkerLaunchAttempt(launch.attempt, 'scale_up_rollback', killPane).catch(() => false)
                     : await killPane();
                 if (cleaned)
-                    return;
+                    return true;
                 cleanupFailures.push(`${label}:${launch ? 'provider' : 'pane'}:${candidate}`);
+                markPreserve();
+                return false;
             };
             const cleanupIdentity = async (workerName) => {
+                if (preserveIdentity.has(workerName))
+                    return;
                 const workerDir = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
                 for (let attempt = 0; attempt < 2 && existsSync(workerDir); attempt++) {
                     await rm(workerDir, { recursive: true, force: true }).catch(() => undefined);
@@ -288,7 +309,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 if (idx >= 0)
                     config.workers.splice(idx, 1);
                 if (worker.pane_id)
-                    await cleanupPane(worker.pane_id, worker.name);
+                    await cleanupPane(worker.pane_id, worker.name, worker.name);
                 if (worker.worktree_path) {
                     let cleaned = false;
                     for (let attempt = 0; attempt < 2 && !cleaned; attempt++) {
@@ -678,23 +699,32 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         catch (error) {
             return await rollbackScaleUp(`Scale-up config commit lost its revision: ${error instanceof Error ? error.message : String(error)}`);
         }
-        // Workers are durably committed. Best-effort release; if it fails,
-        // the 'committed' fence is reconcilable and does not block later ops.
-        if (!await releaseScaleUpReservation()) {
-            await releaseScaleUpReservation().catch(() => false);
-        }
+        // Workers are durably committed under the committed fence. Finalize services
+        // WHILE the fence is still held so shutdown cannot race teardown, then release.
         await teamAppendEvent(sanitized, {
             type: 'team_leader_nudge',
             worker: 'leader-fixed',
             reason: `scale_up: added ${count} worker(s), new count=${config.worker_count}`,
         }, leaderCwd);
         let servicesSync = 'synced';
-        try {
-            const { reconcileCommittedTeamServices } = await import('./runtime-v2.js');
-            servicesSync = await reconcileCommittedTeamServices(config, leaderCwd);
-        }
-        catch {
+        // Re-read lifecycle under lock semantics: never restart services during shutdown.
+        const postCommit = await readRevisionedTeamConfig(sanitized, leaderCwd);
+        if (!postCommit || (postCommit.config.lifecycle_state && postCommit.config.lifecycle_state !== 'active')) {
             servicesSync = 'repair_required';
+        }
+        else {
+            try {
+                const { reconcileCommittedTeamServices } = await import('./runtime-v2.js');
+                servicesSync = await reconcileCommittedTeamServices(postCommit.config, leaderCwd);
+            }
+            catch {
+                servicesSync = 'repair_required';
+            }
+        }
+        // Best-effort release after finalization. If release fails, the committed fence
+        // remains reconcilable and does not block later ops once lifecycle is active.
+        if (!await releaseScaleUpReservation()) {
+            await releaseScaleUpReservation().catch(() => false);
         }
         return {
             ok: true,
@@ -771,10 +801,10 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         if (config.workers.length - targetWorkers.length < 1) {
             return { ok: false, error: 'Cannot remove all workers — at least 1 must remain' };
         }
-        const operationId = randomUUID();
+        let operationId = randomUUID();
         const workspaceHash = createHash('sha256').update(leaderCwd).digest('hex');
         const lifecycleLock = absPath(leaderCwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
-        const selectedNames = targetWorkers.map(worker => worker.name);
+        let selectedNames = targetWorkers.map(worker => worker.name);
         const workerIdentity = (worker) => ({
             name: worker.name,
             ...(worker.pane_id ? { pane_id: worker.pane_id } : {}),
@@ -790,30 +820,67 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                     throw new Error('team_mutation_busy');
                 }
                 const existingScaleDown = current.config.active_scale_down;
-                // Reclaim policy for scale-down fences:
-                // - draining + dead owner: safe (no effects started, or owner crashed before effects)
-                // - failed + dead owner OR same live owner: cleanup is resumable via a new draining reservation
-                // - effects (any owner): fail-closed — partial provider/pane cleanup is ambiguous
+                // Reclaim/resume policy:
+                // - draining + dead owner: replace with new draining (no effects started)
+                // - failed + same/dead owner: RESUME the exact operation_id + workers (never retarget)
+                // - effects (any owner): fail-closed
+                let resumeFailed = null;
                 if (existingScaleDown) {
                     const ownerDead = isProcessIdentityDead(existingScaleDown);
-                    const processStartedAt = currentProcessStartIdentity();
-                    const sameOwner = Boolean(processStartedAt)
+                    const processStartedAtProbe = currentProcessStartIdentity();
+                    const sameOwner = Boolean(processStartedAtProbe)
                         && existingScaleDown.pid === process.pid
-                        && existingScaleDown.process_started_at === processStartedAt;
-                    const reclaimable = (existingScaleDown.phase === 'draining' && ownerDead)
-                        || (existingScaleDown.phase === 'failed' && (ownerDead || sameOwner));
-                    if (!reclaimable)
+                        && existingScaleDown.process_started_at === processStartedAtProbe;
+                    if (existingScaleDown.phase === 'failed' && (ownerDead || sameOwner)) {
+                        resumeFailed = existingScaleDown;
+                    }
+                    else if (existingScaleDown.phase === 'draining' && ownerDead) {
+                        // fall through to new reservation over dead draining
+                    }
+                    else {
                         throw new Error('team_mutation_busy');
+                    }
                 }
-                const selected = selectedNames.map(name => current.config.workers.find(worker => worker.name === name));
-                if (selected.some((worker) => !worker)
-                    || !identitiesMatch(selected, targetWorkers.map(workerIdentity)))
-                    throw new Error('team_mutation_busy');
                 const now = new Date().toISOString();
                 const processStartedAt = currentProcessStartIdentity();
                 if (!processStartedAt)
                     throw new Error('process_start_identity_unavailable');
                 const nextRevision = current.stateRevision + 1;
+                if (resumeFailed) {
+                    // Resume exact failed transaction — same operation_id and worker set.
+                    const resumeWorkers = resumeFailed.workers;
+                    const selected = resumeWorkers.map(w => current.config.workers.find(worker => worker.name === w.name));
+                    // Workers may still be present (cleanup incomplete) — required for discoverability.
+                    if (selected.some((worker) => !worker))
+                        throw new Error('team_mutation_busy');
+                    const next = { ...current.config, state_revision: nextRevision,
+                        ...(current.config.active_scale_up?.phase === 'committed' ? { active_scale_up: undefined } : {}),
+                        active_scale_down: {
+                            ...resumeFailed,
+                            phase: 'draining',
+                            pid: process.pid,
+                            process_started_at: processStartedAt,
+                            workers: resumeWorkers,
+                            state_revision: nextRevision,
+                            updated_at: now,
+                            failure_reason: undefined,
+                        },
+                    };
+                    // Same operation_id but possibly new pid (dead-owner adopt) => reclaim if owner changed.
+                    const sameOpOwner = resumeFailed.pid === process.pid
+                        && resumeFailed.process_started_at === processStartedAt;
+                    if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd, undefined, {
+                        ...(sameOpOwner ? {} : { reclaim: { active_scale_down: true } }),
+                        ...(next.active_scale_up === undefined && current.config.active_scale_up
+                            ? { release: { active_scale_up: true } } : {}),
+                    }))
+                        throw new Error('team_mutation_busy');
+                    return next;
+                }
+                const selected = selectedNames.map(name => current.config.workers.find(worker => worker.name === name));
+                if (selected.some((worker) => !worker)
+                    || !identitiesMatch(selected, targetWorkers.map(workerIdentity)))
+                    throw new Error('team_mutation_busy');
                 const next = { ...current.config, state_revision: nextRevision,
                     // Reconcile a committed scale-up fence: workers are provably
                     // durable, so clearing the fence is safe and idempotent.
@@ -823,7 +890,12 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                         process_started_at: processStartedAt, workers: selected.map(workerIdentity),
                         state_revision: nextRevision, created_at: now, updated_at: now,
                     } };
-                if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd))
+                // New install or reclaim over dead draining.
+                if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd, undefined, {
+                    ...(existingScaleDown ? { reclaim: { active_scale_down: true } } : {}),
+                    ...(next.active_scale_up === undefined && current.config.active_scale_up
+                        ? { release: { active_scale_up: true } } : {}),
+                }))
                     throw new Error('team_mutation_busy');
                 return next;
             });
@@ -831,7 +903,15 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         catch (error) {
             return { ok: false, error: error instanceof Error ? error.message : 'team_mutation_busy' };
         }
-        targetWorkers = selectedNames.map(name => config.workers.find(worker => worker.name === name)).filter(Boolean);
+        // Bind cleanup authority to the durable fence (resume may retain a prior operation_id).
+        const activeFence = config.active_scale_down;
+        if (!activeFence)
+            return { ok: false, error: 'team_mutation_busy' };
+        operationId = activeFence.operation_id;
+        selectedNames = activeFence.workers.map(w => w.name);
+        targetWorkers = selectedNames
+            .map(name => config.workers.find(worker => worker.name === name))
+            .filter(Boolean);
         const markScaleDownFailed = async (reason) => {
             let configMarkError;
             try {
@@ -1065,7 +1145,9 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             const nextRevision = current.stateRevision + 1;
             const next = { ...current.config, workers, worker_count: workers.length, active_scale_down: undefined,
                 state_revision: nextRevision };
-            if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd))
+            if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd, undefined, {
+                release: { active_scale_down: true },
+            }))
                 return false;
             config = next;
             return true;

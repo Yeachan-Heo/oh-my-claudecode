@@ -1361,7 +1361,13 @@ function persistRecoveryFinal(
 
 interface RecoveryOwnerFinalizationDeps {
   readRevisionedConfig: (teamName: string, cwd: string) => Promise<{ config: TeamConfig; stateRevision: number } | null>;
-  saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void) => Promise<boolean>;
+  saveConfigAtRevision: (
+    config: TeamConfig,
+    expectedRevision: number,
+    cwd: string,
+    afterCommit?: () => Promise<void> | void,
+    options?: import('./monitor.js').SaveTeamConfigAtRevisionOptions,
+  ) => Promise<boolean>;
   withConfigLock?: <T>(teamName: string, cwd: string, fn: () => Promise<T> | T) => Promise<T>;
   publishFinal: (input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result) => RecoverDeadWorkerV2Result;
   readDurableContinuation?: (cwd: string, requestId: string, recoveryId: string) => 'none' | 'selected' | 'reserved' | 'adopted';
@@ -1460,7 +1466,7 @@ export async function finalizeRecoveryOwnerResult(
           && verified.stateRevision === finalRevision) {
           published = deps.publishFinal(input, recoveryId, result);
         }
-      });
+      }, { release: { active_recovery: true } });
     } catch {
       saved = false;
     }
@@ -4034,8 +4040,14 @@ export async function shutdownTeamV2(
     const nextRevision = current.stateRevision + 1;
     const next = { ...current.config, lifecycle_state: 'shutting_down' as const, state_revision: nextRevision,
       shutdown_attempt: { nonce: ownedShutdownNonce, pid: process.pid, process_started_at: processStartedAt,
-        state_revision: nextRevision, created_at: new Date().toISOString() } };
-    if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd)) throw new Error('stale_state_revision');
+        state_revision: nextRevision, created_at: new Date().toISOString() },
+      // Clearing all_dead_recovery when adopting into a real shutdown attempt.
+      all_dead_recovery: undefined,
+    };
+    if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd, undefined, {
+      ...(current.config.shutdown_attempt ? { reclaim: { shutdown_attempt: true as const } } : {}),
+      ...(current.config.all_dead_recovery ? { release: { all_dead_recovery: true as const } } : {}),
+    })) throw new Error('stale_state_revision');
     return next;
   });
   const revalidateShutdownFence = async (): Promise<TeamConfig> => withProcessIdentityFileLock(lifecycleLock, async () => {
@@ -4060,7 +4072,9 @@ export async function shutdownTeamV2(
     }
     const stopped = { ...current.config, lifecycle_state: 'stopped' as const, shutdown_attempt: undefined,
       state_revision: current.stateRevision + 1 };
-    if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd)) throw new Error('stale_state_revision');
+    if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd, undefined, {
+      release: { shutdown_attempt: true },
+    })) throw new Error('stale_state_revision');
   });
   const rollbackRejectedShutdownFence = async (expected: TeamConfig): Promise<boolean> => withProcessIdentityFileLock(lifecycleLock, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
@@ -4070,7 +4084,9 @@ export async function shutdownTeamV2(
       || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce) return false;
     const active = { ...current.config, lifecycle_state: 'active' as const, shutdown_attempt: undefined,
       state_revision: current.stateRevision + 1 };
-    return saveTeamConfigAtRevision(active, current.stateRevision, cwd);
+    return saveTeamConfigAtRevision(active, current.stateRevision, cwd, undefined, {
+      release: { shutdown_attempt: true },
+    });
   });
   const rollbackShutdownForRetry = async (): Promise<boolean> => {
     if (!config) return false;

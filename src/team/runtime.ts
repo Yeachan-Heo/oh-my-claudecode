@@ -986,6 +986,14 @@ export async function shutdownTeam(
   const effectiveWorkerPaneIds = sessionMode === 'split-pane'
     ? await resolveSplitPaneWorkerPaneIds(sessionName, workerPaneIds, leaderPaneId)
     : workerPaneIds;
+  // Fail closed: split-pane teams with workers but no identity-bound pane evidence
+  // must not report successful cleanup and delete state.
+  if (sessionMode === 'split-pane') {
+    const expectedWorkers = Number(configData?.workerCount ?? 0);
+    if (expectedWorkers > 0 && (!effectiveWorkerPaneIds || effectiveWorkerPaneIds.length === 0)) {
+      return false;
+    }
+  }
   if (!await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode })) return false;
 
   // Clean up state

@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { migrateTeamConfigRevision, readRevisionedTeamConfig, readTeamConfig, readTeamManifest, saveTeamConfig, saveTeamConfigAtRevision, withScalingLock } from '../monitor.js';
+import { migrateTeamConfigRevision, readRevisionedTeamConfig, readTeamConfig, readTeamManifest, saveTeamConfig, saveTeamConfigAtRevision,
+  assertActiveFenceOwnershipTransition, withScalingLock } from '../monitor.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import type { TeamConfig } from '../types.js';
 import { withProcessIdentityFileLock, withProcessIdentityFileLockSync } from '../process-identity-lock.js';
@@ -141,7 +142,7 @@ describe('team config revision transaction', () => {
     const recoveryCommit = saveTeamConfigAtRevision(cleanup, 1, cwd, async () => {
       finalEntered();
       await finalRelease;
-    });
+    }, { release: { active_recovery: true } });
     await entered;
 
     const staleNormal = initialConfig();
@@ -175,7 +176,9 @@ describe('team config revision transaction', () => {
   it('rejects a stale pre-incremented writer that would restore cleared recovery state', async () => {
     const cleanup = { ...initialConfig(), state_revision: 2, active_recovery: undefined,
       last_recovery: { ...initialConfig().active_recovery!, phase: 'adopted' as const, state_revision: 2 } };
-    await expect(saveTeamConfigAtRevision(cleanup, 1, cwd)).resolves.toBe(true);
+    await expect(saveTeamConfigAtRevision(cleanup, 1, cwd, undefined, {
+      release: { active_recovery: true },
+    })).resolves.toBe(true);
     const stalePreincremented = initialConfig();
     stalePreincremented.state_revision = 2;
     stalePreincremented.active_recovery = { ...stalePreincremented.active_recovery!, state_revision: 2 };
@@ -276,8 +279,8 @@ describe('team config revision transaction', () => {
     ['malformed pane', { ...initialConfig(), leader_pane_id: 7 }],
     ['malformed routing', { ...initialConfig(), resolved_routing: { executor: { primary: {}, fallback: {} } } }],
     ['mismatched active fence revision', { ...initialConfig(), active_recovery: { ...initialConfig().active_recovery!, state_revision: 2 } }],
-    ['mismatched active scale-up fence revision', { ...initialConfig(), active_scale_up: { operation_id: 'up', phase: 'reserved', pid: 1, process_started_at: 'linux:1', state_revision: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }],
-    ['mismatched active scale-down fence revision', { ...initialConfig(), active_scale_down: { operation_id: 'down', phase: 'draining', pid: 1, process_started_at: 'linux:1', workers: [], state_revision: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }],
+    ['mismatched active scale-up fence revision', { ...initialConfig(), active_scale_up: { operation_id: 'up', phase: 'reserved' as const, pid: 1, process_started_at: 'linux:1', state_revision: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }],
+    ['mismatched active scale-down fence revision', { ...initialConfig(), active_scale_down: { operation_id: 'down', phase: 'draining' as const, pid: 1, process_started_at: 'linux:1', workers: [], state_revision: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }],
     ['mismatched shutdown fence revision', { ...initialConfig(), shutdown_attempt: { nonce: 'shutdown', pid: 1, process_started_at: 'linux:1', state_revision: 2, created_at: new Date().toISOString() } }],
     ['mismatched all-dead fence revision', { ...initialConfig(), all_dead_recovery: { detected_at: new Date().toISOString(), deadline_at: new Date().toISOString(), state_revision: 2 } }],
     ['malformed owner', { ...initialConfig(), runtime_owner_epoch: { epoch: 1, nonce: 'owner' } }],
@@ -491,4 +494,194 @@ describe('team config revision transaction', () => {
     expect(effect).toHaveBeenCalledTimes(1);
     expect(existsSync(lockPath)).toBe(false);
   });
+
+
+  // ── CAS fence ownership trust boundary (exact-head 70d5 P1) ──────────────
+
+  it('rejects foreign active_scale_up ownership substitution at matching revision', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'effects' as const, pid: 111, process_started_at: 'linux:owner-A',
+        state_revision: 1, created_at: now, updated_at: now,
+      },
+    });
+    const foreign = {
+      ...initialConfig(),
+      state_revision: 2,
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-B', phase: 'effects' as const, pid: 222, process_started_at: 'linux:owner-B',
+        state_revision: 2, created_at: now, updated_at: now,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(foreign, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_up?.operation_id).toBe('owner-A');
+    expect(after?.stateRevision).toBe(1);
+  });
+
+  it('accepts same-owner scale-up phase transition with revision rebase', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'reserved' as const, pid: 111, process_started_at: 'linux:owner-A',
+        state_revision: 1, created_at: now, updated_at: now,
+      },
+    });
+    const advanced = {
+      ...initialConfig(),
+      state_revision: 2,
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'effects' as const, pid: 111, process_started_at: 'linux:owner-A',
+        state_revision: 2, created_at: now, updated_at: now,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(advanced, 1, cwd)).resolves.toBe(true);
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_up?.phase).toBe('effects');
+    expect(after?.config.active_scale_up?.operation_id).toBe('owner-A');
+    expect(after?.config.active_scale_up?.state_revision).toBe(2);
+  });
+
+  it('rejects clearing active_scale_up without release authorization', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'committed' as const, pid: 111, process_started_at: 'linux:owner-A',
+        state_revision: 1, created_at: now, updated_at: now,
+      },
+    });
+    const cleared = {
+      ...initialConfig(),
+      state_revision: 2,
+      active_recovery: undefined,
+      active_scale_up: undefined,
+    };
+    await expect(saveTeamConfigAtRevision(cleared, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+    await expect(saveTeamConfigAtRevision(cleared, 1, cwd, undefined, {
+      release: { active_scale_up: true },
+    })).resolves.toBe(true);
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_up).toBeUndefined();
+  });
+
+  it('rejects foreign active_recovery substitution', async () => {
+    const base = initialConfig(); // has active_recovery recovery-a
+    const foreign = {
+      ...base,
+      state_revision: 2,
+      active_recovery: {
+        ...base.active_recovery!,
+        recovery_id: 'foreign-recovery',
+        request_id: 'foreign-request',
+        owner_epoch: 99,
+        owner_nonce: 'foreign-nonce',
+        state_revision: 2,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(foreign, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+  });
+
+  it('rejects foreign active_scale_down ownership substitution and worker retarget', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-A', phase: 'failed' as const, pid: 111, process_started_at: 'linux:A',
+        workers: [{ name: 'worker-2' }],
+        state_revision: 1, failure_reason: 'pane_cleanup_failed',
+        created_at: now, updated_at: now,
+      },
+    });
+    // Foreign owner + different target worker
+    const foreign = {
+      ...initialConfig(),
+      state_revision: 2,
+      active_recovery: undefined,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-B', phase: 'draining' as const, pid: 222, process_started_at: 'linux:B',
+        workers: [{ name: 'worker-1' }], // retarget!
+        state_revision: 2, created_at: now, updated_at: now,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(foreign, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_down?.operation_id).toBe('sd-A');
+    expect(after?.config.active_scale_down?.workers).toEqual([{ name: 'worker-2' }]);
+  });
+
+  it('rejects stale expected revision even for same-owner transition', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'reserved' as const, pid: 111, process_started_at: 'linux:A',
+        state_revision: 1, created_at: now, updated_at: now,
+      },
+    });
+    const advanced = {
+      ...initialConfig(),
+      state_revision: 2,
+      active_recovery: undefined,
+      active_scale_up: {
+        operation_id: 'owner-A', phase: 'effects' as const, pid: 111, process_started_at: 'linux:A',
+        state_revision: 2, created_at: now, updated_at: now,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(advanced, 0, cwd)).resolves.toBe(false);
+  });
+
+  it('rejects empty/non-string launch_attempt_id on worker rows', async () => {
+    const base = initialConfig();
+    const badEmpty = {
+      ...base,
+      state_revision: 2,
+      active_recovery: { ...base.active_recovery!, state_revision: 2 },
+      workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], launch_attempt_id: '' }],
+    };
+    await expect(saveTeamConfigAtRevision(badEmpty as any, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+    const badNull = {
+      ...base,
+      state_revision: 2,
+      active_recovery: { ...base.active_recovery!, state_revision: 2 },
+      workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], launch_attempt_id: null }],
+    };
+    await expect(saveTeamConfigAtRevision(badNull as any, 1, cwd)).rejects.toThrow('invalid_persisted_state');
+  });
+
+  it('accepts non-empty launch_attempt_id strings (UUID and attempt-scoped forms)', async () => {
+    const base = initialConfig();
+    for (const id of ['123e4567-e89b-12d3-a456-426614174000', 'attempt-worker-1']) {
+      const good = {
+        ...base,
+        state_revision: 2,
+        active_recovery: { ...base.active_recovery!, state_revision: 2 },
+        workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], launch_attempt_id: id }],
+      };
+      await expect(saveTeamConfigAtRevision(good, 1, cwd)).resolves.toBe(true);
+      // Reset for next iteration
+      writeConfig(base);
+    }
+  });
+
 });

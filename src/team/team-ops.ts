@@ -264,9 +264,23 @@ export async function teamReadConfig(teamName: string, cwd: string): Promise<Tea
   const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
   const [manifest, config] = await Promise.all([
     teamReadManifest(teamName, cwd),
-    readJsonSafe<TeamConfig>(configPath),
+    readJsonSafe<TeamConfig & { agentTypes?: unknown[] }>(configPath),
   ]);
   if (!config && existsSync(configPath)) throw new Error('invalid_persisted_state');
+  // Preserve raw V1 agentTypes provenance before any worker canonicalization.
+  // Canonicalization must not erase the only signal used to route legacy cleanup.
+  if (config && Array.isArray((config as { agentTypes?: unknown[] }).agentTypes)) {
+    const agentTypes = (config as { agentTypes: unknown[] }).agentTypes;
+    // Do not inject empty workers that would reclassify this as V2.
+    const { workers: _drop, ...rest } = config as TeamConfig & { workers?: unknown; agentTypes?: unknown[] };
+    // Preserve agentTypes provenance; only keep workers if the raw file already had them.
+    const rawWorkers = (config as { workers?: unknown }).workers;
+    return {
+      ...rest,
+      agentTypes,
+      workers: Array.isArray(rawWorkers) ? rawWorkers as TeamConfig['workers'] : [],
+    } as unknown as TeamConfig;
+  }
   if (config && typeof config.state_revision === 'number' && Number.isSafeInteger(config.state_revision)) {
     return canonicalizeTeamConfigWorkers(config);
   }

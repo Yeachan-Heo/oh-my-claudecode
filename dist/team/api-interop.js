@@ -210,11 +210,25 @@ export function resolveTeamApiCliCommand(env = process.env) {
         return 'omx team api';
     return 'omc team api';
 }
-function isRuntimeV2Config(config) {
-    return !!config && typeof config === 'object' && Array.isArray(config.workers);
-}
+/**
+ * Classify team configs BEFORE relying on canonicalized shape.
+ * V1 (legacy) configs are identified by the durable `agentTypes` field.
+ * An empty `workers: []` array must NOT be treated as V2 provenance — that is
+ * often injected by canonicalizeTeamConfigWorkers on raw V1 configs.
+ */
 function isLegacyRuntimeConfig(config) {
-    return !!config && typeof config === 'object' && Array.isArray(config.agentTypes);
+    return !!config && typeof config === 'object'
+        && Array.isArray(config.agentTypes);
+}
+function isRuntimeV2Config(config) {
+    if (!config || typeof config !== 'object')
+        return false;
+    // Legacy agentTypes provenance wins over any workers array (including []).
+    // teamReadConfig preserves agentTypes for on-disk V1 configs so they never
+    // reach this branch after empty-workers canonicalization.
+    if (isLegacyRuntimeConfig(config))
+        return false;
+    return Array.isArray(config.workers);
 }
 function assertNoNativeWorktreeCleanupEvidence(teamName, cwd) {
     const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
@@ -246,12 +260,7 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
         await teamCleanup(teamName, cwd);
         return;
     }
-    if (isRuntimeV2Config(config)) {
-        const shutdown = await shutdownTeamV2(teamName, cwd);
-        if (shutdown.outcome !== 'cleaned')
-            throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
-        return;
-    }
+    // Legacy first: agentTypes provenance must not be shadowed by empty workers[].
     if (isLegacyRuntimeConfig(config)) {
         const legacyConfig = config;
         const sessionName = typeof legacyConfig.tmuxSession === 'string' && legacyConfig.tmuxSession.trim() !== ''
@@ -263,6 +272,12 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
         const cleaned = await shutdownTeam(teamName, sessionName, cwd, 30_000, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
         if (!cleaned)
             throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
+        return;
+    }
+    if (isRuntimeV2Config(config)) {
+        const shutdown = await shutdownTeamV2(teamName, cwd);
+        if (shutdown.outcome !== 'cleaned')
+            throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
         return;
     }
     assertNoNativeWorktreeCleanupEvidence(teamName, cwd);

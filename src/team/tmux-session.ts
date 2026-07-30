@@ -2080,7 +2080,9 @@ export async function killTeamSession(
     ?? (sessionName.includes(':') ? 'split-pane' : 'detached-session');
 
   if (sessionMode === 'split-pane') {
-    if (!workerPaneIds?.length) return true;
+    // Missing/empty pane evidence is NOT successful cleanup — callers must
+    // supply validated pane identities or treat cleanup as incomplete.
+    if (!workerPaneIds?.length) return false;
     const provider = sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
     let cleaned = true;
     for (const id of workerPaneIds) {

@@ -174,7 +174,7 @@ interface RecoveryOwnerFinalizationDeps {
         config: TeamConfig;
         stateRevision: number;
     } | null>;
-    saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void) => Promise<boolean>;
+    saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void, options?: import('./monitor.js').SaveTeamConfigAtRevisionOptions) => Promise<boolean>;
     withConfigLock?: <T>(teamName: string, cwd: string, fn: () => Promise<T> | T) => Promise<T>;
     publishFinal: (input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result) => RecoverDeadWorkerV2Result;
     readDurableContinuation?: (cwd: string, requestId: string, recoveryId: string) => 'none' | 'selected' | 'reserved' | 'adopted';

@@ -27,7 +27,29 @@ export declare function migrateTeamConfigRevision(teamName: string, cwd: string)
     config: TeamConfig;
     stateRevision: number;
 } | null>;
-export declare function saveTeamConfigAtRevision(config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void): Promise<boolean>;
+/** Fence families protected by the CAS ownership trust boundary. */
+export type ActiveFenceFamily = 'active_scale_up' | 'active_scale_down' | 'active_recovery' | 'shutdown_attempt' | 'all_dead_recovery';
+export type FenceReclaimAuthorization = Partial<Record<ActiveFenceFamily, true>>;
+export interface SaveTeamConfigAtRevisionOptions {
+    /**
+     * Authorizes foreign-owner replacement for specific fence families after the
+     * caller has verified reclaim eligibility (e.g. dead owner). Without this,
+     * only same-owner phase transitions / revision rebases are permitted.
+     */
+    reclaim?: FenceReclaimAuthorization;
+    /**
+     * Authorizes clearing a fence. Release is never implied by numeric revision CAS alone.
+     */
+    release?: FenceReclaimAuthorization;
+}
+/**
+ * Trust boundary: a proposed config may only retain/replace active fences when
+ * ownership identity matches the authoritative fence and the phase transition is
+ * allowed, or when an explicit reclaim/release authorization is supplied.
+ * Revision rebasing alone must never launder foreign ownership.
+ */
+export declare function assertActiveFenceOwnershipTransition(current: TeamConfig, proposed: TeamConfig, options?: SaveTeamConfigAtRevisionOptions): void;
+export declare function saveTeamConfigAtRevision(config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void, options?: SaveTeamConfigAtRevisionOptions): Promise<boolean>;
 export declare function readTeamManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null>;
 export declare function readWorkerStatus(teamName: string, workerName: string, cwd: string): Promise<WorkerStatus>;
 export declare function writeWorkerStatus(teamName: string, workerName: string, status: WorkerStatus, cwd: string): Promise<void>;
