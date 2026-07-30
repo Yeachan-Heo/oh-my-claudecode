@@ -231,6 +231,16 @@ export async function reconcileCommittedTeamServices(config, cwd) {
     // A lingering phase=committed fence is reconcilable and must not wedge recovery/services.
     if (scaleUpFenceBlocks(config))
         return 'repair_required';
+    /** Re-read authoritative lifecycle; abort service side effects if shutdown owns the team. */
+    const assertLifecycleStillActive = async () => {
+        const latest = await readRevisionedTeamConfig(config.name, cwd).catch(() => null);
+        if (!latest)
+            return false;
+        const life = latest.config.lifecycle_state ?? 'active';
+        return life === 'active';
+    };
+    if (!await assertLifecycleStillActive())
+        return 'repair_required';
     const descriptor = config.service_descriptor;
     if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation)
         || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root)
@@ -267,6 +277,9 @@ export async function reconcileCommittedTeamServices(config, cwd) {
         }
         let orchestrator = getTeamOrchestrator(config.name);
         if (!orchestrator) {
+            // Re-check lifecycle immediately before starting services (stale active snapshot race).
+            if (!await assertLifecycleStillActive())
+                return 'repair_required';
             orchestrator = await startMergeOrchestrator({ teamName: config.name, repoRoot: descriptor.workspace_root,
                 leaderBranch: descriptor.leader_branch, cwd, serviceGeneration: descriptor.service_generation,
                 serviceAttemptId: descriptor.service_attempt_id });
@@ -309,6 +322,8 @@ export async function reconcileCommittedTeamServices(config, cwd) {
             const installed = cadence?.entries.some(candidate => cadenceContextMatches(candidate, context));
             if (installed)
                 continue;
+            if (!await assertLifecycleStillActive())
+                return 'repair_required';
             const installedCadence = await installCommitCadence(context);
             registerTeamCadence(config.name, context, installedCadence.method === 'fallback-poll' ? startFallbackPoller(context.worktreePath, context.workerName) : undefined);
         }

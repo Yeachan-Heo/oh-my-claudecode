@@ -33458,7 +33458,9 @@ function assertActiveFenceOwnershipTransition(current, proposed, options = {}) {
       if (sameScaleOwner(cur, next)) {
         const from = phaseIndex(phases, cur.phase);
         const to = phaseIndex(phases, next.phase);
-        if (from < 0 || to < 0 || to < from) throw new Error("invalid_persisted_state");
+        if (from < 0 || to < 0) throw new Error("invalid_persisted_state");
+        const scaleDownFailedResume = family === "active_scale_down" && cur.phase === "failed" && next.phase === "draining";
+        if (!scaleDownFailedResume && to < from) throw new Error("invalid_persisted_state");
         if (family === "active_scale_up" && cur.phase === "committed" && next.phase !== "committed") {
           throw new Error("invalid_persisted_state");
         }
@@ -42455,6 +42457,13 @@ async function removeStaleTeamCadence(teamName, expectedContexts) {
 }
 async function reconcileCommittedTeamServices(config2, cwd2) {
   if (scaleUpFenceBlocks(config2)) return "repair_required";
+  const assertLifecycleStillActive = async () => {
+    const latest2 = await readRevisionedTeamConfig(config2.name, cwd2).catch(() => null);
+    if (!latest2) return false;
+    const life = latest2.config.lifecycle_state ?? "active";
+    return life === "active";
+  };
+  if (!await assertLifecycleStillActive()) return "repair_required";
   const descriptor = config2.service_descriptor;
   if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation) || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root) return "repair_required";
   if (!descriptor.auto_merge_enabled) {
@@ -42483,6 +42492,7 @@ async function reconcileCommittedTeamServices(config2, cwd2) {
     }
     let orchestrator = getTeamOrchestrator(config2.name);
     if (!orchestrator) {
+      if (!await assertLifecycleStillActive()) return "repair_required";
       orchestrator = await startMergeOrchestrator({
         teamName: config2.name,
         repoRoot: descriptor.workspace_root,
@@ -42532,6 +42542,7 @@ async function reconcileCommittedTeamServices(config2, cwd2) {
     for (const context of expectedContexts) {
       const installed = cadence?.entries.some((candidate) => cadenceContextMatches(candidate, context));
       if (installed) continue;
+      if (!await assertLifecycleStillActive()) return "repair_required";
       const installedCadence = await installCommitCadence(context);
       registerTeamCadence(
         config2.name,

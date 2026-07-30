@@ -684,4 +684,106 @@ describe('team config revision transaction', () => {
     }
   });
 
+
+
+  it('authorizes same-owner failed→draining scale-down resume with identical workers', () => {
+    const now = new Date().toISOString();
+    const workers = [{ name: 'worker-2', pane_id: '%2' }];
+    const current = {
+      ...initialConfig(),
+      active_recovery: undefined,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-resume', phase: 'failed' as const, pid: 111, process_started_at: 'linux:A',
+        workers, state_revision: 1, failure_reason: 'pane_cleanup_failed',
+        created_at: now, updated_at: now,
+      },
+    };
+    const proposed = {
+      ...current,
+      state_revision: 2,
+      active_scale_down: {
+        ...current.active_scale_down!,
+        phase: 'draining' as const,
+        state_revision: 2,
+        updated_at: now,
+        failure_reason: undefined,
+      },
+    };
+    expect(() => assertActiveFenceOwnershipTransition(current, proposed)).not.toThrow();
+  });
+
+  it('rejects failed→draining scale-down when workers are retargeted', () => {
+    const now = new Date().toISOString();
+    const current = {
+      ...initialConfig(),
+      active_recovery: undefined,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-resume', phase: 'failed' as const, pid: 111, process_started_at: 'linux:A',
+        workers: [{ name: 'worker-2' }], state_revision: 1, failure_reason: 'x',
+        created_at: now, updated_at: now,
+      },
+    };
+    const proposed = {
+      ...current,
+      state_revision: 2,
+      active_scale_down: {
+        ...current.active_scale_down!,
+        phase: 'draining' as const,
+        workers: [{ name: 'worker-1' }], // retarget forbidden
+        state_revision: 2,
+        updated_at: now,
+      },
+    };
+    expect(() => assertActiveFenceOwnershipTransition(current, proposed)).toThrow('invalid_persisted_state');
+  });
+
+  it('persists same-owner failed→draining scale-down resume through real CAS', async () => {
+    const now = new Date().toISOString();
+    writeConfig({
+      ...initialConfig(),
+      active_recovery: undefined,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-cas-resume', phase: 'failed', pid: 42, process_started_at: 'linux:owner',
+        workers: [{ name: 'worker-2', pane_id: '%2' }],
+        state_revision: 1, failure_reason: 'pane_cleanup_failed',
+        created_at: now, updated_at: now,
+      },
+    } as any);
+    const advanced = {
+      ...initialConfig(),
+      active_recovery: undefined,
+      state_revision: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
+        { name: 'worker-2', index: 2, role: 'executor', assigned_tasks: [] },
+      ],
+      worker_count: 2,
+      active_scale_down: {
+        operation_id: 'sd-cas-resume', phase: 'draining' as const, pid: 42, process_started_at: 'linux:owner',
+        workers: [{ name: 'worker-2', pane_id: '%2' }],
+        state_revision: 2, created_at: now, updated_at: now,
+      },
+    };
+    await expect(saveTeamConfigAtRevision(advanced, 1, cwd)).resolves.toBe(true);
+    const after = await readRevisionedTeamConfig(teamName, cwd);
+    expect(after?.config.active_scale_down?.phase).toBe('draining');
+    expect(after?.config.active_scale_down?.operation_id).toBe('sd-cas-resume');
+    expect(after?.config.active_scale_down?.workers).toEqual([{ name: 'worker-2', pane_id: '%2' }]);
+  });
+
 });

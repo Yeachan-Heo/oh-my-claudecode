@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const monitorMocks = vi.hoisted(() => ({
+  readRevisionedTeamConfig: vi.fn(async (): Promise<LifecycleRead> => ({ config: { lifecycle_state: 'active' }, stateRevision: 1 })),
+}));
 const mergeMocks = vi.hoisted(() => ({
   registerWorker: vi.fn(async (_worker: string) => undefined),
   unregisterWorker: vi.fn(async (_worker: string) => undefined),
@@ -22,8 +25,21 @@ vi.mock('../worker-commit-cadence.js', () => ({
   uninstallCommitCadence: cadenceMocks.uninstallCommitCadence,
 }));
 
+vi.mock('../monitor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../monitor.js')>();
+  return {
+    ...actual,
+    readRevisionedTeamConfig: monitorMocks.readRevisionedTeamConfig,
+  };
+});
+
+
 import { reconcileCommittedTeamServices } from '../runtime-v2.js';
 import type { TeamConfig, WorkerInfo } from '../types.js';
+
+type TeamLifecycleState = NonNullable<TeamConfig['lifecycle_state']>;
+type LifecycleRead = { config: { lifecycle_state?: TeamLifecycleState }; stateRevision: number };
+
 
 const launch = (provider: 'codex' | 'gemini') => ({
   schema_version: 1 as const,
@@ -53,6 +69,10 @@ function config(overrides: Partial<TeamConfig> = {}): TeamConfig {
 describe('runtime-v2 committed service reconciliation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    monitorMocks.readRevisionedTeamConfig.mockResolvedValue({
+      config: { lifecycle_state: 'active' },
+      stateRevision: 1,
+    } satisfies LifecycleRead);
     mergeMocks.startMergeOrchestrator.mockResolvedValue({
       registerWorker: mergeMocks.registerWorker,
       unregisterWorker: mergeMocks.unregisterWorker,
@@ -212,5 +232,48 @@ describe('runtime-v2 committed service reconciliation', () => {
     await expect(reconcileCommittedTeamServices(disabled, '/repo')).resolves.toBe('repair_required');
     await expect(reconcileCommittedTeamServices(disabled, '/repo')).resolves.toBe('synced');
   });
+
+
+  it('aborts service side effects when authoritative lifecycle is no longer active', async () => {
+    // Stale snapshot is still "active", but re-read sees shutting_down before orchestrator start.
+    monitorMocks.readRevisionedTeamConfig
+      .mockResolvedValueOnce({ config: { lifecycle_state: 'active' }, stateRevision: 1 })
+      .mockResolvedValue({ config: { lifecycle_state: 'shutting_down' satisfies TeamLifecycleState }, stateRevision: 2 });
+
+    const enabled = config({ name: 'demo-lifecycle-race', lifecycle_state: 'active' });
+    await expect(reconcileCommittedTeamServices(enabled, '/repo')).resolves.toBe('repair_required');
+    expect(mergeMocks.startMergeOrchestrator).not.toHaveBeenCalled();
+    expect(cadenceMocks.installCommitCadence).not.toHaveBeenCalled();
+  });
+
+  it('aborts cadence install when lifecycle flips after orchestrator already exists', async () => {
+    // First call: active throughout → synced (orchestrator created)
+    await expect(reconcileCommittedTeamServices(config({ name: 'demo-lifecycle-mid' }), '/repo')).resolves.toBe('synced');
+    expect(mergeMocks.startMergeOrchestrator).toHaveBeenCalledTimes(1);
+
+    // Second call: lifecycle becomes shutting_down before new cadence install for expanded workers
+    monitorMocks.readRevisionedTeamConfig.mockResolvedValue({
+      config: { lifecycle_state: 'shutting_down' satisfies TeamLifecycleState },
+      stateRevision: 9,
+    } satisfies LifecycleRead);
+    const expanded = config({
+      name: 'demo-lifecycle-mid',
+      worker_count: 3,
+      workers: [
+        ...config().workers,
+        { name: 'worker-3', index: 3, role: 'executor', worker_cli: 'codex', assigned_tasks: [],
+          worktree_path: '/repo/.omc/team/demo/worktrees/worker-3', launch_descriptor: launch('codex') },
+      ],
+      service_descriptor: {
+        schema_version: 1, service_generation: 3, service_attempt_id: '3:owner',
+        auto_merge_enabled: true, workspace_root: '/repo', leader_branch: 'main', cadence_policy: 'worker-auto-commit-v1',
+      },
+    });
+    const cadenceCallsBefore = cadenceMocks.installCommitCadence.mock.calls.length;
+    await expect(reconcileCommittedTeamServices(expanded, '/repo')).resolves.toBe('repair_required');
+    // No additional cadence installs after lifecycle flipped
+    expect(cadenceMocks.installCommitCadence.mock.calls.length).toBe(cadenceCallsBefore);
+  });
+
 
 });

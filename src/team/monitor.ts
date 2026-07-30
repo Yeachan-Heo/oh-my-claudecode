@@ -494,7 +494,13 @@ export function assertActiveFenceOwnershipTransition(
       if (sameScaleOwner(cur, next)) {
         const from = phaseIndex(phases, cur.phase);
         const to = phaseIndex(phases, next.phase);
-        if (from < 0 || to < 0 || to < from) throw new Error('invalid_persisted_state');
+        if (from < 0 || to < 0) throw new Error('invalid_persisted_state');
+        // Same-owner scale-down resume: failed → draining re-enters cleanup for the
+        // exact operation/workers. This is the only authorized backward phase move.
+        const scaleDownFailedResume = family === 'active_scale_down'
+          && cur.phase === 'failed'
+          && next.phase === 'draining';
+        if (!scaleDownFailedResume && to < from) throw new Error('invalid_persisted_state');
         if (family === 'active_scale_up' && cur.phase === 'committed' && next.phase !== 'committed') {
           throw new Error('invalid_persisted_state');
         }
