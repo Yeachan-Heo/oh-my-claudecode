@@ -3,7 +3,7 @@
  * Provides unified process management across Windows, macOS, and Linux.
  */
 
-import { execFileSync, execFile } from 'child_process';
+import { execFileSync, execFile, spawnSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { promisify } from 'util';
 import * as fsPromises from 'fs/promises';
@@ -231,9 +231,14 @@ async function getProcessStartTimeLinux(pid: number, deadlineAt?: number): Promi
 /**
  * Synchronous process start identity capture for use immediately after spawn,
  * before the event loop turns. Closes the PID-reuse window that an async
- * getProcessStartIdentity call would leave open. On Linux, /proc/<pid>/stat
- * is readable in the same synchronous tick as spawn().
- * Returns null on platforms or conditions where synchronous capture is unavailable.
+ * getProcessStartIdentity call would leave open.
+ *
+ * - Linux: reads /proc/<pid>/stat synchronously (microseconds).
+ * - macOS: spawnSync('ps', ...) to get the process start time.
+ * - Windows: spawnSync('powershell', ...) to get StartTime ticks.
+ *
+ * Returns null if the identity cannot be captured synchronously. The caller
+ * must fail closed (no signal) when this returns null.
  */
 export function getProcessStartIdentitySync(pid: number): string | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
@@ -245,6 +250,29 @@ export function getProcessStartIdentitySync(pid: number): string | null {
       const fields = stat.substring(closeParen + 2).split(' ');
       const startTime = parseInt(fields[19] ?? '', 10);
       return Number.isNaN(startTime) ? null : String(startTime);
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === 'darwin') {
+    try {
+      const result = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='],
+        { encoding: 'utf8', timeout: 2000, windowsHide: true });
+      if (result.status !== 0 || !result.stdout) return null;
+      const time = new Date(result.stdout.trim()).getTime();
+      return Number.isNaN(time) ? null : `mac:${time}`;
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === 'win32') {
+    try {
+      const cmd = `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`;
+      const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd],
+        { encoding: 'utf8', timeout: 3000, windowsHide: true });
+      if (result.status !== 0 || !result.stdout) return null;
+      const ticks = result.stdout.trim().match(/^\d+$/)?.[0];
+      return ticks ? `ticks:${ticks}` : null;
     } catch {
       return null;
     }

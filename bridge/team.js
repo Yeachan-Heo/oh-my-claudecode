@@ -3391,7 +3391,7 @@ var init_tmux_clipboard = __esm({
 });
 
 // src/platform/process-utils.ts
-import { execFileSync as execFileSync4, execFile as execFile2 } from "child_process";
+import { execFileSync as execFileSync4, execFile as execFile2, spawnSync as spawnSync2 } from "child_process";
 import { readFileSync as readFileSync4 } from "fs";
 import { promisify as promisify2 } from "util";
 import * as fsPromises from "fs/promises";
@@ -6676,10 +6676,10 @@ var init_prompt_helpers = __esm({
 });
 
 // src/utils/omc-cli-rendering.ts
-import { spawnSync as spawnSync2 } from "child_process";
+import { spawnSync as spawnSync3 } from "child_process";
 function commandExists(command, env) {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync2(lookupCommand, [command], {
+  const result = spawnSync3(lookupCommand, [command], {
     stdio: "ignore",
     env
   });
@@ -8573,7 +8573,7 @@ var init_security_config = __esm({
 });
 
 // src/team/model-contract.ts
-import { spawnSync as spawnSync3 } from "child_process";
+import { spawnSync as spawnSync4 } from "child_process";
 import { isAbsolute as isAbsolute6, normalize as normalize3, sep as sep3, win32 as win32Path2 } from "path";
 function getTrustedPrefixes() {
   const trusted = [
@@ -8611,7 +8611,7 @@ function resolveCliBinaryPath(binary) {
   const cached = resolvedPathCache.get(binary);
   if (cached) return cached;
   const finder = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync3(finder, [binary], {
+  const result = spawnSync4(finder, [binary], {
     timeout: 5e3,
     env: process.env
   });
@@ -8664,7 +8664,7 @@ function resolveBinaryPath(binary) {
   if (isAbsolute6(binary)) return binary;
   try {
     const resolver = process.platform === "win32" ? "where" : "which";
-    const result = spawnSync3(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
+    const result = spawnSync4(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
     if (result.status !== 0) return binary;
     const lines = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
     const firstPath = lines[0];

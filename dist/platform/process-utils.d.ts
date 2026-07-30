@@ -21,6 +21,19 @@ export declare function isProcessAlive(pid: number): boolean;
  */
 export declare function getProcessStartTime(pid: number, deadlineAt?: number): Promise<number | undefined>;
 /**
+ * Synchronous process start identity capture for use immediately after spawn,
+ * before the event loop turns. Closes the PID-reuse window that an async
+ * getProcessStartIdentity call would leave open.
+ *
+ * - Linux: reads /proc/<pid>/stat synchronously (microseconds).
+ * - macOS: spawnSync('ps', ...) to get the process start time.
+ * - Windows: spawnSync('powershell', ...) to get StartTime ticks.
+ *
+ * Returns null if the identity cannot be captured synchronously. The caller
+ * must fail closed (no signal) when this returns null.
+ */
+export declare function getProcessStartIdentitySync(pid: number): string | null;
+/**
  * Gracefully terminate a process with escalation.
  */
 export declare function gracefulKill(pid: number, gracePeriodMs?: number): Promise<'graceful' | 'forced' | 'failed'>;

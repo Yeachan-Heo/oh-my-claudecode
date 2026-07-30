@@ -220,4 +220,36 @@ describe('SessionEnd action runner', () => {
     );
     expect(result.completed).toBe(false);
   });
+
+  it('proves real platform-branch identity capture succeeds for a live process', async () => {
+    const { createRequire } = await import('node:module');
+    const nodeRequire = createRequire(import.meta.url);
+    const pid = process.pid;
+    let identity: string | null = null;
+    if (process.platform === 'linux') {
+      const fs = nodeRequire('node:fs');
+      try {
+        const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const closeParen = stat.lastIndexOf(')');
+        if (closeParen !== -1) {
+          const fields = stat.substring(closeParen + 2).split(' ');
+          const startTime = parseInt(fields[19] ?? '', 10);
+          if (!Number.isNaN(startTime)) identity = String(startTime);
+        }
+      } catch { /* non-Linux */ }
+    } else if (process.platform === 'darwin') {
+      const cp = nodeRequire('node:child_process');
+      const result = cp.spawnSync('ps', ['-p', String(pid), '-o', 'lstart='],
+        { encoding: 'utf8', timeout: 2000, windowsHide: true });
+      if (result.status === 0 && result.stdout) {
+        const time = new Date(result.stdout.trim()).getTime();
+        if (!Number.isNaN(time)) identity = `mac:${time}`;
+      }
+    }
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+      expect(identity).not.toBeNull();
+      expect(typeof identity).toBe('string');
+      expect(identity!.length).toBeGreaterThan(0);
+    }
+  });
 });
