@@ -357,24 +357,198 @@ function renderTomlString(value: string): string {
   return `"${escapeTomlString(value)}"`;
 }
 
+function isValidTomlLiteralContent(content: string): boolean {
+  // TOML literal strings permit only tab (U+0009) among control characters.
+  // Reject U+0000–U+0008, U+000A–U+001F, and U+007F (DEL).
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    if ((code <= 0x08) || (code >= 0x0A && code <= 0x1F) || code === 0x7F) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function parseTomlQuotedString(value: string): string | undefined {
-  const match = value.trim().match(/^"((?:\\.|[^"\\])*)"$/);
-  return match ? unescapeTomlString(match[1]) : undefined;
+  const trimmed = value.trim();
+
+  const basicMatch = trimmed.match(/^"((?:\\.|[^"\\])*)"$/);
+  if (basicMatch) {
+    return unescapeTomlString(basicMatch[1]);
+  }
+
+  // TOML literal string ('...'): single-line, no escape processing.
+  // Reject raw CR/LF and multi-line; preserve every interior character verbatim.
+  if (trimmed.startsWith("'") && !trimmed.includes('\n') && !trimmed.includes('\r')) {
+    const literalMatch = trimmed.match(/^'([^']*)'$/);
+    if (literalMatch && isValidTomlLiteralContent(literalMatch[1])) {
+      return literalMatch[1];
+    }
+  }
+
+  return undefined;
 }
 
 function renderTomlStringArray(values: string[]): string {
   return `[${values.map(renderTomlString).join(', ')}]`;
 }
 
+function parseTomlStringArrayFallback(value: string): string[] | undefined {
+  let i = 0;
+
+  // Skip leading whitespace; require opening '['.
+  while (i < value.length && (value[i] === ' ' || value[i] === '\t')) {
+    i++;
+  }
+  if (i >= value.length || value[i] !== '[') {
+    return undefined;
+  }
+  i++;
+
+  const result: string[] = [];
+
+  for (;;) {
+    // Skip horizontal whitespace between tokens.
+    while (i < value.length && (value[i] === ' ' || value[i] === '\t')) {
+      i++;
+    }
+
+    if (i >= value.length) {
+      return undefined; // Unterminated: EOF before ']'.
+    }
+
+    // Empty array.
+    if (value[i] === ']' && result.length === 0) {
+      i++;
+      // After ']', allow only horizontal whitespace through EOF.
+      while (i < value.length) {
+        if (value[i] !== ' ' && value[i] !== '\t') {
+          return undefined;
+        }
+        i++;
+      }
+      return result;
+    }
+
+    // Parse a quoted string member.
+    const quote = value[i];
+    if (quote !== '"' && quote !== "'") {
+      return undefined; // Non-string member.
+    }
+
+    let member: string;
+
+    if (quote === "'") {
+      // Literal string: scan to next apostrophe, no escapes.
+      i++;
+      const start = i;
+      while (i < value.length && value[i] !== "'") {
+        i++;
+      }
+      if (i >= value.length) {
+        return undefined; // Unterminated literal.
+      }
+      member = value.slice(start, i);
+      if (!isValidTomlLiteralContent(member)) {
+        return undefined;
+      }
+      i++; // Consume closing apostrophe.
+    } else {
+      // Basic string: backslash-aware scan to closing quote, then JSON.parse the full token.
+      i++; // Skip opening quote.
+      const tokenStart = i - 1;
+      while (i < value.length) {
+        if (value[i] === '\\') {
+          i += 2; // Skip escaped character.
+        } else if (value[i] === '"') {
+          break;
+        } else {
+          i++;
+        }
+      }
+      if (i >= value.length || value[i] !== '"') {
+        return undefined; // Unterminated basic string.
+      }
+      i++; // Consume closing quote.
+      const token = value.slice(tokenStart, i);
+      try {
+        const decoded = JSON.parse(token) as unknown;
+        if (typeof decoded !== 'string') {
+          return undefined;
+        }
+        member = decoded;
+      } catch {
+        return undefined;
+      }
+    }
+
+    result.push(member);
+
+    // After member: skip whitespace, require ',' or ']'.
+    while (i < value.length && (value[i] === ' ' || value[i] === '\t')) {
+      i++;
+    }
+    if (i >= value.length) {
+      return undefined; // Unterminated: EOF after member.
+    }
+    if (value[i] === ']') {
+      i++;
+      // After ']', allow only horizontal whitespace through EOF.
+      while (i < value.length) {
+        if (value[i] !== ' ' && value[i] !== '\t') {
+          return undefined;
+        }
+        i++;
+      }
+      return result;
+    }
+    if (value[i] !== ',') {
+      return undefined; // Missing separator.
+    }
+    i++; // Consume comma.
+
+    // After comma, allow a closing ']' (TOML v1.0 trailing comma) or another quoted member.
+    while (i < value.length && (value[i] === ' ' || value[i] === '\t')) {
+      i++;
+    }
+    if (i >= value.length) {
+      return undefined; // Unterminated: EOF after comma.
+    }
+    if (value[i] === ']') {
+      i++;
+      while (i < value.length) {
+        if (value[i] !== ' ' && value[i] !== '\t') {
+          return undefined;
+        }
+        i++;
+      }
+      return result;
+    }
+    if (value[i] !== '"' && value[i] !== "'") {
+      return undefined; // Missing member after comma.
+    }
+  }
+}
+
 function parseTomlStringArray(value: string): string[] | undefined {
+  const trimmed = value.trim();
+
+  // JSON-first path: all-basic arrays use existing JSON.parse semantics.
   try {
-    const parsed = JSON.parse(value.trim()) as unknown;
+    const parsed = JSON.parse(trimmed) as unknown;
     return Array.isArray(parsed) && parsed.every(item => typeof item === 'string')
       ? parsed
       : undefined;
   } catch {
+    // Fall through to the literal/mixed-array fallback.
+  }
+
+  // Reject raw CR/LF before scanning (single-line arrays only).
+  if (value.includes('\n') || value.includes('\r')) {
     return undefined;
   }
+
+  return parseTomlStringArrayFallback(value);
 }
 
 function renderTomlBareKey(key: string): string {
