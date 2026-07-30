@@ -1514,6 +1514,32 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": "3603",
+      "targetRef": "dev",
+      "mergeBaseSha": "0686239b0b6fa4e1b7d923d1b8b2aa3e7431dc15",
+      "headSha": "9d6ca59c6c1eb985d61e228a0616160823fe1d35",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-12T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 2,
+        "sha256": "a13673c490cd40b85b45c4ca20c0bef862861129abc6b75039c07ebd1addff50"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "c3802ae1f08c27add10b3f8454bbb3642c64fddc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js",
+          "sha": "99d3c36dbb897f4a4d2ed23abb8964c68af33e9b",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
