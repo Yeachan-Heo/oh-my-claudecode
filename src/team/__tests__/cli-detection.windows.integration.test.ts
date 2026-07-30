@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { delimiter, join } from 'path';
 import { tmpdir } from 'os';
 import { probeCli } from '../cli-detection.js';
 
 const isWindows = process.platform === 'win32';
+
+function canonicalWindowsPath(value: string): string {
+  return realpathSync.native(value).toLowerCase();
+}
 
 describe.skipIf(!isWindows)('cli-detection native Windows integration', () => {
   let fixtureRoot: string | undefined;
@@ -46,7 +50,8 @@ describe.skipIf(!isWindows)('cli-detection native Windows integration', () => {
     const result = probeCli('omc-native-exe');
 
     expect(result.found).toBe(true);
-    expect(result.path?.toLowerCase()).toBe(exePath.toLowerCase());
+    expect(result.path).toBeDefined();
+    expect(canonicalWindowsPath(result.path!)).toBe(canonicalWindowsPath(exePath));
     expect(result.version).toBeDefined();
   });
 
@@ -75,10 +80,13 @@ describe.skipIf(!isWindows)('cli-detection native Windows integration', () => {
 
     const multi = probeCli('omc-multi');
     expect(multi.found).toBe(true);
-    expect(multi.path?.toLowerCase()).toBe(join(first, 'omc-multi.exe').toLowerCase());
+    expect(multi.path).toBeDefined();
+    expect(canonicalWindowsPath(multi.path!)).toBe(canonicalWindowsPath(join(first, 'omc-multi.exe')));
 
     const safe = probeCli('safe-provider');
-    expect(safe).toEqual({ found: true, path: safeBatch, version: 'safe-provider 1.0.0' });
+    expect(safe).toMatchObject({ found: true, version: 'safe-provider 1.0.0' });
+    expect(safe.path).toBeDefined();
+    expect(canonicalWindowsPath(safe.path!)).toBe(canonicalWindowsPath(safeBatch));
     const launches = readFileSync(process.env.OMC_CLI_DETECTION_EXPECTED_LAUNCH!, 'utf8')
       .split(/\r?\n/)
       .filter(Boolean);
@@ -105,11 +113,13 @@ describe.skipIf(!isWindows)('cli-detection native Windows integration', () => {
       rmSync(sentinelPath!, { force: true });
       process.env.PATH = `${unsafeDir}${delimiter}${originalPath ?? ''}`;
 
-      expect(probeCli('omc-unsafe')).toEqual({
+      const result = probeCli('omc-unsafe');
+      expect(result).toMatchObject({
         found: true,
-        path: unsafeBatch,
         error: 'version probe skipped: batch path is not literal-safe',
       });
+      expect(result.path).toBeDefined();
+      expect(canonicalWindowsPath(result.path!)).toBe(canonicalWindowsPath(unsafeBatch));
       expect(existsSync(sentinelPath!)).toBe(false);
     }
   });

@@ -5,9 +5,9 @@
  * to `claude` when config is empty) and checks CLI presence on PATH.
  * Emits warnings (not errors) for missing binaries — AC-11.
  */
+import { execSync } from 'child_process';
 import { colors } from '../utils/formatting.js';
 import { loadConfig } from '../../config/loader.js';
-import { probeCli } from '../../team/cli-detection.js';
 const PROVIDER_BINARY = {
     claude: 'claude',
     codex: 'codex',
@@ -18,11 +18,29 @@ const PROVIDER_BINARY = {
 };
 function probeProvider(provider) {
     const binary = PROVIDER_BINARY[provider];
-    return {
-        provider,
-        binary,
-        ...probeCli(binary),
-    };
+    const probe = { provider, binary, found: false };
+    try {
+        const resolved = execSync(`command -v ${binary}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+            .trim();
+        if (resolved) {
+            probe.found = true;
+            probe.path = resolved;
+            try {
+                const version = execSync(`${binary} --version`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 })
+                    .trim()
+                    .split('\n')[0];
+                if (version)
+                    probe.version = version;
+            }
+            catch {
+                // Version probe is best-effort; binary found is enough.
+            }
+        }
+    }
+    catch (err) {
+        probe.error = err instanceof Error ? err.message : String(err);
+    }
+    return probe;
 }
 function collectConfiguredProviders() {
     const cfg = loadConfig();
@@ -56,31 +74,21 @@ export async function doctorTeamRoutingCommand(options) {
         }, null, 2));
     }
     else {
-        const claudeFound = probes.some((probe) => probe.provider === 'claude' && probe.found);
         console.log(colors.bold('Team role routing — provider CLI probe'));
         for (const p of probes) {
             if (p.found) {
-                const resolvedPath = p.path ? `: ${p.path}` : '';
-                const version = p.version ? ` (${p.version})` : p.error ? ' (version unavailable)' : '';
-                console.log(`  ${colors.green('✓')} ${p.provider}${resolvedPath}${version}`);
+                const version = p.version ? ` (${p.version})` : '';
+                console.log(`  ${colors.green('✓')} ${p.provider}: ${p.path}${version}`);
             }
             else {
-                const fallback = p.provider === 'claude'
-                    ? 'orchestrator/fallback unavailable'
-                    : claudeFound
-                        ? `/team tasks routed to ${p.provider} can fall back to Claude`
-                        : 'no available Claude fallback';
-                console.log(`  ${colors.yellow('⚠')} ${p.provider}: not found on PATH — ${fallback}`);
+                console.log(`  ${colors.yellow('⚠')} ${p.provider}: not found on PATH — /team tasks routed to ${p.provider} will fall back to claude`);
             }
         }
         if (missing.length === 0) {
             console.log(colors.green('\nAll configured providers are available.'));
         }
-        else if (!claudeFound) {
-            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — no available Claude fallback; orchestrator/fallback unavailable).`));
-        }
         else {
-            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — /team can fall back to Claude).`));
+            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — /team falls back to claude).`));
         }
     }
     // Never error on missing providers — AC-11 says warn, not error.
