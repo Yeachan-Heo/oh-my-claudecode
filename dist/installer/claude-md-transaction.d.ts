@@ -44,6 +44,7 @@ export interface ClaudeMdTransactionResult {
 export interface ClaudeMdTransactionFs {
     existsSync: typeof nodeFs.existsSync;
     lstatSync: typeof nodeFs.lstatSync;
+    realpathSync: typeof nodeFs.realpathSync;
     mkdirSync: typeof nodeFs.mkdirSync;
     openSync: typeof nodeFs.openSync;
     closeSync: typeof nodeFs.closeSync;

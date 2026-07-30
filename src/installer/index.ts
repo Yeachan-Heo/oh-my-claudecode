@@ -909,6 +909,15 @@ function mergeHookGroups(
     return [...nonOmcGroups, ...newOmcGroups];
   }
 
+  // Nothing is registered for this event yet, so this is a first-time install
+  // rather than an "already configured" state. Without this branch the empty
+  // array that was passed in is returned unchanged, which writes an empty hook
+  // list into settings.json while the log claims the event was already set up.
+  if (existingGroups.length === 0) {
+    log(`  Installed ${eventType} hook`);
+    return newOmcGroups;
+  }
+
   if (hasNonOmcHook) {
     log(`  Warning: ${eventType} hook has non-OMC hook. Skipping. Use --force-hooks to override.`);
     result.hookConflicts.push({ eventType, existingCommand: nonOmcCommand });
@@ -2402,7 +2411,6 @@ export function install(options: InstallOptions = {}): InstallResult {
     // Keep the public installer on the same raw-byte transaction path as setup.
     // The public string merger remains exported for callers that use it directly.
     if (!projectScoped) {
-      const claudeMdPath = join(CLAUDE_CONFIG_DIR, 'CLAUDE.md');
       const transaction = executeClaudeMdTransaction({
         mode: 'global-overwrite',
         root: CLAUDE_CONFIG_DIR,
@@ -2412,7 +2420,7 @@ export function install(options: InstallOptions = {}): InstallResult {
       });
       if (!transaction.ok) throw new Error(transaction.error ?? 'CLAUDE.md transaction failed');
       for (const backupPath of transaction.backups) log(`Backed up existing CLAUDE.md to ${backupPath}`);
-      log(transaction.operations.some(operation => operation.existedBefore && operation.path === claudeMdPath)
+      log(transaction.operations.some(operation => operation.type === 'write' && operation.existedBefore && basename(operation.path) === 'CLAUDE.md')
         ? 'Updated CLAUDE.md (merged with existing content)'
         : 'Created CLAUDE.md');
     }
