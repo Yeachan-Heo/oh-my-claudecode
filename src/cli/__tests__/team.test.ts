@@ -85,6 +85,7 @@ describe('team cli', () => {
     mocks.resumeTeam.mockReset();
     mocks.monitorTeam.mockReset();
     mocks.shutdownTeam.mockReset();
+    mocks.shutdownTeam.mockResolvedValue(true);
     mocks.isRuntimeV2Enabled.mockReset();
     mocks.isRuntimeV2Enabled.mockReturnValue(false);
     mocks.monitorTeamV2.mockReset();

@@ -774,7 +774,9 @@ async function main() {
                     }
                 }
                 else {
-                    await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, 2_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
+                    const cleaned = await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, 2_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
+                    if (!cleaned)
+                        throw new Error('team_shutdown_failed:legacy_cleanup_unverified');
                 }
             }
             catch (err) {

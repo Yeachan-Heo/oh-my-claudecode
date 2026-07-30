@@ -771,7 +771,7 @@ export async function runWorkerLaunchBootstrap(value) {
                         outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
                         pid: child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
-                    await invocation.cleanup();
+                    await invocation.cleanup().catch(() => undefined);
                     resolve(cleanupVerified
                         ? { outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }
                         : { outcome: 'provider_cleanup_unverified' });
@@ -786,7 +786,7 @@ export async function runWorkerLaunchBootstrap(value) {
                         ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error', cleanup_verified: false,
                         pid: child.pid ?? null, process_start_identity: providerStartIdentity, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
-                    await invocation.cleanup();
+                    await invocation.cleanup().catch(() => undefined);
                     resolve({ outcome: 'provider_spawn_failed' });
                 });
             });
@@ -900,7 +900,7 @@ export async function runWorkerLaunchBootstrap(value) {
                                 ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'cleanup_unverified', cleanup_verified: false,
                                 pid: child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: exitCode, signal: null, written_at: new Date().toISOString(),
                             }).catch(() => undefined);
-                            await invocation.cleanup();
+                            await invocation.cleanup().catch(() => undefined);
                             resolveCompletion({ outcome: 'provider_cleanup_unverified' });
                         }
                     }).catch(() => undefined).finally(() => { pollingCompletion = false; });

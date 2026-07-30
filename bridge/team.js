@@ -9057,7 +9057,7 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
 - **Worker**: ${workerName}
 - **Agent Type**: ${agentType}
 - **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName}
-- **Launch Attempt**: read the exact value from \0OMC_WORKER_LAUNCH_ATTEMPT_ID\0 and preserve it in status updates and task claims.
+- **Launch Attempt**: read the exact value from \`OMC_WORKER_LAUNCH_ATTEMPT_ID\` and preserve it in status updates and task claims.
 
 ## Your Tasks
 ${taskList}
@@ -9089,7 +9089,7 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
   {"state": "idle", "launch_attempt_id": "<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>", "updated_at": "<ISO timestamp>"}
   \`\`\`
   States: "idle" | "working" | "blocked" | "done" | "failed"
-  Every startup status MUST include the exact current \0launch_attempt_id\0; evidence without it belongs to another attempt and is ignored.
+  Every startup status MUST include the exact current \`launch_attempt_id\`; evidence without it belongs to another attempt and is ignored.
 - **Heartbeat**: Update ${heartbeatPath} every few minutes:
   \`\`\`json
   {"pid":<pid>,"last_turn_at":"<ISO timestamp>","turn_count":<n>,"alive":true}
@@ -16149,7 +16149,8 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
     const legacyConfig = config;
     const sessionName2 = typeof legacyConfig.tmuxSession === "string" && legacyConfig.tmuxSession.trim() !== "" ? legacyConfig.tmuxSession.trim() : `omc-team-${teamName}`;
     const leaderPaneId = typeof legacyConfig.leaderPaneId === "string" && legacyConfig.leaderPaneId.trim() !== "" ? legacyConfig.leaderPaneId.trim() : void 0;
-    await shutdownTeam(teamName, sessionName2, cwd, 3e4, void 0, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    const cleaned = await shutdownTeam(teamName, sessionName2, cwd, 3e4, void 0, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    if (!cleaned) throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
     return;
   }
   assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
@@ -17700,7 +17701,7 @@ async function teamShutdownByName(teamName, options = {}) {
     }
     throw new Error(`Team ${teamName} is not running. Use --force to clear stale state.`);
   }
-  await shutdownTeam(
+  const cleaned = await shutdownTeam(
     runtime.teamName,
     runtime.sessionName,
     runtime.cwd,
@@ -17711,9 +17712,10 @@ async function teamShutdownByName(teamName, options = {}) {
   );
   return {
     teamName,
-    shutdown: true,
+    shutdown: cleaned,
     forced: Boolean(options.force),
-    sessionFound: true
+    sessionFound: true,
+    ...cleaned ? {} : { error: "team_shutdown_failed:cleanup_unverified" }
   };
 }
 async function executeTeamApiOperation2(operation, input, cwd = process.cwd()) {

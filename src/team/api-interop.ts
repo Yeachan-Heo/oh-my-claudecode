@@ -331,7 +331,8 @@ async function executeTeamCleanupViaRuntime(teamName: string, cwd: string): Prom
     const leaderPaneId = typeof legacyConfig.leaderPaneId === 'string' && legacyConfig.leaderPaneId.trim() !== ''
       ? legacyConfig.leaderPaneId.trim()
       : undefined;
-    await shutdownTeam(teamName, sessionName, cwd, 30_000, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    const cleaned = await shutdownTeam(teamName, sessionName, cwd, 30_000, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    if (!cleaned) throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
     return;
   }
 

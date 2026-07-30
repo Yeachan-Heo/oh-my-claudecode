@@ -902,7 +902,8 @@ async function handleTeamShutdown(teamName: string, cwd: string, force: boolean)
 
   // v1 fallback
   const { shutdownTeam } = await import('../../team/runtime.js');
-  await shutdownTeam(teamName, `omc-team-${teamName}`, cwd);
+  const cleaned = await shutdownTeam(teamName, `omc-team-${teamName}`, cwd);
+  if (!cleaned) throw new Error(`Team shutdown failed: cleanup unverified for ${teamName}`);
   console.log(`Team shutdown complete: ${teamName}`);
 }
 

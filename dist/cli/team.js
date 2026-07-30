@@ -519,12 +519,13 @@ export async function teamShutdownByName(teamName, options = {}) {
         }
         throw new Error(`Team ${teamName} is not running. Use --force to clear stale state.`);
     }
-    await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, options.force ? 0 : 30_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
+    const cleaned = await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, options.force ? 0 : 30_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
     return {
         teamName,
-        shutdown: true,
+        shutdown: cleaned,
         forced: Boolean(options.force),
         sessionFound: true,
+        ...(cleaned ? {} : { error: 'team_shutdown_failed:cleanup_unverified' }),
     };
 }
 export async function executeTeamApiOperation(operation, input, cwd = process.cwd()) {

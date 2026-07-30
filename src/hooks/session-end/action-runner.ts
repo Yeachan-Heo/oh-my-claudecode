@@ -81,7 +81,12 @@ export async function runSessionEndAction(context: ActionRunContext, _execute: (
     };
     identity = await getProcessStartIdentity(child.pid!, context.deadlineAt);
     if (!identity) {
-      child.kill('SIGKILL');
+      // Identity capture failed (e.g. /proc unreadable or deadline expired).
+      // Kill the entire detached process group — not just the direct child —
+      // so detached descendants are not orphaned. The child was spawned
+      // milliseconds ago in the same synchronous flow, so PID reuse is not a
+      // practical concern here, but verify liveness before signalling.
+      try { process.kill(-child.pid!, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* best-effort */ } }
       await Promise.race([childExit, new Promise<void>(resolve => setTimeout(resolve, POST_KILL_SETTLE_MS))]);
       return { code: 'runner-identity-unavailable', completed: false };
     }

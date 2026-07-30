@@ -27327,7 +27327,14 @@ async function runSessionEndAction(context, _execute) {
     };
     identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
     if (!identity) {
-      child.kill("SIGKILL");
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+        }
+      }
       await Promise.race([childExit, new Promise((resolve33) => setTimeout(resolve33, POST_KILL_SETTLE_MS))]);
       return { code: "runner-identity-unavailable", completed: false };
     }
@@ -37774,7 +37781,7 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
 - **Worker**: ${workerName2}
 - **Agent Type**: ${agentType}
 - **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName2}
-- **Launch Attempt**: read the exact value from \0OMC_WORKER_LAUNCH_ATTEMPT_ID\0 and preserve it in status updates and task claims.
+- **Launch Attempt**: read the exact value from \`OMC_WORKER_LAUNCH_ATTEMPT_ID\` and preserve it in status updates and task claims.
 
 ## Your Tasks
 ${taskList}
@@ -37806,7 +37813,7 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
   {"state": "idle", "launch_attempt_id": "<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>", "updated_at": "<ISO timestamp>"}
   \`\`\`
   States: "idle" | "working" | "blocked" | "done" | "failed"
-  Every startup status MUST include the exact current \0launch_attempt_id\0; evidence without it belongs to another attempt and is ignored.
+  Every startup status MUST include the exact current \`launch_attempt_id\`; evidence without it belongs to another attempt and is ignored.
 - **Heartbeat**: Update ${heartbeatPath} every few minutes:
   \`\`\`json
   {"pid":<pid>,"last_turn_at":"<ISO timestamp>","turn_count":<n>,"alive":true}
@@ -100354,7 +100361,8 @@ async function executeTeamCleanupViaRuntime(teamName, cwd2) {
     const legacyConfig = config2;
     const sessionName2 = typeof legacyConfig.tmuxSession === "string" && legacyConfig.tmuxSession.trim() !== "" ? legacyConfig.tmuxSession.trim() : `omc-team-${teamName}`;
     const leaderPaneId = typeof legacyConfig.leaderPaneId === "string" && legacyConfig.leaderPaneId.trim() !== "" ? legacyConfig.leaderPaneId.trim() : void 0;
-    await shutdownTeam(teamName, sessionName2, cwd2, 3e4, void 0, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    const cleaned = await shutdownTeam(teamName, sessionName2, cwd2, 3e4, void 0, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+    if (!cleaned) throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
     return;
   }
   assertNoNativeWorktreeCleanupEvidence(teamName, cwd2);
@@ -104384,7 +104392,8 @@ async function handleTeamShutdown(teamName, cwd2, force) {
     return;
   }
   const { shutdownTeam: shutdownTeam2 } = await Promise.resolve().then(() => (init_runtime(), runtime_exports));
-  await shutdownTeam2(teamName, `omc-team-${teamName}`, cwd2);
+  const cleaned = await shutdownTeam2(teamName, `omc-team-${teamName}`, cwd2);
+  if (!cleaned) throw new Error(`Team shutdown failed: cleanup unverified for ${teamName}`);
   console.log(`Team shutdown complete: ${teamName}`);
 }
 async function handleTeamApi(args, cwd2) {

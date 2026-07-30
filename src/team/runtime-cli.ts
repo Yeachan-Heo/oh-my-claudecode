@@ -881,7 +881,7 @@ async function main(): Promise<void> {
               throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
             }
           } else {
-            await shutdownTeam(
+            const cleaned = await shutdownTeam(
               runtime.teamName,
               runtime.sessionName,
               runtime.cwd,
@@ -890,6 +890,7 @@ async function main(): Promise<void> {
               runtime.leaderPaneId,
               runtime.ownsWindow,
             );
+            if (!cleaned) throw new Error('team_shutdown_failed:legacy_cleanup_unverified');
           }
         } catch (err) {
           process.stderr.write(`[runtime-cli] shutdown error: ${err}\n`);

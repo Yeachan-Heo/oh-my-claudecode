@@ -87,7 +87,7 @@ export async function runWorkerActivationGate(gate) {
                         written_at: new Date().toISOString() });
                 }
                 catch { /* owner may have already cleaned terminal attempt state */ }
-                await invocation.cleanup();
+                await invocation.cleanup().catch(() => undefined);
                 resolve(result);
             };
             finishCompletion = finish;

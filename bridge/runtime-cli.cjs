@@ -1807,7 +1807,7 @@ async function runWorkerLaunchBootstrap(value) {
             signal: effectiveSignal,
             written_at: (/* @__PURE__ */ new Date()).toISOString()
           }).catch(() => void 0);
-          await invocation.cleanup();
+          await invocation.cleanup().catch(() => void 0);
           resolve8(cleanupVerified ? { outcome: "ran", exitCode: effectiveExitCode, signal: effectiveSignal } : { outcome: "provider_cleanup_unverified" });
         });
         child.once("error", async () => {
@@ -1823,7 +1823,7 @@ async function runWorkerLaunchBootstrap(value) {
             process_start_identity: providerStartIdentity,
             written_at: (/* @__PURE__ */ new Date()).toISOString()
           }).catch(() => void 0);
-          await invocation.cleanup();
+          await invocation.cleanup().catch(() => void 0);
           resolve8({ outcome: "provider_spawn_failed" });
         });
       });
@@ -1928,7 +1928,7 @@ async function runWorkerLaunchBootstrap(value) {
                 signal: null,
                 written_at: (/* @__PURE__ */ new Date()).toISOString()
               }).catch(() => void 0);
-              await invocation.cleanup();
+              await invocation.cleanup().catch(() => void 0);
               resolveCompletion({ outcome: "provider_cleanup_unverified" });
             }
           }).catch(() => void 0).finally(() => {
@@ -7162,7 +7162,7 @@ You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without 
 - **Worker**: ${workerName2}
 - **Agent Type**: ${agentType}
 - **Environment**: OMC_TEAM_WORKER=${teamName}/${workerName2}
-- **Launch Attempt**: read the exact value from \0OMC_WORKER_LAUNCH_ATTEMPT_ID\0 and preserve it in status updates and task claims.
+- **Launch Attempt**: read the exact value from \`OMC_WORKER_LAUNCH_ATTEMPT_ID\` and preserve it in status updates and task claims.
 
 ## Your Tasks
 ${taskList}
@@ -7194,7 +7194,7 @@ Use the CLI API for all task lifecycle operations. Do NOT directly edit task fil
   {"state": "idle", "launch_attempt_id": "<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>", "updated_at": "<ISO timestamp>"}
   \`\`\`
   States: "idle" | "working" | "blocked" | "done" | "failed"
-  Every startup status MUST include the exact current \0launch_attempt_id\0; evidence without it belongs to another attempt and is ignored.
+  Every startup status MUST include the exact current \`launch_attempt_id\`; evidence without it belongs to another attempt and is ignored.
 - **Heartbeat**: Update ${heartbeatPath} every few minutes:
   \`\`\`json
   {"pid":<pid>,"last_turn_at":"<ISO timestamp>","turn_count":<n>,"alive":true}
@@ -11593,7 +11593,7 @@ async function runWorkerActivationGate(gate) {
           });
         } catch {
         }
-        await invocation.cleanup();
+        await invocation.cleanup().catch(() => void 0);
         resolve8(result);
       };
       finishCompletion = finish;
@@ -15467,7 +15467,7 @@ async function main() {
               throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
             }
           } else {
-            await shutdownTeam(
+            const cleaned = await shutdownTeam(
               runtime.teamName,
               runtime.sessionName,
               runtime.cwd,
@@ -15476,6 +15476,7 @@ async function main() {
               runtime.leaderPaneId,
               runtime.ownsWindow
             );
+            if (!cleaned) throw new Error("team_shutdown_failed:legacy_cleanup_unverified");
           }
         } catch (err) {
           process.stderr.write(`[runtime-cli] shutdown error: ${err}

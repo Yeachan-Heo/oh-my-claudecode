@@ -118,7 +118,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
           await writeAtomic(`${gate.runPath}.terminal`, { ...expected, provider_pid: child.pid ?? null, ...terminal,
             written_at: new Date().toISOString() });
         } catch { /* owner may have already cleaned terminal attempt state */ }
-        await invocation.cleanup();
+        await invocation.cleanup().catch(() => undefined);
         resolve(result);
       };
       finishCompletion = finish;

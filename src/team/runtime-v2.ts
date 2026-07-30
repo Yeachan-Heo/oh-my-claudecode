@@ -3242,7 +3242,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
         reason: `startup_manual_intervention_required:${wName}:${workerLaunch.startupFailureReason}`,
       }, leaderCwd).catch(logEventFailure);
     }
-    }
+  }
   } catch (error) {
     await rollbackStartedNativeWorktreeStartup({
       teamName: sanitized,

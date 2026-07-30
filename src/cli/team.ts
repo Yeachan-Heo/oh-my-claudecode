@@ -706,7 +706,7 @@ export async function teamShutdownByName(teamName: string, options: { cwd?: stri
     throw new Error(`Team ${teamName} is not running. Use --force to clear stale state.`);
   }
 
-  await shutdownTeam(
+  const cleaned = await shutdownTeam(
     runtime.teamName,
     runtime.sessionName,
     runtime.cwd,
@@ -718,9 +718,10 @@ export async function teamShutdownByName(teamName: string, options: { cwd?: stri
 
   return {
     teamName,
-    shutdown: true,
+    shutdown: cleaned,
     forced: Boolean(options.force),
     sessionFound: true,
+    ...(cleaned ? {} : { error: 'team_shutdown_failed:cleanup_unverified' }),
   };
 }
 
