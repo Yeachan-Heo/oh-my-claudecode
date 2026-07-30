@@ -37592,7 +37592,20 @@ async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, option
       await tmuxExecAsync(["kill-window", "-t", sessionName2]);
       return true;
     } catch {
-      return false;
+      try {
+        const result = await tmuxCmdAsync(["list-windows", "-t", sessionName2.split(":")[0] ?? sessionName2]);
+        const windows = result.stdout.trim();
+        if (!windows) return true;
+        const windowIndex = sessionName2.split(":")[1];
+        if (!windowIndex) return false;
+        const windowPresent = windows.split("\n").some((line) => {
+          const match = line.trim().match(/^(\d+):/);
+          return match !== null && match[1] === windowIndex;
+        });
+        return !windowPresent;
+      } catch {
+        return false;
+      }
     }
   }
   const sessionTarget = sessionName2.split(":")[0] ?? sessionName2;

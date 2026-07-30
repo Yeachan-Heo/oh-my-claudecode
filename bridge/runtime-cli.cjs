@@ -683,6 +683,51 @@ async function getProcessStartTimeLinux(pid, deadlineAt) {
     return void 0;
   }
 }
+function getProcessStartIdentitySync(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === "linux") {
+    try {
+      const stat2 = (0, import_fs6.readFileSync)(`/proc/${pid}/stat`, "utf8");
+      const closeParen = stat2.lastIndexOf(")");
+      if (closeParen === -1) return null;
+      const fields = stat2.substring(closeParen + 2).split(" ");
+      const startTime = parseInt(fields[19] ?? "", 10);
+      return Number.isNaN(startTime) ? null : String(startTime);
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === "darwin") {
+    try {
+      const result = (0, import_child_process4.spawnSync)(
+        "ps",
+        ["-p", String(pid), "-o", "lstart="],
+        { encoding: "utf8", timeout: 2e3, windowsHide: true }
+      );
+      if (result.status !== 0 || !result.stdout) return null;
+      const time = new Date(result.stdout.trim()).getTime();
+      return Number.isNaN(time) ? null : String(time);
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === "win32") {
+    try {
+      const cmd = `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`;
+      const result = (0, import_child_process4.spawnSync)(
+        "powershell",
+        ["-NoProfile", "-NonInteractive", "-Command", cmd],
+        { encoding: "utf8", timeout: 3e3, windowsHide: true }
+      );
+      if (result.status !== 0 || !result.stdout) return null;
+      const ticks = result.stdout.trim().match(/^\d+$/)?.[0];
+      return ticks ? `ticks:${ticks}` : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 async function getProcessStartIdentityWindows(pid, deadlineAt) {
   for (const command of [
     `$p = Get-Process -Id ${pid} -ErrorAction Stop; if ($p -and $p.StartTime) { $p.StartTime.ToUniversalTime().Ticks }`,
@@ -1892,7 +1937,14 @@ async function runWorkerLaunchBootstrap(value) {
       }
       if (!spec.release_after_spawn) await new Promise((resolve8) => setTimeout(resolve8, 75));
       if (settled) return { completion };
-      providerStartIdentity = child.pid ? await getProcessStartIdentity(child.pid) : null;
+      providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+      if (!providerStartIdentity && child.pid) {
+        providerStartIdentity = await getProcessStartIdentity(child.pid);
+        if (!child.pid || !isProcessAlive(child.pid)) {
+          if (!await terminateProvider()) return { outcome: "provider_cleanup_unverified" };
+          return { outcome: "provider_spawn_failed" };
+        }
+      }
       if (!child.pid || !providerStartIdentity || !isProcessAlive(child.pid)) {
         if (!await terminateProvider()) return { outcome: "provider_cleanup_unverified" };
         return { outcome: "provider_spawn_failed" };
@@ -3520,7 +3572,20 @@ async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, option
       await tmuxExecAsync(["kill-window", "-t", sessionName2]);
       return true;
     } catch {
-      return false;
+      try {
+        const result = await tmuxCmdAsync(["list-windows", "-t", sessionName2.split(":")[0] ?? sessionName2]);
+        const windows = result.stdout.trim();
+        if (!windows) return true;
+        const windowIndex = sessionName2.split(":")[1];
+        if (!windowIndex) return false;
+        const windowPresent = windows.split("\n").some((line) => {
+          const match = line.trim().match(/^(\d+):/);
+          return match !== null && match[1] === windowIndex;
+        });
+        return !windowPresent;
+      } catch {
+        return false;
+      }
     }
   }
   const sessionTarget = sessionName2.split(":")[0] ?? sessionName2;

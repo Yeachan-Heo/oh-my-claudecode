@@ -1746,7 +1746,31 @@ export async function killTeamSession(sessionName, workerPaneIds, leaderPaneId, 
             return true;
         }
         catch {
-            return false;
+            // The kill-window command may fail because the window is already gone.
+            // Verify absence: only a successful list-windows that does NOT list
+            // the exact target window is proof of cleanup. A list-windows command
+            // failure is unknown, not success.
+            try {
+                const result = await tmuxCmdAsync(['list-windows', '-t', sessionName.split(':')[0] ?? sessionName]);
+                const windows = result.stdout.trim();
+                if (!windows)
+                    return true;
+                const windowIndex = sessionName.split(':')[1];
+                if (!windowIndex)
+                    return false; // ambiguous: no window index in session name
+                // Canonical match: each line in list-windows starts with "<index>:<name>"
+                // Match the exact index at line start, not a substring collision.
+                const windowPresent = windows.split('\n').some(line => {
+                    const match = line.trim().match(/^(\d+):/);
+                    return match !== null && match[1] === windowIndex;
+                });
+                return !windowPresent;
+            }
+            catch {
+                // list-windows itself failed (tmux unavailable, control error).
+                // This is unknown, NOT confirmed absence.
+                return false;
+            }
         }
     }
     const sessionTarget = sessionName.split(':')[0] ?? sessionName;

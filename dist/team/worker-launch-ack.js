@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
@@ -832,7 +832,19 @@ export async function runWorkerLaunchBootstrap(value) {
                 await new Promise(resolve => setTimeout(resolve, 75));
             if (settled)
                 return { completion };
-            providerStartIdentity = child.pid ? await getProcessStartIdentity(child.pid) : null;
+            // Capture identity synchronously to close the PID-reuse window that
+            // an async getProcessStartIdentity would leave open. If sync capture
+            // is unavailable, fall back to async but recheck liveness after.
+            providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+            if (!providerStartIdentity && child.pid) {
+                providerStartIdentity = await getProcessStartIdentity(child.pid);
+                // Recheck liveness after async lookup to detect PID reuse
+                if (!child.pid || !isProcessAlive(child.pid)) {
+                    if (!await terminateProvider())
+                        return { outcome: 'provider_cleanup_unverified' };
+                    return { outcome: 'provider_spawn_failed' };
+                }
+            }
             if (!child.pid || !providerStartIdentity || !isProcessAlive(child.pid)) {
                 if (!await terminateProvider())
                     return { outcome: 'provider_cleanup_unverified' };

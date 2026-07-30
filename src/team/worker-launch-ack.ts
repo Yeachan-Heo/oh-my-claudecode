@@ -5,7 +5,7 @@ import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'nod
 import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
@@ -961,7 +961,18 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       }
       if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
       if (settled) return { completion };
-      providerStartIdentity = child.pid ? await getProcessStartIdentity(child.pid) : null;
+      // Capture identity synchronously to close the PID-reuse window that
+      // an async getProcessStartIdentity would leave open. If sync capture
+      // is unavailable, fall back to async but recheck liveness after.
+      providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+      if (!providerStartIdentity && child.pid) {
+        providerStartIdentity = await getProcessStartIdentity(child.pid);
+        // Recheck liveness after async lookup to detect PID reuse
+        if (!child.pid || !isProcessAlive(child.pid)) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+      }
       if (!child.pid || !providerStartIdentity || !isProcessAlive(child.pid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
