@@ -4,6 +4,7 @@
  */
 
 import { execFileSync, execFile } from 'child_process';
+import { readFileSync } from 'fs';
 import { promisify } from 'util';
 import * as fsPromises from 'fs/promises';
 
@@ -228,6 +229,30 @@ async function getProcessStartTimeLinux(pid: number, deadlineAt?: number): Promi
 }
 
 /**
+ * Synchronous process start identity capture for use immediately after spawn,
+ * before the event loop turns. Closes the PID-reuse window that an async
+ * getProcessStartIdentity call would leave open. On Linux, /proc/<pid>/stat
+ * is readable in the same synchronous tick as spawn().
+ * Returns null on platforms or conditions where synchronous capture is unavailable.
+ */
+export function getProcessStartIdentitySync(pid: number): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const closeParen = stat.lastIndexOf(')');
+      if (closeParen === -1) return null;
+      const fields = stat.substring(closeParen + 2).split(' ');
+      const startTime = parseInt(fields[19] ?? '', 10);
+      return Number.isNaN(startTime) ? null : String(startTime);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Gracefully terminate a process with escalation.
  */
 export async function gracefulKill(
@@ -339,32 +364,57 @@ export async function terminateOwnedProcessTree(
     'Add-Type -TypeDefinition @"',
     'using System;',
     'using System.Runtime.InteropServices;',
-    'public static class OmcNative { [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle); }',
+    'public static class OmcNative {',
+    '  [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle);',
+    '  [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr handle);',
+    '}',
     '"@',
     `$root = [System.Diagnostics.Process]::GetProcessById(${options.pid})`,
     `if ($root.StartTime.ToUniversalTime().Ticks -ne ${expectedTicks}) { exit 3 }`,
     '$owned = @{}',
-    '$owned[$root.Id] = @{ Process = $root; Depth = 0 }',
+    '$owned[$root.Id] = @{ Process = $root; Depth = 0; Suspended = $true }',
     '[void][OmcNative]::NtSuspendProcess($root.Handle)',
-    'for ($pass = 0; $pass -lt 64; $pass++) {',
-    '  $added = $false',
-    '  foreach ($row in Get-CimInstance Win32_Process) {',
-    '    $parent = [int]$row.ParentProcessId; $id = [int]$row.ProcessId',
-    '    if (-not $owned.ContainsKey($parent) -or $owned.ContainsKey($id)) { continue }',
-    '    try {',
-    '      $process = [System.Diagnostics.Process]::GetProcessById($id)',
-    '      $created = ([DateTime]$row.CreationDate).ToUniversalTime().Ticks',
-    '      if ($process.StartTime.ToUniversalTime().Ticks -ne $created) { continue }',
-    '      [void][OmcNative]::NtSuspendProcess($process.Handle)',
-    '      $owned[$id] = @{ Process = $process; Depth = ([int]$owned[$parent].Depth + 1) }',
-    '      $added = $true',
-    '    } catch {}',
+    'try {',
+    '  for ($pass = 0; $pass -lt 64; $pass++) {',
+    '    $added = $false',
+    '    foreach ($row in Get-CimInstance Win32_Process) {',
+    '      $parent = [int]$row.ParentProcessId; $id = [int]$row.ProcessId',
+    '      if (-not $owned.ContainsKey($parent) -or $owned.ContainsKey($id)) { continue }',
+    '      try {',
+    '        $process = [System.Diagnostics.Process]::GetProcessById($id)',
+    '        $created = ([DateTime]$row.CreationDate).ToUniversalTime().Ticks',
+    '        if ($process.StartTime.ToUniversalTime().Ticks -ne $created) { continue }',
+    '        [void][OmcNative]::NtSuspendProcess($process.Handle)',
+    '        $owned[$id] = @{ Process = $process; Depth = ([int]$owned[$parent].Depth + 1); Suspended = $true }',
+    '        $added = $true',
+    '      } catch {}',
+    '    }',
+    '    if (-not $added) { break }',
     '  }',
-    '  if (-not $added) { break }',
+    '  $ordered = $owned.Values | Sort-Object -Property Depth -Descending',
+    '  foreach ($entry in $ordered) {',
+    '    try {',
+    '      if (-not $entry.Process.HasExited) { $entry.Process.Kill() }',
+    '      $entry.Suspended = $false',
+    '    } catch {',
+    '      # Kill failed: resume this process so it is not left frozen.',
+    '      try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {}',
+    '      exit 4',
+    '    }',
+    '  }',
+    `  if (-not $root.WaitForExit(${waitMs})) {`,
+    '    # Deadline exceeded after suspension: resume any still-suspended processes.',
+    '    foreach ($entry in $ordered) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }',
+    '    exit 5',
+    '  }',
+    '} catch {',
+    '  # Outer failure (e.g. CIM enumeration error): resume every suspended process.',
+    '  foreach ($entry in $owned.Values) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }',
+    '  exit 6',
+    '} finally {',
+    '  # Final safety net: resume any process still marked suspended.',
+    '  foreach ($entry in $owned.Values) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }',
     '}',
-    '$ordered = $owned.Values | Sort-Object -Property Depth -Descending',
-    'foreach ($entry in $ordered) { try { if (-not $entry.Process.HasExited) { $entry.Process.Kill() } } catch { exit 4 } }',
-    `if (-not $root.WaitForExit(${waitMs})) { exit 5 }`,
   ].join("\n");
   try {
     await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
@@ -375,6 +425,9 @@ export async function terminateOwnedProcessTree(
     const status = (error as { status?: number; code?: number }).status ?? (error as { code?: number }).code;
     if (status === 3) return 'identity-mismatch';
     if (!isProcessAlive(options.pid)) return 'already-dead';
+    // exit 4 (kill failed), exit 5 (deadline after suspension), exit 6 (outer failure):
+    // all suspended processes have been resumed by the finally block, but we cannot
+    // prove termination, so return unknown rather than claiming success.
     return 'unknown';
   }
 }

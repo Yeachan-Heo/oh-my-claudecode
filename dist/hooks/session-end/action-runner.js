@@ -3,7 +3,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
-import { getProcessStartIdentity, terminateOwnedProcessTree } from '../../platform/process-utils.js';
+import { getProcessStartIdentitySync, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 import { markSessionEndActionRunner, readSessionEndJob } from './cleanup-manifest.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 const RUNNER_ARG = '--omc-session-end-action-runner';
@@ -43,6 +43,11 @@ export async function runSessionEndAction(context, _execute) {
             return { code: 'deadline-before-arm', completed: false };
         const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
         const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: runnerEnvironment(context) });
+        // Capture identity synchronously, in the same tick as spawn, before
+        // child.unref() or any async operation. This eliminates the PID-reuse
+        // window that an async identity lookup would create. If the child already
+        // exited or /proc is unreadable, identity is null and we fail closed.
+        const identity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
         child.unref();
         let settled = false;
         let exitCode = null;
@@ -61,13 +66,12 @@ export async function runSessionEndAction(context, _execute) {
         let deadlineTermination;
         let resolveTermination;
         const terminationFinished = new Promise((resolve) => { resolveTermination = resolve; });
-        let identity = null;
         const terminate = async () => {
             const postKillWait = new Promise((resolve) => {
                 const timer = setTimeout(resolve, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
                 timer.unref();
             });
-            if (identity) {
+            if (identity && child.pid) {
                 await Promise.race([terminateOwnedProcessTree({
                         pid: child.pid, expectedStartIdentity: identity,
                         deadlineAt: new Date(context.deadlineAt + POST_KILL_SETTLE_MS).toISOString(), force: true,
@@ -75,22 +79,11 @@ export async function runSessionEndAction(context, _execute) {
             }
             await Promise.race([childExit, postKillWait]);
         };
-        identity = await getProcessStartIdentity(child.pid, context.deadlineAt);
-        if (!identity) {
-            // Identity capture failed (e.g. /proc unreadable or deadline expired).
-            // Kill the entire detached process group — not just the direct child —
-            // so detached descendants are not orphaned. The child was spawned
-            // milliseconds ago in the same synchronous flow, so PID reuse is not a
-            // practical concern here, but verify liveness before signalling.
-            try {
-                process.kill(-child.pid, 'SIGKILL');
-            }
-            catch {
-                try {
-                    child.kill('SIGKILL');
-                }
-                catch { /* best-effort */ }
-            }
+        if (!identity || !child.pid) {
+            // Identity capture failed: fail closed WITHOUT signalling any PID or
+            // process group. The child has its own deadline timer (set in the
+            // runner entrypoint) and will self-exit. Signalling a raw PID/group
+            // after identity failure could hit a reused PID.
             await Promise.race([childExit, new Promise(resolve => setTimeout(resolve, POST_KILL_SETTLE_MS))]);
             return { code: 'runner-identity-unavailable', completed: false };
         }

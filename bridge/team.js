@@ -3392,6 +3392,7 @@ var init_tmux_clipboard = __esm({
 
 // src/platform/process-utils.ts
 import { execFileSync as execFileSync4, execFile as execFile2 } from "child_process";
+import { readFileSync as readFileSync4 } from "fs";
 import { promisify as promisify2 } from "util";
 import * as fsPromises from "fs/promises";
 function remainingDeadlineMs(deadlineAt) {
@@ -3612,32 +3613,57 @@ async function terminateOwnedProcessTree(options) {
     'Add-Type -TypeDefinition @"',
     "using System;",
     "using System.Runtime.InteropServices;",
-    'public static class OmcNative { [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle); }',
+    "public static class OmcNative {",
+    '  [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle);',
+    '  [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr handle);',
+    "}",
     '"@',
     `$root = [System.Diagnostics.Process]::GetProcessById(${options.pid})`,
     `if ($root.StartTime.ToUniversalTime().Ticks -ne ${expectedTicks}) { exit 3 }`,
     "$owned = @{}",
-    "$owned[$root.Id] = @{ Process = $root; Depth = 0 }",
+    "$owned[$root.Id] = @{ Process = $root; Depth = 0; Suspended = $true }",
     "[void][OmcNative]::NtSuspendProcess($root.Handle)",
-    "for ($pass = 0; $pass -lt 64; $pass++) {",
-    "  $added = $false",
-    "  foreach ($row in Get-CimInstance Win32_Process) {",
-    "    $parent = [int]$row.ParentProcessId; $id = [int]$row.ProcessId",
-    "    if (-not $owned.ContainsKey($parent) -or $owned.ContainsKey($id)) { continue }",
-    "    try {",
-    "      $process = [System.Diagnostics.Process]::GetProcessById($id)",
-    "      $created = ([DateTime]$row.CreationDate).ToUniversalTime().Ticks",
-    "      if ($process.StartTime.ToUniversalTime().Ticks -ne $created) { continue }",
-    "      [void][OmcNative]::NtSuspendProcess($process.Handle)",
-    "      $owned[$id] = @{ Process = $process; Depth = ([int]$owned[$parent].Depth + 1) }",
-    "      $added = $true",
-    "    } catch {}",
+    "try {",
+    "  for ($pass = 0; $pass -lt 64; $pass++) {",
+    "    $added = $false",
+    "    foreach ($row in Get-CimInstance Win32_Process) {",
+    "      $parent = [int]$row.ParentProcessId; $id = [int]$row.ProcessId",
+    "      if (-not $owned.ContainsKey($parent) -or $owned.ContainsKey($id)) { continue }",
+    "      try {",
+    "        $process = [System.Diagnostics.Process]::GetProcessById($id)",
+    "        $created = ([DateTime]$row.CreationDate).ToUniversalTime().Ticks",
+    "        if ($process.StartTime.ToUniversalTime().Ticks -ne $created) { continue }",
+    "        [void][OmcNative]::NtSuspendProcess($process.Handle)",
+    "        $owned[$id] = @{ Process = $process; Depth = ([int]$owned[$parent].Depth + 1); Suspended = $true }",
+    "        $added = $true",
+    "      } catch {}",
+    "    }",
+    "    if (-not $added) { break }",
     "  }",
-    "  if (-not $added) { break }",
-    "}",
-    "$ordered = $owned.Values | Sort-Object -Property Depth -Descending",
-    "foreach ($entry in $ordered) { try { if (-not $entry.Process.HasExited) { $entry.Process.Kill() } } catch { exit 4 } }",
-    `if (-not $root.WaitForExit(${waitMs})) { exit 5 }`
+    "  $ordered = $owned.Values | Sort-Object -Property Depth -Descending",
+    "  foreach ($entry in $ordered) {",
+    "    try {",
+    "      if (-not $entry.Process.HasExited) { $entry.Process.Kill() }",
+    "      $entry.Suspended = $false",
+    "    } catch {",
+    "      # Kill failed: resume this process so it is not left frozen.",
+    "      try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {}",
+    "      exit 4",
+    "    }",
+    "  }",
+    `  if (-not $root.WaitForExit(${waitMs})) {`,
+    "    # Deadline exceeded after suspension: resume any still-suspended processes.",
+    "    foreach ($entry in $ordered) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }",
+    "    exit 5",
+    "  }",
+    "} catch {",
+    "  # Outer failure (e.g. CIM enumeration error): resume every suspended process.",
+    "  foreach ($entry in $owned.Values) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }",
+    "  exit 6",
+    "} finally {",
+    "  # Final safety net: resume any process still marked suspended.",
+    "  foreach ($entry in $owned.Values) { try { if ($entry.Suspended -and -not $entry.Process.HasExited) { [void][OmcNative]::NtResumeProcess($entry.Process.Handle) } } catch {} }",
+    "}"
   ].join("\n");
   try {
     await execFileAsync(
@@ -3735,7 +3761,7 @@ var init_atomic_write = __esm({
 
 // src/platform/index.ts
 import * as path2 from "path";
-import { readFileSync as readFileSync4 } from "fs";
+import { readFileSync as readFileSync5 } from "fs";
 var PLATFORM;
 var init_platform = __esm({
   "src/platform/index.ts"() {
@@ -3761,7 +3787,7 @@ import {
   closeSync as closeSync3,
   unlinkSync as unlinkSync5,
   writeSync as writeSync3,
-  readFileSync as readFileSync5,
+  readFileSync as readFileSync6,
   statSync,
   constants as fsConstants
 } from "fs";
@@ -3772,7 +3798,7 @@ function isLockStale(lockPath, staleLockMs) {
     const ageMs = Date.now() - stat2.mtimeMs;
     if (ageMs < staleLockMs) return false;
     try {
-      const raw = readFileSync5(lockPath, "utf-8");
+      const raw = readFileSync6(lockPath, "utf-8");
       const payload = JSON.parse(raw);
       if (payload.pid && isProcessAlive(payload.pid)) return false;
     } catch {
@@ -6499,7 +6525,7 @@ var init_mcp_comm = __esm({
 });
 
 // src/agents/utils.ts
-import { readFileSync as readFileSync6 } from "fs";
+import { readFileSync as readFileSync7 } from "fs";
 import { join as join13, dirname as dirname13, basename as basename8, resolve as resolve3, relative as relative3, isAbsolute as isAbsolute5 } from "path";
 import { fileURLToPath } from "url";
 function getPackageDir() {
@@ -6549,7 +6575,7 @@ function loadAgentPrompt(agentName) {
     if (rel.startsWith("..") || isAbsolute5(rel)) {
       throw new Error(`Invalid agent name: path traversal detected`);
     }
-    const content = readFileSync6(agentPath, "utf-8");
+    const content = readFileSync7(agentPath, "utf-8");
     return stripFrontmatter(content);
   } catch (error) {
     const message = error instanceof Error && error.message.includes("Invalid agent name") ? error.message : "Agent prompt file not found";
@@ -6690,7 +6716,7 @@ var init_omc_cli_rendering = __esm({
 
 // src/utils/paths.ts
 import { join as join15 } from "path";
-import { existsSync as existsSync12, readFileSync as readFileSync7, readdirSync as readdirSync4, statSync as statSync2, unlinkSync as unlinkSync6, rmSync, symlinkSync } from "fs";
+import { existsSync as existsSync12, readFileSync as readFileSync8, readdirSync as readdirSync4, statSync as statSync2, unlinkSync as unlinkSync6, rmSync, symlinkSync } from "fs";
 import { homedir as homedir3 } from "os";
 function getConfigDir() {
   if (process.platform === "win32") {
@@ -7192,7 +7218,7 @@ var init_delegation_routing = __esm({
 });
 
 // src/config/loader.ts
-import { readFileSync as readFileSync8, existsSync as existsSync13 } from "fs";
+import { readFileSync as readFileSync9, existsSync as existsSync13 } from "fs";
 import { join as join16, dirname as dirname15 } from "path";
 function buildDefaultConfig() {
   const defaultTierModels = getDefaultTierModels();
@@ -7368,7 +7394,7 @@ function loadJsoncFile(path4) {
     return null;
   }
   try {
-    const content = readFileSync8(path4, "utf-8");
+    const content = readFileSync9(path4, "utf-8");
     const result = parseJsonc(content);
     return result;
   } catch (error) {
@@ -8467,7 +8493,7 @@ var init_delegation_enforcer = __esm({
 });
 
 // src/lib/security-config.ts
-import { existsSync as existsSync14, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync14, readFileSync as readFileSync10 } from "fs";
 import { join as join17 } from "path";
 function loadSecurityFromConfigFiles() {
   const paths = [
@@ -8477,7 +8503,7 @@ function loadSecurityFromConfigFiles() {
   for (const configPath of paths) {
     if (!existsSync14(configPath)) continue;
     try {
-      const content = readFileSync9(configPath, "utf-8");
+      const content = readFileSync10(configPath, "utf-8");
       const parsed = parseJsonc(content);
       if (parsed?.security && typeof parsed.security === "object") {
         return parsed.security;
@@ -9270,7 +9296,7 @@ var init_worktree_cleanup_safety = __esm({
 });
 
 // src/team/git-worktree.ts
-import { existsSync as existsSync16, realpathSync as realpathSync5, readFileSync as readFileSync10, readdirSync as readdirSync5, rmSync as rmSync2, unlinkSync as unlinkSync7, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync16, realpathSync as realpathSync5, readFileSync as readFileSync11, readdirSync as readdirSync5, rmSync as rmSync2, unlinkSync as unlinkSync7, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join20, resolve as resolve5 } from "node:path";
 import { execFileSync as execFileSync5 } from "node:child_process";
 function getWorktreePath(repoRoot, teamName, workerName) {
@@ -9386,7 +9412,7 @@ function readRootAgentsBackup(repoRoot, teamName, workerName) {
   const backupPath = getRootAgentsBackupPath(repoRoot, teamName, workerName);
   if (!existsSync16(backupPath)) return null;
   try {
-    return JSON.parse(readFileSync10(backupPath, "utf-8"));
+    return JSON.parse(readFileSync11(backupPath, "utf-8"));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[omc] warning: worktree root AGENTS backup parse error: ${msg}
@@ -9405,7 +9431,7 @@ function installWorktreeRootAgents(teamName, workerName, repoRoot, worktreePath,
   validateResolvedPath(backupPath, omcRoot);
   ensureDirWithMode(getWorkerStateDir(repoRoot, teamName, workerName));
   const previous = readRootAgentsBackup(repoRoot, teamName, workerName);
-  const currentContent = existsSync16(agentsPath) ? readFileSync10(agentsPath, "utf-8") : void 0;
+  const currentContent = existsSync16(agentsPath) ? readFileSync11(agentsPath, "utf-8") : void 0;
   if (previous && currentContent !== void 0 && currentContent !== previous.installedContent) {
     const error = new Error(`agents_dirty: preserving modified worktree root AGENTS.md at ${agentsPath}`);
     error.code = "agents_dirty";
@@ -9438,7 +9464,7 @@ function restoreWorktreeRootAgents(teamName, workerName, repoRoot, worktreePath)
   }
   const agentsPath = join20(resolvedWorktreePath, "AGENTS.md");
   validateResolvedPath(agentsPath, resolvedWorktreePath);
-  const currentContent = existsSync16(agentsPath) ? readFileSync10(agentsPath, "utf-8") : void 0;
+  const currentContent = existsSync16(agentsPath) ? readFileSync11(agentsPath, "utf-8") : void 0;
   const isPartialInstallOriginal = backup.hadOriginal && currentContent === (backup.originalContent ?? "");
   if (currentContent !== void 0 && currentContent !== backup.installedContent && !isPartialInstallOriginal) {
     return { restored: false, reason: "agents_dirty" };
@@ -9461,7 +9487,7 @@ function readMetadataResult(repoRoot, teamName) {
   for (const metaPath of paths) {
     if (!existsSync16(metaPath)) continue;
     try {
-      const entries = JSON.parse(readFileSync10(metaPath, "utf-8"));
+      const entries = JSON.parse(readFileSync11(metaPath, "utf-8"));
       for (const entry of entries) byWorker.set(entry.workerName, entry);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -9484,7 +9510,7 @@ function listRootAgentsBackupIssues(repoRoot, teamName, entries) {
     const backupPath = join20(workersDir, workerName, "worktree-root-agents.json");
     if (!existsSync16(backupPath)) continue;
     try {
-      JSON.parse(readFileSync10(backupPath, "utf-8"));
+      JSON.parse(readFileSync11(backupPath, "utf-8"));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       issues.push({ path: backupPath, message: `worktree_root_agents_backup_unreadable:${workerName}:${message}` });
@@ -9611,7 +9637,7 @@ function checkWorkerWorktreeRemovalSafety(teamName, workerName, repoRoot, worktr
   if (backup) {
     const agentsPath = join20(wtPath, "AGENTS.md");
     validateResolvedPath(agentsPath, wtPath);
-    const currentContent = existsSync16(agentsPath) ? readFileSync10(agentsPath, "utf-8") : void 0;
+    const currentContent = existsSync16(agentsPath) ? readFileSync11(agentsPath, "utf-8") : void 0;
     const isPartialInstallOriginal = backup.hadOriginal && currentContent === (backup.originalContent ?? "");
     if (currentContent !== void 0 && currentContent !== backup.installedContent && !isPartialInstallOriginal) {
       const error = new Error(`agents_dirty: preserving modified worktree root AGENTS.md at ${agentsPath}`);
@@ -10356,7 +10382,7 @@ var init_runtime_flags = __esm({
 
 // src/team/merge-coordinator.ts
 import { execFileSync as execFileSync6 } from "node:child_process";
-import { appendFileSync, mkdirSync as mkdirSync6, readFileSync as readFileSync12 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync6, readFileSync as readFileSync13 } from "node:fs";
 import { isAbsolute as isAbsolute8, join as join23 } from "node:path";
 function validateBranchName(branch) {
   if (!BRANCH_NAME_RE.test(branch)) {
@@ -10381,7 +10407,7 @@ function configureHarnessMergeAttributes(repoRoot) {
   const attrPath = join23(infoDir, "attributes");
   let existing = "";
   try {
-    existing = readFileSync12(attrPath, "utf-8");
+    existing = readFileSync13(attrPath, "utf-8");
   } catch {
   }
   const existingLines = new Set(existing.split("\n").map((l) => l.trim()));
@@ -10941,8 +10967,8 @@ async function startMergeOrchestrator(config) {
   let persisted = { lastShas: {} };
   if (existsSync22(persistedPath)) {
     try {
-      const { readFileSync: readFileSync18 } = await import("node:fs");
-      persisted = JSON.parse(readFileSync18(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync19 } = await import("node:fs");
+      persisted = JSON.parse(readFileSync19(persistedPath, "utf-8"));
     } catch {
       persisted = { lastShas: {} };
     }
@@ -11348,8 +11374,8 @@ async function recoverFromRestart(config) {
   let persistedShasLoaded = 0;
   if (existsSync22(persistedPath)) {
     try {
-      const { readFileSync: readFileSync18 } = await import("node:fs");
-      const persisted = JSON.parse(readFileSync18(persistedPath, "utf-8"));
+      const { readFileSync: readFileSync19 } = await import("node:fs");
+      const persisted = JSON.parse(readFileSync19(persistedPath, "utf-8"));
       persistedShasLoaded = Object.keys(persisted.lastShas ?? {}).length;
     } catch {
       persistedShasLoaded = 0;
@@ -11414,7 +11440,7 @@ var init_merge_orchestrator = __esm({
 
 // src/team/recovery-request-store.ts
 import { createHash as createHash7, randomUUID as randomUUID9 } from "crypto";
-import { existsSync as existsSync23, linkSync as linkSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync13, readdirSync as readdirSync7, renameSync as renameSync3, unlinkSync as unlinkSync9, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync23, linkSync as linkSync3, mkdirSync as mkdirSync7, readFileSync as readFileSync14, readdirSync as readdirSync7, renameSync as renameSync3, unlinkSync as unlinkSync9, writeFileSync as writeFileSync6 } from "fs";
 import { dirname as dirname21, join as join27 } from "path";
 function isSafeRecoveryRequestId(requestId) {
   return requestId.length > 0 && requestId.length <= 128 && requestId !== "." && requestId !== ".." && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requestId);
@@ -11434,7 +11460,7 @@ function sha256(value) {
 }
 function parseCanonical(path4) {
   try {
-    const text = readFileSync13(path4, "utf8");
+    const text = readFileSync14(path4, "utf8");
     const parsed = JSON.parse(text);
     return canonicalize2(parsed) === text ? parsed : null;
   } catch {
@@ -11761,7 +11787,7 @@ __export(runtime_owner_client_exports, {
 });
 import { spawn } from "node:child_process";
 import { createHash as createHash8, randomUUID as randomUUID10 } from "node:crypto";
-import { existsSync as existsSync24, readdirSync as readdirSync8, readFileSync as readFileSync14 } from "node:fs";
+import { existsSync as existsSync24, readdirSync as readdirSync8, readFileSync as readFileSync15 } from "node:fs";
 import { link as link3, mkdir as mkdir12, open as open4, readFile as readFile12, unlink as unlink5 } from "node:fs/promises";
 import { basename as basename10, dirname as dirname22, join as join28 } from "node:path";
 function workspaceHash(cwd) {
@@ -11887,7 +11913,7 @@ function hasLiveOrUnknownBootstrapCandidate(input, recoveryId, expectedEpoch, pr
     if (!entry.endsWith(".json")) continue;
     let value;
     try {
-      value = JSON.parse(readFileSync14(join28(candidateDirectory, entry), "utf8"));
+      value = JSON.parse(readFileSync15(join28(candidateDirectory, entry), "utf8"));
     } catch {
       return true;
     }
@@ -14899,7 +14925,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed"
   );
   const { rename: rename5 } = await import("fs/promises");
-  const { readFileSync: readFileSync18, writeFileSync: writeFileSync8, existsSync: fsExistsSync } = await import("fs");
+  const { readFileSync: readFileSync19, writeFileSync: writeFileSync8, existsSync: fsExistsSync } = await import("fs");
   const { withFileLockSync: withFileLockSync2 } = await Promise.resolve().then(() => (init_file_lock(), file_lock_exports));
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -14933,7 +14959,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
       const taskPath2 = absPath(cwd, TeamPaths.taskFile(sanitized, taskId));
       if (!fsExistsSync(taskPath2)) continue;
       try {
-        const taskRaw = readFileSync18(taskPath2, "utf-8");
+        const taskRaw = readFileSync19(taskPath2, "utf-8");
         const taskData = JSON.parse(taskRaw);
         if (taskData.owner === worker.name && taskData.status === "in_progress") {
           targetTaskId = taskId;
@@ -14961,7 +14987,7 @@ async function processCliWorkerVerdicts(teamName, cwd) {
     let transitionOk = false;
     try {
       withFileLockSync2(targetTaskPath + ".lock", () => {
-        const raw = readFileSync18(targetTaskPath, "utf-8");
+        const raw = readFileSync19(targetTaskPath, "utf-8");
         const taskData = JSON.parse(raw);
         if (taskData.status !== "in_progress" || taskData.owner !== worker.name) {
           return;
@@ -15699,7 +15725,7 @@ var init_runtime_v2 = __esm({
 // src/cli/team.ts
 import { randomUUID as randomUUID12 } from "crypto";
 import { spawn as spawn2 } from "child_process";
-import { existsSync as existsSync28, mkdirSync as mkdirSync8, readFileSync as readFileSync17, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync28, mkdirSync as mkdirSync8, readFileSync as readFileSync18, writeFileSync as writeFileSync7 } from "fs";
 import { readFile as readFile15, rm as rm6 } from "fs/promises";
 import { dirname as dirname24, join as join32 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
@@ -15714,7 +15740,7 @@ init_dispatch_queue();
 init_mailbox_notification_guard();
 init_dispatch_queue();
 init_worker_bootstrap();
-import { existsSync as existsSync26, readFileSync as readFileSync15 } from "node:fs";
+import { existsSync as existsSync26, readFileSync as readFileSync16 } from "node:fs";
 import { dirname as dirname23, join as join30, resolve as resolvePath } from "node:path";
 
 // src/team/runtime.ts
@@ -15736,7 +15762,7 @@ init_tmux_session();
 init_fs_utils();
 init_platform();
 init_state_paths();
-import { readFileSync as readFileSync11, readdirSync as readdirSync6, existsSync as existsSync17, openSync as openSync4, closeSync as closeSync4, unlinkSync as unlinkSync8, writeSync as writeSync4, statSync as statSync3, constants as fsConstants2 } from "fs";
+import { readFileSync as readFileSync12, readdirSync as readdirSync6, existsSync as existsSync17, openSync as openSync4, closeSync as closeSync4, unlinkSync as unlinkSync8, writeSync as writeSync4, statSync as statSync3, constants as fsConstants2 } from "fs";
 import { join as join21 } from "path";
 
 // src/team/runtime.ts
@@ -16159,7 +16185,7 @@ async function executeTeamCleanupViaRuntime(teamName, cwd) {
 function readTeamStateRootFromFile(path4) {
   if (!existsSync26(path4)) return null;
   try {
-    const parsed = JSON.parse(readFileSync15(path4, "utf8"));
+    const parsed = JSON.parse(readFileSync16(path4, "utf8"));
     return typeof parsed.team_state_root === "string" && parsed.team_state_root.trim() !== "" ? parsed.team_state_root.trim() : null;
   } catch {
     return null;
@@ -16945,7 +16971,7 @@ init_paths();
 
 // src/planning/artifacts.ts
 init_worktree_paths();
-import { readdirSync as readdirSync9, readFileSync as readFileSync16, existsSync as existsSync27 } from "fs";
+import { readdirSync as readdirSync9, readFileSync as readFileSync17, existsSync as existsSync27 } from "fs";
 import { join as join31 } from "path";
 
 // src/planning/artifact-names.ts
@@ -17046,7 +17072,7 @@ function selectLatestPlanningArtifactPath(paths) {
 // src/planning/artifacts.ts
 function readFileSafe(path4) {
   try {
-    return readFileSync16(path4, "utf-8");
+    return readFileSync17(path4, "utf-8");
   } catch {
     return null;
   }
@@ -17344,7 +17370,7 @@ async function resolveCleanupPaneEvidence(job, jobsDir, jobId) {
 }
 function readJobFromDisk(jobId, jobsDir) {
   try {
-    const content = readFileSync17(jobPath(jobsDir, jobId), "utf-8");
+    const content = readFileSync18(jobPath(jobsDir, jobId), "utf-8");
     return parseJsonSafe(content);
   } catch {
     return null;
@@ -17373,7 +17399,7 @@ function generateJobId(now = Date.now()) {
 }
 function convergeWithResultArtifact(jobId, job, jobsDir) {
   try {
-    const artifactRaw = readFileSync17(resultArtifactPath(jobsDir, jobId), "utf-8");
+    const artifactRaw = readFileSync18(resultArtifactPath(jobsDir, jobId), "utf-8");
     const artifactParsed = parseJsonSafe(artifactRaw);
     if (artifactParsed?.status === "completed" || artifactParsed?.status === "failed") {
       return {

@@ -622,7 +622,7 @@ export async function scaleUpOwned(
           `unaddressable_spawned_pane:${(result.stdout || '').trim() || '<missing>'}`);
       }
       const ownershipResult = await adoptWorkerPaneOwnership({
-        provider: 'tmux',
+        provider: paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
         providerTarget: config.tmux_session,
         paneId,
         leaderPaneId: config.leader_pane_id ?? '',
@@ -968,7 +968,7 @@ export async function scaleDownOwned(
       let paneOwnership: WorkerPaneOwnership | null = null;
       if (initialPaneLiveness !== 'dead') {
         const ownershipResult = await adoptWorkerPaneOwnership({
-          provider: 'tmux',
+          provider: paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
           providerTarget: config.tmux_session,
           paneId,
           leaderPaneId: config.leader_pane_id ?? '',

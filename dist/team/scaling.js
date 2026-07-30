@@ -554,7 +554,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     return await rollbackScaleUp(`Failed to capture pane ID for ${workerName}`, undefined, `unaddressable_spawned_pane:${(result.stdout || '').trim() || '<missing>'}`);
                 }
                 const ownershipResult = await adoptWorkerPaneOwnership({
-                    provider: 'tmux',
+                    provider: paneId.startsWith('%') ? 'tmux' : 'cmux',
                     providerTarget: config.tmux_session,
                     paneId,
                     leaderPaneId: config.leader_pane_id ?? '',
@@ -881,7 +881,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             let paneOwnership = null;
             if (initialPaneLiveness !== 'dead') {
                 const ownershipResult = await adoptWorkerPaneOwnership({
-                    provider: 'tmux',
+                    provider: paneId.startsWith('%') ? 'tmux' : 'cmux',
                     providerTarget: config.tmux_session,
                     paneId,
                     leaderPaneId: config.leader_pane_id ?? '',
