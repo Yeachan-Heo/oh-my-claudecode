@@ -163,6 +163,9 @@ function runBatchVersion(resolvedPath: string): SpawnResult | undefined {
   const comspec = validatedComspec();
   if (!comspec) return undefined;
 
+  // cmd.exe parses the raw command tail itself. The closed path grammar makes
+  // this fixed payload safe to pass verbatim and avoids Node re-quoting it.
+
   try {
     return spawnSync(
       comspec,
@@ -173,7 +176,7 @@ function runBatchVersion(resolvedPath: string): SpawnResult | undefined {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,
-        windowsVerbatimArguments: false,
+        windowsVerbatimArguments: true,
         env: process.env,
       },
     ) as SpawnResult;

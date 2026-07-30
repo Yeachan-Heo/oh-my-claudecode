@@ -227,7 +227,7 @@ describe('cli-detection', () => {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,
-        windowsVerbatimArguments: false,
+        windowsVerbatimArguments: true,
         env: process.env,
       },
     );
