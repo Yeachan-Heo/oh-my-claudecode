@@ -769,7 +769,7 @@ export async function runWorkerLaunchBootstrap(value) {
                     await atomicWriteJson(`${spec.started_path}.terminal`, {
                         ...identityOf(spec), kind: 'worker_launch_provider_terminal',
                         outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
-                        pid: child.pid ?? null, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
+                        pid: child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
                     await invocation.cleanup();
                     resolve(cleanupVerified
@@ -784,7 +784,7 @@ export async function runWorkerLaunchBootstrap(value) {
                         clearInterval(supervisorTimer);
                     await atomicWriteJson(`${spec.started_path}.terminal`, {
                         ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error', cleanup_verified: false,
-                        pid: child.pid ?? null, written_at: new Date().toISOString(),
+                        pid: child.pid ?? null, process_start_identity: providerStartIdentity, written_at: new Date().toISOString(),
                     }).catch(() => undefined);
                     await invocation.cleanup();
                     resolve({ outcome: 'provider_spawn_failed' });
@@ -898,7 +898,7 @@ export async function runWorkerLaunchBootstrap(value) {
                                 clearInterval(supervisorTimer);
                             await atomicWriteJson(`${spec.started_path}.terminal`, {
                                 ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'cleanup_unverified', cleanup_verified: false,
-                                pid: child.pid ?? null, exit_code: exitCode, signal: null, written_at: new Date().toISOString(),
+                                pid: child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: exitCode, signal: null, written_at: new Date().toISOString(),
                             }).catch(() => undefined);
                             await invocation.cleanup();
                             resolveCompletion({ outcome: 'provider_cleanup_unverified' });

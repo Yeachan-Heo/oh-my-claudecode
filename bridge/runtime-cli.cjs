@@ -1802,6 +1802,7 @@ async function runWorkerLaunchBootstrap(value) {
             outcome: cleanupVerified ? "exit" : "cleanup_unverified",
             cleanup_verified: cleanupVerified,
             pid: child.pid ?? null,
+            process_start_identity: providerStartIdentity,
             exit_code: effectiveExitCode,
             signal: effectiveSignal,
             written_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -1819,6 +1820,7 @@ async function runWorkerLaunchBootstrap(value) {
             outcome: "error",
             cleanup_verified: false,
             pid: child.pid ?? null,
+            process_start_identity: providerStartIdentity,
             written_at: (/* @__PURE__ */ new Date()).toISOString()
           }).catch(() => void 0);
           await invocation.cleanup();
@@ -1921,6 +1923,7 @@ async function runWorkerLaunchBootstrap(value) {
                 outcome: "cleanup_unverified",
                 cleanup_verified: false,
                 pid: child.pid ?? null,
+                process_start_identity: providerStartIdentity,
                 exit_code: exitCode,
                 signal: null,
                 written_at: (/* @__PURE__ */ new Date()).toISOString()

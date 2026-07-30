@@ -34,9 +34,9 @@ export interface TerminateOwnedProcessTreeOptions {
     force?: boolean;
 }
 /**
- * Terminate only a process whose durable start identity still matches. The
- * Windows path is asynchronous and receives the worker's remaining deadline,
- * preventing taskkill from holding SessionEnd for its legacy five seconds.
+ * Terminate only a process whose durable start identity still matches. Windows
+ * binds verification and tree termination to one System.Diagnostics.Process
+ * handle so a reused numeric PID is never handed to taskkill.
  */
 export declare function terminateOwnedProcessTree(options: TerminateOwnedProcessTreeOptions): Promise<'terminated' | 'already-dead' | 'identity-mismatch' | 'unknown' | 'deadline-exceeded'>;
 //# sourceMappingURL=process-utils.d.ts.map
