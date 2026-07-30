@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { buildProviderSpawnInvocation, materializeProviderSpawnInvocation, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from './worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { getProcessStartIdentity, getProcessStartIdentitySync, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 export interface RecoveryActivationGate {
   recoveryId: string;
   workerName: string;
@@ -179,8 +179,17 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
       await new Promise(resolve => setTimeout(resolve, 150));
       if (settled) return await completion;
       providerPid = child.pid;
-      providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
-      if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+      // Capture identity synchronously to close the PID-reuse window.
+      providerStartIdentity = providerPid ? getProcessStartIdentitySync(providerPid) : null;
+      if (!providerStartIdentity && providerPid) {
+        providerStartIdentity = await getProcessStartIdentity(providerPid);
+        // Recheck settled and liveness after async lookup to detect PID reuse
+        if (settled || !providerPid || !isProcessAlive(providerPid)) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+      }
+      if (settled || !providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
         if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
         return { outcome: 'provider_spawn_failed' as const };
       }

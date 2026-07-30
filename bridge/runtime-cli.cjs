@@ -11748,8 +11748,15 @@ async function runWorkerActivationGate(gate) {
       await new Promise((resolve8) => setTimeout(resolve8, 150));
       if (settled) return await completion;
       providerPid = child.pid;
-      providerStartIdentity = providerPid ? await getProcessStartIdentity(providerPid) : null;
-      if (!providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
+      providerStartIdentity = providerPid ? getProcessStartIdentitySync(providerPid) : null;
+      if (!providerStartIdentity && providerPid) {
+        providerStartIdentity = await getProcessStartIdentity(providerPid);
+        if (settled || !providerPid || !isProcessAlive(providerPid)) {
+          if (!await terminateProvider()) return { outcome: "provider_cleanup_unverified" };
+          return { outcome: "provider_spawn_failed" };
+        }
+      }
+      if (settled || !providerPid || !providerStartIdentity || !isProcessAlive(providerPid)) {
         if (!await terminateProvider()) return { outcome: "provider_cleanup_unverified" };
         return { outcome: "provider_spawn_failed" };
       }
