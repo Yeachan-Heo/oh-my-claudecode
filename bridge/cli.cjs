@@ -14998,20 +14998,158 @@ function unescapeTomlString(value) {
 function renderTomlString(value) {
   return `"${escapeTomlString(value)}"`;
 }
+function isValidTomlLiteralContent(content) {
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    if (code <= 8 || code >= 10 && code <= 31 || code === 127) {
+      return false;
+    }
+  }
+  return true;
+}
 function parseTomlQuotedString(value) {
-  const match = value.trim().match(/^"((?:\\.|[^"\\])*)"$/);
-  return match ? unescapeTomlString(match[1]) : void 0;
+  const trimmed = value.trim();
+  const basicMatch = trimmed.match(/^"((?:\\.|[^"\\])*)"$/);
+  if (basicMatch) {
+    return unescapeTomlString(basicMatch[1]);
+  }
+  if (trimmed.startsWith("'") && !trimmed.includes("\n") && !trimmed.includes("\r")) {
+    const literalMatch = trimmed.match(/^'([^']*)'$/);
+    if (literalMatch && isValidTomlLiteralContent(literalMatch[1])) {
+      return literalMatch[1];
+    }
+  }
+  return void 0;
 }
 function renderTomlStringArray(values) {
   return `[${values.map(renderTomlString).join(", ")}]`;
 }
-function parseTomlStringArray(value) {
-  try {
-    const parsed = JSON.parse(value.trim());
-    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : void 0;
-  } catch {
+function parseTomlStringArrayFallback(value) {
+  let i = 0;
+  while (i < value.length && (value[i] === " " || value[i] === "	")) {
+    i++;
+  }
+  if (i >= value.length || value[i] !== "[") {
     return void 0;
   }
+  i++;
+  const result = [];
+  for (; ; ) {
+    while (i < value.length && (value[i] === " " || value[i] === "	")) {
+      i++;
+    }
+    if (i >= value.length) {
+      return void 0;
+    }
+    if (value[i] === "]" && result.length === 0) {
+      i++;
+      while (i < value.length) {
+        if (value[i] !== " " && value[i] !== "	") {
+          return void 0;
+        }
+        i++;
+      }
+      return result;
+    }
+    const quote = value[i];
+    if (quote !== '"' && quote !== "'") {
+      return void 0;
+    }
+    let member;
+    if (quote === "'") {
+      i++;
+      const start = i;
+      while (i < value.length && value[i] !== "'") {
+        i++;
+      }
+      if (i >= value.length) {
+        return void 0;
+      }
+      member = value.slice(start, i);
+      if (!isValidTomlLiteralContent(member)) {
+        return void 0;
+      }
+      i++;
+    } else {
+      i++;
+      const tokenStart = i - 1;
+      while (i < value.length) {
+        if (value[i] === "\\") {
+          i += 2;
+        } else if (value[i] === '"') {
+          break;
+        } else {
+          i++;
+        }
+      }
+      if (i >= value.length || value[i] !== '"') {
+        return void 0;
+      }
+      i++;
+      const token = value.slice(tokenStart, i);
+      try {
+        const decoded = JSON.parse(token);
+        if (typeof decoded !== "string") {
+          return void 0;
+        }
+        member = decoded;
+      } catch {
+        return void 0;
+      }
+    }
+    result.push(member);
+    while (i < value.length && (value[i] === " " || value[i] === "	")) {
+      i++;
+    }
+    if (i >= value.length) {
+      return void 0;
+    }
+    if (value[i] === "]") {
+      i++;
+      while (i < value.length) {
+        if (value[i] !== " " && value[i] !== "	") {
+          return void 0;
+        }
+        i++;
+      }
+      return result;
+    }
+    if (value[i] !== ",") {
+      return void 0;
+    }
+    i++;
+    while (i < value.length && (value[i] === " " || value[i] === "	")) {
+      i++;
+    }
+    if (i >= value.length) {
+      return void 0;
+    }
+    if (value[i] === "]") {
+      i++;
+      while (i < value.length) {
+        if (value[i] !== " " && value[i] !== "	") {
+          return void 0;
+        }
+        i++;
+      }
+      return result;
+    }
+    if (value[i] !== '"' && value[i] !== "'") {
+      return void 0;
+    }
+  }
+}
+function parseTomlStringArray(value) {
+  const trimmed = value.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : void 0;
+  } catch {
+  }
+  if (value.includes("\n") || value.includes("\r")) {
+    return void 0;
+  }
+  return parseTomlStringArrayFallback(value);
 }
 function renderTomlBareKey(key) {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : renderTomlString(key);
