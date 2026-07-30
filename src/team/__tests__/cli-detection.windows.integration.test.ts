@@ -6,6 +6,7 @@ import { probeCli } from '../cli-detection.js';
 
 const isWindows = process.platform === 'win32';
 
+// where.exe expands short 8.3 segments, so compare canonical filesystem identity.
 function canonicalWindowsPath(value: string): string {
   return realpathSync.native(value).toLowerCase();
 }
