@@ -15277,10 +15277,15 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
       if (!attempt || !Number.isInteger(attempt.pid) || attempt.pid <= 0 || !attempt.process_started_at) {
         throw new Error("shutdown_fence_unowned");
       }
-      if (!isProcessIdentityDead({ pid: attempt.pid, process_started_at: attempt.process_started_at })) {
+      const isAllDeadExpiry = attempt.nonce.startsWith("all-dead-expiry:") && attempt.state_revision === current.config.state_revision;
+      const ownerIsDead = isProcessIdentityDead({ pid: attempt.pid, process_started_at: attempt.process_started_at });
+      const isSameOwner = attempt.pid === process.pid && attempt.process_started_at === currentProcessStartIdentity();
+      if (!ownerIsDead && !isAllDeadExpiry) {
         throw new Error("shutdown_in_progress");
       }
-      const isAllDeadExpiry = attempt.nonce.startsWith("all-dead-expiry:") && attempt.state_revision === current.config.state_revision;
+      if (isAllDeadExpiry && !ownerIsDead && !isSameOwner) {
+        throw new Error("shutdown_in_progress");
+      }
       if (!isAllDeadExpiry) {
         throw new Error("shutdown_fence_unowned");
       }
@@ -15340,12 +15345,14 @@ async function shutdownTeamV2(teamName, cwd, options = {}) {
     return saveTeamConfigAtRevision(active, current.stateRevision, cwd);
   });
   const rollbackShutdownForRetry = async () => {
-    if (!config) return;
+    if (!config) return false;
     const rolled = await rollbackRejectedShutdownFence(config).catch(() => false);
     if (rolled) {
       const refreshed = await readRevisionedTeamConfig(sanitized, cwd);
       if (refreshed) config = refreshed.config;
+      return true;
     }
+    return false;
   };
   const finalizeAutoMerge = async () => {
     const orchestrator = getTeamOrchestrator(sanitized);
@@ -15537,20 +15544,17 @@ Then exit your session.
     })) providerCleanupFailures.push(worker.name);
   }
   if (paneCleanupAlive.length > 0) {
-    await rollbackShutdownForRetry();
-    await finalizeAutoMerge();
+    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
     return { outcome: "preserved", reason: "worker_panes_alive", workers: paneCleanupAlive };
   }
   if (paneCleanupUnknown.length > 0) {
-    await rollbackShutdownForRetry();
-    await finalizeAutoMerge();
+    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
     return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: paneCleanupUnknown };
   }
   if (providerCleanupFailures.length > 0) {
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
 `);
-    await rollbackShutdownForRetry();
-    await finalizeAutoMerge();
+    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
     return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: providerCleanupFailures };
   }
   try {
@@ -15565,8 +15569,7 @@ Then exit your session.
     const splitPaneMode = Boolean(config.tmux_session && !ownsWindow && config.tmux_session.includes(":"));
     if (!splitPaneMode && config.tmux_session) {
       if (!config.leader_pane_id) {
-        await rollbackShutdownForRetry();
-        await finalizeAutoMerge();
+        if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: ["leader-fixed"] };
       }
       const leaderOwnership = await verifyTeamTargetOwnership({
@@ -15577,8 +15580,7 @@ Then exit your session.
         paneId: config.leader_pane_id
       });
       if (leaderOwnership.kind !== "owned") {
-        await rollbackShutdownForRetry();
-        await finalizeAutoMerge();
+        if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: "preserved", reason: "provider_cleanup_unverified", workers: ["leader-fixed"] };
       }
       const sessionMode = ownsWindow ? config.tmux_session.includes(":") ? "dedicated-window" : "detached-session" : "detached-session";
@@ -15592,16 +15594,14 @@ Then exit your session.
     if (aliveWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
-      await rollbackShutdownForRetry();
-      await finalizeAutoMerge();
+      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
       return { outcome: "preserved", reason: "worker_panes_alive", workers: aliveWorkers };
     }
     const unknownWorkers = liveness.filter(([, state]) => state === "unknown").map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (unknownWorkers.length > 0) {
       process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(", ")}
 `);
-      await rollbackShutdownForRetry();
-      await finalizeAutoMerge();
+      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
       return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: unknownWorkers };
     }
   } catch (err) {
@@ -15609,8 +15609,7 @@ Then exit your session.
 `);
     if (recordedWorkerPaneIds.length > 0) {
       process.stderr.write("[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n");
-      await rollbackShutdownForRetry();
-      await finalizeAutoMerge();
+      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
       return { outcome: "failed", reason: "tmux_cleanup_failed", detail: err instanceof Error ? err.message : String(err) };
     }
   }
