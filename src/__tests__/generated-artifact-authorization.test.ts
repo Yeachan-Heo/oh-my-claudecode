@@ -323,8 +323,8 @@ describe('generated-artifact base trust root workflow', () => {
     const expected3588Authorization = {
       pullNumber: 3588,
       targetRef: 'dev',
-      mergeBaseSha: '46f26683032c4689fed0b6045cd1f156cefeae7a',
-      headSha: '82f9eac566bb845449755737d2adb535c25f1222',
+      mergeBaseSha: '37ecdd664c45bf948f5b52c1c3b2ca69057df2fd',
+      headSha: 'da4647c33a90c3c8b6ab29b5cf7c20f1ac1d289c',
       owner: 'Yeachan-Heo',
       expiresAt: '2026-08-14T00:00:00.000Z',
       generatedDelta: {
