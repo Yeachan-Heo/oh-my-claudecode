@@ -7,6 +7,7 @@ import { runWorkerActivationGate } from '../worker-activation-gate.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
 import { isProcessAlive } from '../../platform/process-utils.js';
 
+
 let cwd: string;
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'recovery-gate-')); });
 afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
@@ -28,6 +29,30 @@ async function acceptedAttempt(workerName: string, paneId: string, recoveryId: s
 }
 
 describe('worker recovery activation gate', () => {
+  it('fails closed before direct provider spawn on Windows', async () => {
+    const launchAttempt = await prepareWorkerLaunchAttempt({
+      cwd,
+      teamName: 'team',
+      workerName: 'worker-1',
+      paneId: '%1',
+      provider: 'codex',
+      runtimeCliPath: join(cwd, 'runtime-cli.cjs'),
+      context: { kind: 'recovery', recovery_id: 'recovery-windows', replacement_generation: 1, pane_attempt_id: 'pane-windows' },
+    });
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      await expect(runWorkerActivationGate({
+        recoveryId: 'recovery-windows', workerName: 'worker-1', replacementGeneration: 1,
+        paneAttemptId: 'pane-windows', readyPath: join(cwd, 'ready'), activatePath: join(cwd, 'activate'),
+        runPath: join(cwd, 'run'), providerArgv: [process.execPath, '-e', 'process.exit(0)'],
+        launchAttempt, cwd,
+      })).resolves.toEqual({ outcome: 'provider_cleanup_unverified' });
+      expect(isProcessAlive(process.pid)).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+  });
   it('spawns the provider only after matching activate and run records and publishes launched evidence', async () => {
     const readyPath = join(cwd, 'ready.json');
     const activatePath = join(cwd, 'activate.json');

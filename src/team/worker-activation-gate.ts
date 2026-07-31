@@ -68,6 +68,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
     || launchContext.recovery_id !== gate.recoveryId
     || launchContext.replacement_generation !== gate.replacementGeneration
     || launchContext.pane_attempt_id !== gate.paneAttemptId) return { outcome: 'superseded' };
+  if (process.platform === 'win32') return { outcome: 'provider_cleanup_unverified' };
   const expected: GateRecord = {
     recovery_id: gate.recoveryId,
     worker_name: gate.workerName,
