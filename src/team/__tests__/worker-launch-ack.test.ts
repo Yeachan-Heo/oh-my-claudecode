@@ -145,7 +145,7 @@ describe('worker launch acknowledgement', () => {
     const launchAttempt = await attempt();
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 100)'],
+      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 500)'],
       cwd,
     ));
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
@@ -155,12 +155,11 @@ describe('worker launch acknowledgement', () => {
     await vi.waitFor(async () => {
       await expect(isWorkerLaunchProviderStarted(launchAttempt)).resolves.toBe(true);
     }, { timeout: 2_000, interval: 5 });
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
     await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
       timeoutMs: 50,
       pollIntervalMs: 5,
     })).resolves.toBe(false);
-    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
   });
 
   it('kills provider descendants when the provider exits around start publication', async () => {
