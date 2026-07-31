@@ -1584,6 +1584,62 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 3610,
+      "targetRef": "dev",
+      "mergeBaseSha": "c96720aa8f0afc0ab721c38458f7e6f211a9e5ed",
+      "headSha": "a7e08dabb1a6b7a026b2ea1343631a3a62cb3829",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-14T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 7,
+        "sha256": "1a2a6e742ef9b0a60ea1cbb0e29679b9294db65113ecbedcfdc63ac4f8b727f6"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "473bc16119a57960ed45d9d2b707454f08418e8e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/usage-api.test.js",
+          "sha": "150d495f168f4b32eccb0a07a234acb349642f56",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/usage-api.test.js.map",
+          "sha": "2f8bec6d2c66c818cb9402468ed2009f1c448e49",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.d.ts",
+          "sha": "b754ba555a7236895ed225a3c2fa222104388ff0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.d.ts.map",
+          "sha": "d600fb14bb7fb471b1956d392b4ed1d09139d001",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.js",
+          "sha": "cd1afac9f9bdb9f635f740cffe1d1d780100191a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.js.map",
+          "sha": "f05b01a0254e78abb82c2b5e6c0b9ccf3d893341",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
