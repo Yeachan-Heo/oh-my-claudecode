@@ -1516,6 +1516,50 @@
       ]
     },
     {
+      "pullNumber": 3602,
+      "targetRef": "dev",
+      "mergeBaseSha": "3097b7c8aaea8e74e7c25f972fb4ce6febebef3c",
+      "headSha": "b078774c7466ebb4def2d3b0ad2f963b67941176",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-12T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 5,
+        "sha256": "55f64295a50d45a13a95da316b59fb0a97044c37059dc3f9762605e34580a1fc"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "855ccc992e460e01a79f0a6e3c941be4eea3a6e5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/doctor-team-routing.js",
+          "sha": "dd0dff5073ffdc922c6d4403fee85cedc349cae4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "b1ea32f23128d1b7c9dd017156902d4446e9bb9e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/cli-detection.d.ts",
+          "sha": "e7e64318064ff081d64c46329431aa84d78c16e6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/cli-detection.js",
+          "sha": "c888776f5dd23f0a8c308c232a8a6e8e3b603a96",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 3603,
       "targetRef": "dev",
       "mergeBaseSha": "0686239b0b6fa4e1b7d923d1b8b2aa3e7431dc15",
@@ -1537,6 +1581,62 @@
           "status": "modified",
           "filename": "dist/installer/mcp-registry.js",
           "sha": "99d3c36dbb897f4a4d2ed23abb8964c68af33e9b",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 3610,
+      "targetRef": "dev",
+      "mergeBaseSha": "c96720aa8f0afc0ab721c38458f7e6f211a9e5ed",
+      "headSha": "a7e08dabb1a6b7a026b2ea1343631a3a62cb3829",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-14T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 7,
+        "sha256": "1a2a6e742ef9b0a60ea1cbb0e29679b9294db65113ecbedcfdc63ac4f8b727f6"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "473bc16119a57960ed45d9d2b707454f08418e8e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/usage-api.test.js",
+          "sha": "150d495f168f4b32eccb0a07a234acb349642f56",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/usage-api.test.js.map",
+          "sha": "2f8bec6d2c66c818cb9402468ed2009f1c448e49",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.d.ts",
+          "sha": "b754ba555a7236895ed225a3c2fa222104388ff0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.d.ts.map",
+          "sha": "d600fb14bb7fb471b1956d392b4ed1d09139d001",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.js",
+          "sha": "cd1afac9f9bdb9f635f740cffe1d1d780100191a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/usage-api.js.map",
+          "sha": "f05b01a0254e78abb82c2b5e6c0b9ccf3d893341",
           "previousFilename": null
         }
       ]

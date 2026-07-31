@@ -1259,8 +1259,8 @@ doctorCmd
 Examples:
   $ omc doctor team-routing                     Probe configured providers
   $ omc doctor team-routing --json              Output results as JSON`)
-  .action(async (options) => {
-    const exitCode = await doctorTeamRoutingCommand({ json: options.json ?? false });
+  .action(async (_options, command) => {
+    const exitCode = await doctorTeamRoutingCommand({ json: command.optsWithGlobals().json ?? false });
     process.exit(exitCode);
   });
 
