@@ -4675,6 +4675,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   const terminationRequestPath = `${attempt.startedPath}.termination-request`;
   const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
   const existingRequest = await readJson(terminationRequestPath);
+  let hadExistingValidTerminationRequest = false;
   if (process.platform === "win32") {
     if (existingRequest.kind === "absent") {
       try {
@@ -4719,6 +4720,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   } else {
     const value = existingRequest.kind === "value" ? existingRequest.value : null;
     if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_request" || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
+    hadExistingValidTerminationRequest = true;
   }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   const result = await terminateOwnedProcessGroup({
@@ -4728,8 +4730,35 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
     deadlineAt,
     force: true
   });
-  if (result === "already-dead" || result === "identity-mismatch") return terminalCleanupVerified;
+  if (result === "already-dead" || result === "identity-mismatch") {
+    return terminalCleanupVerified || hadExistingValidTerminationRequest && isProcessGroupAbsent(record.process_group_id) && await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record);
+  }
   if (result !== "terminated") return false;
+  if (!await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record)) {
+    const deadline2 = Date.parse(deadlineAt);
+    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline2);
+    if ((liveness === "dead" || liveness === "mismatch") && await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record)) return true;
+    return false;
+  }
+  const deadline = Date.parse(deadlineAt);
+  while (Date.now() < deadline) {
+    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
+    if (liveness === "dead" || liveness === "mismatch") return true;
+    if (liveness === "unknown") return false;
+    await sleep2(20);
+  }
+  return false;
+}
+function isProcessGroupAbsent(processGroupId) {
+  if (process.platform === "win32" || !Number.isSafeInteger(processGroupId) || Number(processGroupId) <= 0) return false;
+  try {
+    process.kill(-Number(processGroupId), 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+async function publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record) {
   const existingComplete = await readJson(terminationCompletePath);
   if (existingComplete.kind === "absent") {
     try {
@@ -4741,38 +4770,13 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
         process_start_identity: record.process_start_identity,
         written_at: (/* @__PURE__ */ new Date()).toISOString()
       });
+      return true;
     } catch {
-      const deadline2 = Date.parse(deadlineAt);
-      const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline2);
-      if (liveness === "dead" || liveness === "mismatch") {
-        try {
-          await writeExclusiveAtomic(terminationCompletePath, {
-            ...identityOf(attempt),
-            kind: "worker_launch_termination_complete",
-            cleanup_verified: true,
-            pid: record.pid,
-            process_start_identity: record.process_start_identity,
-            written_at: (/* @__PURE__ */ new Date()).toISOString()
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      }
       return false;
     }
-  } else {
-    const value = existingComplete.kind === "value" ? existingComplete.value : null;
-    if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_complete" || value.cleanup_verified !== true || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
   }
-  const deadline = Date.parse(deadlineAt);
-  while (Date.now() < deadline) {
-    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
-    if (liveness === "dead" || liveness === "mismatch") return true;
-    if (liveness === "unknown") return false;
-    await sleep2(20);
-  }
-  return false;
+  const value = existingComplete.kind === "value" ? existingComplete.value : null;
+  return !!value && identityMatches(value, attempt) && value.kind === "worker_launch_termination_complete" && value.cleanup_verified === true && value.pid === record.pid && value.process_start_identity === record.process_start_identity;
 }
 async function readValidProviderStarted(attempt) {
   const started = await readJson(attempt.startedPath);

@@ -4221,6 +4221,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   const terminationRequestPath = `${attempt.startedPath}.termination-request`;
   const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
   const existingRequest = await readJson(terminationRequestPath);
+  let hadExistingValidTerminationRequest = false;
   if (process.platform === "win32") {
     if (existingRequest.kind === "absent") {
       try {
@@ -4265,6 +4266,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   } else {
     const value = existingRequest.kind === "value" ? existingRequest.value : null;
     if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_request" || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
+    hadExistingValidTerminationRequest = true;
   }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   const result = await terminateOwnedProcessGroup({
@@ -4274,8 +4276,35 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
     deadlineAt,
     force: true
   });
-  if (result === "already-dead" || result === "identity-mismatch") return terminalCleanupVerified;
+  if (result === "already-dead" || result === "identity-mismatch") {
+    return terminalCleanupVerified || hadExistingValidTerminationRequest && isProcessGroupAbsent(record.process_group_id) && await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record);
+  }
   if (result !== "terminated") return false;
+  if (!await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record)) {
+    const deadline2 = Date.parse(deadlineAt);
+    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline2);
+    if ((liveness === "dead" || liveness === "mismatch") && await publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record)) return true;
+    return false;
+  }
+  const deadline = Date.parse(deadlineAt);
+  while (Date.now() < deadline) {
+    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
+    if (liveness === "dead" || liveness === "mismatch") return true;
+    if (liveness === "unknown") return false;
+    await sleep2(20);
+  }
+  return false;
+}
+function isProcessGroupAbsent(processGroupId) {
+  if (process.platform === "win32" || !Number.isSafeInteger(processGroupId) || Number(processGroupId) <= 0) return false;
+  try {
+    process.kill(-Number(processGroupId), 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+async function publishWorkerLaunchTerminationComplete(terminationCompletePath, attempt, record) {
   const existingComplete = await readJson(terminationCompletePath);
   if (existingComplete.kind === "absent") {
     try {
@@ -4287,38 +4316,13 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
         process_start_identity: record.process_start_identity,
         written_at: (/* @__PURE__ */ new Date()).toISOString()
       });
+      return true;
     } catch {
-      const deadline2 = Date.parse(deadlineAt);
-      const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline2);
-      if (liveness === "dead" || liveness === "mismatch") {
-        try {
-          await writeExclusiveAtomic(terminationCompletePath, {
-            ...identityOf(attempt),
-            kind: "worker_launch_termination_complete",
-            cleanup_verified: true,
-            pid: record.pid,
-            process_start_identity: record.process_start_identity,
-            written_at: (/* @__PURE__ */ new Date()).toISOString()
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      }
       return false;
     }
-  } else {
-    const value = existingComplete.kind === "value" ? existingComplete.value : null;
-    if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_complete" || value.cleanup_verified !== true || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
   }
-  const deadline = Date.parse(deadlineAt);
-  while (Date.now() < deadline) {
-    const liveness = await isProcessIdentityLive(record.pid, record.process_start_identity, deadline);
-    if (liveness === "dead" || liveness === "mismatch") return true;
-    if (liveness === "unknown") return false;
-    await sleep2(20);
-  }
-  return false;
+  const value = existingComplete.kind === "value" ? existingComplete.value : null;
+  return !!value && identityMatches(value, attempt) && value.kind === "worker_launch_termination_complete" && value.cleanup_verified === true && value.pid === record.pid && value.process_start_identity === record.process_start_identity;
 }
 async function readValidProviderStarted(attempt) {
   const started = await readJson(attempt.startedPath);
@@ -4476,36 +4480,41 @@ async function materializeProviderSpawnInvocation(invocation, options = {}) {
     } };
   }
   const wrapperDir = await (0, import_promises.mkdtemp)((0, import_node_path.join)((0, import_node_os.tmpdir)(), "omc-provider-"));
-  const completionPath = superviseProcessTree ? (0, import_node_path.join)(wrapperDir, "provider-exit.txt") : void 0;
-  if (invocation.batchScript) {
-    const wrapperPath2 = (0, import_node_path.join)(wrapperDir, "launch.cmd");
-    const completionScript = completionPath ? `set "_OMC_EXIT=%ERRORLEVEL%"\r
+  try {
+    const completionPath = superviseProcessTree ? (0, import_node_path.join)(wrapperDir, "provider-exit.txt") : void 0;
+    if (invocation.batchScript) {
+      const wrapperPath2 = (0, import_node_path.join)(wrapperDir, "launch.cmd");
+      const completionScript = completionPath ? `set "_OMC_EXIT=%ERRORLEVEL%"\r
 > ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r
 :omc_hold\r
 ping -n 3600 127.0.0.1 >nul\r
 goto omc_hold\r
 ` : "";
-    await (0, import_promises.writeFile)(wrapperPath2, `${invocation.batchScript}${completionScript}`, { encoding: "utf8", mode: 384 });
-    return {
-      command: invocation.command,
-      args: [...invocation.args, `"${wrapperPath2}"`],
-      ...completionPath ? { completionPath } : {},
-      cleanup: async () => {
-        await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true });
-      }
-    };
-  }
-  const wrapperPath = (0, import_node_path.join)(wrapperDir, "launch.sh");
-  const quotedCompletion = `'${completionPath.replace(/'/g, `'"'"'`)}'`;
-  await (0, import_promises.writeFile)(wrapperPath, `#!/bin/sh
+      await (0, import_promises.writeFile)(wrapperPath2, `${invocation.batchScript}${completionScript}`, { encoding: "utf8", mode: 384 });
+      return {
+        command: invocation.command,
+        args: [...invocation.args, `"${wrapperPath2}"`],
+        ...completionPath ? { completionPath } : {},
+        cleanup: async () => {
+          await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true });
+        }
+      };
+    }
+    const wrapperPath = (0, import_node_path.join)(wrapperDir, "launch.sh");
+    const quotedCompletion = `'${completionPath.replace(/'/g, `'"'"'`)}'`;
+    await (0, import_promises.writeFile)(wrapperPath, `#!/bin/sh
 "$@"
 _omc_exit=$?
 printf '%s\\n' "$_omc_exit" > ${quotedCompletion}
 while :; do sleep 3600; done
 `, { encoding: "utf8", mode: 448 });
-  return { command: "/bin/sh", args: [wrapperPath, invocation.command, ...invocation.args], completionPath, cleanup: async () => {
-    await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true });
-  } };
+    return { command: "/bin/sh", args: [wrapperPath, invocation.command, ...invocation.args], completionPath, cleanup: async () => {
+      await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true });
+    } };
+  } catch (error) {
+    await (0, import_promises.rm)(wrapperDir, { recursive: true, force: true }).catch(() => void 0);
+    throw error;
+  }
 }
 async function publishProviderStarted(spec, pid, processStartIdentity, supervisorCompletionPath, processGroupId) {
   const record = {

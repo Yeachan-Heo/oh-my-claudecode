@@ -276,6 +276,24 @@ describe('worker launch acknowledgement', () => {
     expect(retryCleanup).not.toHaveBeenCalled();
   });
 
+  it.runIf(process.platform !== 'win32')('publishes termination-complete on an identity-bound already-dead retry after a prior request', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.startedPath, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_started', pid: 999_999_999, process_start_identity: '1',
+      process_group_id: 999_999_999, written_at: new Date().toISOString() }), 'utf8');
+    await writeFile(`${launchAttempt.startedPath}.termination-request`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_termination_request', pid: 999_999_999,
+      process_start_identity: '1', containment_nonce: launchAttempt.nonce,
+      written_at: new Date().toISOString() }), 'utf8');
+
+    await expect(terminateWorkerLaunchProvider(launchAttempt, 100)).resolves.toBe(true);
+    await expect(readFile(`${launchAttempt.startedPath}.termination-complete`, 'utf8').then(JSON.parse))
+      .resolves.toMatchObject({ ...expected,
+        kind: 'worker_launch_termination_complete', cleanup_verified: true,
+        pid: 999_999_999, process_start_identity: '1' });
+  });
+
   it('does not treat a reused provider PID as cleaned without terminal descendant proof', async () => {
     const launchAttempt = await attempt();
     const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
@@ -807,6 +825,27 @@ describe('worker launch acknowledgement', () => {
     });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\codex.exe', '--version'], 'win32', { ComSpec: 'cmd.exe' }))
       .toMatchObject({ command: 'cmd.exe', args: ['/d', '/v:off', '/s', '/c'], batchScript: expect.stringContaining('codex.exe') });
+  });
+
+  it('cleans up a temporary provider wrapper when wrapper write fails', async () => {
+    vi.resetModules();
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const rmMock = vi.fn(actualFs.rm);
+    const writeFileMock = vi.fn(async (path: Parameters<typeof actualFs.writeFile>[0], ...args: Parameters<typeof actualFs.writeFile> extends [unknown, ...infer Rest] ? Rest : never) => {
+      if (String(path).endsWith('launch.cmd')) throw new Error('synthetic write failure');
+      return actualFs.writeFile(path, ...args);
+    });
+    vi.doMock('node:fs/promises', () => ({ ...actualFs, rm: rmMock, writeFile: writeFileMock }));
+    try {
+      const workerLaunch = await import('../worker-launch-ack.js');
+      await expect(workerLaunch.materializeProviderSpawnInvocation({
+        command: 'cmd.exe', args: ['/d', '/v:off', '/s', '/c'], batchScript: '@echo off\r\n',
+      })).rejects.toThrow('synthetic write failure');
+      expect(rmMock).toHaveBeenCalledWith(expect.stringContaining('omc-provider-'), { recursive: true, force: true });
+    } finally {
+      vi.doUnmock('node:fs/promises');
+      vi.resetModules();
+    }
   });
 
   it('materializes POSIX supervision without changing direct provider argv', async () => {
