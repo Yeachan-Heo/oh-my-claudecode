@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
+  buildWindowsSupervisorSource,
   cleanupWorkerLaunchTransport,
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchProviderStarted,
@@ -23,6 +24,7 @@ import {
   revokeWorkerLaunchAttempt,
   buildProviderSpawnInvocation,
   materializeProviderSpawnInvocation,
+  quoteWindowsCreateProcessArgument,
 } from '../worker-launch-ack.js';
 import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 
@@ -680,7 +682,7 @@ describe('worker launch acknowledgement', () => {
       attempt: launchAttempt,
       providerArgv: ['codex'],
       cwd,
-    })).rejects.toThrow('worker_launch_transport_path_conflict');
+    })).rejects.toThrow('worker_launch_transport_owner_conflict');
 
     const consumed = await readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath) as Record<string, unknown>;
     expect(consumed).toMatchObject({ attempt_id: launchAttempt.attempt_id, provider_env: { PROVIDER_TOKEN: secret } });
@@ -892,4 +894,59 @@ describe('worker launch acknowledgement', () => {
     )).toThrow('worker_launch_provider_argv_invalid');
   });
 
+  it('excludes ambient secret environment values and rejects Windows aliases', async () => {
+    const launchAttempt = await attempt();
+    const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, { providerEnv: { EXPLICIT: 'yes' } });
+    for (const key of ['GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'ANTHROPIC_API_KEY', 'NODE_OPTIONS', 'HTTPS_PROXY', 'HOME', 'USERPROFILE']) {
+      expect(spec.provider_env).not.toHaveProperty(key);
+    }
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, { providerEnv: { OMC_WORKER_LAUNCH_SPEC_FILE: 'x' } })).toThrow('worker_launch_provider_env_reserved');
+      expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, { providerEnv: { PATH: 'one', Path: 'two' } })).toThrow('worker_launch_provider_env_key_alias_conflict');
+      expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, { providerEnv: { SystemRoot: 'D:\\attacker' } })).toThrow('worker_launch_provider_env_reserved');
+      expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, { providerEnv: { SYSTEMROOT: 'D:\\attacker' } })).toThrow('worker_launch_provider_env_reserved');
+    } finally { Object.defineProperty(process, 'platform', { value: originalPlatform }); }
+  });
+
+  it('binds the Windows supervisor source, environment, Job Object, and argv protocol', () => {
+    const source = buildWindowsSupervisorSource();
+    const create = source.indexOf('CreateProcessW(');
+    const assign = source.indexOf('AssignProcessToJobObject(');
+    const resume = source.indexOf('ResumeThread(');
+
+    expect(create).toBeGreaterThan(-1);
+    expect(source).toContain('0x00000400');
+    expect(source).toContain('AllocHGlobal($envBytes.Length)');
+    expect(source).toContain('BasicLimitInformation.LimitFlags = 0x2000');
+    expect(source).toContain('SetInformationJobObject');
+    expect(assign).toBeGreaterThan(create);
+    expect(resume).toBeGreaterThan(assign);
+    expect(source).toContain('TerminateJobObject');
+    expect(source).toContain('process_start_identity=("ticks:" +');
+    expect(source).toContain('containment_nonce=$payload.containment_nonce');
+    expect(source).toContain('finally {');
+  });
+
+  it('quotes exact Windows CreateProcess arguments', () => {
+    expect(quoteWindowsCreateProcessArgument('')).toBe('""');
+    expect(quoteWindowsCreateProcessArgument('plain')).toBe('"plain"');
+    expect(quoteWindowsCreateProcessArgument('two words')).toBe('"two words"');
+    expect(quoteWindowsCreateProcessArgument('C:\\path with space\\')).toBe('"C:\\path with space\\\\"');
+    expect(quoteWindowsCreateProcessArgument('say "hello"')).toBe('"say \\"hello\\""');
+    expect(() => quoteWindowsCreateProcessArgument('bad\r\narg')).toThrow('worker_launch_provider_argv_invalid');
+  });
+
+  it('rejects substituted authority fields and descriptor symlinks', async () => {
+    const launchAttempt = await attempt();
+    const materialized = await materializeWorkerLaunchTransport({ attempt: launchAttempt, providerArgv: ['codex'], cwd });
+    const descriptor = JSON.parse(await readFile(materialized.bootstrapDescriptorPath, 'utf8')) as Record<string, unknown>;
+    descriptor.provider_argv = ['tampered'];
+    await writeFile(materialized.bootstrapDescriptorPath, JSON.stringify(descriptor), 'utf8');
+    await expect(readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath)).rejects.toThrow('worker_launch_descriptor_invalid');
+    await rm(materialized.bootstrapDescriptorPath, { force: true });
+    await symlink(materialized.wrapperPath, materialized.bootstrapDescriptorPath);
+    await expect(readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath)).rejects.toThrow();
+  });
 });

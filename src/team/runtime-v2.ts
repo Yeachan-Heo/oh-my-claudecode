@@ -159,9 +159,7 @@ import {
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
-  retireWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
-  terminateWorkerLaunchProvider,
   withWorkerLaunchAttemptFence,
 } from './worker-launch-ack.js';
 import { isProcessIdentityLive } from '../platform/process-utils.js';
@@ -1240,9 +1238,18 @@ async function cleanupRecoveryPaneAttempt(
 ): Promise<boolean> {
   let providerStopped = true;
   if (pending.startupContext) {
-    const retired = await retireWorkerLaunchAttempt(pending.startupContext.attempt, reason).catch(() => false);
-    providerStopped = retired
-      && await terminateWorkerLaunchProvider(pending.startupContext.attempt).catch(() => false);
+    providerStopped = await retireAndCleanupCurrentWorkerLaunchAttempt(
+      pending.startupContext.attempt,
+      reason,
+      async () => {
+        try {
+          await killOwnedWorkerPane(pending.ownership);
+          return await getWorkerLiveness(pending.ownership.paneId) === 'dead';
+        } catch {
+          return false;
+        }
+      },
+    ).catch(() => false);
   }
   let liveness: WorkerPaneLiveness = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -2458,10 +2465,12 @@ export async function executeRecoverDeadWorkerV2Owner(
           }
         }
         for (const priorLaunch of priorLaunches) {
-          const retired = await retireWorkerLaunchAttempt(priorLaunch, 'recovery_replacement');
-          if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
-            return { ok: false, error: 'worker_cleanup_incomplete' };
-          }
+          const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
+            priorLaunch,
+            'recovery_replacement',
+            async () => true,
+          );
+          if (!cleaned) return { ok: false, error: 'worker_cleanup_incomplete' };
         }
 
         try {
@@ -2814,7 +2823,9 @@ export async function executeRecoverDeadWorkerV2Owner(
           ? 'stale_state_revision'
           : message === 'runtime_owner_fence_lost'
             ? 'runtime_owner_fence_lost'
-            : 'runtime_owner_unavailable';
+            : message === 'worker_cleanup_incomplete'
+              ? 'worker_cleanup_incomplete'
+              : 'runtime_owner_unavailable';
     const result = recoveryError(input, recoveryId, code, message);
     return ownerBound && (code === 'team_not_found' || code === 'invalid_persisted_state')
       ? await finalizeBoundRecoveryOwnerTerminal(input, recoveryId, result)
@@ -2824,7 +2835,7 @@ export async function executeRecoverDeadWorkerV2Owner(
   }
 }
 
-async function rollbackUnpersistedNativeWorktreeStartup(teamName: string, cwd: string, cause: unknown): Promise<void> {
+async function rollbackUnpersistedNativeWorktreeStartup(teamName: string, cwd: string, cause: unknown): Promise<boolean> {
   const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
   const teamRoot = absPath(cwd, TeamPaths.root(teamName));
   const errorMessage = cause instanceof Error ? cause.message : String(cause);
@@ -2840,21 +2851,63 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName: string, cwd: s
   };
 
   if (!safety.hasEvidence) {
-    await writeFailureMarker();
-    return;
+    try {
+      await writeFailureMarker();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   try {
     const cleanup = cleanupTeamWorktrees(teamName, cwd);
-    if (cleanup.preserved.length === 0) {
-      await rm(teamRoot, { recursive: true, force: true });
+    if (cleanup.preserved.length > 0) {
+      await writeFailureMarker({ preserved: cleanup.preserved });
+      return true;
     }
-    await writeFailureMarker({ preserved: cleanup.preserved });
+    await rm(teamRoot, { recursive: true, force: true });
+    if (existsSync(teamRoot)) {
+      await writeFailureMarker({ rollback_error: 'startup_state_removal_unverified' });
+      return false;
+    }
+    return true;
   } catch (rollbackError) {
-    await writeFailureMarker({
-      rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-    });
+    try {
+      await writeFailureMarker({
+        rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        cleanup_incomplete: true,
+      });
+    } catch {
+      // Preserve the original failure; inability to write evidence is itself unverified cleanup.
+    }
+    return false;
   }
+}
+
+async function writeStartedStartupRollbackEvidence(args: {
+  teamName: string;
+  cwd: string;
+  cause: unknown;
+  reason: string;
+  worker?: string;
+  markerReason?: string;
+}): Promise<void> {
+  const teamRoot = absPath(args.cwd, TeamPaths.root(args.teamName));
+  await mkdir(teamRoot, { recursive: true });
+  await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
+    reason: args.markerReason ?? 'startup_rollback_cleanup_incomplete',
+    error: args.cause instanceof Error ? args.cause.message : String(args.cause),
+    rollback_error: args.reason,
+    ...(args.worker ? { worker: args.worker } : {}),
+    cleanup_incomplete: args.markerReason === undefined,
+    recorded_at: new Date().toISOString(),
+  }, null, 2), 'utf-8');
+}
+
+function startupCleanupIncompleteError(cause: unknown): Error {
+  const error = new Error('worker_cleanup_incomplete');
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 async function rollbackStartedNativeWorktreeStartup(args: {
@@ -2867,52 +2920,72 @@ async function rollbackStartedNativeWorktreeStartup(args: {
   sessionMode: TeamSessionMode;
   launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
 }): Promise<void> {
-  // Retire each exact launched provider BEFORE killing the team session or
-  // removing state. This ensures no detached provider survives the rollback.
-  if (args.launchedWorkers) {
-    for (const worker of args.launchedWorkers) {
-      if (!worker.launchAttemptId) continue;
-      try {
-        const attempt = await loadWorkerLaunchAttempt({
-          cwd: args.cwd, teamName: args.teamName, workerName: worker.name,
-          paneId: worker.paneId, provider: worker.provider as CliAgentType,
-          attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
-        });
-        if (attempt) {
-          await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
-            try {
-              return await getWorkerLiveness(worker.paneId) === 'dead'
-                || await killOwnedWorkerPane({
-                  provider: worker.paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
-                  providerTarget: args.sessionName, paneId: worker.paneId,
-                  splitTarget: '', leaderPaneId: args.leaderPaneId ?? '',
-                  reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId), source: 'adopted' as const,
-                }).then(async () => await getWorkerLiveness(worker.paneId) === 'dead');
-            } catch {
-              return false;
-            }
-          }).catch(() => false);
-        }
-      } catch (providerCleanupError) {
-        process.stderr.write(
-          `[team/runtime-v2] startup rollback provider cleanup failed for ${worker.name}: ${providerCleanupError instanceof Error ? providerCleanupError.message : String(providerCleanupError)}\n`,
-        );
-      }
-    }
+  const worktreeCleanupRequired = inspectTeamWorktreeCleanupSafety(args.teamName, args.cwd).hasEvidence;
+  const sessionCleanupRequired = (args.launchedWorkers?.length ?? 0) > 0
+    || args.workerPaneIds.length > 0
+    || args.sessionMode !== 'split-pane';
+  const cleanupRequired = worktreeCleanupRequired || sessionCleanupRequired;
+  try {
+    await writeStartedStartupRollbackEvidence({
+      ...args,
+      reason: 'startup_failure',
+      markerReason: 'startup_failed_before_config_persisted',
+    });
+  } catch {
+    // Preserve the initiating startup error; evidence write failure is handled
+    // as cleanup uncertainty only when cleanup is otherwise required.
   }
   try {
-    await killTeamSession(
-      args.sessionName,
-      args.workerPaneIds,
-      args.leaderPaneId ?? undefined,
-      { sessionMode: args.sessionMode },
-    );
-  } catch (killError) {
-    process.stderr.write(
-      `[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}\n`,
-    );
+    for (const worker of args.launchedWorkers ?? []) {
+      if (!worker.launchAttemptId) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: 'missing_launch_attempt_id', worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:missing_launch_attempt_id`);
+      }
+      const attempt = await loadWorkerLaunchAttempt({
+        cwd: args.cwd, teamName: args.teamName, workerName: worker.name,
+        paneId: worker.paneId, provider: worker.provider as CliAgentType,
+        attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
+      });
+      if (!attempt || attempt.attempt_id !== worker.launchAttemptId || attempt.pane_id !== worker.paneId) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: 'launch_attempt_identity_unverified', worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`);
+      }
+      const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
+        if (await getWorkerLiveness(worker.paneId) === 'dead') return true;
+        await killOwnedWorkerPane({
+          provider: worker.paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
+          providerTarget: args.sessionName, paneId: worker.paneId,
+          splitTarget: '', leaderPaneId: args.leaderPaneId ?? '',
+          reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId), source: 'adopted' as const,
+        });
+        return await getWorkerLiveness(worker.paneId) === 'dead';
+      });
+      if (cleaned !== true) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: 'provider_cleanup_unverified', worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:provider_cleanup_unverified`);
+      }
+    }
+    if (sessionCleanupRequired && !(args.workerPaneIds.length === 0 && args.sessionMode === 'split-pane' && (args.launchedWorkers?.length ?? 0) > 0)) {
+      const sessionCleaned = await killTeamSession(
+        args.sessionName, args.workerPaneIds, args.leaderPaneId ?? undefined, { sessionMode: args.sessionMode },
+      );
+      if (sessionCleaned === false) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: 'session_cleanup_unverified' });
+        throw new Error('worker_cleanup_incomplete:session_cleanup_unverified');
+      }
+    }
+    if (worktreeCleanupRequired && !await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause)) {
+      throw new Error('worker_cleanup_incomplete:state_cleanup_unverified');
+    }
+  } catch (error) {
+    if (!cleanupRequired) return;
+    try {
+      await writeStartedStartupRollbackEvidence({ ...args, reason: error instanceof Error ? error.message : String(error) });
+    } catch {
+      // Evidence write failures remain a cleanup failure.
+    }
+    throw startupCleanupIncompleteError(error);
   }
-  await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause);
 }
 
 // ---------------------------------------------------------------------------
@@ -3034,7 +3107,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       }
     }
   } catch (error) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
   const workerNameSet = new Set(workerNames);
@@ -3133,7 +3206,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       }
     }
   } catch (error) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
 
@@ -3144,7 +3217,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       newWindow: Boolean(config.newWindow),
     });
   } catch (error) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
   const sessionName = session.sessionName;

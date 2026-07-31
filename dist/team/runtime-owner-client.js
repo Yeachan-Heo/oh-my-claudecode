@@ -174,10 +174,16 @@ function hasLiveOrUnknownBootstrapCandidate(input, recoveryId, expectedEpoch, pr
     return false;
 }
 /** Narrow white-box hooks for deterministic crash/retry protocol tests. */
+/** Narrow white-box hooks for deterministic crash/retry protocol tests. */
 export const recoveryOwnerBootstrapTestHooks = {
     publishCandidate: publishRecoveryOwnerBootstrapCandidate,
     hasLiveOrUnknownCandidate: hasLiveOrUnknownBootstrapCandidate,
+    spawn: (implementation) => {
+        recoveryOwnerSpawn = implementation ?? spawn;
+        return recoveryOwnerSpawn;
+    },
 };
+let recoveryOwnerSpawn = spawn;
 export function parseRecoveryIntent(raw) {
     let value;
     try {
@@ -348,27 +354,37 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
     if (hasLiveOrUnknownBootstrapCandidate(input, reservation.recovery_id, expectedEpoch, predecessor))
         return false;
     const bootstrapNonce = randomUUID();
-    const child = spawn(process.execPath, [resolveRuntimeCliPath()], {
-        cwd: input.cwd,
-        detached: true,
-        stdio: 'ignore',
-        env: {
-            ...process.env,
-            OMC_RECOVERY_OWNER_INPUT: JSON.stringify(input),
-            OMC_RECOVERY_OWNER_EXPECTED_EPOCH: String(expectedEpoch),
-            OMC_RECOVERY_OWNER_PREDECESSOR_EPOCH: String(predecessorEpoch),
-            OMC_RECOVERY_OWNER_PREDECESSOR_NONCE: predecessor?.nonce ?? '',
-            OMC_RECOVERY_OWNER_NONCE: bootstrapNonce,
-            OMC_RECOVERY_OWNER_PREDECESSOR_PID: String(predecessor?.pid ?? 0),
-            OMC_RECOVERY_OWNER_PREDECESSOR_STARTED_AT: predecessor?.process_started_at ?? '',
-            OMC_RECOVERY_OWNER_RECOVERY_ID: reservation.recovery_id,
-        },
-    });
+    let child;
+    let childFailed = false;
+    const onChildFailure = () => { childFailed = true; };
+    try {
+        child = recoveryOwnerSpawn(process.execPath, [resolveRuntimeCliPath()], {
+            cwd: input.cwd,
+            detached: true,
+            stdio: 'ignore',
+            env: {
+                ...process.env,
+                OMC_RECOVERY_OWNER_INPUT: JSON.stringify(input),
+                OMC_RECOVERY_OWNER_EXPECTED_EPOCH: String(expectedEpoch),
+                OMC_RECOVERY_OWNER_PREDECESSOR_EPOCH: String(predecessorEpoch),
+                OMC_RECOVERY_OWNER_PREDECESSOR_NONCE: predecessor?.nonce ?? '',
+                OMC_RECOVERY_OWNER_NONCE: bootstrapNonce,
+                OMC_RECOVERY_OWNER_PREDECESSOR_PID: String(predecessor?.pid ?? 0),
+                OMC_RECOVERY_OWNER_PREDECESSOR_STARTED_AT: predecessor?.process_started_at ?? '',
+                OMC_RECOVERY_OWNER_RECOVERY_ID: reservation.recovery_id,
+            },
+        });
+    }
+    catch {
+        return false;
+    }
+    child.once('error', onChildFailure);
+    child.once('exit', onChildFailure);
     child.unref();
     if (!child.pid)
         return false;
     const childProcessStartedAt = currentProcessStartIdentity(child.pid);
-    if (!childProcessStartedAt)
+    if (!childProcessStartedAt || childFailed)
         return false;
     try {
         await publishRecoveryOwnerBootstrapCandidate(input, reservation.recovery_id, expectedEpoch, bootstrapNonce, child.pid, childProcessStartedAt, predecessor);
@@ -378,6 +394,8 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
     }
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
+        if (childFailed)
+            return false;
         let owner;
         try {
             owner = readLatestOwnerEpoch(input.cwd, input.teamName);
@@ -393,8 +411,13 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
             && configBound?.epoch === expectedEpoch && configBound.nonce === bootstrapNonce
             && configBound.pid === child.pid && configBound.process_started_at === childProcessStartedAt
             && active?.request_id === input.requestId && active?.recovery_id === reservation.recovery_id
-            && active?.worker_name === input.workerName && active?.owner_epoch === expectedEpoch && active?.owner_nonce === bootstrapNonce)
+            && active?.worker_name === input.workerName && active?.owner_epoch === expectedEpoch && active?.owner_nonce === bootstrapNonce) {
+            if (childFailed || child.exitCode !== null || child.signalCode !== null)
+                return false;
+            child.removeListener('error', onChildFailure);
+            child.removeListener('exit', onChildFailure);
             return true;
+        }
         if (owner && (owner.epoch > expectedEpoch || (owner.epoch === expectedEpoch && owner.pid !== child.pid)))
             return false;
         await new Promise(resolve => setTimeout(resolve, 25));

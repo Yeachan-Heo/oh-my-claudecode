@@ -1,5 +1,6 @@
 import type { CliAgentType } from './model-contract.js';
 declare const WORKER_LAUNCH_SCHEMA_VERSION: 1;
+export declare function buildWindowsSupervisorSource(): string;
 interface WorkerLaunchIdentity {
     schema_version: typeof WORKER_LAUNCH_SCHEMA_VERSION;
     attempt_id: string;
@@ -46,6 +47,9 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
     cwd: string;
     decision_timeout_ms: number;
     release_after_spawn: boolean;
+    authority_digest: string;
+    containment_nonce: string;
+    supervisor_source_sha256: string;
 }
 export type WorkerLaunchAcceptance = {
     ok: true;
@@ -70,12 +74,14 @@ export interface MaterializedProviderSpawnInvocation {
     args: string[];
     cleanup: () => Promise<void>;
     completionPath?: string;
+    stdinPayload?: string;
 }
 export interface MaterializedWorkerLaunchTransport {
     wrapperPath: string;
     bootstrapDescriptorPath: string;
     wrapperRelativePath: string;
 }
+export declare function buildProviderEnvironment(providerEnv: NodeJS.ProcessEnv | Record<string, string> | undefined, sourceEnv?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): Record<string, string>;
 export declare function prepareWorkerLaunchAttempt(input: {
     cwd: string;
     teamName: string;
@@ -134,6 +140,7 @@ export declare function awaitWorkerLaunchProviderStarted(attempt: WorkerLaunchAt
     pollIntervalMs?: number;
 }): Promise<boolean>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function quoteWindowsCreateProcessArgument(value: string): string;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation, options?: {
     superviseWindowsTree?: boolean;

@@ -1272,17 +1272,12 @@ export async function runWorkerLaunchFromEnvironment(): Promise<void> {
       ? Buffer.from(process.env.OMC_WORKER_LAUNCH_SPEC_B64, 'base64').toString('utf8')
       : undefined);
   if (descriptorPath && raw) throw new Error('worker_launch_spec_source_conflict');
-  let spec: unknown;
-  if (descriptorPath) {
-    spec = await readAndConsumeWorkerLaunchDescriptor(descriptorPath);
-  } else {
+  if (!descriptorPath) {
     if (!raw) throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
-    try {
-      spec = JSON.parse(raw);
-    } catch {
-      throw new Error('worker_launch_invalid_spec_json');
-    }
+    try { JSON.parse(raw); } catch { throw new Error('worker_launch_invalid_spec_json'); }
+    throw new Error('worker_launch_descriptor_required');
   }
+  const spec = await readAndConsumeWorkerLaunchDescriptor(descriptorPath);
   const result = await runWorkerLaunchBootstrap(spec);
   if (result.outcome !== 'ran') throw new Error(`worker_launch_${result.outcome}`);
   if (result.signal) process.kill(process.pid, result.signal);

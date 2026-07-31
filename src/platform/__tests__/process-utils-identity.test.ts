@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { dmtfCreationDateToTicks } from '../process-utils.js';
+import { describe, expect, it, vi } from 'vitest';
+import { dmtfCreationDateToTicks, terminateOwnedProcessGroup } from '../process-utils.js';
 
 describe('Windows process start identity formats', () => {
   it('converts DMTF creation dates to ticks with full 100ns precision', () => {
@@ -52,5 +52,46 @@ describe('Windows process start identity formats', () => {
     const plus60 = dmtfCreationDateToTicks('20240115133045.000000+060'); // local = UTC+60min → same UTC
     expect(utc).toBeTruthy();
     expect(plus60).toBe(utc);
+  });
+});
+
+describe('launch-owned process-group termination authority', () => {
+  const deadlineAt = () => new Date(Date.now() + 1_000).toISOString();
+
+  it('refuses a reused leader identity without signaling its group', async () => {
+    if (process.platform === 'win32') return;
+    const result = await terminateOwnedProcessGroup({
+      pid: process.pid,
+      expectedStartIdentity: 'reused-process-identity',
+      processGroupId: process.pid,
+      deadlineAt: deadlineAt(),
+      force: true,
+    });
+    expect(result).toBe('identity-mismatch');
+  });
+
+  it('refuses an unknown or mismatched process group without PID fallback', async () => {
+    if (process.platform === 'win32') return;
+    const result = await terminateOwnedProcessGroup({
+      pid: process.pid,
+      expectedStartIdentity: 'reused-process-identity',
+      processGroupId: 2_147_483_647,
+      deadlineAt: deadlineAt(),
+    });
+    expect(['identity-mismatch', 'unknown']).toContain(result);
+  });
+
+  it('refuses insecure Windows launch-owned fallback', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    try {
+      await expect(terminateOwnedProcessGroup({
+        pid: process.pid,
+        expectedStartIdentity: 'ticks:1',
+        processGroupId: process.pid,
+        deadlineAt: deadlineAt(),
+      })).resolves.toBe('unknown');
+    } finally {
+      platform.mockRestore();
+    }
   });
 });

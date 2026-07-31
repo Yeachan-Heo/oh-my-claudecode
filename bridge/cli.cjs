@@ -6575,6 +6575,55 @@ var init_atomic_write = __esm({
 });
 
 // src/platform/process-utils.ts
+function processGroupIdSync(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === "linux") {
+    try {
+      const stat2 = (0, import_fs15.readFileSync)(`/proc/${pid}/stat`, "utf8");
+      const closeParen = stat2.lastIndexOf(")");
+      if (closeParen === -1) return null;
+      const fields = stat2.substring(closeParen + 2).split(" ");
+      const group = Number(fields[2]);
+      return Number.isInteger(group) && group > 0 ? group : null;
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === "darwin") {
+    try {
+      const result = (0, import_child_process7.spawnSync)("ps", ["-p", String(pid), "-o", "pgid="], {
+        encoding: "utf8",
+        timeout: 2e3,
+        windowsHide: true
+      });
+      const group = Number(result.stdout?.trim());
+      return result.status === 0 && Number.isInteger(group) && group > 0 ? group : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+async function terminateOwnedProcessGroup(options) {
+  const deadline = parseDeadline(options.deadlineAt);
+  if (deadline === void 0 || isDeadlineExceeded(deadline)) return "deadline-exceeded";
+  if (process.platform === "win32") return "unknown";
+  if (!Number.isInteger(options.processGroupId) || options.processGroupId <= 0) return "unknown";
+  if (!isProcessAlive(options.pid)) return "already-dead";
+  const identity = getProcessStartIdentitySync(options.pid);
+  const group = processGroupIdSync(options.pid);
+  if (!identity || !group) return "unknown";
+  if (identity !== options.expectedStartIdentity || group !== options.processGroupId) return "identity-mismatch";
+  if (isDeadlineExceeded(deadline)) return "deadline-exceeded";
+  try {
+    process.kill(-options.processGroupId, options.force ? "SIGKILL" : "SIGTERM");
+    return "terminated";
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ESRCH") return isProcessAlive(options.pid) ? "unknown" : "already-dead";
+    return "unknown";
+  }
+}
 function remainingDeadlineMs(deadlineAt) {
   if (deadlineAt === void 0) return void 0;
   return Math.max(0, deadlineAt - Date.now());
@@ -35795,6 +35844,33 @@ var init_tmux_clipboard = __esm({
 });
 
 // src/team/worker-launch-ack.ts
+function buildWindowsSupervisorSource() {
+  return [
+    '$ErrorActionPreference = "Stop"',
+    "$payload = [Console]::In.ReadLine() | ConvertFrom-Json",
+    "$json = $payload.canonical_json",
+    '$hash = ([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($json)) | ForEach-Object { $_.ToString("x2") }) -join ""',
+    'if ($hash -ne $payload.authority_digest) { throw "worker_launch_authority_digest_mismatch" }',
+    'Add-Type @"',
+    "using System; using System.Text; using System.Runtime.InteropServices;",
+    `public static class O { [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct STARTUPINFO { public int cb; public IntPtr lpReserved; public IntPtr lpDesktop; public IntPtr lpTitle; public int dwX; public int dwY; public int dwXSize; public int dwYSize; public int dwXCountChars; public int dwYCountChars; public int dwFillAttribute; public int dwFlags; public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError; } [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; } [StructLayout(LayoutKind.Sequential)] public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; } [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string dir, ref STARTUPINFO si, out PROCESS_INFORMATION pi); [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateJobObjectW(IntPtr a, string n); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr j, int c, IntPtr i, uint l); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr j, IntPtr p); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint ResumeThread(IntPtr h); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateJobObject(IntPtr j, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr p, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint ms); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); public static string Quote(string value) { var b = new StringBuilder(); b.Append('\\"'); int slashes = 0; foreach (var c in value) { if (c == '\\\\') { slashes++; continue; } if (c == '\\"') { b.Append('\\\\', slashes * 2 + 1); b.Append('\\"'); slashes = 0; continue; } b.Append('\\\\', slashes); slashes = 0; b.Append(c); } b.Append('\\\\', slashes * 2); b.Append('\\"'); return b.ToString(); } public static string BuildCommandLine(string[] argv) { var b = new StringBuilder(); for (var i = 0; i < argv.Length; i++) { if (i != 0) b.Append(' '); b.Append(Quote(argv[i])); } return b.ToString(); } }`,
+    '"@',
+    "$pi = New-Object O+PROCESS_INFORMATION; $job = [IntPtr]::Zero; $envPtr = [IntPtr]::Zero; $cmd = $null",
+    "try {",
+    "  $cmd = [O]::BuildCommandLine([string[]]$payload.provider_argv)",
+    '  $envPairs = @($payload.provider_env.psobject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)',
+    '  $si = New-Object O+STARTUPINFO; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si); $flags = 0x00000004 -bor 0x00000400; if (-not [O]::CreateProcessW($null, $cmd, [IntPtr]::Zero, [IntPtr]::Zero, $false, $flags, $envPtr, $payload.cwd, [ref]$si, [ref]$pi)) { throw "worker_launch_create_process_failed" }',
+    '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; if ([O]::ResumeThread($pi.hThread) -eq [uint32]0xffffffff) { throw "worker_launch_resume_failed" }',
+    '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
+    '  while ($line = [Console]::In.ReadLine()) { if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }; try { $msg = $line | ConvertFrom-Json } catch { continue }; if ($msg.protocol -ne "' + WINDOWS_SUPERVISOR_PROTOCOL + '" -or $msg.attempt_id -ne $payload.identity.attempt_id -or $msg.authority_digest -ne $payload.authority_digest -or $msg.containment_nonce -ne $payload.containment_nonce -or $msg.kind -ne "terminate") { continue }; [O]::TerminateJobObject($job, 1) | Out-Null; [O]::WaitForSingleObject($pi.hProcess, 5000) | Out-Null; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="terminated"; cleanup_verified=$true } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }',
+    "} catch { if ($pi.hProcess -ne [IntPtr]::Zero) { if ($job -ne [IntPtr]::Zero) { [O]::TerminateJobObject($job, 1) | Out-Null } else { [O]::TerminateProcess($pi.hProcess, 1) | Out-Null }; [O]::WaitForSingleObject($pi.hProcess, 5000) | Out-Null }; throw } finally { if ($envPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($envPtr) }; if ($pi.hThread -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hThread) | Out-Null }; if ($pi.hProcess -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hProcess) | Out-Null }; if ($job -ne [IntPtr]::Zero) { [O]::CloseHandle($job) | Out-Null } }"
+  ].join("`n");
+}
+function canonicalAuthorityDigest(input) {
+  const env2 = Object.fromEntries(Object.entries(input.providerEnv).sort(([a], [b]) => a.localeCompare(b)));
+  const payload = JSON.stringify({ protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL, nonce: input.containmentNonce ?? "", supervisor_source_sha256: input.supervisorSourceSha256 ?? "", identity: identityOf(input.identity), provider_argv: [...input.providerArgv], provider_env: env2, cwd: (0, import_node_path9.resolve)(input.cwd) });
+  return (0, import_node_crypto6.createHash)("sha256").update(payload, "utf8").digest("hex");
+}
 function sleep4(ms) {
   return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
@@ -35804,15 +35880,34 @@ function isExactText(value) {
 function isValidEnvironmentKey(key) {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
 }
-function normalizeProviderEnvironment(value) {
+function normalizeProviderEnvironment(value, platform = process.platform) {
   const normalized = {};
+  const seen = /* @__PURE__ */ new Set();
+  const windows = platform === "win32";
   for (const [key, entry] of Object.entries(value ?? {})) {
+    const compareKey = windows ? key.toUpperCase() : key;
+    if (seen.has(compareKey)) throw new Error("worker_launch_provider_env_key_alias_conflict");
+    seen.add(compareKey);
+    if (windows && WINDOWS_RESERVED_ENV_KEYS.has(compareKey)) throw new Error("worker_launch_provider_env_reserved");
     if (WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key)) continue;
     if (!isValidEnvironmentKey(key)) throw new Error("worker_launch_provider_env_key_invalid");
     if (typeof entry !== "string") throw new Error("worker_launch_provider_env_value_invalid");
     normalized[key] = entry;
   }
   return normalized;
+}
+function buildProviderEnvironment(providerEnv, sourceEnv = process.env, platform = process.platform) {
+  const normalized = normalizeProviderEnvironment(providerEnv, platform);
+  const baseline = {};
+  for (const key of SAFE_BASELINE_ENV_KEYS) {
+    const value = sourceEnv[key];
+    if (typeof value === "string" && value.length > 0) baseline[key] = value;
+  }
+  if (platform === "win32") {
+    const systemRoot = sourceEnv.SystemRoot ?? sourceEnv.SYSTEMROOT;
+    if (typeof systemRoot === "string" && /^[A-Za-z]:\\/.test(systemRoot)) baseline.SystemRoot = systemRoot;
+  }
+  return { ...baseline, ...normalized };
 }
 function isUuid(value) {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -35991,6 +36086,10 @@ async function loadCurrentWorkerLaunchAttempt(input) {
   }
 }
 function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2, options = {}) {
+  const providerEnv = buildProviderEnvironment(options.providerEnv);
+  const absoluteCwd = (0, import_node_path9.resolve)(cwd2);
+  const containmentNonce = (0, import_node_crypto6.randomUUID)();
+  const supervisorSourceSha256 = (0, import_node_crypto6.createHash)("sha256").update(buildWindowsSupervisorSource(), "utf8").digest("hex");
   return {
     ...identityOf(attempt),
     current_path: attempt.currentPath,
@@ -36003,18 +36102,22 @@ function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2, options = {
     wrapper_path: attempt.wrapperPath,
     transport_cleanup_complete_path: attempt.transportCleanupCompletePath,
     provider_argv: [...providerArgv],
-    provider_env: normalizeProviderEnvironment(options.providerEnv),
-    cwd: cwd2,
+    provider_env: providerEnv,
+    cwd: absoluteCwd,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
-    release_after_spawn: options.releaseAfterSpawn === true
+    release_after_spawn: options.releaseAfterSpawn === true,
+    containment_nonce: containmentNonce,
+    authority_digest: canonicalAuthorityDigest({ identity: attempt, providerArgv, providerEnv, cwd: absoluteCwd, containmentNonce, supervisorSourceSha256 }),
+    supervisor_source_sha256: supervisorSourceSha256
   };
 }
 function attemptTransportPathsAreDeterministic(attempt) {
   const expectedRoot = (0, import_node_path9.dirname)(attempt.expectedPath);
   return isDeterministicTransportPath(attempt.expectedPath, attempt.transportOwnerPath, "transport-owner.json") && isDeterministicTransportPath(attempt.expectedPath, attempt.bootstrapDescriptorPath, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE) && isDeterministicTransportPath(attempt.expectedPath, attempt.wrapperPath, "launch.cmd") && isDeterministicTransportPath(attempt.expectedPath, attempt.transportCleanupCompletePath, "transport-cleanup-complete.json") && (0, import_node_path9.resolve)(attempt.expectedPath) === (0, import_node_path9.resolve)((0, import_node_path9.join)(expectedRoot, "expected.json"));
 }
-function transportOwnerMatches(value, attempt) {
-  return identityMatches(value, attempt) && typeof value === "object" && value !== null && value.kind === WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+function transportOwnerMatches(value, attempt, authorityDigest) {
+  if (!identityMatches(value, attempt) || typeof value !== "object" || value === null || value.kind !== WORKER_LAUNCH_TRANSPORT_OWNER_KIND) return false;
+  return authorityDigest === void 0 || value.authority_digest === authorityDigest;
 }
 function cleanupProofMatches(value, attempt) {
   return identityMatches(value, attempt) && typeof value === "object" && value !== null && value.kind === WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND && isExactText(value.reason) && typeof value.written_at === "string" && Number.isFinite(Date.parse(value.written_at));
@@ -36049,7 +36152,8 @@ async function materializeWorkerLaunchTransport(input) {
   });
   const owner = {
     ...identityOf(attempt),
-    kind: WORKER_LAUNCH_TRANSPORT_OWNER_KIND
+    kind: WORKER_LAUNCH_TRANSPORT_OWNER_KIND,
+    authority_digest: spec.authority_digest
   };
   const wrapperRelativePath = windowsWrapperRelativePath(input.cwd, attempt.wrapperPath);
   const wrapper = buildWorkerLaunchWrapper(attempt);
@@ -36062,7 +36166,7 @@ async function materializeWorkerLaunchTransport(input) {
         throw new Error("worker_launch_attempt_inactive");
       }
       const existingOwner = await readJson2(attempt.transportOwnerPath);
-      if (existingOwner.kind === "malformed" || existingOwner.kind === "value" && !transportOwnerMatches(existingOwner.value, attempt)) {
+      if (existingOwner.kind === "malformed" || existingOwner.kind === "value" && !transportOwnerMatches(existingOwner.value, attempt, spec.authority_digest)) {
         throw new Error("worker_launch_transport_owner_conflict");
       }
       if (existingOwner.kind === "absent") {
@@ -36237,34 +36341,6 @@ async function withWorkerLaunchAttemptFence(attempt, fn) {
     return { ok: false };
   }
 }
-async function retireWorkerLaunchAttempt(attempt, reason) {
-  const retiredPath = `${attempt.decisionPath}.retired`;
-  try {
-    return await withFileLock(lockPathFor(attempt.currentPath), async () => {
-      const existing = await readJson2(retiredPath);
-      if (existing.kind === "value") {
-        if (!identityMatches(existing.value, attempt)) return false;
-      } else if (existing.kind === "malformed") {
-        return false;
-      } else {
-        await writeExclusiveAtomic(retiredPath, {
-          ...identityOf(attempt),
-          kind: "worker_launch_retired",
-          reason,
-          written_at: (/* @__PURE__ */ new Date()).toISOString()
-        });
-      }
-      if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
-      if (await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
-        await (0, import_promises11.unlink)(attempt.currentPath).catch(() => {
-        });
-      }
-      return true;
-    }, { timeoutMs: 5e3, retryDelayMs: 10 });
-  } catch {
-    return false;
-  }
-}
 async function retireAndCleanupCurrentWorkerLaunchAttempt(attempt, reason, cleanup) {
   const retiredPath = `${attempt.decisionPath}.retired`;
   const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
@@ -36314,13 +36390,14 @@ function isValidProcessStartIdentity2(value) {
   return typeof value === "string" && (/^\d+$/.test(value) || /^ticks:\d+$/.test(value) || /^dmtf:\d{14}\.\d{6}[+-]\d{3}$/.test(value));
 }
 async function readWorkerLaunchCleanupProof(attempt, started) {
-  const terminal = await readJson2(`${attempt.startedPath}.terminal`);
+  const startedPath = "startedPath" in attempt ? attempt.startedPath : attempt.started_path;
+  const terminal = await readJson2(`${startedPath}.terminal`);
   if (terminal.kind === "value") {
     const value = terminal.value;
     const matchesStarted = !started || value.pid === started.pid && value.process_start_identity === started.process_start_identity;
     if (matchesStarted && identityMatches(value, attempt) && value.kind === "worker_launch_provider_terminal" && value.outcome === "exit" && value.cleanup_verified === true && Number.isSafeInteger(value.pid) && Number(value.pid) > 0 && isValidProcessStartIdentity2(value.process_start_identity)) return true;
   }
-  const completed = await readJson2(`${attempt.startedPath}.termination-complete`);
+  const completed = await readJson2(`${startedPath}.termination-complete`);
   if (completed.kind === "value") {
     const value = completed.value;
     const matchesStarted = !started || value.pid === started.pid && value.process_start_identity === started.process_start_identity;
@@ -36338,9 +36415,39 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   if (started.kind !== "value") return false;
   const record2 = started.value;
   if (!identityMatches(record2, attempt) || record2.kind !== "worker_launch_provider_started" || !Number.isSafeInteger(record2.pid) || Number(record2.pid) <= 0 || !isValidProcessStartIdentity2(record2.process_start_identity)) return false;
+  if (terminalCleanupVerified) return true;
+  if (process.platform !== "win32" && (!Number.isSafeInteger(record2.process_group_id) || Number(record2.process_group_id) <= 0)) return false;
   const terminationRequestPath = `${attempt.startedPath}.termination-request`;
   const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
   const existingRequest = await readJson2(terminationRequestPath);
+  if (process.platform === "win32") {
+    if (existingRequest.kind === "absent") {
+      try {
+        await writeExclusiveAtomic(terminationRequestPath, {
+          ...identityOf(attempt),
+          kind: "worker_launch_termination_request",
+          operation: "terminate",
+          pid: record2.pid,
+          process_start_identity: record2.process_start_identity,
+          authority_digest: record2.authority_digest ?? "",
+          containment_nonce: record2.containment_nonce ?? attempt.nonce,
+          written_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      } catch {
+        return false;
+      }
+    } else if (existingRequest.kind !== "value") return false;
+    const deadline2 = Date.now() + timeoutMs;
+    while (Date.now() < deadline2) {
+      const complete = await readJson2(terminationCompletePath);
+      if (complete.kind === "value") {
+        const proof = complete.value;
+        if (identityMatches(proof, attempt) && proof.kind === "worker_launch_termination_complete" && proof.cleanup_verified === true && proof.pid === record2.pid && proof.process_start_identity === record2.process_start_identity && proof.authority_digest === record2.authority_digest && proof.containment_nonce === record2.containment_nonce) return true;
+      }
+      await sleep4(20);
+    }
+    return false;
+  }
   if (existingRequest.kind === "absent") {
     try {
       await writeExclusiveAtomic(terminationRequestPath, {
@@ -36348,6 +36455,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
         kind: "worker_launch_termination_request",
         pid: record2.pid,
         process_start_identity: record2.process_start_identity,
+        containment_nonce: record2.containment_nonce ?? attempt.nonce,
         written_at: (/* @__PURE__ */ new Date()).toISOString()
       });
     } catch {
@@ -36358,9 +36466,10 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
     if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_request" || value.pid !== record2.pid || value.process_start_identity !== record2.process_start_identity) return false;
   }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
-  const result = await terminateOwnedProcessTree({
+  const result = await terminateOwnedProcessGroup({
     pid: record2.pid,
     expectedStartIdentity: record2.process_start_identity,
+    processGroupId: record2.process_group_id,
     deadlineAt,
     force: true
   });
@@ -36416,7 +36525,7 @@ async function readValidProviderStarted(attempt) {
   if (started.kind !== "value") return null;
   const record2 = started.value;
   if (record2.supervisor_completion_path !== void 0 && (typeof record2.supervisor_completion_path !== "string" || record2.supervisor_completion_path.trim().length === 0 || (0, import_node_fs7.existsSync)(record2.supervisor_completion_path))) return null;
-  return identityMatches(record2, attempt) && record2.kind === "worker_launch_provider_started" && Number.isSafeInteger(record2.pid) && record2.pid > 0 && typeof record2.process_start_identity === "string" && record2.process_start_identity.trim().length > 0 && typeof record2.written_at === "string" && Number.isFinite(Date.parse(record2.written_at)) ? record2 : null;
+  return identityMatches(record2, attempt) && record2.kind === "worker_launch_provider_started" && Number.isSafeInteger(record2.pid) && record2.pid > 0 && typeof record2.process_start_identity === "string" && record2.process_start_identity.trim().length > 0 && (record2.containment_nonce === void 0 || isExactText(record2.containment_nonce)) && typeof record2.written_at === "string" && Number.isFinite(Date.parse(record2.written_at)) ? record2 : null;
 }
 async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
   const timeoutMs = options.timeoutMs ?? resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
@@ -36453,7 +36562,7 @@ function quoteWindowsCmdArgument(value) {
   if (/[\r\n]/.test(value)) throw new Error("worker_launch_provider_argv_invalid");
   return `"${value.replace(/%/g, "%%").replace(/"/g, '""')}"`;
 }
-var import_node_crypto6, import_node_fs7, import_promises11, import_node_path9, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_INTERNAL_ENV_KEYS;
+var import_node_crypto6, import_node_fs7, import_promises11, import_node_path9, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_INTERNAL_ENV_KEYS, WORKER_LAUNCH_AUTHORITY_PROTOCOL, WINDOWS_SUPERVISOR_PROTOCOL, WINDOWS_RESERVED_ENV_KEYS, SAFE_BASELINE_ENV_KEYS;
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
@@ -36477,6 +36586,10 @@ var init_worker_launch_ack = __esm({
       "OMC_WORKER_LAUNCH_SPEC_B64",
       "OMC_WORKER_LAUNCH_SPEC_FILE"
     ]);
+    WORKER_LAUNCH_AUTHORITY_PROTOCOL = "worker-launch-authority-v1";
+    WINDOWS_SUPERVISOR_PROTOCOL = "worker-launch-windows-supervisor-v1";
+    WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, "SystemRoot"].map((key) => key.toUpperCase()));
+    SAFE_BASELINE_ENV_KEYS = ["PATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP"];
   }
 });
 
@@ -41888,7 +42001,8 @@ var init_recovery_request_store = __esm({
       "worker_activation_failed",
       "auto_merge_unavailable",
       "stale_state_revision",
-      "config_commit_failed"
+      "config_commit_failed",
+      "worker_cleanup_incomplete"
     ]);
     RECOVERY_WARNINGS = /* @__PURE__ */ new Set([
       "projection_repair_required",
@@ -42228,26 +42342,37 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
   const expectedEpoch = predecessorEpoch + 1;
   if (hasLiveOrUnknownBootstrapCandidate(input, reservation.recovery_id, expectedEpoch, predecessor)) return false;
   const bootstrapNonce = (0, import_node_crypto7.randomUUID)();
-  const child = (0, import_node_child_process10.spawn)(process.execPath, [resolveRuntimeCliPath()], {
-    cwd: input.cwd,
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      OMC_RECOVERY_OWNER_INPUT: JSON.stringify(input),
-      OMC_RECOVERY_OWNER_EXPECTED_EPOCH: String(expectedEpoch),
-      OMC_RECOVERY_OWNER_PREDECESSOR_EPOCH: String(predecessorEpoch),
-      OMC_RECOVERY_OWNER_PREDECESSOR_NONCE: predecessor?.nonce ?? "",
-      OMC_RECOVERY_OWNER_NONCE: bootstrapNonce,
-      OMC_RECOVERY_OWNER_PREDECESSOR_PID: String(predecessor?.pid ?? 0),
-      OMC_RECOVERY_OWNER_PREDECESSOR_STARTED_AT: predecessor?.process_started_at ?? "",
-      OMC_RECOVERY_OWNER_RECOVERY_ID: reservation.recovery_id
-    }
-  });
+  let child;
+  let childFailed = false;
+  const onChildFailure = () => {
+    childFailed = true;
+  };
+  try {
+    child = recoveryOwnerSpawn(process.execPath, [resolveRuntimeCliPath()], {
+      cwd: input.cwd,
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        OMC_RECOVERY_OWNER_INPUT: JSON.stringify(input),
+        OMC_RECOVERY_OWNER_EXPECTED_EPOCH: String(expectedEpoch),
+        OMC_RECOVERY_OWNER_PREDECESSOR_EPOCH: String(predecessorEpoch),
+        OMC_RECOVERY_OWNER_PREDECESSOR_NONCE: predecessor?.nonce ?? "",
+        OMC_RECOVERY_OWNER_NONCE: bootstrapNonce,
+        OMC_RECOVERY_OWNER_PREDECESSOR_PID: String(predecessor?.pid ?? 0),
+        OMC_RECOVERY_OWNER_PREDECESSOR_STARTED_AT: predecessor?.process_started_at ?? "",
+        OMC_RECOVERY_OWNER_RECOVERY_ID: reservation.recovery_id
+      }
+    });
+  } catch {
+    return false;
+  }
+  child.once("error", onChildFailure);
+  child.once("exit", onChildFailure);
   child.unref();
   if (!child.pid) return false;
   const childProcessStartedAt = currentProcessStartIdentity(child.pid);
-  if (!childProcessStartedAt) return false;
+  if (!childProcessStartedAt || childFailed) return false;
   try {
     await publishRecoveryOwnerBootstrapCandidate(
       input,
@@ -42263,6 +42388,7 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
   }
   const deadline = Date.now() + 1e4;
   while (Date.now() < deadline) {
+    if (childFailed) return false;
     let owner;
     try {
       owner = readLatestOwnerEpoch(input.cwd, input.teamName);
@@ -42273,7 +42399,12 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
     const configBound = config2?.config.runtime_owner_epoch;
     const active = config2?.config.active_recovery;
     const fenceOk = owner ? checkOwnerFence(input.cwd, input.teamName, { epoch: owner.epoch, nonce: owner.nonce }).ok : false;
-    if (isExpectedRecoveryOwnerSuccessor(owner, expectedEpoch, child.pid, childProcessStartedAt, fenceOk, bootstrapNonce) && configBound?.epoch === expectedEpoch && configBound.nonce === bootstrapNonce && configBound.pid === child.pid && configBound.process_started_at === childProcessStartedAt && active?.request_id === input.requestId && active?.recovery_id === reservation.recovery_id && active?.worker_name === input.workerName && active?.owner_epoch === expectedEpoch && active?.owner_nonce === bootstrapNonce) return true;
+    if (isExpectedRecoveryOwnerSuccessor(owner, expectedEpoch, child.pid, childProcessStartedAt, fenceOk, bootstrapNonce) && configBound?.epoch === expectedEpoch && configBound.nonce === bootstrapNonce && configBound.pid === child.pid && configBound.process_started_at === childProcessStartedAt && active?.request_id === input.requestId && active?.recovery_id === reservation.recovery_id && active?.worker_name === input.workerName && active?.owner_epoch === expectedEpoch && active?.owner_nonce === bootstrapNonce) {
+      if (childFailed || child.exitCode !== null || child.signalCode !== null) return false;
+      child.removeListener("error", onChildFailure);
+      child.removeListener("exit", onChildFailure);
+      return true;
+    }
     if (owner && (owner.epoch > expectedEpoch || owner.epoch === expectedEpoch && owner.pid !== child.pid)) return false;
     await new Promise((resolve34) => setTimeout(resolve34, 25));
   }
@@ -42388,7 +42519,7 @@ async function requestRuntimeOwnerRecovery(input) {
   });
   return createRecoveryOwnerClient(dispatch, { persistentOwnerBootstrap: !installedRecoveryOwnerDispatch }).recoverDeadWorker(input);
 }
-var import_node_child_process10, import_node_crypto7, import_node_fs13, import_promises18, import_node_path15, MIN_RECOVERY_TIMEOUT_MS, MAX_RECOVERY_TIMEOUT_MS, recoveryOwnerBootstrapTestHooks, installedRecoveryOwnerDispatch;
+var import_node_child_process10, import_node_crypto7, import_node_fs13, import_promises18, import_node_path15, MIN_RECOVERY_TIMEOUT_MS, MAX_RECOVERY_TIMEOUT_MS, recoveryOwnerBootstrapTestHooks, recoveryOwnerSpawn, installedRecoveryOwnerDispatch;
 var init_runtime_owner_client = __esm({
   "src/team/runtime-owner-client.ts"() {
     "use strict";
@@ -42406,8 +42537,13 @@ var init_runtime_owner_client = __esm({
     MAX_RECOVERY_TIMEOUT_MS = 3e5;
     recoveryOwnerBootstrapTestHooks = {
       publishCandidate: publishRecoveryOwnerBootstrapCandidate,
-      hasLiveOrUnknownCandidate: hasLiveOrUnknownBootstrapCandidate
+      hasLiveOrUnknownCandidate: hasLiveOrUnknownBootstrapCandidate,
+      spawn: (implementation) => {
+        recoveryOwnerSpawn = implementation ?? import_node_child_process10.spawn;
+        return recoveryOwnerSpawn;
+      }
     };
+    recoveryOwnerSpawn = import_node_child_process10.spawn;
   }
 });
 
@@ -43297,8 +43433,18 @@ async function recordUnaddressableRecoveryPaneFailure(input, recoveryId, paneAtt
 async function cleanupRecoveryPaneAttempt(input, recoveryId, pending, reason) {
   let providerStopped = true;
   if (pending.startupContext) {
-    const retired = await retireWorkerLaunchAttempt(pending.startupContext.attempt, reason).catch(() => false);
-    providerStopped = retired && await terminateWorkerLaunchProvider(pending.startupContext.attempt).catch(() => false);
+    providerStopped = await retireAndCleanupCurrentWorkerLaunchAttempt(
+      pending.startupContext.attempt,
+      reason,
+      async () => {
+        try {
+          await killOwnedWorkerPane(pending.ownership);
+          return await getWorkerLiveness(pending.ownership.paneId) === "dead";
+        } catch {
+          return false;
+        }
+      }
+    ).catch(() => false);
   }
   let liveness = "unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -44233,10 +44379,12 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           }
         }
         for (const priorLaunch of priorLaunches) {
-          const retired = await retireWorkerLaunchAttempt(priorLaunch, "recovery_replacement");
-          if (!retired || !await terminateWorkerLaunchProvider(priorLaunch)) {
-            return { ok: false, error: "worker_cleanup_incomplete" };
-          }
+          const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
+            priorLaunch,
+            "recovery_replacement",
+            async () => true
+          );
+          if (!cleaned) return { ok: false, error: "worker_cleanup_incomplete" };
         }
         try {
           const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
@@ -44556,7 +44704,7 @@ async function executeRecoverDeadWorkerV2Owner(input) {
     return finalizeRecoveryOwnerResult(input, recoveryId, result);
   } catch (error2) {
     const message2 = error2 instanceof Error ? error2.message : String(error2);
-    const code = message2 === "team_not_found" ? "team_not_found" : message2 === "invalid_persisted_state" ? "invalid_persisted_state" : message2 === "stale_state_revision" ? "stale_state_revision" : message2 === "runtime_owner_fence_lost" ? "runtime_owner_fence_lost" : "runtime_owner_unavailable";
+    const code = message2 === "team_not_found" ? "team_not_found" : message2 === "invalid_persisted_state" ? "invalid_persisted_state" : message2 === "stale_state_revision" ? "stale_state_revision" : message2 === "runtime_owner_fence_lost" ? "runtime_owner_fence_lost" : message2 === "worker_cleanup_incomplete" ? "worker_cleanup_incomplete" : "runtime_owner_unavailable";
     const result = recoveryError(input, recoveryId, code, message2);
     return ownerBound && (code === "team_not_found" || code === "invalid_persisted_state") ? await finalizeBoundRecoveryOwnerTerminal(input, recoveryId, result) : code === "team_not_found" || code === "invalid_persisted_state" ? persistRecoveryFinal(input, recoveryId, result) : result;
   }
@@ -44576,74 +44724,125 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName, cwd2, cause) {
     }, null, 2), "utf-8");
   };
   if (!safety.hasEvidence) {
-    await writeFailureMarker();
-    return;
+    try {
+      await writeFailureMarker();
+      return true;
+    } catch {
+      return false;
+    }
   }
   try {
     const cleanup = cleanupTeamWorktrees(teamName, cwd2);
-    if (cleanup.preserved.length === 0) {
-      await (0, import_promises21.rm)(teamRoot, { recursive: true, force: true });
+    if (cleanup.preserved.length > 0) {
+      await writeFailureMarker({ preserved: cleanup.preserved });
+      return true;
     }
-    await writeFailureMarker({ preserved: cleanup.preserved });
+    await (0, import_promises21.rm)(teamRoot, { recursive: true, force: true });
+    if ((0, import_fs78.existsSync)(teamRoot)) {
+      await writeFailureMarker({ rollback_error: "startup_state_removal_unverified" });
+      return false;
+    }
+    return true;
   } catch (rollbackError) {
-    await writeFailureMarker({
-      rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-    });
+    try {
+      await writeFailureMarker({
+        rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        cleanup_incomplete: true
+      });
+    } catch {
+    }
+    return false;
   }
 }
+async function writeStartedStartupRollbackEvidence(args) {
+  const teamRoot = absPath(args.cwd, TeamPaths.root(args.teamName));
+  await (0, import_promises21.mkdir)(teamRoot, { recursive: true });
+  await (0, import_promises21.writeFile)((0, import_path95.join)(teamRoot, "startup-failure.json"), JSON.stringify({
+    reason: args.markerReason ?? "startup_rollback_cleanup_incomplete",
+    error: args.cause instanceof Error ? args.cause.message : String(args.cause),
+    rollback_error: args.reason,
+    ...args.worker ? { worker: args.worker } : {},
+    cleanup_incomplete: args.markerReason === void 0,
+    recorded_at: (/* @__PURE__ */ new Date()).toISOString()
+  }, null, 2), "utf-8");
+}
+function startupCleanupIncompleteError(cause) {
+  const error2 = new Error("worker_cleanup_incomplete");
+  error2.cause = cause;
+  return error2;
+}
 async function rollbackStartedNativeWorktreeStartup(args) {
-  if (args.launchedWorkers) {
-    for (const worker of args.launchedWorkers) {
-      if (!worker.launchAttemptId) continue;
-      try {
-        const attempt = await loadWorkerLaunchAttempt({
-          cwd: args.cwd,
-          teamName: args.teamName,
-          workerName: worker.name,
-          paneId: worker.paneId,
-          provider: worker.provider,
-          attemptId: worker.launchAttemptId,
-          runtimeCliPath: resolveRuntimeCliPath()
-        });
-        if (attempt) {
-          await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, "startup_rollback", async () => {
-            try {
-              return await getWorkerLiveness(worker.paneId) === "dead" || await killOwnedWorkerPane({
-                provider: worker.paneId.startsWith("%") ? "tmux" : "cmux",
-                providerTarget: args.sessionName,
-                paneId: worker.paneId,
-                splitTarget: "",
-                leaderPaneId: args.leaderPaneId ?? "",
-                reservedPaneIds: args.workerPaneIds.filter((p) => p !== worker.paneId),
-                source: "adopted"
-              }).then(async () => await getWorkerLiveness(worker.paneId) === "dead");
-            } catch {
-              return false;
-            }
-          }).catch(() => false);
-        }
-      } catch (providerCleanupError) {
-        process.stderr.write(
-          `[team/runtime-v2] startup rollback provider cleanup failed for ${worker.name}: ${providerCleanupError instanceof Error ? providerCleanupError.message : String(providerCleanupError)}
-`
-        );
-      }
-    }
+  const worktreeCleanupRequired = inspectTeamWorktreeCleanupSafety(args.teamName, args.cwd).hasEvidence;
+  const sessionCleanupRequired = (args.launchedWorkers?.length ?? 0) > 0 || args.workerPaneIds.length > 0 || args.sessionMode !== "split-pane";
+  const cleanupRequired = worktreeCleanupRequired || sessionCleanupRequired;
+  try {
+    await writeStartedStartupRollbackEvidence({
+      ...args,
+      reason: "startup_failure",
+      markerReason: "startup_failed_before_config_persisted"
+    });
+  } catch {
   }
   try {
-    await killTeamSession(
-      args.sessionName,
-      args.workerPaneIds,
-      args.leaderPaneId ?? void 0,
-      { sessionMode: args.sessionMode }
-    );
-  } catch (killError) {
-    process.stderr.write(
-      `[team/runtime-v2] startup rollback tmux cleanup failed: ${killError instanceof Error ? killError.message : String(killError)}
-`
-    );
+    for (const worker of args.launchedWorkers ?? []) {
+      if (!worker.launchAttemptId) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: "missing_launch_attempt_id", worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:missing_launch_attempt_id`);
+      }
+      const attempt = await loadWorkerLaunchAttempt({
+        cwd: args.cwd,
+        teamName: args.teamName,
+        workerName: worker.name,
+        paneId: worker.paneId,
+        provider: worker.provider,
+        attemptId: worker.launchAttemptId,
+        runtimeCliPath: resolveRuntimeCliPath()
+      });
+      if (!attempt || attempt.attempt_id !== worker.launchAttemptId || attempt.pane_id !== worker.paneId) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: "launch_attempt_identity_unverified", worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`);
+      }
+      const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, "startup_rollback", async () => {
+        if (await getWorkerLiveness(worker.paneId) === "dead") return true;
+        await killOwnedWorkerPane({
+          provider: worker.paneId.startsWith("%") ? "tmux" : "cmux",
+          providerTarget: args.sessionName,
+          paneId: worker.paneId,
+          splitTarget: "",
+          leaderPaneId: args.leaderPaneId ?? "",
+          reservedPaneIds: args.workerPaneIds.filter((p) => p !== worker.paneId),
+          source: "adopted"
+        });
+        return await getWorkerLiveness(worker.paneId) === "dead";
+      });
+      if (cleaned !== true) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: "provider_cleanup_unverified", worker: worker.name });
+        throw new Error(`worker_cleanup_incomplete:${worker.name}:provider_cleanup_unverified`);
+      }
+    }
+    if (sessionCleanupRequired && !(args.workerPaneIds.length === 0 && args.sessionMode === "split-pane" && (args.launchedWorkers?.length ?? 0) > 0)) {
+      const sessionCleaned = await killTeamSession(
+        args.sessionName,
+        args.workerPaneIds,
+        args.leaderPaneId ?? void 0,
+        { sessionMode: args.sessionMode }
+      );
+      if (sessionCleaned === false) {
+        await writeStartedStartupRollbackEvidence({ ...args, reason: "session_cleanup_unverified" });
+        throw new Error("worker_cleanup_incomplete:session_cleanup_unverified");
+      }
+    }
+    if (worktreeCleanupRequired && !await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause)) {
+      throw new Error("worker_cleanup_incomplete:state_cleanup_unverified");
+    }
+  } catch (error2) {
+    if (!cleanupRequired) return;
+    try {
+      await writeStartedStartupRollbackEvidence({ ...args, reason: error2 instanceof Error ? error2.message : String(error2) });
+    } catch {
+    }
+    throw startupCleanupIncompleteError(error2);
   }
-  await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause);
 }
 async function startTeamV2(config2) {
   const sanitized = sanitizeTeamName(config2.teamName);
@@ -44731,7 +44930,7 @@ async function startTeamV2(config2) {
       }
     }
   } catch (error2) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2)) throw startupCleanupIncompleteError(error2);
     throw error2;
   }
   const workerNameSet = new Set(workerNames);
@@ -44834,7 +45033,7 @@ async function startTeamV2(config2) {
       }
     }
   } catch (error2) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2)) throw startupCleanupIncompleteError(error2);
     throw error2;
   }
   let session;
@@ -44843,7 +45042,7 @@ async function startTeamV2(config2) {
       newWindow: Boolean(config2.newWindow)
     });
   } catch (error2) {
-    await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2);
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error2)) throw startupCleanupIncompleteError(error2);
     throw error2;
   }
   const sessionName2 = session.sessionName;
@@ -61339,11 +61538,11 @@ var require_codegen = __commonJS2((exports2) => {
       const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
       return `${varKind} ${this.name}${rhs};` + _n;
     }
-    optimizeNames(names, constants6) {
+    optimizeNames(names, constants7) {
       if (!names[this.name.str])
         return;
       if (this.rhs)
-        this.rhs = optimizeExpr(this.rhs, names, constants6);
+        this.rhs = optimizeExpr(this.rhs, names, constants7);
       return this;
     }
     get names() {
@@ -61360,10 +61559,10 @@ var require_codegen = __commonJS2((exports2) => {
     render({ _n }) {
       return `${this.lhs} = ${this.rhs};` + _n;
     }
-    optimizeNames(names, constants6) {
+    optimizeNames(names, constants7) {
       if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
         return;
-      this.rhs = optimizeExpr(this.rhs, names, constants6);
+      this.rhs = optimizeExpr(this.rhs, names, constants7);
       return this;
     }
     get names() {
@@ -61424,8 +61623,8 @@ var require_codegen = __commonJS2((exports2) => {
     optimizeNodes() {
       return `${this.code}` ? this : void 0;
     }
-    optimizeNames(names, constants6) {
-      this.code = optimizeExpr(this.code, names, constants6);
+    optimizeNames(names, constants7) {
+      this.code = optimizeExpr(this.code, names, constants7);
       return this;
     }
     get names() {
@@ -61454,12 +61653,12 @@ var require_codegen = __commonJS2((exports2) => {
       }
       return nodes.length > 0 ? this : void 0;
     }
-    optimizeNames(names, constants6) {
+    optimizeNames(names, constants7) {
       const { nodes } = this;
       let i = nodes.length;
       while (i--) {
         const n = nodes[i];
-        if (n.optimizeNames(names, constants6))
+        if (n.optimizeNames(names, constants7))
           continue;
         subtractNames(names, n.names);
         nodes.splice(i, 1);
@@ -61512,12 +61711,12 @@ var require_codegen = __commonJS2((exports2) => {
         return;
       return this;
     }
-    optimizeNames(names, constants6) {
+    optimizeNames(names, constants7) {
       var _a;
-      this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants6);
-      if (!(super.optimizeNames(names, constants6) || this.else))
+      this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants7);
+      if (!(super.optimizeNames(names, constants7) || this.else))
         return;
-      this.condition = optimizeExpr(this.condition, names, constants6);
+      this.condition = optimizeExpr(this.condition, names, constants7);
       return this;
     }
     get names() {
@@ -61540,10 +61739,10 @@ var require_codegen = __commonJS2((exports2) => {
     render(opts) {
       return `for(${this.iteration})` + super.render(opts);
     }
-    optimizeNames(names, constants6) {
-      if (!super.optimizeNames(names, constants6))
+    optimizeNames(names, constants7) {
+      if (!super.optimizeNames(names, constants7))
         return;
-      this.iteration = optimizeExpr(this.iteration, names, constants6);
+      this.iteration = optimizeExpr(this.iteration, names, constants7);
       return this;
     }
     get names() {
@@ -61579,10 +61778,10 @@ var require_codegen = __commonJS2((exports2) => {
     render(opts) {
       return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
     }
-    optimizeNames(names, constants6) {
-      if (!super.optimizeNames(names, constants6))
+    optimizeNames(names, constants7) {
+      if (!super.optimizeNames(names, constants7))
         return;
-      this.iterable = optimizeExpr(this.iterable, names, constants6);
+      this.iterable = optimizeExpr(this.iterable, names, constants7);
       return this;
     }
     get names() {
@@ -61624,11 +61823,11 @@ var require_codegen = __commonJS2((exports2) => {
       (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
       return this;
     }
-    optimizeNames(names, constants6) {
+    optimizeNames(names, constants7) {
       var _a, _b;
-      super.optimizeNames(names, constants6);
-      (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants6);
-      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants6);
+      super.optimizeNames(names, constants7);
+      (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants7);
+      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants7);
       return this;
     }
     get names() {
@@ -61899,7 +62098,7 @@ var require_codegen = __commonJS2((exports2) => {
   function addExprNames(names, from) {
     return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
   }
-  function optimizeExpr(expr, names, constants6) {
+  function optimizeExpr(expr, names, constants7) {
     if (expr instanceof code_1.Name)
       return replaceName(expr);
     if (!canOptimize(expr))
@@ -61914,14 +62113,14 @@ var require_codegen = __commonJS2((exports2) => {
       return items;
     }, []));
     function replaceName(n) {
-      const c = constants6[n.str];
+      const c = constants7[n.str];
       if (c === void 0 || names[n.str] !== 1)
         return n;
       delete names[n.str];
       return c;
     }
     function canOptimize(e) {
-      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants6[c.str] !== void 0);
+      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants7[c.str] !== void 0);
     }
   }
   function subtractNames(names, from) {
@@ -100902,6 +101101,7 @@ var RECOVERY_ERROR_CODES = /* @__PURE__ */ new Set([
   "startup_ack_timeout",
   "worker_activation_failed",
   "auto_merge_unavailable",
+  "worker_cleanup_incomplete",
   "stale_state_revision",
   "config_commit_failed"
 ]);

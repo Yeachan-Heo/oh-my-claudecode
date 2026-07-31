@@ -526,8 +526,6 @@ describe('recovery pane rollback evidence', () => {
     let bootstrapResult: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
     let launchedPath = '';
     let expectedLaunchAttemptId = '';
-    const previousGateSpec = process.env.OMC_RECOVERY_GATE_SPEC;
-    const previousLaunchAttemptId = process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
     paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (
       _sessionName: string,
       ownership: { paneId: string },
@@ -567,13 +565,16 @@ describe('recovery pane rollback evidence', () => {
         recovery_id: recoveryId,
         replacement_generation: 2,
       });
-      process.env.OMC_RECOVERY_GATE_SPEC = JSON.stringify({ ...gateSpec, launchAttempt: attempt });
-      process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = attempt.attempt_id;
+      const gateEnv = {
+        ...config.envVars,
+        OMC_RECOVERY_GATE_SPEC: JSON.stringify({ ...gateSpec, launchAttempt: attempt }),
+        OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
+      };
       const spec = buildWorkerLaunchBootstrapSpec(
         attempt,
         [config.launchBinary, ...config.launchArgs],
         config.cwd,
-        { releaseAfterSpawn: true },
+        { releaseAfterSpawn: true, providerEnv: gateEnv },
       );
       bootstrapResult = runWorkerLaunchBootstrap(spec);
       const accepted = await awaitWorkerLaunchAcknowledgement(attempt, {
@@ -584,43 +585,36 @@ describe('recovery pane rollback evidence', () => {
       return { ownership, provider: config.provider, attempt };
     });
 
-    try {
-      await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
-        .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
-      expect(bootstrapResult).toBeDefined();
-      await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
-      expect(existsSync(launchedPath)).toBe(true);
-      expect(JSON.parse(readFileSync(launchedPath, 'utf8'))).toMatchObject({
-        recovery_id: recoveryId,
-        worker_name: 'worker-1',
-        replacement_generation: 2,
-        launch_attempt_id: expectedLaunchAttemptId,
-      });
-      expect(readFileSync(providerObservedPath, 'utf8')).toContain('Recovery completed for this idle worker.');
-      expect(readFileSync(providerObservedPath, 'utf8')).not.toContain('STALE PRE-RECOVERY INBOX');
-      const followupRequestId = 'idle-gemini-followup-request';
-      const followupRecoveryId = 'idle-gemini-followup-recovery';
-      reserveRecoveryRequest(cwd, followupRequestId, {
-        operation: 'recover-worker',
-        workspaceHash: createHash('sha256').update(cwd).digest('hex'),
-        teamName,
-        workerName: 'worker-1',
-      }, followupRecoveryId);
-      let lockTimeout: NodeJS.Timeout | undefined;
-      const followup = await Promise.race([
-        executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId: followupRequestId }),
-        new Promise<never>((_, reject) => {
-          lockTimeout = setTimeout(() => reject(new Error('recovery lock remained held')), 2_000);
-        }),
-      ]);
-      if (lockTimeout) clearTimeout(lockTimeout);
-      expect(followup).toMatchObject({ outcome: 'already_running', committed: true, recoveryId: followupRecoveryId });
-    } finally {
-      if (previousGateSpec === undefined) delete process.env.OMC_RECOVERY_GATE_SPEC;
-      else process.env.OMC_RECOVERY_GATE_SPEC = previousGateSpec;
-      if (previousLaunchAttemptId === undefined) delete process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
-      else process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = previousLaunchAttemptId;
-    }
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId }))
+      .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
+    expect(bootstrapResult).toBeDefined();
+    await expect(bootstrapResult!).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    expect(existsSync(launchedPath)).toBe(true);
+    expect(JSON.parse(readFileSync(launchedPath, 'utf8'))).toMatchObject({
+      recovery_id: recoveryId,
+      worker_name: 'worker-1',
+      replacement_generation: 2,
+      launch_attempt_id: expectedLaunchAttemptId,
+    });
+    expect(readFileSync(providerObservedPath, 'utf8')).toContain('Recovery completed for this idle worker.');
+    expect(readFileSync(providerObservedPath, 'utf8')).not.toContain('STALE PRE-RECOVERY INBOX');
+    const followupRequestId = 'idle-gemini-followup-request';
+    const followupRecoveryId = 'idle-gemini-followup-recovery';
+    reserveRecoveryRequest(cwd, followupRequestId, {
+      operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName,
+      workerName: 'worker-1',
+    }, followupRecoveryId);
+    let lockTimeout: NodeJS.Timeout | undefined;
+    const followup = await Promise.race([
+      executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId: followupRequestId }),
+      new Promise<never>((_, reject) => {
+        lockTimeout = setTimeout(() => reject(new Error('recovery lock remained held')), 2_000);
+      }),
+    ]);
+    if (lockTimeout) clearTimeout(lockTimeout);
+    expect(followup).toMatchObject({ outcome: 'already_running', committed: true, recoveryId: followupRecoveryId });
   });
 
   it('publishes durable orphan evidence when split succeeds without a parseable pane id', async () => {

@@ -7,6 +7,77 @@ import { readFileSync } from 'fs';
 import { promisify } from 'util';
 import * as fsPromises from 'fs/promises';
 const execFileAsync = promisify(execFile);
+function processGroupIdSync(pid) {
+    if (!Number.isInteger(pid) || pid <= 0)
+        return null;
+    if (process.platform === 'linux') {
+        try {
+            const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+            const closeParen = stat.lastIndexOf(')');
+            if (closeParen === -1)
+                return null;
+            const fields = stat.substring(closeParen + 2).split(' ');
+            const group = Number(fields[2]);
+            return Number.isInteger(group) && group > 0 ? group : null;
+        }
+        catch {
+            return null;
+        }
+    }
+    if (process.platform === 'darwin') {
+        try {
+            const result = spawnSync('ps', ['-p', String(pid), '-o', 'pgid='], {
+                encoding: 'utf8', timeout: 2000, windowsHide: true,
+            });
+            const group = Number(result.stdout?.trim());
+            return result.status === 0 && Number.isInteger(group) && group > 0 ? group : null;
+        }
+        catch {
+            return null;
+        }
+    }
+    return null;
+}
+/** Capture creation-bound POSIX process-group metadata for a detached owner. */
+export function captureOwnedProcessGroup(pid) {
+    if (process.platform === 'win32')
+        return null;
+    const processStartIdentity = getProcessStartIdentitySync(pid);
+    const processGroupId = processGroupIdSync(pid);
+    if (!processStartIdentity || processGroupId === null)
+        return null;
+    return { pid, processStartIdentity, processGroupId };
+}
+/** Signal only an exact-identity POSIX process-group leader; never fall back to PID. */
+export async function terminateOwnedProcessGroup(options) {
+    const deadline = parseDeadline(options.deadlineAt);
+    if (deadline === undefined || isDeadlineExceeded(deadline))
+        return 'deadline-exceeded';
+    if (process.platform === 'win32')
+        return 'unknown';
+    if (!Number.isInteger(options.processGroupId) || options.processGroupId <= 0)
+        return 'unknown';
+    if (!isProcessAlive(options.pid))
+        return 'already-dead';
+    const identity = getProcessStartIdentitySync(options.pid);
+    const group = processGroupIdSync(options.pid);
+    if (!identity || !group)
+        return 'unknown';
+    if (identity !== options.expectedStartIdentity || group !== options.processGroupId)
+        return 'identity-mismatch';
+    if (isDeadlineExceeded(deadline))
+        return 'deadline-exceeded';
+    try {
+        process.kill(-options.processGroupId, options.force ? 'SIGKILL' : 'SIGTERM');
+        return 'terminated';
+    }
+    catch (error) {
+        const code = error.code;
+        if (code === 'ESRCH')
+            return isProcessAlive(options.pid) ? 'unknown' : 'already-dead';
+        return 'unknown';
+    }
+}
 function remainingDeadlineMs(deadlineAt) {
     if (deadlineAt === undefined)
         return undefined;
@@ -22,8 +93,9 @@ function parseDeadline(deadlineAt) {
 /**
  * Kill a process and optionally its entire process tree.
  *
- * On Windows: Uses taskkill /T for tree kill, /F for force
- * On Unix: Signals the owned process group, falling back to the root PID
+ * On Windows: Uses taskkill /T for generic callers; this is not creation-bound
+ * and MUST NOT be used for launch-owned cleanup.
+ * On Unix: Signals the owned process group, falling back to the root PID.
  */
 export async function killProcessTree(pid, signal = 'SIGTERM') {
     if (!Number.isInteger(pid) || pid <= 0)
@@ -376,8 +448,10 @@ export async function isProcessIdentityLive(pid, expectedStartIdentity, deadline
 }
 /**
  * Terminate only a process whose durable start identity still matches. Windows
- * binds verification and tree termination to one System.Diagnostics.Process
- * handle so a reused numeric PID is never handed to taskkill.
+ * binds verification to one exact root process identity and uses handles while
+ * enumerating descendants; this remains a generic tree cleanup API, not a
+ * creation-bound launch-owned authority. Launch-owned callers must use the
+ * exact process-group API on POSIX and refuse unsupported Windows reconnects.
  */
 export async function terminateOwnedProcessTree(options) {
     const deadline = parseDeadline(options.deadlineAt);

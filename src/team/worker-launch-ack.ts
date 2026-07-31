@@ -1,17 +1,18 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants, existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
+import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
 
 const WORKER_LAUNCH_SCHEMA_VERSION = 1 as const;
+
 const DEFAULT_ACK_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 25;
 const DEFAULT_DECISION_TIMEOUT_MS = 15_000;
@@ -24,6 +25,50 @@ const WORKER_LAUNCH_INTERNAL_ENV_KEYS = new Set([
   'OMC_WORKER_LAUNCH_SPEC_B64',
   'OMC_WORKER_LAUNCH_SPEC_FILE',
 ]);
+const WORKER_LAUNCH_AUTHORITY_PROTOCOL = 'worker-launch-authority-v1';
+const WINDOWS_SUPERVISOR_PROTOCOL = 'worker-launch-windows-supervisor-v1';
+
+export function buildWindowsSupervisorSource(): string {
+  return [
+    '$ErrorActionPreference = "Stop"',
+    '$payload = [Console]::In.ReadLine() | ConvertFrom-Json',
+    '$json = $payload.canonical_json',
+    '$hash = ([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($json)) | ForEach-Object { $_.ToString("x2") }) -join ""',
+    'if ($hash -ne $payload.authority_digest) { throw "worker_launch_authority_digest_mismatch" }',
+    'Add-Type @"',
+    'using System; using System.Text; using System.Runtime.InteropServices;',
+    `public static class O { [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct STARTUPINFO { public int cb; public IntPtr lpReserved; public IntPtr lpDesktop; public IntPtr lpTitle; public int dwX; public int dwY; public int dwXSize; public int dwYSize; public int dwXCountChars; public int dwYCountChars; public int dwFillAttribute; public int dwFlags; public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError; } [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; } [StructLayout(LayoutKind.Sequential)] public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; } [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string dir, ref STARTUPINFO si, out PROCESS_INFORMATION pi); [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateJobObjectW(IntPtr a, string n); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr j, int c, IntPtr i, uint l); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr j, IntPtr p); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint ResumeThread(IntPtr h); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateJobObject(IntPtr j, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr p, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint ms); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); public static string Quote(string value) { var b = new StringBuilder(); b.Append('\\"'); int slashes = 0; foreach (var c in value) { if (c == '\\\\') { slashes++; continue; } if (c == '\\"') { b.Append('\\\\', slashes * 2 + 1); b.Append('\\"'); slashes = 0; continue; } b.Append('\\\\', slashes); slashes = 0; b.Append(c); } b.Append('\\\\', slashes * 2); b.Append('\\"'); return b.ToString(); } public static string BuildCommandLine(string[] argv) { var b = new StringBuilder(); for (var i = 0; i < argv.Length; i++) { if (i != 0) b.Append(' '); b.Append(Quote(argv[i])); } return b.ToString(); } }`,
+    '"@',
+    '$pi = New-Object O+PROCESS_INFORMATION; $job = [IntPtr]::Zero; $envPtr = [IntPtr]::Zero; $cmd = $null',
+    'try {',
+    '  $cmd = [O]::BuildCommandLine([string[]]$payload.provider_argv)',
+    '  $envPairs = @($payload.provider_env.psobject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)',
+    '  $si = New-Object O+STARTUPINFO; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si); $flags = 0x00000004 -bor 0x00000400; if (-not [O]::CreateProcessW($null, $cmd, [IntPtr]::Zero, [IntPtr]::Zero, $false, $flags, $envPtr, $payload.cwd, [ref]$si, [ref]$pi)) { throw "worker_launch_create_process_failed" }',
+    '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; if ([O]::ResumeThread($pi.hThread) -eq [uint32]0xffffffff) { throw "worker_launch_resume_failed" }',
+    '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
+    '  while ($line = [Console]::In.ReadLine()) { if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }; try { $msg = $line | ConvertFrom-Json } catch { continue }; if ($msg.protocol -ne "' + WINDOWS_SUPERVISOR_PROTOCOL + '" -or $msg.attempt_id -ne $payload.identity.attempt_id -or $msg.authority_digest -ne $payload.authority_digest -or $msg.containment_nonce -ne $payload.containment_nonce -or $msg.kind -ne "terminate") { continue }; [O]::TerminateJobObject($job, 1) | Out-Null; [O]::WaitForSingleObject($pi.hProcess, 5000) | Out-Null; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="terminated"; cleanup_verified=$true } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }',
+    '} catch { if ($pi.hProcess -ne [IntPtr]::Zero) { if ($job -ne [IntPtr]::Zero) { [O]::TerminateJobObject($job, 1) | Out-Null } else { [O]::TerminateProcess($pi.hProcess, 1) | Out-Null }; [O]::WaitForSingleObject($pi.hProcess, 5000) | Out-Null }; throw } finally { if ($envPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($envPtr) }; if ($pi.hThread -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hThread) | Out-Null }; if ($pi.hProcess -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hProcess) | Out-Null }; if ($job -ne [IntPtr]::Zero) { [O]::CloseHandle($job) | Out-Null } }',
+  ].join("`n");
+}
+
+function encodePowerShell(source: string): string {
+  return Buffer.from(source, 'utf16le').toString('base64');
+}
+const WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, 'SystemRoot'].map(key => key.toUpperCase()));
+const SAFE_BASELINE_ENV_KEYS = ['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP'] as const;
+
+function canonicalAuthorityDigest(input: {
+  identity: WorkerLaunchIdentity;
+  providerArgv: readonly string[];
+  providerEnv: Record<string, string>;
+  cwd: string;
+  containmentNonce?: string;
+  supervisorSourceSha256?: string;
+}): string {
+  const env = Object.fromEntries(Object.entries(input.providerEnv).sort(([a], [b]) => a.localeCompare(b)));
+  const payload = JSON.stringify({ protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL, nonce: input.containmentNonce ?? '', supervisor_source_sha256: input.supervisorSourceSha256 ?? '', identity: identityOf(input.identity), provider_argv: [...input.providerArgv], provider_env: env, cwd: resolve(input.cwd) });
+  return createHash('sha256').update(payload, 'utf8').digest('hex');
+}
 
 interface WorkerLaunchIdentity {
   schema_version: typeof WORKER_LAUNCH_SCHEMA_VERSION;
@@ -38,6 +83,7 @@ interface WorkerLaunchIdentity {
 
 interface WorkerLaunchTransportOwner extends WorkerLaunchIdentity {
   kind: typeof WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+  authority_digest?: string;
 }
 
 interface WorkerLaunchTransportCleanupComplete extends WorkerLaunchIdentity {
@@ -72,7 +118,11 @@ interface WorkerLaunchProviderStarted extends WorkerLaunchIdentity {
   pid: number | null;
   written_at: string;
   process_start_identity: string;
+  containment_nonce?: string;
+
+  authority_digest?: string;
   supervisor_completion_path?: string;
+  process_group_id?: number;
 }
 
 export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
@@ -104,6 +154,9 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
   cwd: string;
   decision_timeout_ms: number;
   release_after_spawn: boolean;
+  authority_digest: string;
+  containment_nonce: string;
+  supervisor_source_sha256: string;
 }
 
 export type WorkerLaunchAcceptance =
@@ -125,6 +178,7 @@ export interface MaterializedProviderSpawnInvocation {
   args: string[];
   cleanup: () => Promise<void>;
   completionPath?: string;
+  stdinPayload?: string;
 }
 
 export interface MaterializedWorkerLaunchTransport {
@@ -147,9 +201,15 @@ function isValidEnvironmentKey(key: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
 }
 
-function normalizeProviderEnvironment(value: NodeJS.ProcessEnv | Record<string, string> | undefined): Record<string, string> {
+function normalizeProviderEnvironment(value: NodeJS.ProcessEnv | Record<string, string> | undefined, platform: NodeJS.Platform = process.platform): Record<string, string> {
   const normalized: Record<string, string> = {};
+  const seen = new Set<string>();
+  const windows = platform === 'win32';
   for (const [key, entry] of Object.entries(value ?? {})) {
+    const compareKey = windows ? key.toUpperCase() : key;
+    if (seen.has(compareKey)) throw new Error('worker_launch_provider_env_key_alias_conflict');
+    seen.add(compareKey);
+    if (windows && WINDOWS_RESERVED_ENV_KEYS.has(compareKey)) throw new Error('worker_launch_provider_env_reserved');
     if (WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key)) continue;
     if (!isValidEnvironmentKey(key)) throw new Error('worker_launch_provider_env_key_invalid');
     if (typeof entry !== 'string') throw new Error('worker_launch_provider_env_value_invalid');
@@ -158,10 +218,27 @@ function normalizeProviderEnvironment(value: NodeJS.ProcessEnv | Record<string, 
   return normalized;
 }
 
-function isValidProviderEnvironment(value: unknown): value is Record<string, string> {
+function isValidProviderEnvironment(value: unknown, platform: NodeJS.Platform = process.platform): value is Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.entries(value).every(([key, entry]) => isValidEnvironmentKey(key)
-    && !WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key) && typeof entry === 'string');
+  try { normalizeProviderEnvironment(value as Record<string, string>, platform); return true; } catch { return false; }
+}
+
+export function buildProviderEnvironment(
+  providerEnv: NodeJS.ProcessEnv | Record<string, string> | undefined,
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  const normalized = normalizeProviderEnvironment(providerEnv, platform);
+  const baseline: Record<string, string> = {};
+  for (const key of SAFE_BASELINE_ENV_KEYS) {
+    const value = sourceEnv[key];
+    if (typeof value === 'string' && value.length > 0) baseline[key] = value;
+  }
+  if (platform === 'win32') {
+    const systemRoot = sourceEnv.SystemRoot ?? sourceEnv.SYSTEMROOT;
+    if (typeof systemRoot === 'string' && /^[A-Za-z]:\\/.test(systemRoot)) baseline.SystemRoot = systemRoot;
+  }
+  return { ...baseline, ...normalized };
 }
 
 function isUuid(value: unknown): value is string {
@@ -410,6 +487,10 @@ export function buildWorkerLaunchBootstrapSpec(
   cwd: string,
   options: { releaseAfterSpawn?: boolean; providerEnv?: NodeJS.ProcessEnv | Record<string, string> } = {},
 ): WorkerLaunchBootstrapSpec {
+  const providerEnv = buildProviderEnvironment(options.providerEnv);
+  const absoluteCwd = resolve(cwd);
+  const containmentNonce = randomUUID();
+  const supervisorSourceSha256 = createHash('sha256').update(buildWindowsSupervisorSource(), 'utf8').digest('hex');
   return {
     ...identityOf(attempt),
     current_path: attempt.currentPath,
@@ -422,10 +503,13 @@ export function buildWorkerLaunchBootstrapSpec(
     wrapper_path: attempt.wrapperPath,
     transport_cleanup_complete_path: attempt.transportCleanupCompletePath,
     provider_argv: [...providerArgv],
-    provider_env: normalizeProviderEnvironment(options.providerEnv),
-    cwd,
+    provider_env: providerEnv,
+    cwd: absoluteCwd,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
     release_after_spawn: options.releaseAfterSpawn === true,
+    containment_nonce: containmentNonce,
+    authority_digest: canonicalAuthorityDigest({ identity: attempt, providerArgv, providerEnv, cwd: absoluteCwd, containmentNonce, supervisorSourceSha256 }),
+    supervisor_source_sha256: supervisorSourceSha256,
   };
 }
 
@@ -438,10 +522,11 @@ function attemptTransportPathsAreDeterministic(attempt: WorkerLaunchAttempt): bo
     && resolve(attempt.expectedPath) === resolve(join(expectedRoot, 'expected.json'));
 }
 
-function transportOwnerMatches(value: unknown, attempt: WorkerLaunchIdentity): value is WorkerLaunchTransportOwner {
-  return identityMatches(value, attempt)
-    && typeof value === 'object' && value !== null
-    && (value as { kind?: unknown }).kind === WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+function transportOwnerMatches(value: unknown, attempt: WorkerLaunchIdentity, authorityDigest?: string): value is WorkerLaunchTransportOwner {
+  if (!identityMatches(value, attempt)
+    || typeof value !== 'object' || value === null
+    || (value as { kind?: unknown }).kind !== WORKER_LAUNCH_TRANSPORT_OWNER_KIND) return false;
+  return authorityDigest === undefined || (value as { authority_digest?: unknown }).authority_digest === authorityDigest;
 }
 
 function cleanupProofMatches(value: unknown, attempt: WorkerLaunchIdentity): value is WorkerLaunchTransportCleanupComplete {
@@ -493,6 +578,7 @@ export async function materializeWorkerLaunchTransport(input: {
   const owner: WorkerLaunchTransportOwner = {
     ...identityOf(attempt),
     kind: WORKER_LAUNCH_TRANSPORT_OWNER_KIND,
+    authority_digest: spec.authority_digest,
   };
   const wrapperRelativePath = windowsWrapperRelativePath(input.cwd, attempt.wrapperPath);
   const wrapper = buildWorkerLaunchWrapper(attempt);
@@ -507,7 +593,8 @@ export async function materializeWorkerLaunchTransport(input: {
       }
       const existingOwner = await readJson(attempt.transportOwnerPath);
       if (existingOwner.kind === 'malformed'
-        || (existingOwner.kind === 'value' && !transportOwnerMatches(existingOwner.value, attempt))) {
+        || (existingOwner.kind === 'value' && !transportOwnerMatches(existingOwner.value, attempt, spec.authority_digest))) {
+
         throw new Error('worker_launch_transport_owner_conflict');
       }
       if (existingOwner.kind === 'absent') {
@@ -598,30 +685,31 @@ export async function cleanupWorkerLaunchTransport(attempt: WorkerLaunchAttempt,
 
 export async function readAndConsumeWorkerLaunchDescriptor(descriptorPath: string): Promise<unknown> {
   let parsed: unknown;
+  let handle;
   try {
-    parsed = JSON.parse(await readFile(descriptorPath, 'utf8')) as unknown;
+    handle = await open(descriptorPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await handle.stat();
+    if (!info.isFile() || info.nlink !== 1) throw new Error('worker_launch_descriptor_invalid');
+    parsed = JSON.parse(await handle.readFile('utf8')) as unknown;
   } catch (error) {
-    throw new Error((error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? 'worker_launch_descriptor_missing' : 'worker_launch_descriptor_invalid');
+    if (error instanceof Error && error.message.startsWith('worker_launch_descriptor_')) throw error;
+    throw new Error((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'worker_launch_descriptor_missing' : 'worker_launch_descriptor_invalid');
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
   if (!isValidBootstrapSpec(parsed)) throw new Error('worker_launch_descriptor_invalid');
   const spec = parsed;
-  if (resolve(descriptorPath) !== resolve(spec.bootstrap_descriptor_path)) {
-    throw new Error('worker_launch_descriptor_path_mismatch');
-  }
+  if (resolve(descriptorPath) !== resolve(spec.bootstrap_descriptor_path)) throw new Error('worker_launch_descriptor_path_mismatch');
   const owner = await readJson(spec.transport_owner_path);
-  if (owner.kind !== 'value' || !transportOwnerMatches(owner.value, spec)
-    || !existsSync(spec.wrapper_path)) {
-    throw new Error('worker_launch_descriptor_owner_invalid');
-  }
+  if (owner.kind !== 'value' || !transportOwnerMatches(owner.value, spec, spec.authority_digest) || !existsSync(spec.wrapper_path)) throw new Error('worker_launch_descriptor_owner_invalid');
+
   try {
     await withFileLock(lockPathFor(spec.current_path), async () => {
       const currentOwner = await readJson(spec.transport_owner_path);
-      if (currentOwner.kind !== 'value' || !transportOwnerMatches(currentOwner.value, spec)
+      if (currentOwner.kind !== 'value' || !transportOwnerMatches(currentOwner.value, spec, spec.authority_digest)
         || !await isCurrentLaunchIdentity(spec.current_path, spec)
-        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
-        throw new Error('worker_launch_descriptor_owner_invalid');
-      }
+        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') throw new Error('worker_launch_descriptor_owner_invalid');
+
       await unlink(descriptorPath);
     });
   } catch (error) {
@@ -840,10 +928,11 @@ function isValidProcessStartIdentity(value: unknown): value is string {
 }
 
 async function readWorkerLaunchCleanupProof(
-  attempt: WorkerLaunchAttempt,
+  attempt: WorkerLaunchAttempt | WorkerLaunchBootstrapSpec,
   started?: Partial<WorkerLaunchProviderStarted>,
 ): Promise<boolean> {
-  const terminal = await readJson(`${attempt.startedPath}.terminal`);
+  const startedPath = 'startedPath' in attempt ? attempt.startedPath : attempt.started_path;
+  const terminal = await readJson(`${startedPath}.terminal`);
   if (terminal.kind === 'value') {
     const value = terminal.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>;
     const matchesStarted = !started || (value.pid === started.pid
@@ -853,7 +942,7 @@ async function readWorkerLaunchCleanupProof(
       && Number.isSafeInteger(value.pid) && Number(value.pid) > 0
       && isValidProcessStartIdentity(value.process_start_identity)) return true;
   }
-  const completed = await readJson(`${attempt.startedPath}.termination-complete`);
+  const completed = await readJson(`${startedPath}.termination-complete`);
   if (completed.kind === 'value') {
     const value = completed.value as Partial<WorkerLaunchIdentity> & Record<string, unknown>;
     const matchesStarted = !started || (value.pid === started.pid
@@ -882,14 +971,45 @@ export async function terminateWorkerLaunchProvider(
     || !Number.isSafeInteger(record.pid)
     || Number(record.pid) <= 0
     || !isValidProcessStartIdentity(record.process_start_identity)) return false;
+  if (terminalCleanupVerified) return true;
+  if (process.platform !== 'win32' && (!Number.isSafeInteger(record.process_group_id) || Number(record.process_group_id) <= 0)) return false;
   const terminationRequestPath = `${attempt.startedPath}.termination-request`;
   const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
   const existingRequest = await readJson(terminationRequestPath);
+  if (process.platform === 'win32') {
+    if (existingRequest.kind === 'absent') {
+      try {
+        await writeExclusiveAtomic(terminationRequestPath, {
+          ...identityOf(attempt), kind: 'worker_launch_termination_request', operation: 'terminate',
+          pid: record.pid, process_start_identity: record.process_start_identity,
+          authority_digest: record.authority_digest ?? '', containment_nonce: record.containment_nonce ?? attempt.nonce,
+          written_at: new Date().toISOString(),
+        });
+      } catch { return false; }
+    } else if (existingRequest.kind !== 'value') return false;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const complete = await readJson(terminationCompletePath);
+      if (complete.kind === 'value') {
+        const proof = complete.value as Record<string, unknown>;
+        if (identityMatches(proof, attempt)
+          && proof.kind === 'worker_launch_termination_complete'
+          && proof.cleanup_verified === true
+          && proof.pid === record.pid
+          && proof.process_start_identity === record.process_start_identity
+          && proof.authority_digest === record.authority_digest
+          && proof.containment_nonce === record.containment_nonce) return true;
+      }
+      await sleep(20);
+    }
+    return false;
+  }
   if (existingRequest.kind === 'absent') {
     try {
       await writeExclusiveAtomic(terminationRequestPath, {
         ...identityOf(attempt), kind: 'worker_launch_termination_request', pid: record.pid,
-        process_start_identity: record.process_start_identity, written_at: new Date().toISOString(),
+        process_start_identity: record.process_start_identity, containment_nonce: record.containment_nonce ?? attempt.nonce, written_at: new Date().toISOString(),
+
       });
     } catch {
       return false;
@@ -902,8 +1022,9 @@ export async function terminateWorkerLaunchProvider(
       || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
   }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
-  const result = await terminateOwnedProcessTree({
-    pid: record.pid!, expectedStartIdentity: record.process_start_identity, deadlineAt, force: true,
+  const result = await terminateOwnedProcessGroup({
+    pid: record.pid!, expectedStartIdentity: record.process_start_identity,
+    processGroupId: record.process_group_id!, deadlineAt, force: true,
   });
   if (result === 'already-dead' || result === 'identity-mismatch') return terminalCleanupVerified;
   if (result !== 'terminated') return false;
@@ -969,6 +1090,7 @@ async function readValidProviderStarted(
     && record.pid! > 0
     && typeof record.process_start_identity === 'string'
     && record.process_start_identity.trim().length > 0
+    && (record.containment_nonce === undefined || isExactText(record.containment_nonce))
     && typeof record.written_at === 'string'
     && Number.isFinite(Date.parse(record.written_at))
     ? record as WorkerLaunchProviderStarted
@@ -1036,7 +1158,15 @@ function isValidBootstrapSpec(value: unknown): value is WorkerLaunchBootstrapSpe
     && spec.cwd.length > 0
     && Number.isSafeInteger(spec.decision_timeout_ms)
     && typeof spec.release_after_spawn === 'boolean'
-    && Number(spec.decision_timeout_ms) > 0;
+    && Number(spec.decision_timeout_ms) > 0
+    && typeof spec.containment_nonce === 'string'
+    && spec.containment_nonce.length > 0
+    && typeof spec.supervisor_source_sha256 === 'string'
+    && /^[0-9a-f]{64}$/.test(spec.supervisor_source_sha256)
+    && spec.supervisor_source_sha256 === createHash('sha256').update(buildWindowsSupervisorSource(), 'utf8').digest('hex')
+    && typeof spec.authority_digest === 'string'
+    && /^[0-9a-f]{64}$/.test(spec.authority_digest)
+    && spec.authority_digest === canonicalAuthorityDigest({ identity: spec as WorkerLaunchIdentity, providerArgv: spec.provider_argv, providerEnv: spec.provider_env, cwd: spec.cwd, containmentNonce: spec.containment_nonce, supervisorSourceSha256: spec.supervisor_source_sha256 });
 }
 
 async function publishAcknowledgement(spec: WorkerLaunchBootstrapSpec): Promise<boolean> {
@@ -1074,36 +1204,79 @@ async function waitForBootstrapDecision(spec: WorkerLaunchBootstrapSpec): Promis
   return 'timeout';
 }
 
+function buildWindowsSupervisorInvocation(spec: WorkerLaunchBootstrapSpec): MaterializedProviderSpawnInvocation {
+  const env = Object.fromEntries(Object.entries(spec.provider_env).sort(([a], [b]) => a.localeCompare(b)));
+  const canonical_json = JSON.stringify({
+    protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL,
+    nonce: spec.containment_nonce,
+    supervisor_source_sha256: spec.supervisor_source_sha256,
+    identity: identityOf(spec),
+    provider_argv: [...spec.provider_argv],
+    provider_env: env,
+    cwd: resolve(spec.cwd),
+  });
+  const payload = Buffer.from(JSON.stringify({
+    canonical_json,
+    authority_digest: spec.authority_digest,
+    containment_nonce: spec.containment_nonce,
+    supervisor_source_sha256: spec.supervisor_source_sha256,
+    identity: identityOf(spec),
+    provider_argv: [...spec.provider_argv],
+    provider_env: env,
+    cwd: resolve(spec.cwd),
+  }), 'utf8').toString('base64');
+  const systemRoot = spec.provider_env.SystemRoot ?? spec.provider_env.SYSTEMROOT;
+  if (!systemRoot || !/^[A-Za-z]:\\/.test(systemRoot)) throw new Error('worker_launch_powershell_authority_missing');
+  return {
+    command: `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodePowerShell(buildWindowsSupervisorSource())],
+    stdinPayload: Buffer.from(payload, 'base64').toString('utf8'),
+    cleanup: async () => {},
+  };
+}
+
 function quoteWindowsCmdArgument(value: string): string {
   if (/[\r\n]/.test(value)) throw new Error('worker_launch_provider_argv_invalid');
   return `"${value.replace(/%/g, '%%').replace(/"/g, '""')}"`;
 }
 
+export function quoteWindowsCreateProcessArgument(value: string): string {
+  if (/[\r\n]/.test(value)) throw new Error('worker_launch_provider_argv_invalid');
+  let result = '"';
+  let slashes = 0;
+  for (const char of value) {
+    if (char === '\\') { slashes++; continue; }
+    if (char === '"') { result += '\\'.repeat(slashes * 2 + 1) + '"'; slashes = 0; continue; }
+    result += '\\'.repeat(slashes) + char; slashes = 0;
+  }
+  return result + '\\'.repeat(slashes * 2) + '"';
+}
+
 export function buildProviderSpawnInvocation(
   providerArgv: readonly string[],
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = {},
 ): ProviderSpawnInvocation {
   const [command, ...args] = providerArgv;
   if (!command) throw new Error('worker_launch_provider_argv_missing');
   if (platform === 'win32') {
-    const renderedProvider = providerArgv.map(quoteWindowsCmdArgument).join(' ');
-    const waitsForBatchProvider = ['.cmd', '.bat'].includes(extname(command).toLowerCase());
-    return {
-      command: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
-      args: ['/d', '/v:off', '/s', '/c'],
-      batchScript: `@echo off\r\n${waitsForBatchProvider ? 'start "" /b /wait ' : ''}${renderedProvider}\r\n`,
-    };
+    const comSpec = env.ComSpec ?? env.COMSPEC ?? 'cmd.exe';
+    const batchScript = ['@echo off', `start "" /b /wait ${providerArgv.map(quoteWindowsCmdArgument).join(' ')}`, ''].join('\r\n');
+    return { command: comSpec, args: ['/d', '/v:off', '/s', '/c'], batchScript };
   }
   return { command, args };
 }
+
 
 async function awaitExternalTerminationCompletion(
   spec: WorkerLaunchBootstrapSpec,
   timeoutMs: number = 2_000,
 ): Promise<boolean> {
   const request = await readJson(`${spec.started_path}.termination-request`);
-  if (request.kind !== 'value' || !identityMatches(request.value as Partial<WorkerLaunchIdentity>, spec)) return false;
+  if (request.kind !== 'value' || !identityMatches(request.value as Partial<WorkerLaunchIdentity>, spec)
+    || (request.value as Record<string, unknown>).containment_nonce !== spec.containment_nonce
+    || (request.value as Record<string, unknown>).authority_digest !== spec.authority_digest) return false;
+
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const completed = await readJson(`${spec.started_path}.termination-complete`);
@@ -1115,6 +1288,29 @@ async function awaitExternalTerminationCompletion(
   }
   return false;
 }
+async function isCorrelatedTerminationDead(spec: WorkerLaunchBootstrapSpec): Promise<boolean> {
+  const [request, started] = await Promise.all([
+    readJson(`${spec.started_path}.termination-request`),
+    readJson(spec.started_path),
+  ]);
+  if (request.kind !== 'value' || started.kind !== 'value'
+    || !identityMatches(request.value as Partial<WorkerLaunchIdentity>, spec)
+    || !identityMatches(started.value as Partial<WorkerLaunchIdentity>, spec)) return false;
+  const requestRecord = request.value as Record<string, unknown>;
+  const startedRecord = started.value as Partial<WorkerLaunchProviderStarted>;
+  if (requestRecord.kind !== 'worker_launch_termination_request'
+    || requestRecord.pid !== startedRecord.pid
+    || requestRecord.process_start_identity !== startedRecord.process_start_identity
+    || !Number.isSafeInteger(startedRecord.pid)
+    || !isValidProcessStartIdentity(startedRecord.process_start_identity)) return false;
+  const liveness = await isProcessIdentityLive(
+    startedRecord.pid!,
+    startedRecord.process_start_identity!,
+    Date.now() + 500,
+  );
+  return liveness === 'dead' || liveness === 'mismatch';
+}
+
 
 export async function materializeProviderSpawnInvocation(
   invocation: ProviderSpawnInvocation,
@@ -1126,18 +1322,7 @@ export async function materializeProviderSpawnInvocation(
   }
   const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
   const completionPath = superviseProcessTree ? join(wrapperDir, 'provider-exit.txt') : undefined;
-  try {
-    if (!invocation.batchScript) {
-      const wrapperPath = join(wrapperDir, 'launch.sh');
-      const quotedCompletion = `'${completionPath!.replace(/'/g, `'"'"'`)}'`;
-      await writeFile(wrapperPath,
-        `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`,
-        { encoding: 'utf8', mode: 0o700 });
-      return {
-        command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath,
-        cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
-      };
-    }
+  if (invocation.batchScript) {
     const wrapperPath = join(wrapperDir, 'launch.cmd');
     const completionScript = completionPath
       ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
@@ -1149,17 +1334,18 @@ export async function materializeProviderSpawnInvocation(
       ...(completionPath ? { completionPath } : {}),
       cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
     };
-  } catch (writeError) {
-    await rm(wrapperDir, { recursive: true, force: true }).catch(() => undefined);
-    throw writeError;
   }
+  const wrapperPath = join(wrapperDir, 'launch.sh');
+  const quotedCompletion = `'${completionPath!.replace(/'/g, `'"'"'`)}'`;
+  await writeFile(wrapperPath, `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
+  return { command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath, cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); } };
 }
-
 async function publishProviderStarted(
   spec: WorkerLaunchBootstrapSpec,
   pid: number | undefined,
   processStartIdentity: string,
   supervisorCompletionPath?: string,
+  processGroupId?: number,
 ): Promise<boolean> {
   const record: WorkerLaunchProviderStarted = {
     schema_version: spec.schema_version,
@@ -1173,8 +1359,11 @@ async function publishProviderStarted(
     kind: 'worker_launch_provider_started',
     pid: Number.isSafeInteger(pid) ? pid! : null,
     process_start_identity: processStartIdentity,
+    containment_nonce: spec.containment_nonce,
     ...(supervisorCompletionPath ? { supervisor_completion_path: supervisorCompletionPath } : {}),
     written_at: new Date().toISOString(),
+    authority_digest: spec.authority_digest,
+    ...(processGroupId !== undefined ? { process_group_id: processGroupId } : {}),
   };
   try {
     await writeExclusiveAtomic(spec.started_path, record);
@@ -1193,44 +1382,101 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
   const decision = await waitForBootstrapDecision(spec);
   if (decision === 'timeout') return { outcome: 'decision_timeout' };
   if (decision === 'revoked') return { outcome: 'revoked' };
-  const providerEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.provider_env };
-  for (const key of WORKER_LAUNCH_INTERNAL_ENV_KEYS) delete providerEnv[key];
+  const providerEnv: NodeJS.ProcessEnv = { ...spec.provider_env };
   try {
     const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)
         || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
         return { outcome: 'superseded' as const };
       }
-      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv), {
-        superviseProcessTree: true,
-      });
+      const invocation = process.platform === 'win32'
+        ? buildWindowsSupervisorInvocation(spec)
+        : await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv, process.platform, providerEnv), { superviseProcessTree: true });
       const child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd,
         env: providerEnv,
-        stdio: 'inherit',
+        stdio: process.platform === 'win32' ? ['pipe', 'pipe', 'pipe'] : 'inherit',
         detached: process.platform !== 'win32',
       });
+      if (process.platform === 'win32' && invocation.stdinPayload && child.stdin?.writable) {
+        child.stdin.write(`${invocation.stdinPayload}\n`);
+      }
       let settled = false;
+      let providerPid: number | null = null;
       let providerStartIdentity: string | null = null;
       let supervisedExitCode: number | null = null;
+      let launchGroup: ReturnType<typeof captureOwnedProcessGroup> = null;
       let supervisorTimer: NodeJS.Timeout | undefined;
-      let terminationResult: Promise<Awaited<ReturnType<typeof terminateOwnedProcessTree>>> | null = null;
+      let terminationResult: Promise<Awaited<ReturnType<typeof terminateOwnedProcessGroup>>> | null = null;
       let resolveCompletion!: (result: WorkerLaunchBootstrapResult) => void;
+      let resolveWindowsReady!: (ready: boolean) => void;
+      let resolveWindowsTerminal!: (verified: boolean) => void;
+      const windowsReady = new Promise<boolean>(resolve => { resolveWindowsReady = resolve; });
+      const windowsTerminal = new Promise<boolean>(resolve => { resolveWindowsTerminal = resolve; });
+      if (process.platform === 'win32' && child.stdout) {
+        let buffered = '';
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', chunk => {
+          buffered += String(chunk);
+          if (buffered.length > 16_384) {
+            buffered = '';
+            resolveWindowsReady(false);
+            resolveWindowsTerminal(false);
+            return;
+          }
+          for (;;) {
+            const newline = buffered.indexOf('\n');
+            if (newline < 0) break;
+            const line = buffered.slice(0, newline).trim();
+            buffered = buffered.slice(newline + 1);
+            if (!line) continue;
+            let message: Record<string, unknown>;
+            try { message = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+            const matches = message.protocol === WINDOWS_SUPERVISOR_PROTOCOL
+              && message.attempt_id === spec.attempt_id
+              && message.authority_digest === spec.authority_digest
+              && message.containment_nonce === spec.containment_nonce;
+            if (!matches) continue;
+            if (message.kind === 'ready' && Number.isSafeInteger(message.pid) && Number(message.pid) > 0
+              && isValidProcessStartIdentity(message.process_start_identity)) {
+              providerPid = Number(message.pid);
+              providerStartIdentity = String(message.process_start_identity);
+              resolveWindowsReady(true);
+            } else if (message.kind === 'terminal' && message.pid === providerPid
+              && message.outcome === 'terminated' && message.cleanup_verified === true) {
+              void writeExclusiveAtomic(`${spec.started_path}.termination-complete`, {
+                ...identityOf(spec), kind: 'worker_launch_termination_complete', cleanup_verified: true,
+                pid: providerPid, process_start_identity: providerStartIdentity,
+                authority_digest: spec.authority_digest, containment_nonce: spec.containment_nonce,
+                written_at: new Date().toISOString(),
+              }).catch(() => undefined);
+              resolveWindowsTerminal(true);
+            }
+          }
+        });
+      }
       const completion = new Promise<WorkerLaunchBootstrapResult>(resolve => {
         resolveCompletion = resolve;
         child.once('exit', async (exitCode, signal) => {
           if (settled) return;
           settled = true;
           if (supervisorTimer) clearInterval(supervisorTimer);
+          if (process.platform === 'win32') {
+            resolveWindowsReady(false);
+            resolveWindowsTerminal(false);
+          }
           const effectiveExitCode = supervisedExitCode ?? exitCode;
           const effectiveSignal = supervisedExitCode === null ? signal : null;
-          const cleanupVerified = terminationResult
-            ? await terminationResult === 'terminated'
-            : await awaitExternalTerminationCompletion(spec);
+          const cleanupVerified = process.platform === 'win32'
+            ? await awaitExternalTerminationCompletion(spec) || await readWorkerLaunchCleanupProof(spec)
+            : terminationResult
+              ? ['terminated', 'already-dead', 'identity-mismatch'].includes(await terminationResult)
+              : await awaitExternalTerminationCompletion(spec) || await readWorkerLaunchCleanupProof(spec)
+                || await isCorrelatedTerminationDead(spec);
           await atomicWriteJson(`${spec.started_path}.terminal`, {
             ...identityOf(spec), kind: 'worker_launch_provider_terminal',
             outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
-            pid: child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
+            pid: providerPid ?? child.pid ?? null, process_start_identity: providerStartIdentity, exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
           }).catch(() => undefined);
           await invocation.cleanup().catch(() => undefined);
           resolve(cleanupVerified
@@ -1241,28 +1487,37 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           if (settled) return;
           settled = true;
           if (supervisorTimer) clearInterval(supervisorTimer);
+          resolveWindowsReady(false);
+          resolveWindowsTerminal(false);
           await atomicWriteJson(`${spec.started_path}.terminal`, {
             ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'error', cleanup_verified: false,
-            pid: child.pid ?? null, process_start_identity: providerStartIdentity, written_at: new Date().toISOString(),
+            pid: providerPid ?? child.pid ?? null, process_start_identity: providerStartIdentity, written_at: new Date().toISOString(),
           }).catch(() => undefined);
           await invocation.cleanup().catch(() => undefined);
           resolve({ outcome: 'provider_spawn_failed' });
         });
       });
-      /**
-       * Creation-bound containment: can reap the exact ChildProcess even before a
-       * durable process-start identity exists. Never promotes raw PID to later authority.
-       */
       const terminateProvider = async (): Promise<boolean> => {
-        if (settled) return true;
-        if (child.pid && providerStartIdentity) {
-          terminationResult ??= terminateOwnedProcessTree({
-            pid: child.pid,
-            expectedStartIdentity: providerStartIdentity,
-            deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-            force: true,
+        if (settled) return process.platform !== 'win32';
+        if (process.platform === 'win32') {
+          if (!providerPid || !providerStartIdentity || !child.stdin?.writable) return false;
+          const frame = JSON.stringify({
+            protocol: WINDOWS_SUPERVISOR_PROTOCOL, kind: 'terminate', attempt_id: spec.attempt_id,
+            authority_digest: spec.authority_digest, containment_nonce: spec.containment_nonce,
           });
-          const terminated = await terminationResult === 'terminated';
+          child.stdin.write(`${frame}\n`);
+          return await Promise.race([
+            windowsTerminal,
+            new Promise<false>(resolve => setTimeout(() => resolve(false), 5_000)),
+          ]);
+        }
+        if (child.pid && providerStartIdentity && launchGroup) {
+          terminationResult ??= terminateOwnedProcessGroup({
+            pid: launchGroup.pid, expectedStartIdentity: launchGroup.processStartIdentity,
+            processGroupId: launchGroup.processGroupId,
+            deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
+          });
+          const terminated = ['terminated', 'already-dead', 'identity-mismatch'].includes(await terminationResult);
           const completed = await new Promise<boolean>(resolve => {
             const timer = setTimeout(() => resolve(false), 2_000);
             void completion.then(result => {
@@ -1272,25 +1527,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           });
           return terminated && completed;
         }
-        // Pre-identity path: kill only via the spawn handle (and its process group
-        // when detached). This is creation-bound containment, not durable ownership.
-        try {
-          if (child.pid && process.platform !== 'win32') {
-            try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
-          } else {
-            child.kill('SIGKILL');
-          }
-        } catch { /* already dead */ }
-        const completed = await new Promise<boolean>(resolve => {
-          const timer = setTimeout(() => resolve(false), 2_000);
-          void completion.then(() => {
-            clearTimeout(timer);
-            resolve(true);
-          });
-          // If already settled between kill and wait
-          if (settled) { clearTimeout(timer); resolve(true); }
-        });
-        return completed;
+        return false;
       };
       const cleanupSignals: NodeJS.Signals[] = ['SIGHUP', 'SIGINT', 'SIGTERM'];
       const onBootstrapSignal = () => { void terminateProvider(); };
@@ -1309,23 +1546,35 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         await completion;
         return { outcome: 'provider_spawn_failed' as const };
       }
-      // Bind identity IMMEDIATELY after spawn, before any await/yield that could
-      // race with child exit + PID reuse. Fail closed if sync identity unavailable.
-      providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
-      if (!child.pid || !providerStartIdentity || settled || !isProcessAlive(child.pid)) {
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-        return { outcome: 'provider_spawn_failed' as const };
-      }
-      if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
-      if (settled) {
-        // Child settled during delay — do not publish; cleanup may already be in flight.
-        return { completion };
-      }
-      // Rebind after the delay await before any durable publication.
-      const reboundIdentity = getProcessStartIdentitySync(child.pid);
-      if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-        return { outcome: 'provider_spawn_failed' as const };
+      if (process.platform === 'win32') {
+        const ready = await Promise.race([
+          windowsReady,
+          new Promise<false>(resolve => setTimeout(() => resolve(false), 10_000)),
+        ]);
+        if (!ready || !providerPid || !providerStartIdentity || settled) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+      } else {
+        // Bind identity immediately after spawn, before an async handoff can race PID reuse.
+        providerPid = child.pid ?? null;
+        providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+        if (!child.pid || !providerStartIdentity || settled || !isProcessAlive(child.pid)) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+        launchGroup = captureOwnedProcessGroup(child.pid);
+        if (!launchGroup) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
+        if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
+        if (settled) return { completion };
+        const reboundIdentity = getProcessStartIdentitySync(child.pid);
+        if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
+          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+          return { outcome: 'provider_spawn_failed' as const };
+        }
       }
       if (invocation.completionPath && existsSync(invocation.completionPath)) {
         const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
@@ -1339,7 +1588,8 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         return { outcome: 'superseded' as const };
       }
       try {
-        if (!await publishProviderStarted(spec, child.pid, providerStartIdentity, invocation.completionPath)) {
+        if (!await publishProviderStarted(spec, providerPid ?? child.pid, providerStartIdentity, invocation.completionPath,
+          launchGroup?.processGroupId)) {
           if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
           return { outcome: 'provider_spawn_failed' as const };
         }
@@ -1381,6 +1631,30 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
               resolveCompletion({ outcome: 'provider_cleanup_unverified' });
             }
           }).catch(() => undefined).finally(() => { pollingCompletion = false; });
+        }, DEFAULT_POLL_INTERVAL_MS);
+        supervisorTimer.unref();
+      }
+      if (process.platform === 'win32') {
+        let pollingTermination = false;
+        supervisorTimer = setInterval(() => {
+          if (pollingTermination || settled || !providerPid || !providerStartIdentity) return;
+          pollingTermination = true;
+          void readJson(`${spec.started_path}.termination-request`).then(async request => {
+            if (request.kind !== 'value') return;
+            const record = request.value as Record<string, unknown>;
+            if (!identityMatches(record, spec) || record.kind !== 'worker_launch_termination_request'
+              || record.operation !== 'terminate' || record.pid !== providerPid
+              || record.process_start_identity !== providerStartIdentity
+              || record.authority_digest !== spec.authority_digest
+              || record.containment_nonce !== spec.containment_nonce) return;
+            const cleaned = await terminateProvider();
+            if (!cleaned && !settled) {
+              await atomicWriteJson(`${spec.started_path}.terminal`, {
+                ...identityOf(spec), kind: 'worker_launch_provider_terminal', outcome: 'cleanup_unverified', cleanup_verified: false,
+                pid: providerPid, process_start_identity: providerStartIdentity, exit_code: null, signal: null, written_at: new Date().toISOString(),
+              }).catch(() => undefined);
+            }
+          }).catch(() => undefined).finally(() => { pollingTermination = false; });
         }, DEFAULT_POLL_INTERVAL_MS);
         supervisorTimer.unref();
       }

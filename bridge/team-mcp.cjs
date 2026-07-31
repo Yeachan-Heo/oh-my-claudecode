@@ -18498,6 +18498,14 @@ function withFileLockSync(lockPath, fn, opts) {
   }
 }
 
+// src/team/worker-launch-ack.ts
+var WORKER_LAUNCH_INTERNAL_ENV_KEYS = /* @__PURE__ */ new Set([
+  "OMC_WORKER_LAUNCH_SPEC",
+  "OMC_WORKER_LAUNCH_SPEC_B64",
+  "OMC_WORKER_LAUNCH_SPEC_FILE"
+]);
+var WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, "SystemRoot"].map((key) => key.toUpperCase()));
+
 // src/team/tmux-session.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var execFileAsync2 = (0, import_util7.promisify)(import_child_process4.execFile);

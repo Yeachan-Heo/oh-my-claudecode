@@ -1129,20 +1129,18 @@ export async function runWorkerLaunchFromEnvironment() {
             : undefined);
     if (descriptorPath && raw)
         throw new Error('worker_launch_spec_source_conflict');
-    let spec;
-    if (descriptorPath) {
-        spec = await readAndConsumeWorkerLaunchDescriptor(descriptorPath);
-    }
-    else {
+    if (!descriptorPath) {
         if (!raw)
             throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
         try {
-            spec = JSON.parse(raw);
+            JSON.parse(raw);
         }
         catch {
             throw new Error('worker_launch_invalid_spec_json');
         }
+        throw new Error('worker_launch_descriptor_required');
     }
+    const spec = await readAndConsumeWorkerLaunchDescriptor(descriptorPath);
     const result = await runWorkerLaunchBootstrap(spec);
     if (result.outcome !== 'ran')
         throw new Error(`worker_launch_${result.outcome}`);

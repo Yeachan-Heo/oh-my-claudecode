@@ -358,6 +358,7 @@ const RECOVERY_ERRORS = new Set<RecoverDeadWorkerV2Error>([
   'recovery_checkpoint_ambiguous', 'recovery_checkpoint_stale', 'task_requeue_failed', 'launch_metadata_incomplete',
   'launch_descriptor_unresolvable', 'spawn_failed', 'startup_ack_timeout', 'worker_activation_failed',
   'auto_merge_unavailable', 'stale_state_revision', 'config_commit_failed',
+  'worker_cleanup_incomplete',
 ]);
 const RECOVERY_WARNINGS = new Set(['projection_repair_required', 'identity_repair_required', 'services_pending',
   'event_repair_required', 'result_repair_required']);

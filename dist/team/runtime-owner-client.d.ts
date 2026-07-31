@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { readLatestOwnerEpoch } from './team-owner-epoch.js';
 import type { RecoverDeadWorkerV2Result } from './types.js';
 export interface RecoveryOwnerBootstrap {
@@ -39,9 +40,11 @@ export interface RecoveryIntentRecord {
 declare function publishRecoveryOwnerBootstrapCandidate(input: RecoverDeadWorkerOwnerInput, recoveryId: string, expectedEpoch: number, nonce: string, pid: number, processStartedAt: string, predecessor: ReturnType<typeof readLatestOwnerEpoch>): Promise<void>;
 declare function hasLiveOrUnknownBootstrapCandidate(input: RecoverDeadWorkerOwnerInput, recoveryId: string, expectedEpoch: number, predecessor: ReturnType<typeof readLatestOwnerEpoch>): boolean;
 /** Narrow white-box hooks for deterministic crash/retry protocol tests. */
+/** Narrow white-box hooks for deterministic crash/retry protocol tests. */
 export declare const recoveryOwnerBootstrapTestHooks: {
     publishCandidate: typeof publishRecoveryOwnerBootstrapCandidate;
     hasLiveOrUnknownCandidate: typeof hasLiveOrUnknownBootstrapCandidate;
+    spawn: (implementation?: typeof spawn) => typeof spawn;
 };
 export declare function parseRecoveryIntent(raw: string): RecoveryIntentRecord;
 export declare function resolveRuntimeCliPath(): string;

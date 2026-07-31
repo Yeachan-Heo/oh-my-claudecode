@@ -2,11 +2,28 @@
  * Cross-Platform Process Utilities
  * Provides unified process management across Windows, macOS, and Linux.
  */
+export interface OwnedProcessGroup {
+    pid: number;
+    processStartIdentity: string;
+    processGroupId: number;
+}
+/** Capture creation-bound POSIX process-group metadata for a detached owner. */
+export declare function captureOwnedProcessGroup(pid: number): OwnedProcessGroup | null;
+export interface TerminateOwnedProcessGroupOptions {
+    pid: number;
+    expectedStartIdentity: string;
+    processGroupId: number;
+    deadlineAt: string;
+    force?: boolean;
+}
+/** Signal only an exact-identity POSIX process-group leader; never fall back to PID. */
+export declare function terminateOwnedProcessGroup(options: TerminateOwnedProcessGroupOptions): Promise<'terminated' | 'already-dead' | 'identity-mismatch' | 'unknown' | 'deadline-exceeded'>;
 /**
  * Kill a process and optionally its entire process tree.
  *
- * On Windows: Uses taskkill /T for tree kill, /F for force
- * On Unix: Signals the owned process group, falling back to the root PID
+ * On Windows: Uses taskkill /T for generic callers; this is not creation-bound
+ * and MUST NOT be used for launch-owned cleanup.
+ * On Unix: Signals the owned process group, falling back to the root PID.
  */
 export declare function killProcessTree(pid: number, signal?: NodeJS.Signals): Promise<boolean>;
 /**
@@ -50,8 +67,10 @@ export interface TerminateOwnedProcessTreeOptions {
 }
 /**
  * Terminate only a process whose durable start identity still matches. Windows
- * binds verification and tree termination to one System.Diagnostics.Process
- * handle so a reused numeric PID is never handed to taskkill.
+ * binds verification to one exact root process identity and uses handles while
+ * enumerating descendants; this remains a generic tree cleanup API, not a
+ * creation-bound launch-owned authority. Launch-owned callers must use the
+ * exact process-group API on POSIX and refuse unsupported Windows reconnects.
  */
 export declare function terminateOwnedProcessTree(options: TerminateOwnedProcessTreeOptions): Promise<'terminated' | 'already-dead' | 'identity-mismatch' | 'unknown' | 'deadline-exceeded'>;
 //# sourceMappingURL=process-utils.d.ts.map

@@ -431,12 +431,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(marker.reason).toBe('startup_failed_before_config_persisted');
     expect(marker.error).toContain('claude launch exploded');
     expect(marker.recorded_at).toBeTruthy();
-    expect(mocks.killTeamSession).toHaveBeenCalledWith(
-      'dispatch-session',
-      [],
-      '%1',
-      { sessionMode: 'split-pane' },
-    );
+    expect(mocks.killTeamSession).not.toHaveBeenCalled();
   });
 
   it('does not persist sensitive cmux worker command payloads in startup failure evidence', async () => {
@@ -974,12 +969,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     })).rejects.toThrow('worker_start_ack_ack_timeout:worker-1:%2:attempt');
 
     expect(mocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
-    expect(mocks.killTeamSession).toHaveBeenCalledWith(
-      'dispatch-session',
-      [],
-      '%1',
-      { sessionMode: 'split-pane' },
-    );
+    expect(mocks.killTeamSession).not.toHaveBeenCalled();
     const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
     const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
     expect(persisted.workers[0].pane_id).toBeUndefined();
