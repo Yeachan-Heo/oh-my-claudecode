@@ -72,7 +72,7 @@ describe('SessionEnd action runner', () => {
     directories.push(directory);
     const child = Object.assign(new EventEmitter(), { pid: 12347, unref: vi.fn() });
     childProcess.spawn.mockReturnValue(child);
-    
+
     let finishKill!: () => void;
     processUtils.terminateOwnedProcessTree.mockImplementation(() => new Promise<'terminated'>((resolve) => { finishKill = () => resolve('terminated'); }));
     const result = runSessionEndAction({ ...context(directory), deadlineAt: now + 10 }, async () => undefined);
@@ -98,7 +98,7 @@ describe('SessionEnd action runner', () => {
     directories.push(directory);
     const child = Object.assign(new EventEmitter(), { pid: 12348, unref: vi.fn() });
     childProcess.spawn.mockReturnValue(child);
-    
+
     processUtils.terminateOwnedProcessTree.mockResolvedValue('unknown');
 
     const result = runSessionEndAction({ ...context(directory), deadlineAt: now + 10 }, async () => undefined);
@@ -119,7 +119,7 @@ describe('SessionEnd action runner', () => {
       queueMicrotask(() => child.emit('exit', 0));
       return child;
     });
-    
+
     vi.stubEnv('OMC_DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/secret');
     vi.stubEnv('OMC_DISCORD', '1');
 
@@ -144,7 +144,6 @@ describe('SessionEnd action runner', () => {
       queueMicrotask(() => child.emit('exit', 0));
       return child;
     });
-    
     vi.stubEnv('OMC_OPENCLAW', '1');
     vi.stubEnv('OMC_OPENCLAW_CONFIG', '/tmp/recovering-session.json');
     vi.stubEnv('OPENCLAW_REPLY_CHANNEL', '#new-session');
