@@ -1,7 +1,8 @@
 /**
  * OMC HUD - Usage API
  *
- * Fetches rate limit usage from Anthropic's OAuth API.
+ * Fetches rate limit usage from Anthropic's OAuth API, with overrides for
+ * third-party providers (z.ai, MiniMax, Kimi) detected via ANTHROPIC_BASE_URL.
  * Based on claude-hud implementation by jarrodwatts.
  *
  * Authentication:
@@ -88,6 +89,69 @@ export declare function isZaiHost(urlString: string): boolean;
  *   - minimax.com / *.minimax.com  (China alternative)
  */
 export declare function isMinimaxHost(urlString: string): boolean;
+/**
+ * Check if a URL points to the Kimi For Coding platform (kimi.com).
+ * Matches kimi.com and any subdomain (e.g. api.kimi.com). The Moonshot open
+ * platform (api.moonshot.ai / api.moonshot.cn) is intentionally NOT matched:
+ * it exposes balance, not plan quota windows (no /usages endpoint).
+ */
+export declare function isKimiHost(urlString: string): boolean;
+/**
+ * Kimi For Coding `/usages` payload (GET {origin}/coding/v1/usages).
+ * Reverse-engineered from the open-source kimi-code CLI
+ * (MoonshotAI/kimi-code, packages/oauth/src/managed-usage.ts) and verified
+ * against the live endpoint with an API key.
+ *
+ * Quirk: `limit`/`used`/`remaining` arrive as JSON strings ("100"), not
+ * numbers. `resetTime` is ISO 8601 with nano-precision fractional seconds.
+ *
+ * Shape (abridged live payload):
+ *   {
+ *     "usage":  { "limit": "100", "used": "45", "remaining": "55", "resetTime": "..." },  // weekly window
+ *     "limits": [
+ *       { "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },                    // 5h window
+ *         "detail": { "limit": "100", "used": "2", "remaining": "98", "resetTime": "..." } }
+ *     ],
+ *     "boosterWallet": { ... }  // optional extra (metered) monthly spend
+ *   }
+ */
+interface KimiQuotaRow {
+    /** Fields are string-typed in the wire format; numbers tolerated for robustness */
+    limit?: number | string;
+    used?: number | string;
+    remaining?: number | string;
+    /** ISO 8601, may carry nano-precision fraction (".628002Z") */
+    resetTime?: string;
+    /** Aliases observed across payload versions (per kimi-code's loose parser) */
+    reset_at?: string;
+    resetAt?: string;
+}
+interface KimiUsageResponse {
+    usage?: KimiQuotaRow;
+    limits?: Array<{
+        window?: {
+            duration?: number;
+            timeUnit?: string;
+        };
+        detail?: KimiQuotaRow;
+    } & KimiQuotaRow>;
+    boosterWallet?: {
+        balance?: {
+            type?: string;
+            amount?: number;
+            amountLeft?: number;
+        };
+        monthlyChargeLimit?: {
+            priceInCents?: number;
+            currency?: string;
+        };
+        monthlyUsed?: {
+            priceInCents?: number;
+            currency?: string;
+        };
+        monthlyChargeLimitEnabled?: boolean;
+    };
+}
 interface MinimaxModelRemain {
     model_name: string;
     current_interval_total_count: number;
@@ -136,6 +200,18 @@ export declare function parseZaiResponse(response: ZaiQuotaResponse): RateLimits
  * Parse MiniMax coding plan API response into RateLimits
  */
 export declare function parseMinimaxResponse(response: MinimaxCodingPlanResponse): RateLimits | null;
+/**
+ * Parse Kimi For Coding `/usages` response into RateLimits.
+ *
+ * Mapping (verified against live payload):
+ * - Top-level `usage` → weekly window (resetTime ~7 days out)
+ * - `limits[]` entry whose window is exactly 300 minutes → 5-hour window
+ *   (observed: window.duration=300, timeUnit=TIME_UNIT_MINUTE). Any other
+ *   duration is dropped, never rendered under the HUD's "5h" label.
+ * - `boosterWallet` (optional) → extra usage, USD only: the HUD's extra-usage
+ *   renderer hard-codes "$", so CNY wallets are skipped rather than mislabeled.
+ */
+export declare function parseKimiResponse(response: KimiUsageResponse): RateLimits | null;
 /**
  * Get usage data (with caching)
  *
