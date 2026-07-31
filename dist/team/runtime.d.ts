@@ -92,7 +92,7 @@ export declare function assignTask(teamName: string, taskId: string, targetWorke
 /**
  * Gracefully shut down all workers and clean up.
  */
-export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string, ownsWindow?: boolean): Promise<boolean>;
+export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string, ownsWindow?: boolean): Promise<void>;
 /**
  * Resume an existing team from persisted state.
  * Reconstructs activeWorkers by scanning task files for in_progress tasks

@@ -151,7 +151,6 @@ export interface TeamTaskClaim {
     owner: string;
     token: string;
     leased_until: string;
-    launch_attempt_id?: string;
 }
 /** Base team task matching OMX shape */
 export interface TeamTask {
@@ -262,7 +261,7 @@ export type TaskRecoveryAdoptionResult = {
     error: 'task_not_found' | 'claim_conflict' | 'checkpoint_missing' | 'checkpoint_malformed' | 'checkpoint_stale' | 'checkpoint_ambiguous';
 };
 export type RecoverDeadWorkerV2Warning = 'projection_repair_required' | 'identity_repair_required' | 'services_pending' | 'event_repair_required' | 'result_repair_required';
-export type RecoverDeadWorkerV2Error = 'invalid_input' | 'team_not_found' | 'worker_not_found' | 'runtime_v2_required' | 'invalid_persisted_state' | 'runtime_owner_unavailable' | 'runtime_owner_fence_lost' | 'recovery_request_timeout' | 'recovery_attempt_conflict' | 'team_mutation_busy' | 'team_mutation_resume_required' | 'team_shutting_down' | 'team_session_dead' | 'worker_liveness_unknown' | 'recovery_checkpoint_missing' | 'recovery_checkpoint_malformed' | 'recovery_checkpoint_ambiguous' | 'recovery_checkpoint_stale' | 'task_requeue_failed' | 'launch_metadata_incomplete' | 'launch_descriptor_unresolvable' | 'spawn_failed' | 'startup_ack_timeout' | 'worker_activation_failed' | 'worker_cleanup_incomplete' | 'auto_merge_unavailable' | 'stale_state_revision' | 'config_commit_failed';
+export type RecoverDeadWorkerV2Error = 'invalid_input' | 'team_not_found' | 'worker_not_found' | 'runtime_v2_required' | 'invalid_persisted_state' | 'runtime_owner_unavailable' | 'runtime_owner_fence_lost' | 'recovery_request_timeout' | 'recovery_attempt_conflict' | 'team_mutation_busy' | 'team_mutation_resume_required' | 'team_shutting_down' | 'team_session_dead' | 'worker_liveness_unknown' | 'recovery_checkpoint_missing' | 'recovery_checkpoint_malformed' | 'recovery_checkpoint_ambiguous' | 'recovery_checkpoint_stale' | 'task_requeue_failed' | 'launch_metadata_incomplete' | 'launch_descriptor_unresolvable' | 'spawn_failed' | 'startup_ack_timeout' | 'worker_activation_failed' | 'auto_merge_unavailable' | 'stale_state_revision' | 'config_commit_failed';
 export interface RecoverDeadWorkerV2OutcomeBase {
     requestId: string;
     recoveryId: string;
@@ -302,7 +301,7 @@ export interface TeamRuntimeOwnerEpoch {
 /** Durable lifecycle fence for a scale-up operation. */
 export interface TeamScaleUpAttempt {
     operation_id: string;
-    phase: 'reserved' | 'effects' | 'committed' | 'failed';
+    phase: 'reserved' | 'effects' | 'failed';
     pid: number;
     process_started_at: string;
     state_revision: number;
@@ -422,7 +421,6 @@ export interface WorkerInfo {
     recovery_id?: string;
     replacement_generation?: number;
     pane_attempt_id?: string;
-    launch_attempt_id?: string;
     operational_state?: 'starting' | 'active' | 'dead' | 'stopped';
     launch_descriptor?: WorkerLaunchDescriptor;
 }
@@ -689,7 +687,6 @@ export interface WorkerStatus {
     state: 'idle' | 'working' | 'blocked' | 'done' | 'failed' | 'draining' | 'unknown';
     current_task_id?: string;
     reason?: string;
-    launch_attempt_id?: string;
     updated_at: string;
 }
 /** Worker heartbeat for liveness detection */

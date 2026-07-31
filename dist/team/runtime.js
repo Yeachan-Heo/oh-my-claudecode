@@ -768,30 +768,19 @@ export async function shutdownTeam(teamName, sessionName, cwd, timeoutMs = 30_00
     const effectiveWorkerPaneIds = sessionMode === 'split-pane'
         ? await resolveSplitPaneWorkerPaneIds(sessionName, workerPaneIds, leaderPaneId)
         : workerPaneIds;
-    // Fail closed: split-pane teams with workers but no identity-bound pane evidence
-    // must not report successful cleanup and delete state.
-    if (sessionMode === 'split-pane') {
-        const expectedWorkers = Number(configData?.workerCount ?? 0);
-        if (expectedWorkers > 0 && (!effectiveWorkerPaneIds || effectiveWorkerPaneIds.length === 0)) {
-            return false;
-        }
-    }
-    if (!await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode }))
-        return false;
+    await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode });
     // Clean up state
     try {
-        if (cleanupTeamWorktrees(teamName, cwd).preserved.length > 0)
-            return false;
+        cleanupTeamWorktrees(teamName, cwd);
     }
     catch {
-        return false;
+        // best-effort: worktree cleanup is dormant in current runtime paths
     }
     try {
         await rm(root, { recursive: true, force: true });
-        return true;
     }
     catch {
-        return false;
+        // Ignore cleanup errors
     }
 }
 /**

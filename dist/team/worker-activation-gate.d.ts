@@ -1,4 +1,3 @@
-import { type WorkerLaunchAttempt } from './worker-launch-ack.js';
 export interface RecoveryActivationGate {
     recoveryId: string;
     workerName: string;
@@ -7,7 +6,6 @@ export interface RecoveryActivationGate {
     readyPath: string;
     activatePath: string;
     runPath: string;
-    launchAttempt?: WorkerLaunchAttempt;
     providerArgv: string[];
     cwd: string;
     env?: NodeJS.ProcessEnv;
@@ -19,15 +17,13 @@ export type RecoveryActivationGateResult = {
     exitCode: number | null;
     signal: NodeJS.Signals | null;
 } | {
-    outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed' | 'provider_cleanup_unverified' | 'superseded';
+    outcome: 'activation_timeout' | 'run_timeout' | 'invalid_provider_argv' | 'provider_spawn_failed';
 };
 interface GateRecord {
     recovery_id: string;
     worker_name: string;
     replacement_generation: number;
     pane_attempt_id: string;
-    launch_attempt_id: string;
-    launch_nonce: string;
     written_at: string;
 }
 export declare function waitForRecoveryGateRecord(path: string, expected: Omit<GateRecord, 'written_at'>, timeoutMs: number, pollIntervalMs?: number): Promise<boolean>;

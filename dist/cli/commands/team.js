@@ -747,17 +747,13 @@ async function handleTeamShutdown(teamName, cwd, force) {
     const { isRuntimeV2Enabled } = await import('../../team/runtime-v2.js');
     if (isRuntimeV2Enabled()) {
         const { shutdownTeamV2 } = await import('../../team/runtime-v2.js');
-        const shutdown = await shutdownTeamV2(teamName, cwd, { force });
-        if (shutdown.outcome !== 'cleaned')
-            throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
+        await shutdownTeamV2(teamName, cwd, { force });
         console.log(`Team shutdown complete: ${teamName}`);
         return;
     }
     // v1 fallback
     const { shutdownTeam } = await import('../../team/runtime.js');
-    const cleaned = await shutdownTeam(teamName, `omc-team-${teamName}`, cwd);
-    if (!cleaned)
-        throw new Error(`Team shutdown failed: cleanup unverified for ${teamName}`);
+    await shutdownTeam(teamName, `omc-team-${teamName}`, cwd);
     console.log(`Team shutdown complete: ${teamName}`);
 }
 // ---------------------------------------------------------------------------

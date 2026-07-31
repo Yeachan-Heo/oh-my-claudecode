@@ -100,17 +100,6 @@ export interface ShutdownOptionsV2 {
     ralph?: boolean;
     timeoutMs?: number;
 }
-export type ShutdownTeamV2Result = {
-    outcome: 'cleaned';
-} | {
-    outcome: 'preserved';
-    reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worktrees_preserved';
-    workers: string[];
-} | {
-    outcome: 'failed';
-    reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed' | 'state_cleanup_failed';
-    detail: string;
-};
 /**
  * Resolve a per-task routing assignment from the team's routing snapshot.
  *
@@ -168,13 +157,12 @@ export interface StartTeamV2Config {
      */
     autoMerge?: boolean;
 }
-export declare function promptModeRecoveryRequiresProgressEvidence(promptMode: boolean, continuationCount: number): boolean;
 interface RecoveryOwnerFinalizationDeps {
     readRevisionedConfig: (teamName: string, cwd: string) => Promise<{
         config: TeamConfig;
         stateRevision: number;
     } | null>;
-    saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void, options?: import('./monitor.js').SaveTeamConfigAtRevisionOptions) => Promise<boolean>;
+    saveConfigAtRevision: (config: TeamConfig, expectedRevision: number, cwd: string, afterCommit?: () => Promise<void> | void) => Promise<boolean>;
     withConfigLock?: <T>(teamName: string, cwd: string, fn: () => Promise<T> | T) => Promise<T>;
     publishFinal: (input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result) => RecoverDeadWorkerV2Result;
     readDurableContinuation?: (cwd: string, requestId: string, recoveryId: string) => 'none' | 'selected' | 'reserved' | 'adopted';
@@ -269,7 +257,7 @@ export declare function monitorTeamV2(teamName: string, cwd: string): Promise<Te
  * 4. Force kill remaining tmux panes
  * 5. Clean up state
  */
-export declare function shutdownTeamV2(teamName: string, cwd: string, options?: ShutdownOptionsV2): Promise<ShutdownTeamV2Result>;
+export declare function shutdownTeamV2(teamName: string, cwd: string, options?: ShutdownOptionsV2): Promise<void>;
 export declare function resumeTeamV2(teamName: string, cwd: string): Promise<TeamRuntimeV2 | null>;
 export declare function findActiveTeamsV2(cwd: string): Promise<string[]>;
 //# sourceMappingURL=runtime-v2.d.ts.map

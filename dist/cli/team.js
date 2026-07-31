@@ -496,9 +496,7 @@ export async function teamShutdownByName(teamName, options = {}) {
     const runtimeV2 = await import('../team/runtime-v2.js');
     if (runtimeV2.isRuntimeV2Enabled()) {
         const config = await readTeamConfig(teamName, cwd);
-        const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
-        if (shutdown.outcome !== 'cleaned')
-            throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
+        await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
         return {
             teamName,
             shutdown: true,
@@ -519,13 +517,12 @@ export async function teamShutdownByName(teamName, options = {}) {
         }
         throw new Error(`Team ${teamName} is not running. Use --force to clear stale state.`);
     }
-    const cleaned = await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, options.force ? 0 : 30_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
+    await shutdownTeam(runtime.teamName, runtime.sessionName, runtime.cwd, options.force ? 0 : 30_000, runtime.workerPaneIds, runtime.leaderPaneId, runtime.ownsWindow);
     return {
         teamName,
-        shutdown: cleaned,
+        shutdown: true,
         forced: Boolean(options.force),
         sessionFound: true,
-        ...(cleaned ? {} : { error: 'team_shutdown_failed:cleanup_unverified' }),
     };
 }
 export async function executeTeamApiOperation(operation, input, cwd = process.cwd()) {

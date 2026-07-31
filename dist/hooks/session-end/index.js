@@ -586,7 +586,7 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
     if (teamNames.length === 0) {
         return { attempted, cleaned, failed };
     }
-    const { teamReadConfig } = await import('../../team/team-ops.js');
+    const { teamReadConfig, teamCleanup } = await import('../../team/team-ops.js');
     const { shutdownTeamV2 } = await import('../../team/runtime-v2.js');
     const { shutdownTeam } = await import('../../team/runtime.js');
     await Promise.all(teamNames.map(async (teamName) => {
@@ -594,15 +594,16 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
         try {
             const config = await teamReadConfig(teamName, directory);
             if (!config || typeof config !== 'object') {
-                failed.push({ teamName, error: 'team-shutdown-preserved:config_missing_cleanup_evidence' });
+                await teamCleanup(teamName, directory);
+                cleaned.push(teamName);
                 return;
             }
-            // Classify raw provenance: agentTypes => legacy V1, even if workers:[] was injected.
-            const hasAgentTypes = Array.isArray(config.agentTypes);
-            const workers = config.workers;
-            // V2 when workers array present and not legacy agentTypes provenance.
-            const hasV2Workers = !hasAgentTypes && Array.isArray(workers);
-            if (hasAgentTypes) {
+            if (Array.isArray(config.workers)) {
+                await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
+                cleaned.push(teamName);
+                return;
+            }
+            if (Array.isArray(config.agentTypes)) {
                 const legacyConfig = config;
                 const sessionName = typeof legacyConfig.tmuxSession === 'string' && legacyConfig.tmuxSession.trim() !== ''
                     ? legacyConfig.tmuxSession.trim()
@@ -610,25 +611,12 @@ export async function cleanupSessionOwnedTeams(directory, sessionId, initialTeam
                 const leaderPaneId = typeof legacyConfig.leaderPaneId === 'string' && legacyConfig.leaderPaneId.trim() !== ''
                     ? legacyConfig.leaderPaneId.trim()
                     : undefined;
-                if (await shutdownTeam(teamName, sessionName, directory, 0, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true)) {
-                    cleaned.push(teamName);
-                }
-                else {
-                    failed.push({ teamName, error: 'team-shutdown-failed:legacy_cleanup_unverified' });
-                }
+                await shutdownTeam(teamName, sessionName, directory, 0, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
+                cleaned.push(teamName);
                 return;
             }
-            if (hasV2Workers) {
-                const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-                if (shutdown.outcome === 'cleaned') {
-                    cleaned.push(teamName);
-                }
-                else {
-                    failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
-                }
-                return;
-            }
-            failed.push({ teamName, error: 'team-shutdown-preserved:config_cleanup_unsupported' });
+            await teamCleanup(teamName, directory);
+            cleaned.push(teamName);
         }
         catch (error) {
             failed.push({
