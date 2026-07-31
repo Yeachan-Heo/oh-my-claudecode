@@ -2765,7 +2765,13 @@ export async function executeRecoverDeadWorkerV2Owner(
           await ensureFence();
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
             if (!await waitForCurrentEvidence()) return { ok: false as const, error: `${pending.agentType}_startup_evidence_missing` };
-          } else if (!pending.promptMode) {
+          } else if (pending.promptMode) {
+            // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
+            // intentionally have no task/status progress to prove. At this point
+            // the activation gate has published launched evidence and the provider
+            // identity has been verified live, so waiting for fabricated progress
+            // would turn a successful idle recovery into a deterministic timeout.
+          } else {
           const recoveryTriggerMessage = `${generateTriggerMessage(
             input.teamName,
             sagaInput.workerName,

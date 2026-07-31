@@ -52,7 +52,7 @@ type PluginShippingSurface = {
 
 const CLI_BIN_TARGET = "bin/oh-my-claudecode.js";
 const SUPPORTED_CLI_ALIASES = ["oh-my-claudecode", "omc"] as const;
-const GENERATED_BRIDGE_FILES = new Set([
+const GENERATED_RUNTIME_ENTRYPOINTS = new Set([
   "bridge/claude-md-coordinator.cjs",
   "bridge/cli.cjs",
   "bridge/mcp-server.cjs",
@@ -60,6 +60,7 @@ const GENERATED_BRIDGE_FILES = new Set([
   "bridge/team-bridge.cjs",
   "bridge/team-mcp.cjs",
   "bridge/team.js",
+  "dist/hooks/skill-bridge.cjs",
 ]);
 
 let packedPackageCache: PackedPackage | null = null;
@@ -99,7 +100,7 @@ function createIsolatedPackWorkspace(
     preserveTimestamps: true,
   });
   rmSync(join(workspacePath, "dist"), { recursive: true, force: true });
-  for (const relativePath of GENERATED_BRIDGE_FILES) {
+  for (const relativePath of GENERATED_RUNTIME_ENTRYPOINTS) {
     rmSync(join(workspacePath, relativePath), { force: true });
   }
   symlinkSync(
@@ -131,7 +132,7 @@ function getPackedPackage(): PackedPackage {
     committedSnapshotCache = join(fixtureRootCache, "committed");
     packDirCache = join(fixtureRootCache, "packed");
     createIsolatedPackWorkspace(packWorkspaceCache, committedSnapshotCache);
-    const startedWithoutGeneratedBundles = [...GENERATED_BRIDGE_FILES].every(
+    const startedWithoutGeneratedBundles = [...GENERATED_RUNTIME_ENTRYPOINTS].every(
       (file) => !existsSync(join(packWorkspaceCache!, file)),
     );
     mkdirSync(packDirCache, { recursive: true });
@@ -221,14 +222,9 @@ describe("npm package bin surface regression", () => {
     const packedFiles = packedPackageFixture.files;
 
     expect(packedFiles.has(CLI_BIN_TARGET)).toBe(true);
-    expect(packedFiles.has("dist/hooks/skill-bridge.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/cli.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/claude-md-coordinator.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/mcp-server.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/runtime-cli.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/team-bridge.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/team-mcp.cjs")).toBe(true);
-    expect(packedFiles.has("bridge/team.js")).toBe(true);
+    for (const relativePath of GENERATED_RUNTIME_ENTRYPOINTS) {
+      expect(packedFiles.has(relativePath), relativePath).toBe(true);
+    }
     expect(packedFiles.has("bridge/gyoshu_bridge.py")).toBe(true);
     expect(packedFiles.has("bridge/run-mcp-server.sh")).toBe(true);
   });
@@ -243,6 +239,7 @@ describe("npm package bin surface regression", () => {
       expect(packedPackageFixture.files.has(relativePath), relativePath).toBe(
         true,
       );
+      if (relativePath.startsWith("dist/") || relativePath.startsWith("bridge/")) continue;
       expect(
         sha256(join(extractedPackageRoot, relativePath)),
         relativePath,

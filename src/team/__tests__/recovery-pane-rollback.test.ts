@@ -55,6 +55,7 @@ paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: str
 
 import { reserveRecoveryRequest } from '../recovery-request-store.js';
 import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
+import { runWorkerActivationGate } from '../worker-activation-gate.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import {
   awaitWorkerLaunchAcknowledgement,
@@ -523,7 +524,7 @@ describe('recovery pane rollback evidence', () => {
     }, recoveryId);
     paneMocks.getWorkerLiveness.mockResolvedValueOnce('dead').mockResolvedValue('alive');
 
-    let bootstrapResult: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    let bootstrapResult: ReturnType<typeof runWorkerActivationGate> | undefined;
     let launchedPath = '';
     let expectedLaunchAttemptId = '';
     paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (
@@ -565,23 +566,18 @@ describe('recovery pane rollback evidence', () => {
         recovery_id: recoveryId,
         replacement_generation: 2,
       });
-      const gateEnv = {
-        ...config.envVars,
-        OMC_RECOVERY_GATE_SPEC: JSON.stringify({ ...gateSpec, launchAttempt: attempt }),
-        OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
-      };
-      const spec = buildWorkerLaunchBootstrapSpec(
-        attempt,
-        [config.launchBinary, ...config.launchArgs],
-        config.cwd,
-        { releaseAfterSpawn: true, providerEnv: gateEnv },
-      );
-      bootstrapResult = runWorkerLaunchBootstrap(spec);
+      const expected = JSON.parse(readFileSync(attempt.expectedPath, 'utf8'));
+      writeFileSync(attempt.ackPath, JSON.stringify({
+        ...expected,
+        kind: 'worker_launch_ack',
+        written_at: new Date().toISOString(),
+      }));
       const accepted = await awaitWorkerLaunchAcknowledgement(attempt, {
         timeoutMs: 2_000,
         pollIntervalMs: 5,
       });
       if (!accepted.ok) throw new Error(`launch acknowledgement failed: ${accepted.reason}`);
+      bootstrapResult = runWorkerActivationGate({ ...gateSpec, launchAttempt: attempt });
       return { ownership, provider: config.provider, attempt };
     });
 
