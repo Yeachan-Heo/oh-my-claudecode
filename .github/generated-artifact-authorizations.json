@@ -1349,18 +1349,18 @@
       "pullNumber": 3588,
       "targetRef": "dev",
       "mergeBaseSha": "46f26683032c4689fed0b6045cd1f156cefeae7a",
-      "headSha": "5ef9941066a53c2086dc9cbfa26811bcad64ae5d",
+      "headSha": "be11403446123225cdddb3bb1e77744df6644c64",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-14T00:00:00.000Z",
       "generatedDelta": {
         "count": 41,
-        "sha256": "f316df58ef9177287e8a413ae852adb1ad60743cf04032747685befc992038f4"
+        "sha256": "a6839932dfa2059721571c692a95bbd8ace56367403c5e453958caf579b8c54a"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "b64298f20925610bd9be63028b748f87ed13cc86",
+          "sha": "d4685c49441ef738366bafbbfbc1715e97c0baa9",
           "previousFilename": null
         },
         {
@@ -1372,7 +1372,7 @@
         {
           "status": "modified",
           "filename": "bridge/runtime-cli.cjs",
-          "sha": "53e0a7de780745d8017a35fa60724cd6b82565bd",
+          "sha": "111fdf03204a3fa6b40a9a894b46ab7f749a7aeb",
           "previousFilename": null
         },
         {
@@ -1390,7 +1390,7 @@
         {
           "status": "modified",
           "filename": "bridge/team.js",
-          "sha": "463978858bda94e15d0d0f7cb801e8ac6c5dc975",
+          "sha": "0d0333ea0fbef0d0ba9529322a8bdcf2a86a6db3",
           "previousFilename": null
         },
         {
