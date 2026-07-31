@@ -1516,6 +1516,50 @@
       ]
     },
     {
+      "pullNumber": 3602,
+      "targetRef": "dev",
+      "mergeBaseSha": "23349fc99645175b34b283b1a3cc2e6f840ecdaf",
+      "headSha": "25631c08eb0f02607a307842f456f19099936478",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-12T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 5,
+        "sha256": "8d872fbc7e1da2a1883a9a373cebd0c3e9935e313bfde66b25f666f2e42881e4"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "d654a152faf574fc33b35ffff286c3cbbf3f5934",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/doctor-team-routing.js",
+          "sha": "dd0dff5073ffdc922c6d4403fee85cedc349cae4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "b1ea32f23128d1b7c9dd017156902d4446e9bb9e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/cli-detection.d.ts",
+          "sha": "e7e64318064ff081d64c46329431aa84d78c16e6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/cli-detection.js",
+          "sha": "c888776f5dd23f0a8c308c232a8a6e8e3b603a96",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 3603,
       "targetRef": "dev",
       "mergeBaseSha": "0686239b0b6fa4e1b7d923d1b8b2aa3e7431dc15",
