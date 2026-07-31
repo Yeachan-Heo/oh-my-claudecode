@@ -1519,18 +1519,18 @@
       "pullNumber": 3602,
       "targetRef": "dev",
       "mergeBaseSha": "3097b7c8aaea8e74e7c25f972fb4ce6febebef3c",
-      "headSha": "da02723e87524f1a1f4e9adff8cba8f726fbf1f4",
+      "headSha": "b078774c7466ebb4def2d3b0ad2f963b67941176",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-12T00:00:00.000Z",
       "generatedDelta": {
         "count": 5,
-        "sha256": "8d872fbc7e1da2a1883a9a373cebd0c3e9935e313bfde66b25f666f2e42881e4"
+        "sha256": "55f64295a50d45a13a95da316b59fb0a97044c37059dc3f9762605e34580a1fc"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "d654a152faf574fc33b35ffff286c3cbbf3f5934",
+          "sha": "855ccc992e460e01a79f0a6e3c941be4eea3a6e5",
           "previousFilename": null
         },
         {
