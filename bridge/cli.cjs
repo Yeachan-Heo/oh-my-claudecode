@@ -7375,7 +7375,7 @@ async function removeFileIfExists(filePath) {
   }
 }
 function sleep2(ms) {
-  return new Promise((resolve33) => setTimeout(resolve33, ms));
+  return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
 var import_child_process9, fs5, fsPromises2, path5, import_url6, import_child_process10, import_util6, execFileAsync3, BRIDGE_SPAWN_TIMEOUT_MS, DEFAULT_GRACE_PERIOD_MS, SIGTERM_GRACE_MS, ownedBridgeSessionIds, USE_TCP_FALLBACK;
 var init_bridge_manager = __esm({
@@ -13408,7 +13408,7 @@ function withFileLockSync(lockPath2, fn, opts) {
   }
 }
 function sleep3(ms) {
-  return new Promise((resolve33) => setTimeout(resolve33, ms));
+  return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
 async function acquireFileLock(lockPath2, opts) {
   const staleLockMs = opts?.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
@@ -27440,24 +27440,24 @@ async function runSessionEndAction(context, _execute) {
     let settled = false;
     let exitCode = null;
     let settleChild = () => void 0;
-    const childExit = new Promise((resolve33) => {
+    const childExit = new Promise((resolve34) => {
       settleChild = (code2) => {
         if (settled) return;
         settled = true;
         exitCode = code2;
-        resolve33(code2);
+        resolve34(code2);
       };
       child.once("exit", settleChild);
       child.once("error", () => settleChild(null));
     });
     let deadlineTermination;
     let resolveTermination;
-    const terminationFinished = new Promise((resolve33) => {
-      resolveTermination = resolve33;
+    const terminationFinished = new Promise((resolve34) => {
+      resolveTermination = resolve34;
     });
     const terminate = async () => {
-      const postKillWait = new Promise((resolve33) => {
-        const timer = setTimeout(resolve33, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
+      const postKillWait = new Promise((resolve34) => {
+        const timer = setTimeout(resolve34, Math.max(1, context.deadlineAt + POST_KILL_SETTLE_MS - Date.now()));
         timer.unref();
       });
       if (identity && child.pid) {
@@ -27471,7 +27471,7 @@ async function runSessionEndAction(context, _execute) {
       await Promise.race([childExit, postKillWait]);
     };
     if (!identity || !child.pid) {
-      await Promise.race([childExit, new Promise((resolve33) => setTimeout(resolve33, POST_KILL_SETTLE_MS))]);
+      await Promise.race([childExit, new Promise((resolve34) => setTimeout(resolve34, POST_KILL_SETTLE_MS))]);
       return { code: "runner-identity-unavailable", completed: false };
     }
     const timeout = setTimeout(() => {
@@ -27522,7 +27522,7 @@ async function runActionRunnerEntrypoint() {
       } catch {
       }
       if (armed) break;
-      await new Promise((resolve33) => setTimeout(resolve33, 10));
+      await new Promise((resolve34) => setTimeout(resolve34, 10));
     }
     if (Date.now() >= input.deadlineAt) throw new Error("runner-arm-deadline");
     const deadlineTimer = setTimeout(() => {
@@ -29174,7 +29174,7 @@ async function sendTelegram(config2, payload) {
       text: payload.message,
       parse_mode: config2.parseMode || "Markdown"
     });
-    const result = await new Promise((resolve33) => {
+    const result = await new Promise((resolve34) => {
       const req = (0, import_https.request)(
         telegramRequestOptions(Buffer.byteLength(body), config2.botToken),
         (res) => {
@@ -29190,9 +29190,9 @@ async function sendTelegram(config2, payload) {
                 }
               } catch {
               }
-              resolve33({ platform: "telegram", success: true, messageId });
+              resolve34({ platform: "telegram", success: true, messageId });
             } else {
-              resolve33({
+              resolve34({
                 platform: "telegram",
                 success: false,
                 error: `HTTP ${res.statusCode}`
@@ -29202,11 +29202,11 @@ async function sendTelegram(config2, payload) {
         }
       );
       req.on("error", (e) => {
-        resolve33({ platform: "telegram", success: false, error: e.message });
+        resolve34({ platform: "telegram", success: false, error: e.message });
       });
       req.on("timeout", () => {
         req.destroy();
-        resolve33({
+        resolve34({
           platform: "telegram",
           success: false,
           error: "Request timeout"
@@ -29453,9 +29453,9 @@ async function dispatchNotifications(config2, event, payload, platformMessages) 
           }
         )
       ),
-      new Promise((resolve33) => {
+      new Promise((resolve34) => {
         timer = setTimeout(
-          () => resolve33([
+          () => resolve34([
             {
               platform: "unknown",
               success: false,
@@ -32360,10 +32360,10 @@ async function runWithinDeadline(deadlineAt, run) {
   const controller = new AbortController();
   let timer;
   try {
-    return await Promise.race([run(controller.signal), new Promise((resolve33) => {
+    return await Promise.race([run(controller.signal), new Promise((resolve34) => {
       timer = setTimeout(() => {
         controller.abort();
-        resolve33(void 0);
+        resolve34(void 0);
       }, remaining);
     })]);
   } finally {
@@ -32707,6 +32707,10 @@ var init_state_paths = __esm({
       workerLaunchExpected: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/expected.json`,
       workerLaunchAck: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/ack.json`,
       workerLaunchStarted: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/provider-started.json`,
+      workerLaunchTransportOwner: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/transport-owner.json`,
+      workerLaunchBootstrapDescriptor: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/bootstrap.json`,
+      workerLaunchWrapper: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/launch.cmd`,
+      workerLaunchTransportCleanupComplete: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/transport-cleanup-complete.json`,
       workerLaunchDecision: (teamName, workerName2, attemptId) => `.omc/state/team/${teamName}/workers/${workerName2}/launch-attempts/${attemptId}/decision.json`,
       mailbox: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/${workerName2}.json`,
       mailboxLockDir: (teamName, workerName2) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName2}`,
@@ -33094,7 +33098,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           continue;
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve33) => setTimeout(resolve33, 25));
+        await new Promise((resolve34) => setTimeout(resolve34, 25));
         continue;
       }
       try {
@@ -33115,7 +33119,7 @@ async function withProcessIdentityFileLock(lockPath2, fn, timeoutMs = 1e4) {
           }
         }
         if (Date.now() >= deadline) throw new Error("process_identity_lock_timeout");
-        await new Promise((resolve33) => setTimeout(resolve33, 25));
+        await new Promise((resolve34) => setTimeout(resolve34, 25));
       }
     }
     return await fn();
@@ -34505,7 +34509,7 @@ async function withMailboxLock(teamName, workerName2, cwd2, fn) {
   while (Date.now() < deadline) {
     const result = await withLock2(lockDir, fn);
     if (result.ok) return result.value;
-    await new Promise((resolve33) => setTimeout(resolve33, delayMs));
+    await new Promise((resolve34) => setTimeout(resolve34, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire mailbox lock for ${workerName2} after ${timeoutMs}ms`);
@@ -34655,7 +34659,7 @@ async function teamCreateTask(teamName, task, cwd2) {
       return taskLock.value;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve33) => setTimeout(resolve33, delayMs));
+    await new Promise((resolve34) => setTimeout(resolve34, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task creation lock for team ${teamName} after ${timeoutMs}ms`);
@@ -34695,7 +34699,7 @@ async function teamUpdateTask(teamName, taskId, updates, cwd2) {
       return merged;
     });
     if (result.ok) return result.value;
-    await new Promise((resolve33) => setTimeout(resolve33, delayMs));
+    await new Promise((resolve34) => setTimeout(resolve34, delayMs));
     delayMs = Math.min(delayMs * 2, 200);
   }
   throw new Error(`Failed to acquire task update lock for task ${taskId} in team ${teamName} after ${timeoutMs}ms`);
@@ -35792,10 +35796,23 @@ var init_tmux_clipboard = __esm({
 
 // src/team/worker-launch-ack.ts
 function sleep4(ms) {
-  return new Promise((resolve33) => setTimeout(resolve33, ms));
+  return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
 function isExactText(value) {
   return typeof value === "string" && value.length > 0 && value === value.trim();
+}
+function isValidEnvironmentKey(key) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+}
+function normalizeProviderEnvironment(value) {
+  const normalized = {};
+  for (const [key, entry] of Object.entries(value ?? {})) {
+    if (WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key)) continue;
+    if (!isValidEnvironmentKey(key)) throw new Error("worker_launch_provider_env_key_invalid");
+    if (typeof entry !== "string") throw new Error("worker_launch_provider_env_value_invalid");
+    normalized[key] = entry;
+  }
+  return normalized;
 }
 function isUuid(value) {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -35859,6 +35876,22 @@ async function writeExclusiveAtomic(path25, value) {
     await (0, import_promises11.unlink)(candidate).catch(() => void 0);
   }
 }
+async function writeExclusiveTextAtomic(path25, value) {
+  await (0, import_promises11.mkdir)((0, import_node_path9.dirname)(path25), { recursive: true });
+  const candidate = `${path25}.candidate.${process.pid}.${(0, import_node_crypto6.randomUUID)()}`;
+  const handle = await (0, import_promises11.open)(candidate, "wx", 384);
+  try {
+    await handle.writeFile(value, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await (0, import_promises11.link)(candidate, path25);
+  } finally {
+    await (0, import_promises11.unlink)(candidate).catch(() => void 0);
+  }
+}
 function resolvePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -35882,10 +35915,14 @@ async function prepareWorkerLaunchAttempt(input) {
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, attemptId)),
     startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, attemptId)),
+    transportOwnerPath: absPath(input.cwd, TeamPaths.workerLaunchTransportOwner(input.teamName, input.workerName, attemptId)),
+    bootstrapDescriptorPath: absPath(input.cwd, TeamPaths.workerLaunchBootstrapDescriptor(input.teamName, input.workerName, attemptId)),
+    wrapperPath: absPath(input.cwd, TeamPaths.workerLaunchWrapper(input.teamName, input.workerName, attemptId)),
+    transportCleanupCompletePath: absPath(input.cwd, TeamPaths.workerLaunchTransportCleanupComplete(input.teamName, input.workerName, attemptId)),
     runtimeCliPath: input.runtimeCliPath,
     ...input.context ? { context: input.context } : {}
   };
-  if ((0, import_node_fs7.existsSync)(attempt.expectedPath) || (0, import_node_fs7.existsSync)(attempt.ackPath) || (0, import_node_fs7.existsSync)(attempt.decisionPath) || (0, import_node_fs7.existsSync)(attempt.startedPath)) {
+  if ((0, import_node_fs7.existsSync)(attempt.expectedPath) || (0, import_node_fs7.existsSync)(attempt.ackPath) || (0, import_node_fs7.existsSync)(attempt.decisionPath) || (0, import_node_fs7.existsSync)(attempt.startedPath) || (0, import_node_fs7.existsSync)(attempt.transportOwnerPath) || (0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath) || (0, import_node_fs7.existsSync)(attempt.wrapperPath) || (0, import_node_fs7.existsSync)(attempt.transportCleanupCompletePath)) {
     throw new Error("worker_launch_attempt_path_conflict");
   }
   await writeExclusiveAtomic(attempt.expectedPath, identity);
@@ -35919,6 +35956,10 @@ async function loadWorkerLaunchAttempt(input) {
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, input.attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, input.attemptId)),
     startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, input.attemptId)),
+    transportOwnerPath: absPath(input.cwd, TeamPaths.workerLaunchTransportOwner(input.teamName, input.workerName, input.attemptId)),
+    bootstrapDescriptorPath: absPath(input.cwd, TeamPaths.workerLaunchBootstrapDescriptor(input.teamName, input.workerName, input.attemptId)),
+    wrapperPath: absPath(input.cwd, TeamPaths.workerLaunchWrapper(input.teamName, input.workerName, input.attemptId)),
+    transportCleanupCompletePath: absPath(input.cwd, TeamPaths.workerLaunchTransportCleanupComplete(input.teamName, input.workerName, input.attemptId)),
     runtimeCliPath: input.runtimeCliPath
   };
 }
@@ -35957,11 +35998,157 @@ function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2, options = {
     ack_path: attempt.ackPath,
     decision_path: attempt.decisionPath,
     started_path: attempt.startedPath,
+    transport_owner_path: attempt.transportOwnerPath,
+    bootstrap_descriptor_path: attempt.bootstrapDescriptorPath,
+    wrapper_path: attempt.wrapperPath,
+    transport_cleanup_complete_path: attempt.transportCleanupCompletePath,
     provider_argv: [...providerArgv],
+    provider_env: normalizeProviderEnvironment(options.providerEnv),
     cwd: cwd2,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
     release_after_spawn: options.releaseAfterSpawn === true
   };
+}
+function attemptTransportPathsAreDeterministic(attempt) {
+  const expectedRoot = (0, import_node_path9.dirname)(attempt.expectedPath);
+  return isDeterministicTransportPath(attempt.expectedPath, attempt.transportOwnerPath, "transport-owner.json") && isDeterministicTransportPath(attempt.expectedPath, attempt.bootstrapDescriptorPath, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE) && isDeterministicTransportPath(attempt.expectedPath, attempt.wrapperPath, "launch.cmd") && isDeterministicTransportPath(attempt.expectedPath, attempt.transportCleanupCompletePath, "transport-cleanup-complete.json") && (0, import_node_path9.resolve)(attempt.expectedPath) === (0, import_node_path9.resolve)((0, import_node_path9.join)(expectedRoot, "expected.json"));
+}
+function transportOwnerMatches(value, attempt) {
+  return identityMatches(value, attempt) && typeof value === "object" && value !== null && value.kind === WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+}
+function cleanupProofMatches(value, attempt) {
+  return identityMatches(value, attempt) && typeof value === "object" && value !== null && value.kind === WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND && isExactText(value.reason) && typeof value.written_at === "string" && Number.isFinite(Date.parse(value.written_at));
+}
+function windowsWrapperRelativePath(cwd2, wrapperPath) {
+  const relativePath = (0, import_node_path9.relative)((0, import_node_path9.resolve)(cwd2), (0, import_node_path9.resolve)(wrapperPath)).replace(/\//g, "\\");
+  if (!relativePath || relativePath.startsWith("\\") || /^[A-Za-z]:/.test(relativePath) || !/^[A-Za-z0-9._\\-]+$/.test(relativePath)) {
+    throw new Error("worker_launch_transport_relative_path_invalid");
+  }
+  return relativePath;
+}
+function buildWorkerLaunchWrapper(attempt) {
+  const runtimeCli = quoteWindowsCmdArgument(attempt.runtimeCliPath);
+  const nodeExecutable = quoteWindowsCmdArgument(process.execPath);
+  return [
+    "@echo off",
+    "setlocal DisableDelayedExpansion",
+    'set "OMC_WORKER_LAUNCH_SPEC_FILE=%~dp0bootstrap.json"',
+    `${nodeExecutable} ${runtimeCli} --worker-launch`,
+    'set "_OMC_WORKER_LAUNCH_EXIT=%ERRORLEVEL%"',
+    'del /f /q "%~f0" >nul 2>&1',
+    "endlocal & exit /b %_OMC_WORKER_LAUNCH_EXIT%",
+    ""
+  ].join("\\r\\n");
+}
+async function materializeWorkerLaunchTransport(input) {
+  const { attempt } = input;
+  if (!attemptTransportPathsAreDeterministic(attempt)) throw new Error("worker_launch_transport_paths_invalid");
+  const spec = buildWorkerLaunchBootstrapSpec(attempt, input.providerArgv, input.cwd, {
+    providerEnv: input.providerEnv,
+    releaseAfterSpawn: input.releaseAfterSpawn
+  });
+  const owner = {
+    ...identityOf(attempt),
+    kind: WORKER_LAUNCH_TRANSPORT_OWNER_KIND
+  };
+  const wrapperRelativePath = windowsWrapperRelativePath(input.cwd, attempt.wrapperPath);
+  const wrapper = buildWorkerLaunchWrapper(attempt);
+  let ownerCreated = false;
+  let descriptorCreated = false;
+  let wrapperCreated = false;
+  try {
+    await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt) || (await readJson2(`${attempt.decisionPath}.retired`)).kind !== "absent") {
+        throw new Error("worker_launch_attempt_inactive");
+      }
+      const existingOwner = await readJson2(attempt.transportOwnerPath);
+      if (existingOwner.kind === "malformed" || existingOwner.kind === "value" && !transportOwnerMatches(existingOwner.value, attempt)) {
+        throw new Error("worker_launch_transport_owner_conflict");
+      }
+      if (existingOwner.kind === "absent") {
+        await writeExclusiveAtomic(attempt.transportOwnerPath, owner);
+        ownerCreated = true;
+      }
+      if ((0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath) || (0, import_node_fs7.existsSync)(attempt.wrapperPath)) {
+        throw new Error("worker_launch_transport_path_conflict");
+      }
+      await writeExclusiveAtomic(attempt.bootstrapDescriptorPath, spec);
+      descriptorCreated = true;
+      await writeExclusiveTextAtomic(attempt.wrapperPath, wrapper);
+      wrapperCreated = true;
+    });
+  } catch (error2) {
+    let cleanupVerified = true;
+    if (wrapperCreated) {
+      await (0, import_promises11.unlink)(attempt.wrapperPath).catch(() => {
+        cleanupVerified = false;
+      });
+      cleanupVerified &&= !(0, import_node_fs7.existsSync)(attempt.wrapperPath);
+    }
+    if (descriptorCreated) {
+      await (0, import_promises11.unlink)(attempt.bootstrapDescriptorPath).catch(() => {
+        cleanupVerified = false;
+      });
+      cleanupVerified &&= !(0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath);
+    }
+    if (ownerCreated) {
+      await (0, import_promises11.unlink)(attempt.transportOwnerPath).catch(() => {
+        cleanupVerified = false;
+      });
+      cleanupVerified &&= !(0, import_node_fs7.existsSync)(attempt.transportOwnerPath);
+    }
+    if (!cleanupVerified) {
+      const cleanupError = new Error("worker_launch_transport_partial_cleanup_unverified");
+      cleanupError.cause = error2;
+      throw cleanupError;
+    }
+    throw error2;
+  }
+  return {
+    wrapperPath: attempt.wrapperPath,
+    bootstrapDescriptorPath: attempt.bootstrapDescriptorPath,
+    wrapperRelativePath
+  };
+}
+async function cleanupWorkerLaunchTransportUnlocked(attempt, reason) {
+  const owner = await readJson2(attempt.transportOwnerPath);
+  const proof = await readJson2(attempt.transportCleanupCompletePath);
+  if (owner.kind === "malformed" || proof.kind === "malformed") return false;
+  if (owner.kind === "value" && !transportOwnerMatches(owner.value, attempt)) return false;
+  if (proof.kind === "value" && !cleanupProofMatches(proof.value, attempt)) return false;
+  const hasTransportFiles = (0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath) || (0, import_node_fs7.existsSync)(attempt.wrapperPath);
+  if (owner.kind === "absent") {
+    return !hasTransportFiles && (proof.kind === "absent" || cleanupProofMatches(proof.value, attempt));
+  }
+  await (0, import_promises11.unlink)(attempt.bootstrapDescriptorPath).catch((error2) => {
+    if (error2.code !== "ENOENT") throw error2;
+  });
+  await (0, import_promises11.unlink)(attempt.wrapperPath).catch((error2) => {
+    if (error2.code !== "ENOENT") throw error2;
+  });
+  if ((0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath) || (0, import_node_fs7.existsSync)(attempt.wrapperPath)) return false;
+  if (proof.kind === "absent") {
+    await writeExclusiveAtomic(attempt.transportCleanupCompletePath, {
+      ...identityOf(attempt),
+      kind: WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND,
+      reason,
+      written_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  const completed = await readJson2(attempt.transportCleanupCompletePath);
+  return completed.kind === "value" && cleanupProofMatches(completed.value, attempt) && !(0, import_node_fs7.existsSync)(attempt.bootstrapDescriptorPath) && !(0, import_node_fs7.existsSync)(attempt.wrapperPath);
+}
+async function cleanupWorkerLaunchTransport(attempt, reason = "transport_cleanup") {
+  if (!attemptTransportPathsAreDeterministic(attempt)) return false;
+  try {
+    return await withFileLock(
+      lockPathFor(attempt.currentPath),
+      () => cleanupWorkerLaunchTransportUnlocked(attempt, reason),
+      { timeoutMs: 5e3, retryDelayMs: 10 }
+    );
+  } catch {
+    return false;
+  }
 }
 async function publishDecision(attempt, decision, reason) {
   const record2 = {
@@ -36067,6 +36254,7 @@ async function retireWorkerLaunchAttempt(attempt, reason) {
           written_at: (/* @__PURE__ */ new Date()).toISOString()
         });
       }
+      if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       if (await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
         await (0, import_promises11.unlink)(attempt.currentPath).catch(() => {
         });
@@ -36102,7 +36290,9 @@ async function retireAndCleanupCurrentWorkerLaunchAttempt(attempt, reason, clean
           written_at: (/* @__PURE__ */ new Date()).toISOString()
         });
       }
-      if (!await terminateWorkerLaunchProvider(attempt) || !await cleanup()) return false;
+      if (!await terminateWorkerLaunchProvider(attempt)) return false;
+      if (!await cleanup()) return false;
+      if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       const completed = await readJson2(cleanupCompletePath);
       if (completed.kind === "absent") {
         await writeExclusiveAtomic(cleanupCompletePath, {
@@ -36256,7 +36446,14 @@ async function awaitWorkerLaunchProviderStarted(attempt, options = {}) {
 async function isWorkerLaunchProviderStarted(attempt) {
   return await readValidProviderStarted(attempt) !== null;
 }
-var import_node_crypto6, import_node_fs7, import_promises11, import_node_path9, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS;
+function isDeterministicTransportPath(expectedPath, candidate, fileName) {
+  return isExactText(candidate) && (0, import_node_path9.resolve)(candidate) === (0, import_node_path9.resolve)((0, import_node_path9.join)((0, import_node_path9.dirname)(expectedPath), fileName));
+}
+function quoteWindowsCmdArgument(value) {
+  if (/[\r\n]/.test(value)) throw new Error("worker_launch_provider_argv_invalid");
+  return `"${value.replace(/%/g, "%%").replace(/"/g, '""')}"`;
+}
+var import_node_crypto6, import_node_fs7, import_promises11, import_node_path9, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_INTERNAL_ENV_KEYS;
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
@@ -36272,6 +36469,14 @@ var init_worker_launch_ack = __esm({
     DEFAULT_ACK_TIMEOUT_MS = 8e3;
     DEFAULT_POLL_INTERVAL_MS = 25;
     DEFAULT_DECISION_TIMEOUT_MS = 15e3;
+    WORKER_LAUNCH_TRANSPORT_OWNER_KIND = "worker_launch_transport_owner";
+    WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND = "worker_launch_transport_cleanup_complete";
+    WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE = "bootstrap.json";
+    WORKER_LAUNCH_INTERNAL_ENV_KEYS = /* @__PURE__ */ new Set([
+      "OMC_WORKER_LAUNCH_SPEC",
+      "OMC_WORKER_LAUNCH_SPEC_B64",
+      "OMC_WORKER_LAUNCH_SPEC_FILE"
+    ]);
   }
 });
 
@@ -37233,8 +37438,10 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
   if (config2.launchAttempt && config2.launchAttempt.pane_id !== paneId) {
     throw new Error("worker_launch_attempt_pane_mismatch");
   }
-  const startCmd = buildWorkerStartCommand(config2);
-  const fingerprint = commandFingerprint(startCmd);
+  let startCmd = "";
+  let fingerprint = config2.launchAttempt?.attempt_id.slice(0, 12) ?? "unbuilt";
+  let materializedTransport;
+  const nativeAttemptTransport = process.platform === "win32" && !isUnixLikeOnWindows2() && Boolean(config2.launchAttempt) && !isCmuxSurfaceTarget(paneId);
   const requireAcknowledgement = async () => {
     if (!config2.launchAttempt) return;
     const accepted = await awaitWorkerLaunchAcknowledgement(config2.launchAttempt);
@@ -37245,10 +37452,24 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
       throw new Error(`worker_start_provider_failed:${config2.workerName}:${paneId}:${config2.launchAttempt.attempt_id.slice(0, 12)}`);
     }
   };
-  logWorkerSpawnDiagnostic(
-    `worker start delivery begin session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint}`
-  );
   try {
+    if (nativeAttemptTransport && config2.launchAttempt) {
+      materializedTransport = await materializeWorkerLaunchTransport({
+        attempt: config2.launchAttempt,
+        providerArgv: getLaunchWords(config2),
+        cwd: config2.cwd,
+        providerEnv: config2.envVars,
+        releaseAfterSpawn: Boolean(config2.envVars.OMC_RECOVERY_GATE_SPEC)
+      });
+      startCmd = materializedTransport.wrapperRelativePath;
+    } else {
+      startCmd = buildWorkerStartCommand(config2);
+    }
+    fingerprint = commandFingerprint(startCmd);
+    const commandBytes = Buffer.byteLength(startCmd, "utf8");
+    logWorkerSpawnDiagnostic(
+      `worker start delivery begin session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} transport=${nativeAttemptTransport ? "attempt_wrapper" : "inline"}`
+    );
     if (isCmuxSurfaceTarget(paneId)) {
       await cmuxSendSurface(paneId, startCmd);
       await cmuxSendSurfaceKey(paneId, "Enter");
@@ -37270,7 +37491,7 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
       startCmd
     ], { timeout: 5e3 });
     logWorkerSpawnDiagnostic(
-      `worker start send-keys literal session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(sendResult.stderr))}`
+      `worker start send-keys literal session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(sendResult.stderr))}`
     );
     if (!config2.launchAttempt) {
       const delivered = await verifyWorkerStartCommandDelivered(paneId, startCmd);
@@ -37280,8 +37501,19 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
     }
     const enterResult = await tmuxExecAsync(["send-keys", "-t", paneId, "Enter"], { timeout: 5e3 });
     logWorkerSpawnDiagnostic(
-      `worker start submit key sent session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(enterResult.stderr))}`
+      `worker start submit key sent session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(enterResult.stderr))}`
     );
+    if (nativeAttemptTransport) {
+      const [status, observation] = await Promise.all([
+        getPaneCurrentCommandStatus(paneId),
+        capturePaneObservation(paneId, { operation: "worker-start-post-enter" })
+      ]);
+      const captured = observation.ok ? observation.captured : "";
+      const captureSha = captured ? commandFingerprint(captured) : "none";
+      logWorkerSpawnDiagnostic(
+        `worker start post-enter observation session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} paneStatus=${JSON.stringify(status ? `${status.dead ? "1" : "0"} ${redactBoundedDiagnostic(status.command, 96)}` : "unavailable")} captureOk=${observation.ok} captureBytes=${Buffer.byteLength(captured, "utf8")} captureSha=${captureSha}`
+      );
+    }
     if (config2.launchAttempt) {
       await requireAcknowledgement();
     } else {
@@ -37293,6 +37525,14 @@ async function spawnWorkerInPane(sessionName2, paneId, config2) {
   } catch (error2) {
     if (config2.launchAttempt) {
       await revokeWorkerLaunchAttempt(config2.launchAttempt, "launch_failed").catch(() => void 0);
+    }
+    if (nativeAttemptTransport && config2.launchAttempt && (!materializedTransport || (0, import_fs72.existsSync)(materializedTransport.bootstrapDescriptorPath))) {
+      const cleaned = await cleanupWorkerLaunchTransport(config2.launchAttempt, "launch_failed").catch(() => false);
+      if (!cleaned) {
+        logWorkerSpawnDiagnostic(
+          `worker start transport cleanup unverified session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint}`
+        );
+      }
     }
     logWorkerSpawnDiagnostic(
       `worker start failed session=${sessionName2} pane=${paneId} worker=${config2.workerName} cmdSha=${fingerprint} error=${JSON.stringify(redactBoundedDiagnostic(error2))}`
@@ -38260,7 +38500,7 @@ async function withDispatchLock(teamName, cwd2, fn) {
         );
       }
       const jitter = 0.5 + Math.random() * 0.5;
-      await new Promise((resolve33) => setTimeout(resolve33, Math.floor(pollMs * jitter)));
+      await new Promise((resolve34) => setTimeout(resolve34, Math.floor(pollMs * jitter)));
       pollMs = Math.min(pollMs * 2, DISPATCH_LOCK_MAX_POLL_MS);
     }
   }
@@ -41201,8 +41441,8 @@ ${dirtyFiles.map((f) => `- \`${f}\``).join("\n")}`;
               return false;
             }
           })(),
-          new Promise((resolve33) => {
-            const t = setTimeout(() => resolve33(false), remaining);
+          new Promise((resolve34) => {
+            const t = setTimeout(() => resolve34(false), remaining);
             if (typeof t.unref === "function") t.unref();
           })
         ]);
@@ -42035,7 +42275,7 @@ async function bootstrapPersistentOwner(input, priorEpoch) {
     const fenceOk = owner ? checkOwnerFence(input.cwd, input.teamName, { epoch: owner.epoch, nonce: owner.nonce }).ok : false;
     if (isExpectedRecoveryOwnerSuccessor(owner, expectedEpoch, child.pid, childProcessStartedAt, fenceOk, bootstrapNonce) && configBound?.epoch === expectedEpoch && configBound.nonce === bootstrapNonce && configBound.pid === child.pid && configBound.process_started_at === childProcessStartedAt && active?.request_id === input.requestId && active?.recovery_id === reservation.recovery_id && active?.worker_name === input.workerName && active?.owner_epoch === expectedEpoch && active?.owner_nonce === bootstrapNonce) return true;
     if (owner && (owner.epoch > expectedEpoch || owner.epoch === expectedEpoch && owner.pid !== child.pid)) return false;
-    await new Promise((resolve33) => setTimeout(resolve33, 25));
+    await new Promise((resolve34) => setTimeout(resolve34, 25));
   }
   return false;
 }
@@ -42132,7 +42372,7 @@ function createRecoveryOwnerClient(dispatch, timing = {}) {
           teamName: normalized.teamName,
           workerName: normalized.workerName
         })) return outcome.result;
-        await new Promise((resolve33) => setTimeout(resolve33, timing.pollIntervalMs ?? 250));
+        await new Promise((resolve34) => setTimeout(resolve34, timing.pollIntervalMs ?? 250));
       }
       return timeoutResult(normalized, canonical.recovery_id);
     }
@@ -42306,7 +42546,7 @@ async function waitForRecoveryGateRecord(path25, expected, timeoutMs, pollInterv
       if (value.recovery_id === expected.recovery_id && value.worker_name === expected.worker_name && value.replacement_generation === expected.replacement_generation && value.pane_attempt_id === expected.pane_attempt_id && value.launch_attempt_id === expected.launch_attempt_id && value.launch_nonce === expected.launch_nonce) return true;
     } catch {
     }
-    await new Promise((resolve33) => setTimeout(resolve33, pollIntervalMs));
+    await new Promise((resolve34) => setTimeout(resolve34, pollIntervalMs));
   }
   return false;
 }
@@ -42787,7 +43027,7 @@ async function hasCurrentWorkerStartupEvidence(teamName, workerName2, taskId, cw
 async function waitForWorkerStartupEvidence(teamName, workerName2, taskId, cwd2, baseline, launchAttemptId, attempts = 3, delayMs = 250) {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if (await hasCurrentWorkerStartupEvidence(teamName, workerName2, taskId, cwd2, baseline, launchAttemptId)) return true;
-    if (attempt < attempts) await new Promise((resolve33) => setTimeout(resolve33, delayMs));
+    if (attempt < attempts) await new Promise((resolve34) => setTimeout(resolve34, delayMs));
   }
   return false;
 }
@@ -42795,7 +43035,7 @@ async function waitForWorkerStatusTransition(teamName, workerName2, cwd2, baseli
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const status = await readWorkerStatus(teamName, workerName2, cwd2);
     if (status.state !== "unknown" && status.launch_attempt_id === launchAttemptId && workerStatusStartupFingerprint(status) !== baselineFingerprint) return true;
-    if (attempt < attempts) await new Promise((resolve33) => setTimeout(resolve33, delayMs));
+    if (attempt < attempts) await new Promise((resolve34) => setTimeout(resolve34, delayMs));
   }
   return false;
 }
@@ -43344,14 +43584,14 @@ async function readOrCreateRecoveryAttempt(input, recoveryId, replacementGenerat
   }
 }
 function waitForBootstrapRecoveryEvidence(delayMs, signal) {
-  return new Promise((resolve33, reject) => {
+  return new Promise((resolve34, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new Error("bootstrap_recovery_evidence_aborted"));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve33();
+      resolve34();
     }, delayMs);
     const onAbort = () => {
       clearTimeout(timer);
@@ -45954,7 +46194,7 @@ async function readJsonSafe5(filePath) {
         return null;
       }
     }
-    await new Promise((resolve33) => setTimeout(resolve33, 25));
+    await new Promise((resolve34) => setTimeout(resolve34, 25));
   }
   return null;
 }
@@ -46072,7 +46312,7 @@ async function nextPendingTaskIndex(runtime) {
     let task = await readTask(root2, taskId);
     if (!task) {
       for (let attempt = 1; attempt < transientReadRetryAttempts; attempt++) {
-        await new Promise((resolve33) => setTimeout(resolve33, transientReadRetryDelayMs));
+        await new Promise((resolve34) => setTimeout(resolve34, transientReadRetryDelayMs));
         task = await readTask(root2, taskId);
         if (task) break;
       }
@@ -46969,7 +47209,7 @@ async function pollTelegram(config2, state, rateLimiter) {
   try {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
     const path25 = `/bot${config2.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
-    const updates = await new Promise((resolve33, reject) => {
+    const updates = await new Promise((resolve34, reject) => {
       const req = (0, import_https2.request)(
         {
           hostname: "api.telegram.org",
@@ -46986,7 +47226,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                resolve33(body.result || []);
+                resolve34(body.result || []);
               } else {
                 reject(new Error(`HTTP ${res.statusCode}`));
               }
@@ -47050,7 +47290,7 @@ async function pollTelegram(config2, state, rateLimiter) {
             text: "Injected into Claude Code session.",
             reply_to_message_id: msg.message_id
           });
-          await new Promise((resolve33) => {
+          await new Promise((resolve34) => {
             const replyReq = (0, import_https2.request)(
               {
                 hostname: "api.telegram.org",
@@ -47065,13 +47305,13 @@ async function pollTelegram(config2, state, rateLimiter) {
               },
               (res) => {
                 res.resume();
-                resolve33();
+                resolve34();
               }
             );
-            replyReq.on("error", () => resolve33());
+            replyReq.on("error", () => resolve34());
             replyReq.on("timeout", () => {
               replyReq.destroy();
-              resolve33();
+              resolve34();
             });
             replyReq.write(replyBody);
             replyReq.end();
@@ -47210,13 +47450,13 @@ async function pollLoop() {
         }
       }
       writeDaemonState(state);
-      await new Promise((resolve33) => setTimeout(resolve33, config2.pollIntervalMs));
+      await new Promise((resolve34) => setTimeout(resolve34, config2.pollIntervalMs));
     } catch (error2) {
       state.errors++;
       state.lastError = redactTokens(error2 instanceof Error ? error2.message : String(error2));
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
-      await new Promise((resolve33) => setTimeout(resolve33, config2.pollIntervalMs * 2));
+      await new Promise((resolve34) => setTimeout(resolve34, config2.pollIntervalMs * 2));
     }
   }
   log("Poll loop ended");
@@ -55726,7 +55966,7 @@ function validateCredentials(creds) {
   return !isCredentialExpired(creds);
 }
 function refreshAccessToken(refreshToken) {
-  return new Promise((resolve33) => {
+  return new Promise((resolve34) => {
     const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID;
     const body = new URLSearchParams({
       grant_type: "refresh_token",
@@ -55754,7 +55994,7 @@ function refreshAccessToken(refreshToken) {
             try {
               const parsed = JSON.parse(data);
               if (parsed.access_token) {
-                resolve33({
+                resolve34({
                   accessToken: parsed.access_token,
                   refreshToken: parsed.refresh_token || refreshToken,
                   expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1e3 : parsed.expires_at
@@ -55767,20 +56007,20 @@ function refreshAccessToken(refreshToken) {
           if (process.env.OMC_DEBUG) {
             console.error(`[usage-api] Token refresh failed: HTTP ${res.statusCode}`);
           }
-          resolve33(null);
+          resolve34(null);
         });
       }
     );
-    req.on("error", () => resolve33(null));
+    req.on("error", () => resolve34(null));
     req.on("timeout", () => {
       req.destroy();
-      resolve33(null);
+      resolve34(null);
     });
     req.end(body);
   });
 }
 function fetchUsageFromApi(accessToken) {
-  return new Promise((resolve33) => {
+  return new Promise((resolve34) => {
     const req = import_https3.default.request(
       {
         hostname: "api.anthropic.com",
@@ -55801,41 +56041,41 @@ function fetchUsageFromApi(accessToken) {
         res.on("end", () => {
           if (res.statusCode === 200) {
             try {
-              resolve33({ data: JSON.parse(data) });
+              resolve34({ data: JSON.parse(data) });
             } catch {
-              resolve33({ data: null });
+              resolve34({ data: null });
             }
           } else if (res.statusCode === 429) {
             if (process.env.OMC_DEBUG) {
               console.error(`[usage-api] Anthropic API returned 429 (rate limited)`);
             }
-            resolve33({ data: null, rateLimited: true });
+            resolve34({ data: null, rateLimited: true });
           } else {
-            resolve33({ data: null });
+            resolve34({ data: null });
           }
         });
       }
     );
-    req.on("error", () => resolve33({ data: null }));
+    req.on("error", () => resolve34({ data: null }));
     req.on("timeout", () => {
       req.destroy();
-      resolve33({ data: null });
+      resolve34({ data: null });
     });
     req.end();
   });
 }
 function fetchUsageFromZai() {
-  return new Promise((resolve33) => {
+  return new Promise((resolve34) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
     if (!baseUrl || !authToken) {
-      resolve33({ data: null });
+      resolve34({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve33({ data: null });
+      resolve34({ data: null });
       return;
     }
     try {
@@ -55863,29 +56103,29 @@ function fetchUsageFromZai() {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve33({ data: JSON.parse(data) });
+                resolve34({ data: JSON.parse(data) });
               } catch {
-                resolve33({ data: null });
+                resolve34({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] z.ai API returned 429 (rate limited)`);
               }
-              resolve33({ data: null, rateLimited: true });
+              resolve34({ data: null, rateLimited: true });
             } else {
-              resolve33({ data: null });
+              resolve34({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve33({ data: null }));
+      req.on("error", () => resolve34({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve33({ data: null });
+        resolve34({ data: null });
       });
       req.end();
     } catch {
-      resolve33({ data: null });
+      resolve34({ data: null });
     }
   });
 }
@@ -56155,16 +56395,16 @@ function parseZaiResponse(response) {
   return result;
 }
 function fetchUsageFromMinimax(apiKey) {
-  return new Promise((resolve33) => {
+  return new Promise((resolve34) => {
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
     if (!baseUrl) {
-      resolve33({ data: null });
+      resolve34({ data: null });
       return;
     }
     const validation = validateAnthropicBaseUrl(baseUrl);
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Blocking usage API call: ${validation.reason}`);
-      resolve33({ data: null });
+      resolve34({ data: null });
       return;
     }
     try {
@@ -56191,29 +56431,29 @@ function fetchUsageFromMinimax(apiKey) {
           res.on("end", () => {
             if (res.statusCode === 200) {
               try {
-                resolve33({ data: JSON.parse(data) });
+                resolve34({ data: JSON.parse(data) });
               } catch {
-                resolve33({ data: null });
+                resolve34({ data: null });
               }
             } else if (res.statusCode === 429) {
               if (process.env.OMC_DEBUG) {
                 console.error(`[usage-api] MiniMax API returned 429 (rate limited)`);
               }
-              resolve33({ data: null, rateLimited: true });
+              resolve34({ data: null, rateLimited: true });
             } else {
-              resolve33({ data: null });
+              resolve34({ data: null });
             }
           });
         }
       );
-      req.on("error", () => resolve33({ data: null }));
+      req.on("error", () => resolve34({ data: null }));
       req.on("timeout", () => {
         req.destroy();
-        resolve33({ data: null });
+        resolve34({ data: null });
       });
       req.end();
     } catch {
-      resolve33({ data: null });
+      resolve34({ data: null });
     }
   });
 }
@@ -57335,7 +57575,7 @@ function isCacheValid2(cache) {
   return Date.now() - cache.timestamp < CACHE_TTL_MS2;
 }
 function spawnWithTimeout(cmd, timeoutMs) {
-  return new Promise((resolve33, reject) => {
+  return new Promise((resolve34, reject) => {
     const [executable, ...args] = Array.isArray(cmd) ? cmd : ["sh", "-c", cmd];
     const child = (0, import_child_process43.spawn)(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -57358,7 +57598,7 @@ function spawnWithTimeout(cmd, timeoutMs) {
       clearTimeout(timer);
       if (!timedOut) {
         if (code === 0) {
-          resolve33(stdout);
+          resolve34(stdout);
         } else {
           reject(new Error(`Command exited with code ${code}`));
         }
@@ -63548,7 +63788,7 @@ var require_compile = __commonJS2((exports2) => {
     const schOrFunc = root2.refs[ref];
     if (schOrFunc)
       return schOrFunc;
-    let _sch = resolve33.call(this, root2, ref);
+    let _sch = resolve34.call(this, root2, ref);
     if (_sch === void 0) {
       const schema = (_a = root2.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
       const { schemaId } = this.opts;
@@ -63575,7 +63815,7 @@ var require_compile = __commonJS2((exports2) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve33(root2, ref) {
+  function resolve34(root2, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string")
       ref = sch;
@@ -64073,54 +64313,54 @@ var require_fast_uri = __commonJS2((exports2, module2) => {
     }
     return uri;
   }
-  function resolve33(baseURI, relativeURI, options) {
+  function resolve34(baseURI, relativeURI, options) {
     const schemelessOptions = Object.assign({ scheme: "null" }, options);
     const resolved = resolveComponents(parse62(baseURI, schemelessOptions), parse62(relativeURI, schemelessOptions), schemelessOptions, true);
     return serialize(resolved, { ...schemelessOptions, skipEscape: true });
   }
-  function resolveComponents(base, relative22, options, skipNormalization) {
+  function resolveComponents(base, relative23, options, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
       base = parse62(serialize(base, options), options);
-      relative22 = parse62(serialize(relative22, options), options);
+      relative23 = parse62(serialize(relative23, options), options);
     }
     options = options || {};
-    if (!options.tolerant && relative22.scheme) {
-      target.scheme = relative22.scheme;
-      target.userinfo = relative22.userinfo;
-      target.host = relative22.host;
-      target.port = relative22.port;
-      target.path = removeDotSegments(relative22.path || "");
-      target.query = relative22.query;
+    if (!options.tolerant && relative23.scheme) {
+      target.scheme = relative23.scheme;
+      target.userinfo = relative23.userinfo;
+      target.host = relative23.host;
+      target.port = relative23.port;
+      target.path = removeDotSegments(relative23.path || "");
+      target.query = relative23.query;
     } else {
-      if (relative22.userinfo !== void 0 || relative22.host !== void 0 || relative22.port !== void 0) {
-        target.userinfo = relative22.userinfo;
-        target.host = relative22.host;
-        target.port = relative22.port;
-        target.path = removeDotSegments(relative22.path || "");
-        target.query = relative22.query;
+      if (relative23.userinfo !== void 0 || relative23.host !== void 0 || relative23.port !== void 0) {
+        target.userinfo = relative23.userinfo;
+        target.host = relative23.host;
+        target.port = relative23.port;
+        target.path = removeDotSegments(relative23.path || "");
+        target.query = relative23.query;
       } else {
-        if (!relative22.path) {
+        if (!relative23.path) {
           target.path = base.path;
-          if (relative22.query !== void 0) {
-            target.query = relative22.query;
+          if (relative23.query !== void 0) {
+            target.query = relative23.query;
           } else {
             target.query = base.query;
           }
         } else {
-          if (relative22.path.charAt(0) === "/") {
-            target.path = removeDotSegments(relative22.path);
+          if (relative23.path.charAt(0) === "/") {
+            target.path = removeDotSegments(relative23.path);
           } else {
             if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-              target.path = "/" + relative22.path;
+              target.path = "/" + relative23.path;
             } else if (!base.path) {
-              target.path = relative22.path;
+              target.path = relative23.path;
             } else {
-              target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative22.path;
+              target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative23.path;
             }
             target.path = removeDotSegments(target.path);
           }
-          target.query = relative22.query;
+          target.query = relative23.query;
         }
         target.userinfo = base.userinfo;
         target.host = base.host;
@@ -64128,7 +64368,7 @@ var require_fast_uri = __commonJS2((exports2, module2) => {
       }
       target.scheme = base.scheme;
     }
-    target.fragment = relative22.fragment;
+    target.fragment = relative23.fragment;
     return target;
   }
   function equal(uriA, uriB, options) {
@@ -64306,7 +64546,7 @@ var require_fast_uri = __commonJS2((exports2, module2) => {
   var fastUri = {
     SCHEMES,
     normalize: normalize13,
-    resolve: resolve33,
+    resolve: resolve34,
     resolveComponents,
     equal,
     serialize,
@@ -78673,7 +78913,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = (_c = (_a = task2.pollInterval) !== null && _a !== void 0 ? _a : (_b = this._options) === null || _b === void 0 ? void 0 : _b.defaultTaskPollInterval) !== null && _c !== void 0 ? _c : 1e3;
-        await new Promise((resolve33) => setTimeout(resolve33, pollInterval));
+        await new Promise((resolve34) => setTimeout(resolve34, pollInterval));
         (_d = options === null || options === void 0 ? void 0 : options.signal) === null || _d === void 0 || _d.throwIfAborted();
       }
     } catch (error2) {
@@ -78685,7 +78925,7 @@ var Protocol = class {
   }
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options !== null && options !== void 0 ? options : {};
-    return new Promise((resolve33, reject) => {
+    return new Promise((resolve34, reject) => {
       var _a, _b, _c, _d, _e, _f, _g;
       const earlyReject = (error2) => {
         reject(error2);
@@ -78766,7 +79006,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve33(parseResult.data);
+            resolve34(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -78963,12 +79203,12 @@ var Protocol = class {
       }
     } catch (_d) {
     }
-    return new Promise((resolve33, reject) => {
+    return new Promise((resolve34, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve33, interval);
+      const timeoutId = setTimeout(resolve34, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -79767,7 +80007,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = (_a = task.pollInterval) !== null && _a !== void 0 ? _a : 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve33) => setTimeout(resolve33, pollInterval));
+      await new Promise((resolve34) => setTimeout(resolve34, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -84907,7 +85147,7 @@ var LspClient = class _LspClient {
 Install with: ${this.serverConfig.installHint}`
       );
     }
-    return new Promise((resolve33, reject) => {
+    return new Promise((resolve34, reject) => {
       const command = this.devContainerContext ? "docker" : this.serverConfig.command;
       const args = this.devContainerContext ? ["exec", "-i", "-w", this.devContainerContext.containerWorkspaceRoot, this.devContainerContext.containerId, this.serverConfig.command, ...this.serverConfig.args] : this.serverConfig.args;
       this.process = (0, import_child_process4.spawn)(command, args, {
@@ -84934,7 +85174,7 @@ Install with: ${this.serverConfig.installHint}`
       });
       this.initialize().then(() => {
         this.initialized = true;
-        resolve33();
+        resolve34();
       }).catch(reject);
     });
   }
@@ -85100,13 +85340,13 @@ ${content}`);
     const message2 = `Content-Length: ${Buffer.byteLength(content)}\r
 \r
 ${content}`;
-    return new Promise((resolve33, reject) => {
+    return new Promise((resolve34, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`LSP request '${method}' timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       this.pendingRequests.set(id, {
-        resolve: resolve33,
+        resolve: resolve34,
         reject,
         timeout: timeoutHandle
       });
@@ -85182,7 +85422,7 @@ ${content}`;
       }
     });
     this.openDocuments.add(hostUri);
-    await new Promise((resolve33) => setTimeout(resolve33, 100));
+    await new Promise((resolve34) => setTimeout(resolve34, 100));
   }
   /**
    * Close a document
@@ -85343,13 +85583,13 @@ ${content}`;
     if (this.diagnostics.has(uri)) {
       return Promise.resolve();
     }
-    return new Promise((resolve33) => {
+    return new Promise((resolve34) => {
       let resolved = false;
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
           this.diagnosticWaiters.delete(uri);
-          resolve33();
+          resolve34();
         }
       }, timeoutMs);
       const existing = this.diagnosticWaiters.get(uri) || [];
@@ -85357,7 +85597,7 @@ ${content}`;
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
-          resolve33();
+          resolve34();
         }
       });
       this.diagnosticWaiters.set(uri, existing);
@@ -87287,7 +87527,7 @@ var SessionLock = class {
   }
 };
 function sleep(ms) {
-  return new Promise((resolve33) => setTimeout(resolve33, ms));
+  return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
 
 // src/tools/python-repl/socket-client.ts
@@ -87317,7 +87557,7 @@ var JsonRpcError = class extends Error {
   }
 };
 async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
-  return new Promise((resolve33, reject) => {
+  return new Promise((resolve34, reject) => {
     const id = (0, import_crypto5.randomUUID)();
     const request = {
       jsonrpc: "2.0",
@@ -87407,7 +87647,7 @@ async function sendSocketRequest(socketPath, method, params, timeout = 6e4) {
           }
           if (!settled) {
             settled = true;
-            resolve33(response.result);
+            resolve34(response.result);
           }
         } catch (e) {
           if (!settled) {
@@ -91399,7 +91639,7 @@ function mergeArrays(fieldName, base, incoming) {
       return mergeScalarArray(base, incoming);
   }
 }
-function mergeByKey(base, incoming, keyFn, resolve33) {
+function mergeByKey(base, incoming, keyFn, resolve34) {
   const seen = /* @__PURE__ */ new Map();
   for (const item of base) {
     seen.set(keyFn(item), item);
@@ -91408,7 +91648,7 @@ function mergeByKey(base, incoming, keyFn, resolve33) {
     const key = keyFn(item);
     const existing = seen.get(key);
     if (existing) {
-      seen.set(key, resolve33(existing, item));
+      seen.set(key, resolve34(existing, item));
     } else {
       seen.set(key, item);
     }
@@ -102643,7 +102883,7 @@ async function pollLoop2(config2) {
       log2(`Poll error: ${state.lastError}`, config2);
       writeDaemonState2(state, config2);
     }
-    await new Promise((resolve33) => setTimeout(resolve33, config2.pollIntervalMs));
+    await new Promise((resolve34) => setTimeout(resolve34, config2.pollIntervalMs));
   }
 }
 function startDaemon(config2) {
@@ -105834,7 +106074,7 @@ async function ralphthonCommand(args) {
   console.log(source_default.gray("Orchestrator running. Press Ctrl+C to stop."));
 }
 function sleep6(ms) {
-  return new Promise((resolve33) => setTimeout(resolve33, ms));
+  return new Promise((resolve34) => setTimeout(resolve34, ms));
 }
 
 // src/cli/commands/ultragoal.ts
@@ -108664,15 +108904,15 @@ async function runHudWatchLoop(options) {
     if (shouldStop) {
       break;
     }
-    await new Promise((resolve33) => {
+    await new Promise((resolve34) => {
       const timer = setTimeout(() => {
         wakeSleep = null;
-        resolve33();
+        resolve34();
       }, options.intervalMs);
       wakeSleep = () => {
         clearTimeout(timer);
         wakeSleep = null;
-        resolve33();
+        resolve34();
       };
       timer.unref?.();
     });

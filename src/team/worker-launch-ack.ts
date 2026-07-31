@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, join } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessTree } from '../platform/process-utils.js';
@@ -16,6 +16,15 @@ const DEFAULT_ACK_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 25;
 const DEFAULT_DECISION_TIMEOUT_MS = 15_000;
 
+const WORKER_LAUNCH_TRANSPORT_OWNER_KIND = 'worker_launch_transport_owner' as const;
+const WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND = 'worker_launch_transport_cleanup_complete' as const;
+const WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE = 'bootstrap.json' as const;
+const WORKER_LAUNCH_INTERNAL_ENV_KEYS = new Set([
+  'OMC_WORKER_LAUNCH_SPEC',
+  'OMC_WORKER_LAUNCH_SPEC_B64',
+  'OMC_WORKER_LAUNCH_SPEC_FILE',
+]);
+
 interface WorkerLaunchIdentity {
   schema_version: typeof WORKER_LAUNCH_SCHEMA_VERSION;
   attempt_id: string;
@@ -25,6 +34,16 @@ interface WorkerLaunchIdentity {
   pane_id: string;
   provider: CliAgentType;
   created_at: string;
+}
+
+interface WorkerLaunchTransportOwner extends WorkerLaunchIdentity {
+  kind: typeof WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+}
+
+interface WorkerLaunchTransportCleanupComplete extends WorkerLaunchIdentity {
+  kind: typeof WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND;
+  reason: string;
+  written_at: string;
 }
 
 export type WorkerLaunchContext =
@@ -62,6 +81,10 @@ export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
   ackPath: string;
   decisionPath: string;
   startedPath: string;
+  transportOwnerPath: string;
+  bootstrapDescriptorPath: string;
+  wrapperPath: string;
+  transportCleanupCompletePath: string;
   runtimeCliPath: string;
   context?: WorkerLaunchContext;
 }
@@ -72,7 +95,12 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
   ack_path: string;
   decision_path: string;
   started_path: string;
+  transport_owner_path: string;
+  bootstrap_descriptor_path: string;
+  wrapper_path: string;
+  transport_cleanup_complete_path: string;
   provider_argv: string[];
+  provider_env: Record<string, string>;
   cwd: string;
   decision_timeout_ms: number;
   release_after_spawn: boolean;
@@ -99,6 +127,12 @@ export interface MaterializedProviderSpawnInvocation {
   completionPath?: string;
 }
 
+export interface MaterializedWorkerLaunchTransport {
+  wrapperPath: string;
+  bootstrapDescriptorPath: string;
+  wrapperRelativePath: string;
+}
+
 type JsonReadResult = { kind: 'absent' } | { kind: 'malformed' } | { kind: 'value'; value: unknown };
 
 function sleep(ms: number): Promise<void> {
@@ -107,6 +141,27 @@ function sleep(ms: number): Promise<void> {
 
 function isExactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
+}
+
+function isValidEnvironmentKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+}
+
+function normalizeProviderEnvironment(value: NodeJS.ProcessEnv | Record<string, string> | undefined): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value ?? {})) {
+    if (WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key)) continue;
+    if (!isValidEnvironmentKey(key)) throw new Error('worker_launch_provider_env_key_invalid');
+    if (typeof entry !== 'string') throw new Error('worker_launch_provider_env_value_invalid');
+    normalized[key] = entry;
+  }
+  return normalized;
+}
+
+function isValidProviderEnvironment(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.entries(value).every(([key, entry]) => isValidEnvironmentKey(key)
+    && !WORKER_LAUNCH_INTERNAL_ENV_KEYS.has(key) && typeof entry === 'string');
 }
 
 function isUuid(value: unknown): value is string {
@@ -200,6 +255,23 @@ async function writeExclusiveAtomic(path: string, value: unknown): Promise<void>
   }
 }
 
+async function writeExclusiveTextAtomic(path: string, value: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
+  const handle = await open(candidate, 'wx', 0o600);
+  try {
+    await handle.writeFile(value, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await link(candidate, path);
+  } finally {
+    await unlink(candidate).catch(() => undefined);
+  }
+}
+
 function resolvePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -232,11 +304,17 @@ export async function prepareWorkerLaunchAttempt(input: {
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, attemptId)),
     startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, attemptId)),
+    transportOwnerPath: absPath(input.cwd, TeamPaths.workerLaunchTransportOwner(input.teamName, input.workerName, attemptId)),
+    bootstrapDescriptorPath: absPath(input.cwd, TeamPaths.workerLaunchBootstrapDescriptor(input.teamName, input.workerName, attemptId)),
+    wrapperPath: absPath(input.cwd, TeamPaths.workerLaunchWrapper(input.teamName, input.workerName, attemptId)),
+    transportCleanupCompletePath: absPath(input.cwd, TeamPaths.workerLaunchTransportCleanupComplete(input.teamName, input.workerName, attemptId)),
     runtimeCliPath: input.runtimeCliPath,
     ...(input.context ? { context: input.context } : {}),
   };
   if (existsSync(attempt.expectedPath) || existsSync(attempt.ackPath)
-    || existsSync(attempt.decisionPath) || existsSync(attempt.startedPath)) {
+    || existsSync(attempt.decisionPath) || existsSync(attempt.startedPath)
+    || existsSync(attempt.transportOwnerPath) || existsSync(attempt.bootstrapDescriptorPath)
+    || existsSync(attempt.wrapperPath) || existsSync(attempt.transportCleanupCompletePath)) {
     throw new Error('worker_launch_attempt_path_conflict');
   }
   await writeExclusiveAtomic(attempt.expectedPath, identity);
@@ -281,6 +359,10 @@ export async function loadWorkerLaunchAttempt(input: {
     ackPath: absPath(input.cwd, TeamPaths.workerLaunchAck(input.teamName, input.workerName, input.attemptId)),
     decisionPath: absPath(input.cwd, TeamPaths.workerLaunchDecision(input.teamName, input.workerName, input.attemptId)),
     startedPath: absPath(input.cwd, TeamPaths.workerLaunchStarted(input.teamName, input.workerName, input.attemptId)),
+    transportOwnerPath: absPath(input.cwd, TeamPaths.workerLaunchTransportOwner(input.teamName, input.workerName, input.attemptId)),
+    bootstrapDescriptorPath: absPath(input.cwd, TeamPaths.workerLaunchBootstrapDescriptor(input.teamName, input.workerName, input.attemptId)),
+    wrapperPath: absPath(input.cwd, TeamPaths.workerLaunchWrapper(input.teamName, input.workerName, input.attemptId)),
+    transportCleanupCompletePath: absPath(input.cwd, TeamPaths.workerLaunchTransportCleanupComplete(input.teamName, input.workerName, input.attemptId)),
     runtimeCliPath: input.runtimeCliPath,
   };
 }
@@ -326,7 +408,7 @@ export function buildWorkerLaunchBootstrapSpec(
   attempt: WorkerLaunchAttempt,
   providerArgv: string[],
   cwd: string,
-  options: { releaseAfterSpawn?: boolean } = {},
+  options: { releaseAfterSpawn?: boolean; providerEnv?: NodeJS.ProcessEnv | Record<string, string> } = {},
 ): WorkerLaunchBootstrapSpec {
   return {
     ...identityOf(attempt),
@@ -335,11 +417,218 @@ export function buildWorkerLaunchBootstrapSpec(
     ack_path: attempt.ackPath,
     decision_path: attempt.decisionPath,
     started_path: attempt.startedPath,
+    transport_owner_path: attempt.transportOwnerPath,
+    bootstrap_descriptor_path: attempt.bootstrapDescriptorPath,
+    wrapper_path: attempt.wrapperPath,
+    transport_cleanup_complete_path: attempt.transportCleanupCompletePath,
     provider_argv: [...providerArgv],
+    provider_env: normalizeProviderEnvironment(options.providerEnv),
     cwd,
     decision_timeout_ms: resolvePositiveInteger(process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS, DEFAULT_DECISION_TIMEOUT_MS),
     release_after_spawn: options.releaseAfterSpawn === true,
   };
+}
+
+function attemptTransportPathsAreDeterministic(attempt: WorkerLaunchAttempt): boolean {
+  const expectedRoot = dirname(attempt.expectedPath);
+  return isDeterministicTransportPath(attempt.expectedPath, attempt.transportOwnerPath, 'transport-owner.json')
+    && isDeterministicTransportPath(attempt.expectedPath, attempt.bootstrapDescriptorPath, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE)
+    && isDeterministicTransportPath(attempt.expectedPath, attempt.wrapperPath, 'launch.cmd')
+    && isDeterministicTransportPath(attempt.expectedPath, attempt.transportCleanupCompletePath, 'transport-cleanup-complete.json')
+    && resolve(attempt.expectedPath) === resolve(join(expectedRoot, 'expected.json'));
+}
+
+function transportOwnerMatches(value: unknown, attempt: WorkerLaunchIdentity): value is WorkerLaunchTransportOwner {
+  return identityMatches(value, attempt)
+    && typeof value === 'object' && value !== null
+    && (value as { kind?: unknown }).kind === WORKER_LAUNCH_TRANSPORT_OWNER_KIND;
+}
+
+function cleanupProofMatches(value: unknown, attempt: WorkerLaunchIdentity): value is WorkerLaunchTransportCleanupComplete {
+  return identityMatches(value, attempt)
+    && typeof value === 'object' && value !== null
+    && (value as { kind?: unknown }).kind === WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND
+    && isExactText((value as { reason?: unknown }).reason)
+    && typeof (value as { written_at?: unknown }).written_at === 'string'
+    && Number.isFinite(Date.parse((value as { written_at: string }).written_at));
+}
+
+function windowsWrapperRelativePath(cwd: string, wrapperPath: string): string {
+  const relativePath = relative(resolve(cwd), resolve(wrapperPath)).replace(/\//g, '\\');
+  if (!relativePath || relativePath.startsWith('\\') || /^[A-Za-z]:/.test(relativePath)
+    || !/^[A-Za-z0-9._\\-]+$/.test(relativePath)) {
+    throw new Error('worker_launch_transport_relative_path_invalid');
+  }
+  return relativePath;
+}
+
+function buildWorkerLaunchWrapper(attempt: WorkerLaunchAttempt): string {
+  const runtimeCli = quoteWindowsCmdArgument(attempt.runtimeCliPath);
+  const nodeExecutable = quoteWindowsCmdArgument(process.execPath);
+  return [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "OMC_WORKER_LAUNCH_SPEC_FILE=%~dp0bootstrap.json"',
+    `${nodeExecutable} ${runtimeCli} --worker-launch`,
+    'set "_OMC_WORKER_LAUNCH_EXIT=%ERRORLEVEL%"',
+    'del /f /q "%~f0" >nul 2>&1',
+    'endlocal & exit /b %_OMC_WORKER_LAUNCH_EXIT%',
+    '',
+  ].join('\\r\\n');
+}
+
+export async function materializeWorkerLaunchTransport(input: {
+  attempt: WorkerLaunchAttempt;
+  providerArgv: string[];
+  cwd: string;
+  providerEnv?: NodeJS.ProcessEnv | Record<string, string>;
+  releaseAfterSpawn?: boolean;
+}): Promise<MaterializedWorkerLaunchTransport> {
+  const { attempt } = input;
+  if (!attemptTransportPathsAreDeterministic(attempt)) throw new Error('worker_launch_transport_paths_invalid');
+  const spec = buildWorkerLaunchBootstrapSpec(attempt, input.providerArgv, input.cwd, {
+    providerEnv: input.providerEnv,
+    releaseAfterSpawn: input.releaseAfterSpawn,
+  });
+  const owner: WorkerLaunchTransportOwner = {
+    ...identityOf(attempt),
+    kind: WORKER_LAUNCH_TRANSPORT_OWNER_KIND,
+  };
+  const wrapperRelativePath = windowsWrapperRelativePath(input.cwd, attempt.wrapperPath);
+  const wrapper = buildWorkerLaunchWrapper(attempt);
+  let ownerCreated = false;
+  let descriptorCreated = false;
+  let wrapperCreated = false;
+  try {
+    await withFileLock(lockPathFor(attempt.currentPath), async () => {
+      if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)
+        || (await readJson(`${attempt.decisionPath}.retired`)).kind !== 'absent') {
+        throw new Error('worker_launch_attempt_inactive');
+      }
+      const existingOwner = await readJson(attempt.transportOwnerPath);
+      if (existingOwner.kind === 'malformed'
+        || (existingOwner.kind === 'value' && !transportOwnerMatches(existingOwner.value, attempt))) {
+        throw new Error('worker_launch_transport_owner_conflict');
+      }
+      if (existingOwner.kind === 'absent') {
+        await writeExclusiveAtomic(attempt.transportOwnerPath, owner);
+        ownerCreated = true;
+      }
+      if (existsSync(attempt.bootstrapDescriptorPath) || existsSync(attempt.wrapperPath)) {
+        throw new Error('worker_launch_transport_path_conflict');
+      }
+      await writeExclusiveAtomic(attempt.bootstrapDescriptorPath, spec);
+      descriptorCreated = true;
+      await writeExclusiveTextAtomic(attempt.wrapperPath, wrapper);
+      wrapperCreated = true;
+    });
+  } catch (error) {
+    let cleanupVerified = true;
+    if (wrapperCreated) {
+      await unlink(attempt.wrapperPath).catch(() => { cleanupVerified = false; });
+      cleanupVerified &&= !existsSync(attempt.wrapperPath);
+    }
+    if (descriptorCreated) {
+      await unlink(attempt.bootstrapDescriptorPath).catch(() => { cleanupVerified = false; });
+      cleanupVerified &&= !existsSync(attempt.bootstrapDescriptorPath);
+    }
+    if (ownerCreated) {
+      await unlink(attempt.transportOwnerPath).catch(() => { cleanupVerified = false; });
+      cleanupVerified &&= !existsSync(attempt.transportOwnerPath);
+    }
+    if (!cleanupVerified) {
+      const cleanupError = new Error('worker_launch_transport_partial_cleanup_unverified');
+      (cleanupError as { cause?: unknown }).cause = error;
+      throw cleanupError;
+    }
+    throw error;
+  }
+  return {
+    wrapperPath: attempt.wrapperPath,
+    bootstrapDescriptorPath: attempt.bootstrapDescriptorPath,
+    wrapperRelativePath,
+  };
+}
+
+async function cleanupWorkerLaunchTransportUnlocked(
+  attempt: WorkerLaunchAttempt,
+  reason: string,
+): Promise<boolean> {
+  const owner = await readJson(attempt.transportOwnerPath);
+  const proof = await readJson(attempt.transportCleanupCompletePath);
+  if (owner.kind === 'malformed' || proof.kind === 'malformed') return false;
+  if (owner.kind === 'value' && !transportOwnerMatches(owner.value, attempt)) return false;
+  if (proof.kind === 'value' && !cleanupProofMatches(proof.value, attempt)) return false;
+  const hasTransportFiles = existsSync(attempt.bootstrapDescriptorPath) || existsSync(attempt.wrapperPath);
+  if (owner.kind === 'absent') {
+    return !hasTransportFiles && (proof.kind === 'absent' || cleanupProofMatches(proof.value, attempt));
+  }
+  await unlink(attempt.bootstrapDescriptorPath).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  });
+  await unlink(attempt.wrapperPath).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  });
+  if (existsSync(attempt.bootstrapDescriptorPath) || existsSync(attempt.wrapperPath)) return false;
+  if (proof.kind === 'absent') {
+    await writeExclusiveAtomic(attempt.transportCleanupCompletePath, {
+      ...identityOf(attempt),
+      kind: WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND,
+      reason,
+      written_at: new Date().toISOString(),
+    });
+  }
+  const completed = await readJson(attempt.transportCleanupCompletePath);
+  return completed.kind === 'value' && cleanupProofMatches(completed.value, attempt)
+    && !existsSync(attempt.bootstrapDescriptorPath) && !existsSync(attempt.wrapperPath);
+}
+
+export async function cleanupWorkerLaunchTransport(attempt: WorkerLaunchAttempt, reason = 'transport_cleanup'): Promise<boolean> {
+  if (!attemptTransportPathsAreDeterministic(attempt)) return false;
+  try {
+    return await withFileLock(
+      lockPathFor(attempt.currentPath),
+      () => cleanupWorkerLaunchTransportUnlocked(attempt, reason),
+      { timeoutMs: 5_000, retryDelayMs: 10 },
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function readAndConsumeWorkerLaunchDescriptor(descriptorPath: string): Promise<unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(descriptorPath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new Error((error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? 'worker_launch_descriptor_missing' : 'worker_launch_descriptor_invalid');
+  }
+  if (!isValidBootstrapSpec(parsed)) throw new Error('worker_launch_descriptor_invalid');
+  const spec = parsed;
+  if (resolve(descriptorPath) !== resolve(spec.bootstrap_descriptor_path)) {
+    throw new Error('worker_launch_descriptor_path_mismatch');
+  }
+  const owner = await readJson(spec.transport_owner_path);
+  if (owner.kind !== 'value' || !transportOwnerMatches(owner.value, spec)
+    || !existsSync(spec.wrapper_path)) {
+    throw new Error('worker_launch_descriptor_owner_invalid');
+  }
+  try {
+    await withFileLock(lockPathFor(spec.current_path), async () => {
+      const currentOwner = await readJson(spec.transport_owner_path);
+      if (currentOwner.kind !== 'value' || !transportOwnerMatches(currentOwner.value, spec)
+        || !await isCurrentLaunchIdentity(spec.current_path, spec)
+        || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
+        throw new Error('worker_launch_descriptor_owner_invalid');
+      }
+      await unlink(descriptorPath);
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('worker_launch_descriptor_')) throw error;
+    throw new Error('worker_launch_descriptor_remove_failed');
+  }
+  return spec;
 }
 
 async function publishDecision(
@@ -486,6 +775,7 @@ export async function retireWorkerLaunchAttempt(
           written_at: new Date().toISOString(),
         });
       }
+      if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       if (await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
         await unlink(attempt.currentPath).catch(() => {});
       }
@@ -524,7 +814,9 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
           ...identityOf(attempt), kind: 'worker_launch_retired', reason, written_at: new Date().toISOString(),
         });
       }
-      if (!await terminateWorkerLaunchProvider(attempt) || !await cleanup()) return false;
+      if (!await terminateWorkerLaunchProvider(attempt)) return false;
+      if (!await cleanup()) return false;
+      if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       const completed = await readJson(cleanupCompletePath);
       if (completed.kind === 'absent') {
         await writeExclusiveAtomic(cleanupCompletePath, {
@@ -718,6 +1010,11 @@ export async function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt
   return (await readValidProviderStarted(attempt)) !== null;
 }
 
+function isDeterministicTransportPath(expectedPath: string, candidate: unknown, fileName: string): candidate is string {
+  return isExactText(candidate)
+    && resolve(candidate) === resolve(join(dirname(expectedPath), fileName));
+}
+
 function isValidBootstrapSpec(value: unknown): value is WorkerLaunchBootstrapSpec {
   if (!isValidIdentity(value)) return false;
   const spec = value as Partial<WorkerLaunchBootstrapSpec>;
@@ -726,10 +1023,15 @@ function isValidBootstrapSpec(value: unknown): value is WorkerLaunchBootstrapSpe
     && isExactText(spec.ack_path)
     && isExactText(spec.decision_path)
     && isExactText(spec.started_path)
+    && isDeterministicTransportPath(spec.expected_path, spec.transport_owner_path, 'transport-owner.json')
+    && isDeterministicTransportPath(spec.expected_path, spec.bootstrap_descriptor_path, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE)
+    && isDeterministicTransportPath(spec.expected_path, spec.wrapper_path, 'launch.cmd')
+    && isDeterministicTransportPath(spec.expected_path, spec.transport_cleanup_complete_path, 'transport-cleanup-complete.json')
     && Array.isArray(spec.provider_argv)
     && spec.provider_argv.length > 0
     && isExactText(spec.provider_argv[0])
     && spec.provider_argv.slice(1).every(argument => typeof argument === 'string')
+    && isValidProviderEnvironment(spec.provider_env)
     && typeof spec.cwd === 'string'
     && spec.cwd.length > 0
     && Number.isSafeInteger(spec.decision_timeout_ms)
@@ -891,7 +1193,8 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
   const decision = await waitForBootstrapDecision(spec);
   if (decision === 'timeout') return { outcome: 'decision_timeout' };
   if (decision === 'revoked') return { outcome: 'revoked' };
-  const { OMC_WORKER_LAUNCH_SPEC: _launchSpec, OMC_WORKER_LAUNCH_SPEC_B64: _encodedLaunchSpec, ...providerEnv } = process.env;
+  const providerEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.provider_env };
+  for (const key of WORKER_LAUNCH_INTERNAL_ENV_KEYS) delete providerEnv[key];
   try {
     const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)

@@ -8,12 +8,15 @@ import {
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
+  cleanupWorkerLaunchTransport,
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchProviderStarted,
   loadWorkerLaunchAttempt,
   loadCurrentWorkerLaunchAttempt,
   prepareWorkerLaunchAttempt,
+  materializeWorkerLaunchTransport,
   runWorkerLaunchBootstrap,
+  readAndConsumeWorkerLaunchDescriptor,
   retireWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
@@ -622,6 +625,153 @@ describe('worker launch acknowledgement', () => {
     await expect(retireWorkerLaunchAttempt(launchAttempt, 'test_cleanup')).resolves.toBe(true);
     await expect(terminateWorkerLaunchProvider(launchAttempt)).resolves.toBe(true);
     await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+  });
+
+  it('materializes an attempt-owned Windows transport without exposing provider secrets in pane text', async () => {
+    const launchAttempt = await attempt();
+    const secret = 'synthetic-token-value';
+    const longValue = `long-${'x'.repeat(12_000)}`;
+    const providerArgv = [
+      'C:\\Program Files\\Codex\\codex.exe',
+      '--token', secret,
+      '--metacharacters', '100% ! ^ & | ( ) "quoted" with spaces',
+      '--unicode', 'Grüße-λ-漢字',
+      '--long', longValue,
+    ];
+    const providerEnv = {
+      OMC_TEAM_WORKER: 'launch-team/worker-1',
+      OMC_WORKER_LAUNCH_ATTEMPT_ID: launchAttempt.attempt_id,
+      PROVIDER_TOKEN: secret,
+      PROVIDER_URL: 'https://provider.example.test/path?x=1&y=2',
+      PATH: 'C:\\Program Files\\Node;C:\\Tools',
+      SYNTHETIC_METACHARS: '100% ! ^ & | ( ) "quoted" with spaces',
+      SYNTHETIC_UNICODE: 'Grüße-λ-漢字',
+      SYNTHETIC_CRLF: 'line-one\r\nline-two',
+      SYNTHETIC_LONG: longValue,
+    };
+    const materialized = await materializeWorkerLaunchTransport({
+      attempt: launchAttempt,
+      providerArgv,
+      providerEnv,
+      cwd,
+    });
+
+    expect(materialized.wrapperRelativePath).toMatch(/^\.omc\\state\\team\\launch-team\\workers\\worker-1\\launch-attempts\\[0-9a-f-]+\\launch\.cmd$/);
+    expect(Buffer.byteLength(materialized.wrapperRelativePath, 'utf8')).toBeLessThan(256);
+    const wrapper = await readFile(materialized.wrapperPath, 'utf8');
+    expect(wrapper).toContain('setlocal DisableDelayedExpansion');
+    expect(wrapper).toContain('OMC_WORKER_LAUNCH_SPEC_FILE=%~dp0bootstrap.json');
+    expect(wrapper).toContain('--worker-launch');
+    for (const value of [secret, providerEnv.PROVIDER_URL, providerEnv.SYNTHETIC_METACHARS,
+      providerEnv.SYNTHETIC_UNICODE, providerEnv.SYNTHETIC_CRLF, longValue]) {
+      expect(wrapper).not.toContain(value);
+    }
+    expect(wrapper).not.toContain('PROVIDER_TOKEN');
+    const descriptorRaw = await readFile(materialized.bootstrapDescriptorPath, 'utf8');
+    expect(Buffer.byteLength(descriptorRaw, 'utf8')).toBeGreaterThan(12_000);
+    const descriptor = JSON.parse(descriptorRaw);
+    expect(descriptor).toMatchObject({
+      attempt_id: launchAttempt.attempt_id,
+      nonce: launchAttempt.nonce,
+    });
+    expect(descriptor.provider_argv).toEqual(providerArgv);
+    expect(descriptor.provider_env).toEqual(providerEnv);
+    await expect(materializeWorkerLaunchTransport({
+      attempt: launchAttempt,
+      providerArgv: ['codex'],
+      cwd,
+    })).rejects.toThrow('worker_launch_transport_path_conflict');
+
+    const consumed = await readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath) as Record<string, unknown>;
+    expect(consumed).toMatchObject({ attempt_id: launchAttempt.attempt_id, provider_env: { PROVIDER_TOKEN: secret } });
+    await expect(readFile(materialized.bootstrapDescriptorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(cleanupWorkerLaunchTransport(launchAttempt, 'test_cleanup')).resolves.toBe(true);
+    await expect(readFile(materialized.wrapperPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(cleanupWorkerLaunchTransport(launchAttempt, 'test_cleanup_retry')).resolves.toBe(true);
+    await expect(readFile(launchAttempt.transportCleanupCompletePath, 'utf8').then(JSON.parse))
+      .resolves.toMatchObject({ attempt_id: launchAttempt.attempt_id, kind: 'worker_launch_transport_cleanup_complete' });
+  });
+
+  it('uses a safe relative wrapper command when worker cwd is nested below the leader state root', async () => {
+    const launchAttempt = await attempt();
+    const workerCwd = join(cwd, '.omc', 'team', 'launch-team', 'worktrees', 'worker-1');
+    await mkdir(workerCwd, { recursive: true });
+    const materialized = await materializeWorkerLaunchTransport({
+      attempt: launchAttempt,
+      providerArgv: ['codex'],
+      providerEnv: { OMC_TEAM_WORKER: 'launch-team/worker-1' },
+      cwd: workerCwd,
+    });
+
+    expect(materialized.wrapperRelativePath).toMatch(/^(?:\.\.\\)+state\\team\\launch-team\\workers\\worker-1\\launch-attempts\\[0-9a-f-]+\\launch\.cmd$/);
+    expect(materialized.wrapperRelativePath).not.toMatch(/[\s"%!^&|()]/);
+    await expect(cleanupWorkerLaunchTransport(launchAttempt, 'nested_worktree_cleanup')).resolves.toBe(true);
+  });
+
+  it('removes only partial current-attempt transport files when exclusive materialization fails', async () => {
+    const launchAttempt = await attempt();
+    await writeFile(launchAttempt.wrapperPath, 'foreign-wrapper', 'utf8');
+
+    await expect(materializeWorkerLaunchTransport({
+      attempt: launchAttempt,
+      providerArgv: ['codex'],
+      providerEnv: { OMC_TEAM_WORKER: 'launch-team/worker-1' },
+      cwd,
+    })).rejects.toThrow('worker_launch_transport_path_conflict');
+    await expect(readFile(launchAttempt.transportOwnerPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(launchAttempt.bootstrapDescriptorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(launchAttempt.wrapperPath, 'utf8')).resolves.toBe('foreign-wrapper');
+  });
+
+  it('refuses transport cleanup when the durable owner belongs to another attempt identity', async () => {
+    const launchAttempt = await attempt();
+    await materializeWorkerLaunchTransport({ attempt: launchAttempt, providerArgv: ['codex'], cwd });
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.transportOwnerPath, JSON.stringify({
+      ...expected,
+      nonce: '00000000-0000-4000-8000-000000000000',
+      kind: 'worker_launch_transport_owner',
+    }), 'utf8');
+
+    await expect(readAndConsumeWorkerLaunchDescriptor(launchAttempt.bootstrapDescriptorPath))
+      .rejects.toThrow('worker_launch_descriptor_owner_invalid');
+    await expect(readFile(launchAttempt.bootstrapDescriptorPath, 'utf8')).resolves.toContain(launchAttempt.attempt_id);
+    await expect(cleanupWorkerLaunchTransport(launchAttempt, 'foreign_owner')).resolves.toBe(false);
+    await expect(readFile(launchAttempt.wrapperPath, 'utf8')).resolves.toContain('--worker-launch');
+    await expect(readFile(launchAttempt.bootstrapDescriptorPath, 'utf8')).resolves.toContain(launchAttempt.attempt_id);
+  });
+
+  it('validates provider environment keys and propagates only explicit provider values', async () => {
+    const launchAttempt = await attempt();
+    expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, {
+      providerEnv: { 'BAD-KEY': 'value' },
+    })).toThrow('worker_launch_provider_env_key_invalid');
+    expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd, {
+      providerEnv: { VALID_KEY: undefined },
+    })).toThrow('worker_launch_provider_env_value_invalid');
+
+    const marker = join(cwd, 'provider-env.json');
+    const providerScript = `require('node:fs').writeFileSync(${JSON.stringify(marker)},JSON.stringify({value:process.env.OMC_TEST_PROVIDER_VALUE,attempt:process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID,internal:process.env.OMC_WORKER_LAUNCH_SPEC_FILE}));setTimeout(()=>process.exit(0),200)`;
+    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+      launchAttempt,
+      [process.execPath, '-e', providerScript],
+      cwd,
+      {
+        providerEnv: {
+          OMC_TEST_PROVIDER_VALUE: 'provider-value',
+          OMC_WORKER_LAUNCH_ATTEMPT_ID: launchAttempt.attempt_id,
+          OMC_WORKER_LAUNCH_SPEC_FILE: 'must-be-filtered',
+        },
+        releaseAfterSpawn: true,
+      },
+    ));
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+      .resolves.toEqual({ ok: true });
+    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    await expect(readFile(marker, 'utf8').then(JSON.parse)).resolves.toEqual({
+      value: 'provider-value',
+      attempt: launchAttempt.attempt_id,
+    });
   });
 
   it('routes native Windows batch shims through a percent-safe temporary wrapper without changing POSIX argv', async () => {

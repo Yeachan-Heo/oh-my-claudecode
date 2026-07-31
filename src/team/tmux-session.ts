@@ -23,8 +23,10 @@ import {
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
+  cleanupWorkerLaunchTransport,
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchAttemptCurrent,
+  materializeWorkerLaunchTransport,
   prepareWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   revokeWorkerLaunchAttempt,
@@ -1318,8 +1320,13 @@ export async function spawnWorkerInPane(
   if (config.launchAttempt && config.launchAttempt.pane_id !== paneId) {
     throw new Error('worker_launch_attempt_pane_mismatch');
   }
-  const startCmd = buildWorkerStartCommand(config);
-  const fingerprint = commandFingerprint(startCmd);
+  let startCmd = '';
+  let fingerprint = config.launchAttempt?.attempt_id.slice(0, 12) ?? 'unbuilt';
+  let materializedTransport: Awaited<ReturnType<typeof materializeWorkerLaunchTransport>> | undefined;
+  const nativeAttemptTransport = process.platform === 'win32'
+    && !isUnixLikeOnWindows()
+    && Boolean(config.launchAttempt)
+    && !isCmuxSurfaceTarget(paneId);
   const requireAcknowledgement = async (): Promise<void> => {
     if (!config.launchAttempt) return;
     const accepted = await awaitWorkerLaunchAcknowledgement(config.launchAttempt);
@@ -1331,12 +1338,27 @@ export async function spawnWorkerInPane(
     }
   };
 
-  logWorkerSpawnDiagnostic(
-    `worker start delivery begin session=${sessionName} pane=${paneId} ` +
-    `worker=${config.workerName} cmdSha=${fingerprint}`,
-  );
-
   try {
+    if (nativeAttemptTransport && config.launchAttempt) {
+      materializedTransport = await materializeWorkerLaunchTransport({
+        attempt: config.launchAttempt,
+        providerArgv: getLaunchWords(config),
+        cwd: config.cwd,
+        providerEnv: config.envVars,
+        releaseAfterSpawn: Boolean(config.envVars.OMC_RECOVERY_GATE_SPEC),
+      });
+      startCmd = materializedTransport.wrapperRelativePath;
+    } else {
+      startCmd = buildWorkerStartCommand(config);
+    }
+    fingerprint = commandFingerprint(startCmd);
+    const commandBytes = Buffer.byteLength(startCmd, 'utf8');
+    logWorkerSpawnDiagnostic(
+      `worker start delivery begin session=${sessionName} pane=${paneId} ` +
+      `worker=${config.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} ` +
+      `transport=${nativeAttemptTransport ? 'attempt_wrapper' : 'inline'}`,
+    );
+
     if (isCmuxSurfaceTarget(paneId)) {
       await cmuxSendSurface(paneId, startCmd);
       await cmuxSendSurfaceKey(paneId, 'Enter');
@@ -1358,7 +1380,8 @@ export async function spawnWorkerInPane(
     ], { timeout: 5000 });
     logWorkerSpawnDiagnostic(
       `worker start send-keys literal session=${sessionName} pane=${paneId} ` +
-      `worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(sendResult.stderr))}`,
+      `worker=${config.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} ` +
+      `sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(sendResult.stderr))}`,
     );
 
     if (!config.launchAttempt) {
@@ -1371,8 +1394,23 @@ export async function spawnWorkerInPane(
     const enterResult = await tmuxExecAsync(['send-keys', '-t', paneId, 'Enter'], { timeout: 5000 });
     logWorkerSpawnDiagnostic(
       `worker start submit key sent session=${sessionName} pane=${paneId} ` +
-      `worker=${config.workerName} cmdSha=${fingerprint} sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(enterResult.stderr))}`,
+      `worker=${config.workerName} cmdSha=${fingerprint} cmdBytes=${commandBytes} ` +
+      `sendStatus=0 stderr=${JSON.stringify(redactBoundedDiagnostic(enterResult.stderr))}`,
     );
+    if (nativeAttemptTransport) {
+      const [status, observation] = await Promise.all([
+        getPaneCurrentCommandStatus(paneId),
+        capturePaneObservation(paneId, { operation: 'worker-start-post-enter' }),
+      ]);
+      const captured = observation.ok ? observation.captured : '';
+      const captureSha = captured ? commandFingerprint(captured) : 'none';
+      logWorkerSpawnDiagnostic(
+        `worker start post-enter observation session=${sessionName} pane=${paneId} ` +
+        `worker=${config.workerName} cmdSha=${fingerprint} paneStatus=${JSON.stringify(status
+          ? `${status.dead ? '1' : '0'} ${redactBoundedDiagnostic(status.command, 96)}` : 'unavailable')} ` +
+        `captureOk=${observation.ok} captureBytes=${Buffer.byteLength(captured, 'utf8')} captureSha=${captureSha}`,
+      );
+    }
 
     if (config.launchAttempt) {
       await requireAcknowledgement();
@@ -1385,6 +1423,17 @@ export async function spawnWorkerInPane(
   } catch (error) {
     if (config.launchAttempt) {
       await revokeWorkerLaunchAttempt(config.launchAttempt, 'launch_failed').catch(() => undefined);
+    }
+    if (nativeAttemptTransport && config.launchAttempt
+      && (!materializedTransport || existsSync(materializedTransport.bootstrapDescriptorPath))) {
+      const cleaned = await cleanupWorkerLaunchTransport(config.launchAttempt, 'launch_failed')
+        .catch(() => false);
+      if (!cleaned) {
+        logWorkerSpawnDiagnostic(
+          `worker start transport cleanup unverified session=${sessionName} pane=${paneId} ` +
+          `worker=${config.workerName} cmdSha=${fingerprint}`,
+        );
+      }
     }
     logWorkerSpawnDiagnostic(
       `worker start failed session=${sessionName} pane=${paneId} worker=${config.workerName} ` +

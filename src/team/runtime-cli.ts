@@ -24,7 +24,7 @@ import type { RecoverDeadWorkerV2Result } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { canonicalRecoveryPayloadHash, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation } from './recovery-request-store.js';
 import { runWorkerActivationGate, type RecoveryActivationGate } from './worker-activation-gate.js';
-import { runWorkerLaunchBootstrap } from './worker-launch-ack.js';
+import { readAndConsumeWorkerLaunchDescriptor, runWorkerLaunchBootstrap } from './worker-launch-ack.js';
 import { readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { checkOwnerFence, currentProcessStartIdentity, requireOwnerProcessIdentity, type OwnerFence } from './team-owner-epoch.js';
@@ -1266,16 +1266,22 @@ async function runRecoveryGateFromEnvironment(): Promise<void> {
 }
 
 export async function runWorkerLaunchFromEnvironment(): Promise<void> {
+  const descriptorPath = process.env.OMC_WORKER_LAUNCH_SPEC_FILE;
   const raw = process.env.OMC_WORKER_LAUNCH_SPEC
     ?? (process.env.OMC_WORKER_LAUNCH_SPEC_B64
       ? Buffer.from(process.env.OMC_WORKER_LAUNCH_SPEC_B64, 'base64').toString('utf8')
       : undefined);
-  if (!raw) throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
+  if (descriptorPath && raw) throw new Error('worker_launch_spec_source_conflict');
   let spec: unknown;
-  try {
-    spec = JSON.parse(raw);
-  } catch {
-    throw new Error('worker_launch_invalid_spec_json');
+  if (descriptorPath) {
+    spec = await readAndConsumeWorkerLaunchDescriptor(descriptorPath);
+  } else {
+    if (!raw) throw new Error('OMC_WORKER_LAUNCH_SPEC is required');
+    try {
+      spec = JSON.parse(raw);
+    } catch {
+      throw new Error('worker_launch_invalid_spec_json');
+    }
   }
   const result = await runWorkerLaunchBootstrap(spec);
   if (result.outcome !== 'ran') throw new Error(`worker_launch_${result.outcome}`);

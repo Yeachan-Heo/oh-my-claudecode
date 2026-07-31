@@ -139,6 +139,26 @@ describe('runtime-cli worker launch bootstrap', () => {
     }
   });
 
+  it('fails closed when inline and descriptor launch-spec sources conflict', async () => {
+    process.env.OMC_WORKER_LAUNCH_SPEC = '{}';
+    process.env.OMC_WORKER_LAUNCH_SPEC_FILE = join(tmpdir(), 'conflicting-worker-launch.json');
+    try {
+      await expect(runWorkerLaunchFromEnvironment()).rejects.toThrow('worker_launch_spec_source_conflict');
+    } finally {
+      delete process.env.OMC_WORKER_LAUNCH_SPEC;
+      delete process.env.OMC_WORKER_LAUNCH_SPEC_FILE;
+    }
+  });
+
+  it('fails closed when the attempt-owned descriptor is missing', async () => {
+    process.env.OMC_WORKER_LAUNCH_SPEC_FILE = join(tmpdir(), 'missing-worker-launch.json');
+    try {
+      await expect(runWorkerLaunchFromEnvironment()).rejects.toThrow('worker_launch_descriptor_missing');
+    } finally {
+      delete process.env.OMC_WORKER_LAUNCH_SPEC_FILE;
+    }
+  });
+
   it('prioritizes explicit worker launch and recovery gate modes over inherited owner state', () => {
     const inheritedOwner = { OMC_RECOVERY_OWNER_INPUT: '{"requestId":"stale"}' };
 

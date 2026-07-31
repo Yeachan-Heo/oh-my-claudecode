@@ -24,6 +24,10 @@ export interface WorkerLaunchAttempt extends WorkerLaunchIdentity {
     ackPath: string;
     decisionPath: string;
     startedPath: string;
+    transportOwnerPath: string;
+    bootstrapDescriptorPath: string;
+    wrapperPath: string;
+    transportCleanupCompletePath: string;
     runtimeCliPath: string;
     context?: WorkerLaunchContext;
 }
@@ -33,7 +37,12 @@ export interface WorkerLaunchBootstrapSpec extends WorkerLaunchIdentity {
     ack_path: string;
     decision_path: string;
     started_path: string;
+    transport_owner_path: string;
+    bootstrap_descriptor_path: string;
+    wrapper_path: string;
+    transport_cleanup_complete_path: string;
     provider_argv: string[];
+    provider_env: Record<string, string>;
     cwd: string;
     decision_timeout_ms: number;
     release_after_spawn: boolean;
@@ -62,6 +71,11 @@ export interface MaterializedProviderSpawnInvocation {
     cleanup: () => Promise<void>;
     completionPath?: string;
 }
+export interface MaterializedWorkerLaunchTransport {
+    wrapperPath: string;
+    bootstrapDescriptorPath: string;
+    wrapperRelativePath: string;
+}
 export declare function prepareWorkerLaunchAttempt(input: {
     cwd: string;
     teamName: string;
@@ -88,7 +102,17 @@ export declare function loadCurrentWorkerLaunchAttempt(input: {
 }): Promise<WorkerLaunchAttempt | null>;
 export declare function buildWorkerLaunchBootstrapSpec(attempt: WorkerLaunchAttempt, providerArgv: string[], cwd: string, options?: {
     releaseAfterSpawn?: boolean;
+    providerEnv?: NodeJS.ProcessEnv | Record<string, string>;
 }): WorkerLaunchBootstrapSpec;
+export declare function materializeWorkerLaunchTransport(input: {
+    attempt: WorkerLaunchAttempt;
+    providerArgv: string[];
+    cwd: string;
+    providerEnv?: NodeJS.ProcessEnv | Record<string, string>;
+    releaseAfterSpawn?: boolean;
+}): Promise<MaterializedWorkerLaunchTransport>;
+export declare function cleanupWorkerLaunchTransport(attempt: WorkerLaunchAttempt, reason?: string): Promise<boolean>;
+export declare function readAndConsumeWorkerLaunchDescriptor(descriptorPath: string): Promise<unknown>;
 export declare function revokeWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
 export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;

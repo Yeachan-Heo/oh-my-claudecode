@@ -177,6 +177,10 @@ describe('buildWorkerStartCommand', () => {
         ackPath: '/tmp/ack.json',
         decisionPath: '/tmp/decision.json',
         startedPath: '/tmp/provider-started.json',
+        transportOwnerPath: '/tmp/transport-owner.json',
+        bootstrapDescriptorPath: '/tmp/bootstrap.json',
+        wrapperPath: '/tmp/launch.cmd',
+        transportCleanupCompletePath: '/tmp/transport-cleanup-complete.json',
         runtimeCliPath: '/opt/omc/runtime-cli.cjs',
       },
     });
@@ -212,6 +216,10 @@ describe('buildWorkerStartCommand', () => {
         ackPath: 'C:\\state\\ack.json',
         decisionPath: 'C:\\state\\decision.json',
         startedPath: 'C:\\state\\provider-started.json',
+        transportOwnerPath: 'C:\\state\\transport-owner.json',
+        bootstrapDescriptorPath: 'C:\\state\\bootstrap.json',
+        wrapperPath: 'C:\\state\\launch.cmd',
+        transportCleanupCompletePath: 'C:\\state\\transport-cleanup-complete.json',
         runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
       },
     });

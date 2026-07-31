@@ -52,6 +52,10 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
             ackPath: spec.ack_path,
             decisionPath: spec.decision_path,
             startedPath: spec.started_path,
+            transportOwnerPath: spec.transport_owner_path,
+            bootstrapDescriptorPath: spec.bootstrap_descriptor_path,
+            wrapperPath: spec.wrapper_path,
+            transportCleanupCompletePath: spec.transport_cleanup_complete_path,
             runtimeCliPath: '/runtime-cli.js',
             context: spec.context,
           };
@@ -132,6 +136,7 @@ afterEach(async () => {
   delete process.env.MSYSTEM;
   delete process.env.MINGW_PREFIX;
   delete process.env.COMSPEC;
+  delete process.env.TMUX;
   delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   if (cwd) await rm(cwd, { recursive: true, force: true });
   cwd = '';
@@ -228,22 +233,26 @@ describe('worker pane startup safety', () => {
   });
 
   it.each([
-    ['wide visible command', 'node runtime-cli.cjs --worker-launch'],
-    ['narrow wrapped command', 'node runtime-\ncli.cjs --worker-\nlaunch'],
-    ['stale scrollback command', 'old launch command\n› ready'],
-    ['alternate-screen repaint', '\u001b[?1049h\u001b[2Jprovider ui'],
-    ['capture failure placeholder', ''],
-  ])('accepts a stable Windows cmd wrapper independently of %s capture', async (_fixture, captured) => {
+    ['wide visible command', 'node runtime-cli.cjs --worker-launch', undefined, 'codex'],
+    ['narrow wrapped command', 'node runtime-\ncli.cjs --worker-\nlaunch', undefined, 'claude'],
+    ['stale scrollback command', 'old launch command\n› ready', undefined, 'codex'],
+    ['alternate-screen repaint', '\u001b[?1049h\u001b[2Jprovider ui', undefined, 'claude'],
+    ['capture failure placeholder', '', undefined, 'codex'],
+    ['ignored capture-pane -J', new Error('unknown option -- J'), undefined, 'claude'],
+    ['in-session psmux', 'provider ui', '/tmp/psmux/default,11877,0', 'codex'],
+  ] as const)('accepts a stable Windows cmd wrapper independently of %s capture', async (_fixture, captured, tmuxEnv, provider) => {
     cwd = await mkdtemp(join(tmpdir(), 'startup-stable-cmd-'));
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     process.env.COMSPEC = 'cmd.exe';
+    if (tmuxEnv) process.env.TMUX = tmuxEnv;
+    else delete process.env.TMUX;
     tmuxState.captures = [captured];
     const attempt = await prepareWorkerLaunchAttempt({
       cwd,
       teamName: 'startup-team',
       workerName: 'worker-1',
       paneId: '%2',
-      provider: 'codex',
+      provider,
       runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
     });
     tmuxState.activeAttempt = attempt;
@@ -252,15 +261,28 @@ describe('worker pane startup safety', () => {
       teamName: 'startup-team',
       workerName: 'worker-1',
       envVars: { OMC_TEAM_WORKER: 'startup-team/worker-1' },
-      launchBinary: 'C:\\Program Files\\Codex\\codex.exe',
+      launchBinary: provider === 'codex'
+        ? 'C:\\Program Files\\Codex\\codex.exe'
+        : 'C:\\Program Files\\Claude\\claude.exe',
       launchArgs: ['--full-auto'],
       cwd,
-      provider: 'codex',
+      provider,
       launchAttempt: attempt,
     })).resolves.toBeUndefined();
 
-    expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
-    expect(tmuxState.captures).toEqual([captured]);
+    const launchSend = tmuxState.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+    expect(launchSend?.at(-1)).toMatch(/^\.omc\\state\\team\\startup-team\\workers\\worker-1\\launch-attempts\\[0-9a-f-]+\\launch\.cmd$/);
+    expect(launchSend?.at(-1)).not.toContain('cmd.exe');
+    expect(launchSend?.at(-1)).not.toContain('OMC_TEAM_WORKER');
+    expect(launchSend?.at(-1)).not.toContain('Codex');
+    expect(launchSend?.at(-1)).not.toContain('Claude');
+    const literalIndex = tmuxState.args.indexOf(launchSend!);
+    const enterIndex = tmuxState.args.findIndex(args => args[0] === 'send-keys' && args.at(-1) === 'Enter');
+    expect(literalIndex).toBeGreaterThanOrEqual(0);
+    expect(enterIndex).toBeGreaterThan(literalIndex);
+    expect(launchSend).toEqual(['send-keys', '-t', '%2', '-l', launchSend?.at(-1)]);
+    expect(tmuxState.args[enterIndex]).toEqual(['send-keys', '-t', '%2', 'Enter']);
+    expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(true);
     expect(tmuxState.args.some(args => args.includes('#{pane_dead} #{pane_current_command}'))).toBe(true);
     expect(tmuxState.paneStatus).toBe('0 cmd\n');
   });

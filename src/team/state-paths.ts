@@ -84,6 +84,18 @@ export const TeamPaths = {
   workerLaunchStarted: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/provider-started.json`,
 
+  workerLaunchTransportOwner: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/transport-owner.json`,
+
+  workerLaunchBootstrapDescriptor: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/bootstrap.json`,
+
+  workerLaunchWrapper: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/launch.cmd`,
+
+  workerLaunchTransportCleanupComplete: (teamName: string, workerName: string, attemptId: string) =>
+    `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/transport-cleanup-complete.json`,
+
   workerLaunchDecision: (teamName: string, workerName: string, attemptId: string) =>
     `.omc/state/team/${teamName}/workers/${workerName}/launch-attempts/${attemptId}/decision.json`,
 
