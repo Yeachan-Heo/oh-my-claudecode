@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
@@ -1337,6 +1337,99 @@ function confirmSkillModeStates(stateDir, skillName, sessionId) {
   }
 }
 
+/**
+ * Handle TaskOutput race condition.
+ *
+ * When a background task completes, the assistant sends a <task-notification>
+ * containing <output-file> with the path to the output. But the task JSON file
+ * (~/.claude/tasks/{sessionId}/{taskId}.json) can be cleaned up before the
+ * agent calls TaskOutput, causing "No task found with ID: xxx" errors.
+ *
+ * This function intercepts TaskOutput calls, parses the session transcript for
+ * the matching task-notification, reads the output file directly, and returns
+ * the content so the agent gets the result without retrying.
+ *
+ * @param {object} data - The tool input data from stdin
+ * @param {string} directory - The current working directory
+ * @returns {string|null} The output content to inject, or null to fall through
+ */
+function handleTaskOutputRaceCondition(data, directory) {
+  try {
+    const toolInput = data.toolInput || data.tool_input || {};
+    const taskId = toolInput.task_id || toolInput.taskId;
+    if (!taskId) return null;
+
+    const sessionId = data.session_id || data.sessionId || '';
+    if (!sessionId) return null;
+
+    // Resolve transcript path (same logic as resolveTranscriptPath)
+    const rawTranscriptPath = data.transcript_path || data.transcriptPath || '';
+    let transcriptPath = rawTranscriptPath;
+
+    if (transcriptPath && !existsSync(transcriptPath)) {
+      // Try encoding the project path
+      const configDir = getClaudeConfigDir();
+      const projectsDir = join(configDir, 'projects');
+      const sessionFile = basename(transcriptPath);
+      if (sessionFile && existsSync(projectsDir)) {
+        const encoded = encodeProjectPath(directory || process.cwd());
+        const resolved = join(projectsDir, encoded, sessionFile);
+        if (existsSync(resolved)) transcriptPath = resolved;
+      }
+    }
+
+    if (!transcriptPath || !existsSync(transcriptPath)) return null;
+
+    // Read the tail of the transcript (last 256KB) to find the task-notification
+    const stat = statSync(transcriptPath);
+    const TAIL_BYTES = 256 * 1024;
+    const offset = Math.max(0, stat.size - TAIL_BYTES);
+    const fd = openSync(transcriptPath, 'r');
+    let tail;
+    try {
+      const buf = Buffer.allocUnsafe(Math.min(TAIL_BYTES, stat.size));
+      readSync(fd, buf, 0, buf.length, offset);
+      tail = buf.toString('utf-8');
+    } finally {
+      closeSync(fd);
+    }
+
+    // Search for <task-notification> containing our taskId and <output-file>
+    const lines = tail.split('\n').reverse(); // newest first
+    for (const line of lines) {
+      if (!line.includes('<task-notification>')) continue;
+      if (!line.includes(taskId)) continue;
+
+      // Extract <output-file> path
+      const fileMatch = line.match(/<output-file>([^<]+)<\/output-file>/);
+      if (!fileMatch) continue;
+
+      const outputFile = fileMatch[1].trim();
+      if (!existsSync(outputFile)) continue;
+
+      // Read the output file
+      const content = readFileSync(outputFile, 'utf-8');
+      if (!content.trim()) continue;
+
+      // Also extract <summary> for context
+      const summaryMatch = line.match(/<summary>([^<]+)<\/summary>/);
+      const summary = summaryMatch ? summaryMatch[1].trim() : '';
+
+      return [
+        '[TaskOutput race condition bypass]',
+        summary ? `Task: ${summary}` : '',
+        `Output file: ${outputFile}`,
+        '',
+        '--- Output ---',
+        content,
+      ].filter(Boolean).join('\n');
+    }
+  } catch {
+    // Best-effort: never block tool execution on error
+  }
+  return null;
+}
+
 // Record Skill/Task invocations to flow trace (best-effort)
 async function recordToolInvocation(data, directory) {
   try {
@@ -1604,6 +1697,29 @@ async function main() {
 
     const slopWarning = generateSlopWarning(data, toolName);
     let message;
+
+    // TaskOutput race condition fix: when a background task completes, the
+    // task-notification includes an <output-file> path. But the task JSON file
+    // can be cleaned up before the agent calls TaskOutput, causing "No task
+    // found" errors. Intercept TaskOutput, parse the transcript for the
+    // output-file path, read it directly, and block the call with the output
+    // so the agent gets the result without retrying.
+    if (toolName === 'TaskOutput') {
+      const taskOutputFallback = handleTaskOutputRaceCondition(data, directory);
+      if (taskOutputFallback) {
+        console.log(JSON.stringify({
+          continue: true,
+          suppressOutput: true,
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: taskOutputFallback,
+          },
+        }));
+        return;
+      }
+    }
+
     if (BUILT_IN_TASK_LIST_TOOL_NAMES.has(toolName)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;

@@ -2432,3 +2432,212 @@ describe('pre-tool-enforcer agents.<name>.model injection (issue #3242)', () => 
     expect(updatedModel(throttled)).toBe('sonnet');
   });
 });
+
+describe('pre-tool-enforcer TaskOutput race condition fix', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'pre-enforcer-taskoutput-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeTranscript(transcriptPath: string, lines: string[]): void {
+    mkdirSync(dirname(transcriptPath), { recursive: true });
+    writeFileSync(transcriptPath, lines.join('\n') + '\n', 'utf-8');
+  }
+
+  function writeOutputFile(filePath: string, content: string): void {
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, content, 'utf-8');
+  }
+
+  it('blocks TaskOutput and returns output when transcript has matching task-notification', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    const outputFile = join(tempDir, 'task-abc123.output');
+
+    writeOutputFile(outputFile, 'Build succeeded in 42s');
+    writeTranscript(transcriptPath, [
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: `<task-notification><task-id>abc123</task-id><status>completed</status><summary>Build CLI</summary><output-file>${outputFile.replace(/\\/g, '\\\\')}</output-file></task-notification>`,
+        },
+      }),
+    ]);
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'abc123', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-test',
+        transcript_path: transcriptPath,
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    expect(output.continue).toBe(true);
+    expect(output.suppressOutput).toBe(true);
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookSpecificOutput).toBeDefined();
+    expect(hookSpecificOutput.permissionDecision).toBe('deny');
+    const reason = hookSpecificOutput.permissionDecisionReason as string;
+    expect(reason).toContain('[TaskOutput race condition bypass]');
+    expect(reason).toContain('Build CLI');
+    expect(reason).toContain('Build succeeded in 42s');
+  });
+
+  it('falls through when no task-notification matches the taskId', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+
+    writeTranscript(transcriptPath, [
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<task-notification><task-id>other-task</task-id><status>completed</status><output-file>/tmp/other.output</output-file></task-notification>',
+        },
+      }),
+    ]);
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'abc123', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-no-match',
+        transcript_path: transcriptPath,
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    // Falls through to default BUILT_IN_TASK_LIST_TOOL_NAMES handling
+    expect(output).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('falls through when output file does not exist', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+
+    writeTranscript(transcriptPath, [
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<task-notification><task-id>abc123</task-id><status>completed</status><output-file>/nonexistent/path/output.txt</output-file></task-notification>',
+        },
+      }),
+    ]);
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'abc123', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-no-file',
+        transcript_path: transcriptPath,
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    expect(output).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('falls through when transcript path is missing', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'abc123', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-no-transcript',
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    expect(output).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('falls through when task_id is missing from TaskOutput input', () => {
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-no-taskid',
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    expect(output).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('includes summary in permissionDecisionReason when available', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    const outputFile = join(tempDir, 'task-def456.output');
+
+    writeOutputFile(outputFile, 'Test output');
+    writeTranscript(transcriptPath, [
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: `<task-notification><task-id>def456</task-id><status>completed</status><summary>Run tests</summary><output-file>${outputFile.replace(/\\/g, '\\\\')}</output-file></task-notification>`,
+        },
+      }),
+    ]);
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'def456', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-summary',
+        transcript_path: transcriptPath,
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    const reason = hookSpecificOutput.permissionDecisionReason as string;
+    expect(reason).toContain('Task: Run tests');
+    expect(reason).toContain('--- Output ---');
+  });
+
+  it('reads last 256KB of transcript (tail read)', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    const outputFile = join(tempDir, 'task-xyz.output');
+
+    writeOutputFile(outputFile, 'Final output');
+
+    // Write many lines before the task-notification to simulate a large transcript
+    const fillerLines = Array.from({ length: 500 }, (_, i) =>
+      JSON.stringify({ type: 'user', message: { role: 'user', content: `filler line ${i}` } }),
+    );
+    const notificationLine = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `<task-notification><task-id>xyz</task-id><status>completed</status><output-file>${outputFile.replace(/\\/g, '\\\\')}</output-file></task-notification>`,
+      },
+    });
+    writeTranscript(transcriptPath, [...fillerLines, notificationLine]);
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'TaskOutput',
+        toolInput: { task_id: 'xyz', block: true },
+        cwd: tempDir,
+        session_id: 'session-taskoutput-tail',
+        transcript_path: transcriptPath,
+      },
+      { HOME: join(tempDir, '.test-home') },
+    );
+
+    const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown>;
+    expect(hookSpecificOutput.permissionDecision).toBe('deny');
+    expect((hookSpecificOutput.permissionDecisionReason as string)).toContain('Final output');
+  });
+});
