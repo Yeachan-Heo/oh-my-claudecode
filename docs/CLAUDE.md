@@ -14,8 +14,9 @@ Coordinate specialized agents, tools, and skills so work is completed accurately
 </operating_principles>
 
 <delegation_rules>
-Delegate for: multi-file changes, refactors, debugging, reviews, planning, research, verification.
-Work directly for: trivial ops, small clarifications, single commands.
+Delegate for large, genuinely independent tracks of work: multi-file changes, refactors, wide investigations, planning, research.
+Work directly for: trivial ops, small clarifications, single commands, and anything finishable in a handful of tool calls.
+Do not delegate a subagent to verify or double-check your own work. If one subagent can do the job, use one rather than several.
 Route code to `executor` (use `model=opus` for complex work). Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
 </delegation_rules>
 
@@ -32,11 +33,6 @@ Team orchestration is explicit via `/team`.
 Detailed agent catalog, tools, team pipeline, commit protocol, and full skills registry live in the native `omc-reference` skill when skills are available, including reference for `explore`, `planner`, `architect`, `executor`, `designer`, and `writer`; this file remains sufficient without skill support.
 </skills>
 
-<verification>
-Verify before claiming completion. Size appropriately: small→haiku, standard→sonnet, large/security→opus.
-If verification fails, keep iterating.
-</verification>
-
 <failure_mode_guards>
 User input: when clarification, preference, or approval is required and AskUserQuestion is available, use AskUserQuestion instead of ending with a prose question; ask one focused question with 2-4 options. Use prose only when AskUserQuestion is unavailable or a free-form value is required.
 Session/worktree continuity: before editing after resume/compaction or inside a linked worktree, re-check `git status --short --branch`, current cwd, and relevant `.omc/state/` or `.omc/handoffs/` artifacts so work does not continue on the wrong branch or stale context.
@@ -47,7 +43,7 @@ No fake completion: TODO-style placeholder notes, `test.skip`/`.only`, stub test
 Broad requests: explore first, then plan. 2+ independent tasks in parallel. `run_in_background` for builds/tests.
 Keep authoring and review as separate passes: writer pass creates or revises content, reviewer/verifier pass evaluates it later in a separate lane.
 Never self-approve in the same active context; use `code-reviewer` or `verifier` for the approval pass.
-Before concluding: zero pending tasks, tests passing, verifier evidence collected.
+Before concluding: zero pending tasks, tests passing.
 </execution_protocols>
 
 <hooks_and_context>

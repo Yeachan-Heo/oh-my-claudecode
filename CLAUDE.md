@@ -14,8 +14,9 @@ Coordinate specialized agents, tools, and skills so work is completed accurately
 </operating_principles>
 
 <delegation_rules>
-Delegate for: multi-file changes, refactors, debugging, reviews, planning, research, verification.
-Work directly for: trivial ops, small clarifications, single commands.
+Delegate for large, genuinely independent tracks of work: multi-file changes, refactors, wide investigations, planning, research.
+Work directly for: trivial ops, small clarifications, single commands, and anything finishable in a handful of tool calls.
+Do not delegate a subagent to verify or double-check your own work. If one subagent can do the job, use one rather than several.
 Route code to `executor` (use `model=opus` for complex work). Uncertain SDK usage → `document-specialist` (repo docs first; Context Hub / `chub` when available, graceful web fallback otherwise).
 </delegation_rules>
 
@@ -53,16 +54,11 @@ Stages: `team-plan` → `team-prd` → `team-exec` → `team-verify` → `team-f
 Fix loop bounded by max attempts. `team ralph` links both modes.
 </team_pipeline>
 
-<verification>
-Verify before claiming completion. Size appropriately: small→haiku, standard→sonnet, large/security→opus.
-If verification fails, keep iterating.
-</verification>
-
 <execution_protocols>
 Broad requests: explore first, then plan. 2+ independent tasks in parallel. `run_in_background` for builds/tests.
 Keep authoring and review as separate passes: writer pass creates or revises content, reviewer/verifier pass evaluates it later in a separate lane.
 Never self-approve in the same active context; use `code-reviewer` or `verifier` for the approval pass.
-Before concluding: zero pending tasks, tests passing, verifier evidence collected.
+Before concluding: zero pending tasks, tests passing.
 Local OMC fork: edits to `src/**/*.ts` require `npm run build` before they show up in the running Claude Code plugin (it loads `dist/`, not `src/`). After editing TS, surface a one-line reminder per editing round — see `skills/local-build-reminder/SKILL.md`. `.mjs`/`.cjs`/`.md` files load from disk; no build needed.
 </execution_protocols>
 
