@@ -198,15 +198,21 @@ function isSourceFile(filePath) {
   return SOURCE_EXTENSIONS.has(ext);
 }
 
-// Patterns that indicate file modification in bash commands
+// Strip redirects that cannot modify project files (fd dups and /dev sinks),
+// so `2>/dev/null`, `2>&1`, `&>/dev/null` etc. stop triggering false positives.
+function stripSafeRedirects(command) {
+  return command
+    .replace(/\d*>&\d+/g, ' ')
+    .replace(/&?\d*>{1,2}\s*\/dev\/(?:null|stdout|stderr)\b/g, ' ');
+}
+
+// Patterns that indicate file modification in bash commands.
+// The redirect pattern excludes comparison/arrow operators (>=, ->, =>, <>)
+// that show up inside inline python/js snippets.
 const FILE_MODIFY_PATTERNS = [
   /sed\s+-i/,
-  />\s*[^&]/,
-  />>/,
-  /tee\s+/,
-  /cat\s+.*>\s*/,
-  /echo\s+.*>\s*/,
-  /printf\s+.*>\s*/,
+  /(?<![-=<>!&|])>{1,2}(?![=&])/,
+  /\btee\s+/,
 ];
 
 // Source file pattern for command inspection
@@ -234,8 +240,9 @@ function workerCommandViolation(command) {
 }
 
 function checkBashCommand(command) {
-  // Check if command might modify files
-  const mayModify = FILE_MODIFY_PATTERNS.some(pattern => pattern.test(command));
+  // Check if command might modify files (after removing harmless redirects)
+  const stripped = stripSafeRedirects(command);
+  const mayModify = FILE_MODIFY_PATTERNS.some(pattern => pattern.test(stripped));
   if (!mayModify) return null;
 
   // Check if it might affect source files
