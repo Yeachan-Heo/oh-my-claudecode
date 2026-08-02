@@ -81,13 +81,29 @@ function isCacheValid(cache: CustomProviderCache): boolean {
  * Sends SIGTERM when the timeout fires, then SIGKILL after 200 ms if still
  * alive. The returned promise rejects on non-zero exit or timeout.
  */
-function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<string> {
+export function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const [executable, ...args] = Array.isArray(cmd)
       ? cmd
       : (['sh', '-c', cmd] as string[]);
 
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(executable, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    });
+
+    const killTree = (signal: NodeJS.Signals): void => {
+      if (child.pid === undefined) return;
+      try {
+        if (process.platform === 'win32') {
+          child.kill(signal);
+        } else {
+          process.kill(-child.pid, signal);
+        }
+      } catch {
+        // The process group may already have exited.
+      }
+    };
 
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => {
@@ -95,21 +111,19 @@ function spawnWithTimeout(cmd: string | string[], timeoutMs: number): Promise<st
     });
 
     let timedOut = false;
+    let escalationTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
-      setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // already exited
-        }
-      }, 200);
+      killTree('SIGTERM');
+      child.stdout.destroy();
+      child.stderr.destroy();
+      escalationTimer = setTimeout(() => killTree('SIGKILL'), 200);
       reject(new Error(`Custom rate limit command timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (!timedOut && escalationTimer) clearTimeout(escalationTimer);
       if (!timedOut) {
         if (code === 0) {
           resolve(stdout);
