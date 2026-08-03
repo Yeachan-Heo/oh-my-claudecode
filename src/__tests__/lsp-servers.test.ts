@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { LSP_SERVERS, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace } from '../tools/lsp/servers.js';
+import { LSP_SERVERS, getPythonServer, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace } from '../tools/lsp/servers.js';
 
 function createTypeScriptProject(options: { version: string; tsserver?: boolean; getExePath?: boolean; tscBin?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'omc-lsp-ts-'));
@@ -64,7 +64,6 @@ describe('LSP Server Configurations', () => {
 describe('getServerForFile', () => {
   const cases: [string, string][] = [
     ['app.ts', 'TypeScript Language Server'],
-    ['app.py', 'Python Language Server (ty)'],
     ['main.rs', 'Rust Analyzer'],
     ['main.go', 'gopls'],
     ['main.c', 'clangd'],
@@ -180,7 +179,6 @@ describe('getServerForLanguage', () => {
   const cases: [string, string][] = [
     ['typescript', 'TypeScript Language Server'],
     ['javascript', 'TypeScript Language Server'],
-    ['python', 'Python Language Server (ty)'],
     ['rust', 'Rust Analyzer'],
     ['go', 'gopls'],
     ['golang', 'gopls'],
@@ -243,7 +241,31 @@ describe('OmniSharp command casing', () => {
 });
 
 describe('Python server selection', () => {
-  it('should invoke ty via its LSP subcommand', () => {
+  it('prefers ty when it is installed', () => {
+    const server = getPythonServer(() => true);
+    expect(server.command).toBe('ty');
+    expect(server.args).toEqual(['server']);
+  });
+
+  it('falls back to basedpyright when ty is missing', () => {
+    const server = getPythonServer((command) => command === 'basedpyright-langserver');
+    expect(server.command).toBe('basedpyright-langserver');
+    expect(server.args).toEqual(['--stdio']);
+  });
+
+  it('reports ty with a hint naming both options when neither is installed', () => {
+    const server = getPythonServer(() => false);
+    expect(server.command).toBe('ty');
+    expect(server.installHint).toContain('basedpyright');
+  });
+
+  it('routes .py files and the python language through the resolver', () => {
+    const resolved = getPythonServer();
+    expect(getServerForFile('app.py')).toEqual(resolved);
+    expect(getServerForLanguage('python')).toEqual(resolved);
+  });
+
+  it('keeps ty as the registry default entry', () => {
     expect(LSP_SERVERS.python.command).toBe('ty');
     expect(LSP_SERVERS.python.args).toEqual(['server']);
   });

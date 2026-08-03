@@ -101,18 +101,44 @@ export function getTypeScriptServerForWorkspace(workspaceRoot: string): LspServe
   };
 }
 
+const PYTHON_EXTENSIONS = ['.py', '.pyw'];
+
+const TY_SERVER: LspServerConfig = {
+  name: 'Python Language Server (ty)',
+  command: 'ty',
+  args: ['server'],
+  extensions: PYTHON_EXTENSIONS,
+  installHint: 'Install ty from https://github.com/astral-sh/ty (or basedpyright: uv tool install basedpyright)'
+};
+
+const BASEDPYRIGHT_SERVER: LspServerConfig = {
+  name: 'Python Language Server (basedpyright)',
+  command: 'basedpyright-langserver',
+  args: ['--stdio'],
+  extensions: PYTHON_EXTENSIONS,
+  installHint: 'uv tool install basedpyright'
+};
+
+/**
+ * Pick the Python language server: ty when installed, otherwise basedpyright
+ * when installed, otherwise ty (whose install hint names both options).
+ */
+export function getPythonServer(isInstalled: (command: string) => boolean = commandExists): LspServerConfig {
+  if (isInstalled(TY_SERVER.command)) {
+    return TY_SERVER;
+  }
+  if (isInstalled(BASEDPYRIGHT_SERVER.command)) {
+    return BASEDPYRIGHT_SERVER;
+  }
+  return TY_SERVER;
+}
+
 /**
  * Known LSP servers and their configurations
  */
 export const LSP_SERVERS: Record<string, LspServerConfig> = {
   typescript: TYPESCRIPT_CLASSIC_SERVER,
-  python: {
-    name: 'Python Language Server (ty)',
-    command: 'ty',
-    args: ['server'],
-    extensions: ['.py', '.pyw'],
-    installHint: 'Install ty from https://github.com/astral-sh/ty'
-  },
+  python: TY_SERVER,
   rust: {
     name: 'Rust Analyzer',
     command: 'rust-analyzer',
@@ -264,6 +290,10 @@ export function getServerForFile(filePath: string, workspaceRoot?: string): LspS
     return getTypeScriptServerForWorkspace(workspaceRoot);
   }
 
+  if (PYTHON_EXTENSIONS.includes(ext)) {
+    return getPythonServer();
+  }
+
   for (const [_, config] of Object.entries(LSP_SERVERS)) {
     if (config.extensions.includes(ext)) {
       return config;
@@ -277,10 +307,13 @@ export function getServerForFile(filePath: string, workspaceRoot?: string): LspS
  * Get all available servers (installed and not installed)
  */
 export function getAllServers(): Array<LspServerConfig & { installed: boolean }> {
-  return Object.values(LSP_SERVERS).map(config => ({
-    ...config,
-    installed: commandExists(config.command)
-  }));
+  return Object.entries(LSP_SERVERS).map(([key, config]) => {
+    const resolved = key === 'python' ? getPythonServer() : config;
+    return {
+      ...resolved,
+      installed: commandExists(resolved.command)
+    };
+  });
 }
 
 /**
@@ -337,6 +370,9 @@ export function getServerForLanguage(language: string): LspServerConfig | null {
   };
 
   const serverKey = langMap[language.toLowerCase()];
+  if (serverKey === 'python') {
+    return getPythonServer();
+  }
   if (serverKey && LSP_SERVERS[serverKey]) {
     return LSP_SERVERS[serverKey];
   }
