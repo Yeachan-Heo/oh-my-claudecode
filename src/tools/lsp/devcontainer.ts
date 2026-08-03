@@ -141,6 +141,15 @@ export function containerUriToHostUri(uri: string, context: DevContainerContext 
   return pathToFileURL(containerPathToHostPath(fileURLToPath(uri), context)).href;
 }
 
+/**
+ * Check whether a command exists inside the container the LSP server will
+ * be launched in (via `docker exec`), as opposed to the host PATH.
+ */
+export function commandExistsInContainer(context: DevContainerContext, command: string): boolean {
+  const result = runDocker(['exec', context.containerId, 'sh', '-c', `command -v ${command}`]);
+  return result?.status === 0;
+}
+
 function resolveDevContainerConfigPath(workspaceRoot: string): string | undefined {
   let dir = workspaceRoot;
 

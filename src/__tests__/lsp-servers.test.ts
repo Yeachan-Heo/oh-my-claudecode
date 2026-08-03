@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { LSP_SERVERS, getPythonServer, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace } from '../tools/lsp/servers.js';
+import { LSP_SERVERS, getPythonServer, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace, resolveServerForContext } from '../tools/lsp/servers.js';
 
 function createTypeScriptProject(options: { version: string; tsserver?: boolean; getExePath?: boolean; tscBin?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'omc-lsp-ts-'));
@@ -268,5 +268,23 @@ describe('Python server selection', () => {
   it('keeps ty as the registry default entry', () => {
     expect(LSP_SERVERS.python.command).toBe('ty');
     expect(LSP_SERVERS.python.args).toEqual(['server']);
+  });
+
+  it('probes inside the dev container, not the host, when a context is present', () => {
+    const context = { containerId: 'abc123', hostWorkspaceRoot: '/host/project', containerWorkspaceRoot: '/workspaces/project' };
+
+    // host has only basedpyright, container has only ty
+    const hostPickedBasedpyright = getPythonServer((command) => command === 'basedpyright-langserver');
+    expect(resolveServerForContext(hostPickedBasedpyright, context, (_ctx, command) => command === 'ty').command).toBe('ty');
+
+    // host has only ty, container has only basedpyright
+    const hostPickedTy = getPythonServer((command) => command === 'ty');
+    expect(resolveServerForContext(hostPickedTy, context, (_ctx, command) => command === 'basedpyright-langserver').command).toBe('basedpyright-langserver');
+  });
+
+  it('leaves non-python servers and host contexts untouched', () => {
+    const context = { containerId: 'abc123', hostWorkspaceRoot: '/host/project', containerWorkspaceRoot: '/workspaces/project' };
+    expect(resolveServerForContext(LSP_SERVERS.rust, null)).toBe(LSP_SERVERS.rust);
+    expect(resolveServerForContext(LSP_SERVERS.rust, context, () => false)).toBe(LSP_SERVERS.rust);
   });
 });

@@ -16,7 +16,7 @@ import {
 } from './devcontainer.js';
 import type { DevContainerContext } from './devcontainer.js';
 import type { LspServerConfig } from './servers.js';
-import { getServerForFile, commandExists } from './servers.js';
+import { getServerForFile, commandExists, resolveServerForContext } from './servers.js';
 
 /** Default timeout (ms) for LSP requests. Override with OMC_LSP_TIMEOUT_MS env var. */
 export const DEFAULT_LSP_REQUEST_TIMEOUT_MS: number = (() => {
@@ -917,11 +917,12 @@ export class LspClientManager {
     }
 
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
-    const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
+    const resolvedConfig = resolveServerForContext(serverConfig, devContainerContext);
+    const key = `${workspaceRoot}:${resolvedConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
 
     let client = this.clients.get(key);
     if (!client) {
-      client = new LspClient(workspaceRoot, serverConfig, devContainerContext);
+      client = new LspClient(workspaceRoot, resolvedConfig, devContainerContext);
       try {
         await client.connect();
         this.clients.set(key, client);
@@ -948,11 +949,12 @@ export class LspClientManager {
     }
 
     const devContainerContext = resolveDevContainerContext(workspaceRoot);
-    const key = `${workspaceRoot}:${serverConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
+    const resolvedConfig = resolveServerForContext(serverConfig, devContainerContext);
+    const key = `${workspaceRoot}:${resolvedConfig.command}:${devContainerContext?.containerId ?? 'host'}`;
 
     let client = this.clients.get(key);
     if (!client) {
-      client = new LspClient(workspaceRoot, serverConfig, devContainerContext);
+      client = new LspClient(workspaceRoot, resolvedConfig, devContainerContext);
       try {
         await client.connect();
         this.clients.set(key, client);

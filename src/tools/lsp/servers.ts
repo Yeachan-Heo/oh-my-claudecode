@@ -8,6 +8,8 @@
 import { spawnSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, extname, isAbsolute, join, parse, resolve } from 'path';
+import { commandExistsInContainer } from './devcontainer.js';
+import type { DevContainerContext } from './devcontainer.js';
 
 export interface LspServerConfig {
   name: string;
@@ -131,6 +133,26 @@ export function getPythonServer(isInstalled: (command: string) => boolean = comm
     return BASEDPYRIGHT_SERVER;
   }
   return TY_SERVER;
+}
+
+/**
+ * Re-resolve a server config for the context it will actually execute in.
+ * Python selection probes PATH, and when the server launches inside a dev
+ * container (docker exec) the probe must run there — the host and container
+ * may have different servers installed.
+ */
+export function resolveServerForContext(
+  config: LspServerConfig,
+  context: DevContainerContext | null,
+  probeContainer: (context: DevContainerContext, command: string) => boolean = commandExistsInContainer
+): LspServerConfig {
+  if (!context) {
+    return config;
+  }
+  if (config.command !== TY_SERVER.command && config.command !== BASEDPYRIGHT_SERVER.command) {
+    return config;
+  }
+  return getPythonServer((command) => probeContainer(context, command));
 }
 
 /**
