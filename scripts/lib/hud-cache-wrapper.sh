@@ -72,6 +72,19 @@ extract_json_string() {
   sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$file" 2>/dev/null | head -1
 }
 
+# Like extract_json_string, but scoped to a specific flat parent object
+# (e.g. "id" within "model":{...}) instead of the first bare match anywhere
+# in the payload. Both `model` and `effort` are flat, single-level objects
+# in the real statusline schema, so matching up to the first `}` is safe.
+extract_nested_json_string() {
+  parent=$1
+  key=$2
+  file=${3:-$INPUT_TMP}
+  object=$(sed -n "s/.*\"$parent\"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p" "$file" 2>/dev/null | head -1)
+  [ -n "$object" ] || return 0
+  printf '%s' "$object" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1
+}
+
 SESSION_KEY=$(extract_json_string session_id)
 if [ -z "$SESSION_KEY" ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
   SESSION_KEY=$CLAUDE_SESSION_ID
@@ -117,9 +130,9 @@ MARKER_FILE="$CACHE_DIR/model-effort.$SESSION_KEY.txt"
 NEW_MARKER=""
 MODEL_CHANGED=0
 if [ -s "$INPUT_FILE" ]; then
-  NEW_MODEL_ID=$(extract_json_string id "$INPUT_FILE")
+  NEW_MODEL_ID=$(extract_nested_json_string model id "$INPUT_FILE")
   if [ -n "$NEW_MODEL_ID" ]; then
-    NEW_EFFORT_LEVEL=$(extract_json_string level "$INPUT_FILE")
+    NEW_EFFORT_LEVEL=$(extract_nested_json_string effort level "$INPUT_FILE")
     NEW_MARKER="${NEW_MODEL_ID}|${NEW_EFFORT_LEVEL}"
     if [ -f "$MARKER_FILE" ]; then
       PREV_MARKER=$(cat "$MARKER_FILE" 2>/dev/null)
@@ -168,9 +181,16 @@ refresh_cache() {
   # Keep the last good line if rendering fails or returns empty output.
   if [ -s "$NODE_STDOUT_TMP" ]; then
     mv "$NODE_STDOUT_TMP" "$OUTPUT_FILE" 2>/dev/null || cp "$NODE_STDOUT_TMP" "$OUTPUT_FILE" 2>/dev/null || :
-    if [ -n "$NEW_MARKER" ]; then
-      printf '%s' "$NEW_MARKER" > "$MARKER_FILE" 2>/dev/null || :
-    fi
+  fi
+
+  # Record that we've reacted to this model/effort regardless of whether the
+  # render itself succeeded. The marker means "already forced a synchronous
+  # refresh for this selection", not "successfully rendered it" — otherwise a
+  # renderer that keeps failing would never advance the marker, and every
+  # single frame would retry a blocking foreground Node spawn forever instead
+  # of falling back to the cheap hot path like it did before this selection.
+  if [ -n "$NEW_MARKER" ]; then
+    printf '%s' "$NEW_MARKER" > "$MARKER_FILE" 2>/dev/null || :
   fi
 
   rm -f "$NODE_STDOUT_TMP" "$NODE_STDERR_TMP" 2>/dev/null || :

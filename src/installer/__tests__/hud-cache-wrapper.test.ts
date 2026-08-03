@@ -327,16 +327,22 @@ describe('HUD cached statusLine launcher', () => {
   });
 
   it('does not force a synchronous refresh when the model/effort marker is unchanged', () => {
+    // Deliberately does NOT pre-hold the render lock: with a held lock, the
+    // hot path and the (incorrectly) forced-sync path both degrade to "cat
+    // the stale render and exit", making them indistinguishable. Instead,
+    // the fake `node` sleeps well past the process timeout. If MODEL_CHANGED
+    // were wrongly true here, the wrapper would block on a foreground
+    // `refresh_cache` waiting on that sleep and get killed by the timeout —
+    // so a clean, on-time exit with the cached content proves the refresh
+    // ran only in the background, i.e. the ordinary hot path was taken.
     const staged = stageWrapper();
     try {
       writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'CACHED HUD LINE\n');
       writeFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'claude|');
-      mkdirSync(join(staged.cacheDir, 'render.session-123.lock'));
 
-      const nodeMarker = join(staged.dir, 'node-invoked');
       const fakeBin = join(staged.dir, 'bin');
       mkdirSync(fakeBin, { recursive: true });
-      writeFileSync(join(fakeBin, 'node'), `#!/bin/sh\ntouch ${JSON.stringify(nodeMarker)}\nexit 0\n`, 'utf8');
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nsleep 2\nprintf "SHOULD NOT BE SEEN SYNCHRONOUSLY\\n"\n', 'utf8');
       chmodSync(join(fakeBin, 'node'), 0o755);
 
       const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
@@ -348,18 +354,25 @@ describe('HUD cached statusLine launcher', () => {
           CLAUDE_CONFIG_DIR: staged.dir,
           OMC_HUD_CACHE_DIR: staged.cacheDir,
         },
-        timeout: 1000,
+        timeout: 800,
       });
 
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('CACHED HUD LINE\n');
-      expect(existsSync(nodeMarker)).toBe(false);
     } finally {
       rmSync(staged.dir, { recursive: true, force: true });
     }
   });
 
-  it('falls back to the last good render when the model changed but a refresh is already in flight', () => {
+  it('never regresses to a blank placeholder when the model changed but a refresh is already in flight', () => {
+    // With the render lock held, a forced synchronous refresh cannot
+    // acquire it and must fall back to the last good render — the same
+    // externally-observable outcome as the ordinary hot path taking that
+    // branch, since neither can spawn `node` while the lock is held. This
+    // test cannot distinguish which internal branch produced the output;
+    // it locks in the invariant that matters to the user: a model/effort
+    // change under lock contention must never show the blank "[OMC]
+    // Starting..." placeholder over an existing stale render.
     const staged = stageWrapper();
     try {
       writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'OLD MODEL LINE\n');
@@ -387,6 +400,100 @@ describe('HUD cached statusLine launcher', () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('OLD MODEL LINE\n');
       expect(existsSync(nodeMarker)).toBe(false);
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('advances the marker even when the render fails, so repeated renderer failures do not force a synchronous refresh forever', () => {
+    // Regression test for a bug where the marker write was nested inside
+    // the "render succeeded" guard: a renderer that kept failing (no
+    // stdout) would never advance the marker, so MODEL_CHANGED stayed
+    // true forever and every single frame blocked on a synchronous,
+    // foreground `node` spawn instead of falling back to the cheap hot
+    // path once the marker had been recorded.
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'OLD MODEL LINE\n');
+      writeFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'claude-old|');
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      // Always fails (no stdout) and sleeps 2s, so a second *synchronous*
+      // spawn on call 2 would be caught by that call's 800ms timeout.
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nsleep 2\nexit 1\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const env = {
+        ...process.env,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        CLAUDE_CONFIG_DIR: staged.dir,
+        OMC_HUD_CACHE_DIR: staged.cacheDir,
+      };
+
+      // Call 1: model changed, forces a synchronous refresh; the renderer
+      // fails (no stdout) but the marker must still advance.
+      const first = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env,
+        timeout: 3000,
+      });
+      expect(first.status).toBe(0);
+      expect(first.stdout).toBe('OLD MODEL LINE\n');
+      expect(readFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'utf8')).toBe('claude|');
+
+      // Call 2: marker now matches, so this must take the cheap hot path
+      // and return well before the fake node's 2s sleep would allow.
+      const second = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env,
+        timeout: 800,
+      });
+      expect(second.status).toBe(0);
+      expect(second.stdout).toBe('OLD MODEL LINE\n');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('scopes model id extraction to the model object, ignoring an unrelated bare "id" key elsewhere in the payload', () => {
+    // Regression test for the unscoped `extract_json_string id`, whose
+    // greedy sed pattern matched the LAST bare "id" key anywhere in the
+    // payload. With a decoy "id" after "model" in the JSON, that returned
+    // the decoy value instead of the real model id.
+    const staged = stageWrapper();
+    try {
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nprintf "RENDERED\\n"\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const decoyPayload = JSON.stringify({
+        session_id: 'session-123',
+        cwd: '/tmp',
+        transcript_path: '/tmp/session.jsonl',
+        model: { id: 'claude-real' },
+        agent: { id: 'DECOY-ID' },
+      });
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: decoyPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+          OMC_HUD_SYNC_REFRESH: '1',
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('RENDERED\n');
+      expect(readFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'utf8')).toBe('claude-real|');
     } finally {
       rmSync(staged.dir, { recursive: true, force: true });
     }
