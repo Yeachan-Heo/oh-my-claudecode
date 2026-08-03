@@ -291,4 +291,104 @@ describe('HUD cached statusLine launcher', () => {
     }
   });
 
+  it('forces a synchronous refresh when the model changed since the last recorded marker', () => {
+    // Without this, a bare `/model` switch would keep showing the stale
+    // cached model line until some unrelated interaction happened to
+    // trigger another statusLine call (see hud-cache-wrapper.sh comments).
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'OLD MODEL LINE\n');
+      writeFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'claude-old|');
+
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), '#!/bin/sh\nprintf "NEW MODEL LINE\\n"\n', 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('NEW MODEL LINE\n');
+      expect(readFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'utf8')).toBe('NEW MODEL LINE\n');
+      expect(readFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'utf8')).toBe('claude|');
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not force a synchronous refresh when the model/effort marker is unchanged', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'CACHED HUD LINE\n');
+      writeFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'claude|');
+      mkdirSync(join(staged.cacheDir, 'render.session-123.lock'));
+
+      const nodeMarker = join(staged.dir, 'node-invoked');
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), `#!/bin/sh\ntouch ${JSON.stringify(nodeMarker)}\nexit 0\n`, 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('CACHED HUD LINE\n');
+      expect(existsSync(nodeMarker)).toBe(false);
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the last good render when the model changed but a refresh is already in flight', () => {
+    const staged = stageWrapper();
+    try {
+      writeFileSync(join(staged.cacheDir, 'statusline.session-123.txt'), 'OLD MODEL LINE\n');
+      writeFileSync(join(staged.cacheDir, 'model-effort.session-123.txt'), 'claude-old|');
+      mkdirSync(join(staged.cacheDir, 'render.session-123.lock'));
+
+      const nodeMarker = join(staged.dir, 'node-invoked');
+      const fakeBin = join(staged.dir, 'bin');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(join(fakeBin, 'node'), `#!/bin/sh\ntouch ${JSON.stringify(nodeMarker)}\nexit 0\n`, 'utf8');
+      chmodSync(join(fakeBin, 'node'), 0o755);
+
+      const result = spawnSync('sh', [staged.wrapperPath, staged.hudPath], {
+        input: stdinPayload,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          CLAUDE_CONFIG_DIR: staged.dir,
+          OMC_HUD_CACHE_DIR: staged.cacheDir,
+        },
+        timeout: 1000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('OLD MODEL LINE\n');
+      expect(existsSync(nodeMarker)).toBe(false);
+    } finally {
+      rmSync(staged.dir, { recursive: true, force: true });
+    }
+  });
 });

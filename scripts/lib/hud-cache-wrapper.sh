@@ -68,7 +68,8 @@ cat > "$INPUT_TMP" 2>/dev/null || :
 
 extract_json_string() {
   key=$1
-  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$INPUT_TMP" 2>/dev/null | head -1
+  file=${2:-$INPUT_TMP}
+  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$file" 2>/dev/null | head -1
 }
 
 SESSION_KEY=$(extract_json_string session_id)
@@ -106,6 +107,28 @@ if [ -s "$INPUT_TMP" ]; then
   mv "$INPUT_TMP" "$INPUT_FILE" 2>/dev/null || cp "$INPUT_TMP" "$INPUT_FILE" 2>/dev/null || :
 fi
 rm -f "$INPUT_TMP" 2>/dev/null || :
+
+# Detect a model/effort switch (e.g. `/model`) so the hot path below can
+# force a synchronous refresh instead of serving stale cached text. Claude
+# Code does not reliably re-poll the statusLine right after a bare /model
+# selection, so without this the wrong model can stay on screen until some
+# unrelated interaction happens to trigger another statusLine call.
+MARKER_FILE="$CACHE_DIR/model-effort.$SESSION_KEY.txt"
+NEW_MARKER=""
+MODEL_CHANGED=0
+if [ -s "$INPUT_FILE" ]; then
+  NEW_MODEL_ID=$(extract_json_string id "$INPUT_FILE")
+  if [ -n "$NEW_MODEL_ID" ]; then
+    NEW_EFFORT_LEVEL=$(extract_json_string level "$INPUT_FILE")
+    NEW_MARKER="${NEW_MODEL_ID}|${NEW_EFFORT_LEVEL}"
+    if [ -f "$MARKER_FILE" ]; then
+      PREV_MARKER=$(cat "$MARKER_FILE" 2>/dev/null)
+      if [ "$NEW_MARKER" != "$PREV_MARKER" ]; then
+        MODEL_CHANGED=1
+      fi
+    fi
+  fi
+fi
 
 try_acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -145,6 +168,9 @@ refresh_cache() {
   # Keep the last good line if rendering fails or returns empty output.
   if [ -s "$NODE_STDOUT_TMP" ]; then
     mv "$NODE_STDOUT_TMP" "$OUTPUT_FILE" 2>/dev/null || cp "$NODE_STDOUT_TMP" "$OUTPUT_FILE" 2>/dev/null || :
+    if [ -n "$NEW_MARKER" ]; then
+      printf '%s' "$NEW_MARKER" > "$MARKER_FILE" 2>/dev/null || :
+    fi
   fi
 
   rm -f "$NODE_STDOUT_TMP" "$NODE_STDERR_TMP" 2>/dev/null || :
@@ -152,8 +178,9 @@ refresh_cache() {
   trap - EXIT HUP INT TERM
 }
 
-# Hot path: return immediately from the last successful render for this session.
-if [ -s "$OUTPUT_FILE" ]; then
+# Hot path: return immediately from the last successful render for this
+# session, unless the model/effort just changed (see MODEL_CHANGED above).
+if [ -s "$OUTPUT_FILE" ] && [ "$MODEL_CHANGED" != "1" ]; then
   cat "$OUTPUT_FILE" 2>/dev/null || printf '[OMC] Starting...\n'
   # Refresh in background for the next frame.
   if try_acquire_lock; then
@@ -166,15 +193,23 @@ if [ -s "$OUTPUT_FILE" ]; then
   exit 0
 fi
 
-# First render for this session: do a synchronous refresh so the user
-# sees the real HUD from the first frame. Claude Code v2.1.x does not
-# re-poll the statusLine until user interaction, so an async background
-# refresh leaves the pane stuck on "[OMC] Starting..." until they type.
+# First render for this session, or a just-detected model/effort switch: do
+# a synchronous refresh so the user sees the correct HUD on this frame.
+# Claude Code v2.1.x does not re-poll the statusLine until user interaction,
+# so an async background refresh could leave a stale/placeholder line on
+# screen until some unrelated interaction happens to trigger another call.
 if [ -s "$INPUT_FILE" ] && try_acquire_lock; then
   refresh_cache
   if [ -s "$OUTPUT_FILE" ]; then
     cat "$OUTPUT_FILE" 2>/dev/null && exit 0
   fi
+fi
+
+# Couldn't refresh synchronously (e.g. a background refresh already holds
+# the lock) — fall back to the last good render rather than a blank
+# placeholder; the next call will pick up the fresh content.
+if [ -s "$OUTPUT_FILE" ]; then
+  cat "$OUTPUT_FILE" 2>/dev/null && exit 0
 fi
 
 printf '[OMC] Starting...\n'
