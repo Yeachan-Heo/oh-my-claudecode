@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import type { StatuslineStdin } from '../../hud/types.js';
 import {
   getContextPercent,
+  getEffortLevel,
   getModelId,
   getModelName,
   getRateLimitsFromStdin,
@@ -292,6 +293,21 @@ describe('HUD stdin model display', () => {
 
     expect(getModelName(stdin)).toBeNull();
     expect(getModelId(stdin)).toBeNull();
+  });
+});
+
+describe('HUD stdin effort level', () => {
+  it('reads the effort level from stdin', () => {
+    const stdin = makeStdin({ effort: { level: 'high' } });
+    expect(getEffortLevel(stdin)).toBe('high');
+  });
+
+  it('returns null when stdin omits the effort block', () => {
+    expect(getEffortLevel(makeStdin({ effort: undefined }))).toBeNull();
+  });
+
+  it('returns null for a blank effort level instead of guessing', () => {
+    expect(getEffortLevel(makeStdin({ effort: { level: '   ' } }))).toBeNull();
   });
 });
 

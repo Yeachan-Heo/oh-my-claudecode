@@ -57,6 +57,11 @@ export interface StatuslineStdin {
     display_name?: string;
   };
 
+  /** Reasoning-effort metadata from Claude Code statusline stdin */
+  effort?: {
+    level?: string;
+  };
+
   /** Context window metrics from Claude Code statusline stdin */
   context_window?: {
     context_window_size?: number;
@@ -346,6 +351,9 @@ export interface HudRenderContext {
 
   /** Raw model id from Claude Code statusline stdin; used when full model format is requested */
   modelId?: string | null;
+
+  /** Reasoning-effort level from Claude Code statusline stdin; null when unavailable */
+  effortLevel?: string | null;
 
   /** Ralph loop state */
   ralph: RalphStateForHud | null;

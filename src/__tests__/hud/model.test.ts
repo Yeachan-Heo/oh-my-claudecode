@@ -85,5 +85,25 @@ describe('model element', () => {
     it('returns null for null input', () => {
       expect(renderModel(null)).toBeNull();
     });
+
+    it('appends the reasoning-effort level when provided', () => {
+      const result = renderModel('claude-sonnet-5', 'versioned', undefined, 'high');
+      expect(result).not.toBeNull();
+      expect(result).toContain('Model: Sonnet 5 (high)');
+    });
+
+    it('omits the effort suffix when effort level is null', () => {
+      const result = renderModel('claude-sonnet-5', 'versioned', undefined, null);
+      expect(result).not.toBeNull();
+      expect(result).toContain('Model: Sonnet 5');
+      expect(result).not.toContain('(');
+    });
+
+    it('omits the effort suffix when effort level is omitted', () => {
+      const result = renderModel('claude-sonnet-5', 'versioned');
+      expect(result).not.toBeNull();
+      expect(result).toContain('Model: Sonnet 5');
+      expect(result).not.toContain('(');
+    });
   });
 });

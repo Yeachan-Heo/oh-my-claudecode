@@ -13,6 +13,7 @@ import {
   getContextPercent,
   getModelId,
   getModelName,
+  getEffortLevel,
   getRateLimitsFromStdin,
   stabilizeContextPercent,
 } from "./stdin.js";
@@ -461,6 +462,7 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       contextDisplayScope: currentSessionId ?? cwd,
       modelName: getModelName(stdin),
       modelId: getModelId(stdin),
+      effortLevel: getEffortLevel(stdin),
       ralph,
       ultrawork,
       prd,

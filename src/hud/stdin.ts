@@ -405,3 +405,13 @@ export function getModelName(stdin: StatuslineStdin): string | null {
   const displayName = stdin.model?.display_name?.trim();
   return displayName || getModelId(stdin);
 }
+
+/**
+ * Get the current reasoning-effort level from stdin (e.g. 'low', 'medium',
+ * 'high', 'xhigh', 'max'). Returns null when Claude Code does not provide
+ * effort metadata.
+ */
+export function getEffortLevel(stdin: StatuslineStdin): string | null {
+  const level = stdin.effort?.level?.trim();
+  return level || null;
+}

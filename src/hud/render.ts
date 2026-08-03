@@ -292,6 +292,7 @@ export async function render(
       modelSource,
       enabledElements.modelFormat,
       hudLabels,
+      context.effortLevel ?? null,
     );
     if (modelElement) rendered.set("model", modelElement);
   }

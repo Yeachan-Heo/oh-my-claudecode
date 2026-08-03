@@ -77,8 +77,10 @@ export function renderModel(
   modelId: string | null | undefined,
   format: ModelFormat = 'versioned',
   labels: Pick<HudLabels, 'model'> = DEFAULT_HUD_LABELS,
+  effortLevel: string | null = null,
 ): string | null {
   const name = formatModelName(modelId, format);
   if (!name) return null;
-  return cyan(`${labels.model}: ${name}`);
+  const effortSuffix = effortLevel ? ` (${effortLevel})` : '';
+  return cyan(`${labels.model}: ${name}${effortSuffix}`);
 }
