@@ -288,11 +288,12 @@ export async function render(
     ? context.modelId ?? context.modelName
     : context.modelName;
   if (enabledElements.model && modelSource) {
+    const showEffortLevel = enabledElements.effortLevel ?? true;
     const modelElement = renderModel(
       modelSource,
       enabledElements.modelFormat,
       hudLabels,
-      context.effortLevel ?? null,
+      showEffortLevel ? context.effortLevel ?? null : null,
     );
     if (modelElement) rendered.set("model", modelElement);
   }

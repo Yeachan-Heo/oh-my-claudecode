@@ -836,10 +836,15 @@ describe('optional HUD line defaults', () => {
 });
 
 describe('HUD model display', () => {
-  const createModelContext = (modelName: string | null, modelId: string | null = null): HudRenderContext => ({
+  const createModelContext = (
+    modelName: string | null,
+    modelId: string | null = null,
+    effortLevel: string | null = null,
+  ): HudRenderContext => ({
     contextPercent: 0,
     modelName,
     modelId,
+    effortLevel,
     ralph: null,
     ultrawork: null,
     prd: null,
@@ -939,5 +944,24 @@ describe('HUD model display', () => {
 
     expect(output).toBe('\u001b[1m[OMC#4.14.0]\u001b[0m');
     expect(output).not.toContain('Unknown');
+  });
+
+  it('renders the reasoning-effort level end-to-end through the effortLevel context field', async () => {
+    const output = await render(
+      createModelContext('Claude Sonnet 4.5', null, 'high'),
+      modelConfig,
+    );
+
+    expect(output).toContain('Model: Sonnet 4.5 (high)');
+  });
+
+  it('omits the effort level when the effortLevel element is disabled in config', async () => {
+    const output = await render(
+      createModelContext('Claude Sonnet 4.5', null, 'high'),
+      { ...modelConfig, elements: { ...modelConfig.elements, effortLevel: false } },
+    );
+
+    expect(output).toContain('Model: Sonnet 4.5');
+    expect(output).not.toContain('(high)');
   });
 });
