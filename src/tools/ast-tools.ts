@@ -26,6 +26,9 @@ let sgModule: typeof import("@ast-grep/napi") | null = null;
 let sgLoadFailed = false;
 let sgLoadError = "";
 const AST_GREP_INSTALL_COMMAND = "npm install -g @ast-grep/napi@0.31";
+const AST_GREP_RECOVERY_GUIDANCE =
+  `Install the supported runtime with: ${AST_GREP_INSTALL_COMMAND}\n` +
+  "Then restart Claude Code (or the MCP server) so @ast-grep/napi is reloaded.";
 
 async function getSgModule(): Promise<typeof import("@ast-grep/napi") | null> {
   if (sgLoadFailed) {
@@ -115,7 +118,9 @@ function toLangEnum(
 
   const lang = langMap[language];
   if (!lang) {
-    throw new Error(`Unsupported language: ${language}`);
+    throw new Error(
+      `Unsupported language: ${language}. The loaded @ast-grep/napi runtime does not provide this language.\n${AST_GREP_RECOVERY_GUIDANCE}`,
+    );
   }
   return lang;
 }
@@ -351,7 +356,7 @@ Note: Patterns must be valid AST nodes for the language.`,
           content: [
             {
               type: "text" as const,
-              text: `@ast-grep/napi is not available. Install it with: ${AST_GREP_INSTALL_COMMAND}\nError: ${sgLoadError}`,
+              text: `@ast-grep/napi is not available.\n${AST_GREP_RECOVERY_GUIDANCE}\nError: ${sgLoadError}`,
             },
           ],
         };
@@ -488,7 +493,7 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
           content: [
             {
               type: "text" as const,
-              text: `@ast-grep/napi is not available. Install it with: ${AST_GREP_INSTALL_COMMAND}\nError: ${sgLoadError}`,
+              text: `@ast-grep/napi is not available.\n${AST_GREP_RECOVERY_GUIDANCE}\nError: ${sgLoadError}`,
             },
           ],
         };
