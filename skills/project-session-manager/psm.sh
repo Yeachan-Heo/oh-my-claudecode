@@ -61,24 +61,28 @@ psm_validate_worktree_result() {
         [[ "$remainder" == *"|"* ]] || break
         remainder="${remainder#*|}"
     done
-    local status="${fields[0]}"
+    # Not named `status`/`path`: zsh ties both to shell state ($? and the $PATH
+    # array), so declaring them local corrupts that state for the rest of the
+    # function. Harmless while this file only ever runs under its bash shebang,
+    # renamed so it stays correct if it is ever sourced.
+    local record_status="${fields[0]}"
     local count="${#fields[@]}"
-    local path="${fields[1]:-}"
+    local record_path="${fields[1]:-}"
     local branch="${fields[2]:-}"
-    case "$status" in
+    case "$record_status" in
         created|exists)
             # Required fields must be present and not whitespace-only, or the caller
             # could launch tmux in an empty/unusable working directory.
             case "$schema" in
                 pr)
-                    if [[ "$count" -ne 2 ]] || [[ "$path" =~ ^[[:space:]]*$ ]]; then
-                        log_error "Malformed worktree result: invalid $status record"
+                    if [[ "$count" -ne 2 ]] || [[ "$record_path" =~ ^[[:space:]]*$ ]]; then
+                        log_error "Malformed worktree result: invalid $record_status record"
                         return 1
                     fi
                     ;;
                 branched)
-                    if [[ "$count" -ne 3 ]] || [[ "$path" =~ ^[[:space:]]*$ ]] || [[ "$branch" =~ ^[[:space:]]*$ ]]; then
-                        log_error "Malformed worktree result: invalid $status record"
+                    if [[ "$count" -ne 3 ]] || [[ "$record_path" =~ ^[[:space:]]*$ ]] || [[ "$branch" =~ ^[[:space:]]*$ ]]; then
+                        log_error "Malformed worktree result: invalid $record_status record"
                         return 1
                     fi
                     ;;

@@ -5,22 +5,29 @@
 # Returns 0 if valid, 1 if invalid
 # Usage: validate_worktree_path <path>
 validate_worktree_path() {
-    local path="$1"
+    # NOT named `path`: zsh ties $path to the $PATH array, so `local path=...`
+    # replaces PATH with the candidate directory for the rest of the function.
+    # jq then falls off PATH, psm_get_worktree_root returns empty, `cd ''` is a
+    # zsh no-op, and abs_root silently becomes the caller's cwd — so this guard
+    # ends up comparing against the wrong root in both directions.
+    local wt_path="$1"
     local worktree_root
     worktree_root=$(psm_get_worktree_root 2>/dev/null) || return 1
+    # An empty root would make the containment check below meaningless.
+    [[ -n "$worktree_root" ]] || return 1
 
     # Path must exist and be a directory
-    if [[ ! -d "$path" ]]; then
+    if [[ ! -d "$wt_path" ]]; then
         return 1
     fi
 
     # Resolve to absolute paths for comparison
     local abs_path abs_root
-    abs_path=$(cd "$path" 2>/dev/null && pwd) || return 1
+    abs_path=$(cd "$wt_path" 2>/dev/null && pwd) || return 1
     abs_root=$(cd "$worktree_root" 2>/dev/null && pwd) || return 1
 
     # Check path is under root and doesn't contain ..
-    if [[ "$abs_path" != "$abs_root"/* ]] || [[ "$path" == *".."* ]]; then
+    if [[ "$abs_path" != "$abs_root"/* ]] || [[ "$wt_path" == *".."* ]]; then
         echo "error|Invalid worktree path: not under PSM root" >&2
         return 1
     fi

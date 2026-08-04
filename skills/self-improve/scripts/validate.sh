@@ -304,24 +304,25 @@ check_result_schema() {
     fi
     ok "Result contains all required fields."
 
-    # Validate status enum
-    local status
-    status=$(jq -r '.status' "${result_file}" 2>/dev/null)
-    case "${status}" in
+    # Validate status enum. Not named `status`: zsh makes it read-only (it is $?),
+    # so `local status` aborts the function outright under zsh.
+    local result_status
+    result_status=$(jq -r '.status' "${result_file}" 2>/dev/null)
+    case "${result_status}" in
         success|regression|error|timeout) ;;
         *)
-            err "Invalid status '${status}'. Must be one of: success, regression, error, timeout"
+            err "Invalid status '${result_status}'. Must be one of: success, regression, error, timeout"
             exit 1
             ;;
     esac
-    ok "Status '${status}' is valid."
+    ok "Status '${result_status}' is valid."
 
     # Check failure_analysis on non-success status
-    if [[ "${status}" != "success" ]]; then
+    if [[ "${result_status}" != "success" ]]; then
         local fa_type
         fa_type=$(jq -r '.failure_analysis | type' "${result_file}" 2>/dev/null)
         if [[ "${fa_type}" != "object" ]]; then
-            err "failure_analysis must be a non-null object when status is '${status}' (got ${fa_type})"
+            err "failure_analysis must be a non-null object when status is '${result_status}' (got ${fa_type})"
             exit 1
         fi
 

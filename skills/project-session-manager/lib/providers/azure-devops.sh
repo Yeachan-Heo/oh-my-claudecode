@@ -30,9 +30,11 @@ provider_azure_pr_merged() {
     local repo="$2"
     command -v az >/dev/null 2>&1 || return 1
     command -v jq >/dev/null 2>&1 || return 1
-    local status
-    status=$(az repos pr show --id "$pr_number" --output json 2>/dev/null | jq -r '.status // empty')
-    [[ "$status" == "completed" ]]
+    # Not `status`: zsh makes it read-only (it is $?), so `local status` aborts
+    # the function outright when this lib is sourced into a zsh shell.
+    local pr_status
+    pr_status=$(az repos pr show --id "$pr_number" --output json 2>/dev/null | jq -r '.status // empty')
+    [[ "$pr_status" == "completed" ]]
 }
 
 provider_azure_issue_closed() {
