@@ -159,6 +159,48 @@ describe('pre-tool-enforcer advisory throttling (issue #3163)', () => {
     }
   });
 
+  it('lets the plugin-install cancel command through the armed ultragoal guard', () => {
+    // Plugin installs ship no global `omc` binary, so the only working invocation is
+    // `node <plugin-dir>/bin/oh-my-claudecode.js …`. Without this the guard blocks the
+    // one command that could disarm it, leaving the session with no in-session exit.
+    const sessionId = 'session-ultragoal-escape';
+    writeJson(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ultragoal-state.json'), {
+      active: true,
+      session_id: sessionId,
+      project_path: tempDir,
+      objective: 'complete the aggregate ultragoal',
+      last_checked_at: new Date().toISOString(),
+    });
+
+    const run = (command: string) =>
+      runPreToolEnforcer({
+        tool_name: 'Bash',
+        cwd: tempDir,
+        session_id: sessionId,
+        tool_input: { command },
+      });
+
+    const pluginCancel = run(
+      'node /home/u/.claude/plugins/cache/omc/oh-my-claudecode/4.15.7/bin/oh-my-claudecode.js cancel',
+    );
+    const pluginStateClear = run(
+      'node /home/u/.claude/plugins/cache/omc/oh-my-claudecode/4.15.7/bin/oh-my-claudecode.js state clear',
+    );
+    const globalCancel = run('omc cancel');
+
+    for (const output of [pluginCancel, pluginStateClear, globalCancel]) {
+      const hookSpecificOutput = output.hookSpecificOutput as Record<string, unknown> | undefined;
+      expect(hookSpecificOutput?.permissionDecision).not.toBe('deny');
+    }
+
+    // The widened matcher must not become a general `node` escape hatch.
+    for (const command of ['node server.js cancel', 'rm -rf .omc', 'omc build']) {
+      const denied = run(command).hookSpecificOutput as Record<string, unknown>;
+      expect(denied.permissionDecision).toBe('deny');
+      expect(denied.permissionDecisionReason).toContain('[ULTRAGOAL /GOAL REQUIRED]');
+    }
+  });
+
   it('uses deterministic cooldown interval boundaries', () => {
     const first = runWithThrottle('Bash', '1000');
     const beforeCooldown = runWithThrottle('Bash', '5999');

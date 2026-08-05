@@ -61,22 +61,26 @@ const EXECUTION_MODES: [string, ...string[]] = [
   'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
 ];
 
-// merge-readiness is read/clear-eligible (state_read/status/clear + /cancel work) but NOT write-eligible.
+// merge-readiness and ultragoal are read/clear-eligible (state_read/status/clear + /cancel work)
+// but NOT write-eligible — both are owned by their own runtime (`omc ultragoal` for the latter).
+// ultragoal must be clearable here: the PreToolUse guard whitelists the state_* tools while it
+// blocks everything else, so this is the only in-session way out of an armed ultragoal guard.
 const STATE_TOOL_MODES: [string, ...string[]] = [
   ...EXECUTION_MODES,
   'ralplan',
   'omc-teams',
   'skill-active',
-  'merge-readiness'
+  'merge-readiness',
+  'ultragoal'
 ];
-// Modes that may be generically written via state_write. Excludes merge-readiness (runtime-owned).
+// Modes that may be generically written via state_write. Excludes merge-readiness and ultragoal (runtime-owned).
 const STATE_WRITE_MODES: [string, ...string[]] = [
   ...EXECUTION_MODES,
   'ralplan',
   'omc-teams',
   'skill-active'
 ];
-const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active'] as const;
+const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active', 'ultragoal'] as const;
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
 const OWNER_SESSION_FALLBACK_MODES = new Set<StateToolMode>(['ralph']);

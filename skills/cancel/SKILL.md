@@ -23,6 +23,7 @@ Automatically detects which mode is active and cancels it:
 - **Ralph**: Stops persistence loop, clears linked ultrawork if applicable
 - **Ultrawork**: Stops parallel execution (standalone or linked)
 - **UltraQA**: Stops QA cycling workflow
+- **Ultragoal**: Disarms the `/goal` PreToolUse guard and the persistent Stop hook by clearing ultragoal state; the durable plan and ledger under `.omc/ultragoal/` are left on disk
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
 - **Pipeline**: Stops sequential agent pipeline
@@ -113,13 +114,14 @@ Active modes are still cancelled in dependency order:
 2. Ralph (cleans its linked ultrawork or )
 3. Ultrawork (standalone)
 4. UltraQA (standalone)
-5. Swarm (standalone)
-6. Ultrapilot (standalone)
-7. Pipeline (standalone)
-8. Team (Claude Code native)
-9. OMC Teams (tmux CLI workers)
-10. Plan Consensus (standalone)
-11. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
+5. Ultragoal (standalone — clear state first; see below, it gates every other tool)
+6. Swarm (standalone)
+7. Ultrapilot (standalone)
+8. Pipeline (standalone)
+9. Team (Claude Code native)
+10. OMC Teams (tmux CLI workers)
+11. Plan Consensus (standalone)
+12. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
 
 ## Force Clear All
 
@@ -305,6 +307,31 @@ Force cancellation follows the same primary-first rule for every autopilot group
 #### If UltraQA Active (standalone)
 
 Clear directly: `state_clear(mode="ultraqa", session_id)`
+
+#### If Ultragoal Active (standalone)
+
+Clear this **before** any other mode you plan to inspect. While ultragoal state is active, the
+PreToolUse guard denies every tool whose name is not on its bootstrap allowlist (`Skill(cancel)`,
+`ToolSearch`, the `state_*` tools, and a single `omc cancel` / `omc state …` Bash command), so a
+session cannot read files or run commands until this is gone.
+
+```
+state_clear(mode="ultragoal", session_id)
+```
+
+If the state tools are unavailable, the equivalent Bash form is allowlisted by the guard:
+
+```bash
+omc ultragoal status                      # confirm what is armed
+# global install
+omc cancel
+# plugin install (no global binary on PATH)
+node ~/.claude/plugins/cache/omc/oh-my-claudecode/<version>/bin/oh-my-claudecode.js cancel
+```
+
+The durable plan and ledger under `.omc/ultragoal/` are intentionally left in place — clearing the
+mode disarms the guard and the Stop hook, it does not discard the recorded work. Re-running
+`omc ultragoal complete-goals` resumes from the ledger.
 
 #### No Active Modes
 
