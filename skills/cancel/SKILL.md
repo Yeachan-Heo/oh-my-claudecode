@@ -1,7 +1,7 @@
 ---
 name: cancel
 aliases: [cancel-ralph]
-description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, swarm, ultrapilot, pipeline, team)
+description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, ultragoal, swarm, ultrapilot, pipeline, team)
 argument-hint: "[--force|--all]"
 level: 2
 ---
@@ -23,6 +23,7 @@ Automatically detects which mode is active and cancels it:
 - **Ralph**: Stops persistence loop, clears linked ultrawork if applicable
 - **Ultrawork**: Stops parallel execution (standalone or linked)
 - **UltraQA**: Stops QA cycling workflow
+- **Ultragoal**: Clears the session-scoped ultragoal runtime guard (`.omc/state/.../ultragoal-state.json`) so PreToolUse `/goal` enforcement and Stop reinforcement release. Durable `.omc/ultragoal/` plan/ledger artifacts are preserved.
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
 - **Pipeline**: Stops sequential agent pipeline
@@ -52,7 +53,7 @@ escape from the stop hook loop**. This is NOT a full replacement for the cancel 
 it only removes state files to unblock the session. Linked modes (e.g. ralph→ultrawork,
 autopilot→ralph/ultraqa) must be cleared separately by running the fallback once per mode.
 
-Replace `MODE` with the specific mode (e.g. `ralplan`, `ralph`, `ultrawork`, `ultraqa`).
+Replace `MODE` with the specific mode (e.g. `ralplan`, `ralph`, `ultrawork`, `ultraqa`, `ultragoal`).
 
 **WARNING:** Do NOT use this fallback for `autopilot` or `omc-teams`. Autopilot requires
 `state_write(active=false)` to preserve resume data. omc-teams requires tmux session
@@ -113,13 +114,14 @@ Active modes are still cancelled in dependency order:
 2. Ralph (cleans its linked ultrawork or )
 3. Ultrawork (standalone)
 4. UltraQA (standalone)
-5. Swarm (standalone)
-6. Ultrapilot (standalone)
-7. Pipeline (standalone)
-8. Team (Claude Code native)
-9. OMC Teams (tmux CLI workers)
-10. Plan Consensus (standalone)
-11. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
+5. Ultragoal (standalone runtime guard — `state_clear(mode="ultragoal")`; preserves durable `.omc/ultragoal/` artifacts)
+6. Swarm (standalone)
+7. Ultrapilot (standalone)
+8. Pipeline (standalone)
+9. Team (Claude Code native)
+10. OMC Teams (tmux CLI workers)
+11. Plan Consensus (standalone)
+12. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
 
 ## Force Clear All
 
@@ -306,6 +308,11 @@ Force cancellation follows the same primary-first rule for every autopilot group
 
 Clear directly: `state_clear(mode="ultraqa", session_id)`
 
+#### If Ultragoal Active (standalone)
+
+Clear the runtime guard only: `state_clear(mode="ultragoal", session_id)`.
+Durable `.omc/ultragoal/{brief.md,goals.json,ledger.jsonl}` artifacts are preserved.
+
 #### No Active Modes
 
 Report: "No active OMC modes detected. Use --force to clear all state files anyway."
@@ -335,6 +342,7 @@ Mode-specific subsections below describe what extra cleanup each handler perform
 | Ralph | "Ralph cancelled. Persistent mode deactivated." |
 | Ultrawork | "Ultrawork cancelled. Parallel execution mode deactivated." |
 | UltraQA | "UltraQA cancelled. QA cycling workflow stopped." |
+| Ultragoal | "Ultragoal cancelled. Runtime /goal guard released; durable plan/ledger preserved." |
 | Swarm | "Swarm cancelled. Coordinated agents stopped." |
 | Ultrapilot | "Ultrapilot cancelled. Parallel autopilot workers stopped." |
 | Pipeline | "Pipeline cancelled. Sequential agent chain stopped." |
@@ -351,6 +359,7 @@ Mode-specific subsections below describe what extra cleanup each handler perform
 | Ralph | No | N/A |
 | Ultrawork | No | N/A |
 | UltraQA | No | N/A |
+| Ultragoal | Yes (durable plan/ledger under `.omc/ultragoal/`) | Resume via `/ultragoal` / `omc ultragoal complete-goals` |
 | Swarm | No | N/A |
 | Ultrapilot | No | N/A |
 | Pipeline | No | N/A |

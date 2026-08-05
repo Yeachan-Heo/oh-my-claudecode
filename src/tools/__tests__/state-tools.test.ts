@@ -988,6 +988,36 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain('cleared');
       expect(existsSync(join(sessionDir, 'ralplan-state.json'))).toBe(false);
     });
+    it('should clear ultragoal runtime guard state with explicit session_id (#3630)', async () => {
+      const sessionId = 'test-session-ultragoal';
+      const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, 'ultragoal-state.json'),
+        JSON.stringify({
+          active: true,
+          session_id: sessionId,
+          current_phase: 'executing',
+          claude_goal_objective: 'Complete all ultragoal stories in .omc/ultragoal/goals.json: G001',
+        }),
+      );
+
+      const result = await stateClearTool.handler({
+        mode: 'ultragoal',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(result.content[0].text).toContain('cleared');
+      expect(existsSync(join(sessionDir, 'ultragoal-state.json'))).toBe(false);
+
+      const readResult = await stateReadTool.handler({
+        mode: 'ultragoal',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      expect(readResult.content[0].text).toMatch(/No state found|not found/i);
+    });
 
     it('should also remove non-session legacy state files during session clear', async () => {
       const sessionId = 'legacy-cleanup-session';

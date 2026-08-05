@@ -896,7 +896,11 @@ function isCancelSkillBootstrapTool(toolName, toolInput) {
   if (toolName !== 'Bash') return false;
   const command = typeof toolInput.command === 'string' ? toolInput.command : '';
   if (!isSingleShellCommand(command)) return false;
-  return /^(?:omc|oh-my-claudecode|gjc)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(command.trim());
+  // Bare CLI names (PATH installs) or trusted plugin entrypoint via node/nodejs.
+  // Basename is constrained to oh-my-claudecode.js; arbitrary node scripts stay denied.
+  // isSingleShellCommand above rejects chaining/expansion so a recognized token cannot
+  // smuggle other commands past the guard (e.g. `... cancel && npm test`).
+  return /^(?:(?:node|nodejs)\s+(?:"[^"\n]*[/\\]oh-my-claudecode\.js"|'[^'\n]*[/\\]oh-my-claudecode\.js'|[^\s;|&`]*[/\\]oh-my-claudecode\.js)\s+|(?:omc|oh-my-claudecode|gjc)\s+)(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(command.trim());
 }
 
 function isUltragoalBootstrapTool(toolName, toolInput) {
