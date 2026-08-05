@@ -193,8 +193,16 @@ describe('pre-tool-enforcer advisory throttling (issue #3163)', () => {
       expect(hookSpecificOutput?.permissionDecision).not.toBe('deny');
     }
 
-    // The widened matcher must not become a general `node` escape hatch.
-    for (const command of ['node server.js cancel', 'rm -rf .omc', 'omc build']) {
+    // The widened matcher must not become a general `node` escape hatch, and the
+    // subcommand must stay anchored right after the CLI/script path — otherwise
+    // arg-taking subcommands smuggle the keyword through without clearing state.
+    for (const command of [
+      'node server.js cancel',
+      'rm -rf .omc',
+      'omc build',
+      'omc ask cancel',
+      'node /home/u/.claude/plugins/cache/omc/oh-my-claudecode/4.15.7/bin/oh-my-claudecode.js ask cancel',
+    ]) {
       const denied = run(command).hookSpecificOutput as Record<string, unknown>;
       expect(denied.permissionDecision).toBe('deny');
       expect(denied.permissionDecisionReason).toContain('[ULTRAGOAL /GOAL REQUIRED]');

@@ -897,15 +897,17 @@ function isCancelSkillBootstrapTool(toolName, toolInput) {
   const command = typeof toolInput.command === 'string' ? toolInput.command : '';
   if (!isSingleShellCommand(command)) return false;
   const trimmed = command.trim();
-  // Subcommands that can wind an armed mode down.
-  const escapeSubcommand = /(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/;
-  if (!escapeSubcommand.test(trimmed)) return false;
   // Global CLI (npm -g install).
-  if (/^(?:omc|oh-my-claudecode|gjc)\s+/.test(trimmed)) return true;
+  if (/^(?:omc|oh-my-claudecode|gjc)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(trimmed)) {
+    return true;
+  }
   // Plugin installs ship no global binary — the only working invocation is
-  // `node <plugin-dir>/bin/oh-my-claudecode.js …`, so the anchored CLI form above
-  // never matches there and the hatch is unreachable on exactly those installs.
-  return /^node\s+\S*(?:oh-my-claudecode|omc)[^\s]*\.(?:js|mjs|cjs)\s+/.test(trimmed);
+  // `node <plugin-dir>/bin/oh-my-claudecode.js …`, so the CLI form above never
+  // matches there and the hatch is unreachable on exactly those installs.
+  // The subcommand stays anchored immediately after the script path: matching it
+  // anywhere in the command would let arg-taking subcommands (`omc ask cancel`)
+  // through without clearing any state.
+  return /^node\s+\S*(?:oh-my-claudecode|omc)[^\s]*\.(?:js|mjs|cjs)\s+(?:state\s+(?:clear|read|write|list-active|get-status)|cancel)\b/.test(trimmed);
 }
 
 function isUltragoalBootstrapTool(toolName, toolInput) {
