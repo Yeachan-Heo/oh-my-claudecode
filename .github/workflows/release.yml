@@ -163,8 +163,9 @@ jobs:
           if npm publish "$FINAL_TARBALL" --ignore-scripts --access public --provenance 2>&1 | tee npm-publish.log; then
             VERIFICATION_PREFIX="$RUNNER_TEMP/npm-provenance-verification"
             AUDIT_JSON="$VERIFICATION_PREFIX/audit-signatures.json"
-            MAX_PROPAGATION_ATTEMPTS=6
+            MAX_PROPAGATION_ATTEMPTS=12
             ATTEMPT=1
+            BACKOFF_SECONDS=10
             while [ "$ATTEMPT" -le "$MAX_PROPAGATION_ATTEMPTS" ]; do
               rm -rf "$VERIFICATION_PREFIX"
               if npm install --ignore-scripts --no-audit --no-fund --prefix "$VERIFICATION_PREFIX" "oh-my-claude-sisyphus@$VERSION" && npm audit signatures --json --include-attestations --prefix "$VERIFICATION_PREFIX" > "$AUDIT_JSON" && test -s "$AUDIT_JSON"; then
@@ -175,15 +176,20 @@ jobs:
                 exit 1
               fi
               ATTEMPT=$((ATTEMPT + 1))
-              sleep 10
+              sleep "$BACKOFF_SECONDS"
+              BACKOFF_SECONDS=$((BACKOFF_SECONDS * 2))
+              if [ "$BACKOFF_SECONDS" -gt 60 ]; then
+                BACKOFF_SECONDS=60
+              fi
             done
             node scripts/release-boundary.mjs verify-registry --package oh-my-claude-sisyphus --version "$VERSION" --tag "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --evidence "$EVIDENCE_JSON" --tarball "$FINAL_TARBALL" --provenance required --audit "$AUDIT_JSON"
           else
             node scripts/release-boundary.mjs assert-sigstore-fallback --publish-log npm-publish.log
             node scripts/release-boundary.mjs assert-evidence --tarball "$FINAL_TARBALL" --evidence "$EVIDENCE_JSON"
             npm publish "$FINAL_TARBALL" --ignore-scripts --access public
-            MAX_FALLBACK_PROPAGATION_ATTEMPTS=6
+            MAX_FALLBACK_PROPAGATION_ATTEMPTS=12
             FALLBACK_ATTEMPT=1
+            FALLBACK_BACKOFF_SECONDS=10
             while [ "$FALLBACK_ATTEMPT" -le "$MAX_FALLBACK_PROPAGATION_ATTEMPTS" ]; do
               if node scripts/release-boundary.mjs verify-registry --package oh-my-claude-sisyphus --version "$VERSION" --tag "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --evidence "$EVIDENCE_JSON" --tarball "$FINAL_TARBALL" --provenance sigstore-fallback --publish-log npm-publish.log; then
                 break
@@ -193,7 +199,11 @@ jobs:
                 exit 1
               fi
               FALLBACK_ATTEMPT=$((FALLBACK_ATTEMPT + 1))
-              sleep 10
+              sleep "$FALLBACK_BACKOFF_SECONDS"
+              FALLBACK_BACKOFF_SECONDS=$((FALLBACK_BACKOFF_SECONDS * 2))
+              if [ "$FALLBACK_BACKOFF_SECONDS" -gt 60 ]; then
+                FALLBACK_BACKOFF_SECONDS=60
+              fi
             done
           fi
         env:
