@@ -494,6 +494,68 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     expect(writtenSettings.hooks).toBeUndefined();
   });
 
+  it('removes verbatim plugin-hook-command duplicates from settings.json while preserving unrelated hooks in the same mixed group (#3638)', async () => {
+    // This models the real-world pollution shape from #3638: settings.json
+    // ends up with an exact copy of the plugin's own modern
+    // `$CLAUDE_PLUGIN_ROOT/scripts/...` hook commands, mixed into the SAME
+    // hook-group array as unrelated, non-OMC user commands. Neither
+    // `isStandaloneOmcHookCommand` (expects a `.claude/hooks/` path) nor
+    // group-level `.every()` filtering can catch this shape.
+    fakePluginRoot = mkdtempSync(join(tmpdir(), 'omc-fake-plugin-'));
+    writeCompletePluginPayload(fakePluginRoot);
+
+    const sessionStartCommands = [
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs',
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/project-memory-session.mjs',
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/wiki-session-start.mjs',
+    ];
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { matcher: '*', hooks: sessionStartCommands.map(command => ({ type: 'command', command })) },
+        ],
+      },
+    }));
+
+    const pluginsDir = join(testClaudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      'oh-my-claudecode': [{ installPath: fakePluginRoot }],
+    }));
+
+    const unrelatedCommands = [
+      'orca orchestration check --peek --timeout-ms 2000',
+      'python3 /Users/x/.claude/scripts/nfd_guard.py session',
+    ];
+
+    // Single settings.json write (mirrors real user settings): plugin already
+    // enabled AND settings.json already polluted with the 3 duplicate
+    // commands sharing one mixed group with the 2 unrelated commands.
+    mkdirSync(testClaudeDir, { recursive: true });
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [
+          {
+            matcher: '*',
+            hooks: [...sessionStartCommands, ...unrelatedCommands].map(command => ({ type: 'command', command })),
+          },
+        ],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+
+    const writtenSettings = JSON.parse(
+      readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8'),
+    ) as { hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
+
+    expect(result.success).toBe(true);
+    const remainingCommands = writtenSettings.hooks?.SessionStart?.[0]?.hooks?.map(h => h.command) ?? [];
+    expect(remainingCommands).toEqual(unrelatedCommands);
+  });
+
   it('prunes legacy standalone OMC hook files when plugin handles hooks', async () => {
     setupPluginWithHooks();
 

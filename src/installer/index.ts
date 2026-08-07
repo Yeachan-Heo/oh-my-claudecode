@@ -442,12 +442,54 @@ function isShippedStandaloneHookPayload(targetPath: string, filename: string, lo
 }
 
 /**
+ * Read every command string from the currently-installed OMC plugin's own
+ * `hooks/hooks.json` manifest(s). Used to recognize settings.json entries that
+ * are verbatim duplicates of the plugin's modern `$CLAUDE_PLUGIN_ROOT/scripts/...`
+ * hook commands — a distinct pollution shape from the older standalone
+ * `.claude/hooks/*.mjs` files that `OMC_HOOK_FILENAMES`/`isStandaloneOmcHookCommand`
+ * were built to detect (see #3638).
+ *
+ * Best-effort: unreadable/missing manifests are silently skipped.
+ */
+function getPluginHookCommands(): Set<string> {
+  const commands = new Set<string>();
+  for (const pluginRoot of getInstalledOmcPluginRoots()) {
+    const hooksJsonPath = join(pluginRoot, 'hooks', 'hooks.json');
+    if (!existsSync(hooksJsonPath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(hooksJsonPath, 'utf-8')) as {
+        hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string }> }>>;
+      };
+      for (const groups of Object.values(parsed.hooks ?? {})) {
+        for (const group of groups) {
+          for (const hook of group.hooks ?? []) {
+            if (hook.type === 'command' && typeof hook.command === 'string') {
+              commands.add(hook.command);
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore unreadable manifests; recognition should remain best-effort.
+    }
+  }
+  return commands;
+}
+
+/**
  * Detect whether a hook command belongs to oh-my-claudecode.
  *
  * Recognition strategy (any match is sufficient):
  * 1. Command path contains "omc" as a path/word segment (e.g. `omc-hook.mjs`, `/omc/`)
  * 2. Command path contains "oh-my-claudecode"
  * 3. Command references a known OMC hook filename inside .claude/hooks/
+ *
+ * Deliberately does NOT compare against the installed plugin's own
+ * `hooks/hooks.json` (see `getPluginHookCommands()` below, used separately by
+ * `configureInstallerSettings()`) — this function is called from many
+ * contexts, including tests, that don't isolate `CLAUDE_CONFIG_DIR`/
+ * `CLAUDE_PLUGIN_ROOT`, and reading real plugin state here would make it
+ * silently environment-dependent.
  *
  * @param command - The hook command string
  * @returns true if the command belongs to OMC
@@ -667,19 +709,57 @@ function configureInstallerSettings(
 
   {
     const existingHooks = { ...((settings.hooks || {}) as Record<string, unknown>) };
+
+    const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
+    const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
+    // Only trust "matches the plugin's own current manifest" as a removal signal
+    // once we've confirmed the plugin is actually installed and handling hooks —
+    // otherwise there's no live hooks.json to compare against.
+    const pluginHookCommands = pluginHandlesHooks ? getPluginHookCommands() : new Set<string>();
+
     let legacyRemoved = 0;
+    let staleDuplicatesRemoved = 0;
 
     for (const [eventType, groups] of Object.entries(existingHooks)) {
       const groupList = groups as HookGroup[];
-      const filtered = groupList.filter(group => {
-        const isLegacy = group.hooks.every(h =>
+      const filtered: HookGroup[] = [];
+
+      for (const group of groupList) {
+        const isFullyLegacyGroup = group.hooks.every(h =>
           h.type === 'command'
           && typeof h.command === 'string'
           && isStandaloneOmcHookCommand(h.command)
         );
-        if (isLegacy) legacyRemoved++;
-        return !isLegacy;
-      });
+        if (isFullyLegacyGroup) {
+          legacyRemoved++;
+          continue;
+        }
+
+        // A group can be a MIX of OMC-owned and unrelated user hooks (e.g. a
+        // single "*" SessionStart group containing both a duplicated plugin
+        // command and a user's own hook). Filter per-entry rather than
+        // requiring the whole group to be uniformly OMC-owned before touching
+        // it, so unrelated hooks in the same group survive (#3638).
+        if (pluginHandlesHooks && pluginHookCommands.size > 0) {
+          const keptHooks = group.hooks.filter(h => {
+            const isStaleDuplicate = h.type === 'command'
+              && typeof h.command === 'string'
+              && pluginHookCommands.has(h.command);
+            if (isStaleDuplicate) staleDuplicatesRemoved++;
+            return !isStaleDuplicate;
+          });
+          if (keptHooks.length === 0) {
+            continue;
+          }
+          if (keptHooks.length !== group.hooks.length) {
+            filtered.push({ ...group, hooks: keptHooks });
+            continue;
+          }
+        }
+
+        filtered.push(group);
+      }
+
       if (filtered.length === 0) {
         delete existingHooks[eventType];
       } else {
@@ -690,9 +770,10 @@ function configureInstallerSettings(
     if (legacyRemoved > 0) {
       context.log(`  Cleaned up ${legacyRemoved} legacy hook entries from settings.json`);
     }
+    if (staleDuplicatesRemoved > 0) {
+      context.log(`  Cleaned up ${staleDuplicatesRemoved} stale plugin-duplicate hook entries from settings.json`);
+    }
 
-    const enabledOmcPlugin = context.runningAsPlugin || isOmcPluginEnabledInSettings(settings);
-    const pluginHandlesHooks = context.pluginProvidesHookFiles && enabledOmcPlugin;
     if (pluginHandlesHooks) {
       const activeStandaloneOmcHookFilenames = collectActiveStandaloneOmcHookFilenames(existingHooks);
       pruneLegacyStandaloneHookScripts(context.log, activeStandaloneOmcHookFilenames);
