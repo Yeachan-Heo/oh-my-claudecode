@@ -8,7 +8,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { ensureWikiDir } from '../storage.js';
-import { onSessionEnd, onSessionStart } from '../session-hooks.js';
+import { onSessionEnd, onSessionStart, buildWikiSessionEndCaptureIntent } from '../session-hooks.js';
 import { getWikiDir, readPage } from '../storage.js';
 
 describe('Wiki Session Hooks', () => {
@@ -47,6 +47,83 @@ describe('Wiki Session Hooks', () => {
     const wikiEntries = fs.readdirSync(wikiDir);
     expect(wikiEntries.filter(entry => entry.startsWith('session-log-'))).toHaveLength(0);
     expect(fs.existsSync(path.join(wikiDir, 'log.md'))).toBe(false);
+  });
+});
+
+describe('buildWikiSessionEndCaptureIntent — skip empty sessions (#3639)', () => {
+  let tempDir: string;
+  let configDir: string;
+  let originalClaudeConfigDir: string | undefined;
+
+  beforeEach(async () => {
+    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wiki-session-end-capture-'));
+    configDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wiki-session-end-capture-config-'));
+    originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    ensureWikiDir(tempDir);
+  });
+
+  afterEach(async () => {
+    if (originalClaudeConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+    await fsp.rm(tempDir, { recursive: true, force: true });
+    await fsp.rm(configDir, { recursive: true, force: true });
+  });
+
+  function writeTranscript(lines: unknown[]): string {
+    const transcriptPath = path.join(tempDir, 'transcript.jsonl');
+    fs.writeFileSync(transcriptPath, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+    return transcriptPath;
+  }
+
+  it('returns null (skips capture) when the transcript has zero human messages', () => {
+    const transcriptPath = writeTranscript([
+      { type: 'user', isMeta: true, message: { role: 'user', content: '<system-reminder>...</system-reminder>' } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    ]);
+
+    const intent = buildWikiSessionEndCaptureIntent({
+      cwd: tempDir,
+      session_id: 'session-empty',
+      transcript_path: transcriptPath,
+    });
+
+    expect(intent).toBeNull();
+  });
+
+  it('returns a capture intent when the transcript has at least one real human message', () => {
+    const transcriptPath = writeTranscript([
+      { type: 'user', message: { role: 'user', content: 'please fix the bug' } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'sure' }] } },
+    ]);
+
+    const intent = buildWikiSessionEndCaptureIntent({
+      cwd: tempDir,
+      session_id: 'session-active',
+      transcript_path: transcriptPath,
+    });
+
+    expect(intent).not.toBeNull();
+    expect(intent?.sessionId).toBe('session-active');
+  });
+
+  it('fails open (still captures) when transcript_path is missing or unreadable', () => {
+    const intentNoPath = buildWikiSessionEndCaptureIntent({
+      cwd: tempDir,
+      session_id: 'session-no-path',
+    });
+    expect(intentNoPath).not.toBeNull();
+
+    const intentBadPath = buildWikiSessionEndCaptureIntent({
+      cwd: tempDir,
+      session_id: 'session-bad-path',
+      transcript_path: path.join(tempDir, 'does-not-exist.jsonl'),
+    });
+    expect(intentBadPath).not.toBeNull();
   });
 });
 

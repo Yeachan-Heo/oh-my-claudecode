@@ -913,7 +913,11 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
 /** Wiki producer has no foreground lock or write; it only seals a durable capture/no-op intent. */
 export async function processWikiSessionEnd(input: SessionEndInput): Promise<HookOutput> {
   const directory = resolveToWorktreeRoot(input.cwd);
-  const intent = buildWikiSessionEndCaptureIntent({ cwd: directory, session_id: input.session_id });
+  const intent = buildWikiSessionEndCaptureIntent({
+    cwd: directory,
+    session_id: input.session_id,
+    transcript_path: input.transcript_path,
+  });
   sealWikiManifest(directory, input.session_id, intent ? { ...intent } : undefined);
   spawnSessionEndWorker({ directory, sessionId: input.session_id });
   return { continue: true };

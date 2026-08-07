@@ -104,15 +104,80 @@ function loadWikiConfig(root: string): WikiConfig {
 }
 
 /**
+ * A transcript record body carries a real human turn when it's a `type: 'user'`
+ * (or `message.role === 'user'`) record that isn't a meta-injected marker,
+ * compact summary, sidechain (subagent) entry, or a tool_result-only wrapper.
+ * Mirrors the classification already used by `userRecordHasToolResult` in
+ * `persistent-mode/index.ts` and by the (external) session-report analyzer.
+ */
+function isRealHumanTranscriptRecord(parsed: {
+  type?: unknown;
+  isMeta?: unknown;
+  isCompactSummary?: unknown;
+  isSidechain?: unknown;
+  message?: { role?: unknown; content?: unknown };
+}): boolean {
+  const role = parsed?.message?.role;
+  const isUserRole = parsed?.type === 'user' || role === 'user';
+  if (!isUserRole || parsed.isMeta || parsed.isCompactSummary || parsed.isSidechain) {
+    return false;
+  }
+
+  const content = parsed.message?.content;
+  if (typeof content === 'string') {
+    return content.trim().length > 0;
+  }
+  if (Array.isArray(content)) {
+    return content.some((block) => {
+      const type = (block as { type?: unknown } | null)?.type;
+      return type !== 'tool_result' && type !== 'tool_use';
+    });
+  }
+  return false;
+}
+
+/**
+ * Does this session's transcript contain at least one real human message?
+ * Used to skip auto-capturing a session-log page for no-op sessions (e.g. a
+ * bare smoke-test invocation) that would otherwise leave an empty,
+ * never-promoted stub behind forever (#3639).
+ *
+ * Fails OPEN: any read/parse error, or a missing/unreadable transcript,
+ * returns `true` (assume real activity) so a transient filesystem issue never
+ * silently suppresses a legitimate capture.
+ */
+function hasHumanMessageInTranscript(transcriptPath: string): boolean {
+  try {
+    if (!existsSync(transcriptPath)) return true;
+    const raw = readFileSync(transcriptPath, 'utf-8');
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let parsed: Parameters<typeof isRealHumanTranscriptRecord>[0];
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (isRealHumanTranscriptRecord(parsed)) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Build a JSON-safe SessionEnd capture intent without taking the wiki lock or
  * mutating the filesystem. The manifest worker durably owns and commits it.
  */
 export function buildWikiSessionEndCaptureIntent(
-  data: { cwd?: string; session_id?: string },
+  data: { cwd?: string; session_id?: string; transcript_path?: string },
 ): WikiSessionEndCaptureIntent | null {
   try {
     const root = data.cwd || process.cwd();
     if (!loadWikiConfig(root).autoCapture || !existsSync(getWikiDir(root))) return null;
+    if (data.transcript_path && !hasHumanMessageInTranscript(data.transcript_path)) return null;
 
     const sessionId = data.session_id || `session-${Date.now()}`;
     const capturedAt = new Date().toISOString();
