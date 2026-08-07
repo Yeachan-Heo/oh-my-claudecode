@@ -1090,6 +1090,111 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
+  it('bounds every provider spawn with a hard-kill timeout so a hung CLI cannot block omc ask forever', () => {
+    // spawnSync blocks until the child exits, so an unbounded provider turns a wedged
+    // CLI into an indefinite `omc ask` / `/ccg` hang. Antigravity used to be the only
+    // provider with a bound; every provider needs one.
+    const providers: Array<[provider: string, binary: string]> = [
+      ['codex', 'codex'],
+      ['claude', 'claude'],
+      ['gemini', 'gemini'],
+      ['grok', 'grok'],
+      ['cursor', 'cursor-agent'],
+    ];
+
+    for (const [provider, binary] of providers) {
+      const wd = mkdtempSync(join(tmpdir(), `omc-ask-${provider}-killcfg-`));
+      try {
+        const capturePath = join(wd, 'spawn-sync-calls.json');
+        const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+        const result = runAdvisorScriptWithPrelude(
+          preludePath,
+          [provider, '--prompt', 'reply please'],
+          wd,
+          { SPAWN_CAPTURE_PATH: capturePath },
+        );
+        expect(result.status).toBe(0);
+
+        const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+          command: string; args: string[]; options: { timeout: number | null; killSignal: string | null };
+        }>;
+        const providerRun = calls.find((c) => c.command === binary && !c.args.includes('--version'));
+        expect(providerRun).toBeDefined();
+        // SIGKILL, not a catchable SIGTERM: a signal-trapping CLI would otherwise
+        // outlive the timeout and keep spawnSync blocked.
+        expect(providerRun!.options.killSignal).toBe('SIGKILL');
+        // 8 minutes — under Claude Code's 10-minute Bash ceiling, so omc reports the
+        // stall itself instead of being truncated by the harness.
+        expect(providerRun!.options.timeout).toBe(480000);
+      } finally {
+        rmSync(wd, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('reports a non-antigravity provider timeout as a failure naming the CLI and the override', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-timeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['codex', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_MODE: 'timeout' },
+      );
+
+      // A killed run must fail loudly rather than record success or hang.
+      expect(result.status).toBe(1);
+      const stderr = `${result.stderr ?? ''}`;
+      expect(stderr).toContain('timed out');
+      expect(stderr).toContain('codex');
+      expect(stderr).toContain('OMC_ASK_TIMEOUT_MS');
+      // The antigravity-specific #76 guidance must not leak into other providers.
+      expect(stderr).not.toContain('antigravity-cli#76');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('honors a valid OMC_ASK_TIMEOUT_MS override and ignores an invalid one', () => {
+    const cases: Array<[override: string, expectedTimeout: number, expectWarning: boolean]> = [
+      ['60000', 60000, false],
+      ['-5', 480000, true],
+    ];
+
+    for (const [override, expectedTimeout, expectWarning] of cases) {
+      const wd = mkdtempSync(join(tmpdir(), 'omc-ask-codex-timeout-override-'));
+      try {
+        const capturePath = join(wd, 'spawn-sync-calls.json');
+        const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+        const result = runAdvisorScriptWithPrelude(
+          preludePath,
+          ['codex', '--prompt', 'reply please'],
+          wd,
+          { SPAWN_CAPTURE_PATH: capturePath, OMC_ASK_TIMEOUT_MS: override },
+        );
+        expect(result.status).toBe(0);
+
+        const stderr = `${result.stderr ?? ''}`;
+        if (expectWarning) {
+          // A bad override must not silently disable or distort the bound.
+          expect(stderr).toContain('Ignoring invalid OMC_ASK_TIMEOUT_MS');
+        } else {
+          expect(stderr).not.toContain('Ignoring invalid OMC_ASK_TIMEOUT_MS');
+        }
+
+        const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+          command: string; args: string[]; options: { timeout: number | null };
+        }>;
+        const providerRun = calls.find((c) => c.command === 'codex' && !c.args.includes('--version'));
+        expect(providerRun!.options.timeout).toBe(expectedTimeout);
+      } finally {
+        rmSync(wd, { recursive: true, force: true });
+      }
+    }
+  });
+
   it('pipes multiline claude prompts over stdin so the prompt is never a raw argv value (#3221)', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-claude-multiline-stdin-'));
     const multilinePrompt = 'line one\nline two\nline three';
