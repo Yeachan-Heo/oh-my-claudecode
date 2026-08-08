@@ -121,7 +121,16 @@ program
   .name('omc')
   .description('Multi-agent orchestration system for Claude Agent SDK')
   .version(version)
+  // Declared so commander knows it takes a value. Without that, `omc
+  // --plugin-dir <path> setup` leaves <path> sitting in the subcommand slot,
+  // and the unrecognized operand falls through to defaultAction (a Claude
+  // launch) instead of dispatching to setup. The preAction hook runs for
+  // subcommands too, so the root flag reaches them as OMC_PLUGIN_ROOT.
+  .option('--plugin-dir <path>', 'Override OMC plugin root directory (sets OMC_PLUGIN_ROOT)')
   .allowUnknownOption()
+  .hook('preAction', (thisCommand) => {
+    applyPluginDirOption(thisCommand.opts().pluginDir as string | undefined);
+  })
   .action(defaultAction);
 
 /**
