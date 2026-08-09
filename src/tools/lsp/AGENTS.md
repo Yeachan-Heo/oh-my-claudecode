@@ -120,7 +120,7 @@ This table documents catalog/discovery support. Runtime semantic quality still d
 | Language | Server | Command | Extensions |
 |----------|--------|---------|------------|
 | TypeScript/JS | typescript-language-server | `typescript-language-server` | .ts, .tsx, .js, .jsx |
-| Python | ty | `ty server` | .py, .pyw |
+| Python | ty (default), basedpyright (opt-in via `OMC_PYTHON_LSP=basedpyright`) | `ty server` / `basedpyright-langserver --stdio` | .py, .pyw |
 | Rust | rust-analyzer | `rust-analyzer` | .rs |
 | Go | gopls | `gopls` | .go |
 | C/C++ | clangd | `clangd` | .c, .h, .cpp, .cc, .hpp |

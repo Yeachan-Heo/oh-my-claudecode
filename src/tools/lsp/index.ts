@@ -20,6 +20,7 @@ export {
   getServerForFile,
   getServerForLanguage,
   getAllServers,
+  resolvePythonServer,
   commandExists
 } from './servers.js';
 export type { LspServerConfig } from './servers.js';

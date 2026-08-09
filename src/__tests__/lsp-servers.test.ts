@@ -1,8 +1,8 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { describe, expect, it } from 'vitest';
-import { LSP_SERVERS, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace } from '../tools/lsp/servers.js';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LSP_SERVERS, getAllServers, getServerForFile, getServerForLanguage, getTypeScriptServerForWorkspace, resolvePythonServer } from '../tools/lsp/servers.js';
 
 function createTypeScriptProject(options: { version: string; tsserver?: boolean; getExePath?: boolean; tscBin?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'omc-lsp-ts-'));
@@ -26,6 +26,24 @@ function createTypeScriptProject(options: { version: string; tsserver?: boolean;
 
   return root;
 }
+
+const inheritedPythonLsp = process.env.OMC_PYTHON_LSP;
+
+beforeEach(() => {
+  delete process.env.OMC_PYTHON_LSP;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+afterAll(() => {
+  if (inheritedPythonLsp === undefined) {
+    delete process.env.OMC_PYTHON_LSP;
+  } else {
+    process.env.OMC_PYTHON_LSP = inheritedPythonLsp;
+  }
+});
 
 describe('LSP Server Configurations', () => {
   const serverKeys = Object.keys(LSP_SERVERS);
@@ -243,8 +261,55 @@ describe('OmniSharp command casing', () => {
 });
 
 describe('Python server selection', () => {
-  it('should invoke ty via its LSP subcommand', () => {
+  it('uses ty by default', () => {
+    expect(process.env.OMC_PYTHON_LSP).toBeUndefined();
+    expect(resolvePythonServer()).toBe(LSP_SERVERS.python);
+    expect(getServerForFile('app.py')).toBe(LSP_SERVERS.python);
+    expect(getServerForFile('app.pyw')).toBe(LSP_SERVERS.python);
+    expect(getServerForLanguage('python')).toBe(LSP_SERVERS.python);
     expect(LSP_SERVERS.python.command).toBe('ty');
     expect(LSP_SERVERS.python.args).toEqual(['server']);
+  });
+
+  it.each(['', '   ', 'ty', 'TY', 'BasedPyright', 'pyright', 'basedpyright ', 'jedi'])(
+    'uses ty for unsupported selector value %j',
+    value => {
+      vi.stubEnv('OMC_PYTHON_LSP', value);
+
+      expect(resolvePythonServer()).toBe(LSP_SERVERS.python);
+      expect(getServerForFile('app.py')).toBe(getServerForLanguage('python'));
+      expect(getServerForFile('app.pyw')).toBe(LSP_SERVERS.python);
+    }
+  );
+
+  it('uses basedpyright only for the exact selector value', () => {
+    vi.stubEnv('OMC_PYTHON_LSP', 'basedpyright');
+
+    const server = resolvePythonServer();
+    expect(server).toMatchObject({
+      name: 'Python Language Server (basedpyright)',
+      command: 'basedpyright-langserver',
+      args: ['--stdio'],
+      extensions: ['.py', '.pyw'],
+      installHint: 'uv tool install basedpyright'
+    });
+    expect(getServerForFile('app.py')).toBe(server);
+    expect(getServerForFile('app.pyw')).toBe(server);
+    expect(getServerForLanguage('python')).toBe(server);
+  });
+
+  it('does not affect non-Python server selection', () => {
+    vi.stubEnv('OMC_PYTHON_LSP', 'basedpyright');
+
+    expect(getServerForFile('main.rs')).toBe(LSP_SERVERS.rust);
+    expect(getServerForLanguage('go')).toBe(LSP_SERVERS.go);
+  });
+
+  it('lists only the selected Python server', () => {
+    vi.stubEnv('OMC_PYTHON_LSP', 'basedpyright');
+
+    const pythonServers = getAllServers().filter(server => server.extensions.includes('.py'));
+    expect(pythonServers).toHaveLength(1);
+    expect(pythonServers[0].command).toBe('basedpyright-langserver');
   });
 });
