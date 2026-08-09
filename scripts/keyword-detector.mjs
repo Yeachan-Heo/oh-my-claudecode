@@ -613,7 +613,10 @@ function hasActivationIntentNearKeyword(context, keyword) {
   const patterns = [
     new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, 'i'),
     new RegExp(`\\b(?:fix|debug|investigate|resolve|handle|patch|address)\\b[^\\n]{0,28}\\b(?:issue|bug|problem|error)\\b[^\\n]{0,12}\\b(?:with|in)\\s+\\b${escaped}\\b`, 'i'),
-
+    // Vietnamese imperatives: "chạy ralph", "dùng/sử dụng ralph", "bật/mở/gọi ralph",
+    // "khởi động/kích hoạt ralph", "vào chế độ ralph". Verb-before-keyword within a
+    // short window so a mid-sentence mention ("vòng lặp ralph") does not match.
+    new RegExp(`(?:chạy|dùng|sử\\s*dụng|bật|mở|khởi\\s*động|kích\\s*hoạt|gọi|vào)[^\\n]{0,12}\\b${escaped}\\b`, 'i'),
   ];
 
   return patterns.some((pattern) => pattern.test(context));

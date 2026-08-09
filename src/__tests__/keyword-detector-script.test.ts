@@ -629,8 +629,10 @@ diff --git a/a b/b
       { prompt: '/ralph fix parser', mode: 'ralph' },
       { prompt: 'run ralph on this issue', mode: 'ralph' },
       { prompt: '랄프 켜', mode: 'ralph' },
+      { prompt: 'chạy ralph đi', mode: 'ralph' },
       { prompt: 'start ultrawork on this issue', mode: 'ultrawork' },
       { prompt: '울트라워크 돌려', mode: 'ultrawork' },
+      { prompt: 'bật ultrawork lên', mode: 'ultrawork' },
     ] as const;
 
     for (const { prompt, mode } of cases) {
