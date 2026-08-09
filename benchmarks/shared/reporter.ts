@@ -1,162 +1,306 @@
-/**
- * Generalized report generator for agent benchmark results.
- *
- * Produces both machine-readable JSON and human-readable markdown
- * comparing two agent variants (e.g., old prompt vs new prompt).
- */
-
 import type {
   AgentType,
   BenchmarkScores,
   ComparisonReport,
+  CompletedFixtureResult,
+  DiagnosticComparison,
+  FailureReason,
   FixtureResult,
-  AgentBenchmarkReport,
-} from './types.ts';
-import { aggregateScores } from './scorer.ts';
+  NumericDiagnostic,
+  TokenDimensionDiagnostic,
+} from "./types.ts";
+import { aggregateScoresUnknownCapable } from "./scorer.ts";
 
-// ============================================================
-// Public: generateAgentReport
-// ============================================================
+const NUMERIC_SCORE_KEYS: Array<keyof BenchmarkScores> = [
+  "truePositiveRate",
+  "falsePositiveRate",
+  "falseNegativeRate",
+  "severityAccuracy",
+  "missingCoverage",
+  "perspectiveCoverage",
+  "evidenceRate",
+  "compositeScore",
+];
 
-/**
- * Build a single-agent benchmark report.
- */
-export function generateAgentReport(
+export class DuplicateFixtureKeyError extends Error {
+  constructor(side: string, key: string) {
+    super(`Duplicate fixture key on ${side}: ${key}`);
+    this.name = "DuplicateFixtureKeyError";
+  }
+}
+
+export function keyOf(
+  result: Pick<FixtureResult, "domain" | "fixtureId">,
+): string {
+  return `${result.domain}:${result.fixtureId}`;
+}
+
+function uniqueByKey(
   results: FixtureResult[],
-  agentType: AgentType,
-  model: string,
-): AgentBenchmarkReport {
+  side: string,
+): Map<string, FixtureResult> {
+  const map = new Map<string, FixtureResult>();
+  for (const result of results) {
+    const key = keyOf(result);
+    if (map.has(key)) throw new DuplicateFixtureKeyError(side, key);
+    map.set(key, result);
+  }
+  return map;
+}
+
+export function pairResults(
+  aResults: FixtureResult[],
+  bResults: FixtureResult[],
+): {
+  paired: Array<{ key: string; a: FixtureResult; b: FixtureResult }>;
+  aOnlyKeys: string[];
+  bOnlyKeys: string[];
+} {
+  const aByKey = uniqueByKey(aResults, "A");
+  const bByKey = uniqueByKey(bResults, "B");
+  const paired: Array<{ key: string; a: FixtureResult; b: FixtureResult }> = [];
+  const aOnlyKeys: string[] = [];
+  const bOnlyKeys: string[] = [];
+
+  for (const [key, a] of aByKey) {
+    const b = bByKey.get(key);
+    if (b) paired.push({ key, a, b });
+    else aOnlyKeys.push(key);
+  }
+  for (const key of bByKey.keys()) {
+    if (!aByKey.has(key)) bOnlyKeys.push(key);
+  }
+
+  paired.sort((left, right) => left.key.localeCompare(right.key));
+  aOnlyKeys.sort();
+  bOnlyKeys.sort();
+  return { paired, aOnlyKeys, bOnlyKeys };
+}
+
+function aggregate(values: number[], kind: "sum" | "mean"): number | undefined {
+  if (values.length === 0) return undefined;
+  const total = values.reduce((current, value) => current + value, 0);
+  return kind === "sum" ? total : total / values.length;
+}
+
+function numericDiagnostic(
+  pairs: Array<{ a: FixtureResult; b: FixtureResult }>,
+  selector: (result: FixtureResult) => number | undefined,
+  unit: NumericDiagnostic["unit"],
+  aggregateKind: "sum" | "mean",
+): NumericDiagnostic {
+  const aValues: number[] = [];
+  const bValues: number[] = [];
+  for (const pair of pairs) {
+    const aValue = selector(pair.a);
+    const bValue = selector(pair.b);
+    if (aValue === undefined || bValue === undefined) continue;
+    aValues.push(aValue);
+    bValues.push(bValue);
+  }
+  const a = aggregate(aValues, aggregateKind);
+  const b = aggregate(bValues, aggregateKind);
   return {
-    timestamp: new Date().toISOString(),
-    model,
-    agentType,
-    results,
-    aggregateScores: aggregateScores(results),
+    a,
+    b,
+    delta: a !== undefined && b !== undefined ? a - b : undefined,
+    pairedCount: aValues.length,
+    unit,
+    status: aValues.length > 0 ? "compared" : "insufficient",
   };
 }
 
-// ============================================================
-// Public: generateComparisonReport
-// ============================================================
+function tokenDimension(
+  pairs: Array<{ a: FixtureResult; b: FixtureResult }>,
+  selector: (result: FixtureResult) => number | undefined,
+): TokenDimensionDiagnostic {
+  return {
+    total: numericDiagnostic(pairs, selector, "tokens", "sum"),
+    perFixtureMean: numericDiagnostic(pairs, selector, "tokens", "mean"),
+  };
+}
 
-/**
- * Build a comparison report between two agent variants.
- */
+function failureReasons(
+  results: FixtureResult[],
+): Partial<Record<FailureReason, number>> {
+  const counts: Partial<Record<FailureReason, number>> = {};
+  for (const result of results) {
+    if (result.completion !== "failed") continue;
+    counts[result.failureReason] = (counts[result.failureReason] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function buildDiagnostics(
+  aResults: FixtureResult[],
+  bResults: FixtureResult[],
+  paired: Array<{ a: FixtureResult; b: FixtureResult }>,
+  aOnlyKeys: string[],
+  bOnlyKeys: string[],
+  sameAgent: boolean,
+): DiagnosticComparison {
+  const qualityPairs = paired.filter(
+    (pair) =>
+      pair.a.completion === "completed" && pair.b.completion === "completed",
+  );
+  const measurementPairs = sameAgent ? [] : paired;
+  const tokenCost = {
+    input: tokenDimension(measurementPairs, (result) => result.inputTokens),
+    output: tokenDimension(measurementPairs, (result) => result.outputTokens),
+    all: tokenDimension(measurementPairs, (result) => result.totalTokens),
+  };
+  const apiLatency = numericDiagnostic(
+    measurementPairs,
+    (result) => result.latencyMs,
+    "milliseconds",
+    "mean",
+  );
+  const harnessOverhead = numericDiagnostic(
+    measurementPairs,
+    (result) => result.harnessOverheadMs,
+    "milliseconds",
+    "mean",
+  );
+
+  const reasons: string[] = [];
+  if (sameAgent) reasons.push("comparison requires two distinct agents");
+  if (paired.length === 0) reasons.push("no paired fixture observations");
+  if (aOnlyKeys.length > 0 || bOnlyKeys.length > 0)
+    reasons.push("fixture populations differ");
+  if (
+    paired.some(
+      (pair) =>
+        pair.a.completion === "failed" || pair.b.completion === "failed",
+    )
+  ) {
+    reasons.push("one or more paired runs failed");
+  }
+  if (
+    !sameAgent &&
+    [tokenCost.input, tokenCost.output, tokenCost.all].some(
+      (dimension) => dimension.total.pairedCount !== paired.length,
+    )
+  ) {
+    reasons.push("token telemetry is incomplete");
+  }
+  if (!sameAgent && apiLatency.pairedCount !== paired.length) {
+    reasons.push("API latency telemetry is incomplete");
+  }
+  if (!sameAgent && harnessOverhead.pairedCount !== paired.length) {
+    reasons.push("harness overhead telemetry is incomplete");
+  }
+
+  return {
+    completion: {
+      completedA: aResults.filter((result) => result.completion === "completed")
+        .length,
+      failedA: aResults.filter((result) => result.completion === "failed")
+        .length,
+      completedB: bResults.filter((result) => result.completion === "completed")
+        .length,
+      failedB: bResults.filter((result) => result.completion === "failed")
+        .length,
+      failureReasonsA: failureReasons(aResults),
+      failureReasonsB: failureReasons(bResults),
+      pairedFixtures: paired.length,
+      aOnlyKeys,
+      bOnlyKeys,
+    },
+    qualityPairedCount: sameAgent ? 0 : qualityPairs.length,
+    tokenCost,
+    apiLatency,
+    harnessOverhead,
+    validity: reasons.length === 0 ? "valid" : "inconclusive",
+    reasons,
+  };
+}
+
 export function generateComparisonReport(
   results: FixtureResult[],
   agentA: AgentType,
   agentB: AgentType,
   model: string,
 ): ComparisonReport {
-  const aResults = results.filter((r) => r.agentType === agentA);
-  const bResults = results.filter((r) => r.agentType === agentB);
-
-  const aAggregate = aggregateScores(aResults);
-  const bAggregate = aggregateScores(bResults);
-
-  const aggregateScoresMap: Record<AgentType, BenchmarkScores> = {
+  const sameAgent = agentA === agentB;
+  const aResults = results.filter((result) => result.agentType === agentA);
+  const bResults = results.filter((result) => result.agentType === agentB);
+  const pairing = pairResults(aResults, bResults);
+  const qualityPairs = pairing.paired.filter(
+    (
+      pair,
+    ): pair is {
+      key: string;
+      a: CompletedFixtureResult;
+      b: CompletedFixtureResult;
+    } => pair.a.completion === "completed" && pair.b.completion === "completed",
+  );
+  const aAggregate = sameAgent
+    ? null
+    : aggregateScoresUnknownCapable(qualityPairs.map((pair) => pair.a));
+  const bAggregate = sameAgent
+    ? null
+    : aggregateScoresUnknownCapable(qualityPairs.map((pair) => pair.b));
+  const aggregateScores: Record<AgentType, BenchmarkScores | null> = {
     [agentA]: aAggregate,
     [agentB]: bAggregate,
   };
-
-  // Per-metric deltas (A minus B) for numeric fields only
-  const numericKeys: Array<keyof BenchmarkScores> = [
-    'truePositiveRate',
-    'falsePositiveRate',
-    'falseNegativeRate',
-    'severityAccuracy',
-    'missingCoverage',
-    'perspectiveCoverage',
-    'evidenceRate',
-    'compositeScore',
-  ];
-
   const deltas: Partial<Record<keyof BenchmarkScores, number>> = {};
-  for (const key of numericKeys) {
-    const aVal = aAggregate[key];
-    const bVal = bAggregate[key];
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      deltas[key] = aVal - bVal;
+  if (aAggregate && bAggregate) {
+    for (const key of NUMERIC_SCORE_KEYS) {
+      const aValue = aAggregate[key];
+      const bValue = bAggregate[key];
+      if (typeof aValue === "number" && typeof bValue === "number") {
+        deltas[key] = aValue - bValue;
+      }
     }
   }
 
-  // Head-to-head per fixture
-  const fixtureIds = Array.from(new Set(results.map((r) => r.fixtureId)));
-  const headToHead: ComparisonReport['headToHead'] = fixtureIds.map((fixtureId) => {
-    const a = aResults.find((r) => r.fixtureId === fixtureId);
-    const b = bResults.find((r) => r.fixtureId === fixtureId);
-
-    const aScore = a?.scores.compositeScore ?? 0;
-    const bScore = b?.scores.compositeScore ?? 0;
-    const delta = aScore - bScore;
-
-    let winner: AgentType | 'tie';
-    if (Math.abs(delta) < 0.001) {
-      winner = 'tie';
-    } else if (delta > 0) {
-      winner = agentA;
-    } else {
-      winner = agentB;
-    }
-
-    return { fixtureId, winner, delta };
-  });
+  const headToHead: ComparisonReport["headToHead"] = sameAgent
+    ? []
+    : qualityPairs.map(({ a, b }) => {
+        const delta = a.scores.compositeScore - b.scores.compositeScore;
+        return {
+          fixtureId: a.fixtureId,
+          domain: a.domain,
+          winner: Math.abs(delta) < 0.001 ? "tie" : delta > 0 ? agentA : agentB,
+          delta,
+        };
+      });
 
   return {
     timestamp: new Date().toISOString(),
     model,
     results,
-    aggregateScores: aggregateScoresMap,
+    aggregateScores,
     deltas,
     headToHead,
+    diagnostics: buildDiagnostics(
+      aResults,
+      bResults,
+      pairing.paired,
+      pairing.aOnlyKeys,
+      pairing.bOnlyKeys,
+      sameAgent,
+    ),
   };
 }
-
-// ============================================================
-// Markdown formatting helpers
-// ============================================================
 
 function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function sign(value: number): string {
-  return value >= 0 ? `+${pct(value)}` : `-${pct(Math.abs(value))}`;
+function numberOrNA(value: number | undefined, digits = 1): string {
+  return value === undefined ? "n/a" : value.toFixed(digits);
 }
 
-function bool(value: boolean): string {
-  return value ? 'yes' : 'no';
+function diagnosticRow(
+  label: string,
+  diagnostic: NumericDiagnostic,
+  digits = 1,
+): string {
+  return `| ${label} | ${numberOrNA(diagnostic.a, digits)} | ${numberOrNA(diagnostic.b, digits)} | ${numberOrNA(diagnostic.delta, digits)} | ${diagnostic.pairedCount} | ${diagnostic.status} |`;
 }
 
-const METRIC_LABELS: Partial<Record<keyof BenchmarkScores, string>> = {
-  truePositiveRate: 'True Positive Rate',
-  falseNegativeRate: 'False Negative Rate',
-  falsePositiveRate: 'False Positive Rate',
-  severityAccuracy: 'Severity Accuracy',
-  missingCoverage: 'Missing Coverage',
-  perspectiveCoverage: 'Perspective Coverage',
-  evidenceRate: 'Evidence Rate',
-  compositeScore: 'Composite Score',
-};
-
-const SUMMARY_METRICS: Array<keyof BenchmarkScores> = [
-  'truePositiveRate',
-  'falseNegativeRate',
-  'falsePositiveRate',
-  'severityAccuracy',
-  'missingCoverage',
-  'perspectiveCoverage',
-  'evidenceRate',
-  'compositeScore',
-];
-
-// ============================================================
-// Public: generateMarkdownReport
-// ============================================================
-
-/**
- * Render a human-readable markdown comparison report.
- */
 export function generateMarkdownReport(
   report: ComparisonReport,
   agentA: AgentType,
@@ -164,102 +308,71 @@ export function generateMarkdownReport(
 ): string {
   const a = report.aggregateScores[agentA];
   const b = report.aggregateScores[agentB];
+  const d = report.diagnostics;
+  const lines = [
+    `# ${agentA} vs ${agentB} Benchmark Report`,
+    "",
+    `**Date**: ${report.timestamp}`,
+    `**Model**: ${report.model}`,
+    `**Validity**: ${d.validity.toUpperCase()}`,
+    ...(d.reasons.length > 0 ? [`**Reasons**: ${d.reasons.join("; ")}`] : []),
+    "",
+    "## Evidence-Safe Diagnostic",
+    "",
+    `| Dimension | ${agentA} | ${agentB} | Delta | Paired | Status |`,
+    "|---|---:|---:|---:|---:|---|",
+    `| Completion | ${d.completion.completedA} completed / ${d.completion.failedA} failed | ${d.completion.completedB} completed / ${d.completion.failedB} failed | n/a | ${d.completion.pairedFixtures} | ${d.validity} |`,
+    `| Scorer quality | ${a ? pct(a.compositeScore) : "n/a"} | ${b ? pct(b.compositeScore) : "n/a"} | ${typeof report.deltas.compositeScore === "number" ? pct(report.deltas.compositeScore) : "n/a"} | ${d.qualityPairedCount} | ${d.qualityPairedCount > 0 ? "compared" : "insufficient"} |`,
+    diagnosticRow("Input tokens (total)", d.tokenCost.input.total, 0),
+    diagnosticRow(
+      "Input tokens (per-fixture mean)",
+      d.tokenCost.input.perFixtureMean,
+    ),
+    diagnosticRow("Output tokens (total)", d.tokenCost.output.total, 0),
+    diagnosticRow(
+      "Output tokens (per-fixture mean)",
+      d.tokenCost.output.perFixtureMean,
+    ),
+    diagnosticRow("All tokens (total)", d.tokenCost.all.total, 0),
+    diagnosticRow(
+      "All tokens (per-fixture mean)",
+      d.tokenCost.all.perFixtureMean,
+    ),
+    diagnosticRow("API latency mean (ms)", d.apiLatency),
+    diagnosticRow("Harness overhead mean (ms)", d.harnessOverhead),
+    "",
+    `Unpaired ${agentA}: ${d.completion.aOnlyKeys.join(", ") || "none"}`,
+    `Unpaired ${agentB}: ${d.completion.bOnlyKeys.join(", ") || "none"}`,
+    "",
+    "## Per-Fixture Results",
+    "",
+  ];
 
-  if (!a || !b) {
-    return `# Benchmark Report\n\nError: Missing aggregate scores for agents "${agentA}" and/or "${agentB}".\n`;
-  }
-
-  const fixtureCount = new Set(report.results.map((r) => r.fixtureId)).size;
-
-  const lines: string[] = [];
-
-  // ---- Header ----
-  lines.push(`# ${agentA} vs ${agentB} Benchmark Report`);
-  lines.push('');
-  lines.push(`**Date**: ${report.timestamp}`);
-  lines.push(`**Model**: ${report.model}`);
-  lines.push(`**Fixtures**: ${fixtureCount}`);
-  lines.push('');
-
-  // ---- Summary Table ----
-  lines.push('## Summary Table');
-  lines.push('');
-  lines.push(`| Metric | ${agentA} | ${agentB} | Delta |`);
-  lines.push('|--------|-------------|--------|-------|');
-
-  for (const key of SUMMARY_METRICS) {
-    const label = METRIC_LABELS[key] ?? key;
-    const aVal = a[key];
-    const bVal = b[key];
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      const delta = aVal - bVal;
-      lines.push(`| ${label} | ${pct(aVal)} | ${pct(bVal)} | ${sign(delta)} |`);
+  for (const result of [...report.results].sort((left, right) =>
+    keyOf(left).localeCompare(keyOf(right)),
+  )) {
+    lines.push(
+      `- **${keyOf(result)} / ${result.agentType}**: ${result.completion}`,
+    );
+    if (result.completion === "completed") {
+      lines.push(`  - Composite quality: ${pct(result.scores.compositeScore)}`);
+    } else {
+      lines.push(`  - Failure reason: ${result.failureReason}`);
     }
+    lines.push(
+      `  - Tokens: input=${result.inputTokens ?? "n/a"}, output=${result.outputTokens ?? "n/a"}, total=${result.totalTokens ?? "n/a"}`,
+    );
+    lines.push(
+      `  - API latency: ${result.latencyMs === undefined ? "n/a" : `${result.latencyMs.toFixed(1)}ms`}`,
+    );
+    lines.push(
+      `  - Harness overhead: ${result.harnessOverheadMs === undefined ? "n/a" : `${result.harnessOverheadMs.toFixed(1)}ms`}`,
+    );
   }
 
-  lines.push(`| Pre-Commitment | ${bool(a.hasPreCommitment)} | ${bool(b.hasPreCommitment)} | - |`);
-  lines.push(`| Multi-Perspective | ${bool(a.hasMultiPerspective)} | ${bool(b.hasMultiPerspective)} | - |`);
-  lines.push(`| Gap Analysis | ${bool(a.hasGapAnalysis)} | ${bool(b.hasGapAnalysis)} | - |`);
-  lines.push('');
-
-  // ---- Per-Fixture Results ----
-  lines.push('## Per-Fixture Results');
-  lines.push('');
-
-  const fixtureIds = Array.from(new Set(report.results.map((r) => r.fixtureId))).sort();
-
-  for (const fixtureId of fixtureIds) {
-    lines.push(`### ${fixtureId}`);
-    lines.push('');
-
-    for (const agentType of [agentA, agentB]) {
-      const result = report.results.find(
-        (r) => r.fixtureId === fixtureId && r.agentType === agentType,
-      );
-      if (!result) continue;
-
-      const s = result.scores;
-      lines.push(
-        `- **${agentType}**: composite=${pct(s.compositeScore)} ` +
-          `tp=${pct(s.truePositiveRate)} fn=${pct(s.falseNegativeRate)} ` +
-          `fp=${pct(s.falsePositiveRate)}`,
-      );
-      lines.push(
-        `  - Matched: ${result.matchedFindings.length}/${result.matchedFindings.length + result.missedFindings.length} findings`,
-      );
-
-      if (result.missedFindings.length > 0) {
-        lines.push(`  - Missed: ${result.missedFindings.join(', ')}`);
-      }
-      if (result.spuriousFindings.length > 0) {
-        const preview = result.spuriousFindings
-          .slice(0, 3)
-          .map((t) => t.slice(0, 60).replace(/\n/g, ' '))
-          .join('; ');
-        lines.push(`  - Spurious: ${preview}${result.spuriousFindings.length > 3 ? ' ...' : ''}`);
-      }
-
-      if (result.latencyMs !== undefined) {
-        lines.push(`  - Latency: ${(result.latencyMs / 1000).toFixed(1)}s`);
-      }
-    }
-    lines.push('');
-  }
-
-  // ---- Statistical Summary ----
-  lines.push('## Statistical Summary');
-  lines.push('');
-
-  const meanDelta = report.headToHead.reduce((acc, h) => acc + h.delta, 0) /
-    Math.max(report.headToHead.length, 1);
-
-  const wins = report.headToHead.filter((h) => h.winner === agentA).length;
-  const losses = report.headToHead.filter((h) => h.winner === agentB).length;
-  const ties = report.headToHead.filter((h) => h.winner === 'tie').length;
-
-  lines.push(`- Mean composite delta: ${sign(meanDelta)}`);
-  lines.push(`- Win/Loss/Tie (${agentA} perspective): ${wins}/${losses}/${ties}`);
-  lines.push('');
-
-  return lines.join('\n');
+  lines.push("");
+  lines.push(
+    "This diagnostic reports separate observed dimensions. It does not prove an Opus regression or attribute timing to model compute, network, or harness internals beyond the stated boundaries.",
+  );
+  return lines.join("\n");
 }

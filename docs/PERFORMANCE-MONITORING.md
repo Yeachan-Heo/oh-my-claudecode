@@ -274,6 +274,24 @@ console.log(`Active: ${eff.active}, Stale: ${eff.stale}, Total: ${eff.total}`);
 - **<80%**: Some agents stale or waiting
 - **<50%**: Significant parallelization issues
 
+This score is a live activity/health signal. It is not a benchmark of model quality, token cost, latency, or harness overhead.
+
+### Benchmark Efficiency Diagnostic
+
+The TypeScript agent benchmarks under `benchmarks/` report these dimensions separately:
+
+- **Run completion**: whether each agent/fixture run completed or failed.
+- **Scorer quality**: ground-truth-based benchmark scores for completed paired runs.
+- **Token cost proxy**: API-reported input, output, and combined tokens, shown as paired totals and per-fixture means; missing usage is `insufficient`/unavailable, never zero.
+- **API latency**: the retry-inclusive API-call span. It is not pure model compute time.
+- **Harness overhead**: measured non-API processing after the API response, including parsing, ground-truth loading, scoring, matching, and result construction.
+
+Comparison deltas use matching `(domain, fixtureId)` observations for each dimension. Unpaired fixtures, failed runs, or missing telemetry make the diagnostic `INCONCLUSIVE`; they are not treated as improvements or regressions. The report deliberately does not collapse these dimensions into one efficiency score.
+
+Prompt, fixture, and ground-truth I/O failures fail closed instead of silently changing the compared inputs. An absent per-fixture label is reported as a recoverable failed run, while a missing label root or malformed/invalid label is fatal configuration evidence. Recoverable per-fixture failures remain visible in the report, and the shared benchmark CLI exits nonzero after writing the diagnostic when any run failed.
+
+A diagnostic report alone cannot prove that a particular model, including Opus, regressed. A model claim requires controlled paired runs with the same fixtures, prompts, model identity, configuration, and complete measurements. Even then, the timing fields do not attribute differences to model compute, network conditions, provider queues, retries, or harness internals beyond their documented boundaries.
+
 ### Stale Agent Cleanup
 
 Clean up agents that exceed the timeout threshold:
