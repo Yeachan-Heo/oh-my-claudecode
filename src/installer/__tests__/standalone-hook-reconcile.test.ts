@@ -706,4 +706,264 @@ describe('install() plugin-provided hook deduplication (#2252)', () => {
     // OMC hook should NOT be re-added
     expect(commands).not.toContain('node "$HOME/.claude/hooks/keyword-detector.mjs"');
   });
+
+  it('removes exact same-event plugin duplicates while preserving mixed user hooks and cross-event entries (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: pluginCommand }],
+        }],
+      },
+    }, null, 2));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [{
+          matcher: '*',
+          timeout: 42,
+          hooks: [
+            { type: 'command', command: pluginCommand },
+            { type: 'command', command: 'node /user/session-start.mjs', userField: 'preserve-me' },
+          ],
+        }],
+        Stop: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: pluginCommand }],
+        }],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, Array<Record<string, unknown> & { hooks: Array<Record<string, unknown>> }>>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks?.SessionStart).toEqual([{
+      matcher: '*',
+      timeout: 42,
+      hooks: [{ type: 'command', command: 'node /user/session-start.mjs', userField: 'preserve-me' }],
+    }]);
+    expect(writtenSettings.hooks?.Stop?.[0]?.hooks).toEqual([
+      { type: 'command', command: pluginCommand },
+    ]);
+    const firstWrittenSettings = readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8');
+    const secondResult = install({ force: true, skipClaudeCheck: true });
+    expect(secondResult.success).toBe(true);
+    expect(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')).toBe(firstWrittenSettings);
+  });
+
+  it('reaches a fixed point when a plugin duplicate shares a group with a standalone OMC hook (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [{ hooks: [
+          { type: 'command', command: pluginCommand },
+          { type: 'command', command: 'node "$HOME/.claude/hooks/session-start.mjs"' },
+        ] }],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const firstResult = install({ force: true, skipClaudeCheck: true });
+    const firstWrittenSettings = readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8');
+    const firstSettings = JSON.parse(firstWrittenSettings) as { hooks?: Record<string, unknown> };
+    const secondResult = install({ force: true, skipClaudeCheck: true });
+
+    expect(firstResult.success).toBe(true);
+    expect(secondResult.success).toBe(true);
+    expect(firstSettings.hooks).toBeUndefined();
+    expect(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')).toBe(firstWrittenSettings);
+  });
+  it('drops empty hook containers and reports exact removals in verbose mode (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }, null, 2));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const { install } = await loadInstaller();
+      const result = install({ force: true, skipClaudeCheck: true, verbose: true });
+      const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+        hooks?: Record<string, unknown>;
+      };
+
+      expect(result.success).toBe(true);
+      expect(writtenSettings.hooks).toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        '  Removed 1 stale plugin duplicate hook entry from settings.json (events: SessionStart)',
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('fails closed with a root-aware diagnostic when the plugin registry is ambiguous (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }));
+    writeFileSync(join(testClaudeDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      'oh-my-claudecode': [{ installPath: fakePluginRoot }],
+      'oh-my-claudecode-lookalike': [],
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }, null, 2));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const { install } = await loadInstaller();
+      const result = install({ force: true, skipClaudeCheck: true, verbose: true });
+      const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+        hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+      };
+
+      expect(result.success).toBe(true);
+      expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(pluginCommand);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(
+        `Skipped plugin duplicate-hook cleanup: plugin root resolution is plugin (cleanupAllowed=false, roots=${fakePluginRoot})`,
+      ));
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('cleans duplicates when all installed plugin manifests agree (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    const manifest = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [
+          { type: 'command', command: pluginCommand },
+          { type: 'webhook', url: 'https://example.invalid/hook' },
+        ] }],
+      },
+    });
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), manifest);
+    const secondPluginRoot = join(testClaudeDir, 'second-identical-plugin-root');
+    writeCompletePluginPayload(secondPluginRoot);
+    writeFileSync(join(secondPluginRoot, 'hooks', 'hooks.json'), manifest);
+    writeFileSync(join(testClaudeDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      'oh-my-claudecode': [
+        { installPath: fakePluginRoot },
+        { installPath: secondPluginRoot },
+      ],
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: { SessionStart: [{ matcher: 'custom', hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, unknown>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks).toBeUndefined();
+  });
+
+  it('applies the cleanup through real update reconciliation (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }, null, 2));
+
+    vi.resetModules();
+    const { reconcileUpdateRuntime } = await import('../../features/auto-update.js');
+    const result = reconcileUpdateRuntime({ verbose: false, skipGracePeriod: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, unknown>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks).toBeUndefined();
+  });
+
+  it('preserves plugin-shaped settings hooks when the authoritative manifest is corrupt (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), '{');
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(pluginCommand);
+  });
+
+  it('preserves duplicates when installed plugin manifests disagree (#3638)', async () => {
+    setupPluginWithHooks();
+
+    const pluginCommand = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-start.mjs';
+    writeFileSync(join(fakePluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }] },
+    }));
+    const secondPluginRoot = join(testClaudeDir, 'second-plugin-root');
+    writeCompletePluginPayload(secondPluginRoot);
+    writeFileSync(join(secondPluginRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node different-plugin-hook.mjs' }] }] },
+    }));
+    writeFileSync(join(testClaudeDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      'oh-my-claudecode': [
+        { installPath: fakePluginRoot },
+        { installPath: secondPluginRoot },
+      ],
+    }));
+    writeFileSync(join(testClaudeDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode': true },
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: pluginCommand }] }],
+      },
+    }, null, 2));
+
+    const { install } = await loadInstaller();
+    const result = install({ force: true, skipClaudeCheck: true });
+    const writtenSettings = JSON.parse(readFileSync(join(testClaudeDir, 'settings.json'), 'utf-8')) as {
+      hooks?: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(writtenSettings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toBe(pluginCommand);
+  });
 });
