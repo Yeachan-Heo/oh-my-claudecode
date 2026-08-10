@@ -1277,23 +1277,76 @@ function isTeamEnabled() {
 }
 
 /**
- * Detect an installed official Anthropic `ralph-loop` plugin that exposes a
- * `/ralph-loop` command, without scanning any plugin payloads.
+ * Detect an installed AND enabled official Anthropic `ralph-loop` plugin
+ * that exposes a `/ralph-loop` command, without scanning any plugin payloads.
  *
- * Reads only the machine-readable plugin registry
- * `[$CLAUDE_CONFIG_DIR|~/.claude]/plugins/installed_plugins.json` (the same
- * file OMC already uses for plugin-cache bookkeeping) and checks for the
- * existence of the plugin's command file. No SKILL.md body, command body, or
- * private payload is ever read. The official plugin's registry id is
- * `ralph-loop@claude-plugins-official`; lookalike ids that merely contain
- * "ralph" (e.g. a user skill directory named ralph-loop) are not treated as
- * the official plugin.
+ * Two independent signals, following existing installer semantics
+ * (`hasEnabledOmcPlugin` in src/installer/index.ts):
+ *
+ * 1. INSTALLED: the machine-readable plugin registry
+ *    `[$CLAUDE_CONFIG_DIR|~/.claude]/plugins/installed_plugins.json` contains
+ *    the official id `ralph-loop@claude-plugins-official` with a real
+ *    `commands/ralph-loop.md` payload under its installPath. The registry's
+ *    own `enabled` flag is deliberately NOT consulted: it does not
+ *    authoritatively encode enablement (a plugin disabled through canonical
+ *    settings can still carry `enabled: true`, and vice versa).
+ * 2. ENABLED: `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` lists the
+ *    plugin in the canonical `enabledPlugins` field (legacy `plugins` field
+ *    accepted for backward compatibility), as an array of plugin ids or a
+ *    map whose value is not `false`. Missing or malformed settings.json is
+ *    treated as not enabled, exactly like the installer.
+ *
+ * No SKILL.md body, command body, or private payload is ever read. Only the
+ * plugin-name token is matched, so lookalike ids (`my-ralph-loop@community`,
+ * `ralph-loop-fork@community`) are not treated as the official plugin.
  *
  * Returns a short notice string, or '' when the official plugin is not
- * installed. A disabled registry entry (`enabled: false`) is treated as not
- * installed so the notice does not nag about plugins the user turned off.
+ * installed and enabled.
  */
+const OFFICIAL_RALPH_LOOP_PLUGIN_ID = 'ralph-loop@claude-plugins-official';
+
+function normalizeRalphLoopPluginId(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  const at = trimmed.lastIndexOf('@');
+  return (at === -1 ? trimmed : trimmed.slice(0, at)).trim().toLowerCase();
+}
+
+function isOfficialRalphLoopEnabledInSettings(settings) {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+  for (const candidate of [settings.enabledPlugins, settings.plugins]) {
+    if (Array.isArray(candidate)) {
+      if (candidate.some((id) => normalizeRalphLoopPluginId(id) === 'ralph-loop')) {
+        return true;
+      }
+    } else if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      if (Object.entries(candidate).some(([id, value]) =>
+        normalizeRalphLoopPluginId(id) === 'ralph-loop' && value !== false
+      )) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isOfficialRalphLoopEnabledInSettingsFile() {
+  const settingsPath = join(getClaudeConfigDir(), 'settings.json');
+  if (!existsSync(settingsPath)) return false;
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return false;
+  }
+  return isOfficialRalphLoopEnabledInSettings(settings);
+}
+
 function findOfficialRalphLoopNotice() {
+  if (!isOfficialRalphLoopEnabledInSettingsFile()) {
+    return '';
+  }
+
   const installedPluginsPath = join(getClaudeConfigDir(), 'plugins', 'installed_plugins.json');
   if (!existsSync(installedPluginsPath)) {
     return '';
@@ -1314,15 +1367,13 @@ function findOfficialRalphLoopNotice() {
     return '';
   }
 
-  const officialId = 'ralph-loop@claude-plugins-official';
-  const entries = plugins[officialId];
+  const entries = plugins[OFFICIAL_RALPH_LOOP_PLUGIN_ID];
   if (!Array.isArray(entries) || entries.length === 0) {
     return '';
   }
 
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') continue;
-    if (entry.enabled === false) continue;
     const installPath = entry.installPath;
     if (typeof installPath !== 'string' || installPath.length === 0) continue;
     const commandFile = join(installPath, 'commands', 'ralph-loop.md');

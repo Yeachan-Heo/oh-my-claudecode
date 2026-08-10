@@ -34,20 +34,30 @@ with zero mention of the official plugin.
 
 ## What OMC can reliably detect at `/ralph` invocation (no private-payload scan)
 
-Signal: **the installed-plugins registry + one file-existence check**, both
-already-familiar OMC surfaces:
+Two independent signals, both already-familiar OMC surfaces, mirroring the
+installer's `hasEnabledOmcPlugin` semantics (`src/installer/index.ts`):
 
-- Read `[$CLAUDE_CONFIG_DIR|~/.claude]/plugins/installed_plugins.json` (the
-  file OMC's installer/auto-update already owns for plugin-cache bookkeeping).
-- Look up exactly the official id `ralph-loop@claude-plugins-official`.
-- Verify `commands/ralph-loop.md` exists under the entry's `installPath`.
-- Respect `enabled: false` (do not nag about disabled plugins).
-- Never open any SKILL.md / command body / payload.
+1. **INSTALLED** — `[$CLAUDE_CONFIG_DIR|~/.claude]/plugins/installed_plugins.json`
+   (the file OMC's installer/auto-update already owns for plugin-cache
+   bookkeeping) contains the exact official id `ralph-loop@claude-plugins-official`
+   and `commands/ralph-loop.md` exists under the entry's `installPath`.
+   The registry's own `enabled` flag is **deliberately not consulted**: it does
+   not authoritatively encode enablement (a plugin disabled through canonical
+   settings can still carry `enabled: true`, and vice versa).
+2. **ENABLED** — `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` lists the plugin
+   in the canonical `enabledPlugins` field (legacy `plugins` field accepted for
+   backward compatibility), either as an array of plugin ids or as a map whose
+   value is not `false`. Missing, malformed, or field-less settings.json is
+   treated as **not enabled**, exactly like the installer.
+
+Never open any SKILL.md / command body / payload — the only file-existence
+probe is `existsSync` on `commands/ralph-loop.md`.
 
 Measured cost (invocation-time only, no startup scan): ~0.08 ms median for the
-registry read + existence probes vs ~150-335 ms total hook invocation. When the
-official plugin is absent the added cost is one `existsSync` on the registry
-path (~microseconds) and the output is byte-identical to today.
+registry read + settings read + existence probes vs ~150-335 ms total hook
+invocation. When the official plugin is absent or disabled the added cost is
+two `existsSync` probes (~microseconds) and the output is byte-identical to
+today.
 
 ## Implemented option (G002): non-breaking disambiguation notice
 
@@ -60,16 +70,25 @@ path (~microseconds) and the output is byte-identical to today.
   > Note: the official Anthropic \`ralph-loop\` plugin is also installed.
   > \`/ralph\` runs OMC's ralph; use \`/ralph-loop\` for the official plugin.
 
-- Verified matrix (both artifacts, automated regression test A–G):
+- Verified matrix (both artifacts, automated regression test A–N):
   | Case | Outcome |
   |---|---|
-  | A. both enabled | notice present |
-  | B. official absent | silent (identical output) |
-  | C. official disabled | silent |
+  | A. installed + enabled (`enabledPlugins` map) | notice present |
+  | A2. `enabledPlugins` as array of ids | notice present |
+  | B. official absent from registry (settings enables) | silent (identical output) |
+  | C. disabled in settings (`enabledPlugins: false`) | silent — enablement from settings, not registry flag |
+  | C2. settings has neither field | silent |
   | D. registry entry, payload missing | silent (no fabrication) |
-  | E. lookalike id only (`my-ralph-loop@community`) | silent |
+  | E. lookalike id only (`my-ralph-loop@community`) | silent (settings-side lookalike too) |
   | F. no registry | silent |
   | G. non-ralph skill (autopilot) | silent |
+  | H. official `/ralph-loop` command | never routes to OMC, never carries notice |
+  | I. `/omc-ralph` alias | routes to OMC ralph with notice |
+  | J. registry `enabled: false` + settings enabled | notice present (settings wins) |
+  | K. registry `enabled: true` + settings missing | silent (missing settings = not enabled) |
+  | L. legacy `plugins` map | notice present |
+  | M. malformed settings.json | silent (fail closed) |
+  | N. config root via `HOME` (no `CLAUDE_CONFIG_DIR`) | notice present |
 - `/ralph` routing and the full invocation text are unchanged except the note.
 - Suites: `hook-templates.test.ts` 18/18, `keyword-detector-script.test.ts` +
   `skills.test.ts` 154/154, ESLint + `tsc --noEmit` clean.
