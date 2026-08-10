@@ -459,6 +459,42 @@ export function executeFlush(
 }
 
 /**
+ * Durable merge-and-write for a caller that ALREADY holds the state lock.
+ *
+ * R1 (#3663): the state lock is a non-reentrant O_CREAT|O_EXCL advisory lock
+ * (src/lib/file-lock.ts) and isLockStale() sees the CURRENT process as alive, so
+ * a nested acquisition can never succeed. Routing through writeTrackingState +
+ * flushPendingWrites from inside a lock scope therefore busy-spins for the whole
+ * LOCK_OPTS.timeoutMs (500ms of wasted hook budget, and Atomics.wait throws on
+ * the main thread so the wait is a spin) and then degrades to an UNLOCKED,
+ * NON-MERGE-AWARE writeTrackingStateImmediate fallback that overwrites whatever
+ * a concurrent writer landed on disk.
+ *
+ * This helper does the same disk re-read + merge + atomic write as executeFlush
+ * without re-entering the lock, so an in-lock caller gets a durable, merged
+ * write at zero lock-contention cost.
+ *
+ * Any debounced pending write for the same path is consumed: `state` is derived
+ * from readTrackingState(), which already serves the pending snapshot, so
+ * dropping it cannot lose data and stops a later debounce from resurrecting a
+ * pre-mutation snapshot.
+ */
+function writeTrackingStateLocked(
+  directory: string,
+  state: SubagentTrackingState,
+  sessionId?: string,
+): void {
+  const writePath = resolveWritePath(directory, sessionId);
+  const pending = pendingWrites.get(writePath);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingWrites.delete(writePath);
+  }
+  const merged = mergeTrackerStates(readDiskState(directory, sessionId), state);
+  writeTrackingStateImmediate(directory, merged, sessionId);
+}
+
+/**
  * Write tracking state with debouncing to reduce I/O.
  * The flush callback acquires the lock, re-reads disk state, merges with
  * the pending in-memory delta, and writes atomically.
@@ -919,17 +955,22 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
         state.agents = state.agents.filter((a) => !toRemove.has(a.agent_id));
       }
 
-      // B8 (#3663): write the tracking state synchronously and flush it
-      // durably BEFORE the hook returns. writeTrackingState alone is
-      // debounced (100ms) and its flush can be re-queued on lock contention,
-      // so without an explicit flush the hook could return with the evidence
-      // still only in memory. flushPendingWrites() re-enters the lock, merges
-      // with disk state, and writes atomically; the collector deadline was
-      // tightened (EVIDENCE_DEADLINE_MS=3000) so the lock wait (500ms worst
-      // case) + this synchronous flush + replay/mission writes stay inside the
-      // 4.5s runner deadline with the fail-open hook return path intact.
-      writeTrackingState(input.cwd, state, sessionId);
-      flushPendingWrites();
+      // B8 + R1 (#3663): write the tracking state DURABLY before the hook
+      // returns. writeTrackingState alone is debounced (100ms) and its flush can
+      // be re-queued on lock contention, so the hook could otherwise return with
+      // the evidence still only in memory.
+      //
+      // R1: the durable write must NOT route through writeTrackingState +
+      // flushPendingWrites from here. This whole body runs inside
+      // withFileLockSync on the state lock, the lock is non-reentrant
+      // (O_CREAT|O_EXCL) and its staleness check sees this very process as alive,
+      // so the nested acquisition burned the full LOCK_OPTS.timeoutMs (500ms) of
+      // hook budget spinning and then degraded to an unlocked, non-merge-aware
+      // overwrite that could clobber a concurrent writer's disk state.
+      // writeTrackingStateLocked does the identical disk re-read + merge +
+      // atomic write under the lock this frame already holds, so the state is
+      // durable and merged with no reacquisition and no fallback path.
+      writeTrackingStateLocked(input.cwd, state, sessionId);
 
       if (input.agent_id) {
         // Record to session replay JSONL for /trace

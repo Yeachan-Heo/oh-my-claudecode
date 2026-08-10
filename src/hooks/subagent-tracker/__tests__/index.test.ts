@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -11,7 +11,9 @@ import {
   processSubagentStart,
   processSubagentStop,
   readTrackingState,
+  readDiskState,
   writeTrackingState,
+  getStateFilePath,
   recordToolUsageWithTiming,
   getAgentPerformance,
   updateTokenUsage,
@@ -25,6 +27,12 @@ import {
   type SubagentTrackingState,
   type ToolUsageEntry,
 } from "../index.js";
+import { collectWorktreeDirtyEvidence } from "../worktree-evidence.js";
+import {
+  acquireFileLockSync,
+  releaseFileLockSync,
+  lockPathFor,
+} from "../../../lib/file-lock.js";
 import { readMissionBoardState } from "../../../hud/mission-board.js";
 import { readReplayEvents, getReplaySummary } from "../session-replay.js";
 
@@ -1709,12 +1717,11 @@ describe("subagent-tracker", () => {
 
     it("flushes the durable tracking state before the hook returns under lock contention (issue #3663 B8)", () => {
       // B8: the stop hook must write the tracking state DURABLY before
-      // returning. writeTrackingState is debounced; the added
-      // flushPendingWrites() inside the stop path guarantees the state file
-      // exists with the closed agent + evidence even when the caller never
-      // flushes. Use a slow collector (fake slow git via the worktree path is
-      // covered at unit level); here we prove the flush happens by reading
-      // from a FRESH process-scoped path after the stop returns.
+      // returning. writeTrackingState is debounced, so the stop path performs an
+      // in-lock durable merge+write (writeTrackingStateLocked) instead, which
+      // guarantees the state file carries the closed agent + evidence even when
+      // the caller never flushes. See the R1 case below for the lock-scope and
+      // bounded-latency contract of that write.
       const repoDir = makeGitRepo();
       writeFileSync(join(repoDir, "tracked.txt"), "modified\n");
 
@@ -1748,6 +1755,127 @@ describe("subagent-tracker", () => {
       expect(agent?.status).toBe("failed");
       expect(agent?.worktree_evidence?.kind).toBe("dirty");
       expect(state.total_failed).toBe(1);
+    });
+
+    it("persists durably under the already-held lock instead of re-entering it (issue #3663 R1)", () => {
+      // R1: processSubagentStop runs its whole body inside withFileLockSync on
+      // the session state lock. The lock (src/lib/file-lock.ts) is a
+      // non-reentrant O_CREAT|O_EXCL advisory lock and isLockStale() sees the
+      // CURRENT process as alive, so a nested acquisition can never succeed: it
+      // busy-spins for the full LOCK_OPTS.timeoutMs (500ms) and then degrades to
+      // an UNLOCKED, UNMERGED writeTrackingStateImmediate fallback that clobbers
+      // whatever a concurrent writer already landed on disk.
+      //
+      // This test calls the hook with NO external flush and pins all five
+      // properties: disk durability, bounded latency, merge-preserving lock
+      // scope, no residual debounce entry, and a released lock.
+      const repoDir = makeGitRepo();
+      writeFileSync(join(repoDir, "tracked.txt"), "modified\n");
+      const sessionId = "sess-r1-lock";
+
+      processSubagentStart({
+        session_id: sessionId,
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-r1-stop",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "hold the lock exactly once",
+      });
+      flushPendingWrites();
+
+      // Self-calibrating latency baseline: the hook's only unavoidable cost is
+      // the bounded evidence collector, so the nested-lock spin (500ms) is
+      // detectable without a machine-speed-dependent absolute threshold.
+      const evidenceStartedAt = Date.now();
+      collectWorktreeDirtyEvidence(repoDir);
+      const evidenceMs = Date.now() - evidenceStartedAt;
+
+      // Make the hook's in-memory snapshot genuinely stale, deterministically.
+      // processSubagentStop is fully synchronous (execFileSync + sync fs), and so
+      // is everything below, so the 100ms debounce timer seeded here can never
+      // fire before the hook returns — no event-loop turn happens in between.
+      //
+      // 1. Seed the debounce slot with a snapshot that does NOT know about the
+      //    peer agent. readTrackingState() serves this pending snapshot to the
+      //    hook instead of reading disk.
+      // 2. Land a concurrent writer's agent on DISK only.
+      //
+      // A merge-aware write under the held lock (readDiskState + merge) keeps the
+      // peer. The unlocked fallback writes the stale snapshot verbatim and
+      // clobbers it.
+      const statePath = getStateFilePath(repoDir, sessionId);
+      const staleSnapshot = JSON.parse(
+        readFileSync(statePath, "utf-8"),
+      ) as SubagentTrackingState;
+      writeTrackingState(repoDir, staleSnapshot, sessionId);
+
+      const diskWithPeer = JSON.parse(
+        readFileSync(statePath, "utf-8"),
+      ) as SubagentTrackingState;
+      diskWithPeer.agents.push({
+        agent_id: "ag-concurrent-peer",
+        agent_type: "oh-my-claudecode:planner",
+        started_at: new Date().toISOString(),
+        parent_mode: "team",
+        status: "running",
+      });
+      diskWithPeer.total_spawned += 1;
+      writeFileSync(statePath, JSON.stringify(diskWithPeer, null, 2), "utf-8");
+
+      const startedAt = Date.now();
+      const output = processSubagentStop({
+        session_id: sessionId,
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-r1-stop",
+        output: "Agent terminated early due to an API error",
+        success: false,
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+
+      // (b) Bounded latency: no nested-lock acquisition spin. The 500ms spin
+      // cannot hide inside a 300ms allowance over the collector cost.
+      expect(elapsedMs).toBeLessThan(evidenceMs + 300);
+
+      // (a) Durable on DISK with no caller flush — read the file, not the
+      // in-memory pending cache that readTrackingState would serve.
+      const disk = JSON.parse(
+        readFileSync(statePath, "utf-8"),
+      ) as SubagentTrackingState;
+      const stopped = disk.agents.find((a) => a.agent_id === "ag-r1-stop");
+      expect(stopped?.status).toBe("failed");
+      expect(stopped?.worktree_evidence?.kind).toBe("dirty");
+      expect(stopped?.worktree_evidence?.trackedCount).toBe(1);
+
+      // (c) Lock scope: the concurrent writer's disk-only agent survived, so the
+      // write merged with disk under the lock and never fell back to an
+      // unlocked overwrite.
+      expect(disk.agents.map((a) => a.agent_id)).toContain("ag-concurrent-peer");
+      // Counter merge is preserved too (max of disk and in-memory).
+      expect(disk.total_spawned).toBe(2);
+
+      // (e) The lock is released: a zero-timeout acquisition succeeds.
+      const handle = acquireFileLockSync(lockPathFor(statePath), {
+        timeoutMs: 0,
+      });
+      expect(handle).not.toBeNull();
+      releaseFileLockSync(handle!);
+
+      // (d) No residual debounced pending write can resurrect pre-stop state.
+      flushPendingWrites();
+      const afterFlush = readDiskState(repoDir, sessionId);
+      expect(
+        afterFlush.agents.find((a) => a.agent_id === "ag-r1-stop")?.status,
+      ).toBe("failed");
+      expect(afterFlush.agents.map((a) => a.agent_id)).toContain(
+        "ag-concurrent-peer",
+      );
     });
   });
 });
