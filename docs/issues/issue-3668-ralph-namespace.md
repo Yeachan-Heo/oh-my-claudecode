@@ -64,13 +64,14 @@ today.
 - Files: `scripts/keyword-detector.mjs` and `templates/hooks/keyword-detector.mjs`
   (the two packaged artifacts that are kept in lockstep — see
   `src/installer/__tests__/hook-templates.test.ts`).
-- Behavior: only when `ralph` is the routed skill AND the official plugin is
+- Behavior: only when `ralph` is among the routed skills (single-skill or
+  multi-skill routing such as `/ralph ultrawork`) AND the official plugin is
   installed and enabled, the invocation guide gains one line:
 
   > Note: the official Anthropic \`ralph-loop\` plugin is also installed.
   > \`/ralph\` runs OMC's ralph; use \`/ralph-loop\` for the official plugin.
 
-- Verified matrix (both artifacts, automated regression test A–N):
+- Verified matrix (both artifacts, automated regression test A–P3):
   | Case | Outcome |
   |---|---|
   | A. installed + enabled (`enabledPlugins` map) | notice present |
@@ -89,9 +90,16 @@ today.
   | L. legacy `plugins` map | notice present |
   | M. malformed settings.json | silent (fail closed) |
   | N. config root via `HOME` (no `CLAUDE_CONFIG_DIR`) | notice present |
+  | O. same-named community plugin enabled, official `false` | silent (ids match on the full `name@marketplace` id) |
+  | O2. `enabledPlugins` array with only `ralph-loop@community` | silent |
+  | O3. bare marketplace-less `ralph-loop` id | silent (not the official id) |
+  | O4. canonical `enabledPlugins: false` + legacy `plugins: true` | silent (canonical field wins) |
+  | P. multi-skill routing (`/ralph ultrawork`) | notice present (no multi-skill bypass) |
+  | P2. multi-skill routing without ralph | silent |
+  | P3. multi-skill routing, official disabled | silent |
 - `/ralph` routing and the full invocation text are unchanged except the note.
-- Suites: `hook-templates.test.ts` 18/18, `keyword-detector-script.test.ts` +
-  `skills.test.ts` 154/154, ESLint + `tsc --noEmit` clean.
+- Suites: `hook-templates.test.ts` 18/18, `keyword-detector-script.test.ts`
+  53/53, `skills.test.ts` 53/53, `npm run lint` (0 errors) + `tsc --noEmit` clean.
 
 ## Option comparison: notice (implemented) vs rename/alias
 

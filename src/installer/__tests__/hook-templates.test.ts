@@ -544,6 +544,74 @@ OMC Ultrawork = "특수부대 작전 반"
         });
         expect(result.hookSpecificOutput?.additionalContext ?? '').toContain('ralph-loop');
       }
+
+      // O. Same-named COMMUNITY plugin enabled while the official one is explicitly
+      //    disabled -> silent. Plugin ids are matched on the full id including the
+      //    marketplace suffix, so `ralph-loop@community` never stands in for the
+      //    official plugin (Codex P2: name-token matching allowed this bypass).
+      writeSettings({
+        enabledPlugins: {
+          'ralph-loop@claude-plugins-official': false,
+          'ralph-loop@community': true,
+        },
+      });
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': officialEntry(true),
+        'ralph-loop@community': [{ installPath: officialRoot, version: '2.0.0', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-community-same-name-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // O2. Array form: only the same-named community id is enabled -> silent.
+      writeSettings({ enabledPlugins: ['ralph-loop@community', 'other-plugin@foo'] });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-community-array-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // O3. Bare, marketplace-less `ralph-loop` id is not the official id -> silent.
+      writeSettings({ enabledPlugins: { 'ralph-loop': true } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-bare-id-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // O4. Canonical `enabledPlugins` disabling the official plugin wins over a
+      //     stale legacy `plugins` entry that still enables it.
+      writeSettings({
+        enabledPlugins: { 'ralph-loop@claude-plugins-official': false },
+        plugins: { 'ralph-loop@claude-plugins-official': true },
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-canonical-wins-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // P. Multi-skill routing (`ralph ultrawork`) carries the same notice as the
+      //    single-skill path; otherwise combining keywords bypasses disambiguation.
+      writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': officialEntry(true),
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const context = contextOf(runIn(scriptPath, `ralph-multi-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'));
+        expect(context).toContain('[MAGIC KEYWORDS DETECTED: RALPH, ULTRAWORK]');
+        expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+        expect(context).toContain('use `/ralph-loop` for the official plugin');
+      }
+
+      // P2. Multi-skill routing without ralph never carries the notice.
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const context = contextOf(runIn(scriptPath, `nonralph-multi-${basename(scriptPath)}`, 'autopilot and ultrawork this repo'));
+        expect(context).toContain('[MAGIC KEYWORDS DETECTED:');
+        expect(context).not.toContain('ralph-loop');
+      }
+
+      // P3. Multi-skill routing stays silent when the official plugin is disabled.
+      writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-multi-disabled-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'))).not.toContain('ralph-loop');
+      }
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });

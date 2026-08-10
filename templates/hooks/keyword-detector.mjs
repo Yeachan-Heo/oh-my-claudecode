@@ -1139,11 +1139,19 @@ Preferred invocation: /oh-my-claudecode:${s.name}${argsText}
 ${pathStatus}`;
   }).join('\n\n');
 
+  // Multi-skill routing (e.g. `/ralph ultrawork`) must carry the same
+  // disambiguation notice as the single-skill path, or it becomes a bypass.
+  const ralphLoopNotice = skills.some((s) => s.name === 'ralph')
+    ? findOfficialRalphLoopNotice()
+    : '';
+
   return `[MAGIC KEYWORDS DETECTED: ${skills.map(s => s.name.toUpperCase()).join(', ')}]
 
 Execute ALL detected workflows in order using compact invocation guidance. Do not inline full SKILL.md files into the prompt.
 
-${skillBlocks}
+${skillBlocks}${ralphLoopNotice ? `
+
+${ralphLoopNotice}` : ''}
 
 User request (compact echo; original prompt remains authoritative):
 ${compactHookText(originalPrompt)}
@@ -1247,36 +1255,47 @@ function isTeamEnabled() {
  *    map whose value is not `false`. Missing or malformed settings.json is
  *    treated as not enabled, exactly like the installer.
  *
- * No SKILL.md body, command body, or private payload is ever read. Only the
- * plugin-name token is matched, so lookalike ids (`my-ralph-loop@community`,
- * `ralph-loop-fork@community`) are not treated as the official plugin.
+ * Both signals match the FULL plugin id exactly, marketplace suffix included.
+ * The suffix is never stripped, so a same-named community plugin
+ * (`ralph-loop@community`) can never stand in for the official one — not even
+ * when the official plugin is installed and explicitly disabled.
+ *
+ * No SKILL.md body, command body, or private payload is ever read.
  *
  * Returns a short notice string, or '' when the official plugin is not
  * installed and enabled.
  */
 const OFFICIAL_RALPH_LOOP_PLUGIN_ID = 'ralph-loop@claude-plugins-official';
 
-function normalizeRalphLoopPluginId(value) {
-  if (typeof value !== 'string') return '';
-  const trimmed = value.trim();
-  const at = trimmed.lastIndexOf('@');
-  return (at === -1 ? trimmed : trimmed.slice(0, at)).trim().toLowerCase();
+function isOfficialRalphLoopPluginId(value) {
+  return typeof value === 'string'
+    && value.trim().toLowerCase() === OFFICIAL_RALPH_LOOP_PLUGIN_ID;
+}
+
+/**
+ * Enablement verdict of a single settings field for the official plugin:
+ * `true`/`false` when the field mentions the official id, `null` when it does
+ * not mention it at all (so the next field may decide).
+ */
+function officialRalphLoopEnablementIn(field) {
+  if (Array.isArray(field)) {
+    return field.some((id) => isOfficialRalphLoopPluginId(id)) ? true : null;
+  }
+  if (field && typeof field === 'object') {
+    for (const [id, value] of Object.entries(field)) {
+      if (isOfficialRalphLoopPluginId(id)) return value !== false;
+    }
+  }
+  return null;
 }
 
 function isOfficialRalphLoopEnabledInSettings(settings) {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
-  for (const candidate of [settings.enabledPlugins, settings.plugins]) {
-    if (Array.isArray(candidate)) {
-      if (candidate.some((id) => normalizeRalphLoopPluginId(id) === 'ralph-loop')) {
-        return true;
-      }
-    } else if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
-      if (Object.entries(candidate).some(([id, value]) =>
-        normalizeRalphLoopPluginId(id) === 'ralph-loop' && value !== false
-      )) {
-        return true;
-      }
-    }
+  // Canonical `enabledPlugins` wins outright when it mentions the official id;
+  // the legacy `plugins` field only decides when canonical is silent about it.
+  for (const field of [settings.enabledPlugins, settings.plugins]) {
+    const verdict = officialRalphLoopEnablementIn(field);
+    if (verdict !== null) return verdict;
   }
   return false;
 }
