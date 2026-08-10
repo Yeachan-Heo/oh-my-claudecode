@@ -49,6 +49,30 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 **Reviewer selection:** Pass `--critic=architect`, `--critic=critic`, or `--critic=codex` in the Ralph prompt to choose the completion reviewer for that run. `architect` remains the default.
 </PRD_Mode>
 
+<PRD_Criterion_Amendments>
+Acceptance criteria are the PRD's completion authority: Step 4 verifies EACH active criterion and Step 7 reviews against them. A criterion can stop governing ONLY through the evidence-preserving amendment path — never by silent deletion or by "satisfying" a criterion measurement has refuted.
+
+When implementation proves a criterion empirically false (e.g. a count in the dispatching brief is wrong), amend it:
+
+1. **Replace** the refuted criterion with the measured correction, or **supersede** it when no replacement governs.
+2. Record the amendment in the story's `criterionAmendments` ledger. The original criterion text is retained verbatim (never rewritten or deleted) alongside:
+   - `kind`: `"replaced"` or `"superseded"`
+   - `original`: the verbatim refuted criterion (must still be active when the amendment is recorded)
+   - `replacement`: the corrected criterion (only for `replaced`)
+   - `reason`: why the original no longer governs
+   - `evidence`: the bounded measurement that refuted it (e.g. "enumerated 12 setters, not 16: ...")
+   - `authority`: who made the amendment (use the ralph session id)
+   - `timestamp`: ISO 8601 timestamp
+3. The completion check then verifies only the ACTIVE criteria; the ledger keeps the audit trail so reviewers see why the original no longer governs.
+
+Rules:
+- An amendment without bounded evidence, reason, authority, or timestamp is invalid — the PRD fails closed on read rather than being silently weakened.
+- An original that is still active cannot be amended; an original can be amended only once.
+- Programmatic path: `amendCriterion(dir, storyId, { original, replacement, reason, evidence, authority })` and `supersedeCriterion(dir, storyId, { original, reason, evidence, authority })`.
+- Hand-edited PRDs must preserve the same invariants; a contradictory ledger (original still active, or amended twice) makes the PRD invalid.
+- This is not a goal-weakening tool: it exists so that "the measurement disagrees with the plan" resolves toward the measurement without the loop losing its grip.
+</PRD_Criterion_Amendments>
+
 <Execution_Policy>
 
 - Fire independent agent calls simultaneously -- never wait sequentially for independent work
@@ -83,17 +107,18 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
    - Run long operations in background: Builds, installs, test suites use `run_in_background: true`
 
 4. **Verify the current story's acceptance criteria**:
-   a. For EACH acceptance criterion in the story, verify it is met with fresh evidence
+   a. For EACH active acceptance criterion in the story, verify it is met with fresh evidence
    b. Run relevant checks (test, build, lint, typecheck) and read the output
-   c. If any criterion is NOT met, continue working -- do NOT mark the story as complete
+   c. If implementation proves a criterion empirically FALSE (the measurement refutes it), do NOT mark the story complete and do NOT silently delete or weaken the criterion. Instead amend it through the evidence-preserving path described in `<PRD_Criterion_Amendments>`: replace or supersede it in the active criteria and append the original (verbatim) with `kind`, `reason`, `evidence`, `authority`, and `timestamp` to the story's `criterionAmendments` ledger. Then continue verifying the remaining ACTIVE criteria
+   d. If any active criterion is NOT met and NOT amended, continue working -- do NOT mark the story as complete
 
 5. **Mark story complete**:
-   a. When ALL acceptance criteria are verified, set `passes: true` for this story in the active PRD file
+   a. When ALL active acceptance criteria are verified, set `passes: true` for this story in the active PRD file
    b. Record progress in `progress.txt`: what was implemented, files changed, learnings for future iterations
    c. Add any discovered codebase patterns to `progress.txt`
 
 6. **Check PRD completion**:
-   a. Read the active PRD file -- are ALL stories marked `passes: true`?
+   a. Read the active PRD file -- are ALL stories marked `passes: true` (with no active criteria left unverified)?
    b. If NOT all complete, loop back to Step 2 (pick next story)
    c. If ALL complete, proceed to Step 7 (architect verification)
 
@@ -209,6 +234,32 @@ Keeping generic acceptance criteria:
 "prd.json created with criteria: Implementation is complete, Code compiles. Moving on to coding."
 Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD theater.
 </Bad>
+<Good>
+Evidence-preserving criterion amendment:
+```
+Criterion: "All 16 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE"
+
+Implementation enumerated the setters: 12 exist, not 16 (7 listed names are readers/asserters/doc-recipes).
+Two of those mis-classified readers are the ONLY affected files — the wrong count was hiding the answer.
+
+Active criteria become:
+  acceptanceCriteria: [
+    "All 12 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE"
+  ]
+  criterionAmendments: [
+    {
+      "kind": "replaced",
+      "original": "All 16 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+      "replacement": "All 12 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+      "reason": "The brief count was wrong: 7 listed names are readers/asserters/doc-recipes, not setters",
+      "evidence": "Enumerated setters via grep FDFT_WHALE_STREAM=1: 12 setters, 16 total matches",
+      "authority": "ses_<ralph-session-id>",
+      "timestamp": "2026-08-10T03:15:00.000Z"
+    }
+  ]
+```
+Why good: The falsified criterion stops governing, the measurement is preserved verbatim with proof/reason/authority/timestamp, and the loop keeps verifying the corrected criterion.
+</Good>
 </Examples>
 
 <Escalation_And_Stop_Conditions>
@@ -222,6 +273,7 @@ Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD t
 
 <Final_Checklist>
 - [ ] All prd.json stories have `passes: true` (no incomplete stories)
+- [ ] Any refuted acceptance criterion was amended through the evidence ledger (original retained), not silently deleted
 - [ ] prd.json acceptance criteria are task-specific (not generic boilerplate)
 - [ ] All requirements from the original task are met (no scope reduction)
 - [ ] Zero pending or in_progress TODO items

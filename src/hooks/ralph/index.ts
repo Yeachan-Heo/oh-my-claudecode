@@ -72,6 +72,8 @@ export {
   markStoryArchitectVerified,
   getStory,
   getNextStory,
+  amendCriterion,
+  supersedeCriterion,
 
   // PRD creation
   createPrd,
@@ -84,13 +86,19 @@ export {
   formatStory,
   formatPrd,
   formatNextStoryPrompt,
+  formatCriterionAmendments,
 
   // Constants
   PRD_FILENAME,
   PRD_EXAMPLE_FILENAME,
+  MIN_CRITERION_EVIDENCE_LENGTH,
 
   // Types (re-export with aliases to avoid conflicts)
-  type UserStoryInput
+  type UserStoryInput,
+  type CriterionAmendment,
+  type CriterionAmendmentInput,
+  type CriterionAmendmentResult,
+  type CriterionAmendmentKind
 } from './prd.js';
 
 // ============================================================================
