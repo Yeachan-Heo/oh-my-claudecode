@@ -20,6 +20,7 @@ import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
 import { createBuiltinSkills, getSkillsDir } from './builtin-skills/skills.js';
+import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import type { PluginConfig } from '../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -159,19 +160,41 @@ function skillInvocationHint(agentType: string): string | null {
 }
 
 /**
+ * Skills exposed only to skininthegamebros users. Mirrors
+ * src/features/builtin-skills/skills.ts:SKININTHEGAMEBROS_ONLY_SKILLS.
+ */
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
+
+/**
+ * Whether a bundled skill directory is visible to the current user, mirroring
+ * loadSkillsFromDirectory's entitlement filter. Hidden skills must never be
+ * suggested as invocable, even when their directory exists on disk.
+ */
+function isSkillVisibleToUser(skillName: string): boolean {
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName) || isSkininthegamebrosUser();
+}
+
+/**
  * Resolve the canonical primary name for a bundled-skill identifier, mirroring
  * the PreToolUse hook's resolution order (issue #3667): canonical registry
  * precedence wins before any directory shortcut. `learner` therefore resolves
  * to its canonical owner `skillify` (deprecated alias claimed before the
  * legacy skills/learner directory), while dir-only names such as `plan` fall
- * back to their registered name (`omc-plan`). Exact match only — no fuzzy
- * substitution.
+ * back to their registered name (`omc-plan`). The same visibility/entitlement
+ * filter as the runtime loader applies, failing closed for runtime-hidden
+ * skills (`remember`, `verify`, `debug` for non-skininthegamebros users).
+ * Exact match only — no fuzzy substitution.
  */
 function resolveBundledSkillPrimary(agentType: string): string | null {
   const skills = createBuiltinSkills();
   const match = skills.find((s) => s.name.toLowerCase() === agentType.toLowerCase());
   if (match) {
     return match.aliasOf ?? match.name;
+  }
+  // Fail closed before the directory shortcut: a hidden skill directory must
+  // never be recommended as an invocable bundled skill.
+  if (!isSkillVisibleToUser(agentType)) {
+    return null;
   }
   // Directory shortcut parity with the hook: names that exist as skill
   // directories but are not canonical claims (e.g. plan -> omc-plan).

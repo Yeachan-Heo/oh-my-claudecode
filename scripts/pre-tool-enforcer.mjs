@@ -265,6 +265,25 @@ function toSafeSkillName(name) {
   const normalized = name.trim();
   return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
 }
+/**
+ * Skills exposed only to skininthegamebros users. Mirrors
+ * src/features/builtin-skills/skills.ts:SKININTHEGAMEBROS_ONLY_SKILLS: the
+ * runtime loader deliberately hides these directories from everyone else.
+ */
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
+
+function isSkininthegamebrosUser() {
+  return process.env.USER_TYPE === 'ant';
+}
+
+/**
+ * Whether a bundled skill directory is visible to the current user, mirroring
+ * loadSkillsFromDirectory's entitlement filter. Hidden skills must never be
+ * suggested as invocable, even when their directory exists on disk.
+ */
+function isSkillVisibleToUser(skillName) {
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName) || isSkininthegamebrosUser();
+}
 
 let cachedCanonicalSkillRegistry = null;
 
@@ -297,6 +316,8 @@ function buildCanonicalSkillRegistry() {
     });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      // Entitlement filter: hidden skills are not registered for this user.
+      if (!isSkillVisibleToUser(entry.name)) continue;
       const skillPath = join(skillsDir, entry.name, 'SKILL.md');
       if (!existsSync(skillPath)) continue;
       let parsed;
@@ -340,6 +361,9 @@ function resolveBundledSkill(subagentType, directory) {
   if (canonicalPrimary) return { primary: canonicalPrimary };
   // Directory shortcut fallback only for names the canonical registry does not
   // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
+  // Fail closed: a directory that is hidden from this user must never be
+  // suggested as an invocable bundled skill, even though it exists on disk.
+  if (!isSkillVisibleToUser(name)) return null;
   for (const skillsDir of getPluginSkillsDirs()) {
     const directPath = join(skillsDir, name, 'SKILL.md');
     if (existsSync(directPath)) {

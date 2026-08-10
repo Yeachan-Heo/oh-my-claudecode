@@ -2648,4 +2648,37 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     expect(numeric.hookSpecificOutput as Record<string, unknown>).not.toHaveProperty('permissionDecision');
     expect(empty.hookSpecificOutput as Record<string, unknown>).not.toHaveProperty('permissionDecision');
   });
+  it.each(['remember', 'verify', 'debug'])(
+    'does NOT suggest the runtime-hidden %s skill for a non-skininthegamebros user (USER_TYPE != ant)',
+    (hiddenSkill) => {
+      const namespaced = runTask(`oh-my-claudecode:${hiddenSkill}`, 'Task', {}, { USER_TYPE: '' });
+      const bare = runTask(hiddenSkill, 'Task', {}, { USER_TYPE: '' });
+
+      for (const output of [namespaced, bare]) {
+        expect(output.continue).toBe(true);
+        expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+        expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+      }
+    },
+  );
+
+  it.each(['remember', 'verify', 'debug'])(
+    'denies the %s skill for a skininthegamebros user (USER_TYPE=ant)',
+    (hiddenSkill) => {
+      const output = runTask(`oh-my-claudecode:${hiddenSkill}`, 'Task', {}, { USER_TYPE: 'ant' });
+      const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+      expect(hookOutput.permissionDecision).toBe('deny');
+      expect(denyReason(output)).toContain(`Skill(skill="oh-my-claudecode:${hiddenSkill}")`);
+    },
+  );
+
+  it('still denies visible skills for a non-skininthegamebros user while hidden ones pass through', () => {
+    const visible = runTask('oh-my-claudecode:plan', 'Task', {}, { USER_TYPE: '' });
+    const hidden = runTask('oh-my-claudecode:remember', 'Task', {}, { USER_TYPE: '' });
+
+    expect((visible.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+    expect(denyReason(visible)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+    expect((hidden.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+  });
 });

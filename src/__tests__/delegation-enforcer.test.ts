@@ -10,6 +10,7 @@ import {
   getModelForAgent,
   type AgentInput
 } from '../features/delegation-enforcer.js';
+import { clearSkillsCache } from '../features/builtin-skills/skills.js';
 import { resolveDelegation } from '../features/delegation-routing/resolver.js';
 
 describe('delegation-enforcer', () => {
@@ -226,6 +227,64 @@ describe('delegation-enforcer', () => {
 
       expect(thrown).toBeDefined();
       expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+    });
+    describe('runtime-hidden skill visibility (USER_TYPE entitlement, issue #3667)', () => {
+      let savedUserType: string | undefined;
+
+      beforeEach(() => {
+        savedUserType = process.env.USER_TYPE;
+        clearSkillsCache();
+      });
+
+      afterEach(() => {
+        if (savedUserType === undefined) {
+          delete process.env.USER_TYPE;
+        } else {
+          process.env.USER_TYPE = savedUserType;
+        }
+        clearSkillsCache();
+      });
+
+      function thrownFor(subagentType: string): Error | undefined {
+        try {
+          enforceModel({ description: 't', prompt: 'p', subagent_type: subagentType });
+        } catch (error) {
+          return error as Error;
+        }
+        return undefined;
+      }
+
+      it.each(['remember', 'verify', 'debug'])(
+        'does NOT add Skill guidance for the runtime-hidden %s skill when USER_TYPE != ant',
+        (hiddenSkill) => {
+          delete process.env.USER_TYPE;
+          clearSkillsCache();
+          const thrown = thrownFor(`oh-my-claudecode:${hiddenSkill}`);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain('Unknown agent type');
+          expect(thrown!.message).not.toContain('Skill(skill=');
+        },
+      );
+
+      it.each(['remember', 'verify', 'debug'])(
+        'adds Skill guidance for the %s skill when USER_TYPE=ant',
+        (hiddenSkill) => {
+          process.env.USER_TYPE = 'ant';
+          clearSkillsCache();
+          const thrown = thrownFor(`oh-my-claudecode:${hiddenSkill}`);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain(`Skill(skill="oh-my-claudecode:${hiddenSkill}")`);
+        },
+      );
+
+      it('keeps guidance for visible skills while hidden ones stay unsuggested in the same process', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        const visible = thrownFor('oh-my-claudecode:ai-slop-cleaner');
+        const hidden = thrownFor('oh-my-claudecode:remember');
+        expect(visible!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+        expect(hidden!.message).not.toContain('Skill(skill=');
+      });
     });
 
     it('logs warning only when OMC_DEBUG=true', () => {
