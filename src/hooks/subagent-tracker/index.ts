@@ -919,8 +919,17 @@ export function processSubagentStop(input: SubagentStopInput): HookOutput {
         state.agents = state.agents.filter((a) => !toRemove.has(a.agent_id));
       }
 
-      // Write updated state
+      // B8 (#3663): write the tracking state synchronously and flush it
+      // durably BEFORE the hook returns. writeTrackingState alone is
+      // debounced (100ms) and its flush can be re-queued on lock contention,
+      // so without an explicit flush the hook could return with the evidence
+      // still only in memory. flushPendingWrites() re-enters the lock, merges
+      // with disk state, and writes atomically; the collector deadline was
+      // tightened (EVIDENCE_DEADLINE_MS=3000) so the lock wait (500ms worst
+      // case) + this synchronous flush + replay/mission writes stay inside the
+      // 4.5s runner deadline with the fail-open hook return path intact.
       writeTrackingState(input.cwd, state, sessionId);
+      flushPendingWrites();
 
       if (input.agent_id) {
         // Record to session replay JSONL for /trace

@@ -32,15 +32,24 @@ export const GIT_TIMEOUT_MS = 2500;
 export const MAX_EVIDENCE_PATH_LENGTH = 200;
 /**
  * Shared bounded deadline for ALL evidence-collection git work (issue #3663
- * B5). The SubagentStop hook is declared at 5s in hooks/hooks.json; run.cjs
+ * B5 + B8). The SubagentStop hook is declared at 5s in hooks/hooks.json; run.cjs
  * enforces a 500ms cushion and kills the child fail-open at that boundary, so
- * any durable state write after evidence collection would be lost. Keep the
- * total collector budget comfortably below the hook budget: 4s across every
- * git call leaves ~600ms for the state lock/write/replay to complete before
- * the 4.5s runner deadline, while preserving the fail-open design (a timeout
- * degrades to a non-dirty evidence kind, never a thrown hook).
+ * any durable state write after evidence collection would be lost. The
+ * collector budget is deliberately smaller than the hook budget so that the
+ * post-collection work — lock acquisition (500ms worst case), synchronous
+ * durable state flush, replay/mission writes, hook output — has a reserved
+ * worst-case budget before the 4.5s runner deadline (issue #3663 B8).
  */
-export const EVIDENCE_DEADLINE_MS = 4000;
+export const EVIDENCE_DEADLINE_MS = 3000;
+/**
+ * Deliberate output bound for a single git call. Node's execFileSync default
+ * maxBuffer is 1 MiB and raises ENOBUFS on large `--untracked-files=all`
+ * output, silently losing ALL evidence (issue #3663 B7). We raise the child
+ * buffer to this bound so a normal large dirty tree is fully counted, while
+ * the incremental parser stops storing paths once MAX_EVIDENCE_ENTRIES is
+ * reached (bounded memory) and keeps counting lines past the bound.
+ */
+export const GIT_MAX_BUFFER = 32 * 1024 * 1024;
 
 /** Kinds of evidence a stop hook can produce (never throws). */
 export type WorktreeEvidenceKind =
@@ -79,31 +88,69 @@ export interface WorktreeEvidenceOptions {
   deadlineMs?: number;
 }
 
-/** Markers of abnormal agent termination inside a stop `output` summary. */
-export const ABNORMAL_TERMINATION_MARKERS =
-  /(<status>failed<\/status>|Agent terminated early due to an API error|Response stalled mid-stream|API error: Response)/i;
+/** Structured failure envelopes Claude Code emits on abnormal termination. */
+const STRUCTURED_FAILURE_ENVELOPES: ReadonlyArray<RegExp> = [
+  // Whole-line <status>failed</status> (task-notification envelope).
+  /^\s*<status>failed<\/status>\s*$/im,
+  // Start-of-line API-error phrases (API-error/stalled terminations).
+  /^(?:Agent terminated early due to an API error|API Error: Response stalled mid-stream)\b/im,
+];
 
 /**
  * Whether a SubagentStop input represents an abnormal termination.
  *
  * The Claude Code SDK does not reliably set `success` on SubagentStop (it
  * defaults to "completed" when undefined), so abnormal termination is inferred
- * from an explicit failure flag OR from the failure markers Claude Code emits
- * in the stop output summary for API-error terminations (issue #3663).
+ * from the failure markers Claude Code emits in the stop output summary for
+ * API-error terminations (issue #3663).
+ *
+ * Precedence (issue #3663 B6):
+ *  1. EXPLICIT success wins. `success: true` is never abnormal, even when the
+ *     final report merely mentions an API-error phrase.
+ *  2. Explicit `success: false` is abnormal regardless of output.
+ *  3. When `success` is omitted, marker inference fires ONLY on structured
+ *     failure envelopes — a whole-line `<status>failed</status>` or a
+ *     start-of-line API-error phrase — never on arbitrary prose that happens
+ *     to contain a diagnostic word.
+ *
  * User-initiated cancels / interrupts are NOT treated as abnormal.
  */
 export function isAbnormalTermination(input: {
   success?: boolean;
   output?: string;
 }): boolean {
+  if (input.success === true) return false;
   if (input.success === false) return true;
   if (typeof input.output !== "string" || input.output.trim() === "") {
     return false;
   }
-  return ABNORMAL_TERMINATION_MARKERS.test(input.output);
+  const output: string = input.output;
+  return STRUCTURED_FAILURE_ENVELOPES.some((pattern) =>
+    pattern.test(output),
+  );
 }
 
-function runGit(
+/**
+ * Run a single bounded git call and stream its stdout through an incremental
+ * parser. Returns the parsed status rows plus an `outputTruncated` flag.
+ *
+ * B7 (#3663): Node's execFileSync default maxBuffer (1 MiB) raises ENOBUFS on
+ * large `--untracked-files=all` output, silently losing ALL evidence. We raise
+ * the child buffer to GIT_MAX_BUFFER (bounded, 32 MiB) so a normal large dirty
+ * tree is fully counted, while the incremental parser stops storing paths once
+ * MAX_EVIDENCE_ENTRIES is reached and only counts lines past that point —
+ * bounded memory regardless of output size. `error` carries the bounded
+ * reason when git could not be queried.
+ */
+interface GitStatusResult {
+  rows: string[];
+  outputTruncated: boolean;
+  /** Number of non-empty lines beyond the entry cap (B7 full-count totals). */
+  overflowCount?: number;
+  error?: string;
+}
+
+function runGitBounded(
   cwd: string,
   args: string[],
   opts: WorktreeEvidenceOptions,
@@ -114,23 +161,84 @@ function runGit(
     1,
     Math.min(opts.timeoutMs ?? GIT_TIMEOUT_MS, remainingMs),
   );
+  try {
+    return execFileSync(git, args, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer: GIT_MAX_BUFFER,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_OPTIONAL_LOCKS: "0",
+      },
+    }).trim();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw Object.assign(new Error(`git call failed: ${String(code ?? "git_failed")}`), {
+      code: code === "ETIMEDOUT" ? "ETIMEDOUT" : code,
+    });
+  }
+}
+
+function runGitStatus(
+  cwd: string,
+  args: string[],
+  opts: WorktreeEvidenceOptions,
+  remainingMs: number,
+): GitStatusResult {
+  const git = opts.gitCommand || "git";
+  const timeoutMs = Math.max(
+    1,
+    Math.min(opts.timeoutMs ?? GIT_TIMEOUT_MS, remainingMs),
+  );
   // GIT_TERMINAL_PROMPT=0 prevents credential prompts from hanging the hook;
   // GIT_OPTIONAL_LOCKS=0 keeps `git status` from taking optional index locks
   // (read-only, no contention with a concurrent coordinator). The per-call
   // timeout is clamped to the remaining shared deadline so the SUM of all git
-  // calls can never exceed the collector budget (issue #3663 B5).
-  return execFileSync(git, args, {
-    cwd,
-    encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    timeout: timeoutMs,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_OPTIONAL_LOCKS: "0",
-    },
-  });
+  // calls can never exceed the collector budget (issue #3663 B5/B8).
+  let raw: string;
+  try {
+    raw = execFileSync(git, args, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer: GIT_MAX_BUFFER,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_OPTIONAL_LOCKS: "0",
+      },
+    });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return {
+      rows: [],
+      outputTruncated: false,
+      error: code === "ETIMEDOUT" ? "deadline" : String(code ?? "git_failed"),
+    };
+  }
+
+  // Incremental bounded parse: stop storing rows once the entry cap is full,
+  // keep counting lines so totals stay exact even past the cap.
+  const rows: string[] = [];
+  let outputTruncated = false;
+  let overflowCount = 0;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (rows.length < MAX_EVIDENCE_ENTRIES) {
+      rows.push(line);
+    } else {
+      outputTruncated = true;
+      overflowCount++;
+    }
+  }
+  return { rows, outputTruncated, overflowCount };
 }
 
 function isLinkedWorktree(toplevel: string): boolean {
@@ -174,7 +282,7 @@ const empty = (): WorktreeDirtyEvidence => ({
 /**
  * Collect bounded dirty-worktree evidence for a directory. READ-ONLY and
  * fail-closed: never throws, never mutates the repository. Total git wall-time
- * is capped by the shared EVIDENCE_DEADLINE_MS budget (issue #3663 B5) so
+ * is capped by the shared EVIDENCE_DEADLINE_MS budget (issue #3663 B5/B8) so
  * durable state writes after collection can never be starved by the collector.
  */
 export function collectWorktreeDirtyEvidence(
@@ -193,7 +301,15 @@ export function collectWorktreeDirtyEvidence(
 
     let toplevel: string;
     try {
-      toplevel = runGit(cwd, ["rev-parse", "--show-toplevel"], opts, remaining()).trim();
+      // rev-parse is a single tiny line; bypass the streaming parser and use a
+      // direct bounded call so a fake-git seam (which answers the same status
+      // for every subcommand) still resolves the toplevel correctly.
+      toplevel = runGitBounded(
+        cwd,
+        ["rev-parse", "--show-toplevel"],
+        opts,
+        remaining(),
+      );
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
@@ -203,7 +319,7 @@ export function collectWorktreeDirtyEvidence(
           error: `git_unavailable:${String(code)}`,
         };
       }
-      // ETIMEDOUT means the shared bounded deadline (B5) fired — git is
+      // ETIMEDOUT means the shared bounded deadline (B5/B8) fired — git is
       // present but the budget was exhausted; never misreport that as a
       // non-repository directory.
       const isTimeout = code === "ETIMEDOUT";
@@ -220,59 +336,120 @@ export function collectWorktreeDirtyEvidence(
     // Two bounded read-only calls: regular status (tracked+untracked) and
     // ignored status (informational — ignored files are not at-risk work).
     // Each call's timeout is clamped to the remaining shared deadline so the
-    // sum of every git call stays under EVIDENCE_DEADLINE_MS.
-    const status = runGit(
+    // sum of every git call stays under EVIDENCE_DEADLINE_MS (B5/B8), and each
+    // call streams through a bounded incremental parser (B7) so huge
+    // --untracked-files=all output can never raise ENOBUFS and lose counts.
+    const status = runGitStatus(
       toplevel,
       ["status", "--porcelain", "--untracked-files=all"],
       opts,
       remaining(),
     );
-    const ignoredStatus = runGit(
+    if (status.error) {
+      // A bounded git failure degrades fail-open (never throws). A deadline
+      // hit means the shared budget was exhausted; anything else that is not
+      // an ENOBUFS overflow is a non-repository or failed-git signal.
+      if (status.error === "deadline") {
+        return {
+          ...empty(),
+          kind: "git_unavailable",
+          error: "git_unavailable:deadline",
+        };
+      }
+      return {
+        ...empty(),
+        kind: status.error === "ENOBUFS" ? "git_unavailable" : "not_git",
+        error: status.error === "ENOBUFS" ? "git_unavailable:output_overflow" : status.error,
+      };
+    }
+    const ignoredStatus = runGitStatus(
       toplevel,
       ["status", "--porcelain", "--ignored=matching"],
       opts,
       remaining(),
     );
-
-    const tracked: string[] = [];
-    const untracked: string[] = [];
-    const ignored: string[] = [];
-    for (const line of status.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (trimmed.startsWith("??")) {
-        untracked.push(statusEntryPath(line));
-      } else {
-        tracked.push(statusEntryPath(line));
-      }
+    if (ignoredStatus.error) {
+      // The regular status already succeeded; ignored info is informational.
+      // Degrade the ignored count to 0 rather than losing the at-risk evidence.
+      const base = statusToEvidence(toplevel, linked, status);
+      return {
+        ...base,
+        kind: "git_unavailable",
+        error: `git_unavailable:${ignoredStatus.error}`,
+      };
     }
-    for (const line of ignoredStatus.split("\n")) {
+
+    return statusToEvidence(toplevel, linked, status, ignoredStatus);
+  } catch {
+    // Fail-closed: any unexpected git/filesystem failure must not break the
+    // stop hook and must not claim the worktree is dirty.
+    return { ...empty(), kind: "git_unavailable", error: "evidence_failed" };
+  }
+}
+
+function statusToEvidence(
+  toplevel: string,
+  linked: boolean,
+  status: GitStatusResult,
+  ignoredStatus?: GitStatusResult,
+): WorktreeDirtyEvidence {
+  const tracked: string[] = [];
+  const untracked: string[] = [];
+  const ignored: string[] = [];
+  // B7 (#3663): the incremental parser caps stored rows at
+  // MAX_EVIDENCE_ENTRIES; count every additional line (any kind) so totals
+  // reflect the FULL output even when paths are not stored.
+  let overflowLines = 0;
+
+  for (const line of status.rows) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("??")) {
+      untracked.push(statusEntryPath(line));
+    } else {
+      tracked.push(statusEntryPath(line));
+    }
+  }
+  if (status.outputTruncated) overflowLines += status.overflowCount ?? 0;
+  // NOTE: git's `--ignored=matching` output repeats the `??` untracked lines
+  // from the regular status call; only `!!` lines are ignored-file evidence.
+  // Counting those `??` lines again would double-count untracked totals (B7).
+  // The ignored call runs with a tight budget: with the regular status already
+  // counted, only the ignored rows are needed, so the parser stops at the
+  // entry cap and never inflates totals.
+  if (ignoredStatus) {
+    for (const line of ignoredStatus.rows) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       if (trimmed.startsWith("!!")) {
         ignored.push(statusEntryPath(line));
       }
     }
-
-    const all = [...tracked, ...untracked, ...ignored];
-    const truncated = all.length > MAX_EVIDENCE_ENTRIES;
-    const entries = all.slice(0, MAX_EVIDENCE_ENTRIES);
-
-    return {
-      kind: tracked.length + untracked.length > 0 ? "dirty" : "clean",
-      worktreeRoot: sanitizePathPart(toplevel),
-      isLinkedWorktree: linked,
-      trackedCount: tracked.length,
-      untrackedCount: untracked.length,
-      ignoredCount: ignored.length,
-      entries,
-      truncated,
-    };
-  } catch {
-    // Fail-closed: any unexpected git/filesystem failure must not break the
-    // stop hook and must not claim the worktree is dirty.
-    return { ...empty(), kind: "git_unavailable", error: "evidence_failed" };
   }
+
+  const entries = [...tracked, ...untracked, ...ignored].slice(0, MAX_EVIDENCE_ENTRIES);
+  const truncated =
+    overflowLines > 0 ||
+    (status.outputTruncated || ignoredStatus?.outputTruncated === true) ||
+    tracked.length + untracked.length + ignored.length > MAX_EVIDENCE_ENTRIES;
+  // B7 (#3663): when the incremental parser stopped storing rows at the entry
+  // cap, the totals must still reflect the FULL output. Overflow lines beyond
+  // the cap are counted but not stored; they are attributed to untracked
+  // (the dominant kind in a huge dirty tree) so the coordinator sees the real
+  // scale of at-risk work.
+  const trackedTotal = tracked.length;
+  const untrackedTotal = untracked.length + overflowLines;
+
+  return {
+    kind: trackedTotal + untrackedTotal > 0 ? "dirty" : "clean",
+    worktreeRoot: sanitizePathPart(toplevel),
+    isLinkedWorktree: linked,
+    trackedCount: trackedTotal,
+    untrackedCount: untrackedTotal,
+    ignoredCount: ignored.length,
+    entries,
+    truncated,
+  };
 }
 
 /**

@@ -251,7 +251,6 @@ describe("collectWorktreeDirtyEvidence", () => {
       collectWorktreeDirtyEvidence(repo, { gitCommand: "/nonexistent/git" }),
     ).not.toThrow();
   });
-
   it("respects a shared bounded git deadline (issue #3663 B5)", () => {
     // B5: the total git wall-time must be capped by the shared deadline even
     // when a single git call would otherwise run far longer. Use a
@@ -278,6 +277,39 @@ describe("collectWorktreeDirtyEvidence", () => {
     expect(evidence.kind).toBe("git_unavailable");
     expect(elapsed).toBeLessThan(1500);
     expect(() => evidence).not.toThrow();
+  });
+
+  it("survives huge nested untracked output beyond the default buffer (issue #3663 B7)", () => {
+    // B7: git status --untracked-files=all on a huge dirty tree can exceed
+    // Node's default 1 MiB maxBuffer (ENOBUFS), losing ALL evidence. The
+    // collector must count every line and cap entries without throwing.
+    // Use a fake git that answers rev-parse with the repo toplevel and emits
+    // > 1 MiB of status lines for the status calls — deterministic and fast.
+    const repo = makeTempDir();
+    initRepo(repo);
+    const fakeGit = join(repo, "huge-git.sh");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh
+if [ "$1" = "rev-parse" ]; then
+  echo "$PWD"
+  exit 0
+fi
+# Emit > 1 MiB of untracked status lines (default maxBuffer is 1 MiB).
+for i in $(seq 1 60000); do
+  echo "?? f$i.txt"
+done
+`,
+      { mode: 0o755 },
+    );
+
+    const evidence = collectWorktreeDirtyEvidence(repo, {
+      gitCommand: fakeGit,
+    });
+    expect(evidence.kind).toBe("dirty");
+    expect(evidence.untrackedCount).toBe(60000);
+    expect(evidence.entries.length).toBe(MAX_EVIDENCE_ENTRIES);
+    expect(evidence.truncated).toBe(true);
   });
 });
 
@@ -352,18 +384,42 @@ describe("isAbnormalTermination", () => {
     expect(isAbnormalTermination({ success: false, output: "any output" })).toBe(true);
   });
 
-  it("detects API-error termination markers in the stop output", () => {
+  it("detects structured failure envelopes when success is omitted (issue #3663 B6)", () => {
+    // Whole-line <status>failed</status> envelope.
+    expect(
+      isAbnormalTermination({
+        output: "<task-notification>\n<status>failed</status>\n</task-notification>",
+      }),
+    ).toBe(true);
+    // Start-of-line API-error phrases.
     expect(
       isAbnormalTermination({ output: "Agent terminated early due to an API error" }),
     ).toBe(true);
     expect(
       isAbnormalTermination({ output: "API Error: Response stalled mid-stream" }),
     ).toBe(true);
+  });
+
+  it("never classifies a successful final report as abnormal (issue #3663 B6)", () => {
+    // Explicit success wins even when the report mentions an API-error phrase.
     expect(
       isAbnormalTermination({
-        output: "<task-notification><status>failed</status></task-notification>",
+        success: true,
+        output: "The parser now quotes \"Agent terminated early due to an API error\" correctly.",
       }),
-    ).toBe(true);
+    ).toBe(false);
+    // Unanchored diagnostic phrases in prose (success omitted) are NOT
+    // structured failure envelopes and must not classify failure.
+    expect(
+      isAbnormalTermination({
+        output: "Final report: the fix covers \"Response stalled mid-stream\" handling and <status>failed</status> quoting in docs.",
+      }),
+    ).toBe(false);
+    expect(
+      isAbnormalTermination({
+        output: "Mid-line <status>failed</status> mention is not an envelope.",
+      }),
+    ).toBe(false);
   });
 
   it("treats normal completion and cancel-like stops as non-abnormal", () => {

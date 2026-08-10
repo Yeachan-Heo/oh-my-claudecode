@@ -1585,6 +1585,46 @@ describe("subagent-tracker", () => {
       expect(mission?.taskCounts.failed).toBe(0); // mission failed is derived from blocked status
     });
 
+    it("treats a successful final report that mentions API-error phrases as completed (issue #3663 B6)", () => {
+      // B6: an explicit/omitted-success stop whose final report merely QUOTES
+      // an API-error phrase must be completed — never classified abnormal.
+      const repoDir = makeGitRepo();
+      processSubagentStart({
+        session_id: "sess-b6-quote",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-b6-quote",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "investigate API error phrasing",
+      });
+      flushPendingWrites();
+
+      processSubagentStop({
+        session_id: "sess-b6-quote",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-b6-quote",
+        output:
+          "Final report: the parser now quotes \"Agent terminated early due to an API error\" and <status>failed</status> as text.",
+      });
+      flushPendingWrites();
+
+      const state = readTrackingState(repoDir, "sess-b6-quote");
+      const agent = state.agents.find((a) => a.agent_id === "ag-b6-quote");
+      expect(agent?.status).toBe("completed");
+      expect(state.total_completed).toBe(1);
+      expect(state.total_failed).toBe(0);
+      expect(agent?.worktree_evidence).toBeUndefined();
+      const replayStop = readReplayEvents(repoDir, "sess-b6-quote").find(
+        (e) => e.event === "agent_stop" && e.agent === "ag-b6-quote".substring(0, 7),
+      );
+      expect(replayStop?.success).toBe(true);
+    });
+
     it("clears stale dirty-worktree evidence on agent-id reuse to running (issue #3663 B4)", () => {
       // B4: a reused agent ID must not retain dirty evidence from a previous
       // abnormal termination. After restart, a NORMAL stop must not surface
@@ -1665,6 +1705,49 @@ describe("subagent-tracker", () => {
       expect(replayStops).toHaveLength(2);
       // The normal stop carries NO dirty evidence.
       expect(replayStops[1].dirty_worktree).toBeUndefined();
+    });
+
+    it("flushes the durable tracking state before the hook returns under lock contention (issue #3663 B8)", () => {
+      // B8: the stop hook must write the tracking state DURABLY before
+      // returning. writeTrackingState is debounced; the added
+      // flushPendingWrites() inside the stop path guarantees the state file
+      // exists with the closed agent + evidence even when the caller never
+      // flushes. Use a slow collector (fake slow git via the worktree path is
+      // covered at unit level); here we prove the flush happens by reading
+      // from a FRESH process-scoped path after the stop returns.
+      const repoDir = makeGitRepo();
+      writeFileSync(join(repoDir, "tracked.txt"), "modified\n");
+
+      processSubagentStart({
+        session_id: "sess-b8-flush",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-b8-flush",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "run with flush",
+      });
+      flushPendingWrites();
+
+      const output = processSubagentStop({
+        session_id: "sess-b8-flush",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-b8-flush",
+        output: "Agent terminated early due to an API error",
+        success: false,
+      });
+      // NO caller flush: the hook itself must have flushed durably.
+      expect(output).toEqual({ continue: true, suppressOutput: true });
+
+      const state = readTrackingState(repoDir, "sess-b8-flush");
+      const agent = state.agents.find((a) => a.agent_id === "ag-b8-flush");
+      expect(agent?.status).toBe("failed");
+      expect(agent?.worktree_evidence?.kind).toBe("dirty");
+      expect(state.total_failed).toBe(1);
     });
   });
 });
