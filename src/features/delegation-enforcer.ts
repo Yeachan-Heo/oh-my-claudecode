@@ -155,7 +155,7 @@ function skillInvocationHint(agentType: string): string | null {
     return null;
   }
   const primary = match.aliasOf ?? match.name;
-  return ` "${agentType}" is a bundled Skill, not an agent — invoke it with the Skill tool (Skill(skill="${primary}")) instead of Task/Agent subagent_type, and do NOT substitute a similarly-named agent`;
+  return ` "${agentType}" is a bundled Skill, not an agent — invoke it with the Skill tool (Skill(skill="oh-my-claudecode:${primary}")) instead of Task/Agent subagent_type, and do NOT substitute a similarly-named agent`;
 }
 
 /**

@@ -167,7 +167,7 @@ describe('delegation-enforcer', () => {
       expect(thrown!.message).toContain('Unknown agent type');
       expect(thrown!.message).toContain('ai-slop-cleaner');
       expect(thrown!.message).toContain('Skill');
-      expect(thrown!.message).toContain('Skill(skill="ai-slop-cleaner")');
+      expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
       expect(thrown!.message).toContain('do NOT substitute a similarly-named agent');
     });
 

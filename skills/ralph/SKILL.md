@@ -113,7 +113,7 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 
 7.5 **Mandatory Deslop Pass** (runs unconditionally after Step 7 approval, unless `{{PROMPT}}` contains `--no-deslop`):
 
-- **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("ai-slop-cleaner")`** — it is a Skill, not an agent. If you mistakenly call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")`, OMC's PreToolUse hook denies the call with the correct Skill-tool identifier; do not substitute a similarly-named agent. Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
+- **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`** — it is a Skill, not an agent. If you mistakenly call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")`, OMC's PreToolUse hook denies the call with the correct Skill-tool identifier; do not substitute a similarly-named agent. Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
 - Keep the scope bounded to the Ralph changed-file set; do not broaden the cleanup pass to unrelated files.
 - If the reviewer approved the implementation but the deslop pass introduces follow-up edits, keep those edits inside the same changed-file scope before proceeding.
 
@@ -137,7 +137,7 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 - Skip architect consultation for simple feature additions, well-tested changes, or time-critical verification
 - Proceed with architect agent verification alone -- never block on unavailable tools
 - Use `state_write` / `state_read` for ralph mode state persistence between iterations
-- **Skill vs agent invocation**: skills (e.g. `ai-slop-cleaner`) are invoked via the Skill tool: `Skill("ai-slop-cleaner")`; agents (e.g. `architect`, `critic`, `executor`) via `Task(subagent_type="oh-my-claudecode:<name>")`. OMC's PreToolUse hook denies a Task/Agent call whose `subagent_type` names a bundled skill and returns the correct Skill-tool identifier — do not substitute a similarly-named agent as a "closest match".
+- **Skill vs agent invocation**: skills (e.g. `ai-slop-cleaner`) are invoked via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`; agents (e.g. `architect`, `critic`, `executor`) via `Task(subagent_type="oh-my-claudecode:<name>")`. OMC's PreToolUse hook denies a Task/Agent call whose `subagent_type` names a bundled skill and returns the correct Skill-tool identifier — do not substitute a similarly-named agent as a "closest match".
   </Tool_Usage>
 
 <Examples>

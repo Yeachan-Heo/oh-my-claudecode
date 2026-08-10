@@ -309,10 +309,13 @@ function evaluateSkillAsAgentCall(toolName, toolInput, directory) {
   const skill = resolveBundledSkill(subagentType, directory);
   if (!skill) return null;
 
-  const { name, namespaced } = splitAgentNamespace(subagentType);
-  // Mirror the caller's namespace form, but always use the canonical OMC
-  // plugin namespace (`oh-my-claudecode:`) for the suggested identifier.
-  const skillIdentifier = namespaced ? `oh-my-claudecode:${skill.primary}` : skill.primary;
+  const { name } = splitAgentNamespace(subagentType);
+  // Always suggest the canonical plugin-namespaced identifier. A bare skill
+  // name can resolve to a different project/user skill or fail: bundled
+  // skills are exposed under the `oh-my-claudecode:` namespace (issue #3667
+  // review), so the recovery must be unambiguous regardless of the caller's
+  // input namespace form.
+  const skillIdentifier = `oh-my-claudecode:${skill.primary}`;
   const queriedName = name === skill.primary
     ? `"${subagentType}"`
     : `"${subagentType}" (alias of "${skill.primary}")`;

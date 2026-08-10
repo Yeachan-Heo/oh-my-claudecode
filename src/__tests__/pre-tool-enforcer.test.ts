@@ -2488,12 +2488,15 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     expect(hookOutput.permissionDecisionReason as string).not.toContain('code-simplifier');
   });
 
-  it('denies Agent call with a bare bundled skill identifier', () => {
+  it('denies Agent call with a bare bundled skill identifier and suggests the canonical namespaced identifier', () => {
     const output = runTask('ai-slop-cleaner', 'Agent');
     const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
 
     expect(hookOutput.permissionDecision).toBe('deny');
-    expect(denyReason(output)).toContain('Skill(skill="ai-slop-cleaner")');
+    // Recovery must be unambiguous: always the plugin-namespaced form, never a
+    // bare skill name that could resolve to a different project/user skill.
+    expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+    expect(denyReason(output)).not.toContain('Skill(skill="ai-slop-cleaner")');
   });
 
   it('recognizes the omc: namespace alias and suggests the canonical oh-my-claudecode: identifier', () => {
@@ -2611,7 +2614,7 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
 
     expect(hookOutput.permissionDecision).toBe('deny');
-    expect(denyReason(output)).toContain('Skill(skill="wiki")');
+    expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:wiki")');
   });
 
   it('does NOT deny non-string or empty subagent_type values', () => {
