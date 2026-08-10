@@ -142,12 +142,34 @@ export function isAbnormalTermination(input: {
  * bounded memory regardless of output size. `error` carries the bounded
  * reason when git could not be queried.
  */
+/** Porcelain row categories (`XY` prefix), used for exact per-kind totals. */
+type StatusCategory = "tracked" | "untracked" | "ignored";
+
+interface CategoryCounts {
+  tracked: number;
+  untracked: number;
+  ignored: number;
+}
+
 interface GitStatusResult {
   rows: string[];
   outputTruncated: boolean;
-  /** Number of non-empty lines beyond the entry cap (B7 full-count totals). */
-  overflowCount?: number;
+  /**
+   * Per-category counts for rows beyond the entry cap. Overflow rows are
+   * counted but never stored, and each one keeps its own porcelain category
+   * so a capped huge tree still reports exact tracked/untracked/ignored
+   * totals (issue #3663 P2).
+   */
+  overflow: CategoryCounts;
   error?: string;
+}
+
+/** Classify a `git status --porcelain` row by its two-character status code. */
+function statusCategory(line: string): StatusCategory {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("??")) return "untracked";
+  if (trimmed.startsWith("!!")) return "ignored";
+  return "tracked";
 }
 
 function runGitBounded(
@@ -219,6 +241,7 @@ function runGitStatus(
     return {
       rows: [],
       outputTruncated: false,
+      overflow: { tracked: 0, untracked: 0, ignored: 0 },
       error: code === "ETIMEDOUT" ? "deadline" : String(code ?? "git_failed"),
     };
   }
@@ -227,7 +250,7 @@ function runGitStatus(
   // keep counting lines so totals stay exact even past the cap.
   const rows: string[] = [];
   let outputTruncated = false;
-  let overflowCount = 0;
+  const overflow: CategoryCounts = { tracked: 0, untracked: 0, ignored: 0 };
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -235,10 +258,10 @@ function runGitStatus(
       rows.push(line);
     } else {
       outputTruncated = true;
-      overflowCount++;
+      overflow[statusCategory(line)]++;
     }
   }
-  return { rows, outputTruncated, overflowCount };
+  return { rows, outputTruncated, overflow };
 }
 
 function isLinkedWorktree(toplevel: string): boolean {
@@ -369,13 +392,16 @@ export function collectWorktreeDirtyEvidence(
       remaining(),
     );
     if (ignoredStatus.error) {
-      // The regular status already succeeded; ignored info is informational.
-      // Degrade the ignored count to 0 rather than losing the at-risk evidence.
+      // The regular status already succeeded, so its dirty/clean verdict is
+      // authoritative. Ignored info is purely informational: degrade the
+      // ignored count to 0 and record the bounded secondary failure WITHOUT
+      // overwriting the kind (issue #3663 P1). Reporting git_unavailable here
+      // suppressed both the coordinator notice and the replay dirty_worktree
+      // record for a worktree that was proven dirty.
       const base = statusToEvidence(toplevel, linked, status);
       return {
         ...base,
-        kind: "git_unavailable",
-        error: `git_unavailable:${ignoredStatus.error}`,
+        error: `ignored_scan_failed:${ignoredStatus.error}`,
       };
     }
 
@@ -396,10 +422,10 @@ function statusToEvidence(
   const tracked: string[] = [];
   const untracked: string[] = [];
   const ignored: string[] = [];
-  // B7 (#3663): the incremental parser caps stored rows at
-  // MAX_EVIDENCE_ENTRIES; count every additional line (any kind) so totals
-  // reflect the FULL output even when paths are not stored.
-  let overflowLines = 0;
+  // B7/P2 (#3663): the incremental parser caps stored rows at
+  // MAX_EVIDENCE_ENTRIES and counts every additional line PER CATEGORY, so
+  // totals reflect the FULL output with the right kind even when paths are
+  // not stored.
 
   for (const line of status.rows) {
     const trimmed = line.trim();
@@ -410,7 +436,6 @@ function statusToEvidence(
       tracked.push(statusEntryPath(line));
     }
   }
-  if (status.outputTruncated) overflowLines += status.overflowCount ?? 0;
   // NOTE: git's `--ignored=matching` output repeats the `??` untracked lines
   // from the regular status call; only `!!` lines are ignored-file evidence.
   // Counting those `??` lines again would double-count untracked totals (B7).
@@ -426,19 +451,18 @@ function statusToEvidence(
       }
     }
   }
-
   const entries = [...tracked, ...untracked, ...ignored].slice(0, MAX_EVIDENCE_ENTRIES);
+  // Overflow rows from the regular status call carry tracked/untracked work.
+  // The ignored call repeats the regular status rows, so only its `!!`
+  // overflow is consumed — counting its `??`/tracked rows again would
+  // double-count the at-risk totals (B7).
+  const trackedTotal = tracked.length + status.overflow.tracked;
+  const untrackedTotal = untracked.length + status.overflow.untracked;
+  const ignoredTotal = ignored.length + (ignoredStatus?.overflow.ignored ?? 0);
   const truncated =
-    overflowLines > 0 ||
-    (status.outputTruncated || ignoredStatus?.outputTruncated === true) ||
+    status.outputTruncated ||
+    ignoredStatus?.outputTruncated === true ||
     tracked.length + untracked.length + ignored.length > MAX_EVIDENCE_ENTRIES;
-  // B7 (#3663): when the incremental parser stopped storing rows at the entry
-  // cap, the totals must still reflect the FULL output. Overflow lines beyond
-  // the cap are counted but not stored; they are attributed to untracked
-  // (the dominant kind in a huge dirty tree) so the coordinator sees the real
-  // scale of at-risk work.
-  const trackedTotal = tracked.length;
-  const untrackedTotal = untracked.length + overflowLines;
 
   return {
     kind: trackedTotal + untrackedTotal > 0 ? "dirty" : "clean",
@@ -446,7 +470,7 @@ function statusToEvidence(
     isLinkedWorktree: linked,
     trackedCount: trackedTotal,
     untrackedCount: untrackedTotal,
-    ignoredCount: ignored.length,
+    ignoredCount: ignoredTotal,
     entries,
     truncated,
   };

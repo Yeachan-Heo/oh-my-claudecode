@@ -311,6 +311,138 @@ done
     expect(evidence.entries.length).toBe(MAX_EVIDENCE_ENTRIES);
     expect(evidence.truncated).toBe(true);
   });
+
+  it("keeps dirty evidence when only the ignored scan fails (issue #3663 P1)", () => {
+    // P1: the ignored-file scan is informational. When the regular status call
+    // already proved the worktree dirty, a secondary ignored-scan failure must
+    // NOT overwrite the dirty kind with git_unavailable — that suppressed the
+    // coordinator notice and the replay dirty_worktree record entirely.
+    const repo = makeTempDir();
+    initRepo(repo);
+    const fakeGit = join(repo, "ignored-fails-git.sh");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh
+if [ "$1" = "rev-parse" ]; then
+  echo "$PWD"
+  exit 0
+fi
+for arg in "$@"; do
+  case "$arg" in
+    --ignored=*) exit 128 ;;
+  esac
+done
+printf ' M README.md\\n?? new.txt\\n'
+exit 0
+`,
+      { mode: 0o755 },
+    );
+
+    const evidence = collectWorktreeDirtyEvidence(repo, { gitCommand: fakeGit });
+    expect(evidence.kind).toBe("dirty");
+    expect(evidence.trackedCount).toBe(1);
+    expect(evidence.untrackedCount).toBe(1);
+    // Ignored info is unavailable, so it degrades to 0 — never to lost evidence.
+    expect(evidence.ignoredCount).toBe(0);
+    expect(evidence.error).toContain("ignored_scan_failed");
+    expect(evidence.worktreeRoot).toBe(repo);
+    // The coordinator notice and the replay dirty gate both key off kind.
+    expect(
+      buildDirtyWorktreeNotice(evidence, "agent-p1", "executor"),
+    ).toContain("2 uncommitted file(s)");
+  });
+
+  it("keeps a clean verdict when only the ignored scan fails (issue #3663 P1)", () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    const fakeGit = join(repo, "ignored-fails-clean-git.sh");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh
+if [ "$1" = "rev-parse" ]; then
+  echo "$PWD"
+  exit 0
+fi
+for arg in "$@"; do
+  case "$arg" in
+    --ignored=*) exit 128 ;;
+  esac
+done
+exit 0
+`,
+      { mode: 0o755 },
+    );
+
+    const evidence = collectWorktreeDirtyEvidence(repo, { gitCommand: fakeGit });
+    expect(evidence.kind).toBe("clean");
+    expect(evidence.trackedCount).toBe(0);
+    expect(evidence.untrackedCount).toBe(0);
+    expect(evidence.ignoredCount).toBe(0);
+    expect(evidence.error).toContain("ignored_scan_failed");
+  });
+
+  it("attributes overflow rows to their porcelain category (issue #3663 P2)", () => {
+    // P2: rows beyond MAX_EVIDENCE_ENTRIES were counted as untracked
+    // regardless of their porcelain status code, so tracked (at-risk,
+    // committed-history-bearing) work was reported as untracked and ignored
+    // rows past the cap vanished.
+    const repo = makeTempDir();
+    initRepo(repo);
+    const fakeGit = join(repo, "mixed-overflow-git.sh");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh
+if [ "$1" = "rev-parse" ]; then
+  echo "$PWD"
+  exit 0
+fi
+emit_tracked() {
+  i=1
+  while [ "$i" -le 30 ]; do
+    printf ' M tracked-%s.txt\\n' "$i"
+    i=$((i + 1))
+  done
+}
+emit_untracked() {
+  i=1
+  while [ "$i" -le 25 ]; do
+    printf '?? untracked-%s.txt\\n' "$i"
+    i=$((i + 1))
+  done
+}
+for arg in "$@"; do
+  case "$arg" in
+    --ignored=*)
+      emit_tracked
+      emit_untracked
+      i=1
+      while [ "$i" -le 10 ]; do
+        printf '!! ignored-%s.txt\\n' "$i"
+        i=$((i + 1))
+      done
+      exit 0
+      ;;
+  esac
+done
+emit_tracked
+emit_untracked
+exit 0
+`,
+      { mode: 0o755 },
+    );
+
+    const evidence = collectWorktreeDirtyEvidence(repo, { gitCommand: fakeGit });
+    expect(evidence.kind).toBe("dirty");
+    expect(evidence.trackedCount).toBe(30);
+    expect(evidence.untrackedCount).toBe(25);
+    expect(evidence.ignoredCount).toBe(10);
+    expect(evidence.entries.length).toBe(MAX_EVIDENCE_ENTRIES);
+    expect(evidence.truncated).toBe(true);
+    // Ignored rows are informational and never inflate the at-risk total.
+    expect(
+      buildDirtyWorktreeNotice(evidence, "agent-p2", "executor"),
+    ).toContain("55 uncommitted file(s)");
+  });
 });
 
 describe("buildDirtyWorktreeNotice", () => {
